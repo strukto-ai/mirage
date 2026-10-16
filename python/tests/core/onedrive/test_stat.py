@@ -134,7 +134,7 @@ async def test_a_listed_row_carries_modified():
 async def test_a_listed_row_carries_the_ctag():
     # A listing already names each file's cTag, so the row the mount
     # answers a stat with carries the same token a network stat does; a
-    # watch walk fingerprints on the rows it lists.
+    # delta walk fingerprints on the rows it lists.
     with aioresponses() as m:
         m.get(
             "https://graph.microsoft.com/v1.0/me/drive/root/children",

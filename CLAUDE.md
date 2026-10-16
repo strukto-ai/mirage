@@ -205,12 +205,12 @@ sync bridge. `direct_io` plus `attr_timeout=0` keep unknown sizes correct.
 Python fskit writes need `fuse/darwin.py`. One FUSE mount per process on
 macOS. Never touch your own TypeScript mountpoint synchronously.
 
-### Records, cache, watch, spec, integ
+### Records, cache, events, spec, integ
 
 `workspace/record/`: keyed-record clients (disk lockfile plus rename, s3
 CAS) that sessions, the node table and metadata import, never the reverse.
 `cache/`: the read-through file cache and the index a readdir fills.
-`watch/`: external changes as mount events. `scripts/parity/`: maintained parity baselines; generated manifests stay local. `integ/`: runners, fake services (`server/`), goldens (`truth/`),
+`events/`: external changes as mount events. `scripts/parity/`: maintained parity baselines; generated manifests stay local. `integ/`: runners, fake services (`server/`), goldens (`truth/`),
 `targets.json`; spawn asynchronously, a fake on the same loop deadlocks a
 sync spawn.
 
@@ -233,7 +233,7 @@ flowchart TD
     Dispatch --> NS["namespace<br/>mount table · symlinks · attr overlay"]
     NS --> VFS["VFS<br/>ops table → core → accessor"]
     VFS --> Backend[("backend API")]
-    Watch["watch"] -.-> NS
+    Events["events"] -.-> NS
     Session["session · history<br/>stores · record clients"] -.-> Exec
 ```
 
@@ -249,7 +249,7 @@ Repository:
 
 ```
 python/mirage/   accessor core ops vfs commands workspace shell runtime policy
-                 observe cache watch mount fuse cli server agents
+                 observe cache events mount fuse cli server agents
 typescript/packages/
   core/          runtime-agnostic twin; no Node-only or browser-only API
   node/ browser/ runtime-specific VFS, commands, wiring, FUSE (node)

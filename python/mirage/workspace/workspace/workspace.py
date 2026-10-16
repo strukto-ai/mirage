@@ -194,6 +194,7 @@ from mirage.workspace.workspace.build import (
     wire_runtime_world,
 )
 from mirage.workspace.workspace.cache import build_file_cache
+from mirage.workspace.workspace.events import EventDelegate, EventManager
 from mirage.workspace.workspace.execute import (
     ExecuteEnv,
     LineFrame,
@@ -220,7 +221,6 @@ from mirage.workspace.workspace.mounts import (
 )
 from mirage.workspace.workspace.mounts import unmount as unmount_prefix
 from mirage.workspace.workspace.types import VFSMount
-from mirage.workspace.workspace.watch import WatchDelegate, WatchManager
 
 logger = logging.getLogger(__name__)
 
@@ -461,7 +461,7 @@ class Workspace:
             admit_write=self._admit_write,
         )
         self._registry.set_reconciler(self._dispatcher.reconciler)
-        self._watch = WatchManager(self._registry)
+        self._events = EventManager(self._registry)
 
         specs = normalize_mounts(
             mounts,
@@ -1375,18 +1375,18 @@ class Workspace:
 
     @property
     def registry(self) -> MountRegistry:
-        """Mount table; consumed by the watch runtime."""
+        """Mount table; consumed by the event runtime."""
         return self._registry
 
-    def attach_watch_runtime(self, runtime: WatchDelegate) -> None:
-        """Install the watch runtime that ``watch`` delegates to.
+    def attach_event_runtime(self, runtime: EventDelegate) -> None:
+        """Install the event runtime that ``events`` delegates to.
 
         Only needed to customize the runtime; the default attaches
-        lazily on first ``watch``/``notify``. The workspace closes it
+        lazily on first ``events``/``notify``. The workspace closes it
         on ``close``.
 
         Args:
-            runtime (WatchDelegate): Runtime to attach.
+            runtime (EventDelegate): Runtime to attach.
 
         Raises:
             RuntimeError: The workspace is closed, or a runtime is
@@ -1394,17 +1394,17 @@ class Workspace:
         """
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
-        self._watch.attach(runtime)
+        self._events.attach(runtime)
 
-    async def detach_watch_runtime(self) -> None:
-        """Close and drop the attached watch runtime, if any.
+    async def detach_event_runtime(self) -> None:
+        """Close and drop the attached event runtime, if any.
 
-        Active ``watch`` iterators finish cleanly. Afterwards the next
-        ``watch``/``notify`` lazily attaches a fresh default runtime.
+        Active ``events`` iterators finish cleanly. Afterwards the next
+        ``events``/``notify`` lazily attaches a fresh default runtime.
         """
-        await self._watch.detach()
+        await self._events.detach()
 
-    def watch(
+    def events(
         self, path: str | PathSpec | Sequence[str | PathSpec]
     ) -> AsyncIterator[FileEvent]:
         """Stream externally observed changes under ``path``.
@@ -1412,14 +1412,14 @@ class Workspace:
         The root's shape defines the depth, GNU shell glob style: a
         literal directory is its whole subtree, ``/dir/*`` is the
         entries at that level (shallow), ``/dir/*/`` is everything
-        inside child directories. The default watch runtime attaches
-        lazily on first use; call ``attach_watch_runtime`` beforehand
+        inside child directories. The default event runtime attaches
+        lazily on first use; call ``attach_event_runtime`` beforehand
         only to customize it. The str tolerance lives only
         here, at the consumer boundary (mirroring ``Files``); the
         runtime below is PathSpec-only.
 
         Args:
-            path (str | PathSpec | Sequence[str | PathSpec]): Watch
+            path (str | PathSpec | Sequence[str | PathSpec]): Event
                 root or roots; plain strings are coerced. Each root
                 may carry glob segments (``/nc/data/*.txt``).
         """
@@ -1430,23 +1430,23 @@ class Workspace:
         ]
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
-        return self._watch.watch(specs)
+        return self._events.events(specs)
 
     async def notify(self, change: FileEvent) -> None:
-        """Inject one externally observed change into the watch
+        """Inject one externally observed change into the event
         runtime: invalidate its caches, then deliver it to every
-        matching ``watch``.
+        matching subscription.
 
         The single entry point for consumer-side detection (webhook
         receiver or poll loop over ``VFS.delta_hook()``); see
-        ``mirage.watch.Watcher.notify``.
+        ``mirage.events.EventHub.notify``.
 
         Args:
             change (FileEvent): Observed change.
         """
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
-        await self._watch.notify(change)
+        await self._events.notify(change)
 
     async def close(self) -> None:
         await self._close(drop_state=False)
@@ -1528,7 +1528,7 @@ class Workspace:
         """
         return CloseDeps(
             sessions=self._session_mgr,
-            watch=self._watch,
+            events=self._events,
             cache=self._cache,
             owns_state_store=self._owns_state_store,
             state_store=self._state_store,

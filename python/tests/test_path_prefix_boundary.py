@@ -5,6 +5,8 @@ import pytest
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
+from mirage.events.hub import EventHub
+from mirage.events.payload import event_at, virtual_of
 from mirage.types import FileChangeKind, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import (
     mount_key,
@@ -12,8 +14,6 @@ from mirage.utils.key_prefix import (
     strip_mount,
     under_path,
 )
-from mirage.watch.events import event_at, virtual_of
-from mirage.watch.watcher import Watcher
 
 # Mount/child pairs where the child's name begins with the mount prefix's
 # own characters. Naive `startswith` arithmetic reads the child as already
@@ -151,12 +151,12 @@ def test_a_subtree_eviction_reaches_nested_listings(mount, child):
 async def _framed(mount: str, child: str) -> PathSpec:
     cache, index = RAMFileCacheStore(), RAMIndexCacheStore(ttl=600)
     manager = CacheManager(cache, index, f"{mount}/", True)
-    watcher = Watcher(_Registry(_Entry(f"{mount}/", manager)))
-    return watcher._frame(_Entry(f"{mount}/", manager), f"{mount}/{child}")
+    hub = EventHub(_Registry(_Entry(f"{mount}/", manager)))
+    return hub._frame(_Entry(f"{mount}/", manager), f"{mount}/{child}")
 
 
 @pytest.mark.parametrize("mount,child", CASES)
-def test_the_watcher_frames_a_lookalike_child_correctly(mount, child):
+def test_the_hub_frames_a_lookalike_child_correctly(mount, child):
     framed = _run(_framed(mount, child))
     assert framed.virtual == f"{mount}/{child}"
     assert framed.vfs_path == child

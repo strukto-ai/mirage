@@ -13,7 +13,7 @@ from mirage.types import Delta, PathSpec
 EXAMPLE = runpy.run_path(
     str(
         Path(__file__).resolve().parents[4]
-        / "examples/python/dropbox/watch.py"
+        / "examples/python/dropbox/events.py"
     )
 )
 

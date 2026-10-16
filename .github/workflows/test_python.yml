@@ -178,7 +178,7 @@ jobs:
             integ/truth/python/ram_vfs.json
             integ/truth/python/disk.json
             integ/truth/python/disk_vfs.json
-            integ/truth/watch_delta.json
+            integ/truth/events_delta.json
             integ/truth/permissions.json
             integ/truth/ask.json
             integ/truth/ask_pending.json

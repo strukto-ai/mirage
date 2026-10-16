@@ -1058,8 +1058,8 @@ def word_text(word: "str | PathSpec") -> str:
 class FileChangeKind(StrEnum):
     """Kind of an externally observed file change.
 
-    Shared vocabulary of the watch feature; the producer
-    (``Workspace.watch``) and the watch machinery both depend on it, so
+    Shared vocabulary of the events feature; the producer
+    (``Workspace.events``) and the event machinery both depend on it, so
     it lives here as a leaf type next to ``PathSpec`` / ``FileStat``.
 
     Values:
@@ -1109,7 +1109,7 @@ class FileEvent:
 
     Level-triggered: an event tells the consumer *what is dirty*, not
     every intermediate edit. Consumers read current content through the
-    workspace after receiving an event; the watch runtime guarantees
+    workspace after receiving an event; the event runtime guarantees
     caches were invalidated before delivery, so that read is fresh.
 
     Args:
@@ -1146,11 +1146,11 @@ class Delta:
 
 
 class OverflowPolicy(StrEnum):
-    """Behaviour of a watch queue when pending changes exceed its cap.
+    """Behaviour of an event queue when pending changes exceed its cap.
 
     Values:
         COLLAPSE: drop all pending entries and replace them with one
-            UNKNOWN change at the watch root (default; level-triggered
+            UNKNOWN change at the event root (default; level-triggered
             "rescan" semantics).
         DROP_OLDEST: evict the oldest pending entry.
         ERROR: surface QueueOverflowError to the consumer iterator.

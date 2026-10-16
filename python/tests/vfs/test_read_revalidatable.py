@@ -38,9 +38,9 @@ import mirage.core.gdrive.read as gdrive_read
 import mirage.core.github.read as github_read
 import mirage.core.gridfs.client as gridfs_client
 import mirage.core.gridfs.driver as gridfs_driver
+import mirage.core.gridfs.events as gridfs_events
 import mirage.core.gridfs.read as gridfs_read
 import mirage.core.gridfs.stream as gridfs_stream
-import mirage.core.gridfs.watch as gridfs_watch
 import mirage.core.gsheets.read as gsheets_read
 import mirage.core.gslides.read as gslides_read
 import mirage.core.hf_buckets.read as hf_buckets_read
@@ -407,7 +407,7 @@ def _gridfs_fake(
         monkeypatch.setitem(vars(module), "bucket", lambda *_args: bucket)
     # A listing or a collection query means the path under test reached for
     # something no read or stat should need; refuse it loudly.
-    for module in (gridfs_client, gridfs_driver, gridfs_watch):
+    for module in (gridfs_client, gridfs_driver, gridfs_events):
         for name in ("iter_latest", "files_coll"):
             if name in vars(module):
                 monkeypatch.setitem(vars(module), name, _stray(reach, name))

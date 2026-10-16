@@ -81,7 +81,7 @@ async def ensure_ref(accessor: GitHubAccessor) -> str:
 
     A mount that named no ref follows the repository's default branch, and
     learning that costs a request the constructor cannot make. Every reader
-    that needs a concrete ref -- the tree fetches, the watch walk, readdir's
+    that needs a concrete ref -- the tree fetches, the delta walk, readdir's
     per-directory descent -- goes through here instead of reading
     ``accessor.ref`` directly, so an unpinned mount resolves exactly once and
     then behaves like a pinned one.

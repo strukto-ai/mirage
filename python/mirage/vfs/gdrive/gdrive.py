@@ -20,6 +20,7 @@ from mirage.core.gdrive.capacity import capacity as _capacity
 from mirage.core.gdrive.checksum import checksum as _checksum
 from mirage.core.gdrive.copy import copy as _copy
 from mirage.core.gdrive.create import create as _create
+from mirage.core.gdrive.events import build_delta_hook
 from mirage.core.gdrive.exists import exists as _exists
 from mirage.core.gdrive.mkdir import mkdir as _mkdir
 from mirage.core.gdrive.read import read as _read
@@ -34,9 +35,9 @@ from mirage.core.gdrive.stat import stat as _stat
 from mirage.core.gdrive.tree import tree as _tree
 from mirage.core.gdrive.truncate import truncate as _truncate
 from mirage.core.gdrive.unlink import unlink as _unlink
-from mirage.core.gdrive.watch import build_delta_hook
 from mirage.core.gdrive.write import write as _write
 from mirage.core.google.client import TokenManager
+from mirage.events.base import DeltaHook
 from mirage.types import (
     CapacityResult,
     DirListing,
@@ -47,7 +48,6 @@ from mirage.types import (
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gdrive.config import GoogleDriveConfig
 from mirage.vfs.gdrive.prompt import PROMPT
-from mirage.watch.base import DeltaHook
 
 
 class GoogleDriveVFS(BaseVFS):

@@ -22,6 +22,7 @@ from mirage.core.box.checksum import checksum as _checksum
 from mirage.core.box.client import BoxTokenManager
 from mirage.core.box.copy import copy as _copy
 from mirage.core.box.create import create as _create
+from mirage.core.box.events import build_delta_hook
 from mirage.core.box.exists import exists as _exists
 from mirage.core.box.mkdir import mkdir as _mkdir
 from mirage.core.box.read import read as _read
@@ -34,13 +35,12 @@ from mirage.core.box.search import files_containing as _files_containing
 from mirage.core.box.stat import stat as _stat
 from mirage.core.box.truncate import truncate as _truncate
 from mirage.core.box.unlink import unlink as _unlink
-from mirage.core.box.watch import build_delta_hook
 from mirage.core.box.write import write as _write
+from mirage.events.base import DeltaHook
 from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.box.config import BoxConfig
 from mirage.vfs.box.prompt import PROMPT
-from mirage.watch.base import DeltaHook
 
 
 class BoxVFS(BaseVFS):

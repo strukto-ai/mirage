@@ -81,7 +81,7 @@ function reachable(hostPort: string): Promise<boolean> {
 async function inProcess(): Promise<void> {
   // The same fake twice, which is the reason the config is a map and not a
   // list: CI serves github seeded `cli` for the gh battery and github seeded
-  // `empty` for the watch battery, and the two run at once.
+  // `empty` for the events battery, and the two run at once.
   const live: string[] = []
   const started = await launch(
     {

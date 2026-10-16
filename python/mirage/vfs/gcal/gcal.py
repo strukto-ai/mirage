@@ -17,14 +17,15 @@ from typing import Any
 
 from mirage.accessor.gcal import GCalAccessor
 from mirage.core.gcal.day import bucket_name, bucket_start
+from mirage.core.gcal.events import build_delta_hook
 from mirage.core.gcal.read import read as _read
 from mirage.core.gcal.read import read_many as _read_many
 from mirage.core.gcal.readdir import readdir as _readdir
 from mirage.core.gcal.search import files_containing as _files_containing
 from mirage.core.gcal.stat import stat as _stat
 from mirage.core.gcal.unlink import unlink as _unlink
-from mirage.core.gcal.watch import build_delta_hook
 from mirage.core.google.client import TokenManager
+from mirage.events.base import DeltaHook
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
@@ -35,7 +36,6 @@ from mirage.vfs.gcal.prompt import (
     PROMPT,
     WRITE_PROMPT,
 )
-from mirage.watch.base import DeltaHook
 
 EXAMPLE_DAY = date(2026, 8, 11)
 

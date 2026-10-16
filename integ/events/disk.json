@@ -1,0 +1,118 @@
+{
+  "vfs": "disk",
+  "modes": [
+    "event"
+  ],
+  "mount": "/m",
+  "root": "/m/data",
+  "seed": [
+    "keep.txt"
+  ],
+  "cases": [
+    {
+      "id": "create_file",
+      "warm": [
+        "ls /m/data"
+      ],
+      "mutate": {
+        "op": "write",
+        "path": "data/report.txt",
+        "body": "alpha line\nbeta line\n"
+      },
+      "expect": {
+        "kind": "create",
+        "path": "/m/data/report.txt"
+      },
+      "checks": [
+        {
+          "cmd": "cat /m/data/report.txt",
+          "contains": "alpha line"
+        },
+        {
+          "cmd": "ls /m/data",
+          "contains": "report.txt"
+        },
+        {
+          "cmd": "grep -rl beta /m/data",
+          "contains": "report.txt"
+        }
+      ]
+    },
+    {
+      "id": "update_body",
+      "warm": [
+        "cat /m/data/report.txt",
+        "grep -rl alpha /m/data"
+      ],
+      "mutate": {
+        "op": "write",
+        "path": "data/report.txt",
+        "body": "gamma line\ndelta line\n"
+      },
+      "expect": {
+        "kind": "update",
+        "path": "/m/data/report.txt"
+      },
+      "checks": [
+        {
+          "cmd": "cat /m/data/report.txt",
+          "contains": "gamma line"
+        },
+        {
+          "cmd": "cat /m/data/report.txt",
+          "absent": "alpha"
+        },
+        {
+          "cmd": "grep -r alpha /m/data",
+          "absent": "report.txt"
+        }
+      ]
+    },
+    {
+      "id": "create_nested",
+      "warm": [
+        "ls /m/data"
+      ],
+      "mutate": {
+        "op": "write",
+        "path": "data/sub/deep.txt",
+        "body": "deep marker\n"
+      },
+      "expect": {
+        "kind": "create",
+        "path": "/m/data/sub/deep.txt"
+      },
+      "checks": [
+        {
+          "cmd": "cat /m/data/sub/deep.txt",
+          "contains": "deep marker"
+        },
+        {
+          "cmd": "ls /m/data",
+          "contains": "sub"
+        }
+      ]
+    },
+    {
+      "id": "delete_file",
+      "warm": [
+        "ls /m/data",
+        "cat /m/data/report.txt"
+      ],
+      "mutate": {
+        "op": "delete",
+        "path": "data/report.txt"
+      },
+      "expect": {
+        "kind": "delete",
+        "path": "/m/data/report.txt"
+      },
+      "checks": [
+        {
+          "cmd": "ls /m/data",
+          "absent": "report.txt"
+        }
+      ]
+    }
+  ]
+}

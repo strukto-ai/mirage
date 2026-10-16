@@ -17,6 +17,7 @@ from typing import Any
 
 from mirage.accessor.airtable import AirtableAccessor
 from mirage.core.airtable.config import AirtableConfig
+from mirage.core.airtable.events import build_delta_hook
 from mirage.core.airtable.read import first_lines as _first_lines
 from mirage.core.airtable.read import read as _read
 from mirage.core.airtable.read import read_stream as _read_stream
@@ -25,13 +26,12 @@ from mirage.core.airtable.search import (
     lines_containing as _lines_containing,
 )
 from mirage.core.airtable.stat import stat as _stat
-from mirage.core.airtable.watch import build_delta_hook
+from mirage.events.base import DeltaHook
 from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.airtable.prompt import PROMPT, WRITE_PROMPT
 from mirage.vfs.base import BaseVFS
-from mirage.watch.base import DeltaHook
 
 
 class AirtableVFS(BaseVFS):

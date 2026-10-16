@@ -102,11 +102,11 @@
             ]
           },
           {
-            "group": "Watch",
+            "group": "Events",
             "icon": "bell",
             "pages": [
-              "home/watch",
-              "home/watch-matrix"
+              "home/events",
+              "home/events-matrix"
             ]
           },
           {
@@ -679,19 +679,27 @@
   "redirects": [
     {
       "source": "/python/watch",
-      "destination": "/home/watch"
+      "destination": "/home/events"
     },
     {
       "source": "/python/watch-matrix",
-      "destination": "/home/watch-matrix"
+      "destination": "/home/events-matrix"
     },
     {
       "source": "/typescript/watch",
-      "destination": "/home/watch"
+      "destination": "/home/events"
+    },
+    {
+      "source": "/home/watch",
+      "destination": "/home/events"
     },
     {
       "source": "/typescript/watch-matrix",
-      "destination": "/home/watch-matrix"
+      "destination": "/home/events-matrix"
+    },
+    {
+      "source": "/home/watch-matrix",
+      "destination": "/home/events-matrix"
     },
     {
       "source": "/home/setup/runtime/python",

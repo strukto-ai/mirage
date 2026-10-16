@@ -486,7 +486,7 @@ async function main(): Promise<void> {
     )
 
     // One binary, several scenarios. github is served three ways from one
-    // server (three repos, one repo and no creation, and empty for the watch
+    // server (three repos, one repo and no creation, and empty for the events
     // battery), which only works if a bare reset replays what the process was
     // started on rather than defaulting back to v1.
     process.stdout.write(

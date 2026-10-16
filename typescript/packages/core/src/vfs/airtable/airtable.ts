@@ -31,8 +31,8 @@ import {
   readStream as airtableStream,
 } from '../../core/airtable/read.ts'
 import { stat as airtableStat } from '../../core/airtable/stat.ts'
-import { buildDeltaHook } from '../../core/airtable/watch.ts'
-import type { DeltaHook } from '../../watch/index.ts'
+import { buildDeltaHook } from '../../core/airtable/events.ts'
+import type { DeltaHook } from '../../events/index.ts'
 import { linesContaining as airtableLinesContaining } from '../../core/airtable/search.ts'
 import type { ByteSource } from '../../io/types.ts'
 

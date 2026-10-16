@@ -250,7 +250,7 @@ export {
   type NextcloudConfigRedacted,
 } from './vfs/nextcloud/config.ts'
 export { PROMPT as NEXTCLOUD_PROMPT } from './vfs/nextcloud/prompt.ts'
-export { NextcloudEventHook } from './core/nextcloud/watch.ts'
+export { NextcloudEventHook } from './core/nextcloud/events.ts'
 export { DiscordVFS, type DiscordVFSState } from './vfs/discord/discord.ts'
 export {
   normalizeDiscordConfig,

@@ -21,6 +21,7 @@ from mirage.core.onedrive.capacity import capacity as _capacity
 from mirage.core.onedrive.client import drive_loc
 from mirage.core.onedrive.copy import copy as _copy
 from mirage.core.onedrive.create import create as _create
+from mirage.core.onedrive.events import build_delta_hook
 from mirage.core.onedrive.exists import exists as _exists
 from mirage.core.onedrive.mkdir import mkdir as _mkdir
 from mirage.core.onedrive.read import read as _read
@@ -33,12 +34,11 @@ from mirage.core.onedrive.stat import tree as _tree
 from mirage.core.onedrive.stream import read_stream as _read_stream
 from mirage.core.onedrive.truncate import truncate as _truncate
 from mirage.core.onedrive.unlink import unlink as _unlink
-from mirage.core.onedrive.watch import build_delta_hook
 from mirage.core.onedrive.write import write as _write
+from mirage.events.base import DeltaHook
 from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.onedrive.prompt import PROMPT
-from mirage.watch.base import DeltaHook
 
 
 class OneDriveVFS(BaseVFS):

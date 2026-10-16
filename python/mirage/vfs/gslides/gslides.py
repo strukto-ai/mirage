@@ -18,14 +18,15 @@ from typing import Any
 
 from mirage.accessor.gslides import GSlidesAccessor
 from mirage.core.google.client import TokenManager
+from mirage.core.google.events import app_delta_hook
 from mirage.core.google.search import files_containing as _files_containing
-from mirage.core.google.watch import app_delta_hook
 from mirage.core.gslides.constants import MIME
 from mirage.core.gslides.read import read as _read
 from mirage.core.gslides.readdir import readdir as _readdir
 from mirage.core.gslides.rename import rename as _rename
 from mirage.core.gslides.stat import stat as _stat
 from mirage.core.gslides.unlink import unlink as _unlink
+from mirage.events.base import DeltaHook
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.generated.google_vocabulary import SLIDES_WORDS
 from mirage.utils.ranges import slice_window
@@ -33,7 +34,6 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.gslides.config import GSlidesConfig
 from mirage.vfs.gslides.prompt import PROMPT, WRITE_PROMPT
 from mirage.vfs.gslides.slide_entry import make_filename
-from mirage.watch.base import DeltaHook
 
 
 class GSlidesVFS(BaseVFS):

@@ -19,10 +19,10 @@ import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionManager } from '../session/manager.ts'
 import type { WorkspaceStateStore } from '../store/base.ts'
 import { ABORT_JOIN_MS } from '../../utils/abort.ts'
-import type { WatchManager } from './watch.ts'
+import type { EventManager } from './events.ts'
 
 export interface CloseDeps {
-  watch: WatchManager
+  events: EventManager
   cache: FileCache & BaseVFS
   ownsStateStore: boolean
   stateStore: WorkspaceStateStore
@@ -43,7 +43,7 @@ export interface CloseDeps {
  * guards re-entry). Mirrors the Python `close_async` in
  * `workspace/lifecycle.py`.
  *
- * Order matters: the watch runtime goes first (it reads mounts), then
+ * Order matters: the event runtime goes first (it reads mounts), then
  * background jobs, then the runtime closers (their journals still write
  * to mounts), then the state store if this workspace built it, and
  * finally every VFS not shared with a sibling workspace.
@@ -56,7 +56,7 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
       if (outcome.status === 'rejected') failures.push(outcome.reason)
     }
   }
-  await settle([() => deps.watch.detach()])
+  await settle([() => deps.events.detach()])
   await settle([() => deps.jobTable.killAll()])
   try {
     deps.jobTable.processes.stop()

@@ -1,0 +1,32 @@
+{
+  "runs": {
+    "python": {
+      "command": [
+        "./python/.venv/bin/python",
+        "examples/python/disk/events.py"
+      ]
+    },
+    "typescript": {
+      "command": [
+        "pnpm",
+        "-C",
+        "examples/typescript",
+        "exec",
+        "tsx",
+        "disk/events.ts"
+      ]
+    }
+  },
+  "exit": 0,
+  "lines": [
+    "read before: 'first quarter'",
+    "",
+    "watcher events:",
+    "  create /data/reports/q3.txt",
+    "  update /data/reports/q1.txt",
+    "  delete /data/reports/q2.txt",
+    "",
+    "read after notify: 'first quarter, revised'",
+    "listing: q1.txt q3.txt"
+  ]
+}

@@ -23,7 +23,7 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import type { FileEvent, PathSpec } from '../types.ts'
 import { MountMode } from '../types.ts'
-import type { WatchRuntime } from '../watch/base.ts'
+import type { EventRuntime } from '../events/base.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const require = createRequire(import.meta.url)
@@ -49,11 +49,11 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve }
 }
 
-class BlockingWatchRuntime implements WatchRuntime {
+class BlockingEventRuntime implements EventRuntime {
   readonly closeStarted = deferred()
   readonly allowClose = deferred()
 
-  watch(_path: PathSpec | readonly PathSpec[]): AsyncIterable<FileEvent> {
+  events(_path: PathSpec | readonly PathSpec[]): AsyncIterable<FileEvent> {
     throw new Error('not used')
   }
 
@@ -89,10 +89,10 @@ describe('Workspace.close', () => {
 
   it('refuses public filesystem operations while close is in progress', async () => {
     const ws = build()
-    const watch = new BlockingWatchRuntime()
-    ws.attachWatchRuntime(watch)
+    const events = new BlockingEventRuntime()
+    ws.attachEventRuntime(events)
     const closing = ws.close()
-    await watch.closeStarted.promise
+    await events.closeStarted.promise
 
     const attempts = await Promise.allSettled([
       ws.resolve('/data'),
@@ -102,7 +102,7 @@ describe('Workspace.close', () => {
       ws.vfs.stat('/data'),
     ])
 
-    watch.allowClose.resolve()
+    events.allowClose.resolve()
     await closing
     expect(
       attempts.map((attempt) =>
@@ -115,10 +115,10 @@ describe('Workspace.close', () => {
 
   it('lets an admitted line finish recursive execution during close', async () => {
     const ws = build()
-    const watch = new BlockingWatchRuntime()
+    const events = new BlockingEventRuntime()
     const entered = deferred()
     const resume = deferred()
-    ws.attachWatchRuntime(watch)
+    ws.attachEventRuntime(events)
     ws.registerCli(
       'pause',
       new CLI({
@@ -138,10 +138,10 @@ describe('Workspace.close', () => {
     const running = ws.shell("pause; eval 'echo hi'")
     await entered.promise
     const closing = ws.close()
-    await watch.closeStarted.promise
+    await events.closeStarted.promise
     resume.resolve()
     const result = await running
-    watch.allowClose.resolve()
+    events.allowClose.resolve()
     await closing
 
     expect(result.exitCode).toBe(0)

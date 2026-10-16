@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { FileChangeKind, PathSpec, FileStat, FileType } from '../types.ts'
 import { mountKey, mountPrefixOf, stripMount, underPath } from '../utils/key_prefix.ts'
-import { eventAt, virtualOf } from '../watch/events.ts'
+import { eventAt, virtualOf } from '../events/payload.ts'
 import { RAMFileCacheStore } from './file/ram.ts'
 import { RAMIndexCacheStore } from './index/ram.ts'
 import { CacheManager } from './manager.ts'

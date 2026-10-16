@@ -1,0 +1,590 @@
+{
+  "mounts": [
+    "dropbox",
+    "onedrive",
+    "box",
+    "gdrive"
+  ],
+  "mount": "/m",
+  "root": "/m/data",
+  "modes": [
+    "ping"
+  ],
+  "seed": [
+    "keep.txt"
+  ],
+  "cases": [
+    {
+      "id": "create_file",
+      "warm": [
+        "ls /m/data"
+      ],
+      "mutate": {
+        "op": "write",
+        "path": "data/report.txt",
+        "body": "alpha line\nbeta line\n"
+      },
+      "expect": {
+        "kind": "create",
+        "path": "/m/data/report.txt"
+      },
+      "checks": [
+        {
+          "cmd": "cat /m/data/report.txt",
+          "contains": "alpha line"
+        },
+        {
+          "cmd": "head -n 1 /m/data/report.txt",
+          "contains": "alpha line"
+        },
+        {
+          "cmd": "ls /m/data",
+          "contains": "report.txt"
+        },
+        {
+          "cmd": "grep -rl beta /m/data",
+          "contains": "report.txt"
+        }
+      ]
+    },
+    {
+      "id": "update_etag_change",
+      "warm": [
+        "cat /m/data/report.txt",
+        "grep -rl alpha /m/data"
+      ],
+      "mutate": {
+        "op": "write",
+        "path": "data/report.txt",
+        "body": "gamma line\ndelta line\n"
+      },
+      "expect": {
+        "kind": "update",
+        "path": "/m/data/report.txt"
+      },
+      "checks": [
+        {
+          "cmd": "cat /m/data/report.txt",
+          "contains": "gamma line"
+        },
+        {
+          "cmd": "cat /m/data/report.txt",
+          "absent": "alpha"
+        },
+        {
+          "cmd": "grep -rl gamma /m/data",
+          "contains": "report.txt"
+        },
+        {
+          "cmd": "grep -r alpha /m/data",
+          "absent": "report.txt"
+        }
+      ]
+    },
+    {
+      "id": "create_nested",
+      "warm": [
+        "ls /m/data"
+      ],
+      "mutate": {
+        "op": "write",
+        "path": "data/sub/deep.txt",
+        "body": "deep marker\n"
+      },
+      "expect": {
+        "kind": "create",
+        "path": "/m/data/sub/deep.txt"
+      },
+      "checks": [
+        {
+          "cmd": "cat /m/data/sub/deep.txt",
+          "contains": "deep marker"
+        },
+        {
+          "cmd": "grep -rl 'deep marker' /m/data",
+          "contains": "deep.txt"
+        }
+      ]
+    },
+    {
+      "id": "delete_file",
+      "warm": [
+        "cat /m/data/report.txt",
+        "ls /m/data"
+      ],
+      "mutate": {
+        "op": "delete",
+        "path": "data/report.txt"
+      },
+      "expect": {
+        "kind": "delete",
+        "path": "/m/data/report.txt"
+      },
+      "checks": [
+        {
+          "cmd": "ls /m/data",
+          "absent": "report.txt"
+        },
+        {
+          "cmd": "grep -rl gamma /m/data",
+          "absent": "report.txt"
+        }
+      ]
+    }
+  ],
+  "scopes": [
+    {
+      "id": "folder",
+      "subscribe": [
+        "/m/data/sub"
+      ],
+      "cases": [
+        {
+          "id": "inside_delivered",
+          "mutate": {
+            "op": "write",
+            "path": "data/sub/in.txt",
+            "body": "inside scope\n"
+          },
+          "expect": {
+            "kind": "create",
+            "path": "/m/data/sub/in.txt"
+          },
+          "checks": [
+            {
+              "cmd": "cat /m/data/sub/in.txt",
+              "contains": "inside scope"
+            }
+          ]
+        },
+        {
+          "id": "outside_skipped",
+          "mutate": {
+            "op": "write",
+            "path": "data/out.txt",
+            "body": "outside scope\n"
+          },
+          "expect": {
+            "kind": "create",
+            "path": "/m/data/out.txt",
+            "delivered": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "pattern",
+      "subscribe": [
+        "/m/data/*.txt"
+      ],
+      "cases": [
+        {
+          "id": "txt_delivered",
+          "mutate": {
+            "op": "write",
+            "path": "data/notes.txt",
+            "body": "txt matches\n"
+          },
+          "expect": {
+            "kind": "create",
+            "path": "/m/data/notes.txt"
+          },
+          "checks": [
+            {
+              "cmd": "cat /m/data/notes.txt",
+              "contains": "txt matches"
+            }
+          ]
+        },
+        {
+          "id": "md_skipped",
+          "mutate": {
+            "op": "write",
+            "path": "data/notes.md",
+            "body": "md does not match\n"
+          },
+          "expect": {
+            "kind": "create",
+            "path": "/m/data/notes.md",
+            "delivered": false
+          }
+        },
+        {
+          "id": "nested_txt_skipped",
+          "mutate": {
+            "op": "write",
+            "path": "data/sub/deep.txt",
+            "body": "glob does not cross slash\n"
+          },
+          "expect": {
+            "kind": "create",
+            "path": "/m/data/sub/deep.txt",
+            "delivered": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "shallow_glob",
+      "subscribe": [
+        "/m/data/*"
+      ],
+      "cases": [
+        {
+          "id": "top_level_delivered",
+          "mutate": {
+            "op": "write",
+            "path": "data/top.txt",
+            "body": "shallow scope\n"
+          },
+          "expect": {
+            "kind": "create",
+            "path": "/m/data/top.txt"
+          },
+          "checks": [
+            {
+              "cmd": "cat /m/data/top.txt",
+              "contains": "shallow scope"
+            }
+          ]
+        },
+        {
+          "id": "nested_skipped",
+          "mutate": {
+            "op": "write",
+            "path": "data/sub/deep.txt",
+            "body": "below shallow scope\n"
+          },
+          "expect": {
+            "kind": "create",
+            "path": "/m/data/sub/deep.txt",
+            "delivered": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "dir_glob",
+      "subscribe": [
+        "/m/data/*/"
+      ],
+      "cases": [
+        {
+          "id": "inside_dir_delivered",
+          "mutate": {
+            "op": "write",
+            "path": "data/sub/in.txt",
+            "body": "inside a child dir\n"
+          },
+          "expect": {
+            "kind": "create",
+            "path": "/m/data/sub/in.txt"
+          },
+          "checks": [
+            {
+              "cmd": "cat /m/data/sub/in.txt",
+              "contains": "inside a child dir"
+            }
+          ]
+        },
+        {
+          "id": "top_level_skipped",
+          "mutate": {
+            "op": "write",
+            "path": "data/top.txt",
+            "body": "not inside a dir\n"
+          },
+          "expect": {
+            "kind": "create",
+            "path": "/m/data/top.txt",
+            "delivered": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "mid_wildcard",
+      "subscribe": [
+        "/m/data/*/reports/"
+      ],
+      "cases": [
+        {
+          "id": "inside_reports_delivered",
+          "mutate": {
+            "op": "write",
+            "path": "data/proj1/reports/spec.md",
+            "body": "quarterly spec\n"
+          },
+          "expect": {
+            "kind": "create",
+            "path": "/m/data/proj1/reports/spec.md"
+          },
+          "checks": [
+            {
+              "cmd": "cat /m/data/proj1/reports/spec.md",
+              "contains": "quarterly spec"
+            }
+          ]
+        },
+        {
+          "id": "project_sibling_skipped",
+          "mutate": {
+            "op": "write",
+            "path": "data/proj1/other.txt",
+            "body": "outside reports\n"
+          },
+          "expect": {
+            "kind": "create",
+            "path": "/m/data/proj1/other.txt",
+            "delivered": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "multi_roots",
+      "subscribe": [
+        "/m/data/sub",
+        "/m/data/*.yaml"
+      ],
+      "cases": [
+        {
+          "id": "literal_root_delivered",
+          "mutate": {
+            "op": "write",
+            "path": "data/sub/in.txt",
+            "body": "literal subtree\n"
+          },
+          "expect": {
+            "kind": "create",
+            "path": "/m/data/sub/in.txt"
+          },
+          "checks": [
+            {
+              "cmd": "cat /m/data/sub/in.txt",
+              "contains": "literal subtree"
+            }
+          ]
+        },
+        {
+          "id": "glob_root_delivered",
+          "mutate": {
+            "op": "write",
+            "path": "data/app.yaml",
+            "body": "yaml root\n"
+          },
+          "expect": {
+            "kind": "create",
+            "path": "/m/data/app.yaml"
+          },
+          "checks": [
+            {
+              "cmd": "cat /m/data/app.yaml",
+              "contains": "yaml root"
+            }
+          ]
+        },
+        {
+          "id": "neither_root_skipped",
+          "mutate": {
+            "op": "write",
+            "path": "data/note.md",
+            "body": "matches no root\n"
+          },
+          "expect": {
+            "kind": "create",
+            "path": "/m/data/note.md",
+            "delivered": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "rename",
+      "subscribe": [
+        "/m/data"
+      ],
+      "cases": [
+        {
+          "id": "seed_orig",
+          "mutate": {
+            "op": "write",
+            "path": "data/orig.txt",
+            "body": "original content\n"
+          },
+          "expect": {
+            "kind": "create",
+            "path": "/m/data/orig.txt"
+          },
+          "checks": [
+            {
+              "cmd": "cat /m/data/orig.txt",
+              "contains": "original content"
+            }
+          ]
+        },
+        {
+          "id": "rename_as_move",
+          "modes": [
+            "ping"
+          ],
+          "warm": [
+            "cat /m/data/orig.txt",
+            "ls /m/data"
+          ],
+          "mutate": {
+            "op": "rename",
+            "path": "data/orig.txt",
+            "to": "data/renamed.txt"
+          },
+          "expect": {
+            "kind": "move",
+            "path": "/m/data/renamed.txt",
+            "previous": "/m/data/orig.txt"
+          },
+          "checks": [
+            {
+              "cmd": "cat /m/data/renamed.txt",
+              "contains": "original content"
+            },
+            {
+              "cmd": "ls /m/data",
+              "absent": "orig.txt"
+            },
+            {
+              "cmd": "cat /m/data/orig.txt",
+              "absent": "original content"
+            }
+          ],
+          "skip_vfs": [
+            "dropbox",
+            "onedrive",
+            "gdrive"
+          ]
+        },
+        {
+          "id": "rename_as_delete_create",
+          "modes": [
+            "ping"
+          ],
+          "warm": [
+            "cat /m/data/orig.txt",
+            "ls /m/data"
+          ],
+          "mutate": {
+            "op": "rename",
+            "path": "data/orig.txt",
+            "to": "data/renamed.txt"
+          },
+          "expect": {
+            "kind": "create",
+            "path": "/m/data/renamed.txt"
+          },
+          "checks": [
+            {
+              "cmd": "cat /m/data/renamed.txt",
+              "contains": "original content"
+            },
+            {
+              "cmd": "ls /m/data",
+              "absent": "orig.txt"
+            },
+            {
+              "cmd": "cat /m/data/orig.txt",
+              "absent": "original content"
+            }
+          ],
+          "skip_vfs": [
+            "box"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "file",
+      "subscribe": [
+        "/m/data/keep.txt"
+      ],
+      "cases": [
+        {
+          "id": "update_delivered",
+          "warm": [
+            "cat /m/data/keep.txt"
+          ],
+          "mutate": {
+            "op": "write",
+            "path": "data/keep.txt",
+            "body": "fresh keep\n"
+          },
+          "expect": {
+            "kind": "update",
+            "path": "/m/data/keep.txt"
+          },
+          "checks": [
+            {
+              "cmd": "cat /m/data/keep.txt",
+              "contains": "fresh keep"
+            },
+            {
+              "cmd": "cat /m/data/keep.txt",
+              "absent": "seed"
+            }
+          ]
+        },
+        {
+          "id": "sibling_skipped",
+          "mutate": {
+            "op": "write",
+            "path": "data/other.txt",
+            "body": "sibling file\n"
+          },
+          "expect": {
+            "kind": "create",
+            "path": "/m/data/other.txt",
+            "delivered": false
+          }
+        },
+        {
+          "id": "delete_delivered",
+          "warm": [
+            "ls /m/data"
+          ],
+          "mutate": {
+            "op": "delete",
+            "path": "data/keep.txt"
+          },
+          "expect": {
+            "kind": "delete",
+            "path": "/m/data/keep.txt"
+          },
+          "checks": [
+            {
+              "cmd": "ls /m/data",
+              "absent": "keep.txt"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "overflow": {
+    "max_pending": 2,
+    "paths": [
+      "data/f1.txt",
+      "data/f2.txt",
+      "data/f3.txt",
+      "data/f4.txt",
+      "data/f5.txt"
+    ],
+    "checks": [
+      {
+        "cmd": "ls /m/data",
+        "contains": "f5.txt"
+      },
+      {
+        "cmd": "cat /m/data/f3.txt",
+        "contains": "burst"
+      }
+    ]
+  }
+}

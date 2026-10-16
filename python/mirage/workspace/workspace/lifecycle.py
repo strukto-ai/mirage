@@ -35,8 +35,8 @@ from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.session.store import SessionStore
 from mirage.workspace.store import WorkspaceStateStore
+from mirage.workspace.workspace.events import EventManager
 from mirage.workspace.workspace.kernel_mounts import KernelMounts
-from mirage.workspace.workspace.watch import WatchManager
 
 # An attribute a ``with`` block replaced: the module, the name and what
 # the name held before.
@@ -50,7 +50,7 @@ class CloseDeps:
     Attributes:
         sessions (SessionManager): settled first, so a pending write
             lands.
-        watch (WatchManager): detached before anything it reads goes.
+        events (EventManager): detached before anything it reads goes.
         cache (FileCacheMixin): cleared and closed last.
         owns_state_store (bool): the workspace built its state store.
         state_store (WorkspaceStateStore): where the state lives.
@@ -73,7 +73,7 @@ class CloseDeps:
     """
 
     sessions: SessionManager
-    watch: WatchManager
+    events: EventManager
     cache: FileCacheMixin
     owns_state_store: bool
     state_store: WorkspaceStateStore
@@ -179,7 +179,7 @@ async def _drop_state(deps: CloseDeps) -> None:
 async def close_workspace(deps: CloseDeps) -> list[BaseException]:
     """Release everything the workspace owns; the caller runs it once.
 
-    Order matters: the watch runtime goes first (it reads mounts), then
+    Order matters: the event runtime goes first (it reads mounts), then
     background jobs, then the line runtimes, then mounts not shared
     with a sibling workspace, then the state store if this workspace
     built it, then the kernel mounts, and finally the cache.
@@ -209,7 +209,7 @@ async def close_workspace(deps: CloseDeps) -> list[BaseException]:
         )
 
     await settle(deps.sessions.settle())
-    await settle(deps.watch.detach())
+    await settle(deps.events.detach())
     await settle(deps.job_table.kill_all())
     try:
         deps.processes.stop()

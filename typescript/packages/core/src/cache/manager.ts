@@ -689,7 +689,7 @@ export class CacheManager {
   /**
    * Invalidate caches after `path` was removed, folder or file.
    *
-   * For a remover that cannot say which it removed: a watched DELETE, or the
+   * For a remover that cannot say which it removed: a notified DELETE, or the
    * vacated side of a MOVE, names a path and nothing more. A folder needs what
    * was cached beneath it dropped, since each nested listing and body was
    * cached under its own key. Every removal retires this manager's reads. The

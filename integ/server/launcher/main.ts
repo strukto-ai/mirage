@@ -180,7 +180,7 @@ const REGISTRY: Record<string, Entry> = {
 
 // The config is a MAP keyed by an instance name, not a list of service names,
 // because the same fake runs twice at once: CI serves github seeded `cli` for
-// the gh battery and github seeded `empty` for the watch battery. The key names
+// the gh battery and github seeded `empty` for the events battery. The key names
 // the instance, `fake` names which one to build when the two differ, and
 // `token` renames the announce line so the second instance does not overwrite
 // the first's environment variable.

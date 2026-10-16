@@ -41,7 +41,7 @@ model HfObject {
   bucket   String
   path     String
   content  Bytes
-  // The vendor's opaque `ETag`, which moves on every content write. A watch
+  // The vendor's opaque `ETag`, which moves on every content write. An event
   // case reads only this: `modified` is frozen so the clock cannot be what
   // reports a change.
   etag     String

@@ -4,6 +4,7 @@ from typing import Any
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.core.sharepoint.copy import copy as _copy
 from mirage.core.sharepoint.create import create as _create
+from mirage.core.sharepoint.events import build_delta_hook
 from mirage.core.sharepoint.exists import exists as _exists
 from mirage.core.sharepoint.mkdir import mkdir as _mkdir
 from mirage.core.sharepoint.read import read as _read
@@ -19,12 +20,11 @@ from mirage.core.sharepoint.stat import stat as _stat
 from mirage.core.sharepoint.stream import read_stream as _read_stream
 from mirage.core.sharepoint.truncate import truncate as _truncate
 from mirage.core.sharepoint.unlink import unlink as _unlink
-from mirage.core.sharepoint.watch import build_delta_hook
 from mirage.core.sharepoint.write import write as _write
+from mirage.events.base import DeltaHook
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.sharepoint.prompt import PROMPT
-from mirage.watch.base import DeltaHook
 
 
 class SharePointVFS(BaseVFS):

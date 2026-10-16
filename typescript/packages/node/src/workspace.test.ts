@@ -21,7 +21,7 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode, PathSpec, ReadPolicy, WritePolicy } from '@struktoai/mirage-core/types'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { DiskAccessor } from './accessor/disk.ts'
-import { DiskEventHook } from './core/disk/watch/hook.ts'
+import { DiskEventHook } from './core/disk/events/hook.ts'
 import { DiskVFS } from './vfs/disk/disk.ts'
 import { InlineGitHub } from './vfs/fixtures/github.ts'
 import { buildVfs } from './vfs/registry.ts'
@@ -208,7 +208,7 @@ describe('a host folder removal reported by the disk watcher', () => {
   let ws: Workspace
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'mirage-watch-push-'))
+    root = await mkdtemp(join(tmpdir(), 'mirage-events-push-'))
     ws = new Workspace({ '/d': new DiskVFS({ root }) }, { mode: MountMode.READ })
   })
 

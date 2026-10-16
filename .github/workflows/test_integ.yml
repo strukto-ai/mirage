@@ -1112,12 +1112,12 @@ jobs:
       - name: Run declarative battery on nextcloud
         run: ./python/.venv/bin/python integ/runners/python/main.py --target nextcloud --strict
 
-  # The watch batteries poll and wait on deliveries, so they get a runner of
+  # The event batteries poll and wait on deliveries, so they get a runner of
   # their own rather than queueing behind the nextcloud corpus battery in
   # integ-data; the path filter is the same one. The notion battery rides
   # here because its fake needs the node toolchain this job sets up anyway,
   # which leaves integ-data a python-only job.
-  integ-watch:
+  integ-events:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.data == 'true') }}
     runs-on: ubuntu-latest
@@ -1154,7 +1154,7 @@ jobs:
         working-directory: python
         run: uv sync --all-extras
 
-      # Node runs the shared API fakes and the TypeScript watch cache cases.
+      # Node runs the shared API fakes and the TypeScript event cache cases.
       - name: Set up Node and pnpm
         uses: ./.github/actions/setup-node-pnpm
         with:
@@ -1197,10 +1197,10 @@ jobs:
           # the reset and the battery cannot disagree about the password.
           admin-password: ${{ env.NEXTCLOUD_PASSWORD }}
 
-      # The cross-host watch cache cases read through an S3 mount.
-      - name: Start MinIO for the watch cache cases
+      # The cross-host event cache cases read through an S3 mount.
+      - name: Start MinIO for the event cache cases
         run: |
-          docker run -d --name minio-watch -p 9000:9000 \
+          docker run -d --name minio-events -p 9000:9000 \
             -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
             cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 server /data
           for i in $(seq 1 30); do
@@ -1211,10 +1211,10 @@ jobs:
             docker pull cgr.dev/chainguard/minio-client@sha256:b8b144ab34694ecea25aa352c4be9de4c26ee2a02701521dce02ee5593c57338 && break
             echo "docker pull failed (attempt $i), retrying"; sleep 10
           done
-          docker run --rm --network container:minio-watch \
+          docker run --rm --network container:minio-events \
             -e MC_HOST_local="http://minio:minio123@localhost:9000" \
             cgr.dev/chainguard/minio-client@sha256:b8b144ab34694ecea25aa352c4be9de4c26ee2a02701521dce02ee5593c57338 \
-            mb --ignore-existing local/mirage-watch
+            mb --ignore-existing local/mirage-events
 
       # gdrive, dropbox, box and onedrive are the ping batteries' targets, each
       # a TypeScript fake out of process. Every one of these backends SKIPS
@@ -1234,46 +1234,46 @@ jobs:
         working-directory: integ
         run: |
           nohup pnpm exec tsx server/dropbox/main.ts --port 5088 \
-            > /tmp/dropbox-watch.log 2>&1 &
+            > /tmp/dropbox-events.log 2>&1 &
           for i in $(seq 1 30); do
-            grep -q "DROPBOX_URL=" /tmp/dropbox-watch.log && break
+            grep -q "DROPBOX_URL=" /tmp/dropbox-events.log && break
             sleep 1
           done
-          cat /tmp/dropbox-watch.log
+          cat /tmp/dropbox-events.log
           # Fail HERE, not 20 minutes later as a connection refused inside the
           # battery: a server that died on startup still leaves this step green
           # if the only thing it does is cat the log.
-          grep -q "DROPBOX_URL=" /tmp/dropbox-watch.log
+          grep -q "DROPBOX_URL=" /tmp/dropbox-events.log
 
       - name: Start the fake Box server
         working-directory: integ
         run: |
           nohup pnpm exec tsx server/box/main.ts --port 5096 \
-            > /tmp/box-watch.log 2>&1 &
+            > /tmp/box-events.log 2>&1 &
           for i in $(seq 1 30); do
-            grep -q "BOX_URL=" /tmp/box-watch.log && break
+            grep -q "BOX_URL=" /tmp/box-events.log && break
             sleep 1
           done
-          cat /tmp/box-watch.log
+          cat /tmp/box-events.log
           # Fail HERE, not 20 minutes later as a connection refused inside the
           # battery: a server that died on startup still leaves this step green
           # if the only thing it does is cat the log.
-          grep -q "BOX_URL=" /tmp/box-watch.log
+          grep -q "BOX_URL=" /tmp/box-events.log
 
       - name: Start the fake Microsoft Graph server
         working-directory: integ
         run: |
           nohup pnpm exec tsx server/onedrive/main.ts --port 5089 \
-            > /tmp/onedrive-watch.log 2>&1 &
+            > /tmp/onedrive-events.log 2>&1 &
           for i in $(seq 1 30); do
-            grep -q "ONEDRIVE_URL=" /tmp/onedrive-watch.log && break
+            grep -q "ONEDRIVE_URL=" /tmp/onedrive-events.log && break
             sleep 1
           done
-          cat /tmp/onedrive-watch.log
+          cat /tmp/onedrive-events.log
           # Fail HERE, not 20 minutes later as a connection refused inside the
           # battery: a server that died on startup still leaves this step green
           # if the only thing it does is cat the log.
-          grep -q "ONEDRIVE_URL=" /tmp/onedrive-watch.log
+          grep -q "ONEDRIVE_URL=" /tmp/onedrive-events.log
 
       # The Airtable ping cases create a webhook on the fake and read its
       # payloads, on both hosts.
@@ -1281,37 +1281,37 @@ jobs:
         working-directory: integ
         run: |
           nohup pnpm exec tsx server/airtable/main.ts --port 5084 \
-            > /tmp/airtable-watch.log 2>&1 &
+            > /tmp/airtable-events.log 2>&1 &
           for i in $(seq 1 30); do
-            grep -q "AIRTABLE_URL=" /tmp/airtable-watch.log && break
+            grep -q "AIRTABLE_URL=" /tmp/airtable-events.log && break
             sleep 1
           done
-          cat /tmp/airtable-watch.log
-          grep -q "AIRTABLE_URL=" /tmp/airtable-watch.log
+          cat /tmp/airtable-events.log
+          grep -q "AIRTABLE_URL=" /tmp/airtable-events.log
 
-      - name: Build packages for cross-host watch cache tests
+      - name: Build packages for cross-host event cache tests
         working-directory: typescript
         run: pnpm --filter @struktoai/mirage-node... build
 
-      - name: Watch cache invalidation (both hosts)
+      - name: Event cache invalidation (both hosts)
         env:
           S3_ENDPOINT: http://localhost:9000
-          S3_BUCKET: mirage-watch
+          S3_BUCKET: mirage-events
           S3_REGION: us-east-1
           AWS_ACCESS_KEY_ID: minio
           AWS_SECRET_ACCESS_KEY: minio123
         run: |
-          ./python/.venv/bin/python integ/watch/cache/run.py
-          pnpm -C integ exec tsx watch/cache/run.ts
+          ./python/.venv/bin/python integ/events/cache/run.py
+          pnpm -C integ exec tsx events/cache/run.ts
 
       - name: Airtable pings (both hosts)
         env:
           AIRTABLE_URL: http://127.0.0.1:5084
         run: |
-          ./python/.venv/bin/python integ/watch/airtable/run.py
-          pnpm -C integ exec tsx watch/airtable/run.ts
+          ./python/.venv/bin/python integ/events/airtable/run.py
+          pnpm -C integ exec tsx events/airtable/run.ts
 
-      - name: Run watch battery
+      - name: Run events battery
         env:
           NEXTCLOUD_URL: http://localhost:8080/remote.php/dav/files/admin/
           NEXTCLOUD_USERNAME: admin
@@ -1320,20 +1320,20 @@ jobs:
           DROPBOX_URL: http://127.0.0.1:5088
           BOX_URL: http://127.0.0.1:5096
           ONEDRIVE_URL: http://127.0.0.1:5089
-          WATCH_RESULTS_FILE: /tmp/watch-battery-results.txt
-        run: ./python/.venv/bin/python integ/watch/run.py
+          EVENTS_RESULTS_FILE: /tmp/events-battery-results.txt
+        run: ./python/.venv/bin/python integ/events/run.py
 
       # The battery names the failing case on stdout, and that lands only in
       # the raw step log, which an org egress policy can put out of reach.
       # A step summary renders for a human but is not served by the API; an
       # artifact is, so the transcript is uploaded here. `always()` is the
       # whole point: the run worth reading is the one that just failed.
-      - name: Upload watch battery results
+      - name: Upload events battery results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: watch-battery-results
-          path: /tmp/watch-battery-results.txt
+          name: events-battery-results
+          path: /tmp/events-battery-results.txt
           if-no-files-found: error
           retention-days: 1
 
@@ -2388,7 +2388,7 @@ jobs:
   gate:
     name: integ-gate
     runs-on: ubuntu-latest
-    needs: [changes, typescript-build, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, integ-database, integ-data, integ-watch, integ-fuse, integ-observability, integ-facets, integ-runtime, integ-e2b, integ-wandb, integ-shell-coverage]
+    needs: [changes, typescript-build, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, integ-database, integ-data, integ-events, integ-fuse, integ-observability, integ-facets, integ-runtime, integ-e2b, integ-wandb, integ-shell-coverage]
     if: always()
     steps:
       - name: Check required jobs

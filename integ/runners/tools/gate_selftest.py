@@ -1605,7 +1605,7 @@ def selftest_shard() -> None:
             "github"
             not in shard.launched(
                 manifest,
-                {"github": {"token": "GITHUB_WATCH_URL"}},
+                {"github": {"token": "GITHUB_EVENTS_URL"}},
                 host,
             ),
             "github still launched",

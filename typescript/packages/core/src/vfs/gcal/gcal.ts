@@ -30,8 +30,8 @@ import { filesContaining as gcalFilesContaining } from '../../core/gcal/search.t
 import { read as gcalRead, readMany as gcalReadMany } from '../../core/gcal/read.ts'
 import { stat as gcalStat } from '../../core/gcal/stat.ts'
 import { unlink as gcalUnlink } from '../../core/gcal/unlink.ts'
-import { buildDeltaHook } from '../../core/gcal/watch.ts'
-import type { DeltaHook } from '../../watch/base.ts'
+import { buildDeltaHook } from '../../core/gcal/events.ts'
+import type { DeltaHook } from '../../events/base.ts'
 
 const EXAMPLE_DAY = '2026-08-11'
 

@@ -22,6 +22,7 @@ from mirage.core.dropbox.client import DropboxTokenManager
 from mirage.core.dropbox.copy import copy as _copy
 from mirage.core.dropbox.copy import dir_copy as _dir_copy
 from mirage.core.dropbox.create import create as _create
+from mirage.core.dropbox.events import build_delta_hook
 from mirage.core.dropbox.exists import exists as _exists
 from mirage.core.dropbox.mkdir import mkdir as _mkdir
 from mirage.core.dropbox.read import read as _read
@@ -35,14 +36,13 @@ from mirage.core.dropbox.search import files_containing as _files_containing
 from mirage.core.dropbox.stat import stat as _stat
 from mirage.core.dropbox.stat import tree as _tree
 from mirage.core.dropbox.unlink import unlink as _unlink
-from mirage.core.dropbox.watch import build_delta_hook
 from mirage.core.dropbox.write import write as _write
 from mirage.core.generic.rewrite import truncate_by_rewrite
+from mirage.events.base import DeltaHook
 from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.dropbox.config import DropboxConfig
 from mirage.vfs.dropbox.prompt import PROMPT
-from mirage.watch.base import DeltaHook
 
 
 class DropboxVFS(BaseVFS):

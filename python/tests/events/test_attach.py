@@ -1,0 +1,311 @@
+import asyncio
+from datetime import datetime, timezone
+from functools import partial
+
+import pytest
+
+from mirage.events import EventHub, RAMEventQueue
+from mirage.types import Delta, FileChangeKind, FileEvent, MountMode, PathSpec
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
+
+_TS = datetime.fromtimestamp(0, tz=timezone.utc)
+
+
+def _change(kind, virtual):
+    return FileEvent(
+        kind=kind, path=PathSpec.from_str_path(virtual), timestamp=_TS
+    )
+
+
+class OneShotHook:
+    def __init__(self):
+        self.calls = 0
+
+    async def pull(self, root, checkpoint):
+        self.calls += 1
+        if checkpoint is None:
+            return Delta(changes=(), checkpoint="base")
+        return Delta(
+            changes=(_change(FileChangeKind.UPDATE, "/data/doc.txt"),),
+            checkpoint="next",
+        )
+
+
+def _attach_custom(ws, **queue_kwargs):
+    hub = EventHub(
+        ws.registry, queue_factory=partial(RAMEventQueue, **queue_kwargs)
+    )
+    ws.attach_event_runtime(hub)
+    return hub
+
+
+@pytest.mark.asyncio
+async def test_events_lazily_attaches_default_runtime():
+    # No attach call anywhere: the runtime attaches on first use, and
+    # ws.notify is the consumer's injection point.
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    assert ws._events.runtime is None
+    agen = ws.events("/data")
+    task = asyncio.ensure_future(agen.__anext__())
+    await asyncio.sleep(0.03)
+    assert ws._events.runtime is not None
+    await ws.notify(_change(FileChangeKind.CREATE, "/data/new.txt"))
+    got = await asyncio.wait_for(task, timeout=2)
+    assert got.path.virtual == "/data/new.txt"
+    await agen.aclose()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_idle_workspace_has_no_event_state():
+    ws = Workspace({"/data": RAMVFS()})
+    assert ws._events.runtime is None
+    await ws.close()
+    assert ws._events.runtime is None
+
+
+@pytest.mark.asyncio
+async def test_attach_after_first_use_raises():
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    await ws.notify(_change(FileChangeKind.UPDATE, "/data/a.txt"))
+    with pytest.raises(RuntimeError):
+        ws.attach_event_runtime(EventHub(ws.registry))
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_attached_custom_runtime_serves_events():
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    hub = _attach_custom(ws, max_pending=8)
+    assert ws._events.runtime is hub
+    agen = ws.events(PathSpec.from_str_path("/data"))
+    task = asyncio.ensure_future(agen.__anext__())
+    await asyncio.sleep(0.03)
+    await ws.notify(_change(FileChangeKind.CREATE, "/data/new.txt"))
+    got = await asyncio.wait_for(task, timeout=2)
+    assert got.kind is FileChangeKind.CREATE
+    assert got.path.virtual == "/data/new.txt"
+    await agen.aclose()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_detach_closes_queues_and_resets_to_idle():
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    hub = _attach_custom(ws, max_pending=8)
+    agen = ws.events("/data")
+    task = asyncio.ensure_future(agen.__anext__())
+    await asyncio.sleep(0.03)
+    await ws.detach_event_runtime()
+    assert hub._closed
+    assert ws._events.runtime is None
+    with pytest.raises(StopAsyncIteration):
+        await asyncio.wait_for(task, timeout=2)
+    await agen.aclose()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_detach_then_lazy_reattach_delivers_again():
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    old = _attach_custom(ws, max_pending=8)
+    await ws.detach_event_runtime()
+    agen = ws.events("/data")
+    task = asyncio.ensure_future(agen.__anext__())
+    await asyncio.sleep(0.03)
+    assert ws._events.runtime is not None
+    assert ws._events.runtime is not old
+    await ws.notify(_change(FileChangeKind.CREATE, "/data/again.txt"))
+    got = await asyncio.wait_for(task, timeout=2)
+    assert got.path.virtual == "/data/again.txt"
+    await agen.aclose()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_detach_idle_workspace_is_noop():
+    ws = Workspace({"/data": RAMVFS()})
+    await ws.detach_event_runtime()
+    assert ws._events.runtime is None
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_each_subscription_owns_its_queue():
+    # Two subscriptions on overlapping scopes: one event fans out into both
+    # queues independently.
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    gen_a = ws.events("/data")
+    gen_b = ws.events("/data/*.txt")
+    task_a = asyncio.ensure_future(gen_a.__anext__())
+    task_b = asyncio.ensure_future(gen_b.__anext__())
+    await asyncio.sleep(0.03)
+    runtime = ws._events.runtime
+    assert len(runtime._subscribers) == 2
+    queues = {id(sub.queue) for sub in runtime._subscribers}
+    assert len(queues) == 2
+    await ws.notify(_change(FileChangeKind.CREATE, "/data/hit.txt"))
+    got_a = await asyncio.wait_for(task_a, timeout=2)
+    got_b = await asyncio.wait_for(task_b, timeout=2)
+    assert got_a.path.virtual == "/data/hit.txt"
+    assert got_b.path.virtual == "/data/hit.txt"
+    await gen_a.aclose()
+    await gen_b.aclose()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_multi_root_overflow_collapses_per_root():
+    # A multi-root subscription that overflows emits one UNKNOWN per root, so
+    # the re-inventory signal covers every scope the subscription spans.
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    _attach_custom(ws, max_pending=2)
+    agen = ws.events(["/data/a", "/data/b"])
+    task = asyncio.ensure_future(agen.__anext__())
+    await asyncio.sleep(0.03)
+    await ws.notify(_change(FileChangeKind.CREATE, "/data/a/first.txt"))
+    await asyncio.wait_for(task, timeout=2)
+    for i in range(3):
+        await ws.notify(_change(FileChangeKind.CREATE, f"/data/a/f{i}.txt"))
+    first = await asyncio.wait_for(agen.__anext__(), timeout=2)
+    second = await asyncio.wait_for(agen.__anext__(), timeout=2)
+    assert first.kind is FileChangeKind.UNKNOWN
+    assert second.kind is FileChangeKind.UNKNOWN
+    assert {first.path.virtual, second.path.virtual} == {"/data/a", "/data/b"}
+    await agen.aclose()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_events_spans_nested_mounts():
+    # A mount nested inside another mount's subtree: one subscription on the
+    # shared ancestor receives events from both, and each event is
+    # reframed to the mount that owns its path (longest prefix), so
+    # invalidation hits the true owner.
+    ws = Workspace(
+        {
+            "/nc1": (RAMVFS(), MountMode.WRITE),
+            "/nc1/abc/inner": (RAMVFS(), MountMode.WRITE),
+        },
+        mode=MountMode.WRITE,
+    )
+    agen = ws.events("/nc1/abc")
+    task = asyncio.ensure_future(agen.__anext__())
+    await asyncio.sleep(0.03)
+    await ws.notify(_change(FileChangeKind.CREATE, "/nc1/abc/report.txt"))
+    outer = await asyncio.wait_for(task, timeout=2)
+    assert outer.path.virtual == "/nc1/abc/report.txt"
+    assert outer.path.vfs_path == "abc/report.txt"
+    task = asyncio.ensure_future(agen.__anext__())
+    await asyncio.sleep(0.03)
+    await ws.notify(_change(FileChangeKind.CREATE, "/nc1/abc/inner/x.txt"))
+    inner = await asyncio.wait_for(task, timeout=2)
+    assert inner.path.virtual == "/nc1/abc/inner/x.txt"
+    assert inner.path.vfs_path == "x.txt"
+    await agen.aclose()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_events_accepts_plain_string_path():
+    # The issue-450 snippet shape: workspace.events("/dir").
+    # Coercion happens at the workspace boundary; the runtime below
+    # only ever sees PathSpec.
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    agen = ws.events("/data")
+    task = asyncio.ensure_future(agen.__anext__())
+    await asyncio.sleep(0.03)
+    await ws.notify(_change(FileChangeKind.CREATE, "/data/new.txt"))
+    got = await asyncio.wait_for(task, timeout=2)
+    assert got.path.virtual == "/data/new.txt"
+    await agen.aclose()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_events_accepts_string_list_and_glob():
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    agen = ws.events(["/data/a", "/data/*.txt"])
+    task = asyncio.ensure_future(agen.__anext__())
+    await asyncio.sleep(0.03)
+    await ws.notify(_change(FileChangeKind.CREATE, "/data/hit.txt"))
+    got = await asyncio.wait_for(task, timeout=2)
+    assert got.path.virtual == "/data/hit.txt"
+    await agen.aclose()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_pull_loop_over_delta_hook_feeds_notify():
+    # The consumer-owned poller pattern: pull a delta from the
+    # VFS hook, feed each change to notify.
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    agen = ws.events(PathSpec.from_str_path("/data"))
+    task = asyncio.ensure_future(agen.__anext__())
+    await asyncio.sleep(0.03)
+
+    hook = OneShotHook()
+    root = PathSpec.from_str_path("/data")
+    checkpoint = None
+    for _ in range(2):
+        delta = await hook.pull(root, checkpoint)
+        checkpoint = delta.checkpoint
+        for change in delta.changes:
+            await ws.notify(change)
+
+    got = await asyncio.wait_for(task, timeout=2)
+    assert got.kind is FileChangeKind.UPDATE
+    assert got.path.virtual == "/data/doc.txt"
+    await agen.aclose()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_close_workspace_stops_hub():
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    hub = _attach_custom(ws, max_pending=8)
+    agen = ws.events(PathSpec.from_str_path("/data"))
+    task = asyncio.ensure_future(agen.__anext__())
+    await asyncio.sleep(0.03)
+    await ws.close()
+    assert hub._closed
+    with pytest.raises(StopAsyncIteration):
+        await asyncio.wait_for(task, timeout=2)
+    await agen.aclose()
+
+
+@pytest.mark.asyncio
+async def test_closed_workspace_rejects_event_operations():
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    await ws.close()
+    with pytest.raises(RuntimeError, match="Workspace is closed"):
+        ws.events(PathSpec.from_str_path("/data"))
+    with pytest.raises(RuntimeError, match="Workspace is closed"):
+        await ws.notify(_change(FileChangeKind.CREATE, "/data/a.txt"))
+    with pytest.raises(RuntimeError, match="Workspace is closed"):
+        ws.attach_event_runtime(EventHub(ws.registry))

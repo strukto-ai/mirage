@@ -24,8 +24,9 @@ from mirage.core.gdocs.rename import rename as _rename
 from mirage.core.gdocs.stat import stat as _stat
 from mirage.core.gdocs.unlink import unlink as _unlink
 from mirage.core.google.client import TokenManager
+from mirage.core.google.events import app_delta_hook
 from mirage.core.google.search import files_containing as _files_containing
-from mirage.core.google.watch import app_delta_hook
+from mirage.events.base import DeltaHook
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.generated.google_vocabulary import DOCS_WORDS
 from mirage.utils.ranges import slice_window
@@ -33,7 +34,6 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.gdocs.config import GDocsConfig
 from mirage.vfs.gdocs.doc_entry import make_filename
 from mirage.vfs.gdocs.prompt import PROMPT, WRITE_PROMPT
-from mirage.watch.base import DeltaHook
 
 
 class GDocsVFS(BaseVFS):

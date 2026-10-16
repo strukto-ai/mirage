@@ -20,7 +20,7 @@ MAX_PAGES = 50
 
 
 async def current_history_id(token_manager: TokenManager) -> str:
-    """The mailbox's history id now, where a watch starts from.
+    """The mailbox's history id now, where a delta starts from.
 
     Args:
         token_manager (TokenManager): manages OAuth2 tokens.

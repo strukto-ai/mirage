@@ -16,7 +16,7 @@ import { type TokenManager, gmailBase, googleGet } from '../google/client.ts'
 
 const MAX_PAGES = 50
 
-/** The mailbox's history id now, where a watch starts from. Mirrors Python's `current_history_id`. */
+/** The mailbox's history id now, where a delta starts from. Mirrors Python's `current_history_id`. */
 export async function currentHistoryId(tokenManager: TokenManager): Promise<string> {
   const url = `${gmailBase(tokenManager)}/users/me/profile`
   const data = (await googleGet(tokenManager, url)) as { historyId?: string | number }

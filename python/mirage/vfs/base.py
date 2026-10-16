@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from mirage.accessor.base import Accessor
 from mirage.errors.fs import enotsup
+from mirage.events.base import DeltaHook
 from mirage.io.types import ByteSource
 from mirage.types import (
     CapacityResult,
@@ -38,7 +39,6 @@ from mirage.vfs.types import (
     SearchQuery,
     Target,
 )
-from mirage.watch.base import DeltaHook
 
 
 class BaseVFS:

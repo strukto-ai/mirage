@@ -169,7 +169,7 @@ jobs:
           run integ/truth/typescript/ram_vfs.json
           run integ/truth/typescript/disk.json
           run integ/truth/typescript/disk_vfs.json
-          run integ/truth/watch_delta.json
+          run integ/truth/events_delta.json
           run integ/truth/permissions.json
           run integ/truth/policy.json
           run integ/truth/policy_yaml.json

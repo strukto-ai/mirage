@@ -17,13 +17,13 @@ export const BOX_API_BASE = 'https://api.box.com/2.0'
 export const BOX_UPLOAD_BASE = 'https://upload.box.com/api/2.0'
 export const TOKEN_BUFFER_SECONDS = 300
 
-// The user event stream the watch hooks read: `changes` is the one Box
+// The user event stream the event hooks read: `changes` is the one Box
 // documents as carrying file tree changes, without the downloads and
 // previews `all` adds.
 export const EVENT_STREAM = 'changes'
 // Box keeps user events for between two weeks and two months, and a position
 // older than that is not refused, it just replays what is left. A checkpoint
-// read this long ago reports the watch root as unknown and starts again at the
+// read this long ago reports the event root as unknown and starts again at the
 // present instead of trusting the replay.
 export const EVENT_REPLAY_DAYS = 14
 // Events that put an item at the path its `source` names.

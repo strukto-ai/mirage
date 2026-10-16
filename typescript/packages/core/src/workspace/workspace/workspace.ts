@@ -145,7 +145,7 @@ import { applyProfile, compileProfile, resolveProfile, withInline } from '../ses
 import { ScriptPolicy } from '../../policy/script.ts'
 import { newSessionId, newWorkspaceId } from '../../utils/ids.ts'
 import { normDir, rstripSlash } from '../../utils/slash.ts'
-import type { WatchRuntime } from '../../watch/base.ts'
+import type { EventRuntime } from '../../events/base.ts'
 import { resolveControlStores } from './build.ts'
 import { executeLine, type ExecuteEnv } from './execute.ts'
 import { closeWorkspace } from './lifecycle.ts'
@@ -164,7 +164,7 @@ import type {
   WorkspaceOptions,
 } from './types.ts'
 import { Mount } from '../mount/spec.ts'
-import { WatchManager } from './watch.ts'
+import { EventManager } from './events.ts'
 import { placementRefused } from './failure.ts'
 
 export { ExecuteResult } from './types.ts'
@@ -238,7 +238,7 @@ export class Workspace {
   private isShuttingDown(): boolean {
     return this.closing !== null || this.closed
   }
-  private readonly watchManager: WatchManager
+  private readonly eventManager: EventManager
   private readonly runtimeWorld: Runtimes
   // Named for what it holds: the source declarations, never a secret.
   private readonly declaredSecretSources: Readonly<Record<string, SecretSource>>
@@ -352,7 +352,7 @@ export class Workspace {
     )
     this.shellParser = options.shellParser ?? null
     this.shellParserFactory = options.shellParserFactory ?? null
-    this.watchManager = new WatchManager(this.registry)
+    this.eventManager = new EventManager(this.registry)
     const sandboxResolver = new PrefixResolver(
       () => this.sandboxVisibleMounts(),
       (directory) => this.namespace.linkNamesUnder(directory),
@@ -1226,23 +1226,23 @@ export class Workspace {
     return this.registry.mountFor(prefix)
   }
 
-  attachWatchRuntime(runtime: WatchRuntime): void {
+  attachEventRuntime(runtime: EventRuntime): void {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    this.watchManager.attach(runtime)
+    this.eventManager.attach(runtime)
   }
 
-  async detachWatchRuntime(): Promise<void> {
-    await this.watchManager.detach()
+  async detachEventRuntime(): Promise<void> {
+    await this.eventManager.detach()
   }
 
-  watch(path: string | PathSpec | readonly (string | PathSpec)[]): AsyncIterable<FileEvent> {
+  events(path: string | PathSpec | readonly (string | PathSpec)[]): AsyncIterable<FileEvent> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    return this.watchManager.watch(path)
+    return this.eventManager.events(path)
   }
 
   async notify(change: FileEvent): Promise<void> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    await this.watchManager.notify(change)
+    await this.eventManager.notify(change)
   }
 
   /**
@@ -2084,7 +2084,7 @@ export class Workspace {
     try {
       await closeWorkspace({
         sessions: this.sessionManager,
-        watch: this.watchManager,
+        events: this.eventManager,
         cache: this.cache,
         ownsStateStore: this.ownsStateStore,
         stateStore: this.stateStoreInternal,
