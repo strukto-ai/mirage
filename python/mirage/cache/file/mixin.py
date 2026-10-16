@@ -179,10 +179,10 @@ class FileCacheMixin:
     def drain_budget(self) -> int:
         """Max bytes a streamed read may buffer to fill this cache.
 
-        ``None`` (the default) derives the budget from ``cache_limit``.
+        ``None`` (the default) caps each fill at 8 MiB or ``cache_limit``.
         An explicit value keeps larger streams out of the cache and may
         not exceed the cache's intended capacity.
         """
         if self.max_drain_bytes is None:
-            return self.cache_limit
+            return min(self.cache_limit, 8 * 1024 * 1024)
         return self.max_drain_bytes

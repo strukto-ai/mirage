@@ -21,7 +21,7 @@ export async function runSed(
   // The session's environment, whose locale decides bytes or characters.
   env?: Record<string, string>,
 ): Promise<CrossResult> {
-  const write = async (path: PathSpec, data: Uint8Array): Promise<void> => {
+  const write = async (path: PathSpec, data: ByteSource): Promise<void> => {
     await dispatch('write', path, [data])
   }
   return (

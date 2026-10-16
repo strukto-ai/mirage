@@ -18,7 +18,7 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=20.10.0"
+    "node": "^22.20 || ^24.12 || >=25"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

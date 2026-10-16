@@ -24,6 +24,7 @@ from typing import Any, cast
 
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.concurrency.limiter import run_blocking
+from mirage.io.async_line_iterator import release_inputs
 from mirage.observe.store import ObserverStore
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.python.host.fs import HostFs, make_rmtree, os_routing
@@ -211,6 +212,15 @@ async def close_workspace(deps: CloseDeps) -> list[BaseException]:
     await settle(deps.sessions.settle())
     await settle(deps.events.detach())
     await settle(deps.job_table.kill_all())
+    await settle(
+        release_inputs(
+            [
+                source
+                for session in deps.sessions.list()
+                for source in session.open_inputs()
+            ]
+        )
+    )
     try:
         deps.processes.stop()
     except Exception as exc:

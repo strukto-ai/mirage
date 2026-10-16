@@ -471,7 +471,8 @@ export class BaseVFS<A extends Accessor = Accessor> {
     _data: ByteSource,
     _signal?: AbortSignal,
     _atomic = false,
-  ): Promise<void> {
+    _handed?: Handed,
+  ): Promise<unknown> {
     return Promise.reject(enotsup(this.name, 'writeStream', path))
   }
 

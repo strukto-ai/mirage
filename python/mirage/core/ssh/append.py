@@ -12,20 +12,36 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from contextlib import aclosing
+
 from mirage.accessor.ssh import SSHAccessor
 from mirage.core.ssh.utils import join_root, open_for_write
+from mirage.io.cooperative import chunks
+from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
 async def append_bytes(
-    accessor: SSHAccessor, path: PathSpec, data: bytes
+    accessor: SSHAccessor, path_spec: PathSpec, data: bytes
+) -> None:
+    await append_stream(accessor, path_spec, data)
+
+
+async def append_stream(
+    accessor: SSHAccessor, path: PathSpec, data: ByteSource
 ) -> None:
     config = accessor.config
     timer = start_op()
     sftp = await accessor.sftp()
-    async with await open_for_write(
-        sftp, join_root(config.root, path.mount_path), path, flags="ab"
-    ) as f:
-        await f.write(data)
-    record("append", path.virtual, "ssh", len(data), timer)
+    size = 0
+    async with (
+        aclosing(chunks(data)) as source,
+        await open_for_write(
+            sftp, join_root(config.root, path.mount_path), path, flags="ab"
+        ) as f,
+    ):
+        async for chunk in source:
+            await f.write(chunk)
+            size += len(chunk)
+    record("append", path.virtual, "ssh", size, timer)

@@ -18,6 +18,7 @@ import { eacces } from '../../../errors/fs.ts'
 import { gzipGeneric } from './gzip.ts'
 import { gunzip } from '../../../utils/compress.ts'
 import { PathSpec } from '../../../types.ts'
+import { materialize } from '../../../io/types.ts'
 
 it.each([false, true])('compression skips suffixes or reports late errors: %s', async (skipped) => {
   const reads: string[] = []
@@ -37,9 +38,8 @@ it.each([false, true])('compression skips suffixes or reports late errors: %s', 
     [PathSpec.fromStrPath(name), PathSpec.fromStrPath('/good')],
     { flags: {}, stdin: null, cwd: '/' },
     read,
-    (path, data) => {
-      writes.set(path.virtual, data)
-      return Promise.resolve()
+    async (path, data) => {
+      writes.set(path.virtual, await materialize(data))
     },
     (path) => {
       removed.push(path.virtual)

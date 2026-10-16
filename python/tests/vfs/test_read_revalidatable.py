@@ -307,10 +307,30 @@ class _Download:
         return None
 
 
+class _Upload:
+    def __init__(self, files, key):
+        self._id, self.files, self.key = ObjectId(), files, key
+        self.data = bytearray()
+
+    async def write(self, data):
+        self.data.extend(data)
+
+    async def close(self):
+        self.files[self.key] = _gridfs_doc(
+            self.key, bytes(self.data), str(self._id), 2030
+        )
+
+    async def abort(self):
+        self.data.clear()
+
+
 class _Bucket:
     def __init__(self, files: dict[str, dict]) -> None:
         self._files = files
         self.opened: list[ObjectId] = []
+
+    def open_upload_stream(self, filename: str) -> _Upload:
+        return _Upload(self._files, filename)
 
     async def upload_from_stream(self, filename: str, data: bytes) -> ObjectId:
         # A new revision is a new doc with a new _id, dated after every

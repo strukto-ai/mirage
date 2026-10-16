@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteSpool } from '../../../io/spool.ts'
 import { ByteWriter } from '../../../io/writer.ts'
 
 import { byteView, decodeText, fromByteView, textView } from '../../../shell/bytes.ts'
@@ -219,7 +220,7 @@ export class AwkStreams implements AwkHost {
    * `eval` takes the line whole, so an empty one, a comment or a line
    * ending in a backslash runs as `sh -c` would run it.
    */
-  async run(command: string, stdin: Uint8Array | null): Promise<CommandRun> {
+  async run(command: string, stdin: ByteSource | null): Promise<CommandRun> {
     const shell = this.opts.shell
     if (shell === undefined) {
       throw new AwkRuntimeError('awk: running a command requires a workspace')
@@ -227,9 +228,17 @@ export class AwkStreams implements AwkHost {
     await this.flushOutput()
     const source: ByteSource = stdin ?? this.stdinView()
     const io = await shell(`( ${shellJoin(['eval', textView(command)])} )`, source)
-    const stdout = await materialize(io.stdout)
-    const stderr = await materialize(io.stderr)
-    return { stdout, stderr, status: io.exitCode }
+    const out = new ByteSpool(),
+      err = new ByteSpool()
+    try {
+      await out.fill(io.stdout ?? new Uint8Array())
+      await err.fill(io.stderr ?? new Uint8Array())
+      return { stdout: await out.output(), stderr: await err.output(), status: io.exitCode }
+    } catch (error) {
+      await out.close()
+      await err.close()
+      throw error
+    }
   }
 }
 
@@ -245,18 +254,9 @@ async function stage(step: Promise<void>, io: IOResult): Promise<boolean> {
   return false
 }
 
-function addStderr(io: IOResult, err: Uint8Array): void {
-  if (err.length === 0) return
-  const held = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
-  const joined = new Uint8Array(held.length + err.length)
-  joined.set(held)
-  joined.set(err, held.length)
-  io.stderr = joined
-}
-
-async function drained(interp: Interpreter, io: IOResult): Promise<Uint8Array> {
+async function drained(interp: Interpreter, errors: ByteSpool): Promise<ByteSource> {
   const [out, err] = await interp.drain()
-  addStderr(io, err)
+  await errors.fill(err)
   return out
 }
 
@@ -271,28 +271,30 @@ async function* awkStream(
   io: IOResult,
   host: AwkStreams,
 ): AsyncIterable<Uint8Array> {
+  const errors = new ByteSpool()
   try {
     const exited = await stage(interp.runBegin(), io)
-    yield await drained(interp, io)
+    yield* chunks(await drained(interp, errors))
     if (!exited && interp.hasMainRules()) {
       for (;;) {
         const record = await interp.nextRecord()
         if (record === null) break
         if (await stage(interp.runRecord(record), io)) break
-        const chunk = await drained(interp, io)
-        if (chunk.length > 0) yield chunk
+        yield* chunks(await drained(interp, errors))
       }
     }
     await stage(interp.runEnd(), io)
     await interp.finish()
-    yield await drained(interp, io)
+    yield* chunks(await drained(interp, errors))
   } catch (err) {
     if (!isFatal(err)) throw err
     const [out, stderr] = await interp.salvage(err)
     io.exitCode = 2
-    addStderr(io, stderr)
-    yield out
+    await errors.fill(stderr)
+    yield* chunks(out)
   } finally {
+    io.stderr = await errors.output()
+    await interp.closeOutputs()
     await host.abortOutput()
     await interp.closeInputs()
   }

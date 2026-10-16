@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import { chunks } from '@struktoai/mirage-core/io/cooperative'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type {
   ChildEntry,
   ObjectMeta,
@@ -144,6 +148,25 @@ async function put(
   return { size: data.byteLength, fingerprint: revision, revision }
 }
 
+async function putStream(conn: GridFSAccessor, key: string, data: ByteSource): Promise<ObjectMeta> {
+  const upload = (await bucket(conn)).openUploadStream(key)
+  let size = 0
+  async function* counted(): AsyncGenerator<Uint8Array> {
+    for await (const part of chunks(data)) {
+      size += part.length
+      yield part
+    }
+  }
+  try {
+    await pipeline(Readable.from(counted()), upload)
+  } catch (error) {
+    await upload.abort()
+    throw error
+  }
+  const revision = upload.id.toString()
+  return { size, fingerprint: revision, revision }
+}
+
 async function deleteFile(conn: GridFSAccessor, key: string): Promise<void> {
   // Removes every revision of the filename (rm semantics; mirrors S3's
   // DeleteObject, which also succeeds silently on a missing key).
@@ -234,6 +257,7 @@ export const DRIVER: ObjectStoreDriver<GridFSAccessor, GridFSAccessor> = {
   head,
   get,
   put,
+  putStream,
   deleteFile,
   deletePrefix,
   moveFile,

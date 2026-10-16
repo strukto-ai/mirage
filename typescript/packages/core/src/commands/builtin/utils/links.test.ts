@@ -121,7 +121,7 @@ describe('the link resolver', () => {
     await resolver.unlink('/data/dir/tl.gz')
     await resolver.lstat(PathSpec.fromStrPath('/data/dir/tl.gz'))
     expect(calls).toEqual([
-      ['read', '/data/dir/tl.gz', [], {}],
+      ['read', '/data/dir/tl.gz', [], { stream: true }],
       ['write', '/data/dir/tl', [data], {}],
       ['unlink', '/data/dir/tl.gz', [], {}],
       ['stat', '/data/dir/tl.gz', [], { nofollow: true }],

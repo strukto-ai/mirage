@@ -27,13 +27,18 @@ from mirage.core.box.resolve import (
     path_parts,
 )
 from mirage.errors.fs import eisdir
+from mirage.io.spool import ByteSpool
+from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import FileStat, FileType, JsonValue, PathSpec
 from mirage.utils.upload import upload_stat
 
 
 async def _upload_new(
-    accessor: BoxAccessor, path: PathSpec, data: bytes, folder_id: str
+    accessor: BoxAccessor,
+    path: PathSpec,
+    data: bytes | ByteSpool,
+    folder_id: str,
 ) -> JsonValue:
     """Upload ``data`` as a new file at ``path``, plainly.
 
@@ -64,7 +69,7 @@ async def _upload_new(
 async def write(
     accessor: BoxAccessor,
     path: PathSpec,
-    data: bytes,
+    data: bytes | ByteSpool,
     entry: FileStat | None = None,
     parent: FileStat | None = None,
 ) -> FileStat | None:
@@ -119,5 +124,24 @@ async def write(
     item = entries[0] if isinstance(entries, list) and entries else None
     stored = upload_stat(item, stat_from_item, path.virtual)
     token = None if stored is None else stored.fingerprint
-    record("write", path.virtual, "box", len(data), timer, fingerprint=token)
+    record(
+        "write",
+        path.virtual,
+        "box",
+        data.size if isinstance(data, ByteSpool) else len(data),
+        timer,
+        fingerprint=token,
+    )
     return stored
+
+
+async def write_stream(
+    accessor: BoxAccessor,
+    path: PathSpec,
+    data: ByteSource,
+    entry: FileStat | None = None,
+    parent: FileStat | None = None,
+) -> FileStat | None:
+    async with ByteSpool() as spool:
+        await spool.fill(data)
+        return await write(accessor, path, spool, entry, parent)

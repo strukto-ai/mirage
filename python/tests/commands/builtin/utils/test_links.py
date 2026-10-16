@@ -179,7 +179,7 @@ async def test_the_dispatcher_reads_writes_and_unlinks_by_the_name_it_is_handed(
     await resolver.unlink("/data/dir/tl.gz")
     await resolver.lstat(PathSpec.from_str_path("/data/dir/tl.gz"))
     assert calls.calls == [
-        ("read", "/data/dir/tl.gz", {}),
+        ("read", "/data/dir/tl.gz", {"stream": True}),
         ("write", "/data/dir/tl", {"data": b"x"}),
         ("unlink", "/data/dir/tl.gz", {}),
         ("stat", "/data/dir/tl.gz", {"nofollow": True}),

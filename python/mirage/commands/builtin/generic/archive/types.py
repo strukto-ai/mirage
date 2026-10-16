@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
+from mirage.io.spool import ByteSlice
 from mirage.types import PathSpec
 
 # What a member is, which is the whole of what an archive records beyond
@@ -43,6 +44,7 @@ class Entry:
     kind: MemberKind
     target: str = ""
     read: PathSpec | None = None
+    size: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,3 +109,17 @@ class Scan:
     crossings: tuple[str, ...] = ()
     problems: tuple[Problem, ...] = ()
     missing: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SpoolZipRecord:
+    name: str
+    local: ByteSlice
+    central: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class SpoolZipArchive:
+    records: tuple[SpoolZipRecord, ...]
+    prefix: ByteSlice
+    comment: bytes

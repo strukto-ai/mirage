@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chunks } from '../../../io/cooperative.ts'
 import type { CommandOpts } from '../../config.ts'
 import type { LinkView, MountView } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { FileStat } from '../../../types.ts'
 import { PathSpec } from '../../../types.ts'
 import { eloop, isEnoent, isEnotdir } from '../../../errors/fs.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { pathVisible } from '../../../utils/hidden.ts'
 import { CycleError, posixNormpath, resolvePath } from '../../../utils/path.ts'
 import { normDir, ownerPrefix, rstripSlash } from '../../../utils/slash.ts'
@@ -139,12 +140,12 @@ export class LinkResolver {
 
   /** What a name leads to, read through the dispatcher, which follows it. */
   async *read(virtual: string): AsyncIterable<Uint8Array> {
-    const [data] = await this.dispatch('read', PathSpec.fromStrPath(virtual))
-    yield data as Uint8Array
+    const [data] = await this.dispatch('read', PathSpec.fromStrPath(virtual), [], { stream: true })
+    yield* chunks(data as ByteSource)
   }
 
   /** Write a file on the mount that owns the name. */
-  async write(virtual: string, data: Uint8Array): Promise<void> {
+  async write(virtual: string, data: ByteSource): Promise<void> {
     await this.dispatch('write', PathSpec.fromStrPath(virtual), [data])
   }
 

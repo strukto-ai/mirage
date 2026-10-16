@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteSpool } from '../../io/spool.ts'
 import { chunks } from '../../io/cooperative.ts'
-import { materialize, type ByteSource } from '../../io/types.ts'
+import { type ByteSource } from '../../io/types.ts'
 import { toIsoZ } from '../../utils/dates.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { VFSName } from '../../types.ts'
@@ -280,9 +281,36 @@ async function putStream(
       conn.config.endpoint !== undefined &&
       conn.config.endpoint !== '')
   ) {
-    const meta = await putIf(conn, key, await materialize(data), cond)
-    if (meta === null) throw new Error('s3: write returned no metadata')
-    return meta
+    const spool = new ByteSpool()
+    try {
+      await spool.fill(data)
+      if (spool.size > 5 * 1024 ** 3) throw new Error('s3: single PUT exceeds 5 GiB')
+      const response = (await guarded(
+        key,
+        conn.send(
+          new conn.mod.PutObjectCommand({
+            Bucket: conn.config.bucket,
+            Key: key,
+            Body: await spool.body(
+              conn.config.presignedUrlProvider === undefined ? 'sdk' : 'fetch',
+            ),
+            ContentLength: spool.size,
+            ...(conn.config.defaultContentType
+              ? { ContentType: conn.config.defaultContentType }
+              : {}),
+            ...condition(cond),
+          }),
+        ),
+        cond.ifMatch !== undefined,
+      )) as { ETag?: string; VersionId?: string }
+      return {
+        size: spool.size,
+        fingerprint: etagOf(response) || null,
+        revision: versionOf(response),
+      }
+    } finally {
+      await spool.close()
+    }
   }
   let upload: string | null = null
   const parts: { PartNumber: number; ETag: string }[] = []

@@ -76,7 +76,7 @@ async def tar(
         resolved,
         list(texts),
         opts,
-        bound_op(ops.read_bytes, accessor, opts.index),
+        bound_op(ops.read_stream, accessor, opts.index),
         archive_write,
         partial(require_op(ops, Operation.MKDIR), accessor),
         bound_op(ops.stat, accessor, opts.index),

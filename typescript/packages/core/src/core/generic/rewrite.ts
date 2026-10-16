@@ -17,6 +17,9 @@ import { OwnRead } from '../../cache/types.ts'
 import { eexist, einval, eisdir, enotsup, isEnotdir, isMissingPath } from '../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec } from '../../types.ts'
 import { spliceWindow } from '../../utils/ranges.ts'
+import { chunks } from '../../io/cooperative.ts'
+import { ByteSpool } from '../../io/spool.ts'
+import type { ByteSource } from '../../io/types.ts'
 
 export type ReadFn = (path: PathSpec) => Promise<Uint8Array>
 export type WriteFn = (path: PathSpec, data: Uint8Array) => Promise<void>
@@ -66,6 +69,54 @@ export async function appendByRewrite(
   joined.set(existing)
   joined.set(data, existing.length)
   await runWithOwnVersion(path, own, () => write(path, joined))
+}
+
+/** Stage a read-modify-write with bounded RAM and the read's version. */
+export async function appendByStreamedRewrite(
+  read: (path: PathSpec, onVersion: (version: string | null) => void) => AsyncIterable<Uint8Array>,
+  write: (path: PathSpec, data: ByteSource) => Promise<void>,
+  stat: StatFn,
+  path: PathSpec,
+  data: ByteSource,
+): Promise<void> {
+  const source = chunks(data)[Symbol.asyncIterator]()
+  const spool = new ByteSpool()
+  try {
+    const first = await source.next()
+    if (first.done) {
+      let found: FileStat
+      try {
+        found = await stat(path)
+      } catch (error) {
+        if (!isMissingPath(error)) throw error
+        await runWithOwnVersion(path, OwnRead.ABSENT, () => write(path, new Uint8Array()))
+        return
+      }
+      if (found.type === FileType.DIRECTORY) throw eisdir(path)
+      return
+    }
+    let own: string | OwnRead | null = null
+    try {
+      await spool.fill(
+        read(path, (version) => {
+          own = version
+        }),
+      )
+    } catch (error) {
+      if (!isMissingPath(error) || spool.size > 0) throw error
+      own = OwnRead.ABSENT
+    }
+    await spool.append(first.value)
+    for (;;) {
+      const part = await source.next()
+      if (part.done) break
+      await spool.append(part.value)
+    }
+    await runWithOwnVersion(path, own, () => write(path, spool.stream()))
+  } finally {
+    await source.return?.()
+    await spool.close()
+  }
 }
 
 /**

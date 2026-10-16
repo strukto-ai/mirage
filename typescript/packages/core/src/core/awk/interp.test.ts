@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { materialize, type ByteSource } from '../../io/types.ts'
 import { describe, expect, it } from 'vitest'
 import { AwkIOError, AwkRuntimeError } from './errors.ts'
 import { ExitProgram, Interpreter } from './interp.ts'
@@ -71,7 +72,8 @@ class FakeHost implements AwkHost {
     return Promise.resolve()
   }
 
-  run(command: string, stdin: Uint8Array | null): Promise<CommandRun> {
+  async run(command: string, source: ByteSource | null): Promise<CommandRun> {
+    const stdin = source === null ? null : await materialize(source)
     this.runs.push([command, stdin])
     const fn = this.commands[command]
     if (fn === undefined) throw new Error(`no fake command ${command}`)
@@ -111,7 +113,7 @@ async function execute(
   }
   await interp.finish()
   const [out, err] = await interp.drain()
-  return [DEC.decode(out), DEC.decode(err)]
+  return [DEC.decode(await materialize(out)), DEC.decode(await materialize(err))]
 }
 
 interface RunOpts {
@@ -233,7 +235,7 @@ describe('awk interpreter', () => {
       { n: '05' },
     )
     await interp.runBegin()
-    expect(DEC.decode((await interp.drain())[0])).toBe('6 1 0\n')
+    expect(DEC.decode(await materialize((await interp.drain())[0]))).toBe('6 1 0\n')
   })
 
   it('carries the exit code and still runs END', async () => {
@@ -251,7 +253,7 @@ describe('awk interpreter', () => {
     }
     expect(code).toBe(3)
     await interp.runEnd()
-    expect(DEC.decode((await interp.drain())[0])).toBe('a\nend\n')
+    expect(DEC.decode(await materialize((await interp.drain())[0]))).toBe('a\nend\n')
   })
 
   it('moves to the next operand on nextfile', async () => {
@@ -469,7 +471,7 @@ describe('awk interpreter', () => {
     const interp = new Interpreter(parse('BEGIN{print "a"; print "b" > "/ro/x"}'), new FakeHost())
     const err = await fatal(interp.runBegin())
     const [out, stderr] = await interp.salvage(err)
-    expect([DEC.decode(out), DEC.decode(stderr)]).toEqual([
+    expect([DEC.decode(await materialize(out)), DEC.decode(await materialize(stderr))]).toEqual([
       'a\n',
       'awk: cannot open "/ro/x" for output (Read-only file system)\n',
     ])

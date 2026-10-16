@@ -309,3 +309,18 @@ describe('sort of long records', () => {
     expect(out).toBe(want.map((line) => line + '\n').join(''))
   })
 })
+
+it('preserves input order for equal keys across multiple merge levels', async () => {
+  const paths = Array.from({ length: 40 }, (_, i) => PathSpec.fromStrPath(`/input${String(i)}`))
+  const files = Object.fromEntries(
+    paths.map((p, i) => [p.virtual, new TextEncoder().encode(`a ${String(i)}\nb ${String(i)}\n`)]),
+  )
+  const expected = ['a', 'b']
+    .flatMap((key) => paths.map((_, i) => `${key} ${String(i)}\n`))
+    .join('')
+  expect(await run({ paths, files, flags: { merge: true, stable: true, key: ['1,1'] } })).toEqual([
+    expected,
+    '',
+    0,
+  ])
+})

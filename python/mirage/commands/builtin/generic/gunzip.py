@@ -9,13 +9,13 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec, StatFn
+from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
 
 async def gunzip(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_bytes: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
     unlink: Callable[..., Awaitable[None]],
     stat: StatFn | None = None,
@@ -75,7 +75,7 @@ async def gunzip_generic(
     paths: list[PathSpec],
     texts: list[str],
     opts: CommandOpts,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_bytes: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
     unlink: Callable[..., Awaitable[None]],
     stat: StatFn | None = None,

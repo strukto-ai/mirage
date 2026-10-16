@@ -20,7 +20,8 @@ import { resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { ByteWriter } from '../../../io/writer.ts'
-import { closeQuietly } from '../../../io/stream.ts'
+import { RecordSpool } from '../../../io/record_spool.ts'
+import { closeQuietly, OutputStream } from '../../../io/stream.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -319,6 +320,88 @@ export function chunkAt(
   return new Uint8Array(0)
 }
 
+async function* numberParts(
+  records: RecordSpool,
+  spec: ChunkSpec,
+  separator: number,
+): AsyncGenerator<ByteSource> {
+  const spool = records.data
+  const count = spec.count
+  if (spec.kind === 'bytes' || spec.kind === 'r') {
+    const base = Math.floor(spool.size / count)
+    const rem = spool.size % count
+    for (
+      let index = spec.only === null ? 0 : spec.only - 1;
+      index < (spec.only ?? count);
+      index++
+    ) {
+      const start = chunkEnd(index, base, rem)
+      yield spec.kind === 'bytes'
+        ? spool.stream(start, chunkEnd(index + 1, base, rem) - start)
+        : roundRobinSource(records, index, count)
+    }
+    return
+  }
+  const base = Math.floor(Math.max(spool.size, count) / count)
+  const rem = Math.max(spool.size, count) % count
+  let index = 0
+  let pos = 0
+  let record = 0
+  while (pos < spool.size && index < count) {
+    const threshold = Math.max(pos, chunkEnd(index + 1, base, rem) - 1)
+    while (record < records.count) {
+      const [start, size] = await records.window(record)
+      if (start + size > threshold) break
+      record++
+    }
+    const [offset, size] = record >= records.count ? [spool.size, 0] : await records.window(record)
+    const end = offset + size
+    let terminated = end > 0 && (await spool.read(end - 1, 1))[0] === separator
+    let start = pos
+    pos = end
+    while (terminated || chunkEnd(index + 1, base, rem) <= pos) {
+      if (!terminated && pos >= spool.size) break
+      if (spec.only === null || spec.only === index + 1) {
+        yield spool.stream(start, pos - start)
+        if (spec.only !== null) return
+      }
+      start = pos
+      index++
+      if (index >= count) break
+      if (chunkEnd(index + 1, base, rem) > pos) terminated = false
+    }
+    if (pos >= spool.size && index < count) {
+      if (spec.only === null || spec.only === index + 1) {
+        yield spool.stream(start, pos - start)
+        if (spec.only !== null) return
+      }
+      index++
+    }
+  }
+  if (spec.only !== null) yield new Uint8Array()
+  else for (; index < count; index++) yield new Uint8Array()
+}
+
+async function* roundRobinSource(
+  records: RecordSpool,
+  index: number,
+  count: number,
+): AsyncGenerator<Uint8Array> {
+  for (let record = index; record < records.count; record += count) yield* records.stream(record)
+}
+
+async function* selectedNumberPart(
+  records: RecordSpool,
+  spec: ChunkSpec,
+  separator: number,
+): AsyncGenerator<Uint8Array> {
+  for await (const part of numberParts(records, spec, separator)) {
+    if (part instanceof Uint8Array) {
+      if (part.length > 0) yield part
+    } else yield* part
+  }
+}
+
 const ALPHA_SUFFIXES = 'abcdefghijklmnopqrstuvwxyz'
 const NUMERIC_SUFFIXES = '0123456789'
 const HEX_SUFFIXES = '0123456789abcdef'
@@ -458,20 +541,24 @@ export async function splitGeneric(
   }
 
   if (chunks !== null) {
-    const gathered: Uint8Array[] = []
-    for await (const c of source) gathered.push(c)
-    const all = concat(gathered)
-    if (chunks.only !== null) {
-      // `K/N` writes the one chunk to stdout and no file at all.
-      return [chunkAt(all, chunks, separator, chunks.only), new IOResult()]
-    }
-    // Every chunk gets its file, an empty one included: GNU creates N files
-    // for `-n N` however short the input is.
-    let i = 0
-    for (const part of chunkParts(all, chunks, separator)) {
-      const name = suffixFn(i) + additionalSuffix
-      i += 1
-      await emit(name, part)
+    const records = new RecordSpool()
+    let handedOff = false
+    try {
+      await records.data.fill(source)
+      if (chunks.kind !== 'bytes') await records.indexDelimited(separator)
+      if (chunks.only !== null) {
+        const output = new OutputStream(selectedNumberPart(records, chunks, separator), () =>
+          records.close(),
+        )
+        handedOff = true
+        return [output, new IOResult()]
+      }
+      let i = 0
+      for await (const part of numberParts(records, chunks, separator)) {
+        await emit(suffixFn(i++) + additionalSuffix, part)
+      }
+    } finally {
+      if (!handedOff) await records.close()
     }
   } else {
     let writer: ByteWriter | null = null

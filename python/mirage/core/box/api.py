@@ -28,10 +28,12 @@ from mirage.core.box.client import (
     box_post_json,
     box_put_json,
     box_upload_multipart,
+    box_upload_session,
 )
 from mirage.core.box.constants import GONE_STATUS, LOST_STATUS
 from mirage.errors.fs import enoent
 from mirage.errors.types import StaleWriteError
+from mirage.io.spool import ByteSpool
 from mirage.types import JsonValue, PathSpec
 from mirage.utils.ranges import ByteWindow
 
@@ -316,8 +318,17 @@ async def search_content(
 
 
 async def upload_new_file(
-    tm: BoxTokenManager, parent_id: str, name: str, data: bytes
+    tm: BoxTokenManager, parent_id: str, name: str, data: bytes | ByteSpool
 ) -> JsonValue:
+    if isinstance(data, ByteSpool):
+        if data.size >= 20 * 1024 * 1024:
+            return await box_upload_session(
+                tm,
+                f"{tm.upload_base}/files/upload_sessions",
+                {"folder_id": parent_id, "file_name": name},
+                data,
+            )
+        data = await data.read(0, data.size)
     return await box_upload_multipart(
         tm,
         f"{tm.upload_base}/files/content",
@@ -331,9 +342,19 @@ async def upload_file_version(
     tm: BoxTokenManager,
     file_id: str,
     name: str,
-    data: bytes,
+    data: bytes | ByteSpool,
     etag: str | None = None,
 ) -> JsonValue:
+    if isinstance(data, ByteSpool):
+        if data.size >= 20 * 1024 * 1024:
+            return await box_upload_session(
+                tm,
+                f"{tm.upload_base}/files/{file_id}/upload_sessions",
+                {"file_name": name},
+                data,
+                etag,
+            )
+        data = await data.read(0, data.size)
     return await box_upload_multipart(
         tm,
         f"{tm.upload_base}/files/{file_id}/content",

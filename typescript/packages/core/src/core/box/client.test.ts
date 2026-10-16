@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteSpool } from '../../io/spool.ts'
+import { boxUploadSession } from './client.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BoxTokenManager, boxGetBytes, conflictOf } from './client.ts'
 import { BOX_TOKEN_URL } from './constants.ts'
@@ -167,3 +169,50 @@ describe('conflictOf', () => {
     expect(conflictOf(text)).toBe(kind)
   })
 })
+
+it.each([false, true])(
+  'upload session commits conditionally and aborts on failure: %s',
+  async (fail) => {
+    const spool = new ByteSpool()
+    await spool.append(new TextEncoder().encode('abcdefg'))
+    const base = 'https://example.test/session'
+    const fake = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          part_size: 4,
+          session_endpoints: { upload_part: base + '/part', commit: base + '/commit', abort: base },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ part: { part_id: '1', offset: 0, size: 4 } }))
+      .mockResolvedValueOnce(Response.json({ part: { part_id: '2', offset: 4, size: 3 } }))
+      .mockResolvedValueOnce(
+        Response.json({ entries: [{ id: 'done' }] }, { status: fail ? 500 : 201 }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    const previous = globalThis.fetch
+    globalThis.fetch = fake
+    try {
+      const result = boxUploadSession(
+        new BoxTokenManager({ accessToken: 'token' }),
+        base,
+        {},
+        spool,
+        '"version"',
+      )
+      if (fail) await expect(result).rejects.toThrow()
+      else await expect(result).resolves.toEqual({ entries: [{ id: 'done' }] })
+      const calls = fake.mock.calls as [string, RequestInit][]
+      expect(new TextDecoder().decode(calls[1]?.[1].body as Uint8Array)).toBe('abcd')
+      expect(new TextDecoder().decode(calls[2]?.[1].body as Uint8Array)).toBe('efg')
+      expect(calls[3]?.[1].headers).toMatchObject({
+        'If-Match': '"version"',
+        Digest: 'sha=L7XhNBn8iSRoZeejJPR27GJOh0A=',
+      })
+      expect(calls.length).toBe(fail ? 5 : 4)
+    } finally {
+      globalThis.fetch = previous
+      await spool.close()
+    }
+  },
+)

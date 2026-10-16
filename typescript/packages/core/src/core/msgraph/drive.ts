@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteSpool } from '../../io/spool.ts'
+import type { ByteSource } from '../../io/types.ts'
 import { enotsup } from '../../errors/fs.ts'
 import { buildTree, emitStartPath, keep, type PredNode } from '../generic/find_eval.ts'
 import {
@@ -44,6 +46,7 @@ import {
   graphStream,
   pollMonitor,
   uploadChunk,
+  cancelUpload,
 } from './client.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { sleep } from '../../utils/abort.ts'
@@ -329,23 +332,55 @@ export async function createChildFolder(
 async function uploadSessionWrite(
   config: MsGraphConfigResolved,
   sessionUrl: string,
-  data: Uint8Array,
+  data: Uint8Array | ByteSpool,
 ): Promise<void> {
   const session = await graphPost(config, sessionUrl, {
     item: { '@microsoft.graph.conflictBehavior': 'replace' },
   })
   const uploadUrl = asString(session.uploadUrl)
   if (uploadUrl === null) throw new GraphError(502, 'missingUploadUrl', sessionUrl)
+  const total = data instanceof ByteSpool ? data.size : data.length
   let start = 0
-  while (start < data.length) {
-    const chunk = data.slice(start, start + UPLOAD_CHUNK)
-    const result = await uploadChunk(config, uploadUrl, chunk, start, data.length)
-    const ranges = result.nextExpectedRanges
-    if (Array.isArray(ranges) && typeof ranges[0] === 'string') {
-      start = Number.parseInt(ranges[0].split('-', 1)[0] ?? '', 10)
-    } else {
-      start += chunk.length
+  try {
+    while (start < total) {
+      const chunk =
+        data instanceof ByteSpool
+          ? await data.read(start, UPLOAD_CHUNK)
+          : data.slice(start, start + UPLOAD_CHUNK)
+      const result = await uploadChunk(config, uploadUrl, chunk, start, total)
+      const ranges = result.nextExpectedRanges
+      const next =
+        Array.isArray(ranges) && typeof ranges[0] === 'string'
+          ? Number(ranges[0].split('-')[0])
+          : start + chunk.length
+      if (!Number.isSafeInteger(next) || next <= start || next > total)
+        throw new Error('Graph upload session made no progress')
+      start = next
     }
+  } catch (error) {
+    try {
+      await cancelUpload(config, uploadUrl)
+    } catch (cleanup) {
+      console.debug('Could not cancel Graph upload session', cleanup)
+    }
+    throw error
+  }
+}
+
+export async function writeItemStream(
+  config: MsGraphConfigResolved,
+  loc: DriveLoc,
+  data: ByteSource,
+): Promise<number> {
+  const spool = new ByteSpool()
+  try {
+    await spool.fill(data)
+    if (spool.size <= SIMPLE_UPLOAD_MAX)
+      await writeItem(config, loc, await spool.read(0, spool.size))
+    else await uploadSessionWrite(config, loc.item('/createUploadSession'), spool)
+    return spool.size
+  } finally {
+    await spool.close()
   }
 }
 

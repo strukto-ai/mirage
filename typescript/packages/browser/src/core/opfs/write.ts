@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chunks } from '@struktoai/mirage-core/io/cooperative'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -19,6 +21,14 @@ import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { openError, resolveFileHandle, toWritableChunk } from './utils.ts'
 
 export async function write(accessor: OPFSAccessor, p: PathSpec, data: Uint8Array): Promise<void> {
+  await writeStream(accessor, p, data)
+}
+
+export async function writeStream(
+  accessor: OPFSAccessor,
+  p: PathSpec,
+  data: ByteSource,
+): Promise<void> {
   const root = await accessor.root()
   const timer = startOp()
   const key = p.mountPath
@@ -29,7 +39,16 @@ export async function write(accessor: OPFSAccessor, p: PathSpec, data: Uint8Arra
     throw await openError(root, key, err, p)
   }
   const writable = await handle.createWritable()
-  await writable.write(toWritableChunk(data))
-  await writable.close()
-  record('write', p.virtual, VFSName.OPFS, data.byteLength, timer)
+  let size = 0
+  try {
+    for await (const part of chunks(data)) {
+      await writable.write(toWritableChunk(part))
+      size += part.length
+    }
+    await writable.close()
+  } catch (error) {
+    await writable.abort()
+    throw error
+  }
+  record('write', p.virtual, VFSName.OPFS, size, timer)
 }

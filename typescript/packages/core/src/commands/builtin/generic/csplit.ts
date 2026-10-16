@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { asyncChain } from '../../../io/stream.ts'
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
+import { RecordSpool } from '../../../io/record_spool.ts'
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -20,11 +21,9 @@ import { CommandName } from '../../spec/types.ts'
 import { missingOperandError } from '../../spec/usage.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { readStdinAsync } from '../utils/stream.ts'
-import { splitLines } from '../utils/lines.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -72,12 +71,12 @@ function checkLineNumbers(patterns: readonly string[]): [string, boolean] {
  * input is always the last piece, empty or not. Mirrors Python's
  * `_split_by_patterns`.
  */
-function splitByPatterns(
-  lines: readonly string[],
+async function splitByPatterns(
+  lines: RecordSpool,
   patterns: readonly string[],
   suppressMatched: boolean,
-): [string[][], string | null] {
-  const parts: string[][] = []
+): Promise<[[number, number][], string | null]> {
+  const parts: [number, number][] = []
   let head = 0
   let seen = 0
   for (const pat of patterns) {
@@ -85,40 +84,40 @@ function splitByPatterns(
     if (isRegex(pat)) {
       const regex = new RegExp(pat.slice(1, -1))
       let found = -1
-      for (let idx = seen; idx < lines.length; idx++) {
-        if (regex.test(lines[idx] ?? '')) {
+      for (let idx = seen; idx < lines.count; idx++) {
+        if (regex.test(DEC.decode(await lines.read(idx)).slice(0, -1))) {
           found = idx
           break
         }
       }
       if (found === -1) {
-        parts.push(lines.slice(head))
+        parts.push([head, lines.count])
         return [parts, `csplit: '${pat}': match not found\n`]
       }
-      parts.push(lines.slice(head, found))
+      parts.push([head, found])
       head = found
       seen = found + 1
     } else {
-      if (suppressMatched && seen >= lines.length) {
-        parts.push([])
+      if (suppressMatched && seen >= lines.count) {
+        parts.push([head, head])
         return [parts, outOfRange]
       }
       const stop = Math.max(head, Number.parseInt(pat, 10) - 1)
-      if (stop > lines.length) {
-        parts.push(lines.slice(head))
+      if (stop > lines.count) {
+        parts.push([head, lines.count])
         return [parts, outOfRange]
       }
-      parts.push(lines.slice(head, stop))
+      parts.push([head, stop])
       head = stop
       seen = Math.max(seen, stop)
-      if (!suppressMatched && seen >= lines.length) return [parts, outOfRange]
+      if (!suppressMatched && seen >= lines.count) return [parts, outOfRange]
     }
-    if (suppressMatched && head < lines.length) {
+    if (suppressMatched && head < lines.count) {
       head += 1
       seen = Math.max(seen, head)
     }
   }
-  parts.push(lines.slice(head))
+  parts.push([head, lines.count])
   return [parts, null]
 }
 
@@ -165,80 +164,75 @@ export async function csplitGeneric(
   const keep = fl.asBool('keep_files')
   const suppressMatched = fl.asBool('suppress_matched')
   const elideEmpty = fl.asBool('elide_empty_files')
-  let raw: Uint8Array
-  // `-` is stdin. /dev/stdin would run csplit on the /dev mount, which is
-  // where its pieces would land, so it stays a path.
   const first = paths[0]
-  if (first !== undefined && first.rawPath !== '-') {
-    raw = await materialize(stream(first))
-  } else {
-    const stdinData = await readStdinAsync(opts.stdin)
-    raw = stdinData ?? new Uint8Array(0)
-  }
-  const checked = checkLineNumbers(texts)
-  let diagnostics = checked[0]
-  if (checked[1]) {
-    return [ENC.encode(''), new IOResult({ stderr: ENC.encode(diagnostics), exitCode: 1 })]
-  }
-  const text = DEC.decode(raw)
-  const lines = splitLines(text)
-  const [parts, splitError] = splitByPatterns(lines, texts, suppressMatched)
-  let error = splitError
-  const sizes: string[] = []
-  const created: [string, PathSpec][] = []
-  for (const part of parts) {
-    if (elideEmpty && part.length === 0) continue
-    const suffix = formatSuffix(sizes.length, digits, suffixFormat)
-    const name = typedPrefix + suffix
-    let size = 0
-    const data = asyncChain(
-      (function* records() {
-        for (const line of part) {
-          const bytes = ENC.encode(line + '\n')
-          size += bytes.byteLength
-          yield bytes
-        }
-      })(),
-    )
-    const scope = PathSpec.fromStrPath(name, undefined, opts.cwd)
-    const spec = new PathSpec({
-      virtual: scope.virtual,
-      directory: scope.directory,
-      dotted: scope.dotted,
-      walkError: scope.walkError,
-      vfsPath: mountKey(scope.virtual, mountPrefix),
-      rawPath: name,
-    })
-    try {
-      await write(spec, data)
-    } catch (err) {
-      if (!isFsError(err)) throw err
-      error = `csplit: ${name}: ${String(fsStrerror(err))}\n`
-      break
-    }
-    created.push([name, spec])
-    sizes.push(String(size))
-  }
-  if (error !== null) diagnostics += error
-  if (error !== null && !keep) {
-    // GNU removes every piece the failed run wrote unless -k keeps them, so
-    // an earlier run's piece of that name is gone too.
-    for (const [name, spec] of created) {
+  const source =
+    first !== undefined && first.rawPath !== '-' ? stream(first) : (opts.stdin ?? new Uint8Array())
+  const records = new RecordSpool()
+  const reader = new AsyncLineIterator(source)
+  try {
+    for await (const line of reader) await records.append(ENC.encode(DEC.decode(line) + '\n'))
+    const checked = checkLineNumbers(texts)
+    let diagnostics = checked[0]
+    if (checked[1])
+      return [new Uint8Array(), new IOResult({ stderr: ENC.encode(diagnostics), exitCode: 1 })]
+    const [parts, splitError] = await splitByPatterns(records, texts, suppressMatched)
+    let error = splitError
+    const sizes: string[] = []
+    const created: [string, PathSpec][] = []
+    for (const [first, last] of parts) {
+      if (elideEmpty && first === last) continue
+      const suffix = formatSuffix(sizes.length, digits, suffixFormat)
+      const name = typedPrefix + suffix
+      const start = first < records.count ? (await records.window(first))[0] : records.data.size
+      const end = last < records.count ? (await records.window(last))[0] : records.data.size
+      const size = end - start
+      const data = records.data.stream(start, size)
+      const scope = PathSpec.fromStrPath(name, undefined, opts.cwd)
+      const spec = new PathSpec({
+        virtual: scope.virtual,
+        directory: scope.directory,
+        dotted: scope.dotted,
+        walkError: scope.walkError,
+        vfsPath: mountKey(scope.virtual, mountPrefix),
+        rawPath: name,
+      })
       try {
-        await unlink(spec)
+        await write(spec, data)
       } catch (err) {
         if (!isFsError(err)) throw err
-        diagnostics += `csplit: ${name}: ${String(fsStrerror(err))}\n`
+        error = `csplit: ${name}: ${String(fsStrerror(err))}\n`
+        break
+      }
+      created.push([name, spec])
+      sizes.push(String(size))
+    }
+    if (error !== null) diagnostics += error
+    if (error !== null && !keep) {
+      // GNU removes every piece the failed run wrote unless -k keeps them, so
+      // an earlier run's piece of that name is gone too.
+      for (const [name, spec] of created) {
+        try {
+          await unlink(spec)
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          diagnostics += `csplit: ${name}: ${String(fsStrerror(err))}\n`
+        }
       }
     }
+    const output = quiet || sizes.length === 0 ? '' : sizes.join('\n') + '\n'
+    const result: ByteSource = ENC.encode(output)
+    return [
+      result,
+      new IOResult({
+        ...(diagnostics !== '' ? { stderr: ENC.encode(diagnostics) } : {}),
+        ...(error !== null ? { exitCode: 1 } : {}),
+      }),
+    ]
+  } finally {
+    try {
+      await reader.discard()
+    } finally {
+      await records.close()
+    }
   }
-  const output = quiet || sizes.length === 0 ? '' : sizes.join('\n') + '\n'
-  const result: ByteSource = ENC.encode(output)
-  return [
-    result,
-    new IOResult({
-      ...(diagnostics !== '' ? { stderr: ENC.encode(diagnostics) } : {}),
-      ...(error !== null ? { exitCode: 1 } : {}),
-    }),
-  ]
 }

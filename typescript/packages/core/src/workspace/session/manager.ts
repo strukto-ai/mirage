@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { releaseInputs } from '../../io/async_line_iterator.ts'
 import { SessionOwner } from '../../context/session_context.ts'
 import { ownRecord, SessionState, varsFromEntries, varsFromEnv } from './session.ts'
 import { setCwd } from './shell_dirs.ts'
@@ -425,6 +426,10 @@ export class SessionManager extends SessionOwner {
         throw new Error(`unknown session: ${sessionId}`)
       }
 
+      const keep = [...this.sessions.entries()]
+        .filter(([id]) => id !== sessionId)
+        .flatMap(([, other]) => other.openInputs())
+      await releaseInputs(session.openInputs(), keep)
       this.sessions.delete(sessionId)
       this.persisted.delete(sessionId)
       await this.sessionStore.delete([sessionId])

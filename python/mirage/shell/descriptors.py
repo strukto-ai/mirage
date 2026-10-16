@@ -14,11 +14,16 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from contextlib import aclosing
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from mirage.errors.fs import ebadf
 from mirage.io.async_line_iterator import SharedInput
+from mirage.io.cooperative import chunks
+from mirage.io.spool import ByteSpool
+from mirage.io.stream import OutputStream
+from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole, OwnedStream, Terminal
 from mirage.shell.constants import FD_BOTH, FD_CLOSE
@@ -79,8 +84,10 @@ async def unreadable_stdin() -> AsyncIterator[bytes]:
 
 
 class FileInput(SharedInput):
-    def __init__(self, description: "FileDescription", data: bytes) -> None:
-        super().__init__(data)
+    def __init__(
+        self, description: "FileDescription", data: ByteSource
+    ) -> None:
+        super().__init__(data, seekable=True)
         self.description = description
 
     def dup(self) -> "FileInput":
@@ -129,16 +136,51 @@ class Recorder(JobConsole, StreamOwner):
 
     def __init__(self) -> None:
         super().__init__()
-        self.chunks: list[tuple[Channel | Inherited, bytes]] = []
+        self.chunks: list[tuple[Channel | Inherited, int, int]] = []
+        self.storage = ByteSpool()
+        self.writing = asyncio.Lock()
+
+    async def _record(self, key: Channel | Inherited, data: bytes) -> None:
+        async with self.writing:
+            start = self.storage.size
+            await self.storage.append(data)
+            if self.chunks and self.chunks[-1][0] == key:
+                _, offset, size = self.chunks[-1]
+                self.chunks[-1] = (key, offset, size + len(data))
+            else:
+                self.chunks.append((key, start, len(data)))
 
     async def emit(self, channel: Channel, data: bytes) -> None:
-        self.chunks.append((channel, data))
+        await self._record(channel, data)
 
     async def emit_to(self, stream: OwnedStream, data: bytes) -> None:
-        if isinstance(stream, Inherited):
-            self.chunks.append((stream, data))
-        else:
-            await self.emit(stream.channel, data)
+        await self._record(
+            stream if isinstance(stream, Inherited) else stream.channel, data
+        )
+
+    async def take(self) -> list[tuple[Channel | Inherited, ByteSource]]:
+        async with self.writing:
+            entries, self.chunks = self.chunks, []
+            storage, self.storage = self.storage, ByteSpool()
+        if storage.size <= storage.memory_limit:
+            data = await storage.read(0, storage.size)
+            await storage.close()
+            return [
+                (key, data[start : start + size])
+                for key, start, size in entries
+            ]
+        remaining = len(entries)
+
+        async def release() -> None:
+            nonlocal remaining
+            remaining -= 1
+            if remaining == 0:
+                await storage.close()
+
+        return [
+            (key, OutputStream(storage.stream(start, size), release))
+            for key, start, size in entries
+        ]
 
 
 # The recorder of the innermost level running a command, for a level
@@ -150,7 +192,7 @@ ENCLOSING: ContextVar[Recorder | None] = ContextVar(
 
 
 async def deliver(
-    sink: JobConsole | None, stream: Inherited, data: bytes
+    sink: JobConsole | None, stream: Inherited, data: ByteSource
 ) -> bool:
     """Send bytes written to a stream another level owns toward it.
 
@@ -172,7 +214,9 @@ async def deliver(
     )
     if target is None:
         return False
-    await target.emit_to(stream, data)
+    async with aclosing(chunks(data)) as source:
+        async for part in source:
+            await target.emit_to(stream, part)
     return True
 
 

@@ -16,6 +16,8 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Protocol
 
+from mirage.io.types import ByteSource
+
 
 @dataclass(frozen=True, slots=True)
 class CommandRun:
@@ -27,8 +29,8 @@ class CommandRun:
         status (int): its exit status.
     """
 
-    stdout: bytes
-    stderr: bytes
+    stdout: ByteSource
+    stderr: ByteSource
     status: int
 
 
@@ -65,7 +67,7 @@ class AwkHost(Protocol):
         """Commit a named output, or all outputs before a visible barrier."""
         ...
 
-    async def run(self, command: str, stdin: bytes | None) -> CommandRun:
+    async def run(self, command: str, stdin: ByteSource | None) -> CommandRun:
         """Run one shell command line to completion.
 
         Args:

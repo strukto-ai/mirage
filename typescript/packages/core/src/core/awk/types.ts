@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSource } from '../../io/types.ts'
 /** What one shell command line left behind once it finished. */
 export interface CommandRun {
-  readonly stdout: Uint8Array
-  readonly stderr: Uint8Array
+  readonly stdout: ByteSource
+  readonly stderr: ByteSource
   readonly status: number
 }
 
@@ -39,5 +40,5 @@ export interface AwkHost {
    * Run one shell command line to completion, as `sh -c` would take it;
    * a null `stdin` hands it awk's own, still unread.
    */
-  run(command: string, stdin: Uint8Array | null): Promise<CommandRun>
+  run(command: string, stdin: ByteSource | null): Promise<CommandRun>
 }

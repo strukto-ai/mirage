@@ -196,7 +196,19 @@ async def _follow(
     except (FileNotFoundError, ValueError):
         return [], [], posix_phrase(FsCondition.ENOENT), []
     if target_stat.type != FileType.DIRECTORY:
-        return [Entry(name_path=virtual, kind="file", read=spec)], [], "", []
+        return (
+            [
+                Entry(
+                    name_path=virtual,
+                    kind="file",
+                    read=spec,
+                    size=target_stat.size,
+                )
+            ],
+            [],
+            "",
+            [],
+        )
     if not recurse:
         return [Entry(name_path=virtual, kind="dir")], [], "", []
     entries, crossings, unreadable = await _subtree(
@@ -292,7 +304,11 @@ async def scan_operand(
                 missing=True,
             )
         if root_stat.type != FileType.DIRECTORY:
-            entries.append(Entry(name_path=base, kind="file", read=path))
+            entries.append(
+                Entry(
+                    name_path=base, kind="file", read=path, size=root_stat.size
+                )
+            )
         else:
             entries.append(Entry(name_path=base, kind="dir"))
             if recurse:

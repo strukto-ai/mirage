@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chunks } from '@struktoai/mirage-core/io/cooperative'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { lstripSlash } from '@struktoai/mirage-core/utils/slash'
@@ -26,8 +28,11 @@ import { read as opfsRead } from '../../core/opfs/read.ts'
 import { stat as opfsStat } from '../../core/opfs/stat.ts'
 import { readStream as opfsStream } from '../../core/opfs/stream.ts'
 import { exists as opfsExists } from '../../core/opfs/exists.ts'
-import { write as opfsWrite } from '../../core/opfs/write.ts'
-import { appendBytes as opfsAppend } from '../../core/opfs/append.ts'
+import { write as opfsWrite, writeStream as opfsWriteStream } from '../../core/opfs/write.ts'
+import {
+  appendBytes as opfsAppend,
+  appendStream as opfsAppendStream,
+} from '../../core/opfs/append.ts'
 import { create as opfsCreate } from '../../core/opfs/create.ts'
 import { mkdir as opfsMkdir } from '../../core/opfs/mkdir.ts'
 import { unlink as opfsUnlink } from '../../core/opfs/unlink.ts'
@@ -168,6 +173,14 @@ export class OPFSVFS extends BaseVFS {
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {
     return opfsWrite(this.accessor, path, data)
+  }
+
+  override writeStream(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
+    return opfsWriteStream(this.accessor, path, chunks(data, signal))
+  }
+
+  override appendStream(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
+    return opfsAppendStream(this.accessor, path, chunks(data, signal))
   }
 
   override append(path: PathSpec, data: Uint8Array): Promise<void> {

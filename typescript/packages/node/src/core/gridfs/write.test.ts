@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
 
@@ -60,4 +61,45 @@ describe('gridfs put token', () => {
     expect(meta?.revision).toBe('oid-1')
     expect(meta?.size).toBe(2)
   })
+})
+
+it.each([false, true])('streams a GridFS upload and aborts failures: %s', async (fail) => {
+  const parts: Uint8Array[] = []
+  const abort = vi.fn(() => Promise.resolve())
+  const upload = Object.assign(
+    new Writable({
+      write(chunk: Uint8Array, _encoding, done) {
+        parts.push(chunk.slice())
+        done()
+      },
+    }),
+    { id: 'new-id', abort },
+  )
+  vi.mocked(clientMod.bucket).mockResolvedValue({ openUploadStream: () => upload } as never)
+  const accessor = new GridFSAccessor({
+    uri: 'mongodb://localhost:27017',
+    database: 'db',
+  } as GridFSConfig)
+  let closed = false
+  async function* source(): AsyncGenerator<Uint8Array> {
+    try {
+      yield new TextEncoder().encode('first')
+      await Promise.resolve()
+      if (fail) throw new Error('producer failed')
+      yield new TextEncoder().encode('last')
+    } finally {
+      closed = true
+    }
+  }
+  if (DRIVER.putStream === undefined) throw new Error('stream hook missing')
+  const result = DRIVER.putStream(accessor, 'a', source(), {})
+  if (fail) {
+    await expect(result).rejects.toThrow('producer failed')
+    expect(abort).toHaveBeenCalledOnce()
+  } else {
+    expect(await result).toMatchObject({ size: 9, revision: 'new-id' })
+    expect(Buffer.concat(parts).toString()).toBe('firstlast')
+    expect(abort).not.toHaveBeenCalled()
+  }
+  expect(closed).toBe(true)
 })

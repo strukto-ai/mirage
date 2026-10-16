@@ -860,13 +860,13 @@ class FailingVFS(RAMVFS):
 
 
 @pytest.mark.asyncio
-async def test_file_read_failing_midway_fails_the_redirect_alone():
+async def test_file_read_failing_midway_keeps_streamed_output():
     ws = Workspace({"/data": FailingVFS()}, mode=MountMode.WRITE)
     try:
         io = await asyncio.wait_for(
             ws.shell("cat < /data/bad; echo after:$?"), 5
         )
-        assert (io.exit_code, await io.stdout_str()) == (0, "after:1\n")
+        assert (io.exit_code, await io.stdout_str()) == (0, "firstafter:1\n")
         assert "Permission denied" in await io.stderr_str()
     finally:
         await ws.close()

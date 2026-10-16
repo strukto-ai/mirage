@@ -12,22 +12,64 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
+from contextlib import aclosing
+from uuid import uuid4
+
+import asyncssh
+
 from mirage.accessor.ssh import SSHAccessor
 from mirage.core.ssh.utils import join_root, open_for_write
+from mirage.io.cooperative import chunks
+from mirage.io.stream import close_quietly
+from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
+
+logger = logging.getLogger(__name__)
 
 
 async def write(
     accessor: SSHAccessor, path_spec: PathSpec, data: bytes
 ) -> None:
-    path = path_spec.mount_path
-    config = accessor.config
-    sftp = await accessor.sftp()
+    await write_stream(accessor, path_spec, data)
+
+
+async def write_stream(
+    accessor: SSHAccessor,
+    path_spec: PathSpec,
+    data: ByteSource,
+    atomic: bool = False,
+) -> None:
     timer = start_op()
-    remote_path = join_root(config.root, path)
-    async with await open_for_write(
-        sftp, remote_path, path_spec, flags="wb"
-    ) as f:
-        await f.write(data)
-    record("write", path_spec.virtual, "ssh", len(data), timer)
+    sftp = await accessor.sftp()
+    remote = join_root(accessor.config.root, path_spec.mount_path)
+    target = remote + ".mirage-" + uuid4().hex if atomic else remote
+    staged = False
+    size = 0
+    mode = None
+    try:
+        if atomic:
+            try:
+                attrs = await sftp.stat(remote)
+                mode = attrs.permissions
+            except asyncssh.SFTPNoSuchFile:
+                logger.debug("staging a new SSH file: %s", path_spec.virtual)
+        handle = await open_for_write(
+            sftp, target, path_spec, flags="xb" if atomic else "wb"
+        )
+        staged = atomic
+        async with handle, aclosing(chunks(data)) as source:
+            async for part in source:
+                await handle.write(part)
+                size += len(part)
+        if atomic:
+            if mode is not None:
+                await sftp.chmod(target, mode & 0o7777)
+            await sftp.posix_rename(target, remote)
+            staged = False
+    finally:
+        await close_quietly(data)
+        if staged:
+            await sftp.remove(target)
+    record("write", path_spec.virtual, "ssh", size, timer)

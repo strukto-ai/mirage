@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { S3Accessor } from '../../accessor/s3.ts'
-import { appendByRewrite } from '../../core/generic/rewrite.ts'
+import { appendByStreamedRewrite } from '../../core/generic/rewrite.ts'
 import { checksum as s3Checksum } from '../../core/s3/checksum.ts'
 import { MD5_ETAG_STORES, SCOPE_ERROR } from '../../core/s3/constants.ts'
 import { copy as s3Copy, copyFrom as s3CopyFrom } from '../../core/s3/copy.ts'
@@ -109,9 +109,13 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
   }
 
   override append(path: PathSpec, data: Uint8Array): Promise<void> {
-    return appendByRewrite(
-      (p) => this.read(p),
-      (p, d) => this.write(p, d),
+    return this.appendStream(path, data)
+  }
+
+  override appendStream(path: PathSpec, data: ByteSource): Promise<void> {
+    return appendByStreamedRewrite(
+      (p, remember) => s3Stream(this.accessor, p, remember),
+      (p, d) => this.writeStream(p, d),
       (p) => this.stat(p),
       path,
       data,

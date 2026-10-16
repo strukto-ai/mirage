@@ -14,7 +14,8 @@
 
 import { EvaluationContext } from '../evaluation.ts'
 import { describe, expect, it, vi } from 'vitest'
-import { DeviceInput, IOResult } from '../../io/types.ts'
+import { SharedInput } from '../../io/async_line_iterator.ts'
+import { DeviceInput, IOResult, materialize } from '../../io/types.ts'
 import { Redirect, RedirectKind } from '../../shell/types.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -108,7 +109,7 @@ describe('handleRedirect < (stdin)', () => {
     })
     let receivedStdin: Uint8Array | null = null
     const execute: ExecuteNodeFn = async (_n, _s, stdin) => {
-      if (stdin instanceof Uint8Array) receivedStdin = stdin
+      receivedStdin = await materialize(stdin)
       return Promise.resolve([null, new IOResult(), new ExecutionNode()])
     }
     const redirects = [new Redirect({ fd: 0, target: '/ram/input.txt', kind: RedirectKind.STDIN })]
@@ -161,7 +162,7 @@ describe('handleRedirect < from a character device', () => {
 
   it('leaves an empty regular file plain', async () => {
     const [stdin] = await stdinFor(new Uint8Array(0), FileType.FILE)
-    expect(stdin).toBeInstanceOf(Uint8Array)
+    expect(stdin).toBeInstanceOf(SharedInput)
     expect(stdin).not.toBeInstanceOf(DeviceInput)
   })
 
@@ -1128,7 +1129,7 @@ it('fails only the redirect when a file read fails midway', async () => {
   )
   try {
     const io = await ws.shell('cat < /data/bad; echo after:$?')
-    expect([io.exitCode, io.stdoutText]).toEqual([0, 'after:1\n'])
+    expect([io.exitCode, io.stdoutText]).toEqual([0, 'firstafter:1\n'])
     expect(io.stderrText).toContain('Permission denied')
   } finally {
     await ws.close()

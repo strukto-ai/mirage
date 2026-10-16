@@ -270,7 +270,14 @@ export async function planCreate(
         notices.push(`tar: ${name}: ${SELF_DUMP}`)
         continue
       }
-      members.push({ name, kind: entry.kind, path: read, target: entry.target ?? '', spelled })
+      members.push({
+        name,
+        kind: entry.kind,
+        path: read,
+        target: entry.target ?? '',
+        spelled,
+        size: entry.size ?? null,
+      })
     }
   }
   // GNU closes a run that failed an operand with one trailer, after

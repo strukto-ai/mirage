@@ -1,6 +1,7 @@
 import zlib
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from functools import partial
 
 from mirage.commands.builtin.constants import GZIP_SUFFIX
 from mirage.commands.builtin.generic.archive.walk import StatFn
@@ -17,7 +18,6 @@ from mirage.commands.builtin.utils.links import LinkResolver, link_resolver
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.stream import (
     resolve_source,
-    stdin_bytes,
     stdin_stream,
 )
 from mirage.commands.config import CommandOpts
@@ -27,9 +27,11 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
-from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.types import PathSpec
-from mirage.utils.compress import gzip_compress, gzip_compress_stream
+from mirage.io.spool import ByteSpool
+from mirage.io.stream import OutputStream, close_quietly, drain
+from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec, PolymorphicReadFn
+from mirage.utils.compress import gzip_compress_stream
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import gnu_basename
 
@@ -53,7 +55,7 @@ def extract_level(fl: FlagView) -> int:
 async def gzip(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_bytes: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
     unlink: Callable[..., Awaitable[None]],
     stat: StatFn | None = None,
@@ -89,108 +91,110 @@ async def gzip(
         return gzip_compress_stream(
             resolve_source(stdin), level=level
         ), IOResult()
-    read = stdin_bytes(read_bytes, stdin)
     source = normalized_read(read_bytes)
     piped = stdin_stream(source, stdin)
-    stdout: list[bytes] = []
+    io = IOResult()
     lines: list[str] = []
-    exit_code = 0
 
     def report(line: str, code: int, warning: bool = False) -> None:
-        nonlocal exit_code
         if not (warning and quiet):
             lines.append(line.rstrip("\n"))
-        if exit_code != 1:
-            exit_code = code
+            io.stderr = ("\n".join(lines) + "\n").encode()
+        if io.exit_code != 1:
+            io.exit_code = code
 
-    for p in paths:
-        in_place = not (to_stdout or p.raw_path == "-")
-        # An input gzip cannot open is reported and skipped, and the run
-        # goes on to the next operand (a directory is a warning, exit 2,
-        # silent under -q, and a link without -c or -f is ELOOP); so is
-        # an input that already has a suffix, without -f and with no
-        # exit code of its own, an output already there without -f, a
-        # link standing there included, and a replace -f is refused. An
-        # output it cannot create is fatal: gzip's write_error leads
-        # with a newline and exits, leaving later operands untouched.
-        # Pinned against gzip 1.13 (debian:stable-slim).
-        link: str | None = None
-        if p.raw_path == "-":
-            try:
-                raw = await read(p)
-            except FS_ERRORS as exc:
-                report(f"gzip: {p.raw_path}: {fs_strerror(exc)}", 1)
-                continue
-        else:
-            opened = await open_gzip_input(
-                p,
-                source if in_place else piped,
-                report,
-                suffix=suffix,
-                decompress=False,
-                follow=to_stdout or force,
-                resolver=resolver,
+    async def run() -> AsyncIterator[bytes]:
+        for p in paths:
+            in_place = not (to_stdout or p.raw_path == "-")
+            opened = (
+                None
+                if p.raw_path == "-"
+                else await open_gzip_input(
+                    p,
+                    source if in_place else piped,
+                    report,
+                    suffix=suffix,
+                    decompress=False,
+                    follow=to_stdout or force,
+                    resolver=resolver,
+                )
             )
-            if opened is None:
+            if opened is None and p.raw_path != "-":
                 continue
-            known = gzip_suffix(p.raw_path, suffix) if in_place else None
-            if known is not None and not force:
-                if not quiet:
-                    lines.append(
-                        f"gzip: {p.raw_path} already has {known} "
-                        "suffix -- unchanged"
+            input_source = piped(p) if opened is None else opened.stream
+            link = None if opened is None else opened.link
+            try:
+                known = gzip_suffix(p.raw_path, suffix) if in_place else None
+                if known is not None and not force:
+                    report(
+                        f"gzip: {p.raw_path} already has {known} suffix -- unchanged",
+                        io.exit_code,
+                        True,
                     )
-                continue
-            try:
-                raw = await materialize(opened.stream)
-            except FS_ERRORS as exc:
-                report(f"\ngzip: {p.raw_path}: {fs_strerror(exc)}", 1)
-                break
-            link = opened.link
-        data = gzip_compress(
-            raw,
-            level=level,
-            name="" if p.raw_path == "-" else gnu_basename(p.raw_path),
-        )
-        if not in_place:
-            stdout.append(data)
-            continue
-        out_path = p.mount_path + suffix
-        out = (
-            mounted_path(p, out_path)
-            if link is None
-            else beside_link(link, p.raw_path + suffix)
-        )
-        existed = await output_taken(out, stat, resolver)
-        if existed and not force:
-            lines.append(
-                f"gzip: {p.raw_path}{suffix} already exists;\tnot overwritten"
-            )
-            exit_code = exit_code or 2
-            continue
-        try:
-            await replace_output(
-                out, data, write_bytes, resolver, link is not None
-            )
-        except FS_ERRORS as exc:
-            lines.append(
-                ("" if existed else "\n")
-                + f"gzip: {p.raw_path}{suffix}: {fs_strerror(exc)}"
-            )
-            exit_code = 1
-            if existed:
-                continue
-            break
-        if not keep:
-            await (
-                unlink(p)
-                if link is None or resolver is None
-                else resolver.unlink(link)
-            )
-    stderr = ("\n".join(lines) + "\n").encode() if lines else None
-    return b"".join(stdout) or None, IOResult(
-        stderr=stderr, exit_code=exit_code
-    )
+                    continue
+                compressed = gzip_compress_stream(
+                    input_source,
+                    level=level,
+                    name="" if p.raw_path == "-" else gnu_basename(p.raw_path),
+                )
+                if not in_place:
+                    try:
+                        async for chunk in compressed:
+                            yield chunk
+                    except FS_ERRORS as exc:
+                        report(f"\ngzip: {p.raw_path}: {fs_strerror(exc)}", 1)
+                        return
+                    continue
+                async with ByteSpool() as spool:
+                    try:
+                        await spool.fill(compressed)
+                    except FS_ERRORS as exc:
+                        report(f"\ngzip: {p.raw_path}: {fs_strerror(exc)}", 1)
+                        return
+                    out = (
+                        mounted_path(p, p.mount_path + suffix)
+                        if link is None
+                        else beside_link(link, p.raw_path + suffix)
+                    )
+                    existed = await output_taken(out, stat, resolver)
+                    if existed and not force:
+                        report(
+                            f"gzip: {p.raw_path}{suffix} already exists;"
+                            "\tnot overwritten",
+                            2,
+                        )
+                        continue
+                    try:
+                        await replace_output(
+                            out,
+                            spool.stream(),
+                            write_bytes,
+                            resolver,
+                            link is not None,
+                        )
+                    except FS_ERRORS as exc:
+                        report(
+                            ("" if existed else "\n")
+                            + f"gzip: {p.raw_path}{suffix}: {fs_strerror(exc)}",
+                            1,
+                        )
+                        if existed:
+                            continue
+                        return
+                if not keep:
+                    await (
+                        unlink(p)
+                        if link is None or resolver is None
+                        else resolver.unlink(link)
+                    )
+            finally:
+                await close_quietly(input_source)
+
+    body = OutputStream(run(), partial(close_quietly, stdin))
+    if not to_stdout and all(p.raw_path != "-" for p in paths):
+        await drain(body)
+        return None, io
+    return body, io
 
 
 __all__ = ["gzip", "extract_level"]
@@ -225,7 +229,7 @@ async def gzip_generic(
     paths: list[PathSpec],
     texts: list[str],
     opts: CommandOpts,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_bytes: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
     unlink: Callable[..., Awaitable[None]],
     stat: StatFn | None = None,

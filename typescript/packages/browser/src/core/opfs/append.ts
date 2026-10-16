@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chunks } from '@struktoai/mirage-core/io/cooperative'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -23,6 +25,14 @@ export async function appendBytes(
   p: PathSpec,
   data: Uint8Array,
 ): Promise<void> {
+  await appendStream(accessor, p, data)
+}
+
+export async function appendStream(
+  accessor: OPFSAccessor,
+  p: PathSpec,
+  data: ByteSource,
+): Promise<void> {
   const root = await accessor.root()
   const timer = startOp()
   const key = p.mountPath
@@ -32,17 +42,28 @@ export async function appendBytes(
   } catch (err) {
     throw await openError(root, key, err, p)
   }
-  // Appending nothing opens the file (`true >> f`): the lookup above created
-  // a missing one, and an existing one stays as it was, modification time
-  // included.
-  if (data.byteLength === 0) return
-  const existing = await handle.getFile()
-  const existingBytes = new Uint8Array(await existing.arrayBuffer())
-  const merged = new Uint8Array(existingBytes.byteLength + data.byteLength)
-  merged.set(existingBytes, 0)
-  merged.set(data, existingBytes.byteLength)
-  const writable = await handle.createWritable()
-  await writable.write(toWritableChunk(merged))
-  await writable.close()
-  record('append', p.virtual, VFSName.OPFS, data.byteLength, timer)
+  const source = chunks(data)[Symbol.asyncIterator]()
+  let writable: FileSystemWritableFileStream | null = null
+  let size = 0
+  try {
+    const first = await source.next()
+    if (first.done) return
+    const existing = await handle.getFile()
+    writable = await handle.createWritable({ keepExistingData: true })
+    await writable.seek(existing.size)
+    await writable.write(toWritableChunk(first.value))
+    size += first.value.length
+    for (;;) {
+      const part = await source.next()
+      if (part.done) break
+      await writable.write(toWritableChunk(part.value))
+      size += part.value.length
+    }
+    await writable.close()
+    writable = null
+  } finally {
+    await source.return?.()
+    if (writable !== null) await writable.abort()
+  }
+  record('append', p.virtual, VFSName.OPFS, size, timer)
 }

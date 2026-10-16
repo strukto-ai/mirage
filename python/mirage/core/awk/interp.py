@@ -95,6 +95,8 @@ from mirage.core.awk.value import (
     to_num,
     to_str,
 )
+from mirage.io.spool import ByteSpool
+from mirage.io.types import ByteSource
 from mirage.io.yield_budget import YieldBudget
 from mirage.shell.bytes import byte_view, from_byte_view
 
@@ -202,12 +204,12 @@ class Interpreter:
         self.globals: dict[str, Value] = {}
         self.tables: dict[str, dict[str, Value]] = {}
         self.frames: list[Frame] = []
-        self.out: list[bytes] = []
-        self.held: list[bytes] = []
-        self.err: list[bytes] = []
+        self.out = ByteSpool()
+        self.held = ByteSpool()
+        self.err = ByteSpool()
         self.out_files: dict[str, list[str]] = {}
         self.out_file_sizes: dict[str, int] = {}
-        self.out_pipes: dict[str, list[str]] = {}
+        self.out_pipes: dict[str, ByteSpool] = {}
         self.in_files: dict[str, RecordReader] = {}
         self.in_pipes: dict[str, InputPipe] = {}
         self.main: RecordReader | None = None
@@ -625,7 +627,7 @@ class Interpreter:
         if pipe is None:
             await self.before_command()
             run = await self.host.run(command, None)
-            self.err.append(run.stderr)
+            await self.err.fill(run.stderr)
             pipe = InputPipe(
                 RecordReader(run.stdout, partial(self.special, "RS")),
                 run.status,
@@ -896,7 +898,7 @@ class Interpreter:
             return True
         return name not in self.globals and name not in COUNTERS
 
-    def stdout(self, body: str) -> None:
+    async def stdout(self, body: str) -> None:
         """Buffer text for standard output.
 
         While an output pipe is open the text waits, since the pipe's
@@ -906,15 +908,16 @@ class Interpreter:
         Args:
             body (str): the text.
         """
-        if self.out_pipes or self.held:
-            self.held.append(from_byte_view(body))
+        if self.out_pipes or self.held.size:
+            await self.held.append(from_byte_view(body))
         else:
-            self.out.append(from_byte_view(body))
+            await self.out.append(from_byte_view(body))
 
-    def release(self) -> None:
+    async def release(self) -> None:
         """Let held standard output go, as a flush of stdout does."""
-        self.out.extend(self.held)
-        self.held.clear()
+        await self.out.fill(self.held.stream())
+        await self.held.close()
+        self.held = ByteSpool()
 
     async def write_file(self, name: str, body: str, append: bool) -> None:
         """Write through the host, a failure ending the run.
@@ -957,7 +960,7 @@ class Interpreter:
         """
         await self.flush_files()
         await self.host.flush_output()
-        self.release()
+        await self.release()
 
     async def write(self, body: str, node: Print | Printf) -> None:
         """Emit output to stdout or to a redirection target.
@@ -973,21 +976,21 @@ class Interpreter:
         """
         redirect = node.redirect
         if redirect is None:
-            self.stdout(body)
+            await self.stdout(body)
             return
         name = to_str(await self.eval(redirect.target), self.convfmt())
         if redirect.kind == RedirKind.PIPE:
             pipe = self.out_pipes.get(name)
             if pipe is None:
                 await self.before_command()
-                pipe = self.out_pipes[name] = []
-            pipe.append(body)
+                pipe = self.out_pipes[name] = ByteSpool()
+            await pipe.append(from_byte_view(body))
             return
         if name in STDOUT_NAMES:
-            self.stdout(body)
+            await self.stdout(body)
             return
         if name == STDERR_NAME:
-            self.err.append(from_byte_view(body))
+            await self.err.fill(from_byte_view(body))
             return
         pending = self.out_files.get(name)
         if pending is None:
@@ -1006,12 +1009,13 @@ class Interpreter:
         Args:
             command (str): the command line.
         """
-        body = "".join(self.out_pipes.pop(command))
-        await self.flush_files()
-        run = await self.host.run(command, from_byte_view(body))
-        self.out.append(run.stdout)
-        self.err.append(run.stderr)
-        return run.status
+        body = self.out_pipes.pop(command)
+        async with body:
+            await self.flush_files()
+            run = await self.host.run(command, body.stream())
+            await self.out.fill(run.stdout)
+            await self.err.fill(run.stderr)
+            return run.status
 
     async def close_stream(self, name: str) -> int:
         """Close whatever the program opened under a name.
@@ -1054,7 +1058,7 @@ class Interpreter:
             await self.before_command()
             return 0
         if name in STDOUT_NAMES:
-            self.release()
+            await self.release()
             return 0
         if name in self.out_files:
             await self.flush_file(name)
@@ -1070,8 +1074,8 @@ class Interpreter:
         """
         await self.before_command()
         run = await self.host.run(command, None)
-        self.out.append(run.stdout)
-        self.err.append(run.stderr)
+        await self.out.fill(run.stdout)
+        await self.err.fill(run.stderr)
         return run.status
 
     async def exec_stmt(self, node: Stmt) -> None:
@@ -1290,7 +1294,7 @@ class Interpreter:
             await self.close_out_pipe(command)
         await self.flush_files()
         await self.host.flush_output()
-        self.release()
+        await self.release()
         await self.close_inputs()
 
     async def close_inputs(self) -> None:
@@ -1305,7 +1309,13 @@ class Interpreter:
         for reader in readers:
             await reader.close()
 
-    async def drain(self) -> tuple[bytes, bytes]:
+    async def close_outputs(self) -> None:
+        """Release buffered output after consumption or cancellation."""
+        for spool in (self.out, self.err, self.held, *self.out_pipes.values()):
+            await spool.close()
+        self.out_pipes.clear()
+
+    async def drain(self) -> tuple[ByteSource, ByteSource]:
         """Take the output ready so far: standard output, then stderr.
 
         Called between records: the files are written out, and standard
@@ -1313,12 +1323,12 @@ class Interpreter:
         """
         await self.flush_files()
         if not self.out_pipes:
-            self.release()
-        return self.take()
+            await self.release()
+        return await self.take()
 
     async def salvage(
         self, failure: AwkRuntimeError | AwkSyntaxError
-    ) -> tuple[bytes, bytes]:
+    ) -> tuple[ByteSource, ByteSource]:
         """Take what a run a fatal error ended leaves behind.
 
         What awk had already printed stays, held text included, and so
@@ -1329,21 +1339,19 @@ class Interpreter:
         Args:
             failure (AwkRuntimeError | AwkSyntaxError): the fatal error.
         """
-        self.err.append(from_byte_view(f"{failure}\n"))
+        await self.err.fill(from_byte_view(f"{failure}\n"))
         try:
             await self.flush_files()
             await self.host.flush_output()
         except AwkRuntimeError as exc:
-            self.err.append(from_byte_view(f"{exc}\n"))
-        self.release()
-        return self.take()
+            await self.err.fill(from_byte_view(f"{exc}\n"))
+        await self.release()
+        return await self.take()
 
-    def take(self) -> tuple[bytes, bytes]:
-        out = b"".join(self.out)
-        err = b"".join(self.err)
-        self.out.clear()
-        self.err.clear()
-        return out, err
+    async def take(self) -> tuple[ByteSource, ByteSource]:
+        out, err = self.out, self.err
+        self.out, self.err = ByteSpool(), ByteSpool()
+        return await out.output(), await err.output()
 
 
 __all__ = [

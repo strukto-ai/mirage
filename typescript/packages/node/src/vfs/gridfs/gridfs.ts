@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -20,13 +21,13 @@ import { redactConfig, type GridFSConfig, type GridFSConfigRedacted } from './co
 import { PROMPT } from './prompt.ts'
 import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
-import { appendByRewrite } from '@struktoai/mirage-core/core/generic/rewrite'
+import { appendByStreamedRewrite } from '@struktoai/mirage-core/core/generic/rewrite'
 import { readdir as gridfsReaddir } from '../../core/gridfs/readdir.ts'
 import { read as gridfsRead } from '../../core/gridfs/read.ts'
 import { stat as gridfsStat } from '../../core/gridfs/stat.ts'
 import { readStream as gridfsStream } from '../../core/gridfs/stream.ts'
 import { exists as gridfsExists } from '../../core/gridfs/exists.ts'
-import { write as gridfsWrite } from '../../core/gridfs/write.ts'
+import { write as gridfsWrite, writeStream as gridfsWriteStream } from '../../core/gridfs/write.ts'
 import { create as gridfsCreate } from '../../core/gridfs/create.ts'
 import { mkdir as gridfsMkdir } from '../../core/gridfs/mkdir.ts'
 import { unlink as gridfsUnlink } from '../../core/gridfs/unlink.ts'
@@ -113,10 +114,18 @@ export class GridFSVFS extends BaseVFS {
     return gridfsWrite(this.accessor, path, data)
   }
 
+  override writeStream(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
+    return gridfsWriteStream(this.accessor, path, data, signal)
+  }
+
   override append(path: PathSpec, data: Uint8Array): Promise<void> {
-    return appendByRewrite(
-      (p) => this.read(p),
-      (p, d) => this.write(p, d),
+    return this.appendStream(path, data)
+  }
+
+  override appendStream(path: PathSpec, data: ByteSource): Promise<void> {
+    return appendByStreamedRewrite(
+      (p, remember) => gridfsStream(this.accessor, p, remember),
+      (p, d) => this.writeStream(p, d),
       (p) => this.stat(p),
       path,
       data,

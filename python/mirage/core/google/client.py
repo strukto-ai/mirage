@@ -15,7 +15,7 @@
 import json
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
-from typing import Any
+from typing import Any, cast
 
 import aiohttp
 
@@ -34,6 +34,7 @@ from mirage.core.google.constants import (
     TOKEN_BUFFER_SECONDS,
     TOKEN_URL,
 )
+from mirage.io.spool import ByteSpool
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.secrets import reveal_secret
 
@@ -328,3 +329,62 @@ async def google_get_stream(
     async with aclosing(source):
         async for chunk in source:
             yield chunk
+
+
+async def google_resumable(
+    tm: TokenManager,
+    method: str,
+    url: str,
+    metadata: dict[str, Any],
+    spool: ByteSpool,
+    mime_type: str,
+    params: dict[str, str],
+) -> dict[str, Any]:
+    location = await api_request(
+        method,
+        url,
+        error_of=_error_of,
+        headers={
+            **await google_headers(tm),
+            "X-Upload-Content-Type": mime_type,
+            "X-Upload-Content-Length": str(spool.size),
+        },
+        params={**params, "uploadType": "resumable"},
+        json_body=metadata,
+        read="location",
+        session=tm.pool,
+    )
+    if not location:
+        raise RuntimeError("Drive upload session returned no Location")
+    offset = 0
+    while offset < spool.size:
+        data = await spool.read(offset, 8 * 1024 * 1024)
+        response = await api_request(
+            "PUT",
+            location,
+            error_of=_error_of,
+            headers={
+                **await google_headers(tm),
+                "Content-Type": mime_type,
+                "Content-Range": (
+                    f"bytes {offset}-{offset + len(data) - 1}/{spool.size}"
+                ),
+            },
+            data=data,
+            read="response",
+            session=tm.pool,
+        )
+        if response.status in (200, 201):
+            return cast(dict[str, Any], response.data)
+        if response.status != 308:
+            raise RuntimeError(
+                f"Unexpected Drive upload status: {response.status}"
+            )
+        acknowledged = response.headers.get("range", "")
+        next_offset = (
+            int(acknowledged.rsplit("-", 1)[-1]) + 1 if acknowledged else 0
+        )
+        if not offset < next_offset <= offset + len(data):
+            raise RuntimeError("Drive upload session made no progress")
+        offset = next_offset
+    raise RuntimeError("Drive upload session did not commit")

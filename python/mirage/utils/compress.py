@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator, Generator, Iterator
 from contextlib import aclosing
 from enum import Enum
 
-from mirage.io.cooperative import chunks
+from mirage.io.cooperative import CHUNK_SIZE, chunks
 from mirage.io.stream import close_quietly
 
 
@@ -128,22 +128,39 @@ def gzip_compress(data: bytes, level: int = -1, name: str = "") -> bytes:
 async def gzip_compress_stream(
     source: AsyncIterator[bytes],
     level: int,
+    name: str = "",
 ) -> AsyncIterator[bytes]:
     """Gzip a byte stream chunk by chunk.
 
     Args:
         source (AsyncIterator[bytes]): plain input chunks.
         level (int): zlib compression level.
+        name (str): original basename, empty for stdin.
 
     Yields:
         bytes: gzip member bytes, trailer included.
     """
     compressor = zlib.compressobj(level, zlib.DEFLATED, zlib.MAX_WBITS | 16)
+
+    def named(data: bytes) -> bytes:
+        nonlocal name
+        if name and data:
+            header = bytearray(data[:GZIP_FIXED_HEADER])
+            header[3] |= GZIP_ORIG_NAME
+            data = (
+                bytes(header)
+                + name.encode()
+                + b"\0"
+                + data[GZIP_FIXED_HEADER:]
+            )
+            name = ""
+        return data
+
     async with aclosing(chunks(source)) as bounded:
         async for chunk in bounded:
-            async for compressed in chunks(compressor.compress(chunk)):
+            async for compressed in chunks(named(compressor.compress(chunk))):
                 yield compressed
-        async for tail in chunks(compressor.flush()):
+        async for tail in chunks(named(compressor.flush())):
             yield tail
 
 
@@ -477,3 +494,30 @@ def gunzip_partial(
     except GzipDataError as exc:
         return b"".join(parts), exc
     return b"".join(parts), None
+
+
+async def deflate_raw_stream(
+    source: AsyncIterator[bytes],
+) -> AsyncIterator[bytes]:
+    compressor = zlib.compressobj(wbits=-15)
+    async with aclosing(chunks(source)) as bounded:
+        async for data in bounded:
+            async for part in chunks(compressor.compress(data)):
+                yield part
+        async for part in chunks(compressor.flush()):
+            yield part
+
+
+async def inflate_raw_stream(
+    source: AsyncIterator[bytes],
+) -> AsyncIterator[bytes]:
+    decoder = zlib.decompressobj(-15)
+    async with aclosing(chunks(source)) as bounded:
+        async for data in bounded:
+            while data:
+                result = decoder.decompress(data, CHUNK_SIZE)
+                data = decoder.unconsumed_tail
+                if result:
+                    yield result
+        if not decoder.eof:
+            raise ValueError("truncated deflate stream")

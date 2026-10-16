@@ -72,6 +72,32 @@ available. A window of a file is cut from the whole `read` unless the class sets
 only the first bytes it sniffs. A derived stream still fetches the entire
 file; define `read_stream` for large files.
 
+For large replacements, implement `write_stream(path, data, *, atomic=False)`;
+`data` is a `ByteSource` (bytes or an async byte iterator). The ordinary
+`write` API still accepts a complete byte string. The dispatcher keeps policy,
+cache invalidation and conditional-write checks in the same path. A streamed
+writer may declare `entry` and `parent` and return the committed `FileStat`,
+just as `write` does. Consume to EOF before an atomic replacement becomes
+visible, and close or abort uploads when the producer fails or is cancelled.
+`append_stream` is a separate capability; object-store append still requires
+reading and replacing the existing object.
+
+Commands that need replay or seekable input spill through temporary files after
+1 MiB per spool. Python runs temporary-file and synchronous archive operations
+outside the event loop. This reduces payload memory for archives, external
+sort, record reordering and deferred output; it does not remove their scan,
+CPU or temporary-disk costs. A single unbounded record, archive metadata, AWK
+arrays, regex `tac`, `diff`/`patch` and `jq --slurp` can still require memory
+proportional to their working data. Whole-byte API results still allocate the
+complete result.
+
+Streamed cache fills retain at most 8 MiB by default, further limited by the
+cache's own capacity. Larger files continue streaming but are not admitted to
+the whole-file cache. Raise `max_drain_bytes` explicitly when retaining larger
+files is worth the memory; partial or cancelled reads never become full cache
+entries. Full-file scans have the same backend byte count even when peak RAM
+falls sharply.
+
 `readdir` returns each child's `FileStat`, filled in as `stat` would fill
 it, with `name` the base name alone. The mount keeps the listing and answers a
 stat of anything it names from that row, so a listing costs one request.

@@ -37,7 +37,7 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.cooperative import chunks
-from mirage.io.stream import materialize
+from mirage.io.spool import ByteSpool
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.writer import ByteWriter
 from mirage.runtime.types import DispatchFn, ShellFn
@@ -262,7 +262,7 @@ class AwkStreams:
         for writer in writers:
             await writer.abort()
 
-    async def run(self, command: str, stdin: bytes | None) -> CommandRun:
+    async def run(self, command: str, stdin: ByteSource | None) -> CommandRun:
         """Run a command line in a subshell of the session, as sh -c would.
 
         ``eval`` takes the line whole, so an empty one, a comment or a
@@ -281,9 +281,17 @@ class AwkStreams:
         io = await self.shell(
             f"( {shell_join(['eval', text_view(command)])} )", source
         )
-        out = await materialize(io.stdout) if io.stdout is not None else b""
-        err = await materialize(io.stderr) if io.stderr is not None else b""
-        return CommandRun(out, err, io.exit_code)
+        out, err = ByteSpool(), ByteSpool()
+        try:
+            await out.fill(io.stdout or b"")
+            await err.fill(io.stderr or b"")
+            return CommandRun(
+                await out.output(), await err.output(), io.exit_code
+            )
+        except BaseException:
+            await out.close()
+            await err.close()
+            raise
 
 
 async def _stage(step: Coroutine[Any, Any, None], io: IOResult) -> bool:
@@ -301,15 +309,9 @@ async def _stage(step: Coroutine[Any, Any, None], io: IOResult) -> bool:
     return False
 
 
-def _add_stderr(io: IOResult, err: bytes) -> None:
-    if err:
-        held = io.stderr if isinstance(io.stderr, bytes) else b""
-        io.stderr = held + err
-
-
-async def _drained(interp: Interpreter, io: IOResult) -> bytes:
+async def _drained(interp: Interpreter, errors: ByteSpool) -> ByteSource:
     out, err = await interp.drain()
-    _add_stderr(io, err)
+    await errors.fill(err)
     return out
 
 
@@ -326,25 +328,36 @@ async def _awk_stream(
         interp (Interpreter): the interpreter.
         io (IOResult): receives the exit status and stderr.
     """
+    errors = ByteSpool()
     try:
         exited = await _stage(interp.run_begin(), io)
-        yield await _drained(interp, io)
+        async with aclosing(chunks(await _drained(interp, errors))) as output:
+            async for data in output:
+                yield data
         if not exited and interp.has_main_rules():
             while (record := await interp.next_record()) is not None:
                 if await _stage(interp.run_record(record), io):
                     break
-                chunk = await _drained(interp, io)
-                if chunk:
-                    yield chunk
+                async with aclosing(
+                    chunks(await _drained(interp, errors))
+                ) as output:
+                    async for data in output:
+                        yield data
         await _stage(interp.run_end(), io)
         await interp.finish()
-        yield await _drained(interp, io)
+        async with aclosing(chunks(await _drained(interp, errors))) as output:
+            async for data in output:
+                yield data
     except (AwkRuntimeError, AwkSyntaxError) as exc:
         out, err = await interp.salvage(exc)
         io.exit_code = 2
-        _add_stderr(io, err)
-        yield out
+        await errors.fill(err)
+        async with aclosing(chunks(out)) as output:
+            async for data in output:
+                yield data
     finally:
+        io.stderr = await errors.output()
+        await interp.close_outputs()
         await host.abort_output()
         await interp.close_inputs()
 

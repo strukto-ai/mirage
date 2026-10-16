@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { makeMockAccessor, spec } from '../../test-utils.ts'
 import { mkdir } from './mkdir.ts'
 import { read } from './read.ts'
-import { write } from './write.ts'
+import { write, writeStream } from './write.ts'
 
 let accessor: ReturnType<typeof makeMockAccessor>
 beforeEach(() => {
@@ -57,4 +57,18 @@ describe('opfs/write.writeBytes', () => {
       code: 'EISDIR',
     })
   })
+})
+
+it('commits all chunks and aborts a failed source without replacing the original', async () => {
+  await write(accessor, spec('/x'), new TextEncoder().encode('old'))
+  async function* source(fail: boolean): AsyncGenerator<Uint8Array> {
+    await Promise.resolve()
+    yield new TextEncoder().encode('first')
+    if (fail) throw new Error('producer failed')
+    yield new TextEncoder().encode('last')
+  }
+  await expect(writeStream(accessor, spec('/x'), source(true))).rejects.toThrow('producer failed')
+  expect(new TextDecoder().decode(await read(accessor, spec('/x')))).toBe('old')
+  await writeStream(accessor, spec('/x'), source(false))
+  expect(new TextDecoder().decode(await read(accessor, spec('/x')))).toBe('firstlast')
 })

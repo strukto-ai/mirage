@@ -80,8 +80,8 @@ describe('Terminal', () => {
     leave()
     leaveAbandoned()
     await tty.jobs.emit(Channel.STDOUT, enc('after\n'))
-    expect(statement.chunks).toEqual([[Channel.STDOUT, enc('bg\n')]])
-    expect(abandoned.chunks).toEqual([[Channel.STDOUT, enc('inner\n')]])
+    expect(await statement.take()).toEqual([[Channel.STDOUT, enc('bg\n')]])
+    expect(await abandoned.take()).toEqual([[Channel.STDOUT, enc('inner\n')]])
     expect(dec(tty.take())).toEqual(['after\n', ''])
   })
 

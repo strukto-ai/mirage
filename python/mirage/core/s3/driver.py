@@ -38,7 +38,8 @@ from mirage.core.s3.constants import CONDITION_LOST_CODES, SCOPE_ERROR
 from mirage.core.s3.types import S3Conn
 from mirage.errors.fs import enoent
 from mirage.io.cooperative import chunks
-from mirage.io.types import ByteSource, materialize
+from mirage.io.spool import ByteSpool
+from mirage.io.types import ByteSource
 from mirage.utils.dates import to_iso_z
 
 logger = logging.getLogger(__name__)
@@ -280,9 +281,31 @@ async def _put_stream(
 ) -> ObjectMeta:
     # Custom endpoints retain their established conditional PUT protocol.
     if cond.if_match is not None and conn.config.endpoint_url:
-        meta = await _put_if(conn, key, await materialize(data), cond)
-        assert meta is not None
-        return meta
+        async with ByteSpool() as spool:
+            await spool.fill(data)
+            if spool.size > 5 * 1024**3:
+                raise ValueError("s3: single PUT exceeds 5 GiB")
+            response = await _guarded(
+                key,
+                conn.client.put_object(
+                    Bucket=conn.config.bucket,
+                    Key=key,
+                    Body=await spool.file(),
+                    ContentLength=spool.size,
+                    **(
+                        {"ContentType": conn.config.default_content_type}
+                        if conn.config.default_content_type
+                        else {}
+                    ),
+                    **_condition(cond),
+                ),
+                matched=True,
+            )
+            return ObjectMeta(
+                size=spool.size,
+                fingerprint=_etag_of(response) or None,
+                revision=_version_of(response),
+            )
     upload: str | None = None
     parts: list[dict[str, Any]] = []
     buffer = bytearray()

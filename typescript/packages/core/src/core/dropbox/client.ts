@@ -21,6 +21,7 @@ import {
 } from './constants.ts'
 import { type ApiResponse, apiRequest, loweredHeaders } from '../api/client.ts'
 import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
+import { ByteSpool } from '../../io/spool.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
 import type { JsonValue } from '../../types.ts'
@@ -159,9 +160,13 @@ export async function dropboxRpc(
 export async function dropboxUpload(
   tm: DropboxTokenManager,
   path: string,
-  data: Uint8Array,
+  data: Uint8Array | ByteSpool,
   rev: string | null = null,
 ): Promise<unknown> {
+  if (data instanceof ByteSpool) {
+    if (data.size > 8 * 1024 * 1024) return dropboxUploadSession(tm, path, data, rev)
+    data = await data.read(0, data.size)
+  }
   const headers = await dropboxAuthHeaders(tm)
   const arg: Record<string, JsonValue> =
     rev === null
@@ -247,5 +252,78 @@ export async function* dropboxDownloadStream(
     const { value, done } = await reader.read()
     if (done) break
     yield value
+  }
+}
+
+async function sessionRequest(
+  tm: DropboxTokenManager,
+  path: string,
+  action: string,
+  arg: Record<string, JsonValue>,
+  data: Uint8Array,
+): Promise<unknown> {
+  return apiRequest('POST', `${tm.contentBase}/files/upload_session/${action}`, {
+    errorOf: (r, text) =>
+      new DropboxApiError(
+        `Dropbox upload ${path} → ${String(r.status)} ${text}`,
+        r.status,
+        summaryOf(text),
+      ),
+    headers: {
+      ...(await dropboxAuthHeaders(tm)),
+      'Content-Type': 'application/octet-stream',
+      'Dropbox-API-Arg': headerJson(arg),
+    },
+    body: data as unknown as BodyInit,
+  })
+}
+
+async function dropboxUploadSession(
+  tm: DropboxTokenManager,
+  path: string,
+  spool: ByteSpool,
+  rev: string | null,
+): Promise<unknown> {
+  const opened = (await sessionRequest(tm, path, 'start', { close: false }, new Uint8Array())) as {
+    session_id: string
+  }
+  const sessionId = opened.session_id
+  let offset = 0
+  const commit: Record<string, JsonValue> =
+    rev === null
+      ? { path, mode: 'overwrite', mute: true }
+      : { path, mode: { '.tag': 'update', update: rev }, mute: true, autorename: false }
+  try {
+    while (offset < spool.size) {
+      const body = await spool.read(offset, 8 * 1024 * 1024)
+      await sessionRequest(
+        tm,
+        path,
+        'append_v2',
+        { cursor: { session_id: sessionId, offset }, close: false },
+        body,
+      )
+      offset += body.length
+    }
+    return await sessionRequest(
+      tm,
+      path,
+      'finish',
+      { cursor: { session_id: sessionId, offset }, commit },
+      new Uint8Array(),
+    )
+  } catch (error) {
+    try {
+      await sessionRequest(
+        tm,
+        path,
+        'append_v2',
+        { cursor: { session_id: sessionId, offset }, close: true },
+        new Uint8Array(),
+      )
+    } catch (cleanup) {
+      console.debug('Could not close Dropbox upload session', cleanup)
+    }
+    throw error
   }
 }

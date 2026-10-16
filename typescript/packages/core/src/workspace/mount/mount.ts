@@ -873,7 +873,8 @@ export class MountEntry {
     try {
       if (!(data instanceof Uint8Array) && vfs.supports(append ? 'appendStream' : 'writeStream')) {
         if (append) await vfs.appendStream(path, data, callerSignal())
-        else await vfs.writeStream(path, data, callerSignal(), kw.atomic === true)
+        else
+          return await vfs.writeStream(path, data, callerSignal(), kw.atomic === true, handedOf(kw))
         return null
       }
       const raw = await materialize(data)

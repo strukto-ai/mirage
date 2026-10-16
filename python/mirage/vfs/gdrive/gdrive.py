@@ -36,8 +36,10 @@ from mirage.core.gdrive.tree import tree as _tree
 from mirage.core.gdrive.truncate import truncate as _truncate
 from mirage.core.gdrive.unlink import unlink as _unlink
 from mirage.core.gdrive.write import write as _write
+from mirage.core.gdrive.write import write_stream as _write_stream
 from mirage.core.google.client import TokenManager
 from mirage.events.base import DeltaHook
+from mirage.io.types import ByteSource
 from mirage.types import (
     CapacityResult,
     DirListing,
@@ -117,6 +119,17 @@ class GoogleDriveVFS(BaseVFS):
         parent: FileStat | None = None,
     ) -> FileStat | None:
         return await _write(self.accessor, path, data, entry, parent)
+
+    async def write_stream(
+        self,
+        path: PathSpec,
+        data: ByteSource,
+        *,
+        atomic: bool = False,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
+    ) -> FileStat | None:
+        return await _write_stream(self.accessor, path, data, entry, parent)
 
     async def create(
         self,

@@ -513,6 +513,21 @@ class SessionState:
         default_factory=dict, repr=False
     )
 
+    def open_inputs(self) -> list[SharedInput]:
+        return [
+            source
+            for source in (
+                self.exec_stdin,
+                self.exec_stdout_input,
+                self.exec_stderr_input,
+                *(
+                    descriptor.source
+                    for descriptor in self.descriptors.values()
+                ),
+            )
+            if source is not None
+        ]
+
     def to_dict(self) -> dict[str, Any]:
         # A managed name serializes as its pointer, never its value: a
         # stored session may leak only where a secret lives. `env` skips

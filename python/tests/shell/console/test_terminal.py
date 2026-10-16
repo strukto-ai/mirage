@@ -80,8 +80,8 @@ async def test_a_job_writes_into_the_statement_running_never_one_already_left():
     leave()
     leave_abandoned()
     await tty.jobs.emit(Channel.STDOUT, b"after\n")
-    assert statement.chunks == [(Channel.STDOUT, b"bg\n")]
-    assert abandoned.chunks == [(Channel.STDOUT, b"inner\n")]
+    assert await statement.take() == [(Channel.STDOUT, b"bg\n")]
+    assert await abandoned.take() == [(Channel.STDOUT, b"inner\n")]
     assert tty.take() == (b"after\n", b"")
 
 

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSpool } from '../../io/spool.ts'
+import type { ApiResponse } from '../api/client.ts'
 import type { GoogleConfig } from './config.ts'
 import {
   CALENDAR_API_BASE,
@@ -232,4 +234,54 @@ export async function* googleGetStream(
       new GoogleApiError(`Google GET ${url} → ${String(r.status)} ${text}`, r.status),
     headers: await googleHeaders(tm),
   })
+}
+
+export async function googleResumable(
+  tm: TokenManager,
+  method: 'POST' | 'PATCH',
+  url: string,
+  metadata: Record<string, unknown>,
+  spool: ByteSpool,
+  mimeType: string,
+  params: Record<string, string>,
+): Promise<unknown> {
+  const errorOf = (r: Response, text: string) =>
+    new GoogleApiError(`Google upload → ${String(r.status)} ${text}`, r.status)
+  const location = await apiRequest(method, url, {
+    errorOf,
+    headers: {
+      ...(await googleHeaders(tm)),
+      'Content-Type': 'application/json',
+      'X-Upload-Content-Type': mimeType,
+      'X-Upload-Content-Length': String(spool.size),
+    },
+    params: { ...params, uploadType: 'resumable' },
+    json: metadata,
+    read: 'location',
+  })
+  if (typeof location !== 'string' || location === '')
+    throw new Error('Drive upload session returned no Location')
+  let offset = 0
+  while (offset < spool.size) {
+    const data = await spool.read(offset, 8 * 1024 * 1024)
+    const response = (await apiRequest('PUT', location, {
+      errorOf,
+      headers: {
+        ...(await googleHeaders(tm)),
+        'Content-Type': mimeType,
+        'Content-Range': `bytes ${String(offset)}-${String(offset + data.length - 1)}/${String(spool.size)}`,
+      },
+      body: data as unknown as BodyInit,
+      read: 'response',
+    })) as ApiResponse
+    if (response.status === 200 || response.status === 201) return response.data
+    if (response.status !== 308)
+      throw new Error(`Unexpected Drive upload status: ${String(response.status)}`)
+    const acknowledged = response.headers.range ?? ''
+    const next = acknowledged === '' ? 0 : Number(acknowledged.split('-').at(-1)) + 1
+    if (!Number.isSafeInteger(next) || next <= offset || next > offset + data.length)
+      throw new Error('Drive upload session made no progress')
+    offset = next
+  }
+  throw new Error('Drive upload session did not commit')
 }

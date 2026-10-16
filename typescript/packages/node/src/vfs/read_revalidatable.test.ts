@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteSpool } from '@struktoai/mirage-core/io/spool'
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
-import { Readable } from 'node:stream'
+import { Readable, Writable } from 'node:stream'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ContextModule from '@struktoai/mirage-core/observe/context'
@@ -212,13 +213,14 @@ vi.mock('../core/gridfs/client.ts', async () => {
         openUploadStream: (key: string) => {
           H.uploads += 1
           const oid = `b${String(H.uploads).padStart(23, '0')}`
-          const listeners: Record<string, (() => void)[]> = {}
-          return {
-            id: { toString: () => oid },
-            on: (event: string, fn: () => void) => {
-              ;(listeners[event] ??= []).push(fn)
+          const parts: Uint8Array[] = []
+          const upload = new Writable({
+            write(chunk: Uint8Array, _encoding, done) {
+              parts.push(chunk.slice())
+              done()
             },
-            end: (data: Uint8Array) => {
+            final(done) {
+              const data = Buffer.concat(parts)
               H.gridfs.set(key, {
                 _id: { toString: () => oid },
                 filename: key,
@@ -226,9 +228,13 @@ vi.mock('../core/gridfs/client.ts', async () => {
                 uploadDate: new Date(Date.UTC(2030, 0, 2)),
                 data,
               })
-              for (const fn of listeners.finish ?? []) fn()
+              done()
             },
-          }
+          })
+          return Object.assign(upload, {
+            id: { toString: () => oid },
+            abort: () => Promise.resolve(),
+          })
         },
       }),
     iterLatest: refuse('iterLatest'),
@@ -308,7 +314,13 @@ vi.mock('@struktoai/mirage-core/core/google/drive', async (importOriginal) => {
     // A write's reply is the uploaded file resource, rendered through
     // gdriveResource like a listing entry, so the token a write records and
     // the token a later probe lists cannot disagree.
-    uploadFile: async (_tm: unknown, name: string, parentId: string, data: Uint8Array) => {
+    uploadFile: async (
+      _tm: unknown,
+      name: string,
+      parentId: string,
+      source: Uint8Array | ByteSpool,
+    ) => {
+      const data = source instanceof ByteSpool ? await source.read(0, source.size) : source
       H.gdriveUploads += 1
       const created: GDriveItem = {
         id: `u${String(H.gdriveUploads)}`,
@@ -321,7 +333,8 @@ vi.mock('@struktoai/mirage-core/core/google/drive', async (importOriginal) => {
       H.gdrive.set(created.id, created)
       return gdriveResource(created)
     },
-    updateFileContent: async (_tm: unknown, id: string, data: Uint8Array) => {
+    updateFileContent: async (_tm: unknown, id: string, source: Uint8Array | ByteSpool) => {
+      const data = source instanceof ByteSpool ? await source.read(0, source.size) : source
       H.gdriveUploads += 1
       const found = item(id)
       found.content = data

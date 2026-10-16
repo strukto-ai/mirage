@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteSpool } from '../../io/spool.ts'
 import {
   driveBase,
   driveUploadBase,
@@ -22,6 +23,7 @@ import {
   googlePatch,
   googlePost,
   googleSendBytes,
+  googleResumable,
 } from './client.ts'
 import type { TokenManager } from './client.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
@@ -432,15 +434,27 @@ export async function createFolder(
   })) as DriveFile
 }
 
-// Multipart uploads cap at 5 MiB on the real API; larger payloads need the
-// resumable protocol, which mirage does not use yet.
+// Large spooled payloads use the resumable protocol.
 export async function uploadFile(
   tm: TokenManager,
   name: string,
   parentId: string,
-  data: Uint8Array,
+  data: Uint8Array | ByteSpool,
   mimeType: string = DEFAULT_UPLOAD_MIME,
 ): Promise<DriveFile> {
+  if (data instanceof ByteSpool) {
+    if (data.size > 4 * 1024 * 1024)
+      return (await googleResumable(
+        tm,
+        'POST',
+        `${driveUploadBase(tm)}/files`,
+        { name, parents: [parentId] },
+        data,
+        mimeType,
+        { supportsAllDrives: 'true', fields: ITEM_FIELDS },
+      )) as DriveFile
+    data = await data.read(0, data.size)
+  }
   const { body, contentType } = multipartRelated({ name, parents: [parentId] }, data, mimeType)
   const url = `${driveUploadBase(tm)}/files`
   return (await googleSendBytes(tm, 'POST', url, body, contentType, {
@@ -453,9 +467,22 @@ export async function uploadFile(
 export async function updateFileContent(
   tm: TokenManager,
   fileId: string,
-  data: Uint8Array,
+  data: Uint8Array | ByteSpool,
   mimeType: string = DEFAULT_UPLOAD_MIME,
 ): Promise<DriveFile> {
+  if (data instanceof ByteSpool) {
+    if (data.size > 4 * 1024 * 1024)
+      return (await googleResumable(
+        tm,
+        'PATCH',
+        `${driveUploadBase(tm)}/files/${fileId}`,
+        {},
+        data,
+        mimeType,
+        { supportsAllDrives: 'true', fields: ITEM_FIELDS },
+      )) as DriveFile
+    data = await data.read(0, data.size)
+  }
   const url = `${driveUploadBase(tm)}/files/${fileId}`
   return (await googleSendBytes(tm, 'PATCH', url, data, mimeType, {
     uploadType: 'media',

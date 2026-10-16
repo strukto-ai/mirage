@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { findBytes } from '../utils/bytes.ts'
 import { abortable } from '../utils/abort.ts'
 import { YieldBudget } from './yield_budget.ts'
 import { chunks } from './cooperative.ts'
@@ -58,6 +59,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   private readonly budget = new YieldBudget()
   private linesSinceCheck = 0
   private pulling = false
+  private started = false
   private searchedBuffer: ArrayBufferLike | null = null
   private searchedOffset = 0
   private searchedText = ''
@@ -87,6 +89,10 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
 
   get position(): number {
     return this.pulled - this.buf.byteLength
+  }
+
+  unread(data: Uint8Array): void {
+    this.buf = concat2(data, this.buf)
   }
 
   get loaded(): number {
@@ -273,12 +279,17 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
       if (this.pulling) void closing.catch(() => undefined)
       else await closing
     }
+    if (!this.started) {
+      const original = this.input as AsyncIterator<Uint8Array>
+      await original.return?.()
+    }
   }
 
   private async pull(signal?: AbortSignal): Promise<IteratorResult<Uint8Array>> {
     // Left set when the pull fails: close() reads it to know the source
     // is still busy with the pull the abort abandoned.
     this.pulling = true
+    this.started = true
     const result = await abortable(this.source.next(), signal)
     this.pulling = false
     if (result.done !== true) this.pulled += result.value.byteLength
@@ -286,28 +297,36 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   }
 
   private async readDelimited(
-    delim: number,
+    delim: number | Uint8Array,
     signal?: AbortSignal,
   ): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
     const parts: Uint8Array[] = []
+    const width = typeof delim === 'number' ? 1 : delim.length
+    if (width === 0) throw new Error('empty separator')
     try {
       for (;;) {
         const pending = this.check(signal)
         if (pending !== undefined) await pending
-        const idx = this.buf.indexOf(delim)
+        const idx = typeof delim === 'number' ? this.buf.indexOf(delim) : findBytes(this.buf, delim)
         if (idx >= 0) {
           const tail = this.buf.subarray(0, idx)
-          this.buf = this.buf.subarray(idx + 1)
+          this.buf = this.buf.subarray(idx + width)
           return [parts.length === 0 ? tail : join([...parts, tail]), true]
         }
-        if (this.buf.byteLength > 0) parts.push(this.buf)
-        this.buf = new Uint8Array(0)
-        if (this.exhausted) return [join(parts), false]
+        if (this.exhausted) {
+          parts.push(this.buf)
+          this.buf = new Uint8Array()
+          return [join(parts), false]
+        }
+        const keep = Math.min(width - 1, this.buf.length)
+        const cut = this.buf.length - keep
+        if (cut > 0) parts.push(this.buf.subarray(0, cut))
+        this.buf = this.buf.subarray(cut)
         // Raced, not just checked between pulls: a stalled stdin must lose
         // to the read's own signal, or the reader outlives the caller.
         const result = await this.pull(signal)
         if (result.done === true) this.exhausted = true
-        else this.buf = copyOf(result.value)
+        else this.buf = concat2(this.buf, result.value)
       }
     } catch (error) {
       await this.failed(error, parts)
@@ -321,7 +340,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
    * `mapfile` report as status 1).
    */
   async readUntil(
-    delim: number,
+    delim: number | Uint8Array,
     signal?: AbortSignal,
   ): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
     const [data, found] = await this.readDelimited(delim, signal)
@@ -445,7 +464,11 @@ export class SharedInput implements AsyncIterableIterator<Uint8Array> {
   /** `source` is what the descriptor reads, or the line buffer of the
    * descriptor it duplicates, whose live pipe `pipe` names; one built over
    * a `PipeStream` takes that stream's. */
-  constructor(source: ByteSource | AsyncLineIterator, pipe: PathSpec | null = null) {
+  constructor(
+    source: ByteSource | AsyncLineIterator,
+    pipe: PathSpec | null = null,
+    readonly seekable = false,
+  ) {
     this.lines = source instanceof AsyncLineIterator ? source : new AsyncLineIterator(source)
     this.pipe = source instanceof PipeStream || source instanceof PipeInput ? source.path : pipe
   }
@@ -457,7 +480,7 @@ export class SharedInput implements AsyncIterableIterator<Uint8Array> {
   /** Another descriptor on the same open file, as `dup` makes: a read
    * through either moves the one offset. */
   dup(): SharedInput {
-    return new SharedInput(this.lines, this.pipe)
+    return new SharedInput(this.lines, this.pipe, this.seekable)
   }
 
   async next(): Promise<IteratorResult<Uint8Array>> {
@@ -536,4 +559,18 @@ function copyOf(buf: Uint8Array): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(buf.byteLength)
   out.set(buf, 0)
   return out
+}
+
+/** Close unreferenced cursors once, preserving duplicate descriptors. */
+export async function releaseInputs(
+  inputs: SharedInput[],
+  keep: SharedInput[] = [],
+): Promise<void> {
+  const retained = new Set(keep.map((source) => source.lines))
+  for (const source of inputs) {
+    if (!retained.has(source.lines)) {
+      retained.add(source.lines)
+      await source.discard()
+    }
+  }
 }

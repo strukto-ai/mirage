@@ -1,5 +1,6 @@
-import { concat } from '../../../utils/bytes.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { ByteSpool } from '../../../io/spool.ts'
+import { closeQuietly } from '../../../io/stream.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { gunzipStream } from '../../../utils/compress.ts'
 import { enoent, eloop, isDotWalkError, isEisdir, isEnoent, isFsError } from '../../../errors/fs.ts'
@@ -216,8 +217,8 @@ export function besideLink(link: string, typed: string): PathSpec {
  */
 export async function replaceOutput(
   out: PathSpec,
-  data: Uint8Array,
-  write: (path: PathSpec, data: Uint8Array) => Promise<void>,
+  data: ByteSource,
+  write: (path: PathSpec, data: ByteSource) => Promise<void>,
   resolver: LinkResolver | null,
   beside: boolean,
 ): Promise<void> {
@@ -238,7 +239,7 @@ interface DecompressOptions {
   force?: boolean
   quiet?: boolean
   suffix?: string
-  write?: (path: PathSpec, data: Uint8Array) => Promise<void>
+  write?: (path: PathSpec, data: ByteSource) => Promise<void>
   unlink?: (path: PathSpec) => Promise<void>
   stat?: StatFn
   resolver?: LinkResolver | null
@@ -306,69 +307,81 @@ export async function decompressInputs(
       const output = inPlace ? decompressed(path, suffix) : null
       if (inPlace && output === null) {
         if (!quiet) report(`gzip: ${shown}: unknown suffix -- ignored\n`, 2)
+        await closeQuietly(source)
         continue
       }
-      const chunks: Uint8Array[] = []
-      let failure: GzipDataError | null = null
+      const spool = new ByteSpool()
       try {
-        for await (const chunk of gunzipStream(source, testOnly, force && !inPlace)) {
-          if (inPlace) chunks.push(chunk)
-          else if (!testOnly) yield chunk
+        let failure: GzipDataError | null = null
+        try {
+          for await (const chunk of gunzipStream(source, testOnly, force && !inPlace)) {
+            if (inPlace) await spool.append(chunk)
+            else if (!testOnly) yield chunk
+          }
+        } catch (err) {
+          if (err instanceof GzipDataError) failure = err
+          else {
+            if (!isFsError(err)) throw err
+            report('\n' + fsErrorLine('gzip', shown, err), 1)
+            return
+          }
         }
-      } catch (err) {
-        if (err instanceof GzipDataError) failure = err
-        else {
-          if (!isFsError(err)) throw err
-          report('\n' + fsErrorLine('gzip', shown, err), 1)
-          return
+        if (output === null) {
+          if (failure !== null) {
+            fail(failure, shown)
+            if (failure.fatal || (onStdin && failure.firstHeader)) return
+          }
+          continue
         }
-      }
-      if (output === null) {
+        if (failure?.firstHeader === true) {
+          fail(failure, shown)
+          if (failure.fatal) return
+          continue
+        }
+        if (options.write === undefined || options.unlink === undefined)
+          throw new Error('in-place decompression requires write and unlink')
+        const outName = output[0]
+        const out = link === null ? output[1] : besideLink(link, outName)
+        const existed = await outputTaken(out, options.stat, resolver)
+        if (existed && !force) {
+          report(`gzip: ${outName} already exists;\tnot overwritten\n`, 2)
+          continue
+        }
         if (failure !== null) {
           fail(failure, shown)
-          if (failure.fatal || (onStdin && failure.firstHeader)) return
+          if (failure.fatal) return
+          if (!failure.keepsOutput) continue
         }
-        continue
-      }
-      if (failure?.firstHeader === true) {
-        fail(failure, shown)
-        if (failure.fatal) return
-        continue
-      }
-      if (options.write === undefined || options.unlink === undefined)
-        throw new Error('in-place decompression requires write and unlink')
-      const outName = output[0]
-      const out = link === null ? output[1] : besideLink(link, outName)
-      const existed = await outputTaken(out, options.stat, resolver)
-      if (existed && !force) {
-        report(`gzip: ${outName} already exists;\tnot overwritten\n`, 2)
-        continue
-      }
-      if (failure !== null) {
-        fail(failure, shown)
-        if (failure.fatal) return
-        if (!failure.keepsOutput) continue
-      }
-      const data = concat(chunks)
-      try {
-        await replaceOutput(out, data, options.write, resolver, link !== null)
-      } catch (err) {
-        if (!isFsError(err)) throw err
-        const line = fsErrorLine('gzip', outName, err)
-        report(existed ? line : '\n' + line, 1)
-        if (existed) continue
-        return
-      }
-      if (options.keep !== true) {
-        if (link === null || resolver === null) await options.unlink(path)
-        else await resolver.unlink(link)
+        const data = spool.stream()
+        try {
+          await replaceOutput(out, data, options.write, resolver, link !== null)
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          const line = fsErrorLine('gzip', outName, err)
+          report(existed ? line : '\n' + line, 1)
+          if (existed) continue
+          return
+        }
+        if (options.keep !== true) {
+          if (link === null || resolver === null) await options.unlink(path)
+          else await resolver.unlink(link)
+        }
+      } finally {
+        await spool.close()
+        await closeQuietly(source)
       }
     }
   }
   const body = run()
   if (testOnly || operands.some((p) => !(options.toStdout === true || p.rawPath === '-'))) {
-    const output = await materialize(body)
-    return [output.byteLength > 0 ? output : null, io]
+    const spool = new ByteSpool()
+    try {
+      await spool.fill(body)
+      return [await spool.output(), io]
+    } catch (error) {
+      await spool.close()
+      throw error
+    }
   }
   return [body, io]
 }

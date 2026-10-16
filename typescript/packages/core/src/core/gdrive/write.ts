@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteSpool } from '../../io/spool.ts'
+import type { ByteSource } from '../../io/types.ts'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { type FileStat, FileType, type PathSpec } from '../../types.ts'
@@ -31,7 +33,7 @@ import { eaccesOnDenied, parentFolder } from './resolve.ts'
 async function writeImpl(
   accessor: GDriveAccessor,
   path: PathSpec,
-  data: Uint8Array,
+  data: Uint8Array | ByteSpool,
   handed: Handed = {},
 ): Promise<FileStat | null> {
   const key = path.vfsPath
@@ -53,9 +55,31 @@ async function writeImpl(
     reply = await uploadFile(tm, basename, parentId, data)
   }
   const token = uploadToken(reply, statFromItem, path.virtual)
-  record('write', path.virtual, 'gdrive', data.length, timer, { fingerprint: token })
+  record(
+    'write',
+    path.virtual,
+    'gdrive',
+    data instanceof ByteSpool ? data.size : data.length,
+    timer,
+    { fingerprint: token },
+  )
   const item: unknown = reply
   return typeof item === 'object' && item !== null ? statFromItem(reply) : null
 }
 
 export const write = eaccesOnDenied(writeImpl)
+
+export async function writeStream(
+  accessor: GDriveAccessor,
+  path: PathSpec,
+  data: ByteSource,
+  handed: Handed = {},
+): Promise<FileStat | null> {
+  const spool = new ByteSpool()
+  try {
+    await spool.fill(data)
+    return await write(accessor, path, spool, handed)
+  } finally {
+    await spool.close()
+  }
+}

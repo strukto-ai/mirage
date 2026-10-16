@@ -17,6 +17,12 @@ import { drainBudget } from './mixin.ts'
 import { RAMFileCacheStore } from './ram.ts'
 
 describe('drainBudget', () => {
+  it('caps default fills while preserving explicit larger budgets', () => {
+    expect(drainBudget(new RAMFileCacheStore({ limit: 1024 ** 3 }))).toBe(8 * 1024 ** 2)
+    expect(
+      drainBudget(new RAMFileCacheStore({ limit: 1024 ** 3, maxDrainBytes: 32 * 1024 ** 2 })),
+    ).toBe(32 * 1024 ** 2)
+  })
   it('defaults to cacheLimit when maxDrainBytes is null', () => {
     const cache = new RAMFileCacheStore({ limit: 1024 })
     expect(cache.maxDrainBytes).toBeNull()

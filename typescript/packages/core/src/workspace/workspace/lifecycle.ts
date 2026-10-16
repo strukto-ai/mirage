@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { releaseInputs } from '../../io/async_line_iterator.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
@@ -58,6 +59,9 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
   }
   await settle([() => deps.events.detach()])
   await settle([() => deps.jobTable.killAll()])
+  await settle([
+    () => releaseInputs(deps.sessions.list().flatMap((session) => session.openInputs())),
+  ])
   try {
     deps.jobTable.processes.stop()
   } catch (err) {

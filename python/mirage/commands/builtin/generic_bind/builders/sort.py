@@ -36,7 +36,7 @@ async def sort(
     paths = await resolve_or_empty(ops, accessor, paths, opts.index)
     return await generic_sort(
         paths,
-        read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
+        read_bytes=bound_op(ops.read_stream, accessor, opts.index),
         write_bytes=(
             partial(ops.write, accessor) if ops.write is not None else None
         ),

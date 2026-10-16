@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { concat } from '../../utils/bytes.ts'
+import { chunks as byteChunks } from '../../io/cooperative.ts'
+import { ByteSpool } from '../../io/spool.ts'
+import { asyncChain, discardStreams } from '../../io/stream.ts'
 import { ByteWriter } from '../../io/writer.ts'
 
 import type { EvaluationContext } from '../evaluation.ts'
@@ -19,7 +23,7 @@ import { PipeClosed } from '../../io/errors.ts'
 import { type RedirectGuard, runWithRedirectPaths } from '../../context/session_context.ts'
 import { fsStrerror, isFsError, isMissingPath } from '../../errors/fs.ts'
 import { ownerPrefix, stripSlash } from '../../utils/slash.ts'
-import { SharedInput, share } from '../../io/async_line_iterator.ts'
+import { SharedInput, releaseInputs, share } from '../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { DeviceInput, IOResult, PipeStream, materialize } from '../../io/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -69,7 +73,6 @@ import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, isUnwinding, takeStderr, takeStdout, type Unwinding } from './control.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { Channel, JobOutput, type OwnedStream } from '../../shell/console/index.ts'
-import { concat } from '../../utils/bytes.ts'
 import { posixPhrase } from '../../errors/posix.ts'
 
 // These producers write no named file while their output is consumed, so
@@ -263,9 +266,9 @@ export class JobRoute extends JobOutput {
       let held = this.recorder
       while (held instanceof Recorder && held.chunks.length > 0) {
         this.recorder = new Recorder()
-        for (const [key, data] of held.chunks) {
+        for (const [key, source] of await held.take()) {
           try {
-            await this.write(key, data)
+            for await (const data of byteChunks(source)) await this.write(key, data)
           } catch (error) {
             if (!isFsError(error)) throw error
             logger.debug(`held job write failed: ${String(error)}`)
@@ -309,6 +312,48 @@ type Input = ByteSource | null | typeof UNREADABLE
  * ran cannot write its output, that failure's status is the shell's.
  */
 export async function handleRedirect(
+  executeNode: ExecuteNodeFn,
+  dispatch: DispatchFn,
+  command: TSNodeLike | null,
+  redirects: readonly Redirect[],
+  context: EvaluationContext,
+  stdin: ByteSource | null = null,
+  callStack: CallStack | null = null,
+  captureInput = false,
+  sink?: JobConsole,
+  expand?: (redirect: Redirect) => Promise<Redirect>,
+  guard?: RedirectGuard,
+  name = '',
+  args: readonly string[] = [],
+  // Whether bash forks to run the command, so a closed pipe ends it alone.
+  forked = false,
+): Promise<Result> {
+  const owned: SharedInput[] = []
+  try {
+    return await runRedirects(
+      owned,
+      executeNode,
+      dispatch,
+      command,
+      redirects,
+      context,
+      stdin,
+      callStack,
+      captureInput,
+      sink,
+      expand,
+      guard,
+      name,
+      args,
+      forked,
+    )
+  } finally {
+    await releaseInputs(owned, context.session.openInputs())
+  }
+}
+
+async function runRedirects(
+  owned: SharedInput[],
   executeNode: ExecuteNodeFn,
   dispatch: DispatchFn,
   command: TSNodeLike | null,
@@ -466,9 +511,7 @@ export async function handleRedirect(
           continue
         }
         const opened = (await dispatch('read', scope, [], { stream: true }))[0] as ByteSource | null
-        // A file is read whole here, so a read failing partway fails the
-        // redirect; a pipe streams.
-        source = opened instanceof PipeStream ? opened : await materialize(opened)
+        source = opened ?? new Uint8Array()
       } catch (error) {
         if (r.kind === RedirectKind.READWRITE && isMissingPath(error)) source = new Uint8Array()
         else {
@@ -481,31 +524,34 @@ export async function handleRedirect(
       readPaths.delete(r.fd)
       outputs.set(r.fd, CLOSED)
       if (r.kind === RedirectKind.READWRITE) {
+        const file = new FileDescription(scope, true)
+        file.opened = true
+        file.source = new FileInput(file, data)
+        owned.push(file.source)
         try {
           await createFile(dispatch, session, scope, new Uint8Array(), true)
         } catch (error) {
           if (!isFsError(error)) throw error
           return failed(redirectFailure(scope, error))
         }
-        const file = new FileDescription(scope, true)
-        file.opened = true
-        file.source = new FileInput(file, await materialize(data))
         files.push(file)
         inputs.set(r.fd, file.source)
         outputs.set(r.fd, file)
       } else {
         readPaths.set(r.fd, scope.virtual)
         if (data instanceof PipeStream) piped.add(r.fd)
-        inputs.set(
-          r.fd,
-          data instanceof Uint8Array &&
-            data.byteLength === 0 &&
-            (await statType(dispatch, scope)) === FileType.CHAR_DEVICE
-            ? new DeviceInput()
-            : r.fd === 0
-              ? data
-              : new SharedInput(data),
-        )
+        const reading = new SharedInput(data, null, !(data instanceof PipeStream))
+        if (!(data instanceof PipeStream)) owned.push(reading)
+        if (
+          !(data instanceof PipeStream) &&
+          !(await reading.lines.peek()) &&
+          (await statType(dispatch, scope)) === FileType.CHAR_DEVICE
+        ) {
+          await reading.discard()
+          inputs.set(r.fd, new DeviceInput())
+          continue
+        }
+        inputs.set(r.fd, reading)
       }
     } else {
       let pipe: PathSpec | null
@@ -667,21 +713,22 @@ export async function handleRedirect(
       else session.descriptors.delete(fd)
     }
   }
-  let stdout: Uint8Array | null = null
+  let stdout: ByteSource | null = null
   route.recorder = new Recorder()
   if (recorder.failure !== null && recorder.file !== null) {
     const [out, error] = await failed(
       redirectFailure(recorder.file.scope, recorder.failure),
       recorder.file,
     )
-    if (out !== null) recorder.chunks.push([Channel.STDOUT, await materialize(out)])
+    if (out !== null)
+      for await (const data of byteChunks(out)) await recorder.emit(Channel.STDOUT, data)
     const diagnostic = await error.materializeStderr()
-    if (diagnostic.length > 0) recorder.chunks.push([Channel.STDERR, diagnostic])
+    if (diagnostic.length > 0) await recorder.emit(Channel.STDERR, diagnostic)
     io.exitCode = 1
   }
 
   try {
-    const chunks = recorder.chunks
+    const chunks = await recorder.take()
     if (refused) {
       outputs.clear()
       outputs.set(0, CLOSED)
@@ -703,13 +750,27 @@ export async function handleRedirect(
       if (key.owner !== recorder.owner) return key
       return key.channel === Channel.STDOUT ? TO_STDOUT : TO_STDERR
     }
-    const routed: [Channel | Inherited, Uint8Array][] = []
+    const routed: [Channel | Inherited, ByteSource][] = []
     const writeFiles = async () => {
-      const write = async (file: FileDescription, data: Uint8Array, replace = false) => {
+      const write = async (file: FileDescription, data: ByteSource, replace = false) => {
         try {
           if (replace && file.source === null && file.offset === 0) {
-            await createFile(dispatch, session, file.scope, data, file.append)
-            file.offset += data.byteLength
+            let size = 0
+            async function* counted(): AsyncGenerator<Uint8Array> {
+              for await (const part of byteChunks(data)) {
+                size += part.length
+                yield part
+              }
+            }
+            await createFile(
+              dispatch,
+              session,
+              file.scope,
+              data instanceof Uint8Array ? data : counted(),
+              file.append,
+            )
+            if (data instanceof Uint8Array) size = data.length
+            file.offset += size
           } else await writeDescription(dispatch, session, file, data)
         } catch (error) {
           if (typeof (error as { code?: unknown } | null)?.code !== 'string') throw error
@@ -734,32 +795,47 @@ export async function handleRedirect(
           }
           await write(
             target,
-            concat(parts),
+            parts.every((part): part is Uint8Array => part instanceof Uint8Array) &&
+              parts.reduce((sum, part) => sum + part.length, 0) <= 1048576
+              ? concat(parts)
+              : asyncChain(parts),
             !refused && target === completeOutput && parts.length === chunks.length,
           )
         } else if (target === TO_STDOUT) routed.push([Channel.STDOUT, data])
         else if (target === TO_STDERR) routed.push([Channel.STDERR, data])
         else if (target instanceof Inherited) routed.push([target, data])
+        else await discardStreams(data)
       }
     }
     if (command === null) await writeFiles()
     else await runWithRedirectPaths(command, targets, writeFiles)
     io.stderr = null
-    const kept: [Channel, Uint8Array][] = []
+    const kept: [Channel, ByteSource][] = []
     for (const [key, data] of routed) {
       if (key instanceof Inherited) {
         if (!(await deliver(sink ?? null, key, data))) kept.push([key.channel, data])
-      } else if (sink !== undefined) await sink.emit(key, data)
-      else kept.push([key, data])
+      } else if (sink !== undefined) {
+        for await (const part of byteChunks(data)) await sink.emit(key, part)
+      } else kept.push([key, data])
     }
-    if (sink !== undefined) for (const [channel, data] of kept) await sink.emit(channel, data)
-    else {
-      const joined = (channel: Channel): Uint8Array | null => {
-        const data = concat(kept.filter(([c]) => c === channel).map(([, d]) => d))
-        return data.byteLength === 0 ? null : data
+    if (sink !== undefined) {
+      for (const [channel, data] of kept)
+        for await (const part of byteChunks(data)) await sink.emit(channel, part)
+    } else {
+      const outStore = new ByteSpool(),
+        errStore = new ByteSpool()
+      try {
+        for (const [channel, data] of kept)
+          await (channel === Channel.STDOUT ? outStore : errStore).fill(data)
+        stdout = outStore.size > 0 ? await outStore.output() : null
+        io.stderr = errStore.size > 0 ? await errStore.output() : null
+        if (stdout === null) await outStore.close()
+        if (io.stderr === null) await errStore.close()
+      } catch (error) {
+        await outStore.close()
+        await errStore.close()
+        throw error
       }
-      stdout = joined(Channel.STDOUT)
-      io.stderr = joined(Channel.STDERR)
     }
   } finally {
     await route.release()

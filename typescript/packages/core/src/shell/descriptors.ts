@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteSpool } from '../io/spool.ts'
+import { chunks } from '../io/cooperative.ts'
+import { OutputStream } from '../io/stream.ts'
+import type { ByteSource } from '../io/types.ts'
 import { FD_BOTH, FD_CLOSE } from './constants.ts'
 import { SharedInput } from '../io/async_line_iterator.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
@@ -81,9 +85,9 @@ export class FileDescription {
 export class FileInput extends SharedInput {
   constructor(
     readonly description: FileDescription,
-    data: Uint8Array,
+    data: ByteSource,
   ) {
-    super(data)
+    super(data, null, true)
   }
   override dup(): this {
     return this
@@ -117,15 +121,51 @@ export class Inherited {
  * lands among the bytes written around it. Mirrors Python's Recorder.
  */
 export class Recorder extends JobConsole {
-  readonly chunks: [Channel | Inherited, Uint8Array][] = []
+  readonly chunks: [Channel | Inherited, number, number][] = []
   readonly owner: StreamOwner = Symbol('recorder')
-  override emit(channel: Channel, data: Uint8Array): Promise<void> {
-    this.chunks.push([channel, data])
-    return Promise.resolve()
+  private storage = new ByteSpool()
+  private writing = Promise.resolve()
+  private async record(key: Channel | Inherited, data: Uint8Array): Promise<void> {
+    const before = this.writing
+    let done = (): void => undefined
+    this.writing = new Promise((resolve) => {
+      done = resolve
+    })
+    try {
+      await before
+      const start = this.storage.size
+      await this.storage.append(data)
+      const last = this.chunks.at(-1)
+      if (last?.[0] === key) last[2] += data.length
+      else this.chunks.push([key, start, data.length])
+    } finally {
+      done()
+    }
+  }
+  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
+    await this.record(channel, data)
   }
   override async emitTo(stream: OwnedStream, data: Uint8Array): Promise<void> {
-    if (stream instanceof Inherited) this.chunks.push([stream, data])
-    else await this.emit(stream.channel, data)
+    await this.record(stream instanceof Inherited ? stream : stream.channel, data)
+  }
+  async take(): Promise<[Channel | Inherited, ByteSource][]> {
+    await this.writing
+    const entries = this.chunks.splice(0),
+      storage = this.storage
+    this.storage = new ByteSpool()
+    if (storage.size <= storage.memoryLimit) {
+      const data = await storage.read(0, storage.size)
+      await storage.close()
+      return entries.map(([key, start, size]) => [key, data.slice(start, start + size)])
+    }
+    let remaining = entries.length
+    const release = async (): Promise<void> => {
+      if (--remaining === 0) await storage.close()
+    }
+    return entries.map(([key, start, size]) => [
+      key,
+      new OutputStream(storage.stream(start, size), release),
+    ])
   }
 }
 
@@ -147,12 +187,12 @@ export const ENCLOSING = createAsyncContext<Recorder>()
 export async function deliver(
   sink: JobConsole | null,
   stream: Inherited,
-  data: Uint8Array,
+  data: ByteSource,
 ): Promise<boolean> {
   const target =
     sink !== null && !(sink instanceof Terminal) ? sink : (ENCLOSING.getStore() ?? null)
   if (target === null) return false
-  await target.emitTo(stream, data)
+  for await (const part of chunks(data)) await target.emitTo(stream, part)
   return true
 }
 

@@ -12,11 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteSpool } from '../../io/spool.ts'
+import { chunks } from '../../io/cooperative.ts'
+import { asyncChain } from '../../io/stream.ts'
 import type { ExecutionFrame } from '../frame.ts'
 import { readFailExitCode } from '../../commands/spec/usage.ts'
 import type { SharedInput } from '../../io/async_line_iterator.ts'
-import type { ByteSource } from '../../io/types.ts'
-import { IOResult, materialize } from '../../io/types.ts'
+import type { ByteSource, IOResult } from '../../io/types.ts'
+import { materialize } from '../../io/types.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import { formatFsError } from '../../errors/render.ts'
 import type { ExecutionNode, StatusWriter } from '../types.ts'
@@ -359,7 +362,7 @@ export function assignmentStatus(frame: ExecutionFrame, seqBefore: number): numb
  * whether it went to the terminal through a copy, which an `exec` diversion of
  * the shell's own output leaves where it is. Mirrors Python's Written.
  */
-export type Written = readonly [Channel, Uint8Array, boolean]
+export type Written = readonly [Channel, ByteSource, boolean]
 
 /**
  * Output written as it is, stdout then stderr, none of it through a copy of
@@ -405,16 +408,32 @@ export async function statementOutput(
   sink: JobConsole | null,
 ): Promise<Written[]> {
   const written: Written[] = []
-  for (const [key, data] of recorder.chunks.splice(0)) {
+  for (const [key, data] of await recorder.take()) {
     if (!(key instanceof Inherited)) written.push([key, data, false])
     else if (key.owner === own || !(await deliver(sink, key, data)))
       written.push([key.channel, data, true])
   }
-  const out = await materialize(stdout)
-  if (out.byteLength > 0) written.push([Channel.STDOUT, out, false])
-  const err = await materialize(io.stderr)
+  const outStore = new ByteSpool()
+  let out: ByteSource
+  try {
+    await outStore.fill(stdout ?? new Uint8Array())
+    out = await outStore.output()
+  } catch (error) {
+    await outStore.close()
+    throw error
+  }
+  if (!(out instanceof Uint8Array) || out.byteLength > 0) written.push([Channel.STDOUT, out, false])
+  const errStore = new ByteSpool()
+  let err: ByteSource
+  try {
+    await errStore.fill(io.stderr ?? new Uint8Array())
+    err = await errStore.output()
+  } catch (error) {
+    await errStore.close()
+    throw error
+  }
   io.stderr = null
-  if (err.byteLength > 0) written.push([Channel.STDERR, err, false])
+  if (!(err instanceof Uint8Array) || err.byteLength > 0) written.push([Channel.STDERR, err, false])
   return written
 }
 
@@ -432,21 +451,20 @@ export async function land(
   if (sink !== null) {
     for (const [index, [channel, data]] of written.entries()) {
       try {
-        await sink.emit(channel, data)
+        for await (const part of chunks(data)) await sink.emit(channel, part)
       } catch (err) {
         if (!(err instanceof PipeClosed)) throw err
         // SIGPIPE keeps what the writer already said on stderr.
         for (const [later, more] of written.slice(index + 1))
-          if (later === Channel.STDERR) await sink.emit(later, more)
+          if (later === Channel.STDERR)
+            for await (const part of chunks(more)) await sink.emit(later, part)
         throw err
       }
     }
     return mergedIo
   }
-  const stdout = concat(written.filter(([c]) => c === Channel.STDOUT).map(([, d]) => d))
-  if (stdout.byteLength > 0) allStdout.push(stdout)
-  const stderr = concat(written.filter(([c]) => c === Channel.STDERR).map(([, d]) => d))
-  return stderr.byteLength > 0
-    ? mergedIo.merge(new IOResult({ stderr, exitCode: mergedIo.exitCode }))
-    : mergedIo
+  allStdout.push(...written.filter(([c]) => c === Channel.STDOUT).map(([, d]) => d))
+  const errors = written.filter(([c]) => c === Channel.STDERR).map(([, d]) => d)
+  if (errors.length > 0) mergedIo.stderr = asyncChain([mergedIo.stderr, ...errors])
+  return mergedIo
 }

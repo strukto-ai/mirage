@@ -21,6 +21,7 @@ from aioresponses import aioresponses
 from yarl import URL
 
 from mirage.core.dropbox.client import (
+    DropboxApiError,
     DropboxTokenManager,
     _token_url_of,
     dropbox_download,
@@ -32,6 +33,7 @@ from mirage.core.dropbox.constants import (
     DROPBOX_API_BASE,
     DROPBOX_CONTENT_BASE,
 )
+from mirage.io.spool import ByteSpool
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.dropbox.config import DropboxConfig
 
@@ -222,3 +224,51 @@ async def test_an_upload_with_a_non_json_body_hands_it_back_unchecked():
     # The upload has landed; an unreadable reply must not raise. The
     # writer's upload_token reads it as no metadata.
     assert await _upload(b"not json", "text/plain") == "not json"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail", [False, True])
+async def test_upload_session_chunks_and_conditional_commit(fail):
+    tm = DropboxTokenManager(make_config())
+    tm.seed("tok", float("inf"))
+    base = f"{tm.content_base}/files/upload_session"
+    async with ByteSpool() as spool:
+        await spool.append(b"x" * (8 * 1024 * 1024 + 7))
+        with aioresponses() as m:
+            m.post(base + "/start", payload={"session_id": "session"})
+            m.post(base + "/append_v2", payload=None, repeat=True)
+            m.post(
+                base + "/finish",
+                status=409 if fail else 200,
+                payload={"error_summary": "path/conflict"}
+                if fail
+                else {"name": "file"},
+            )
+            if fail:
+                with pytest.raises(DropboxApiError):
+                    await dropbox_upload(tm, "/file", spool, "rev1")
+            else:
+                assert await dropbox_upload(tm, "/file", spool, "rev1") == {
+                    "name": "file"
+                }
+            appends = m.requests[("POST", URL(base + "/append_v2"))]
+            assert [len(c.kwargs["data"]) for c in appends[:2]] == [
+                8 * 1024 * 1024,
+                7,
+            ]
+            finish = m.requests[("POST", URL(base + "/finish"))][0].kwargs
+            arg = json.loads(finish["headers"]["Dropbox-API-Arg"])
+            assert arg["cursor"]["offset"] == spool.size
+            assert arg["commit"]["mode"] == {
+                ".tag": "update",
+                "update": "rev1",
+            }
+            assert len(appends) == (3 if fail else 2)
+            if fail:
+                assert (
+                    json.loads(
+                        appends[-1].kwargs["headers"]["Dropbox-API-Arg"]
+                    )["close"]
+                    is True
+                )
+    await tm.close()

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from bson import ObjectId
 from gridfs.errors import NoFile
@@ -28,6 +28,8 @@ async def read_stream(
     accessor: GridFSAccessor,
     path_spec: PathSpec,
     chunk_size: int = 8192,
+    *,
+    on_version: Callable[[str | None], None] | None = None,
 ) -> AsyncIterator[bytes]:
     """Async generator yielding chunks of a GridFS file.
 
@@ -35,13 +37,13 @@ async def read_stream(
         accessor (GridFSAccessor): GridFS accessor.
         path_spec (PathSpec): File path.
         chunk_size (int): Size of each chunk in bytes.
+        on_version (Callable | None): receive the token of this exact stream.
     """
     virtual = path_spec.virtual
     path = path_spec.mount_path
     config = accessor.config
     key = _key(path, config)
     pinned_revision = revision_for(virtual)
-    rec = record_stream("read", virtual, "gridfs")
     if pinned_revision is not None:
         file_id = ObjectId(pinned_revision)
     else:
@@ -53,8 +55,11 @@ async def read_stream(
         out = await bucket(accessor).open_download_stream(file_id)
     except NoFile as exc:
         raise enoent(virtual) from exc
+    rec = record_stream("read", virtual, "gridfs")
+    revision = str(file_id)
+    if on_version is not None:
+        on_version(revision)
     if rec is not None:
-        revision = str(file_id)
         rec.fingerprint = revision
         rec.revision = revision
     try:

@@ -11,7 +11,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import asyncio
 
 import pytest
@@ -29,6 +28,7 @@ from mirage.commands.builtin.generic.shuf import (
     range_error,
     shuf_generic,
 )
+from mirage.io.types import materialize
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -566,7 +566,9 @@ def test_shuf_repeat_with_a_huge_count_on_stdin_is_refused_too():
         )
     )
     assert io.exit_code == 0
-    assert sorted(rendered.decode().split("\n")[:-1]) == ["a", "b"]
+    assert sorted(
+        asyncio.run(materialize(rendered)).decode().split("\n")[:-1]
+    ) == ["a", "b"]
 
 
 # `-n` past UINTMAX_MAX is CLAMPED to SIZE_MAX, never refused, which is the

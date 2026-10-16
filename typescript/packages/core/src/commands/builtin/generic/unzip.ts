@@ -29,7 +29,9 @@ import {
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { inflateRaw } from '../../../utils/compress.ts'
+import { ByteSpool } from '../../../io/spool.ts'
+import { OutputStream, asyncChain, yieldBytes, drain } from '../../../io/stream.ts'
+import { inflateRaw, inflateRawStream, crc32 } from '../../../utils/compress.ts'
 import { type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { versionLine } from '../../spec/standard.ts'
 import { UsageError } from '../../errors.ts'
@@ -45,6 +47,7 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 // an archive using a method mirage cannot inflate still lists.
 export interface ZipEntry extends ZipRow {
   content: () => Promise<Uint8Array>
+  stream?: () => AsyncIterable<Uint8Array>
 }
 
 // Info-ZIP's wording and spacing, verbatim (two spaces after the colon).
@@ -448,6 +451,102 @@ export function readZipEntries(data: Uint8Array): {
   return { entries, count, slack: shift, comment }
 }
 
+async function readSpooledZipEntries(
+  data: ByteSpool,
+): Promise<{ entries: ZipEntry[]; count: number; slack: number; comment: Uint8Array }> {
+  const tailStart = Math.max(0, data.size - EOCD_SEARCH)
+  const tail = await data.read(tailStart, EOCD_SEARCH)
+  const end = findEocd(tail)
+  if (end < 0) throw new ZipFormatError('no_eocd')
+  const eocd = end + tailStart
+  const count = readU16LE(tail, end + 10)
+  const cdSize = readU32LE(tail, end + 12)
+  const cdOffset = readU32LE(tail, end + 16)
+  const shift = eocd - cdOffset - cdSize
+  let offset = eocd - cdSize
+  const entries: ZipEntry[] = []
+  for (let i = 0; i < count; i++) {
+    if (offset < 0 || offset + 46 > eocd) throw new ZipFormatError('corrupt_cdir')
+    const header = await data.read(offset, 46)
+    if (readU32LE(header, 0) !== CENTRAL_HEADER_SIG) throw new ZipFormatError('corrupt_cdir')
+    const madeBy = readU16LE(header, 4)
+    const flags = readU16LE(header, 8)
+    const method = readU16LE(header, 10)
+    const crc = readU32LE(header, 16)
+    const csize = readU32LE(header, 20)
+    const size = readU32LE(header, 24)
+    const nameLen = readU16LE(header, 28)
+    const extraLen = readU16LE(header, 30)
+    const commentLen = readU16LE(header, 32)
+    const localOffset = readU32LE(header, 42) + shift
+    const next = offset + 46 + nameLen + extraLen + commentLen
+    if (next > eocd) throw new ZipFormatError('corrupt_cdir')
+    const extra = await data.read(offset + 46, nameLen + extraLen + commentLen)
+    const stream = (): AsyncGenerator<Uint8Array> =>
+      spooledEntryContent(data, localOffset, method, csize, size, crc, flags)
+    entries.push({
+      name: DEC.decode(extra.subarray(0, nameLen)),
+      size,
+      csize,
+      method,
+      flags,
+      internalAttr: readU16LE(header, 36),
+      externalAttr: readU32LE(header, 38),
+      host: madeBy >> 8,
+      hostVersion: madeBy & 255,
+      dateTime: dosDateTime(readU16LE(header, 14), readU16LE(header, 12)),
+      hasExtra: extraLen > 0,
+      crc,
+      comment: extra.subarray(nameLen + extraLen),
+      stream,
+      content: () => materialize(stream()),
+    })
+    offset = next
+  }
+  if (offset !== eocd) throw new ZipFormatError('corrupt_cdir')
+  return {
+    entries,
+    count,
+    slack: shift,
+    comment: tail.subarray(end + 22, end + 22 + readU16LE(tail, end + 20)),
+  }
+}
+
+async function* spooledEntryContent(
+  data: ByteSpool,
+  localOffset: number,
+  method: number,
+  csize: number,
+  size: number,
+  expectedCrc: number,
+  flags: number,
+): AsyncGenerator<Uint8Array> {
+  if (localOffset < 0) throw new ZipFormatError('corrupt_cdir')
+  const header = await data.read(localOffset, 30)
+  if (header.length !== 30 || readU32LE(header, 0) !== LOCAL_HEADER_SIG)
+    throw new ZipFormatError('corrupt_cdir')
+  if (flags & 1) throw new Error('unzip: encrypted member requires a password')
+  const start = localOffset + 30 + readU16LE(header, 26) + readU16LE(header, 28)
+  if (start + csize > data.size) throw new ZipFormatError('corrupt_cdir')
+  const compressed = data.stream(start, csize)
+  if (method !== 0 && method !== 8)
+    throw new Error(`unzip: unsupported compression method: ${String(method)}`)
+  const source = method === 0 ? compressed : inflateRawStream(compressed)
+  let crc = 0
+  let length = 0
+  for await (const part of source) {
+    length += part.length
+    crc = crc32(part, crc)
+    yield part
+  }
+  if (length !== size || crc !== expectedCrc) throw new ZipFormatError('corrupt_cdir')
+}
+
+async function* memberStream(entry: ZipEntry): AsyncGenerator<Uint8Array> {
+  if (entry.stream !== undefined) yield* entry.stream()
+  else yield* yieldBytes(await entry.content())
+}
+
 // Info-ZIP's line for one extracted file, `%8sing: %-22s  %s`: a stored entry
 // is `extracting`, a compressed one `inflating`, and the name is padded to 22
 // columns and followed by two blanks, the room Info-ZIP keeps for a -a note.
@@ -574,7 +673,7 @@ export async function unzipGeneric(
   members: readonly string[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  write: (p: PathSpec, data: Uint8Array) => Promise<void>,
+  write: (p: PathSpec, data: ByteSource) => Promise<void>,
   mkdir: (p: PathSpec, parents?: boolean) => Promise<void>,
   stat?: StatFn,
   relay = false,
@@ -627,335 +726,349 @@ export async function unzipGeneric(
         rawPath: operand.rawPath,
       })
     : operand
-  const data = await materialize(stream(archivePath))
-  let entries: ZipEntry[]
-  let count: number
-  let slack: number
-  let comment: Uint8Array
+  const data = new ByteSpool()
+  let handedOff = false
   try {
-    ;({ entries, count, slack, comment } = readZipEntries(data))
-  } catch (err) {
-    if (err instanceof ZipFormatError) {
-      return [null, refusal(err.fault, archivePath.rawPath, zipinfoMode, pipeMode)]
-    }
-    throw err
-  }
-  const { selected, unmatched, unmatchedExcludes } = selectEntries(entries, chosen, excludes)
-  const filtered = chosen.length > 0 || excludes.length > 0
-  const [warning, floor] = slack !== 0 ? slackWarning(slack, archivePath.rawPath) : ['', 0]
-  // Every pattern, member or -x, that matched nothing is reported, and a
-  // filter that leaves nothing exits 11 in every mode.
-  const nothingLeft = filtered && selected.length === 0
-  const cautions = cautionText(unmatched, unmatchedExcludes)
-
-  async function run(): Promise<CommandFnResult> {
-    if (zipinfoMode) {
-      const layout = zipinfoLayout({
-        namesOnly,
-        namesHeaders,
-        long: listMode,
-        medium,
-        short,
-        header,
-        totals: testMode,
-        hasMembers: filtered,
-      })
-      const parts: string[] = []
-      if (layout.header) parts.push(renderHeader(archivePath.virtual, data.byteLength, count))
-      if (layout.rows === 'names') {
-        for (const e of selected) parts.push(e.name + '\n')
-      } else if (layout.rows !== 'none') {
-        for (const e of selected) parts.push(renderRow(e, layout.rows) + '\n')
+    await data.fill(stream(archivePath))
+    let entries: ZipEntry[]
+    let count: number
+    let slack: number
+    let comment: Uint8Array
+    try {
+      ;({ entries, count, slack, comment } = await readSpooledZipEntries(data))
+    } catch (err) {
+      if (err instanceof ZipFormatError) {
+        return [null, refusal(err.fault, archivePath.rawPath, zipinfoMode, pipeMode)]
       }
-      if (layout.totals) parts.push(renderTotals(selected))
-      const listing: ByteSource | null = parts.length > 0 ? ENC.encode(parts.join('')) : null
-      const exitCode = nothingLeft ? 11 : 0
-      const stderr = cautions !== '' ? ENC.encode(cautions) : null
-      return [listing, new IOResult({ exitCode, stderr })]
+      throw err
     }
-    const mountPrefix = relay ? '' : mountPrefixOf(archivePath.virtual, archivePath.vfsPath)
-    const destRaw = extractDest(fl.asPath('d') ?? null, opts.cwd)
-    const dest =
-      mountPrefix !== '' && destRaw.startsWith(mountPrefix + '/')
-        ? destRaw.slice(mountPrefix.length)
-        : destRaw === mountPrefix
-          ? '/'
-          : destRaw
+    const { selected, unmatched, unmatchedExcludes } = selectEntries(entries, chosen, excludes)
+    const filtered = chosen.length > 0 || excludes.length > 0
+    const [warning, floor] = slack !== 0 ? slackWarning(slack, archivePath.rawPath) : ['', 0]
+    // Every pattern, member or -x, that matched nothing is reported, and a
+    // filter that leaves nothing exits 11 in every mode.
+    const nothingLeft = filtered && selected.length === 0
+    const cautions = cautionText(unmatched, unmatchedExcludes)
 
-    // Info-ZIP lists only when neither -t nor -p asks for another mode,
-    // and -v widens -l's columns into the verbose table.
-    if ((listMode || verbose) && !(testMode || pipeMode)) {
-      let out: ByteSource
-      if (verbose) {
-        out = renderVerbose(archivePath.virtual, selected, quiet, comment)
-      } else {
-        const lines = ['  Length      Name', '---------  ----']
-        for (const e of selected) {
-          lines.push(`${String(e.size).padStart(9, ' ')}  ${e.name}`)
+    async function run(): Promise<CommandFnResult> {
+      if (zipinfoMode) {
+        const layout = zipinfoLayout({
+          namesOnly,
+          namesHeaders,
+          long: listMode,
+          medium,
+          short,
+          header,
+          totals: testMode,
+          hasMembers: filtered,
+        })
+        const parts: string[] = []
+        if (layout.header) parts.push(renderHeader(archivePath.virtual, data.size, count))
+        if (layout.rows === 'names') {
+          for (const e of selected) parts.push(e.name + '\n')
+        } else if (layout.rows !== 'none') {
+          for (const e of selected) parts.push(renderRow(e, layout.rows) + '\n')
         }
-        out = ENC.encode(lines.join('\n') + '\n')
+        if (layout.totals) parts.push(renderTotals(selected))
+        const listing: ByteSource | null = parts.length > 0 ? ENC.encode(parts.join('')) : null
+        const exitCode = nothingLeft ? 11 : 0
+        const stderr = cautions !== '' ? ENC.encode(cautions) : null
+        return [listing, new IOResult({ exitCode, stderr })]
       }
-      // GNU -l prints no caution lines and only exits 11 when the
-      // patterns left nothing at all.
-      if (nothingLeft) {
-        return [out, new IOResult({ exitCode: 11 })]
-      }
-      return [out, new IOResult()]
-    }
+      const mountPrefix = relay ? '' : mountPrefixOf(archivePath.virtual, archivePath.vfsPath)
+      const destRaw = extractDest(fl.asPath('d') ?? null, opts.cwd)
+      const dest =
+        mountPrefix !== '' && destRaw.startsWith(mountPrefix + '/')
+          ? destRaw.slice(mountPrefix.length)
+          : destRaw === mountPrefix
+            ? '/'
+            : destRaw
 
-    if (testMode) {
-      // GNU -t heads its report with the archive as typed and reports
-      // unmatched patterns on stdout; an unmatched member counts as an
-      // error, an unmatched exclude does not, and a filter that leaves
-      // nothing is its own caution.
-      const shown = archivePath.rawPath
-      const head = (quiet ? '' : `Archive:  ${shown}\n`) + warning
-      if (unmatched.length > 0) {
-        const msg = head + cautions + `At least one error was detected in ${shown}.\n`
-        return [ENC.encode(msg), new IOResult({ exitCode: 11 })]
-      }
-      if (nothingLeft) {
-        const msg = head + cautions + `Caution:  zero files tested in ${shown}.\n`
-        return [ENC.encode(msg), new IOResult({ exitCode: 11 })]
-      }
-      const tested = quiet ? '' : selected.map((e) => TESTING(e.name)).join('')
-      const tail = filtered ? TESTED_SOME(shown, selected.length) : TESTED_ALL(shown)
-      const out: ByteSource = ENC.encode(head + tested + cautions + tail)
-      return [out, new IOResult()]
-    }
-
-    let exitCode = unmatched.length > 0 || nothingLeft ? 11 : 0
-    const stderr = cautions !== '' ? ENC.encode(cautions) : null
-
-    if (pipeMode) {
-      const chunks: Uint8Array[] = []
-      for (const e of selected) {
-        if (!e.name.endsWith('/')) chunks.push(await e.content())
-      }
-      let total = 0
-      for (const c of chunks) total += c.byteLength
-      const merged = new Uint8Array(total)
-      let offset = 0
-      for (const c of chunks) {
-        merged.set(c, offset)
-        offset += c.byteLength
-      }
-      const out: ByteSource = merged
-      return [out, new IOResult({ exitCode, stderr })]
-    }
-
-    const base = rstripSlash(dest)
-    // Info-ZIP names an extracted path as the -d directory was typed
-    // followed by the member, or the bare member; the archive heads the
-    // listing as it was typed too. Mirrors unzip.py.
-    const typedDest = fl.asPath('d')?.rawPath ?? ''
-    const shown = (path: string): string => {
-      const rel = lstripSlash(path.slice(base.length))
-      return typedDest !== '' ? `${rstripSlash(typedDest)}/${rel}` : rel
-    }
-    const makeDirs = async (dir: string): Promise<void> => {
-      if (stat !== undefined) await ensureDir(dir, makePathSpec, mkdir, stat, made)
-      else await mkdir(makePathSpec(dir), true)
-    }
-    const outputLines: string[] = quiet ? [] : [`Archive:  ${archivePath.rawPath}`]
-    const errors: string[] = []
-    const made = new Set<string>()
-    const listing = (): ByteSource | null =>
-      outputLines.length > 0 ? ENC.encode(outputLines.join('\n') + '\n') : null
-    if (fl.raw('d') !== undefined) {
-      try {
-        await makeDirs(dest)
-      } catch (err) {
-        if (!isFsError(err)) throw err
-        return [
-          listing(),
-          new IOResult({
-            exitCode: DEST_EXIT,
-            stderr: ENC.encode(checkdirDest(typedDest, String(fsStrerror(err)))),
-          }),
-        ]
-      }
-    }
-    let checkdirFailed = false
-    let createFailed = false
-    let answers: AsyncLineIterator | null = null
-    const extracted = new Set<string>()
-    let replaceAll = parsed.overwrite && !parsed.neverOverwrite
-    let skipAll = parsed.neverOverwrite
-    const answer = async (): Promise<Uint8Array | null> => {
-      if (opts.stdin === null) return null
-      answers ??= new AsyncLineIterator(opts.stdin)
-      return answers.readline()
-    }
-    // Where a file entry goes when a file may hold its name. Info-ZIP asks
-    // first, unless -o or an `A` said to replace and -n or an `N` said never
-    // to; end of input answers `N`. `r` names another file under the same
-    // directory, which is asked about in its turn. Mirrors unzip.py.
-    const destination = async (start: string): Promise<string | null> => {
-      let outPath = start
-      for (;;) {
-        if (replaceAll) return outPath
-        // Two members can map to one path, so what this run wrote counts as
-        // there even without a stat to ask.
-        const exists =
-          extracted.has(outPath) ||
-          (stat !== undefined && (await pathExists(stat, makePathSpec(outPath))))
-        if (!exists) return outPath
-        if (skipAll) return null
-        const prompt = REPLACE_PROMPT(shown(outPath))
-        const line = await answer()
-        if (line === null) {
-          errors.push(prompt + REPLACE_EOF)
-          skipAll = true
-          exitCode = Math.max(exitCode, WARN_EXIT)
-          return null
-        }
-        errors.push(prompt)
-        const first = String.fromCharCode(line[0] ?? 0)
-        if (first === 'y' || first === 'Y') return outPath
-        if (first === 'n') return null
-        if (first === 'A') {
-          replaceAll = true
-          return outPath
-        }
-        if (first === 'N') {
-          skipAll = true
-          return null
-        }
-        if (first === 'r' || first === 'R') {
-          let name: Uint8Array | null = new Uint8Array(0)
-          while (name !== null && name.length === 0) {
-            errors.push(NEW_NAME)
-            name = await answer()
+      // Info-ZIP lists only when neither -t nor -p asks for another mode,
+      // and -v widens -l's columns into the verbose table.
+      if ((listMode || verbose) && !(testMode || pipeMode)) {
+        let out: ByteSource
+        if (verbose) {
+          out = renderVerbose(archivePath.virtual, selected, quiet, comment)
+        } else {
+          const lines = ['  Length      Name', '---------  ----']
+          for (const e of selected) {
+            lines.push(`${String(e.size).padStart(9, ' ')}  ${e.name}`)
           }
-          if (name !== null) {
-            // Info-ZIP maps the new name as it maps a member's, except that it
-            // puts an absolute one under the working directory instead of -d;
-            // here every name stays under the extraction root.
-            const typed = new TextDecoder().decode(name)
-            const [renamed, skipped] = mapName(typed.replace(/^\/+/, ''))
-            if (skipped) {
-              exitCode = Math.max(exitCode, WARN_EXIT)
-              if (!quiet) outputLines.push(SKIPPED_DOTDOT(typed))
+          out = ENC.encode(lines.join('\n') + '\n')
+        }
+        // GNU -l prints no caution lines and only exits 11 when the
+        // patterns left nothing at all.
+        if (nothingLeft) {
+          return [out, new IOResult({ exitCode: 11 })]
+        }
+        return [out, new IOResult()]
+      }
+
+      if (testMode) {
+        // GNU -t heads its report with the archive as typed and reports
+        // unmatched patterns on stdout; an unmatched member counts as an
+        // error, an unmatched exclude does not, and a filter that leaves
+        // nothing is its own caution.
+        const shown = archivePath.rawPath
+        const head = (quiet ? '' : `Archive:  ${shown}\n`) + warning
+        if (unmatched.length > 0) {
+          const msg = head + cautions + `At least one error was detected in ${shown}.\n`
+          return [ENC.encode(msg), new IOResult({ exitCode: 11 })]
+        }
+        if (nothingLeft) {
+          const msg = head + cautions + `Caution:  zero files tested in ${shown}.\n`
+          return [ENC.encode(msg), new IOResult({ exitCode: 11 })]
+        }
+        for (const entry of selected) {
+          if (entry.name.endsWith('/')) continue
+          try {
+            await drain(memberStream(entry))
+          } catch (error) {
+            if (!(error instanceof Error)) throw error
+            return [ENC.encode(head + `first bad file: ${entry.name}\n`), new IOResult()]
+          }
+        }
+        const tested = quiet ? '' : selected.map((e) => TESTING(e.name)).join('')
+        const tail = filtered ? TESTED_SOME(shown, selected.length) : TESTED_ALL(shown)
+        const out: ByteSource = ENC.encode(head + tested + cautions + tail)
+        return [out, new IOResult()]
+      }
+
+      let exitCode = unmatched.length > 0 || nothingLeft ? 11 : 0
+      const stderr = cautions !== '' ? ENC.encode(cautions) : null
+
+      if (pipeMode) {
+        const out = new OutputStream(
+          asyncChain(selected.filter((e) => !e.name.endsWith('/')).map(memberStream))[
+            Symbol.asyncIterator
+          ](),
+          () => data.close(),
+        )
+        return [out, new IOResult({ exitCode, stderr })]
+      }
+
+      const base = rstripSlash(dest)
+      // Info-ZIP names an extracted path as the -d directory was typed
+      // followed by the member, or the bare member; the archive heads the
+      // listing as it was typed too. Mirrors unzip.py.
+      const typedDest = fl.asPath('d')?.rawPath ?? ''
+      const shown = (path: string): string => {
+        const rel = lstripSlash(path.slice(base.length))
+        return typedDest !== '' ? `${rstripSlash(typedDest)}/${rel}` : rel
+      }
+      const makeDirs = async (dir: string): Promise<void> => {
+        if (stat !== undefined) await ensureDir(dir, makePathSpec, mkdir, stat, made)
+        else await mkdir(makePathSpec(dir), true)
+      }
+      const outputLines: string[] = quiet ? [] : [`Archive:  ${archivePath.rawPath}`]
+      const errors: string[] = []
+      const made = new Set<string>()
+      const listing = (): ByteSource | null =>
+        outputLines.length > 0 ? ENC.encode(outputLines.join('\n') + '\n') : null
+      if (fl.raw('d') !== undefined) {
+        try {
+          await makeDirs(dest)
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          return [
+            listing(),
+            new IOResult({
+              exitCode: DEST_EXIT,
+              stderr: ENC.encode(checkdirDest(typedDest, String(fsStrerror(err)))),
+            }),
+          ]
+        }
+      }
+      let checkdirFailed = false
+      let createFailed = false
+      let answers: AsyncLineIterator | null = null
+      const extracted = new Set<string>()
+      let replaceAll = parsed.overwrite && !parsed.neverOverwrite
+      let skipAll = parsed.neverOverwrite
+      const answer = async (): Promise<Uint8Array | null> => {
+        if (opts.stdin === null) return null
+        answers ??= new AsyncLineIterator(opts.stdin)
+        return answers.readline()
+      }
+      // Where a file entry goes when a file may hold its name. Info-ZIP asks
+      // first, unless -o or an `A` said to replace and -n or an `N` said never
+      // to; end of input answers `N`. `r` names another file under the same
+      // directory, which is asked about in its turn. Mirrors unzip.py.
+      const destination = async (start: string): Promise<string | null> => {
+        let outPath = start
+        for (;;) {
+          if (replaceAll) return outPath
+          // Two members can map to one path, so what this run wrote counts as
+          // there even without a stat to ask.
+          const exists =
+            extracted.has(outPath) ||
+            (stat !== undefined && (await pathExists(stat, makePathSpec(outPath))))
+          if (!exists) return outPath
+          if (skipAll) return null
+          const prompt = REPLACE_PROMPT(shown(outPath))
+          const line = await answer()
+          if (line === null) {
+            errors.push(prompt + REPLACE_EOF)
+            skipAll = true
+            exitCode = Math.max(exitCode, WARN_EXIT)
+            return null
+          }
+          errors.push(prompt)
+          const first = String.fromCharCode(line[0] ?? 0)
+          if (first === 'y' || first === 'Y') return outPath
+          if (first === 'n') return null
+          if (first === 'A') {
+            replaceAll = true
+            return outPath
+          }
+          if (first === 'N') {
+            skipAll = true
+            return null
+          }
+          if (first === 'r' || first === 'R') {
+            let name: Uint8Array | null = new Uint8Array(0)
+            while (name !== null && name.length === 0) {
+              errors.push(NEW_NAME)
+              name = await answer()
             }
-            if (renamed !== '' && !renamed.endsWith('/')) outPath = base + '/' + renamed
+            if (name !== null) {
+              // Info-ZIP maps the new name as it maps a member's, except that it
+              // puts an absolute one under the working directory instead of -d;
+              // here every name stays under the extraction root.
+              const typed = new TextDecoder().decode(name)
+              const [renamed, skipped] = mapName(typed.replace(/^\/+/, ''))
+              if (skipped) {
+                exitCode = Math.max(exitCode, WARN_EXIT)
+                if (!quiet) outputLines.push(SKIPPED_DOTDOT(typed))
+              }
+              if (renamed !== '' && !renamed.endsWith('/')) outPath = base + '/' + renamed
+            }
+            continue
+          }
+          errors.push(INVALID_RESPONSE(response(line)))
+        }
+      }
+      for (const e of selected) {
+        const name = lstripSlash(e.name)
+        if (name !== e.name) {
+          errors.push(STRIPPED_ABSOLUTE(e.name))
+          exitCode = Math.max(exitCode, WARN_EXIT)
+        }
+        const [entryName, skipped] = mapName(name)
+        if (skipped) {
+          exitCode = Math.max(exitCode, WARN_EXIT)
+          if (!quiet) outputLines.push(SKIPPED_DOTDOT(name))
+        }
+        if (entryName === '') {
+          if (!name.endsWith('/')) {
+            errors.push(MAPNAME_FAILED(entryName))
+            exitCode = Math.max(exitCode, MAPNAME_EXIT)
           }
           continue
         }
-        errors.push(INVALID_RESPONSE(response(line)))
-      }
-    }
-    for (const e of selected) {
-      const name = lstripSlash(e.name)
-      if (name !== e.name) {
-        errors.push(STRIPPED_ABSOLUTE(e.name))
-        exitCode = Math.max(exitCode, WARN_EXIT)
-      }
-      const [entryName, skipped] = mapName(name)
-      if (skipped) {
-        exitCode = Math.max(exitCode, WARN_EXIT)
-        if (!quiet) outputLines.push(SKIPPED_DOTDOT(name))
-      }
-      if (entryName === '') {
-        if (!name.endsWith('/')) {
-          errors.push(MAPNAME_FAILED(entryName))
-          exitCode = Math.max(exitCode, MAPNAME_EXIT)
-        }
-        continue
-      }
-      const outPath = base + '/' + rstripSlash(entryName)
-      const isDir = e.name.endsWith('/')
-      // A directory entry is the only record an empty directory leaves, so
-      // it has to be recreated even though nothing is written inside it.
-      const parentEnd = outPath.lastIndexOf('/')
-      const chain = isDir ? outPath : parentEnd > 0 ? outPath.slice(0, parentEnd) : ''
-      let existed = false
-      try {
-        existed = isDir && stat !== undefined && (await pathExists(stat, makePathSpec(outPath)))
-        if (chain !== '' && chain !== '/') await makeDirs(chain)
-      } catch (err) {
-        if (!isFsError(err)) throw err
-        checkdirFailed = true
-        let blocker: string | null = null
-        if (stat !== undefined) {
-          try {
-            blocker = await fileInChain(stat, base, chain)
-          } catch (probe) {
-            if (!isFsError(probe)) throw probe
-            console.warn(`unzip: probing ${chain} failed: ${String(probe)}`)
-          }
-        }
-        errors.push(
-          blocker !== null
-            ? checkdirFile(shown(blocker), e.name)
-            : checkdirError(shown(errorVirtualPath(err)), String(fsStrerror(err)), e.name),
-        )
-        continue
-      }
-      if (isDir) {
-        if (!quiet && !existed) outputLines.push(`   creating: ${shown(outPath)}/`)
-        continue
-      }
-      const target = await destination(outPath)
-      if (target === null) continue
-      const renamedDir = target.slice(0, target.lastIndexOf('/'))
-      if (target !== outPath && renamedDir !== chain) {
+        const outPath = base + '/' + rstripSlash(entryName)
+        const isDir = e.name.endsWith('/')
+        // A directory entry is the only record an empty directory leaves, so
+        // it has to be recreated even though nothing is written inside it.
+        const parentEnd = outPath.lastIndexOf('/')
+        const chain = isDir ? outPath : parentEnd > 0 ? outPath.slice(0, parentEnd) : ''
+        let existed = false
         try {
-          await makeDirs(renamedDir)
+          existed = isDir && stat !== undefined && (await pathExists(stat, makePathSpec(outPath)))
+          if (chain !== '' && chain !== '/') await makeDirs(chain)
         } catch (err) {
           if (!isFsError(err)) throw err
           checkdirFailed = true
-          errors.push(checkdirError(shown(errorVirtualPath(err)), String(fsStrerror(err)), e.name))
+          let blocker: string | null = null
+          if (stat !== undefined) {
+            try {
+              blocker = await fileInChain(stat, base, chain)
+            } catch (probe) {
+              if (!isFsError(probe)) throw probe
+              console.warn(`unzip: probing ${chain} failed: ${String(probe)}`)
+            }
+          }
+          errors.push(
+            blocker !== null
+              ? checkdirFile(shown(blocker), e.name)
+              : checkdirError(shown(errorVirtualPath(err)), String(fsStrerror(err)), e.name),
+          )
           continue
         }
+        if (isDir) {
+          if (!quiet && !existed) outputLines.push(`   creating: ${shown(outPath)}/`)
+          continue
+        }
+        const target = await destination(outPath)
+        if (target === null) continue
+        const renamedDir = target.slice(0, target.lastIndexOf('/'))
+        if (target !== outPath && renamedDir !== chain) {
+          try {
+            await makeDirs(renamedDir)
+          } catch (err) {
+            if (!isFsError(err)) throw err
+            checkdirFailed = true
+            errors.push(
+              checkdirError(shown(errorVirtualPath(err)), String(fsStrerror(err)), e.name),
+            )
+            continue
+          }
+        }
+        const content = new ByteSpool()
+        try {
+          await content.fill(memberStream(e))
+          await write(makePathSpec(target), content.stream())
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          // -o unlinks a file already there before it writes, so a refusal of
+          // that is its own verb.
+          createFailed = true
+          const existed = stat !== undefined && (await pathExists(stat, makePathSpec(target)))
+          errors.push(
+            createError(existed ? 'delete old' : 'create', shown(target), String(fsStrerror(err))),
+          )
+          continue
+        } finally {
+          await content.close()
+        }
+        extracted.add(target)
+        if (!quiet) outputLines.push(extractedLine(e.method, shown(target)))
       }
-      const content = await e.content()
-      try {
-        await write(makePathSpec(target), content)
-      } catch (err) {
-        if (!isFsError(err)) throw err
-        // -o unlinks a file already there before it writes, so a refusal of
-        // that is its own verb.
-        createFailed = true
-        const existed = stat !== undefined && (await pathExists(stat, makePathSpec(target)))
-        errors.push(
-          createError(existed ? 'delete old' : 'create', shown(target), String(fsStrerror(err))),
-        )
-        continue
-      }
-      extracted.add(target)
-      if (!quiet) outputLines.push(extractedLine(e.method, shown(target)))
+      const allStderr = ENC.encode(cautions + errors.join(''))
+      return [
+        listing(),
+        new IOResult({
+          exitCode: createFailed ? CREATE_EXIT : checkdirFailed ? CHECKDIR_EXIT : exitCode,
+          stderr: allStderr.byteLength > 0 ? allStderr : null,
+        }),
+      ]
     }
-    const allStderr = ENC.encode(cautions + errors.join(''))
+
+    const result = await run()
+    handedOff = result?.[0] instanceof OutputStream
+    // A mode that writes nothing says so about -d first; -t prints the
+    // offset warning on stdout, every other mode on stderr.
+    const writesNothing = zipinfoMode || testMode || pipeMode || listMode || verbose
+    const caution =
+      (parsed.overwrite && parsed.neverOverwrite ? NO_AND_O : '') +
+      (fl.asPath('d') !== undefined && writesNothing ? D_IGNORED : '')
+    const onStderr = testMode && !zipinfoMode ? '' : warning
+    if ((caution === '' && onStderr === '' && slack === 0) || result === null) return result
+    const [out, io] = result
+    const lead = ENC.encode(caution + onStderr)
+    const rest = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
+    const merged = new Uint8Array(lead.byteLength + rest.byteLength)
+    merged.set(lead, 0)
+    merged.set(rest, lead.byteLength)
     return [
-      listing(),
+      out,
       new IOResult({
-        exitCode: createFailed ? CREATE_EXIT : checkdirFailed ? CHECKDIR_EXIT : exitCode,
-        stderr: allStderr.byteLength > 0 ? allStderr : null,
+        exitCode: Math.max(io.exitCode, floor),
+        stderr: merged.byteLength > 0 ? merged : null,
       }),
     ]
+  } finally {
+    if (!handedOff) await data.close()
   }
-
-  const result = await run()
-  // A mode that writes nothing says so about -d first; -t prints the
-  // offset warning on stdout, every other mode on stderr.
-  const writesNothing = zipinfoMode || testMode || pipeMode || listMode || verbose
-  const caution =
-    (parsed.overwrite && parsed.neverOverwrite ? NO_AND_O : '') +
-    (fl.asPath('d') !== undefined && writesNothing ? D_IGNORED : '')
-  const onStderr = testMode && !zipinfoMode ? '' : warning
-  if ((caution === '' && onStderr === '' && slack === 0) || result === null) return result
-  const [out, io] = result
-  const lead = ENC.encode(caution + onStderr)
-  const rest = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
-  const merged = new Uint8Array(lead.byteLength + rest.byteLength)
-  merged.set(lead, 0)
-  merged.set(rest, lead.byteLength)
-  return [
-    out,
-    new IOResult({
-      exitCode: Math.max(io.exitCode, floor),
-      stderr: merged.byteLength > 0 ? merged : null,
-    }),
-  ]
 }

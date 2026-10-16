@@ -16,7 +16,8 @@ import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
 
 import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { writeItem } from '../msgraph/drive.ts'
+import type { ByteSource } from '../../io/types.ts'
+import { writeItem, writeItemStream } from '../msgraph/drive.ts'
 import { driveLoc } from './client.ts'
 
 export async function write(
@@ -27,4 +28,14 @@ export async function write(
   const timer = startOp()
   await writeItem(accessor.config, driveLoc(accessor.config, path.vfsPath), data)
   record('write', path.virtual, 'onedrive', data.length, timer)
+}
+
+export async function writeStream(
+  accessor: OneDriveAccessor,
+  path: PathSpec,
+  data: ByteSource,
+): Promise<void> {
+  const timer = startOp()
+  const size = await writeItemStream(accessor.config, driveLoc(accessor.config, path.vfsPath), data)
+  record('write', path.virtual, 'onedrive', size, timer)
 }

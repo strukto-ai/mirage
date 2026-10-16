@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { SSHAccessor } from '../../accessor/ssh.ts'
@@ -32,8 +33,8 @@ import { follow as sshFollow, readStream as sshStream } from '../../core/ssh/str
 import { checksum as sshChecksum } from '../../core/ssh/checksum.ts'
 import { exists as sshExists } from '../../core/ssh/exists.ts'
 import { filesContaining as sshFilesContaining } from '../../core/ssh/search.ts'
-import { write as sshWrite } from '../../core/ssh/write.ts'
-import { appendBytes as sshAppend } from '../../core/ssh/append.ts'
+import { write as sshWrite, writeStream as sshWriteStream } from '../../core/ssh/write.ts'
+import { appendBytes as sshAppend, appendStream as sshAppendStream } from '../../core/ssh/append.ts'
 import { pwrite as sshPwrite } from '../../core/ssh/pwrite.ts'
 import { create as sshCreate } from '../../core/ssh/create.ts'
 import { mkdir as sshMkdir } from '../../core/ssh/mkdir.ts'
@@ -149,6 +150,19 @@ export class SSHVFS extends BaseVFS {
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {
     return sshWrite(this.accessor, path, data)
+  }
+
+  override writeStream(
+    path: PathSpec,
+    data: ByteSource,
+    signal?: AbortSignal,
+    atomic = false,
+  ): Promise<void> {
+    return sshWriteStream(this.accessor, path, data, signal, atomic)
+  }
+
+  override appendStream(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
+    return sshAppendStream(this.accessor, path, data, signal)
   }
 
   override append(path: PathSpec, data: Uint8Array): Promise<void> {

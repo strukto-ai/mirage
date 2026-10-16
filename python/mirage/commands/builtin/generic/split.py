@@ -21,6 +21,8 @@ from mirage.commands.spec.usage import extra_operand_error
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.record_spool import RecordSpool
+from mirage.io.stream import OutputStream
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.writer import ByteWriter
 from mirage.types import PathSpec
@@ -393,6 +395,85 @@ def chunk_at(
     return next(islice(_cut(data, chunks, separator), index - 1, None), b"")
 
 
+async def _number_parts(
+    records: RecordSpool, spec: ChunkSpec, separator: bytes
+) -> AsyncIterator[ByteSource]:
+    spool = records.data
+    count = spec.count
+    indices = range(count) if spec.only is None else (spec.only - 1,)
+    if spec.kind is ChunkKind.BYTES:
+        base, rem = divmod(spool.size, count)
+        for index in indices:
+            start = _chunk_end(index, base, rem)
+            yield spool.stream(start, _chunk_end(index + 1, base, rem) - start)
+        return
+    if spec.kind is ChunkKind.ROUND_ROBIN:
+        for index in indices:
+            yield _round_robin_source(records, index, count)
+        return
+    base, rem = divmod(max(spool.size, count), count)
+    index = pos = record = 0
+    while pos < spool.size and index < count:
+        threshold = max(pos, _chunk_end(index + 1, base, rem) - 1)
+        while record < records.count:
+            start, size = await records.window(record)
+            if start + size > threshold:
+                break
+            record += 1
+        end = (
+            spool.size
+            if record >= records.count
+            else sum(await records.window(record))
+        )
+        terminated = end > 0 and await spool.read(end - 1, 1) == separator
+        if record < records.count - 1:
+            terminated = True
+        start, pos = pos, end
+        while terminated or _chunk_end(index + 1, base, rem) <= pos:
+            if not terminated and pos >= spool.size:
+                break
+            if spec.only is None or spec.only == index + 1:
+                yield spool.stream(start, pos - start)
+                if spec.only is not None:
+                    return
+            start = pos
+            index += 1
+            if index >= count:
+                break
+            if _chunk_end(index + 1, base, rem) > pos:
+                terminated = False
+        if pos >= spool.size and index < count:
+            if spec.only is None or spec.only == index + 1:
+                yield spool.stream(start, pos - start)
+                if spec.only is not None:
+                    return
+            index += 1
+    if spec.only is not None:
+        yield b""
+    else:
+        for _ in range(index, count):
+            yield b""
+
+
+async def _round_robin_source(
+    records: RecordSpool, index: int, count: int
+) -> AsyncIterator[bytes]:
+    for record in range(index, records.count, count):
+        async for data in records.stream(record):
+            yield data
+
+
+async def _selected_number_part(
+    records: RecordSpool, spec: ChunkSpec, separator: bytes
+) -> AsyncIterator[bytes]:
+    async for part in _number_parts(records, spec, separator):
+        if not isinstance(part, bytes):
+            async for data in part:
+                yield data
+        elif part:
+            yield part
+
+
 _ALPHA_SUFFIXES = "abcdefghijklmnopqrstuvwxyz"
 _NUMERIC_SUFFIXES = "0123456789"
 _HEX_SUFFIXES = "0123456789abcdef"
@@ -537,17 +618,26 @@ async def split_generic(
     # the source it stopped in open.
     try:
         if chunks is not None:
-            all_data = b"".join([chunk async for chunk in source])
-            if chunks.only is not None:
-                # `K/N` writes the one chunk to stdout and no file at all.
-                return chunk_at(
-                    all_data, chunks, separator, chunks.only
-                ), IOResult()
-            # Every chunk gets its file, an empty one included: GNU creates
-            # N files for `-n N` however short the input is.
-            for i, part in enumerate(chunk_parts(all_data, chunks, separator)):
-                name = suffix_fn(i) + additional_suffix
-                await emit(name, part)
+            records = RecordSpool()
+            handed_off = False
+            try:
+                await records.data.fill(source)
+                if chunks.kind is not ChunkKind.BYTES:
+                    await records.index_delimited(separator)
+                if chunks.only is not None:
+                    output = OutputStream(
+                        _selected_number_part(records, chunks, separator),
+                        records.close,
+                    )
+                    handed_off = True
+                    return output, IOResult()
+                i = 0
+                async for part in _number_parts(records, chunks, separator):
+                    await emit(suffix_fn(i) + additional_suffix, part)
+                    i += 1
+            finally:
+                if not handed_off:
+                    await records.close()
         else:
             writer: ByteWriter | None = None
             used = 0

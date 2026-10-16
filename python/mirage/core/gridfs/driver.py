@@ -14,12 +14,13 @@
 
 import re
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from typing import Any
 
 from gridfs.errors import NoFile
 
 from mirage.accessor.gridfs import GridFSAccessor
+from mirage.cache.types import WriteCondition
 from mirage.core.gridfs.client import (
     bucket,
     delete_all,
@@ -35,6 +36,8 @@ from mirage.core.object_store.driver import (
     ObjectStoreDriver,
     TreeEntry,
 )
+from mirage.io.cooperative import chunks
+from mirage.io.types import ByteSource
 from mirage.utils.dates import to_iso_z
 
 _COPY_CHUNK = 1024 * 1024
@@ -155,6 +158,24 @@ async def _put(
     return ObjectMeta(size=len(data), fingerprint=revision, revision=revision)
 
 
+async def _put_stream(
+    conn: GridFSAccessor, key: str, data: ByteSource, cond: WriteCondition
+) -> ObjectMeta:
+    upload = bucket(conn).open_upload_stream(key)
+    size = 0
+    try:
+        async with aclosing(chunks(data)) as source:
+            async for chunk in source:
+                await upload.write(chunk)
+                size += len(chunk)
+        await upload.close()
+    except BaseException:
+        await upload.abort()
+        raise
+    revision = str(upload._id)
+    return ObjectMeta(size=size, fingerprint=revision, revision=revision)
+
+
 async def _delete_file(conn: GridFSAccessor, key: str) -> None:
     # Removes every revision of the filename (rm semantics; mirrors S3's
     # delete_object, which also succeeds silently on a missing key).
@@ -263,6 +284,7 @@ DRIVER: ObjectStoreDriver[GridFSAccessor, GridFSAccessor] = ObjectStoreDriver(
     head=_head,
     get=_get,
     put=_put,
+    put_stream=_put_stream,
     delete_file=_delete_file,
     delete_prefix=_delete_prefix,
     move_file=_move_file,

@@ -1,0 +1,344 @@
+{
+  "cases": [
+    {
+      "id": "stream_remaining_named_compression",
+      "seq": 1320100,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/t1320100stream; cd /data/t1320100stream && { printf 'alpha\\nbeta\\n' > a; gzip -c a > a.gz; zgrep beta a.gz; gunzip -c a.gz | wc -l; }; rc=$?; cd /data; rm -r /data/t1320100stream; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "beta\n2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "stream_remaining_archive_update",
+      "seq": 1320101,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/t1320101stream; cd /data/t1320101stream && { printf 'one\\n' > a; printf 'two\\n' > b; zip -q pack.zip a b; printf 'new\\n' > a; zip -q pack.zip a; unzip -p pack.zip a b; }; rc=$?; cd /data; rm -r /data/t1320101stream; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "new\ntwo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "stream_remaining_xz_archive",
+      "seq": 1320102,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/t1320102stream; cd /data/t1320102stream && { printf 'payload\\n' > a; tar -cJf pack.txz a; tar -xJOf pack.txz; }; rc=$?; cd /data; rm -r /data/t1320102stream; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "payload\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "stream_remaining_reused_descriptor",
+      "seq": 1320103,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/t1320103stream; cd /data/t1320103stream && { printf 'first\\nsecond\\n' > a; exec 3< a; head -n 1 <&3; cat <&3; exec 3<&-; }; rc=$?; cd /data; rm -r /data/t1320103stream; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "first\nsecond\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "stream_remaining_read_write_descriptor",
+      "seq": 1320104,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/t1320104stream; cd /data/t1320104stream && { printf 'abcdef' > a; exec 3<>a; head -c 2 <&3; printf XY >&3; cat <&3; exec 3>&-; printf '\\n'; cat a; }; rc=$?; cd /data; rm -r /data/t1320104stream; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "abef\nabXYef",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "stream_remaining_merge_sort",
+      "seq": 1320105,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/t1320105stream; cd /data/t1320105stream && { printf 'a 1\\nc 1\\n' > a; printf 'a 2\\nb 2\\n' > b; sort -msu -k1,1 a b; }; rc=$?; cd /data; rm -r /data/t1320105stream; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a 1\nb 2\nc 1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "stream_remaining_line_chunks",
+      "seq": 1320106,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/t1320106stream; cd /data/t1320106stream && { printf 'aaa\\nb\\ncc\\ndddd\\n' > a; split -n l/3 a part; cat partaa partab partac; csplit -s -f cut a 3; cat cut00 cut01; }; rc=$?; cd /data; rm -r /data/t1320106stream; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "aaa\nb\ncc\ndddd\naaa\nb\ncc\ndddd\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "stream_remaining_deferred_scripts",
+      "seq": 1320107,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/t1320107stream; cd /data/t1320107stream && { printf 'a\\nb\\n' > a; sed -n 'w result' a; cat result; awk '{print $0 | \"cat\"} END {close(\"cat\")}' a; }; rc=$?; cd /data; rm -r /data/t1320107stream; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\na\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "stream_remaining_same_file_iconv",
+      "seq": 1320108,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/t1320108stream; cd /data/t1320108stream && { printf 'hello\\n' > a; iconv -f UTF-8 -t UTF-8 -o a a; cat a; }; rc=$?; cd /data; rm -r /data/t1320108stream; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "stream_remaining_reverse_records",
+      "seq": 1320109,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/t1320109stream; cd /data/t1320109stream && { printf 'aa\\nbb\\ncc\\n' > a; tac a; shuf -n 1 <<<'only'; }; rc=$?; cd /data; rm -r /data/t1320109stream; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "cc\nbb\naa\nonly\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "stream_remaining_reused_descriptor_dash",
+      "seq": 1320110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/t1320110stream; cd /data/t1320110stream && { printf 'first\\nsecond\\n' > a; exec 3< a; head -n 1 - <&3; cat <&3; exec 3<&-; }; rc=$?; cd /data; rm -r /data/t1320110stream; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "first\nsecond\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

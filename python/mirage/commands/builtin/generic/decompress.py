@@ -19,7 +19,9 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eloop, enoent
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import DotWalkMissing
-from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.io.spool import ByteSpool
+from mirage.io.stream import close_quietly
+from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.compress import GzipDataError, gunzip_stream
@@ -370,81 +372,95 @@ async def decompress_inputs(
             if in_place and output is None:
                 if not quiet:
                     report(f"gzip: {shown}: unknown suffix -- ignored\n", 2)
+                await close_quietly(source)
                 continue
-            chunks: list[bytes] = []
-            failure: GzipDataError | None = None
+            spool = ByteSpool()
             try:
-                async for chunk in gunzip_stream(
-                    source, test_only, force and not in_place
-                ):
-                    if in_place:
-                        chunks.append(chunk)
-                    elif not test_only:
-                        yield chunk
-            except GzipDataError as exc:
-                failure = exc
-            except FS_ERRORS as exc:
-                report("\n" + fs_error_line("gzip", shown, exc), 1)
-                return
-            if output is None:
+                failure: GzipDataError | None = None
+                try:
+                    async for chunk in gunzip_stream(
+                        source, test_only, force and not in_place
+                    ):
+                        if in_place:
+                            await spool.append(chunk)
+                        elif not test_only:
+                            yield chunk
+                except GzipDataError as exc:
+                    failure = exc
+                except FS_ERRORS as exc:
+                    report("\n" + fs_error_line("gzip", shown, exc), 1)
+                    return
+                if output is None:
+                    if failure is not None:
+                        fail(failure, shown)
+                        if failure.fatal or (
+                            on_stdin and failure.first_header
+                        ):
+                            return
+                    continue
+                if failure is not None and failure.first_header:
+                    fail(failure, shown)
+                    if failure.fatal:
+                        return
+                    continue
+                if write is None or unlink is None:
+                    raise ValueError(
+                        "in-place decompression requires write and unlink"
+                    )
+                out_name, out = output
+                if link is not None:
+                    out = beside_link(link, out_name)
+                existed = await output_taken(out, stat, resolver)
+                if existed and not force:
+                    report(
+                        f"gzip: {out_name} already exists;\tnot overwritten\n",
+                        2,
+                    )
+                    continue
                 if failure is not None:
                     fail(failure, shown)
-                    if failure.fatal or (on_stdin and failure.first_header):
+                    if failure.fatal:
                         return
-                continue
-            if failure is not None and failure.first_header:
-                fail(failure, shown)
-                if failure.fatal:
+                    if not failure.keeps_output:
+                        continue
+                data = spool.stream()
+                try:
+                    await replace_output(
+                        out, data, write, resolver, link is not None
+                    )
+                except FS_ERRORS as exc:
+                    line = fs_error_line("gzip", out_name, exc)
+                    report(line if existed else "\n" + line, 1)
+                    if existed:
+                        continue
                     return
-                continue
-            if write is None or unlink is None:
-                raise ValueError(
-                    "in-place decompression requires write and unlink"
-                )
-            out_name, out = output
-            if link is not None:
-                out = beside_link(link, out_name)
-            existed = await output_taken(out, stat, resolver)
-            if existed and not force:
-                report(
-                    f"gzip: {out_name} already exists;\tnot overwritten\n", 2
-                )
-                continue
-            if failure is not None:
-                fail(failure, shown)
-                if failure.fatal:
-                    return
-                if not failure.keeps_output:
-                    continue
-            data = b"".join(chunks)
-            try:
-                await replace_output(
-                    out, data, write, resolver, link is not None
-                )
-            except FS_ERRORS as exc:
-                line = fs_error_line("gzip", out_name, exc)
-                report(line if existed else "\n" + line, 1)
-                if existed:
-                    continue
-                return
-            if not keep:
-                await (
-                    unlink(path)
-                    if link is None or resolver is None
-                    else resolver.unlink(link)
-                )
+                if not keep:
+                    await (
+                        unlink(path)
+                        if link is None or resolver is None
+                        else resolver.unlink(link)
+                    )
+            finally:
+                await spool.close()
+                await close_quietly(source)
 
     body = run()
     if test_only or any(
         not (to_stdout or p.raw_path == "-") for p in operands
     ):
-        return (await materialize(body)) or None, io
+        spool = ByteSpool()
+        try:
+            await spool.fill(body)
+            return (await spool.output()) or None, io
+        except BaseException:
+            await spool.close()
+            raise
     return body, io
 
 
 async def replace_output(
     out: PathSpec,
-    data: bytes,
+    data: ByteSource,
     write: Callable[..., Awaitable[None]],
     resolver: LinkResolver | None,
     beside: bool,

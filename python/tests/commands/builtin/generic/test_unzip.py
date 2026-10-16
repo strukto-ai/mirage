@@ -11,7 +11,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import errno
 import io
 import zipfile
@@ -26,6 +25,7 @@ from mirage.commands.builtin.generic.unzip import (
     unzip,
 )
 from mirage.commands.errors import UsageError
+from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -68,7 +68,7 @@ class _Recorder:
         self.written: dict[str, bytes] = {}
 
     async def __call__(self, p: PathSpec, data: bytes) -> None:
-        self.written[p.virtual] = data
+        self.written[p.virtual] = await materialize(data)
 
 
 async def _mkdir_ok(_p: PathSpec, parents: bool = False) -> None:
@@ -89,7 +89,11 @@ async def _run(members: tuple[str, ...], data: bytes | None = None, **kw):
         members=members,
         **kw,
     )
-    return out, res, recorder.written
+    return (
+        await materialize(out) if out is not None else None,
+        res,
+        recorder.written,
+    )
 
 
 def _stderr_text(res) -> str:

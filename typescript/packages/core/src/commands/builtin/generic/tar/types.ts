@@ -33,6 +33,7 @@ export interface Member {
   // what a diagnostic about the member names (GNU reports `/t/priv`, not
   // `t/priv`).
   spelled?: string
+  size?: number | null
 }
 
 // What one `tar -c` pass decided, before anything is written. Notices

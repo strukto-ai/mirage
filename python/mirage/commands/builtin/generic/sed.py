@@ -52,6 +52,7 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition, StaleWriteError
 from mirage.io.cooperative import chunks
+from mirage.io.spool import ByteSpool
 from mirage.io.stream import close_quietly, ensure_stream, prime_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.io.writer import ByteWriter
@@ -131,12 +132,11 @@ class _ScriptFiles:
             return
         if self.write_bytes is None:
             raise eacces(name)
-        previous = (
-            await materialize(normalized_read(self.read_stream)(path))
-            if append
-            else b""
-        )
-        await self.write_bytes(path, previous + await materialize(data))
+        async with ByteSpool() as spool:
+            if append:
+                await spool.fill(normalized_read(self.read_stream)(path))
+            await spool.fill(data)
+            await self.write_bytes(path, spool.stream())
 
 
 def _line_length(raw: str | None) -> int:
@@ -245,17 +245,14 @@ class _ScriptWrites:
         self.edited: set[str] = set()
         self.errors = ""
         self.first: dict[str, str] = {}
-        self.later: dict[str, bytearray] = {}
-        self.dropped: dict[str, int] = {}
+        self.later: dict[str, ByteSpool] = {}
+        self.deferred: dict[str, ByteSpool] = {}
         self.sent: dict[str, int] = {}
         for name in machine.wfiles:
             if self.first.setdefault(access.spec(name).virtual, name) != name:
-                self.later[name] = bytearray()
-                self.dropped[name] = 0
+                self.later[name] = ByteSpool()
 
     async def flush(self, final: bool = False) -> None:
-        if self.defer and not final:
-            return
         for name, out in self.machine.wfiles.items():
             if not out.chunks:
                 continue
@@ -265,19 +262,20 @@ class _ScriptWrites:
             if name in self.failed or path in self.edited:
                 continue
             if name in self.later:
-                self._keep(name, path, data)
+                await self.later[name].append(data)
+            elif self.defer:
+                if name not in self.deferred:
+                    self.deferred[name] = ByteSpool()
+                await self.deferred[name].append(data)
             else:
                 await self._send(name, data)
-
-    def _keep(self, name: str, path: str, data: bytes) -> None:
-        kept = self.later[name]
-        kept += data
-        covered = min(
-            self.sent.get(self.first[path], 0) - self.dropped[name], len(kept)
-        )
-        if covered > 0:
-            del kept[:covered]
-            self.dropped[name] += covered
+        if final:
+            deferred, self.deferred = self.deferred, {}
+            for name, spool in deferred.items():
+                async with spool:
+                    if self.access.spec(name).virtual not in self.edited:
+                        async for data in spool.stream():
+                            await self._send(name, data)
 
     async def _send(self, name: str, data: bytes) -> None:
         writer = self.writers.get(name)
@@ -298,17 +296,12 @@ class _ScriptWrites:
         self.errors += _open_failure(name, exc)
 
     async def finish(self) -> None:
-        tails: dict[str, bytearray] = {}
-        for name, data in reversed(self.later.items()):
+        for name, spool in self.later.items():
             path = self.access.spec(name).virtual
-            sent = self.sent.get(self.first[path], 0)
-            piece = data[sent - self.dropped[name] :]
-            tail = tails.setdefault(path, bytearray())
-            tail[: len(piece)] = piece
-        for path, tail in tails.items():
             first = self.first[path]
-            if tail and first not in self.failed and path not in self.edited:
-                await self._send(first, bytes(tail))
+            if first not in self.failed and path not in self.edited:
+                async for data in spool.stream(self.sent.get(first, 0)):
+                    await self._send(first, data)
         writers, self.writers = self.writers, {}
         for name, writer in writers.items():
             try:
@@ -318,8 +311,14 @@ class _ScriptWrites:
 
     async def abort(self) -> None:
         writers, self.writers = self.writers, {}
-        for writer in writers.values():
-            await writer.abort()
+        try:
+            for writer in writers.values():
+                await writer.abort()
+        finally:
+            for spool in (*self.later.values(), *self.deferred.values()):
+                await spool.close()
+            self.later.clear()
+            self.deferred.clear()
 
 
 def _failed(stderr: str, exit_code: int) -> tuple[None, IOResult]:

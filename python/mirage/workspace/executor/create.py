@@ -11,18 +11,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import logging
+from collections.abc import AsyncIterator
+from contextlib import aclosing
 
 from mirage.context import DEFAULT_UMASK
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.async_line_iterator import AsyncLineIterator
-from mirage.io.stream import materialize
-from mirage.io.types import OpReport
+from mirage.io.cooperative import chunks
+from mirage.io.stream import slice_stream
+from mirage.io.types import ByteSource, OpReport
 from mirage.runtime.types import DispatchFn
 from mirage.shell.descriptors import FileDescription
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.ranges import splice_window
 from mirage.workspace.session import SessionState
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ async def create_file(
     dispatch: DispatchFn,
     session: SessionState,
     scope: PathSpec,
-    data: bytes,
+    data: ByteSource,
     *,
     append: bool = False,
 ) -> PathSpec | None:
@@ -119,7 +120,7 @@ async def write_description(
     dispatch: DispatchFn,
     session: SessionState,
     file: FileDescription,
-    data: bytes,
+    data: ByteSource,
 ) -> None:
     """Write through a shared open file description, preserving its offset.
 
@@ -142,11 +143,34 @@ async def write_description(
         data (bytes): bytes emitted by the command.
     """
     if file.emit is not None:
-        if data:
-            await file.emit(data)
+        async with aclosing(chunks(data)) as source:
+            async for part in source:
+                await file.emit(part)
         return
     async with file.writing:
-        await _write_through(dispatch, session, file, data)
+        if (
+            not isinstance(data, bytes)
+            and file.source is None
+            and (not file.opened or file.append)
+        ):
+            size = 0
+
+            async def counted() -> AsyncIterator[bytes]:
+                nonlocal size
+                async with aclosing(chunks(data)) as source:
+                    async for part in source:
+                        size += len(part)
+                        yield part
+
+            await create_file(
+                dispatch, session, file.scope, counted(), append=file.append
+            )
+            file.opened = True
+            file.offset += size
+            return
+        async with aclosing(chunks(data)) as source:
+            async for part in source:
+                await _write_through(dispatch, session, file, part)
 
 
 async def _write_through(
@@ -184,9 +208,9 @@ async def _write_through(
             await dispatch("pwrite", file.scope, data=data, offset=file.offset)
             file.offset += len(data)
         return
-    content, _ = await dispatch("read", file.scope)
     offset = file.offset + file.source.lines.position
-    content = splice_window(await materialize(content) or b"", offset, data)
-    await create_file(dispatch, session, file.scope, content)
+    await dispatch("pwrite", file.scope, data=data, offset=offset)
+    await file.source.lines.discard()
     file.offset = offset + len(data)
-    file.source.lines = AsyncLineIterator(content[file.offset :])
+    content, _ = await dispatch("read", file.scope, stream=True)
+    file.source.lines = AsyncLineIterator(slice_stream(content, file.offset))

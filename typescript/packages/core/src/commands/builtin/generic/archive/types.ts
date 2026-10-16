@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSlice } from '../../../../io/spool.ts'
 import type { PathSpec } from '../../../../types.ts'
 
 // What a member is, which is the whole of what an archive records beyond
@@ -40,6 +41,7 @@ export interface Entry {
   kind: MemberKind
   target?: string
   read?: PathSpec | null
+  size?: number | null
 }
 
 // One thing the scan could not archive, in the order it was met.
@@ -77,4 +79,16 @@ export interface Scan {
   crossings: string[]
   problems: Problem[]
   missing: boolean
+}
+
+export interface SpoolZipRecord {
+  name: string
+  local: ByteSlice
+  central: Uint8Array
+}
+
+export interface SpoolZipArchive {
+  records: SpoolZipRecord[]
+  prefix: ByteSlice
+  comment: Uint8Array
 }

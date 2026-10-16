@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteSpool } from '../../../io/spool.ts'
 import { ByteWriter } from '../../../io/writer.ts'
-import { concat } from '../../../utils/bytes.ts'
 
 import { isStdin, stdinStream } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -45,7 +45,7 @@ import { byteView, decodeText, encodeText, fromByteView, utf8Locale } from '../.
 import { posixPhrase } from '../../../errors/posix.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
-type Write = (p: PathSpec, data: Uint8Array) => Promise<void>
+type Write = (p: PathSpec, data: ByteSource) => Promise<void>
 
 /**
  * How sed reaches the files its script names (`r`, `R`, `w`, `W`,
@@ -83,12 +83,14 @@ function scriptFiles(opts: CommandOpts, stream: Stream, write: Write): ScriptFil
     stream: open,
     async write(name, data, atomic = false, append = false) {
       if (dispatch === undefined) {
-        const previous = append ? await materialize(open(name)) : new Uint8Array()
-        const next = await materialize(data)
-        const combined = new Uint8Array(previous.length + next.length)
-        combined.set(previous)
-        combined.set(next, previous.length)
-        await write(spec(name), combined)
+        const spool = new ByteSpool()
+        try {
+          if (append) await spool.fill(open(name))
+          await spool.fill(data)
+          await write(spec(name), spool.stream())
+        } finally {
+          await spool.close()
+        }
         return
       }
       await dispatch(append ? 'append' : 'write', spec(name), [data], atomic ? { atomic } : {})
@@ -181,7 +183,8 @@ class ScriptWrites {
   errors = ''
 
   private readonly first = new Map<string, string>()
-  private readonly later = new Map<string, { dropped: number; parts: Uint8Array[] }>()
+  private readonly later = new Map<string, ByteSpool>()
+  private readonly deferred = new Map<string, ByteSpool>()
   private readonly sent = new Map<string, number>()
 
   constructor(
@@ -193,42 +196,38 @@ class ScriptWrites {
     for (const name of machine.wfiles.keys()) {
       const path = access.virtual(name)
       if (!this.first.has(path)) this.first.set(path, name)
-      else this.later.set(name, { dropped: 0, parts: [] })
+      else this.later.set(name, new ByteSpool())
     }
   }
 
   async flush(final = false): Promise<void> {
-    if (this.defer && !final) return
     for (const [name, out] of this.machine.wfiles) {
       if (out.chunks.length === 0) continue
       const data = fromByteView(out.chunks.join(''), this.utf8)
       out.chunks.length = 0
       if (this.failedNames.has(name) || this.edited.has(this.access.virtual(name))) continue
       const kept = this.later.get(name)
-      if (kept !== undefined) this.keep(kept, this.access.virtual(name), data)
-      else await this.send(name, data)
+      if (kept !== undefined) await kept.append(data)
+      else if (this.defer) {
+        let spool = this.deferred.get(name)
+        if (spool === undefined) {
+          spool = new ByteSpool()
+          this.deferred.set(name, spool)
+        }
+        await spool.append(data)
+      } else await this.send(name, data)
     }
-  }
-
-  private keep(
-    kept: { dropped: number; parts: Uint8Array[] },
-    path: string,
-    data: Uint8Array,
-  ): void {
-    kept.parts.push(data)
-    let covered = (this.sent.get(this.first.get(path) ?? '') ?? 0) - kept.dropped
-    let whole = 0
-    for (const part of kept.parts) {
-      if (covered < part.byteLength) break
-      covered -= part.byteLength
-      kept.dropped += part.byteLength
-      whole++
-    }
-    kept.parts.splice(0, whole)
-    const head = kept.parts[0]
-    if (covered > 0 && head !== undefined) {
-      kept.parts[0] = head.subarray(covered)
-      kept.dropped += covered
+    if (final) {
+      for (const [name, spool] of this.deferred) {
+        try {
+          if (!this.edited.has(this.access.virtual(name))) {
+            for await (const data of spool.stream()) await this.send(name, data)
+          }
+        } finally {
+          await spool.close()
+        }
+      }
+      this.deferred.clear()
     }
   }
 
@@ -250,23 +249,12 @@ class ScriptWrites {
   }
 
   async finish(): Promise<void> {
-    const tails = new Map<string, Uint8Array>()
-    for (const [name, kept] of [...this.later].reverse()) {
+    for (const [name, spool] of this.later) {
       const path = this.access.virtual(name)
-      const sent = this.sent.get(this.first.get(path) ?? '') ?? 0
-      const piece = concat(kept.parts).subarray(sent - kept.dropped)
-      const tail = tails.get(path) ?? new Uint8Array()
-      tails.set(
-        path,
-        piece.byteLength >= tail.byteLength
-          ? piece
-          : concat([piece, tail.subarray(piece.byteLength)]),
-      )
-    }
-    for (const [path, tail] of tails) {
       const first = this.first.get(path) ?? ''
-      if (tail.byteLength > 0 && !this.failedNames.has(first) && !this.edited.has(path)) {
-        await this.send(first, tail)
+      if (!this.failedNames.has(first) && !this.edited.has(path)) {
+        for await (const data of spool.stream(this.sent.get(first) ?? 0))
+          await this.send(first, data)
       }
     }
     const writers = this.writers
@@ -284,7 +272,13 @@ class ScriptWrites {
   async abort(): Promise<void> {
     const writers = this.writers
     this.writers = new Map()
-    for (const writer of writers.values()) await writer.abort()
+    try {
+      for (const writer of writers.values()) await writer.abort()
+    } finally {
+      for (const spool of [...this.later.values(), ...this.deferred.values()]) await spool.close()
+      this.later.clear()
+      this.deferred.clear()
+    }
   }
 
   private failed(name: string, error: unknown): void {

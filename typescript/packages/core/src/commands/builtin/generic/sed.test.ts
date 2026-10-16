@@ -146,9 +146,8 @@ it.each([
         cwd: '/',
       } as CommandOpts,
       () => yieldBytes(new Uint8Array()),
-      (p, data) => {
-        files.set(p.virtual, data)
-        return Promise.resolve()
+      async (p, data) => {
+        files.set(p.virtual, await materialize(data))
       },
     )
     if (result === null) throw new Error('no result')

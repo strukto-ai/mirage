@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { materialize } from '../../../io/types.ts'
 import { expect, it } from 'vitest'
 import { eacces, enoent } from '../../../errors/fs.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
@@ -47,9 +48,8 @@ it('a refused probe still reports the entry and goes on', async () => {
       cwd: '/',
     },
     read,
-    (path, bytes) => {
-      written.set(path.virtual, bytes)
-      return Promise.resolve()
+    async (path, bytes) => {
+      written.set(path.virtual, await materialize(bytes))
     },
     (path) => Promise.reject(eacces(path)),
     stat,

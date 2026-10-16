@@ -250,3 +250,26 @@ async def test_a_close_cancels_the_pull_in_flight_in_the_consumers_task():
         await pulling
     assert consumer == [pulling]
     assert events == ["source closed", "handler closed"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("started", [False, True])
+async def test_chain_closes_all_owned_sources_even_when_not_started(started):
+    closed = []
+
+    async def close_first():
+        closed.append("first")
+
+    async def close_second():
+        closed.append("second")
+
+    chain = async_chain(
+        [
+            OutputStream(_make_stream(b"a"), close_first),
+            OutputStream(_make_stream(b"b"), close_second),
+        ]
+    )
+    if started:
+        assert await anext(chain) == b"a"
+    await close_quietly(chain)
+    assert closed == ["first", "second"]

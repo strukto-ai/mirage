@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.core.generic.rewrite import append_by_rewrite
+from mirage.core.generic.rewrite import append_by_streamed_rewrite
 from mirage.core.s3.checksum import checksum as _checksum
 from mirage.core.s3.constants import MD5_ETAG_STORES, SCOPE_ERROR
 from mirage.core.s3.copy import copy as _copy
@@ -151,7 +151,18 @@ class S3VFS(BaseVFS):
         await _write_stream(self.accessor, path, data)
 
     async def append(self, path: PathSpec, data: bytes) -> None:
-        await append_by_rewrite(self.read, self.write, self.stat, path, data)
+        await self.append_stream(path, data)
+
+    async def append_stream(self, path: PathSpec, data: ByteSource) -> None:
+        await append_by_streamed_rewrite(
+            lambda p, remember: _read_stream(
+                self.accessor, p, on_version=remember
+            ),
+            self.write_stream,
+            self.stat,
+            path,
+            data,
+        )
 
     async def create(self, path: PathSpec) -> None:
         await _create(self.accessor, path)

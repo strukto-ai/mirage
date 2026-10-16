@@ -23,7 +23,11 @@ import { enoent } from '../../errors/fs.ts'
 
 const DEFAULT_CHUNK_SIZE = 8192
 
-export async function* readStream(accessor: S3Accessor, path: PathSpec): AsyncIterable<Uint8Array> {
+export async function* readStream(
+  accessor: S3Accessor,
+  path: PathSpec,
+  onVersion?: (version: string | null) => void,
+): AsyncIterable<Uint8Array> {
   const virtual = path.virtual
   const rawPath = rawPathOf(path)
 
@@ -40,16 +44,16 @@ export async function* readStream(accessor: S3Accessor, path: PathSpec): AsyncIt
   const input: Record<string, unknown> = { Bucket: config.bucket, Key: s3Key(rawPath, config) }
   if (pinnedRevision !== null) input.VersionId = pinnedRevision
 
-  const rec = recordStream('read', virtual, VFSName.S3)
-
   try {
     const resp = (await send(new GetObjectCommand(input))) as {
       Body?: unknown
       ETag?: string
       VersionId?: string
     }
+    const rec = recordStream('read', virtual, VFSName.S3)
+    const { fingerprint, revision } = fpRevFromS3Response(resp)
+    onVersion?.(fingerprint)
     if (rec !== null) {
-      const { fingerprint, revision } = fpRevFromS3Response(resp)
       rec.fingerprint = fingerprint
       rec.revision = revision
     }

@@ -830,6 +830,15 @@ export class SessionState {
     return out
   }
 
+  openInputs(): SharedInput[] {
+    return [
+      this.execStdin,
+      this.execStdoutInput,
+      this.execStderrInput,
+      ...[...this.descriptors.values()].map((descriptor) => descriptor.source),
+    ].filter((source): source is SharedInput => source !== null)
+  }
+
   /**
    * The durable-field payload persisted by SessionStore and snapshots.
    * Keys are snake_case, byte-identical to Python's `SessionState.to_dict`,

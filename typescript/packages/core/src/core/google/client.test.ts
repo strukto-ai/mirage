@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteSpool } from '../../io/spool.ts'
+import { googleResumable } from './client.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   TokenManager,
@@ -209,4 +211,46 @@ describe('TokenManager.accessToken short-circuit', () => {
       /needs clientId and refreshToken/,
     )
   })
+})
+
+it.each([true, false])('resumable upload honors acknowledged ranges: %s', async (advance) => {
+  const tm = new TokenManager({ clientId: 'c', refreshToken: 'r' })
+  vi.spyOn(tm, 'getToken').mockResolvedValue('token')
+  const total = 8 * 1024 * 1024 + 17
+  const spool = new ByteSpool()
+  await spool.append(new Uint8Array(total))
+  const fake = vi
+    .fn()
+    .mockResolvedValueOnce(
+      new Response(null, { status: 200, headers: { Location: 'https://example.test/upload' } }),
+    )
+    .mockResolvedValueOnce(
+      new Response(null, { status: 308, headers: advance ? { Range: 'bytes=0-4194303' } : {} }),
+    )
+    .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'done' }), { status: 200 }))
+  const previous = globalThis.fetch
+  globalThis.fetch = fake
+  try {
+    const result = googleResumable(
+      tm,
+      'POST',
+      'https://example.test/start',
+      {},
+      spool,
+      'text/plain',
+      {},
+    )
+    if (advance) {
+      await expect(result).resolves.toEqual({ id: 'done' })
+      const calls = fake.mock.calls as [string, RequestInit][]
+      expect((calls[1]?.[1].body as Uint8Array).length).toBe(8 * 1024 * 1024)
+      expect((calls[2]?.[1].body as Uint8Array).length).toBe(total - 4 * 1024 * 1024)
+      expect(calls[2]?.[1].headers).toMatchObject({
+        'Content-Range': `bytes 4194304-${String(total - 1)}/${String(total)}`,
+      })
+    } else await expect(result).rejects.toThrow('no progress')
+  } finally {
+    globalThis.fetch = previous
+    await spool.close()
+  }
 })

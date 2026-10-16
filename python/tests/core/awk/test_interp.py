@@ -7,6 +7,7 @@ from mirage.core.awk.interp import ExitProgram, Interpreter
 from mirage.core.awk.parser import parse
 from mirage.core.awk.types import CommandRun
 from mirage.core.awk.value import text
+from mirage.io.types import ByteSource, materialize
 
 DATA = ["alice 30 eng", "bob 25 ops", "carol 41 eng", "dave 19 ops"]
 
@@ -46,7 +47,8 @@ class FakeHost:
             raise AwkIOError("Read-only file system")
         self.files[name] = (self.files.get(name, "") if append else "") + body
 
-    async def run(self, command: str, stdin: bytes | None) -> CommandRun:
+    async def run(self, command: str, stdin: ByteSource | None) -> CommandRun:
+        stdin = await materialize(stdin) if stdin is not None else None
         self.runs.append((command, stdin))
         return self.commands[command](stdin)
 

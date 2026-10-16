@@ -34,7 +34,7 @@ def _make_backend(files: dict[str, bytes]):
                 vfs_path=(path).strip("/"), virtual=path, directory=path
             )
         )
-        store[spec.virtual] = data
+        store[spec.virtual] = await materialize(data)
 
     return read_bytes, write_bytes, store
 

@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import aclosing
 
 from mirage.cache.context import (
     own_write_version,
@@ -20,6 +21,9 @@ from mirage.cache.context import (
 )
 from mirage.cache.types import OwnRead
 from mirage.errors.fs import eexist, einval, eisdir, enotsup
+from mirage.io.cooperative import chunks
+from mirage.io.spool import ByteSpool
+from mirage.io.types import ByteSource
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.ranges import splice_window
 
@@ -65,6 +69,56 @@ async def append_by_rewrite(
         return
     with own_write_version(path, own):
         await write(path, existing + data)
+
+
+async def append_by_streamed_rewrite(
+    read: Callable[
+        [PathSpec, Callable[[str | None], None]], AsyncIterator[bytes]
+    ],
+    write: Callable[[PathSpec, ByteSource], Awaitable[None]],
+    stat: StatFn,
+    path: PathSpec,
+    data: ByteSource,
+) -> None:
+    """Stage a read-modify-write with bounded RAM and the read's version.
+
+    Args:
+        read (Callable): streaming reader.
+        write (Callable): streaming replacement.
+        stat (StatFn): point lookup for an empty append.
+        path (PathSpec): the destination.
+        data (ByteSource): additional bytes, consumed once.
+    """
+    async with aclosing(chunks(data)) as source:
+        first = await anext(source, None)
+        if first is None:
+            try:
+                found = await stat(path)
+            except FileNotFoundError:
+                with own_write_version(path, OwnRead.ABSENT):
+                    await write(path, b"")
+                return
+            if found.type == FileType.DIRECTORY:
+                raise eisdir(path)
+            return
+        async with ByteSpool() as spool:
+            own: str | OwnRead | None = None
+
+            def remember(version: str | None) -> None:
+                nonlocal own
+                own = version
+
+            try:
+                await spool.fill(read(path, remember))
+            except FileNotFoundError:
+                if spool.size:
+                    raise
+                own = OwnRead.ABSENT
+            await spool.append(first)
+            async for part in source:
+                await spool.append(part)
+            with own_write_version(path, own):
+                await write(path, spool.stream())
 
 
 async def pwrite_by_rewrite(

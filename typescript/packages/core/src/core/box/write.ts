@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteSpool } from '../../io/spool.ts'
+import type { ByteSource } from '../../io/types.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import { nativeCondition, writeCondition } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
@@ -35,7 +37,7 @@ import { itemOf, liveItem, liveItemOf, parentFolder, pathParts } from './resolve
 async function uploadNew(
   accessor: BoxAccessor,
   path: PathSpec,
-  data: Uint8Array,
+  data: Uint8Array | ByteSpool,
   folderId: string,
 ): Promise<unknown> {
   const tm = accessor.tokenManager
@@ -63,7 +65,7 @@ async function uploadNew(
 export async function write(
   accessor: BoxAccessor,
   path: PathSpec,
-  data: Uint8Array,
+  data: Uint8Array | ByteSpool,
   handed: Handed = {},
 ): Promise<FileStat | null> {
   const parts = pathParts(path)
@@ -103,8 +105,23 @@ export async function write(
       : undefined
   const first = Array.isArray(entries) ? (entries[0] as BoxItem | undefined) : undefined
   const stored = uploadStat(first, statFromItem, path.virtual)
-  record('write', path.virtual, 'box', data.length, timer, {
+  record('write', path.virtual, 'box', data instanceof ByteSpool ? data.size : data.length, timer, {
     fingerprint: stored?.fingerprint ?? null,
   })
   return stored
+}
+
+export async function writeStream(
+  accessor: BoxAccessor,
+  path: PathSpec,
+  data: ByteSource,
+  handed: Handed = {},
+): Promise<FileStat | null> {
+  const spool = new ByteSpool()
+  try {
+    await spool.fill(data)
+    return await write(accessor, path, spool, handed)
+  } finally {
+    await spool.close()
+  }
 }

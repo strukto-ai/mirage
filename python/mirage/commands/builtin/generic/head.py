@@ -31,6 +31,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.render import fs_error_line
+from mirage.io.async_line_iterator import SharedInput
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
@@ -99,6 +100,8 @@ async def head(
                 async for chunk in stream:
                     remaining = c - emitted
                     if len(chunk) >= remaining:
+                        if isinstance(src, SharedInput) and src.seekable:
+                            src.lines.unread(chunk[remaining:])
                         if remaining > 0:
                             yield chunk[:remaining]
                         return
@@ -130,6 +133,12 @@ async def head(
                         if start < len(chunk):
                             yield chunk[start:]
                         break
+                    if (
+                        emitted_lines + 1 >= target
+                        and isinstance(src, SharedInput)
+                        and src.seekable
+                    ):
+                        src.lines.unread(chunk[end + 1 :])
                     yield chunk[start : end + 1]
                     emitted_lines += 1
                     if emitted_lines >= target:
@@ -307,6 +316,8 @@ async def head_generic(
         refused: set[str] = set()
 
         def source_for(p: PathSpec) -> AsyncIterator[bytes]:
+            if is_stdin(p) and isinstance(opts.stdin, SharedInput):
+                return opts.stdin
             source = read(p)
 
             async def bounded() -> AsyncIterator[bytes]:

@@ -20,6 +20,8 @@ from mirage.core.gdrive.readdir import live_row, stat_from_item
 from mirage.core.gdrive.resolve import eacces_on_denied, parent_folder
 from mirage.core.google.drive import update_file_content, upload_file
 from mirage.errors.fs import eacces, eisdir
+from mirage.io.spool import ByteSpool
+from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.upload import upload_token
@@ -29,7 +31,7 @@ from mirage.utils.upload import upload_token
 async def write(
     accessor: GDriveAccessor,
     path: PathSpec,
-    data: bytes,
+    data: bytes | ByteSpool,
     entry: FileStat | None = None,
     parent: FileStat | None = None,
 ) -> FileStat | None:
@@ -72,5 +74,24 @@ async def write(
             token_manager, posixpath.basename(key), parent_id, data
         )
     token = upload_token(reply, stat_from_item, virtual)
-    record("write", virtual, "gdrive", len(data), timer, fingerprint=token)
+    record(
+        "write",
+        virtual,
+        "gdrive",
+        data.size if isinstance(data, ByteSpool) else len(data),
+        timer,
+        fingerprint=token,
+    )
     return stat_from_item(reply) if isinstance(reply, dict) else None
+
+
+async def write_stream(
+    accessor: GDriveAccessor,
+    path: PathSpec,
+    data: ByteSource,
+    entry: FileStat | None = None,
+    parent: FileStat | None = None,
+) -> FileStat | None:
+    async with ByteSpool() as spool:
+        await spool.fill(data)
+        return await write(accessor, path, spool, entry, parent)

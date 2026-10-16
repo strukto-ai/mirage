@@ -1,3 +1,4 @@
+import { writeItemStream } from './drive.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { PathSpec } from '../../types.ts'
@@ -619,4 +620,51 @@ describe('batchTree', () => {
     ])
     expect(await batchTree(config, loc('top'), SPEC)).toBeNull()
   })
+})
+
+it.each([false, true])(
+  'stream upload bounds parts and cancels a failed session (%s)',
+  async (fail) => {
+    const upload = 'https://upload.test/session'
+    const total = 5 * 1024 * 1024
+    const part = 10 * 327680
+    const calls: RequestInit[] = []
+    let puts = 0
+    let cancelled = false
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        await Promise.resolve()
+        if (init.method === 'POST') return Response.json({ uploadUrl: upload })
+        if (init.method === 'DELETE') {
+          cancelled = true
+          return new Response(null, { status: 204 })
+        }
+        calls.push(init)
+        puts++
+        if (puts === 1) return Response.json({ nextExpectedRanges: [`${String(part)}-`] })
+        return Response.json(fail ? { error: { code: 'badRequest' } } : { id: 'file' }, {
+          status: fail ? 400 : 201,
+        })
+      }),
+    )
+    const uploading = writeItemStream(config, loc('file'), new Uint8Array(total))
+    if (fail) await expect(uploading).rejects.toBeInstanceOf(GraphError)
+    else expect(await uploading).toBe(total)
+    expect(calls.map((c) => (c.body as Uint8Array).length)).toEqual([part, total - part])
+    expect(calls.every((c) => !new Headers(c.headers).has('Authorization'))).toBe(true)
+    expect(cancelled).toBe(fail)
+  },
+)
+
+it('stream source failure never starts an upload', async () => {
+  const fetching = vi.fn()
+  vi.stubGlobal('fetch', fetching)
+  async function* broken(): AsyncGenerator<Uint8Array> {
+    await Promise.resolve()
+    yield new Uint8Array([1])
+    throw new Error('source failed')
+  }
+  await expect(writeItemStream(config, loc('file'), broken())).rejects.toThrow('source failed')
+  expect(fetching).not.toHaveBeenCalled()
 })

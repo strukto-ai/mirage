@@ -21,6 +21,7 @@ from mirage.commands.builtin.generic.gzip import extract_level
 from mirage.commands.builtin.generic.gzip import gzip as compress_inputs
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.io.types import materialize
 from mirage.types import PathSpec
 from mirage.workspace.executor.command.flags import parse_flags
 
@@ -66,7 +67,7 @@ async def test_compression_skips_suffixed_streams_and_reports_late_errors(
             raise PermissionError(path.virtual)
 
     async def write(path, data):
-        writes[path.virtual] = data
+        writes[path.virtual] = await materialize(data)
 
     async def unlink(path):
         removed.append(path.virtual)

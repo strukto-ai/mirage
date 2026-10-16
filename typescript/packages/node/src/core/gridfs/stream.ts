@@ -26,12 +26,14 @@ const DEFAULT_CHUNK_SIZE = 8192
 export async function* readStream(
   accessor: GridFSAccessor,
   path: PathSpec,
+  onVersion?: (version: string | null) => void,
 ): AsyncIterable<Uint8Array> {
   const virtual = path.virtual
   const raw = rawPathOf(path)
   const key = gridfsKey(raw, accessor.config)
-  const rec = recordStream('read', virtual, VFSName.GRIDFS)
   const fileId = await resolveFileId(accessor, path, key)
+  onVersion?.(fileId.toString())
+  const rec = recordStream('read', virtual, VFSName.GRIDFS)
   if (rec !== null) {
     const revision = fileId.toString()
     rec.fingerprint = revision

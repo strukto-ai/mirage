@@ -17,13 +17,15 @@ import { C_SPACE } from '../constants.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { quoteText } from '../../quote.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { readStdinAsync, stdinStream } from '../utils/stream.ts'
-import { splitLines } from '../utils/lines.ts'
+import { stdinStream } from '../utils/stream.ts'
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
+import { RecordSpool } from '../../../io/record_spool.ts'
+import { OutputStream, closeQuietly } from '../../../io/stream.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -339,12 +341,58 @@ export function parseFlags(bag: Record<string, FlagValue>): ShufFlags | string {
   }
 }
 
+async function sampleRecords(
+  sources: ByteSource[],
+  sep: string,
+  count: bigint | null,
+  repeat: boolean,
+): Promise<ByteSource> {
+  const records = new RecordSpool()
+  let need: number
+  try {
+    for (const source of sources) {
+      const reader = new AsyncLineIterator(source)
+      try {
+        for (;;) {
+          const line = await reader.readline(undefined, sep.charCodeAt(0))
+          if (line === null) break
+          await records.append(ENC.encode(DEC.decode(line)))
+        }
+      } finally {
+        await reader.discard()
+      }
+    }
+    const required = emitCount(BigInt(records.count), count, repeat)
+    if (required > MAX_OUTPUT_LINES) throw new Error(MEMORY_EXHAUSTED)
+    need = Number(required)
+  } catch (error) {
+    await records.close()
+    throw error
+  }
+  async function* output(): AsyncGenerator<Uint8Array> {
+    const swaps = new Map<number, number>()
+    for (let i = 0; i < need; i++) {
+      let index: number
+      if (repeat) index = Math.floor(Math.random() * records.count)
+      else {
+        const chosen = i + Math.floor(Math.random() * (records.count - i))
+        index = swaps.get(chosen) ?? chosen
+        swaps.set(chosen, swaps.get(i) ?? i)
+        swaps.delete(i)
+      }
+      yield* records.stream(index)
+      yield ENC.encode(sep)
+    }
+  }
+  return new OutputStream(output(), () => records.close())
+}
+
 export async function shufGeneric(
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  write: (p: PathSpec, data: Uint8Array) => Promise<void>,
+  write: (p: PathSpec, data: ByteSource) => Promise<void>,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, opts.stdin)
   const parsed = parseFlags(opts.flags)
@@ -369,6 +417,7 @@ export async function shufGeneric(
   // `-i` never fills `items`: it samples straight into the output, because the
   // range it names can hold 2**64 values (SH5).
   let out: string[] | null = null
+  let result: ByteSource | null = null
   if (inputRange !== null) {
     const extra = paths[0]
     if (extra !== undefined) {
@@ -404,18 +453,20 @@ export async function shufGeneric(
   } else if (echoMode) {
     const base = paths.length > 0 ? paths.map((p) => p.mountPath) : [...texts]
     items = base
-  } else if (paths.length > 0) {
-    items = []
-    for (const p of paths) {
-      const data = DEC.decode(await materialize(stream(p)))
-      for (const l of splitLines(data, sep)) items.push(l)
-    }
   } else {
-    const stdinData = (await readStdinAsync(opts.stdin)) ?? new Uint8Array(0)
-    const text = DEC.decode(stdinData)
-    items = splitLines(text, sep)
+    try {
+      result = await sampleRecords(
+        paths.length > 0 ? paths.map((p) => stream(p)) : [opts.stdin ?? new Uint8Array()],
+        sep,
+        nFlag,
+        repeat,
+      )
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== MEMORY_EXHAUSTED) throw error
+      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${MEMORY_EXHAUSTED}\n`) })]
+    }
   }
-  if (out === null) {
+  if (out === null && result === null) {
     const need = emitCount(BigInt(items.length), nFlag, repeat)
     if (need > MAX_OUTPUT_LINES) {
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${MEMORY_EXHAUSTED}\n`) })]
@@ -424,7 +475,7 @@ export async function shufGeneric(
   }
   // `shuf -n 0` is valid and prints zero bytes, so the separator
   // terminates each line rather than being appended to the join.
-  const result: ByteSource = ENC.encode(out.length === 0 ? '' : out.join(sep) + sep)
+  result ??= ENC.encode(out === null || out.length === 0 ? '' : out.join(sep) + sep)
   if (output !== null) {
     try {
       await write(output, result)
@@ -437,6 +488,8 @@ export async function shufGeneric(
           stderr: ENC.encode(`shuf: ${output.rawPath}: ${String(fsStrerror(err))}\n`),
         }),
       ]
+    } finally {
+      await closeQuietly(result)
     }
     return [null, new IOResult()]
   }

@@ -32,6 +32,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import fs_strerror
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.spool import ByteSpool
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, PolymorphicReadFn
@@ -464,7 +465,9 @@ async def iconv(
 
     converted = output()
     if output_path is not None:
-        await write_bytes(output_path, await materialize(converted))
+        async with ByteSpool() as spool:
+            await spool.fill(converted)
+            await write_bytes(output_path, spool.stream())
         return None, io
     return converted, io
 

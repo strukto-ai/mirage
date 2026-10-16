@@ -2,6 +2,7 @@ from collections.abc import Awaitable, Callable
 
 import pytest
 
+import mirage.commands.builtin.generic.sort as sort_module
 from mirage.commands.builtin.errors import SortKeyError
 from mirage.commands.builtin.generic.sort import (
     CHUNK,
@@ -312,3 +313,23 @@ async def test_long_records_sort_as_one_stable_sort():
     )
     want = sort_lines(lines, _config(parse_flags({"key": ["2,2"]})))
     assert (await materialize(stdout)).decode().splitlines() == want
+
+
+@pytest.mark.asyncio
+async def test_external_sort_preserves_stability_across_spill_and_merge_levels(
+    monkeypatch,
+):
+    monkeypatch.setattr(sort_module, "SORT_RUN_BYTES", 128)
+    monkeypatch.setattr(sort_module, "MERGE_FAN_IN", 2)
+    lines = [f"{i % 7} item{i}" for i in range(97)]
+    flags = {"key": ["1,1"], "stable": True}
+    stdout, result = await sort_generic(
+        [],
+        read_bytes=_unused_read_bytes,
+        stdin=("\n".join(lines) + "\n").encode(),
+        flags=flags,
+    )
+    assert (await materialize(stdout)).decode().splitlines() == sorted(
+        lines, key=lambda line: line.split()[0]
+    )
+    assert result.exit_code == 0

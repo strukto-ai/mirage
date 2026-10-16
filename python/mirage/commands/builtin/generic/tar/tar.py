@@ -1,12 +1,21 @@
+import bz2
 import io
 import logging
+import lzma
 import re
 import stat as stat_mode
 import tarfile
-from collections.abc import Awaitable, Callable, Iterator, Mapping
-from contextlib import ExitStack, contextmanager
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+)
+from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from typing import BinaryIO
 
 from mirage.commands.builtin.constants import C_SPACE, UINTMAX
 from mirage.commands.builtin.generic.archive.extract import (
@@ -50,17 +59,27 @@ from mirage.commands.builtin.generic.tar.types import (
     WriteMode,
 )
 from mirage.commands.builtin.utils.links import links_of, mounts_of
-from mirage.commands.builtin.utils.stream import stdin_bytes
+from mirage.commands.builtin.utils.operands import normalized_read
+from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.concurrency.limiter import run_blocking
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eisdir, fs_strerror
+from mirage.io.cooperative import CHUNK_SIZE, chunks
+from mirage.io.spool import ByteSpool
+from mirage.io.stream import OutputStream, prime_stream
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
-from mirage.utils.compress import GZIP_MAGIC, GzipDataError, gunzip_partial
+from mirage.types import PathSpec, PolymorphicReadFn
+from mirage.utils.compress import (
+    GZIP_MAGIC,
+    GzipDataError,
+    gunzip_stream,
+    gzip_compress_stream,
+)
 from mirage.view.types import LinkView, MountView
 
 logger = logging.getLogger(__name__)
@@ -88,94 +107,139 @@ def _stderr_of(lines: list[str]) -> bytes:
     return ("\n".join(lines) + "\n").encode() if lines else b""
 
 
-class ZeroTail(io.BytesIO):
-    """An archive's whole blocks, then zeros for as far as tar reads.
+class ZeroTail(io.RawIOBase):
+    def __init__(self, file: BinaryIO, limit: int) -> None:
+        self.file, self.limit, self.position = file, limit, 0
 
-    GNU tar drops a partial last block and meets the end of the archive
-    where the data stops, so a member whose data ran out reads as zeros
-    and the header after it as the end-of-archive marker.
-    """
+    def tell(self) -> int:
+        return self.position
 
-    def read(self, size: int | None = -1) -> bytes:
-        got = super().read(size)
-        if size is None or size < 0:
-            return got
-        return got + bytes(size - len(got))
-
-
-@contextmanager
-def _open_archive(
-    data: bytes, suffix: CompressionSuffix
-) -> Iterator[ReadResult]:
-    """Open tar's input while preserving its gzip child's failure.
-
-    GNU tar 1.35 reads whatever gzip decoded before it stopped, whole
-    blocks only, and a tar parsing error must not mask the child's
-    diagnostic and exit status. A member whose data blocks ran out is
-    the ``cut``: GNU reaches it and stops there.
-
-    Args:
-        data (bytes): the archive file's bytes.
-        suffix (CompressionSuffix): the compression the flags asked for.
-    """
-    failure = None
-    mode = _read_mode(suffix)
-    foreign = FOREIGN_INPUT.get(suffix)
-    if (
-        foreign is not None
-        and not data.startswith(foreign[0])
-        and (data or foreign[3])
-    ):
-        # The child refuses the input before tar reads a block.
-        yield ReadResult(
-            None,
-            GzipDataError((foreign[1],), fatal=True, exit_code=foreign[2]),
+    def seek(self, offset: int, whence: int = 0) -> int:
+        self.position = (
+            offset
+            if whence == 0
+            else self.position + offset
+            if whence == 1
+            else self.limit + offset
         )
-        return
-    if suffix == ":gz" or (suffix == "" and data.startswith(GZIP_MAGIC)):
-        data, failure = gunzip_partial(data)
-        mode = "r:"
-    if failure is not None and not data:
-        yield ReadResult(None, failure)
-        return
-    notices: tuple[str, ...] = ()
-    cut: int | None = None
-    tail = b""
-    with ExitStack() as stack:
-        tf: tarfile.TarFile | None
-        try:
-            tf = stack.enter_context(
-                tarfile.open(fileobj=io.BytesIO(data), mode=mode)
+        return self.position
+
+    def read(self, size: int = -1) -> bytes:
+        size = max(0, self.limit - self.position) if size < 0 else size
+        self.file.seek(min(self.position, self.limit))
+        data = self.file.read(min(size, max(0, self.limit - self.position)))
+        self.position += size
+        return data + bytes(size - len(data))
+
+
+def _index_archive(
+    file: BinaryIO, mode: ReadMode, size: int
+) -> tuple[tarfile.TarFile, int | None]:
+    plain = mode == "r:"
+    tf = tarfile.open(
+        fileobj=ZeroTail(file, size // 512 * 512) if plain else file, mode=mode
+    )
+    try:
+        members = tf.getmembers()
+    except BaseException:
+        tf.close()
+        raise
+    cut = (
+        next(
+            (
+                idx
+                for idx, member in enumerate(members)
+                if member.offset_data + member.size > size // 512 * 512
+            ),
+            None,
+        )
+        if plain
+        else None
+    )
+    return tf, cut
+
+
+@asynccontextmanager
+async def _open_archive(
+    data: ByteSpool, suffix: CompressionSuffix
+) -> AsyncIterator[ReadResult]:
+    decoded = ByteSpool()
+    tf: tarfile.TarFile | None = None
+    try:
+        first = await data.read(0, 6)
+        foreign = FOREIGN_INPUT.get(suffix)
+        if (
+            foreign is not None
+            and not first.startswith(foreign[0])
+            and (data.size or foreign[3])
+        ):
+            yield ReadResult(
+                None,
+                GzipDataError((foreign[1],), fatal=True, exit_code=foreign[2]),
             )
-            if isinstance(tf.fileobj, io.BytesIO):
-                whole = len(data) // tarfile.BLOCKSIZE * tarfile.BLOCKSIZE
-                tf = stack.enter_context(
-                    tarfile.open(fileobj=ZeroTail(data[:whole]), mode="r:")
+            return
+        failure = None
+        mode = _read_mode(suffix)
+        source = data
+        if suffix == ":gz" or (suffix == "" and first.startswith(GZIP_MAGIC)):
+            try:
+                await decoded.fill(gunzip_stream(data.stream()))
+            except GzipDataError as exc:
+                failure = exc
+            source, mode = decoded, "r:"
+        elif suffix == "" and not first.startswith((b"BZh", b"\xfd7zXZ\0")):
+            mode = "r:"
+        if failure is not None and source.size == 0:
+            yield ReadResult(None, failure)
+            return
+        notices: tuple[str, ...] = ()
+        cut = None
+        tail: ByteSource = b""
+        try:
+            if source.size < 512 and mode == "r:":
+                raise tarfile.ReadError("short header")
+            tf, cut = await run_blocking(
+                _index_archive, await source.file(), mode, source.size
+            )
+            if cut is not None:
+                assert tf is not None
+                member = tf.getmembers()[cut]
+                tail = source.stream(
+                    member.offset_data,
+                    max(0, source.size // 512 * 512 - member.offset_data),
                 )
-                cut = next(
-                    (
-                        idx
-                        for idx, member in enumerate(tf.getmembers())
-                        if member.offset_data + member.size > whole
-                    ),
-                    None,
-                )
-                if cut is not None:
-                    member = tf.getmembers()[cut]
-                    tail = data[member.offset_data : whole]
-            else:
-                tf.getmembers()
         except tarfile.TarError as exc:
             logger.debug("tar: failed to parse archive: %s", exc)
-            tf = None
             notices = (
                 INVALID_ARCHIVE
-                if len(data) >= tarfile.BLOCKSIZE
+                if source.size >= 512
                 else INVALID_ARCHIVE[:1]
                 if failure is None
                 else ()
             )
         yield ReadResult(tf, failure, notices, cut, tail)
+    finally:
+        try:
+            if tf is not None:
+                await run_blocking(tf.close)
+        finally:
+            try:
+                await decoded.close()
+            finally:
+                await data.close()
+
+
+async def _member_stream(
+    tf: tarfile.TarFile, member: tarfile.TarInfo
+) -> AsyncIterator[bytes]:
+    file = await run_blocking(tf.extractfile, member)
+    if file is None:
+        return
+    try:
+        while data := await run_blocking(file.read, CHUNK_SIZE):
+            yield data
+    finally:
+        await run_blocking(file.close)
 
 
 def _cut_short(failure: GzipDataError | None, lines: list[str]) -> bytes:
@@ -303,51 +367,109 @@ async def _write_archive(
     archive_path: PathSpec,
     mode_suffix: CompressionSuffix,
     verbose: bool,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_bytes: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
 ) -> tuple[ByteSource | None, IOResult]:
-    buf = io.BytesIO()
     names: list[str] = []
-    # A file the session may not read (a rule refused it below the
-    # operand) is GNU's "Cannot open": the member is left out, the run
-    # fails, and the one trailer closes the notices. The plan's notices
-    # come first, so a directory the scan could not open is reported
-    # before a file the write could not read.
     notices = [n for n in plan.notices if n != ERROR_TRAILER]
-    exit_code = plan.exit_code
-    with tarfile.open(fileobj=buf, mode=_write_mode(mode_suffix)) as tf:
+    result = IOResult(exit_code=plan.exit_code)
+    read = normalized_read(read_bytes)
+
+    async def raw_archive() -> AsyncGenerator[bytes, None]:
+        total = 0
         for member in plan.members:
-            data = b""
-            if member.path is not None:
+            async with ByteSpool() as spool:
+                source: ByteSource = b""
+                size = member.size
                 try:
-                    data = await read_bytes(member.path)
+                    if member.path is not None:
+                        if size is None:
+                            await spool.fill(read(member.path))
+                            source, size = spool.stream(), spool.size
+                        else:
+                            source = await prime_stream(read(member.path))
+                    else:
+                        size = 0
                 except PermissionError as exc:
-                    shown = member.spelled or member.name
                     notices.append(
-                        f"tar: {shown}: Cannot open: {fs_strerror(exc)}"
+                        f"tar: {member.spelled or member.name}: "
+                        f"Cannot open: {fs_strerror(exc)}"
                     )
-                    exit_code = CREATE_ERROR_EXIT
+                    result.exit_code = CREATE_ERROR_EXIT
                     continue
-            tf.addfile(_info(member, len(data)), io.BytesIO(data))
-            names.append(member.name)
-    if exit_code:
-        notices.append(ERROR_TRAILER)
-    archive = buf.getvalue()
-    if archive_path.raw_path == "-":
-        return archive, IOResult(
-            stderr=_stderr_of(notices + (names if verbose else [])),
-            exit_code=exit_code,
+                assert size is not None
+                seen = 0
+                header = _info(member, size).tobuf()
+                async with aclosing(chunks(source)) as content:
+                    yield header
+                    async for data in content:
+                        remaining = max(0, size - seen)
+                        if remaining:
+                            yield data[:remaining]
+                        seen += len(data)
+                if seen != size:
+                    shown = member.spelled or member.name
+                    warning = (
+                        f"File shrank by {size - seen} bytes; padding with zeros"
+                        if seen < size
+                        else "file changed as we read it"
+                    )
+                    notices.append(f"tar: {shown}: {warning}")
+                    result.exit_code = max(result.exit_code, 1)
+                    while seen < size:
+                        count = min(CHUNK_SIZE, size - seen)
+                        yield bytes(count)
+                        seen += count
+                padding = (-size) % tarfile.BLOCKSIZE
+                if padding:
+                    yield bytes(padding)
+                total += len(header) + size + padding
+                names.append(member.name)
+        trailer = 2 * tarfile.BLOCKSIZE
+        yield bytes(trailer + (-(total + trailer)) % tarfile.RECORDSIZE)
+        if result.exit_code >= CREATE_ERROR_EXIT:
+            notices.append(ERROR_TRAILER)
+        result.stderr = _stderr_of(
+            notices
+            + (names if verbose and archive_path.raw_path == "-" else [])
         )
+
+    async def archive() -> AsyncGenerator[bytes, None]:
+        async with aclosing(raw_archive()) as source:
+            if mode_suffix == ":gz":
+                async with aclosing(
+                    chunks(gzip_compress_stream(source, -1))
+                ) as compressed:
+                    async for data in compressed:
+                        yield data
+            elif mode_suffix in (":bz2", ":xz"):
+                codec = (
+                    bz2.BZ2Compressor()
+                    if mode_suffix == ":bz2"
+                    else lzma.LZMACompressor()
+                )
+                async for data in source:
+                    async for part in chunks(
+                        await run_blocking(codec.compress, data)
+                    ):
+                        yield part
+                async for part in chunks(await run_blocking(codec.flush)):
+                    yield part
+            else:
+                async for data in source:
+                    yield data
+
+    if archive_path.raw_path == "-":
+        return archive(), result
     try:
-        await write_bytes(archive_path, archive)
+        async with aclosing(archive()) as source:
+            await write_bytes(archive_path, source)
     except FS_ERRORS as exc:
-        # GNU opens the archive before it reads a member, so an archive
-        # it cannot create is the whole run's one fatal line.
         return None, _open_failure(
             archive_path.raw_path, exc, mode_suffix, False
         )
     stdout = ("\n".join(names) + "\n").encode() if verbose and names else None
-    return stdout, IOResult(stderr=_stderr_of(notices), exit_code=exit_code)
+    return stdout, result
 
 
 def _voiced(line: str, who: str) -> str:
@@ -399,10 +521,10 @@ def _open_failure(
 
 async def _read_archive(
     archive_path: PathSpec,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_bytes: PolymorphicReadFn,
     is_dir: DirProbe,
     suffix: CompressionSuffix,
-) -> bytes | IOResult:
+) -> ByteSpool | IOResult:
     """The archive's bytes, or the run's fatal lines when GNU would stop.
 
     Args:
@@ -413,9 +535,12 @@ async def _read_archive(
             directory as absent, where GNU opens it and fails the read.
         suffix (CompressionSuffix): the compressor, empty for none.
     """
+    spool = ByteSpool()
     try:
-        return await read_bytes(archive_path)
+        await spool.fill(normalized_read(read_bytes)(archive_path))
+        return spool
     except FS_ERRORS as exc:
+        await spool.close()
         failure: OSError = exc
         if (
             isinstance(exc, FileNotFoundError)
@@ -424,6 +549,9 @@ async def _read_archive(
         ):
             failure = eisdir(archive_path)
         return _open_failure(archive_path.raw_path, failure, suffix, True)
+    except BaseException:
+        await spool.close()
+        raise
 
 
 def _long_member(member: tarfile.TarInfo, name: str) -> str:
@@ -459,7 +587,7 @@ async def _list_archive(
     verbose: bool,
     directories: list[PathSpec],
     stat: StatFn,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_bytes: PolymorphicReadFn,
     is_dir: DirProbe,
 ) -> tuple[ByteSource | None, IOResult]:
     names: list[str] = []
@@ -467,7 +595,7 @@ async def _list_archive(
     data = await _read_archive(archive_path, read_bytes, is_dir, mode_suffix)
     if isinstance(data, IOResult):
         return None, data
-    with _open_archive(data, mode_suffix) as result:
+    async with _open_archive(data, mode_suffix) as result:
         tf, failure = result.archive, result.failure
         if tf is not None:
             names = [
@@ -514,154 +642,169 @@ async def _extract_archive(
     verbose: bool,
     to_stdout: bool,
     selectors: list[str],
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_bytes: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
     mkdir_fn: Callable[..., Awaitable[None]],
     stat: StatFn,
     is_dir: DirProbe,
 ) -> tuple[ByteSource | None, IOResult]:
-    names: list[str] = []
-    notices: list[str] = []
-    made: set[str] = set()
-    extracted_bytes: list[bytes] = []
-    misses: list[str] = []
-    # A member GNU cannot create (a read-only region, a missing op) is
-    # reported by its own name and the run goes on to the next one,
-    # closing with the one trailer and exit 2.
-    failed = False
-    data = await _read_archive(archive_path, read_bytes, is_dir, mode_suffix)
-    if isinstance(data, IOResult):
-        return None, data
-    with _open_archive(data, mode_suffix) as result:
-        tf, failure = result.archive, result.failure
-        if tf is not None:
-            members = tf.getmembers()
-            listed = [
-                member.name + "/" if member.isdir() else member.name
-                for member in members
-            ]
-            keep, misses = _selected_members(listed, selectors)
-            if keep:
-                errors = await check_directories(directories, is_dir, stat)
-                if errors:
-                    return None, IOResult(
-                        exit_code=2, stderr=_stderr_of(errors)
-                    )
-            for idx, member in enumerate(members):
-                if result.cut is not None and idx > result.cut:
-                    break
-                if idx not in keep:
-                    continue
-                # A symlink member has no bytes to write and no namespace to
-                # write into from here (links are workspace state, not the
-                # backend's), so extraction skips it rather than dropping an
-                # empty file where a link belongs.
-                if not member.isfile() and not member.isdir():
-                    continue
-                if member.isdir():
-                    if not to_stdout:
-                        # A directory member is the only record an empty
-                        # directory leaves, so it has to be recreated even
-                        # though nothing is written inside it. Under -O
-                        # nothing reaches the filesystem at all.
-                        parts = _out_parts(member.name, strip_n, notices)
-                        if parts:
-                            out_dir = (
-                                dest_path.rstrip("/") + "/" + "/".join(parts)
-                            )
-                            try:
-                                await ensure_dir(out_dir, mkdir_fn, stat, made)
-                            except FS_ERRORS as exc:
-                                notices.append(
-                                    f"tar: {'/'.join(parts)}: "
-                                    f"Cannot mkdir: "
-                                    f"{fs_strerror(exc)}"
-                                )
-                                failed = True
-                                continue
-                            names.append(member.name.rstrip("/") + "/")
-                    continue
-                if idx == result.cut:
-                    # Only the whole blocks that arrived are written.
-                    content = result.tail
-                    notices.append(UNEXPECTED_EOF)
-                else:
-                    extracted = tf.extractfile(member)
-                    if not extracted:
+    output = ByteSpool()
+    handed_off = False
+    try:
+        names: list[str] = []
+        notices: list[str] = []
+        made: set[str] = set()
+        misses: list[str] = []
+        # A member GNU cannot create (a read-only region, a missing op) is
+        # reported by its own name and the run goes on to the next one,
+        # closing with the one trailer and exit 2.
+        failed = False
+        data = await _read_archive(
+            archive_path, read_bytes, is_dir, mode_suffix
+        )
+        if isinstance(data, IOResult):
+            return None, data
+        async with _open_archive(data, mode_suffix) as result:
+            tf, failure = result.archive, result.failure
+            if tf is not None:
+                members = tf.getmembers()
+                listed = [
+                    member.name + "/" if member.isdir() else member.name
+                    for member in members
+                ]
+                keep, misses = _selected_members(listed, selectors)
+                if keep:
+                    errors = await check_directories(directories, is_dir, stat)
+                    if errors:
+                        return None, IOResult(
+                            exit_code=2, stderr=_stderr_of(errors)
+                        )
+                for idx, member in enumerate(members):
+                    if result.cut is not None and idx > result.cut:
+                        break
+                    if idx not in keep:
                         continue
-                    content = extracted.read()
-                if to_stdout:
-                    extracted_bytes.append(content)
-                    names.append(member.name)
-                    continue
-                parts = _out_parts(member.name, strip_n, notices)
-                if not parts:
-                    continue
-                out_path = dest_path.rstrip("/") + "/" + "/".join(parts)
-                parent = out_path.rsplit("/", 1)[0] or "/"
-                if parent != "/":
+                    # A symlink member has no bytes to write and no namespace to
+                    # write into from here (links are workspace state, not the
+                    # backend's), so extraction skips it rather than dropping an
+                    # empty file where a link belongs.
+                    if not member.isfile() and not member.isdir():
+                        continue
+                    if member.isdir():
+                        if not to_stdout:
+                            # A directory member is the only record an empty
+                            # directory leaves, so it has to be recreated even
+                            # though nothing is written inside it. Under -O
+                            # nothing reaches the filesystem at all.
+                            parts = _out_parts(member.name, strip_n, notices)
+                            if parts:
+                                out_dir = (
+                                    dest_path.rstrip("/")
+                                    + "/"
+                                    + "/".join(parts)
+                                )
+                                try:
+                                    await ensure_dir(
+                                        out_dir, mkdir_fn, stat, made
+                                    )
+                                except FS_ERRORS as exc:
+                                    notices.append(
+                                        f"tar: {'/'.join(parts)}: "
+                                        f"Cannot mkdir: "
+                                        f"{fs_strerror(exc)}"
+                                    )
+                                    failed = True
+                                    continue
+                                names.append(member.name.rstrip("/") + "/")
+                        continue
+                    if idx == result.cut:
+                        # Only the whole blocks that arrived are written.
+                        content = result.tail
+                        notices.append(UNEXPECTED_EOF)
+                    else:
+                        content = _member_stream(tf, member)
+                    if to_stdout:
+                        await output.fill(content)
+                        names.append(member.name)
+                        continue
+                    parts = _out_parts(member.name, strip_n, notices)
+                    if not parts:
+                        continue
+                    out_path = dest_path.rstrip("/") + "/" + "/".join(parts)
+                    parent = out_path.rsplit("/", 1)[0] or "/"
+                    if parent != "/":
+                        try:
+                            await ensure_dir(parent, mkdir_fn, stat, made)
+                        except FS_ERRORS as exc:
+                            notices.append(
+                                f"tar: {'/'.join(parts[:-1])}: Cannot "
+                                f"mkdir: {fs_strerror(exc)}"
+                            )
+                            # GNU tar 1.35 (debian:stable-slim) reports ENOENT
+                            # for the member after its parent mkdir failed.
+                            notices.append(
+                                f"tar: {'/'.join(parts)}: Cannot "
+                                "open: No such file or directory"
+                            )
+                            failed = True
+                            continue
                     try:
-                        await ensure_dir(parent, mkdir_fn, stat, made)
+                        await write_bytes(
+                            PathSpec.from_str_path(out_path), data=content
+                        )
                     except FS_ERRORS as exc:
                         notices.append(
-                            f"tar: {'/'.join(parts[:-1])}: Cannot "
-                            f"mkdir: {fs_strerror(exc)}"
-                        )
-                        # GNU tar 1.35 (debian:stable-slim) reports ENOENT
-                        # for the member after its parent mkdir failed.
-                        notices.append(
-                            f"tar: {'/'.join(parts)}: Cannot "
-                            "open: No such file or directory"
+                            f"tar: {'/'.join(parts)}: Cannot open: "
+                            f"{fs_strerror(exc)}"
                         )
                         failed = True
                         continue
-                try:
-                    await write_bytes(
-                        PathSpec.from_str_path(out_path), data=content
-                    )
-                except FS_ERRORS as exc:
-                    notices.append(
-                        f"tar: {'/'.join(parts)}: Cannot open: "
-                        f"{fs_strerror(exc)}"
-                    )
-                    failed = True
-                    continue
-                names.append(member.name)
-    notices[:0] = result.notices
-    failed = failed or bool(result.notices)
-    if to_stdout:
-        # GNU moves the verbose listing to stderr when stdout carries
-        # the member bytes.
-        stdout: ByteSource | None = b"".join(extracted_bytes) or None
-        stderr_lines = notices + (names if verbose else [])
-    else:
-        listing = (
-            ("\n".join(names) + "\n").encode() if verbose and names else None
-        )
-        stdout = listing
-        stderr_lines = list(notices)
-    if result.cut is not None:
+                    names.append(member.name)
+        notices[:0] = result.notices
+        failed = failed or bool(result.notices)
+        if to_stdout:
+            # GNU moves the verbose listing to stderr when stdout carries
+            # the member bytes.
+            stdout: ByteSource | None = (
+                OutputStream(output.stream(), output.close)
+                if output.size
+                else None
+            )
+            handed_off = stdout is not None
+            stderr_lines = notices + (names if verbose else [])
+        else:
+            listing = (
+                ("\n".join(names) + "\n").encode()
+                if verbose and names
+                else None
+            )
+            stdout = listing
+            stderr_lines = list(notices)
+        if result.cut is not None:
+            return stdout, IOResult(
+                exit_code=2,
+                stderr=_cut_short(failure, stderr_lines),
+            )
+        if failure is not None:
+            return stdout, IOResult(
+                exit_code=2,
+                stderr=_child_failure(failure, stderr_lines),
+            )
+        if misses or failed:
+            stderr_lines = stderr_lines + misses + [ERROR_TRAILER]
         return stdout, IOResult(
-            exit_code=2,
-            stderr=_cut_short(failure, stderr_lines),
+            exit_code=2 if misses or failed else 0,
+            stderr=_stderr_of(stderr_lines),
         )
-    if failure is not None:
-        return stdout, IOResult(
-            exit_code=2,
-            stderr=_child_failure(failure, stderr_lines),
-        )
-    if misses or failed:
-        stderr_lines = stderr_lines + misses + [ERROR_TRAILER]
-    return stdout, IOResult(
-        exit_code=2 if misses or failed else 0,
-        stderr=_stderr_of(stderr_lines),
-    )
+    finally:
+        if not handed_off:
+            await output.close()
 
 
 async def tar(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_bytes: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
     mkdir_fn: Callable[..., Awaitable[None]],
     stat: StatFn,
@@ -730,7 +873,7 @@ async def tar(
             v,
             C or [],
             stat,
-            stdin_bytes(read_bytes, stdin),
+            stdin_stream(read_bytes, stdin),
             is_dir,
         )
     if x:
@@ -743,7 +886,7 @@ async def tar(
             v,
             to_stdout,
             chosen,
-            stdin_bytes(read_bytes, stdin),
+            stdin_stream(read_bytes, stdin),
             write_bytes,
             mkdir_fn,
             stat,
@@ -852,7 +995,7 @@ async def tar_generic(
     paths: list[PathSpec],
     texts: list[str],
     opts: CommandOpts,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_bytes: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
     mkdir_fn: Callable[..., Awaitable[None]],
     stat: StatFn,

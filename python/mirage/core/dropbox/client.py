@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import logging
 from collections.abc import AsyncIterator, Callable, Mapping
 from functools import partial
 from typing import Any
@@ -28,10 +29,13 @@ from mirage.core.dropbox.constants import (
     RESULT_HEADER,
     TOKEN_BUFFER_SECONDS,
 )
+from mirage.io.spool import ByteSpool
 from mirage.types import JsonValue
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.dropbox.config import DropboxConfig
 from mirage.vfs.secrets import reveal_secret
+
+logger = logging.getLogger(__name__)
 
 
 class DropboxApiError(RuntimeError):
@@ -146,7 +150,10 @@ def _upload_error(
 
 
 async def dropbox_upload(
-    tm: DropboxTokenManager, path: str, data: bytes, rev: str | None = None
+    tm: DropboxTokenManager,
+    path: str,
+    data: bytes | ByteSpool,
+    rev: str | None = None,
 ) -> JsonValue:
     """Upload one file, overwriting, and return the reply as decoded.
 
@@ -164,6 +171,10 @@ async def dropbox_upload(
         data (bytes): file content.
         rev (str | None): the revision the file must still be, or None.
     """
+    if isinstance(data, ByteSpool):
+        if data.size > 8 * 1024 * 1024:
+            return await dropbox_upload_session(tm, path, data, rev)
+        data = await data.read(0, data.size)
     headers = await dropbox_auth_headers(tm)
     arg: dict[str, Any] = {"path": path, "mode": "overwrite", "mute": True}
     if rev is not None:
@@ -254,3 +265,77 @@ async def dropbox_download_stream(
             on_response(lowered_headers(resp.headers))
         async for chunk in resp.content.iter_chunked(chunk_size):
             yield chunk
+
+
+async def _session_request(
+    tm: DropboxTokenManager,
+    path: str,
+    action: str,
+    arg: dict[str, Any],
+    data: bytes,
+) -> Any:
+    return await api_request(
+        "POST",
+        f"{tm.content_base}/files/upload_session/{action}",
+        error_of=partial(_upload_error, path=path),
+        headers={
+            **await dropbox_auth_headers(tm),
+            "Content-Type": "application/octet-stream",
+            "Dropbox-API-Arg": json.dumps(arg),
+        },
+        data=data,
+        session=tm.pool,
+    )
+
+
+async def dropbox_upload_session(
+    tm: DropboxTokenManager, path: str, spool: ByteSpool, rev: str | None
+) -> JsonValue:
+    opened = await _session_request(tm, path, "start", {"close": False}, b"")
+    session_id = opened["session_id"]
+    offset = 0
+    commit: dict[str, Any] = {"path": path, "mode": "overwrite", "mute": True}
+    if rev is not None:
+        commit.update(mode={".tag": "update", "update": rev}, autorename=False)
+    try:
+        while offset < spool.size:
+            body = await spool.read(offset, 8 * 1024 * 1024)
+            await _session_request(
+                tm,
+                path,
+                "append_v2",
+                {
+                    "cursor": {"session_id": session_id, "offset": offset},
+                    "close": False,
+                },
+                body,
+            )
+            offset += len(body)
+        result: JsonValue = await _session_request(
+            tm,
+            path,
+            "finish",
+            {
+                "cursor": {"session_id": session_id, "offset": offset},
+                "commit": commit,
+            },
+            b"",
+        )
+        return result
+    except BaseException:
+        try:
+            await _session_request(
+                tm,
+                path,
+                "append_v2",
+                {
+                    "cursor": {"session_id": session_id, "offset": offset},
+                    "close": True,
+                },
+                b"",
+            )
+        except Exception:
+            logger.debug(
+                "Could not close Dropbox upload session", exc_info=True
+            )
+        raise

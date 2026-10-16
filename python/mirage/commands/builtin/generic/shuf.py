@@ -1,20 +1,22 @@
 import random
 import re
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 
 from mirage.commands.builtin.constants import C_SPACE
-from mirage.commands.builtin.utils.lines import split_lines
-from mirage.commands.builtin.utils.stream import read_stdin_async, stdin_bytes
+from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
+from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.record_spool import RecordSpool
+from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import PathSpec, PolymorphicReadFn
 
 # A `-o` reached a backend wired without a write op, which is a wiring
 # fault rather than anything the command line did wrong. The TypeScript
@@ -418,11 +420,53 @@ def _range_lines(
     return out
 
 
+async def _sample_records(
+    paths: list[PathSpec],
+    read: PolymorphicReadFn,
+    stdin: ByteSource | None,
+    sep: str,
+    count: int | None,
+    repeat: bool,
+) -> ByteSource:
+    records = RecordSpool()
+    stream = stdin_stream(read, stdin)
+    try:
+        sources = [stream(path) for path in paths] if paths else [stdin or b""]
+        for source in sources:
+            reader = AsyncLineIterator(source)
+            try:
+                while (
+                    line := await reader.readline(sep.encode())
+                ) is not None:
+                    await records.append(
+                        line.decode(errors="replace").encode()
+                    )
+            finally:
+                await reader.discard()
+        need = _need(records.count, count, repeat)
+        indices = (
+            (random.randrange(records.count) for _ in range(need))
+            if repeat
+            else iter(random.sample(range(records.count), need))
+        )
+    except BaseException:
+        await records.close()
+        raise
+
+    async def output() -> AsyncIterator[bytes]:
+        for index in indices:
+            async for part in records.stream(index):
+                yield part
+            yield sep.encode()
+
+    return OutputStream(output(), records.close)
+
+
 async def shuf_generic(
     paths: list[PathSpec],
     texts: list[str],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_bytes: PolymorphicReadFn,
     stdin: ByteSource | None = None,
     count: int | None = None,
     echo: bool = False,
@@ -430,9 +474,11 @@ async def shuf_generic(
     with_replacement: bool = False,
     input_range: str | None = None,
     output: PathSpec | None = None,
-    write_bytes: Callable[[PathSpec, bytes], Awaitable[None]] | None = None,
+    write_bytes: Callable[[PathSpec, ByteSource], Awaitable[None]]
+    | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     sep = "\x00" if zero_terminated else "\n"
+    rendered: ByteSource
 
     if input_range is not None:
         if paths:
@@ -452,20 +498,10 @@ async def shuf_generic(
         items = [p.mount_path for p in paths] if paths else list(texts)
         result = _sample(items, count, with_replacement)
         rendered = _render(result, sep)
-    elif paths:
-        read = stdin_bytes(read_bytes, stdin)
-        all_lines: list[str] = []
-        for p in paths:
-            data = (await read(p)).decode(errors="replace")
-            all_lines.extend(split_lines(data, sep))
-        result = _sample(all_lines, count, with_replacement)
-        rendered = _render(result, sep)
     else:
-        raw = await read_stdin_async(stdin) or b""
-        text = raw.decode(errors="replace")
-        lines = split_lines(text, sep)
-        result = _sample(lines, count, with_replacement)
-        rendered = _render(result, sep)
+        rendered = await _sample_records(
+            paths, read_bytes, stdin, sep, count, with_replacement
+        )
     if output is not None:
         if write_bytes is None:
             raise ValueError(NO_WRITE_OP)
@@ -476,6 +512,8 @@ async def shuf_generic(
                 exit_code=1,
                 stderr=f"shuf: {output.raw_path}: {fs_strerror(exc)}\n".encode(),
             )
+        finally:
+            await close_quietly(rendered)
         return None, IOResult()
     return rendered, IOResult()
 

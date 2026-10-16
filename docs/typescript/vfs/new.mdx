@@ -78,6 +78,29 @@ window (`size === null` means through EOF) and fetches only that, and `file`
 then reads only the first bytes it sniffs. A derived stream still fetches the
 entire file; define `readStream` for large files.
 
+For large replacements, implement `writeStream(path, data, signal, atomic, handed)`;
+`data` is a `ByteSource` (a `Uint8Array` or async byte iterable). The ordinary
+`write` API still accepts a complete byte array. Streamed writes use the same
+policy, cache invalidation and conditional-write path. Their `handed` metadata
+comes from the `write` declaration, and they may return the committed
+`FileStat` to keep the index warm. Consume to EOF before an atomic replacement
+becomes visible, and abort uploads when the producer fails or is cancelled.
+`appendStream` is a separate capability; object-store append still reads and
+replaces the existing object.
+
+Replayable command input and deferred output spill after 1 MiB per spool.
+The Node workspace installs async temporary-file storage; the browser workspace
+installs OPFS scratch storage when available. Embeddings that use core directly
+can install a host factory with `setSpoolFactory` from the `io/spool` subpath.
+Without a host factory, core retains spooled data in memory. OPFS quota and
+temporary-disk capacity therefore matter for large archive and sort operations.
+
+Streamed cache fills retain at most 8 MiB by default, further limited by cache
+capacity. Larger files continue streaming but are not admitted to the whole-file
+cache. Set `maxDrainBytes` explicitly to retain larger files; partial or
+cancelled reads never become complete cache entries. Whole-byte API results
+still allocate the complete result.
+
 `readdir` returns each child's `FileStat`, filled in as `stat` would fill
 it, with `name` the base name alone. The mount keeps the listing and answers a
 stat of anything it names from that row, so a listing costs one request.

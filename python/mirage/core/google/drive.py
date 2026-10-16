@@ -28,8 +28,10 @@ from mirage.core.google.client import (
     google_get_stream,
     google_patch,
     google_post,
+    google_resumable,
     google_send_bytes,
 )
+from mirage.io.spool import ByteSpool
 from mirage.utils.ranges import ByteWindow
 
 
@@ -548,13 +550,12 @@ async def upload_file(
     token_manager: TokenManager,
     name: str,
     parent_id: str,
-    data: bytes,
+    data: bytes | ByteSpool,
     mime_type: str = DEFAULT_UPLOAD_MIME,
 ) -> dict[str, Any]:
     """Create a Drive file with content via a multipart upload.
 
-    Multipart uploads cap at 5 MiB on the real API; larger payloads need
-    the resumable protocol, which mirage does not use yet.
+    Large spooled payloads use the resumable protocol.
 
     Args:
         token_manager (TokenManager): OAuth2 token manager.
@@ -567,6 +568,19 @@ async def upload_file(
         dict: created file metadata.
     """
     metadata = {"name": name, "parents": [parent_id]}
+    if isinstance(data, ByteSpool):
+        if data.size > 4 * 1024 * 1024:
+            return await google_resumable(
+                token_manager,
+                "POST",
+                f"{drive_upload_base(token_manager)}/files",
+                metadata,
+                data,
+                mime_type,
+                {"supportsAllDrives": "true", "fields": ITEM_FIELDS},
+            )
+        data = await data.read(0, data.size)
+
     body, content_type = _multipart_related(metadata, data, mime_type)
     url = f"{drive_upload_base(token_manager)}/files"
     return await google_send_bytes(
@@ -586,7 +600,7 @@ async def upload_file(
 async def update_file_content(
     token_manager: TokenManager,
     file_id: str,
-    data: bytes,
+    data: bytes | ByteSpool,
     mime_type: str = DEFAULT_UPLOAD_MIME,
 ) -> dict[str, Any]:
     """Replace an existing Drive file's content.
@@ -600,6 +614,18 @@ async def update_file_content(
     Returns:
         dict: updated file metadata.
     """
+    if isinstance(data, ByteSpool):
+        if data.size > 4 * 1024 * 1024:
+            return await google_resumable(
+                token_manager,
+                "PATCH",
+                f"{drive_upload_base(token_manager)}/files/{file_id}",
+                {},
+                data,
+                mime_type,
+                {"supportsAllDrives": "true", "fields": ITEM_FIELDS},
+            )
+        data = await data.read(0, data.size)
     url = f"{drive_upload_base(token_manager)}/files/{file_id}"
     return await google_send_bytes(
         token_manager,

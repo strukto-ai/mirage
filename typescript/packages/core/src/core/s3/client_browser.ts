@@ -309,7 +309,7 @@ async function sendBrowserCommand(
           ? input.ContentType
           : (defaultContentType ?? 'application/octet-stream')
       const url = await provider(`/${key}`, 'PUT', { contentType })
-      const body = input.Body as Uint8Array | string | undefined
+      const body = input.Body as Uint8Array | Blob | string | undefined
       const resp = await fetch(url, {
         method: 'PUT',
         headers: { 'Content-Type': contentType },

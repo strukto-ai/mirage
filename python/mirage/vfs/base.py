@@ -321,7 +321,7 @@ class BaseVFS:
 
     async def write_stream(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
-    ) -> None:
+    ) -> FileStat | None:
         """Consume a replacement incrementally, through the write dispatcher.
 
         Args:

@@ -13,6 +13,7 @@ from mirage.core.msgraph.drive import (
     copy_tree,
     iter_tree,
     rename_replace,
+    write_item_stream,
 )
 from mirage.core.onedrive.read import read as onedrive_read
 from mirage.core.onedrive.stream import read_stream as onedrive_stream
@@ -690,3 +691,59 @@ async def test_a_missing_top_raises_what_its_listing_raises(monkeypatch):
         await drive_ops.batch_tree(
             MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail", [False, True])
+async def test_stream_upload_has_bounded_parts_and_cancels_failed_session(
+    fail,
+):
+    upload = "https://upload.example/session"
+    total = 5 * 1024 * 1024
+    with aioresponses() as m:
+        m.post(
+            _url("file", "/createUploadSession"), payload={"uploadUrl": upload}
+        )
+        m.put(
+            upload,
+            payload={"nextExpectedRanges": [f"{drive_ops.UPLOAD_CHUNK}-"]},
+        )
+        m.put(
+            upload,
+            status=400 if fail else 201,
+            payload={"error": {"code": "badRequest"}}
+            if fail
+            else {"id": "file"},
+        )
+        m.delete(upload, status=204)
+        if fail:
+            with pytest.raises(GraphError):
+                await write_item_stream(
+                    _config(), _loc("d1", "file"), b"x" * total
+                )
+        else:
+            assert (
+                await write_item_stream(
+                    _config(), _loc("d1", "file"), b"x" * total
+                )
+                == total
+            )
+        calls = m.requests[("PUT", URL(upload))]
+        assert [len(c.kwargs["data"]) for c in calls] == [
+            drive_ops.UPLOAD_CHUNK,
+            total - drive_ops.UPLOAD_CHUNK,
+        ]
+        assert all("Authorization" not in c.kwargs["headers"] for c in calls)
+        assert (("DELETE", URL(upload)) in m.requests) == fail
+
+
+@pytest.mark.asyncio
+async def test_stream_upload_source_failure_never_starts_upload():
+    async def broken():
+        yield b"first"
+        raise OSError("source failed")
+
+    with aioresponses() as m:
+        with pytest.raises(OSError, match="source failed"):
+            await write_item_stream(_config(), _loc("d1", "file"), broken())
+        assert not m.requests

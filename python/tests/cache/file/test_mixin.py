@@ -152,6 +152,20 @@ class TestFingerprint:
 
 
 class TestDrainBudget:
+    def test_default_caps_a_large_cache_fill(self):
+        assert (
+            RAMFileCacheStore(cache_limit="1GB").drain_budget
+            == 8 * 1024 * 1024
+        )
+
+    def test_explicit_larger_fill_budget_is_preserved(self):
+        assert (
+            RAMFileCacheStore(
+                cache_limit="1GB", max_drain_bytes=32 * 1024 * 1024
+            ).drain_budget
+            == 32 * 1024 * 1024
+        )
+
     def test_defaults_to_cache_limit(self):
         cache = RAMFileCacheStore(cache_limit="1KB")
         assert cache.max_drain_bytes is None

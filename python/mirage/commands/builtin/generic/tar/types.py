@@ -3,6 +3,7 @@ from tarfile import TarFile
 from typing import Literal, TypeAlias
 
 from mirage.commands.builtin.generic.archive.types import MemberKind
+from mirage.io.types import ByteSource
 from mirage.types import PathSpec
 from mirage.utils.compress import GzipDataError
 
@@ -30,6 +31,7 @@ class Member:
         spelled (str): the path as the operand was typed, before the
             member-name strip: what a diagnostic about the member names
             (GNU reports ``/t/priv``, not ``t/priv``).
+        size (int | None): rendered byte length, if known before reading.
     """
 
     name: str
@@ -37,6 +39,7 @@ class Member:
     path: PathSpec | None = None
     target: str = ""
     spelled: str = ""
+    size: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,4 +76,4 @@ class ReadResult:
     failure: GzipDataError | None
     notices: tuple[str, ...] = ()
     cut: int | None = None
-    tail: bytes = b""
+    tail: ByteSource = b""

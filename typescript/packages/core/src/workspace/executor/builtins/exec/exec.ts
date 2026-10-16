@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PipeInput, SharedInput, share } from '../../../../io/async_line_iterator.ts'
+import { asyncChain, discardStreams } from '../../../../io/stream.ts'
+import { PipeInput, SharedInput, releaseInputs, share } from '../../../../io/async_line_iterator.ts'
 import { callerSignal } from '../../../abort.ts'
 import { PipeClosed } from '../../../../io/errors.ts'
 import { IOResult, materialize, PipeStream } from '../../../../io/types.ts'
@@ -222,9 +223,9 @@ async function route(
   dispatch: DispatchFn,
   session: SessionState,
   binding: string | null,
-  data: Uint8Array,
+  data: ByteSource,
   own: string,
-): Promise<[Uint8Array | null, Uint8Array | null, boolean]> {
+): Promise<[ByteSource | null, ByteSource | null, boolean]> {
   const target = binding ?? own
   const descriptor = session.descriptors.get(own === TO_STDOUT ? 1 : 2)
   if (descriptor?.file != null && descriptor.identity === target) {
@@ -240,8 +241,12 @@ async function route(
   }
   if (target === TO_STDOUT) return [data, null, false]
   if (target === TO_STDERR) return [null, data, false]
-  if (target === TO_STDIN || target.startsWith(OPEN_FOR_READING)) return [null, null, true]
-  if (target !== CLOSED) await appendTo(dispatch, session, target, data)
+  if (target === TO_STDIN || target.startsWith(OPEN_FOR_READING)) {
+    await discardStreams(data)
+    return [null, null, true]
+  }
+  if (target === CLOSED) await discardStreams(data)
+  else await appendTo(dispatch, session, target, data)
   return [null, null, false]
 }
 
@@ -280,7 +285,7 @@ async function rollBack(
   const partial = session.execStderr
   Object.assign(session, saved)
   const [out, errBytes] = await route(dispatch, session, partial, err, TO_STDERR)
-  return execFailure(errBytes, out)
+  return execFailure(await materialize(errBytes), await materialize(out))
 }
 
 function scopeOf(target: unknown): PathSpec {
@@ -305,23 +310,33 @@ export async function installExecRedirects(
 ): Promise<Result> {
   const badFd = unsupportedDescriptor(redirects)
   if (badFd !== null) return execFailure(badDescriptorLine(badFd))
+  const before = session.openInputs()
+  const owned: SharedInput[] = []
   const saved = bindingsOf(session)
   let err: Uint8Array | null
   try {
-    err = await install(dispatch, session, redirects, stdin, expand)
+    err = await install(owned, dispatch, session, redirects, stdin, expand)
   } catch (error) {
     Object.assign(session, saved)
+    await releaseInputs(owned, before)
     throw error
   }
-  if (err === null)
+  if (err === null) {
+    await releaseInputs([...before, ...owned], session.openInputs())
     return [null, new IOResult(), new ExecutionNode({ command: 'exec', exitCode: 0 })]
-  return rollBack(dispatch, session, saved, err)
+  }
+  try {
+    return await rollBack(dispatch, session, saved, err)
+  } finally {
+    await releaseInputs([...before, ...owned], session.openInputs())
+  }
 }
 
 /** Bind the redirects onto the session's streams, in line order. Returns
  * the diagnostic of the first redirect that fails, with every earlier one
  * still bound, which is the state bash reports from. */
 async function install(
+  owned: SharedInput[],
   dispatch: DispatchFn,
   session: SessionState,
   redirects: readonly Redirect[],
@@ -330,13 +345,14 @@ async function install(
 ): Promise<Uint8Array | null> {
   for (const raw of redirects) {
     const redirect = expand === undefined ? raw : await expand(raw)
-    const error = await installDescriptor(dispatch, session, redirect, stdin)
+    const error = await installDescriptor(owned, dispatch, session, redirect, stdin)
     if (error !== null) return error
   }
   return null
 }
 
 async function installDescriptor(
+  owned: SharedInput[],
   dispatch: DispatchFn,
   session: SessionState,
   redirect: Redirect,
@@ -375,17 +391,17 @@ async function installDescriptor(
       let data: ByteSource
       try {
         const opened = (await dispatch('read', scope, [], { stream: true }))[0] as ByteSource | null
-        // A pipe streams, as under any redirect; a file is read whole here.
-        data = opened instanceof PipeStream ? opened : await materialize(opened)
+        data = opened ?? new Uint8Array()
       } catch (error) {
         if (redirect.kind !== RedirectKind.READWRITE || !isMissingPath(error)) throw error
         data = new Uint8Array()
       }
       if (redirect.kind === RedirectKind.READWRITE) {
-        await createFile(dispatch, session, scope, new Uint8Array(), true)
         const file = new FileDescription(scope)
         file.opened = true
-        file.source = new FileInput(file, await materialize(data))
+        file.source = new FileInput(file, data)
+        owned.push(file.source)
+        await createFile(dispatch, session, scope, new Uint8Array(), true)
         bind(session, fd, OPEN_FOR_READ_WRITE + scope.virtual, false, file.source)
       } else {
         // The descriptor keeps the pipe; each read takes it anew.
@@ -394,7 +410,9 @@ async function installDescriptor(
           await data.close()
           reading = new PipeInput(data.path, data.end, callerSignal)
         }
-        bind(session, fd, OPEN_FOR_READING + scope.virtual, false, new SharedInput(reading))
+        const source = new SharedInput(reading, null, !(data instanceof PipeStream))
+        if (!(data instanceof PipeStream)) owned.push(source)
+        bind(session, fd, OPEN_FOR_READING + scope.virtual, false, source)
       }
     } else {
       const pipe = await createFile(dispatch, session, scope, new Uint8Array(), redirect.append)
@@ -506,7 +524,7 @@ function runs(written: readonly Written[]): Written[] {
   for (const [channel, data, kept] of written) {
     const last = out[out.length - 1]
     if (last?.[0] === channel && last[2] === kept)
-      out[out.length - 1] = [channel, concat([last[1], data]), kept]
+      out[out.length - 1] = [channel, asyncChain([last[1], data]), kept]
     else out.push([channel, data, kept])
   }
   return out
@@ -519,7 +537,7 @@ async function routed(
   dispatch: DispatchFn,
   session: SessionState,
   channel: Channel,
-  data: Uint8Array,
+  data: ByteSource,
   rest: Written[],
 ): Promise<boolean> {
   const stdout = channel === Channel.STDOUT
@@ -540,7 +558,7 @@ async function appendTo(
   dispatch: DispatchFn,
   session: SessionState,
   target: string,
-  data: Uint8Array,
+  data: ByteSource,
 ): Promise<void> {
   if (target === CLOSED) return
   const scope = toScope(target)

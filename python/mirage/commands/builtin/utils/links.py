@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from mirage.commands.builtin.utils.paths import resolve_path_stat
 from mirage.commands.config import CommandOpts
 from mirage.errors.fs import eloop
+from mirage.io.cooperative import chunks
+from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec
 from mirage.utils.hidden import path_visible
@@ -203,10 +205,13 @@ class LinkResolver:
         Args:
             virtual (str): the name's virtual path.
         """
-        data, _ = await self.dispatch("read", PathSpec.from_str_path(virtual))
-        yield data
+        data, _ = await self.dispatch(
+            "read", PathSpec.from_str_path(virtual), stream=True
+        )
+        async for chunk in chunks(data):
+            yield chunk
 
-    async def write(self, virtual: str, data: bytes) -> None:
+    async def write(self, virtual: str, data: ByteSource) -> None:
         """Write a file on the mount that owns the name.
 
         Args:

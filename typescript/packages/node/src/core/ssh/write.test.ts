@@ -17,7 +17,7 @@ import { runWithRecording } from '@struktoai/mirage-core/observe/context'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { makeFakeAccessor } from './_test_utils.ts'
 import { read } from './read.ts'
-import { write } from './write.ts'
+import { write, writeStream } from './write.ts'
 
 function spec(p: string): PathSpec {
   return PathSpec.fromStrPath(p)
@@ -82,4 +82,37 @@ describe('core/ssh/write', () => {
     expect(records[0]?.source).toBe(VFSName.SSH)
     expect(records[0]?.bytes).toBe(5)
   })
+})
+
+it.each([false, true])('commits an atomic streamed SSH write only after EOF: %s', async (fail) => {
+  const old = new TextEncoder().encode('old')
+  const files = new Map([['/data/a', { data: old, attrs: { mode: 0o100640 } }]])
+  const accessor = makeFakeAccessor({
+    files,
+    dirs: new Map([
+      ['/', {}],
+      ['/data', {}],
+    ]),
+  })
+  const sftp = await accessor.sftp()
+  sftp.ext_openssh_rename = sftp.rename.bind(sftp)
+  let closed = false
+  async function* source(): AsyncGenerator<Uint8Array> {
+    try {
+      yield new TextEncoder().encode('first')
+      expect(files.get('/data/a')?.data).toEqual(old)
+      await Promise.resolve()
+      if (fail) throw new Error('producer failed')
+      yield new TextEncoder().encode('last')
+    } finally {
+      closed = true
+    }
+  }
+  const result = writeStream(accessor, spec('/data/a'), source(), undefined, true)
+  if (fail) await expect(result).rejects.toThrow('producer failed')
+  else await result
+  expect([...files.keys()]).toEqual(['/data/a'])
+  expect(new TextDecoder().decode(files.get('/data/a')?.data)).toBe(fail ? 'old' : 'firstlast')
+  expect((files.get('/data/a')?.attrs.mode ?? 0) & 0o777).toBe(0o640)
+  expect(closed).toBe(true)
 })

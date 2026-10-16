@@ -367,3 +367,10 @@ export async function uploadChunk(
     headers: { 'Content-Range': `bytes ${String(start)}-${String(end)}/${String(total)}` },
   })) as Record<string, unknown>
 }
+
+export async function cancelUpload(
+  config: MsGraphConfigResolved,
+  uploadUrl: string,
+): Promise<void> {
+  await graphRequest(config, 'DELETE', uploadUrl, { auth: false, read: 'none' })
+}

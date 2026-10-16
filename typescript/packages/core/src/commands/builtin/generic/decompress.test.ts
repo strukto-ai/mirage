@@ -28,9 +28,8 @@ function backend(files: Map<string, Uint8Array>) {
     reads,
     read,
     options: {
-      write: (path: PathSpec, data: Uint8Array) => {
-        files.set(path.virtual, data)
-        return Promise.resolve()
+      write: async (path: PathSpec, data: ByteSource) => {
+        files.set(path.virtual, await materialize(data))
       },
       unlink: (path: PathSpec) => {
         files.delete(path.virtual)

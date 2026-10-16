@@ -502,3 +502,16 @@ async def upload_chunk(
     )
     payload: dict[str, Any] = _lenient_json(text)
     return payload
+
+
+async def cancel_upload(
+    config: MsGraphConfig, upload_url: str, session: SessionArg = None
+) -> None:
+    await api_request(
+        "DELETE",
+        upload_url,
+        error_of=partial(_error_of, method="DELETE", url=upload_url),
+        read="none",
+        session=session,
+        timeout=None if session is not None else _timeout(config),
+    )

@@ -12,14 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chunks } from '../../io/cooperative.ts'
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
-import { materialize, OpReport, type ByteSource } from '../../io/types.ts'
+import { OpReport, type ByteSource } from '../../io/types.ts'
 import type { FileDescription } from '../../shell/descriptors.ts'
 import { DEFAULT_UMASK, getCurrentEvaluation } from '../../context/session_context.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { isFsError } from '../../errors/fs.ts'
-import { spliceWindow } from '../../utils/ranges.ts'
+import { sliceStream } from '../../io/stream.ts'
 import type { SessionState } from '../session/session.ts'
 import { hasAborted, makeAbortError } from '../../utils/abort.ts'
 
@@ -46,7 +47,7 @@ export async function createFile(
   dispatch: DispatchFn,
   session: SessionState,
   scope: PathSpec,
-  data: Uint8Array,
+  data: ByteSource,
   append = false,
 ): Promise<PathSpec | null> {
   let created = false
@@ -104,10 +105,10 @@ export async function writeDescription(
   dispatch: DispatchFn,
   session: SessionState,
   file: FileDescription,
-  data: Uint8Array,
+  data: ByteSource,
 ): Promise<void> {
   if (file.emit !== null) {
-    if (data.byteLength > 0) await file.emit(data)
+    for await (const part of chunks(data)) await file.emit(part)
     return
   }
   const turn = file.writing
@@ -117,7 +118,18 @@ export async function writeDescription(
     await turn
     const writer = getCurrentEvaluation()?.frame.abortSignal ?? undefined
     if (hasAborted(writer)) throw makeAbortError(writer)
-    await writeThrough(dispatch, session, file, data)
+    if (!(data instanceof Uint8Array) && file.source === null && (!file.opened || file.append)) {
+      let size = 0
+      async function* counted(): AsyncGenerator<Uint8Array> {
+        for await (const part of chunks(data)) {
+          size += part.length
+          yield part
+        }
+      }
+      await createFile(dispatch, session, file.scope, counted(), file.append)
+      file.opened = true
+      file.offset += size
+    } else for await (const part of chunks(data)) await writeThrough(dispatch, session, file, part)
   } finally {
     done()
   }
@@ -153,10 +165,10 @@ async function writeThrough(
     }
     return
   }
-  const content = await materialize((await dispatch('read', file.scope))[0] as ByteSource)
   const offset = file.offset + file.source.lines.position
-  const updated = spliceWindow(content, offset, data)
-  await createFile(dispatch, session, file.scope, updated)
-  file.offset = offset + data.byteLength
-  file.source.lines = new AsyncLineIterator(updated.subarray(file.offset))
+  await dispatch('pwrite', file.scope, [data, offset])
+  await file.source.lines.discard()
+  file.offset = offset + data.length
+  const content = (await dispatch('read', file.scope, [], { stream: true }))[0] as ByteSource
+  file.source.lines = new AsyncLineIterator(sliceStream(content, file.offset))
 }

@@ -24,6 +24,7 @@ import { numberFlagError, parseByteCount } from '../tail_counts.ts'
 import { CHAR_DEVICE_MAX_BYTES, STDIN_HEADER_NAME } from '../utils/constants.ts'
 import { asyncChain, closeQuietly } from '../../../io/stream.ts'
 import { chunks } from '../../../io/cooperative.ts'
+import { SharedInput } from '../../../io/async_line_iterator.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { deadlineCheck, truncateStream } from '../utils/limit.ts'
 import { splitOpened } from '../utils/operands.ts'
@@ -88,6 +89,8 @@ async function* headStream(
       let remaining = bytesMode
       for await (const chunk of pulls) {
         if (chunk.byteLength >= remaining) {
+          if (source instanceof SharedInput && source.seekable)
+            source.lines.unread(chunk.subarray(remaining))
           if (remaining > 0) yield chunk.subarray(0, remaining)
           return
         }
@@ -121,6 +124,8 @@ async function* headStream(
           if (start < chunk.byteLength) yield chunk.subarray(start)
           break
         }
+        if (emitted + 1 >= lines && source instanceof SharedInput && source.seekable)
+          source.lines.unread(chunk.subarray(nl + 1))
         yield chunk.subarray(start, nl + 1)
         emitted += 1
         if (emitted >= lines) return
@@ -268,7 +273,8 @@ export async function headGeneric(
     }
     return [
       headMulti(
-        sourceFor,
+        (path) =>
+          isStdin(path) && opts.stdin instanceof SharedInput ? opts.stdin : sourceFor(path),
         opened,
         parsed.lines,
         parsed.bytesMode,

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteSpool } from '../../io/spool.ts'
 import {
   BoxApiError,
   boxDelete,
@@ -22,6 +23,7 @@ import {
   boxPostJson,
   boxPutJson,
   boxUploadMultipart,
+  boxUploadSession,
 } from './client.ts'
 import type { BoxTokenManager } from './client.ts'
 import { stale } from '../../cache/context.ts'
@@ -300,8 +302,18 @@ export async function uploadNewFile(
   tm: BoxTokenManager,
   parentId: string,
   name: string,
-  data: Uint8Array,
+  data: Uint8Array | ByteSpool,
 ): Promise<unknown> {
+  if (data instanceof ByteSpool) {
+    if (data.size >= 20 * 1024 * 1024)
+      return boxUploadSession(
+        tm,
+        `${tm.uploadBase}/files/upload_sessions`,
+        { folder_id: parentId, file_name: name },
+        data,
+      )
+    data = await data.read(0, data.size)
+  }
   return boxUploadMultipart(
     tm,
     `${tm.uploadBase}/files/content`,
@@ -315,9 +327,20 @@ export async function uploadFileVersion(
   tm: BoxTokenManager,
   fileId: string,
   name: string,
-  data: Uint8Array,
+  data: Uint8Array | ByteSpool,
   etag: string | null = null,
 ): Promise<unknown> {
+  if (data instanceof ByteSpool) {
+    if (data.size >= 20 * 1024 * 1024)
+      return boxUploadSession(
+        tm,
+        `${tm.uploadBase}/files/${fileId}/upload_sessions`,
+        { file_name: name },
+        data,
+        etag,
+      )
+    data = await data.read(0, data.size)
+  }
   return boxUploadMultipart(
     tm,
     `${tm.uploadBase}/files/${fileId}/content`,

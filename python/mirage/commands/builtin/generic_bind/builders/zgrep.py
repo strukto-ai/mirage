@@ -43,7 +43,7 @@ async def zgrep(
         resolved,
         texts,
         opts.flags,
-        read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
+        read_bytes=bound_op(ops.read_stream, accessor, opts.index),
         stdin=opts.stdin,
         stat=partial(ops.stat, accessor),
         resolver=link_resolver(opts),

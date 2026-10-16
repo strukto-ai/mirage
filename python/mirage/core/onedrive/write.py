@@ -13,8 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.core.msgraph.drive import write_item
+from mirage.core.msgraph.drive import write_item, write_item_stream
 from mirage.core.onedrive.client import drive_loc
+from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
@@ -30,3 +31,16 @@ async def write(
         session=accessor.pool,
     )
     record("write", path.virtual, "onedrive", len(data), timer)
+
+
+async def write_stream(
+    accessor: OneDriveAccessor, path: PathSpec, data: ByteSource
+) -> None:
+    timer = start_op()
+    size = await write_item_stream(
+        accessor.config,
+        drive_loc(accessor.config, path.vfs_path),
+        data,
+        session=accessor.pool,
+    )
+    record("write", path.virtual, "onedrive", size, timer)

@@ -74,6 +74,7 @@ export async function closeQuietly<T>(stream: Uint8Array | AsyncIterable<T> | nu
 
 /** Own producer cleanup even when its byte iterator was never started. */
 export class OutputStream implements AsyncIterableIterator<Uint8Array> {
+  private closing: Promise<IteratorResult<Uint8Array>> | null = null
   constructor(
     private readonly source: AsyncIterator<Uint8Array>,
     private readonly close: () => Promise<void>,
@@ -82,10 +83,22 @@ export class OutputStream implements AsyncIterableIterator<Uint8Array> {
   [Symbol.asyncIterator](): AsyncIterableIterator<Uint8Array> {
     return this
   }
-  next(): Promise<IteratorResult<Uint8Array>> {
-    return this.source.next()
+  async next(): Promise<IteratorResult<Uint8Array>> {
+    if (this.closing !== null) return { done: true, value: undefined }
+    try {
+      const next = await this.source.next()
+      if (next.done === true) await this.return()
+      return next
+    } catch (error) {
+      await this.return()
+      throw error
+    }
   }
-  async return(): Promise<IteratorResult<Uint8Array>> {
+  return(): Promise<IteratorResult<Uint8Array>> {
+    this.closing ??= this.finish()
+    return this.closing
+  }
+  private async finish(): Promise<IteratorResult<Uint8Array>> {
     await this.close()
     return (await this.source.return?.()) ?? { done: true, value: undefined }
   }
@@ -106,15 +119,16 @@ export async function discardIo(io: IOResult): Promise<void> {
   await discardStreams(io.stdout, io.stderr)
 }
 
-export async function* asyncChain(streams: Iterable<ByteSource | null>): AsyncIterable<Uint8Array> {
-  for (const stream of streams) {
-    if (stream === null) continue
-    if (stream instanceof Uint8Array) {
-      if (stream.byteLength > 0) yield stream
-      continue
+export function asyncChain(streams: Iterable<ByteSource | null>): AsyncIterable<Uint8Array> {
+  const sources = [...streams]
+  async function* output(): AsyncGenerator<Uint8Array> {
+    for (const source of sources) {
+      if (source !== null) yield* ensureStream(source)
     }
-    for await (const chunk of stream) yield chunk
   }
+  return new OutputStream(output(), async () => {
+    for (const source of sources) await closeQuietly(source)
+  })
 }
 
 export async function* yieldBytes(data: Uint8Array): AsyncIterable<Uint8Array> {
@@ -161,4 +175,31 @@ export async function primeStream(
   return new OutputStream(rest(), async () => {
     await cursor.return?.()
   })
+}
+
+/** Take a byte window without materializing its prefix or suffix. */
+export function sliceStream(
+  source: ByteSource,
+  offset = 0,
+  size: number | null = null,
+): OutputStream {
+  if (offset < 0 || (size !== null && size < 0))
+    throw new RangeError('stream window must be nonnegative')
+  async function* window(): AsyncGenerator<Uint8Array> {
+    let skipped = offset
+    let remaining = size
+    if (remaining === 0) return
+    for await (let part of ensureStream(source)) {
+      const cut = Math.min(skipped, part.length)
+      skipped -= cut
+      part = part.subarray(cut)
+      if (remaining !== null) {
+        part = part.subarray(0, remaining)
+        remaining -= part.length
+      }
+      if (part.length > 0) yield part
+      if (remaining === 0) return
+    }
+  }
+  return new OutputStream(window(), () => closeQuietly(source))
 }

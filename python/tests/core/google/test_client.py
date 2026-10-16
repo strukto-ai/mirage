@@ -16,6 +16,8 @@ import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from aioresponses import aioresponses
+from yarl import URL
 
 from mirage.core.google.client import (
     TokenManager,
@@ -28,6 +30,7 @@ from mirage.core.google.client import (
     google_error_message,
     google_get_stream,
     google_headers,
+    google_resumable,
     sheets_base,
     slides_base,
     token_url,
@@ -44,6 +47,7 @@ from mirage.core.google.constants import (
     SLIDES_API_BASE,
     TOKEN_URL,
 )
+from mirage.io.spool import ByteSpool
 
 API_ERROR = (
     '{"error": {"code": 400, "message": "Unsupported request: '
@@ -164,3 +168,44 @@ async def test_a_stream_closed_early_closes_its_download():
         assert await anext(stream) == b"a"
         await stream.aclose()
     assert closed == [True]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("advance", [True, False])
+async def test_resumable_upload_honors_acknowledged_ranges(advance):
+    tm = _manager()
+    tm.get_token = AsyncMock(return_value="token")
+    url, upload = "https://example.test/start", "https://example.test/upload"
+    total = 8 * 1024 * 1024 + 17
+    async with ByteSpool(0) as spool:
+        await spool.append(b"x" * total)
+        with aioresponses() as mock:
+            mock.post(
+                url + "?uploadType=resumable", headers={"Location": upload}
+            )
+            mock.put(
+                upload,
+                status=308,
+                headers={"Range": "bytes=0-4194303"} if advance else {},
+            )
+            if advance:
+                mock.put(upload, payload={"id": "done"})
+                result = await google_resumable(
+                    tm, "POST", url, {}, spool, "text/plain", {}
+                )
+                assert result == {"id": "done"}
+                calls = mock.requests[("PUT", URL(upload))]
+                assert [len(call.kwargs["data"]) for call in calls] == [
+                    8 * 1024 * 1024,
+                    total - 4 * 1024 * 1024,
+                ]
+                assert (
+                    calls[1].kwargs["headers"]["Content-Range"]
+                    == f"bytes 4194304-{total - 1}/{total}"
+                )
+            else:
+                with pytest.raises(RuntimeError, match="no progress"):
+                    await google_resumable(
+                        tm, "POST", url, {}, spool, "text/plain", {}
+                    )
+    await tm.pool.close()

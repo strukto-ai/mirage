@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { asyncChain } from '../../../io/stream.ts'
-
+import { ByteSpool } from '../../../io/spool.ts'
+import { OutputStream } from '../../../io/stream.ts'
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { stdinStream } from '../utils/stream.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { PathSpec } from '../../../types.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
@@ -35,8 +36,6 @@ import {
   type SortConfig,
   type SortGlobals,
 } from '../sort_keys.ts'
-import { splitLines } from '../utils/lines.ts'
-import { readStdinAsync } from '../utils/stream.ts'
 import { argmatchError } from '../../spec/usage.ts'
 import { argmatch } from '../../spec/argmatch.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -232,29 +231,44 @@ export function operandRefusal(paths: readonly PathSpec[], parsed: SortFlags): I
   return null
 }
 
-function splitRecords(raw: Uint8Array, zeroTerminated: boolean): string[] {
-  if (!zeroTerminated) return splitLines(DEC.decode(raw))
-  const records: string[] = []
-  let start = 0
-  for (let index = 0; index < raw.byteLength; index++) {
-    if (raw[index] === 0) {
-      records.push(DEC.decode(raw.subarray(start, index)))
-      start = index + 1
+async function checkStream(
+  source: ByteSource,
+  path: PathSpec | null,
+  parsed: SortFlags,
+  cfg: SortConfig,
+): Promise<IOResult> {
+  const reader = new AsyncLineIterator(source)
+  let previous: string | null = null
+  let index = 0
+  try {
+    for (;;) {
+      const raw = await reader.readline(undefined, parsed.zeroTerminated ? 0 : 10)
+      if (raw === null) break
+      const current = DEC.decode(raw)
+      index++
+      const comparison = previous !== null ? compareLines(previous, current, cfg) : -1
+      if (comparison > 0 || (previous !== null && parsed.unique && comparison === 0)) {
+        return new IOResult({
+          exitCode: 1,
+          stderr: parsed.checkQuiet
+            ? null
+            : ENC.encode(`sort: ${labelOf(path)}:${String(index)}: disorder: ${current}\n`),
+        })
+      }
+      previous = current
     }
+  } catch (error) {
+    if (!isFsError(error)) throw error
+    const strerror = fsStrerror(error) ?? String(error)
+    const stage = inputStage(strerror, false)
+    return new IOResult({
+      exitCode: 2,
+      stderr: sortDie(stageVerb(stage, true), labelOf(path), strerror),
+    })
+  } finally {
+    await reader.discard()
   }
-  if (start < raw.byteLength) records.push(DEC.decode(raw.subarray(start)))
-  return records
-}
-
-function checkRecords(records: readonly string[], cfg: SortConfig, unique: boolean): number | null {
-  for (let index = 1; index < records.length; index++) {
-    const previous = records[index - 1]
-    const current = records[index]
-    if (previous === undefined || current === undefined) continue
-    const comparison = compareLines(previous, current, cfg)
-    if (comparison > 0 || (unique && comparison === 0)) return index
-  }
-  return null
+  return new IOResult()
 }
 
 function labelOf(path: PathSpec | null): string {
@@ -319,47 +333,154 @@ async function orderedRecords(
   return chunks[0] ?? []
 }
 
-// Every input's records, one run per input, or the line refusing one. Each
-// input is split on its own, so a file that lacks a final newline still
-// ends its last line there instead of running into the next file's first,
-// and `-m` gets the runs it merges. GNU takes every input through one step
-// before any through the next, so the failure reported is the first of the
-// earliest step any input failed at: a directory does not stop the later
-// inputs from being tried, and the first input to fail its access check
-// ends the run, since nothing after it can outrank that. Mirrors
-// _read_runs in sort.py.
-async function readRuns(
-  paths: readonly PathSpec[],
+export const SORT_RUN_BYTES = 8 * 1024 * 1024
+const MERGE_FAN_IN = 16
+
+async function mergeSpools(
+  runs: ByteSpool[],
+  cfg: SortConfig,
+  separator: number,
+  signal?: AbortSignal,
+): Promise<ByteSpool> {
+  const output = new ByteSpool(0)
+  const readers = runs.map((run) => new AsyncLineIterator(run.stream()))
+  const budget = new YieldBudget(signal)
+  try {
+    const heads: (Uint8Array | null)[] = []
+    for (const reader of readers) heads.push(await reader.readline(signal, separator))
+    let previous: string | null = null
+    for (;;) {
+      let chosen = -1
+      let line = ''
+      for (const [index, head] of heads.entries()) {
+        if (head === null) continue
+        const text = DEC.decode(head)
+        if (chosen < 0 || compareLines(text, line, cfg) < 0) {
+          chosen = index
+          line = text
+        }
+      }
+      if (chosen < 0) break
+      if (!cfg.unique || previous === null || compareLines(previous, line, cfg) !== 0) {
+        await output.append(ENC.encode(line + String.fromCharCode(separator)))
+        previous = line
+      }
+      const reader = readers[chosen]
+      if (reader === undefined) throw new Error('missing merge reader')
+      heads[chosen] = await reader.readline(signal, separator)
+      await budget.run()
+    }
+    return output
+  } catch (error) {
+    await output.close()
+    throw error
+  } finally {
+    for (const reader of readers) await reader.discard()
+    for (const run of runs) await run.close()
+  }
+}
+
+async function externalRecords(
+  paths: PathSpec[],
   stream: (path: PathSpec) => AsyncIterable<Uint8Array>,
   stdin: ByteSource | null,
   parsed: SortFlags,
-): Promise<string[][] | Uint8Array> {
-  const sorting = !parsed.check && !parsed.merge
-  const runs: string[][] = []
+  cfg: SortConfig,
+  signal?: AbortSignal,
+): Promise<ByteSpool | Uint8Array> {
+  const separator = parsed.zeroTerminated ? 0 : 10
+  const ending = String.fromCharCode(separator)
+  const levels: ByteSpool[][] = [[]]
   let refused: [InputStage, Uint8Array] | null = null
-  const inputs: (PathSpec | null)[] = paths.length > 0 ? [...paths] : [null]
-  for (const path of inputs) {
-    let raw: Uint8Array
-    try {
-      raw =
-        path === null
-          ? ((await readStdinAsync(stdin)) ?? new Uint8Array())
-          : await materialize(stream(path))
-    } catch (error) {
-      if (!isFsError(error)) throw error
-      const strerror = fsStrerror(error) ?? String(error)
-      const stage = inputStage(strerror, sorting)
-      refused = earliest(
-        refused,
-        stage,
-        sortDie(stageVerb(stage, parsed.check), labelOf(path), strerror),
-      )
-      if (stage === InputStage.ACCESS) break
-      continue
+  let buffer: string[] = []
+  let size = 0
+  async function addRun(initial: ByteSpool): Promise<void> {
+    let run = initial
+    for (let level = 0; ; level++) {
+      const group = levels[level] ?? (levels[level] = [])
+      group.push(run)
+      if (group.length < MERGE_FAN_IN) return
+      levels[level] = []
+      run = await mergeSpools(group, cfg, separator, signal)
     }
-    runs.push(splitRecords(raw, parsed.zeroTerminated))
   }
-  return refused !== null ? refused[1] : runs
+  async function flush(): Promise<void> {
+    if (buffer.length === 0) return
+    const ordered = await orderedRecords([buffer], cfg, false, signal)
+    const run = new ByteSpool()
+    try {
+      for (const line of ordered) await run.append(ENC.encode(line + ending))
+      await addRun(run)
+    } catch (error) {
+      await run.close()
+      throw error
+    }
+    buffer = []
+    size = 0
+  }
+  try {
+    const inputs: (PathSpec | null)[] = paths.length > 0 ? paths : [null]
+    for (const path of inputs) {
+      const reader = new AsyncLineIterator(
+        path === null ? (stdin ?? new Uint8Array()) : stream(path),
+      )
+      let run: ByteSpool | null = parsed.merge ? new ByteSpool() : null
+      try {
+        for (;;) {
+          const raw = await reader.readline(signal, separator)
+          if (raw === null) break
+          const text = DEC.decode(raw)
+          if (run !== null) await run.append(ENC.encode(text + ending))
+          else {
+            buffer.push(text)
+            size += raw.length + 64
+            if (size >= SORT_RUN_BYTES) await flush()
+          }
+        }
+        if (run !== null) {
+          await addRun(run)
+          run = null
+        }
+      } catch (error) {
+        if (!isFsError(error)) throw error
+        const strerror = fsStrerror(error) ?? String(error)
+        const stage = inputStage(strerror, !parsed.merge)
+        refused = earliest(
+          refused,
+          stage,
+          sortDie(stageVerb(stage, false), labelOf(path), strerror),
+        )
+        if (stage === InputStage.ACCESS) break
+      } finally {
+        await reader.discard()
+        if (run !== null) await run.close()
+      }
+    }
+    if (refused !== null) return refused[1]
+    await flush()
+    let runs = [...levels].reverse().flat()
+    while (runs.length > 1) {
+      const next: ByteSpool[] = []
+      for (let start = 0; start < runs.length; start += MERGE_FAN_IN) {
+        const mergedRun = await mergeSpools(
+          runs.slice(start, start + MERGE_FAN_IN),
+          cfg,
+          separator,
+          signal,
+        )
+        levels.push([mergedRun])
+        next.push(mergedRun)
+      }
+      runs = next
+    }
+    let output = runs[0] ?? new ByteSpool()
+    if (parsed.merge && cfg.unique) output = await mergeSpools([output], cfg, separator, signal)
+    for (const level of levels) for (const run of level) if (run !== output) await run.close()
+    levels.length = 0
+    return output
+  } finally {
+    for (const level of levels) for (const run of level) await run.close()
+  }
 }
 
 // GNU sort over the given inputs. The refusals come in GNU's order: the
@@ -387,28 +508,24 @@ export async function sortGeneric(
   }
   const refusal = operandRefusal(paths, parsed)
   if (refusal !== null) return [new Uint8Array(), refusal]
-  const runs = await readRuns(paths, stream, opts.stdin, parsed)
-  if (runs instanceof Uint8Array)
-    return [new Uint8Array(), new IOResult({ exitCode: 2, stderr: runs })]
   if (parsed.check) {
-    const records = runs[0] ?? []
-    const disorder = checkRecords(records, cfg, parsed.unique)
-    if (disorder === null) return [new Uint8Array(), new IOResult()]
-    if (parsed.checkQuiet) return [new Uint8Array(), new IOResult({ exitCode: 1 })]
-    const label = labelOf(paths[0] ?? null)
-    const line = records[disorder] ?? ''
+    const path = paths[0] ?? null
     return [
       new Uint8Array(),
-      new IOResult({
-        exitCode: 1,
-        stderr: ENC.encode(`sort: ${label}:${String(disorder + 1)}: disorder: ${line}\n`),
-      }),
+      await checkStream(
+        path === null ? (opts.stdin ?? new Uint8Array()) : stream(path),
+        path,
+        parsed,
+        cfg,
+      ),
     ]
   }
-  const ordered = await orderedRecords(runs, cfg, parsed.merge, opts.signal)
-  const separator = parsed.zeroTerminated ? '\0' : '\n'
+  const ordered = await externalRecords(paths, stream, opts.stdin, parsed, cfg, opts.signal)
+  if (ordered instanceof Uint8Array)
+    return [new Uint8Array(), new IOResult({ exitCode: 2, stderr: ordered })]
   if (parsed.output !== null) {
     if (write === undefined) {
+      await ordered.close()
       return [
         new Uint8Array(),
         new IOResult({
@@ -426,14 +543,7 @@ export async function sortGeneric(
       walkError: parsed.output.walkError,
     })
     try {
-      await write(
-        outputPath,
-        asyncChain(
-          (function* records() {
-            for (const record of ordered) yield ENC.encode(record + separator)
-          })(),
-        ),
-      )
+      await write(outputPath, ordered.stream())
     } catch (error) {
       if (!isFsError(error)) throw error
       const strerror = fsStrerror(error) ?? String(error)
@@ -444,11 +554,10 @@ export async function sortGeneric(
           stderr: sortDie(OPEN_FAILED, parsed.output.rawPath, strerror),
         }),
       ]
+    } finally {
+      await ordered.close()
     }
     return [new Uint8Array(), new IOResult()]
   }
-  const output: Uint8Array =
-    ordered.length === 0 ? new Uint8Array() : ENC.encode(ordered.join(separator) + separator)
-  const out: ByteSource = output
-  return [out, new IOResult()]
+  return [new OutputStream(ordered.stream(), () => ordered.close()), new IOResult()]
 }

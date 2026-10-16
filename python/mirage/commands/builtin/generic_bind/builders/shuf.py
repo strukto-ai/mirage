@@ -84,7 +84,7 @@ async def _shuf(
     return await generic_shuf(
         paths,
         texts,
-        read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
+        read_bytes=bound_op(ops.read_stream, accessor, opts.index),
         stdin=opts.stdin,
         count=parsed.count,
         echo=parsed.echo,

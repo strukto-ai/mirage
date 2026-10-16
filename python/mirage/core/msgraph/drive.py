@@ -33,6 +33,7 @@ from mirage.core.generic.find_eval import (
 )
 from mirage.core.msgraph.client import (
     GraphError,
+    cancel_upload,
     graph_batch,
     graph_delete,
     graph_get,
@@ -51,6 +52,8 @@ from mirage.core.msgraph.client import (
 from mirage.core.msgraph.config import MsGraphConfig
 from mirage.core.msgraph.constants import BATCH_LIMIT
 from mirage.errors.fs import eexist, enoent, enotdir, enotsup, listing_error
+from mirage.io.spool import ByteSpool
+from mirage.io.types import ByteSource
 from mirage.observe.context import (
     active_recorder,
     record,
@@ -369,11 +372,9 @@ async def create_child_folder(
 async def upload_session_write(
     config: MsGraphConfig,
     session_url: str,
-    data: bytes,
+    data: bytes | ByteSpool,
     session: SessionArg = None,
 ) -> None:
-    # createUploadSession defaults to "fail": without replace, overwriting
-    # an existing file 409s on the final chunk.
     created = await graph_post(
         config,
         session_url,
@@ -381,18 +382,57 @@ async def upload_session_write(
         session=session,
     )
     upload_url = created["uploadUrl"]
-    total = len(data)
+    total = data.size if isinstance(data, ByteSpool) else len(data)
     start = 0
-    while start < total:
-        chunk = data[start : start + UPLOAD_CHUNK]
-        result = await upload_chunk(
-            config, upload_url, chunk, start, total, session=session
-        )
-        ranges = result.get("nextExpectedRanges") if result else None
-        if ranges:
-            start = int(ranges[0].split("-", 1)[0])
+    try:
+        while start < total:
+            chunk = (
+                await data.read(start, UPLOAD_CHUNK)
+                if isinstance(data, ByteSpool)
+                else data[start : start + UPLOAD_CHUNK]
+            )
+            result = await upload_chunk(
+                config, upload_url, chunk, start, total, session=session
+            )
+            ranges = result.get("nextExpectedRanges") if result else None
+            next_start = (
+                int(ranges[0].split("-", 1)[0])
+                if ranges
+                else start + len(chunk)
+            )
+            if next_start <= start or next_start > total:
+                raise ValueError("Graph upload session made no progress")
+            start = next_start
+    except BaseException:
+        try:
+            await cancel_upload(config, upload_url, session=session)
+        except Exception:
+            logger.debug(
+                "Could not cancel Graph upload session", exc_info=True
+            )
+        raise
+
+
+async def write_item_stream(
+    config: MsGraphConfig,
+    loc: DriveLoc,
+    data: ByteSource,
+    session: SessionArg = None,
+) -> int:
+    async with ByteSpool() as spool:
+        await spool.fill(data)
+        if spool.size <= SIMPLE_UPLOAD_MAX:
+            await write_item(
+                config, loc, await spool.read(0, spool.size), session=session
+            )
         else:
-            start += len(chunk)
+            await upload_session_write(
+                config,
+                loc.item("/createUploadSession"),
+                spool,
+                session=session,
+            )
+        return spool.size
 
 
 async def write_item(

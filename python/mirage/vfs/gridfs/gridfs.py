@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.gridfs import GridFSAccessor
-from mirage.core.generic.rewrite import append_by_rewrite
+from mirage.core.generic.rewrite import append_by_streamed_rewrite
 from mirage.core.gridfs.constants import SCOPE_ERROR
 from mirage.core.gridfs.copy import copy as _copy
 from mirage.core.gridfs.create import create as _create
@@ -33,6 +33,8 @@ from mirage.core.gridfs.stream import read_stream as _read_stream
 from mirage.core.gridfs.truncate import truncate as _truncate
 from mirage.core.gridfs.unlink import unlink as _unlink
 from mirage.core.gridfs.write import write as _write
+from mirage.core.gridfs.write import write_stream as _write_stream
+from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gridfs.config import GridFSConfig
@@ -84,8 +86,24 @@ class GridFSVFS(BaseVFS):
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)
 
+    async def write_stream(
+        self, path: PathSpec, data: ByteSource, *, atomic: bool = False
+    ) -> None:
+        await _write_stream(self.accessor, path, data)
+
     async def append(self, path: PathSpec, data: bytes) -> None:
-        await append_by_rewrite(self.read, self.write, self.stat, path, data)
+        await self.append_stream(path, data)
+
+    async def append_stream(self, path: PathSpec, data: ByteSource) -> None:
+        await append_by_streamed_rewrite(
+            lambda p, remember: _read_stream(
+                self.accessor, p, on_version=remember
+            ),
+            self.write_stream,
+            self.stat,
+            path,
+            data,
+        )
 
     async def create(self, path: PathSpec) -> None:
         await _create(self.accessor, path)

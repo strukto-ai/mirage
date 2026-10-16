@@ -1392,10 +1392,17 @@ class MountEntry:
             if not isinstance(data, bytes) and self.vfs.supports(
                 "write_stream"
             ):
-                await self.vfs.write_stream(
-                    path, data, **({"atomic": True} if atomic else {})
+                return await self.vfs.write_stream(
+                    path,
+                    data,
+                    **({"atomic": True} if atomic else {}),
+                    **_handed_on(
+                        self.vfs.write_stream,
+                        index,
+                        entry=entry,
+                        parent=parent,
+                    ),
                 )
-                return None
             write: Callable[..., Awaitable[Any]] = self.vfs.write
             return await write(
                 path,

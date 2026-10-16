@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteSpool } from '../../io/spool.ts'
+import type { ByteSource } from '../../io/types.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import { fromByteView } from '../../shell/bytes.ts'
 import { GetlineKind, RedirKind } from './nodes.ts'
@@ -72,7 +74,6 @@ import {
   toStr,
   type Value,
 } from './value.ts'
-import { concat } from '../../utils/bytes.ts'
 
 const SCALAR_DEFAULTS: Readonly<Record<string, string>> = {
   FS: ' ',
@@ -154,12 +155,12 @@ export class Interpreter {
   private readonly globals = new Map<string, Value>()
   private readonly tables = new Map<string, AwkArray>()
   private readonly frames: Frame[] = []
-  private readonly out: Uint8Array[] = []
-  private readonly held: Uint8Array[] = []
-  private readonly err: Uint8Array[] = []
+  private out = new ByteSpool()
+  private held = new ByteSpool()
+  private err = new ByteSpool()
   private readonly outFiles = new Map<string, string[]>()
   private readonly outFileSizes = new Map<string, number>()
-  private readonly outPipes = new Map<string, string[]>()
+  private readonly outPipes = new Map<string, ByteSpool>()
   private readonly inFiles = new Map<string, RecordReader>()
   private readonly inPipes = new Map<string, InputPipe>()
   private main: RecordReader | null = null
@@ -534,7 +535,7 @@ export class Interpreter {
     if (pipe === undefined) {
       await this.beforeCommand()
       const run = await this.host.run(command, null)
-      this.err.push(run.stderr)
+      await this.err.fill(run.stderr)
       pipe = { reader: new RecordReader(run.stdout, () => this.special('RS')), status: run.status }
       this.inPipes.set(command, pipe)
     }
@@ -785,15 +786,16 @@ export class Interpreter {
    * text waits, since the pipe's command prints ahead of it when it runs;
    * once held, later text waits behind it.
    */
-  private stdout(body: string): void {
-    if (this.outPipes.size > 0 || this.held.length > 0) this.held.push(fromByteView(body))
-    else this.out.push(fromByteView(body))
+  private async stdout(body: string): Promise<void> {
+    if (this.outPipes.size > 0 || this.held.size > 0) await this.held.append(fromByteView(body))
+    else await this.out.append(fromByteView(body))
   }
 
   /** Let held standard output go, as a flush of stdout does. */
-  private release(): void {
-    this.out.push(...this.held)
-    this.held.length = 0
+  private async release(): Promise<void> {
+    await this.out.fill(this.held.stream())
+    await this.held.close()
+    this.held = new ByteSpool()
   }
 
   /** Write through the host, a failure ending the run. */
@@ -827,7 +829,7 @@ export class Interpreter {
   private async beforeCommand(): Promise<void> {
     await this.flushFiles()
     await this.host.flushOutput()
-    this.release()
+    await this.release()
   }
 
   /**
@@ -839,7 +841,7 @@ export class Interpreter {
   private async write(body: string, node: Print | Printf): Promise<void> {
     const redirect = node.redirect
     if (redirect === null) {
-      this.stdout(body)
+      await this.stdout(body)
       return
     }
     const name = toStr(await this.eval(redirect.target), this.convfmt())
@@ -847,18 +849,18 @@ export class Interpreter {
       let pipe = this.outPipes.get(name)
       if (pipe === undefined) {
         await this.beforeCommand()
-        pipe = []
+        pipe = new ByteSpool()
         this.outPipes.set(name, pipe)
       }
-      pipe.push(body)
+      await pipe.append(fromByteView(body))
       return
     }
     if (STDOUT_NAMES.has(name)) {
-      this.stdout(body)
+      await this.stdout(body)
       return
     }
     if (name === STDERR_NAME) {
-      this.err.push(fromByteView(body))
+      await this.err.fill(fromByteView(body))
       return
     }
     let pending = this.outFiles.get(name)
@@ -875,13 +877,18 @@ export class Interpreter {
 
   /** Run an output pipe's command on everything printed to it. */
   private async closeOutPipe(command: string): Promise<number> {
-    const body = (this.outPipes.get(command) ?? []).join('')
+    const body = this.outPipes.get(command)
+    if (body === undefined) return -1
     this.outPipes.delete(command)
-    await this.flushFiles()
-    const run = await this.host.run(command, fromByteView(body))
-    this.out.push(run.stdout)
-    this.err.push(run.stderr)
-    return run.status
+    try {
+      await this.flushFiles()
+      const run = await this.host.run(command, body.stream())
+      await this.out.fill(run.stdout)
+      await this.err.fill(run.stderr)
+      return run.status
+    } finally {
+      await body.close()
+    }
   }
 
   /**
@@ -923,7 +930,7 @@ export class Interpreter {
       return 0
     }
     if (STDOUT_NAMES.has(name)) {
-      this.release()
+      await this.release()
       return 0
     }
     if (this.outFiles.has(name)) {
@@ -938,8 +945,8 @@ export class Interpreter {
   private async system(command: string): Promise<number> {
     await this.beforeCommand()
     const run = await this.host.run(command, null)
-    this.out.push(run.stdout)
-    this.err.push(run.stderr)
+    await this.out.fill(run.stdout)
+    await this.err.fill(run.stderr)
     return run.status
   }
 
@@ -1134,7 +1141,7 @@ export class Interpreter {
     for (const command of [...this.outPipes.keys()].reverse()) await this.closeOutPipe(command)
     await this.flushFiles()
     await this.host.flushOutput()
-    this.release()
+    await this.release()
     await this.closeInputs()
   }
 
@@ -1149,14 +1156,20 @@ export class Interpreter {
     for (const reader of readers) await reader.close()
   }
 
+  async closeOutputs(): Promise<void> {
+    for (const spool of [this.out, this.err, this.held, ...this.outPipes.values()])
+      await spool.close()
+    this.outPipes.clear()
+  }
+
   /**
    * Take the output ready so far, standard output then stderr. Called
    * between records: the files are written out, and standard output held
    * for an output pipe stays held until the pipe closes.
    */
-  async drain(): Promise<[Uint8Array, Uint8Array]> {
+  async drain(): Promise<[ByteSource, ByteSource]> {
     await this.flushFiles()
-    if (this.outPipes.size === 0) this.release()
+    if (this.outPipes.size === 0) await this.release()
     return this.take()
   }
 
@@ -1167,24 +1180,24 @@ export class Interpreter {
    * buffers and nothing else. The error is reported, and after it any
    * file that could not be written now.
    */
-  async salvage(failure: Error): Promise<[Uint8Array, Uint8Array]> {
-    this.err.push(fromByteView(`${failure.message}\n`))
+  async salvage(failure: Error): Promise<[ByteSource, ByteSource]> {
+    await this.err.fill(fromByteView(`${failure.message}\n`))
     try {
       await this.flushFiles()
       await this.host.flushOutput()
     } catch (err) {
       if (!(err instanceof AwkRuntimeError)) throw err
-      this.err.push(fromByteView(`${err.message}\n`))
+      await this.err.fill(fromByteView(`${err.message}\n`))
     }
-    this.release()
+    await this.release()
     return this.take()
   }
 
-  private take(): [Uint8Array, Uint8Array] {
-    const out = concat(this.out)
-    const err = concat(this.err)
-    this.out.length = 0
-    this.err.length = 0
-    return [out, err]
+  private async take(): Promise<[ByteSource, ByteSource]> {
+    const out = this.out,
+      err = this.err
+    this.out = new ByteSpool()
+    this.err = new ByteSpool()
+    return [await out.output(), await err.output()]
   }
 }

@@ -12,6 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSpool } from '../../io/spool.ts'
+import { chunks } from '../../io/cooperative.ts'
+import { Sha1 } from '../../utils/hash.ts'
+import { encodeBase64 } from '../../utils/base64.ts'
+import { sleep } from '../../utils/abort.ts'
+import type { ApiResponse } from '../api/client.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
 import { apiRequest } from '../api/client.ts'
@@ -348,4 +354,80 @@ export async function boxUploadMultipart(
     headers: { ...(await boxAuthHeaders(tm)), ...headers },
     body: form,
   })
+}
+
+function digestHeader(digest: Sha1): string {
+  const hex = digest.digest()
+  return (
+    'sha=' +
+    encodeBase64(
+      Uint8Array.from({ length: 20 }, (_, i) => Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16)),
+    )
+  )
+}
+
+export async function boxUploadSession(
+  tm: BoxTokenManager,
+  url: string,
+  metadata: Record<string, unknown>,
+  spool: ByteSpool,
+  etag: string | null = null,
+): Promise<unknown> {
+  const created = (await boxPostJson(tm, url, { ...metadata, file_size: spool.size })) as {
+    session_endpoints: { upload_part: string; commit: string; abort: string }
+    part_size: number
+  }
+  const endpoints = created.session_endpoints
+  const partSize = created.part_size
+  const parts: unknown[] = []
+  const digest = new Sha1()
+  try {
+    if (!Number.isSafeInteger(partSize) || partSize <= 0 || partSize > 64 * 1024 * 1024)
+      throw new Error('Invalid Box upload part size')
+    for (let offset = 0; offset < spool.size; offset += partSize) {
+      const data = await spool.read(offset, partSize)
+      const partDigest = new Sha1()
+      for await (const chunk of chunks(data)) {
+        digest.update(chunk)
+        partDigest.update(chunk)
+      }
+      const response = (await apiRequest('PUT', endpoints.upload_part, {
+        errorOf: errorOf('upload part', url),
+        headers: {
+          ...(await boxAuthHeaders(tm)),
+          'Content-Type': 'application/octet-stream',
+          Digest: digestHeader(partDigest),
+          'Content-Range': `bytes ${String(offset)}-${String(offset + data.length - 1)}/${String(spool.size)}`,
+        },
+        body: data as unknown as BodyInit,
+      })) as { part: unknown }
+      parts.push(response.part)
+    }
+    const headers: Record<string, string> = {
+      Digest: digestHeader(digest),
+      'Content-Type': 'application/json',
+    }
+    if (etag !== null) headers['If-Match'] = etag
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const response = (await apiRequest('POST', endpoints.commit, {
+        errorOf: errorOf('commit upload', url),
+        headers: { ...(await boxAuthHeaders(tm)), ...headers },
+        json: { parts },
+        read: 'response',
+      })) as ApiResponse
+      if (response.status === 201) return response.data
+      if (response.status !== 202)
+        throw new Error(`Unexpected Box commit status: ${String(response.status)}`)
+      const delay = Number(response.headers['retry-after'] ?? '1')
+      await sleep(1000 * Math.max(0, Math.min(Number.isFinite(delay) ? delay : 1, 30)))
+    }
+    throw new Error('Box upload commit did not complete')
+  } catch (error) {
+    try {
+      await boxDelete(tm, endpoints.abort)
+    } catch (cleanup) {
+      console.debug('Could not abort Box upload session', cleanup)
+    }
+    throw error
+  }
 }

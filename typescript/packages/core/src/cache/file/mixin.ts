@@ -84,13 +84,13 @@ export interface FileCache {
 /**
  * Max bytes a streamed read may buffer to fill the cache.
  *
- * null (the default) derives the budget from `cacheLimit`. An explicit
+ * null (the default) caps each fill at 8 MiB or `cacheLimit`. An explicit
  * value keeps larger streams out of the cache and may not exceed the
  * cache's intended capacity. Mirrors Python `drain_budget`.
  */
 export function drainBudget(cache: FileCache): number {
   validateMaxDrainBytes(cache.cacheLimit, cache.maxDrainBytes)
-  return cache.maxDrainBytes ?? cache.cacheLimit
+  return cache.maxDrainBytes ?? Math.min(cache.cacheLimit, 8 * 1024 * 1024)
 }
 
 export function validateMaxDrainBytes(cacheLimit: number, maxDrainBytes: number | null): void {

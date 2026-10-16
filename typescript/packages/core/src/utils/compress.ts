@@ -159,12 +159,28 @@ export async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
 }
 
 /** Gzip bounded input chunks, yielding bounded output and closing an abandoned source. */
-export async function* gzipCompressStream(
+export function gzipCompressStream(
   source: AsyncIterable<Uint8Array>,
   level: number | null = null,
+  name = '',
+): AsyncGenerator<Uint8Array, void> {
+  return deflateStream(source, level, name, 31)
+}
+
+export function deflateRawStream(
+  source: AsyncIterable<Uint8Array>,
+): AsyncGenerator<Uint8Array, void> {
+  return deflateStream(source, null, '', -15)
+}
+
+async function* deflateStream(
+  source: AsyncIterable<Uint8Array>,
+  level: number | null,
+  name: string,
+  windowBits: number,
 ): AsyncGenerator<Uint8Array, void> {
   const stream = new ZStream()
-  if (zlibDeflateInit2(stream, level ?? -1, GZIP_DEFLATED, 31, 8, 0) !== Z_OK) {
+  if (zlibDeflateInit2(stream, level ?? -1, GZIP_DEFLATED, windowBits, 8, 0) !== Z_OK) {
     throw new Error('gzip compressor initialization failed')
   }
   function* compress(finish: boolean): Generator<Uint8Array> {
@@ -176,7 +192,17 @@ export async function* gzipCompressStream(
       if (status !== Z_OK && status !== Z_STREAM_END && !(status === Z_BUF_ERROR && !finish)) {
         throw new Error(stream.msg || 'gzip compression failed')
       }
-      if (stream.next_out > 0) yield stream.output.subarray(0, stream.next_out)
+      if (stream.next_out > 0) {
+        const data = stream.output.subarray(0, stream.next_out)
+        if (name !== '') {
+          const header = data.slice(0, GZIP_FIXED_HEADER)
+          header[3] = (header[3] ?? 0) | GZIP_ORIG_NAME
+          yield header
+          yield new TextEncoder().encode(name + '\0')
+          yield data.subarray(GZIP_FIXED_HEADER)
+          name = ''
+        } else yield data
+      }
       if (status === Z_STREAM_END || (!finish && stream.avail_in === 0 && stream.avail_out > 0)) {
         return
       }
@@ -486,6 +512,8 @@ export async function inflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
 // permissively licensed bzip2 implementation decompresses only, so mirage
 // reads a .tar.bz2 and refuses to create one.
 export interface CompressionCodec {
+  compressStream?(source: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array>
+  decompressStream?(source: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array>
   compress?(bytes: Uint8Array): Promise<Uint8Array>
   decompress(bytes: Uint8Array): Promise<Uint8Array>
 }
@@ -502,4 +530,37 @@ export function registerCompressionCodec(name: string, codec: CompressionCodec):
 
 export function getCompressionCodec(name: string): CompressionCodec | undefined {
   return codecs.get(name)
+}
+
+export async function* inflateRawStream(
+  source: AsyncIterable<Uint8Array>,
+): AsyncGenerator<Uint8Array, void> {
+  const stream = new ZStream()
+  if (zlibInflateInit2(stream, -15) !== Z_OK) throw new Error('inflate initialization failed')
+  let ended = false
+  try {
+    for await (const data of chunks(source)) {
+      if (ended) continue
+      stream.input = data
+      stream.next_in = 0
+      stream.avail_in = data.length
+      do {
+        stream.output = new Uint8Array(CHUNK_SIZE)
+        stream.next_out = 0
+        stream.avail_out = CHUNK_SIZE
+        const status = zlibInflate(stream, Z_NO_FLUSH)
+        if (status !== Z_OK && status !== Z_STREAM_END && status !== Z_BUF_ERROR)
+          throw new Error(stream.msg || 'invalid deflate stream')
+        if (stream.next_out > 0) yield stream.output.subarray(0, stream.next_out)
+        if (status === Z_STREAM_END) {
+          ended = true
+          break
+        }
+        if (status === Z_BUF_ERROR && stream.avail_in === 0) break
+      } while (stream.avail_in > 0 || stream.avail_out === 0)
+    }
+    if (!ended) throw new Error('truncated deflate stream')
+  } finally {
+    zlibInflateEnd(stream)
+  }
 }

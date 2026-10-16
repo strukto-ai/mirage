@@ -32,7 +32,7 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=20.18.1 <21 || >=22"
+    "node": "^22.20 || ^24.12 || >=25"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -57,15 +57,15 @@
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.1121.0",
-    "@napi-rs/lzma": "^1.4.5",
+    "@napi-rs/lzma": "^1.5.1",
     "@struktoai/mirage-core": "workspace:*",
     "dotenv": "^16.6.1",
     "fast-xml-parser": "^5.9.0",
     "fast-xml-validator": "^1.4.0",
     "http-proxy-agent": "^7.0.2",
     "https-proxy-agent": "^7.0.6",
-    "seek-bzip": "^2.0.0",
     "tree-sitter-bash": "^0.25.1",
+    "unbzip2-stream": "^1.4.3",
     "undici": "^7.30.0",
     "web-tree-sitter": "^0.26.13",
     "yaml": "^2.6.0"

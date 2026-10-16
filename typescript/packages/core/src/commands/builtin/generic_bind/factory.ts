@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { SharedInput } from '../../../io/async_line_iterator.ts'
 import { guardInput } from '../utils/limit.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
@@ -146,7 +147,11 @@ function bind(
       texts,
       {
         ...opts,
-        stdin: opts.stdin === null ? null : guardInput(opts.stdin, opts, split),
+        // head guards its own pulls and needs the descriptor cursor to return lookahead.
+        stdin:
+          opts.stdin === null || (b.name === 'head' && opts.stdin instanceof SharedInput)
+            ? opts.stdin
+            : guardInput(opts.stdin, opts, split),
       },
     )
   }

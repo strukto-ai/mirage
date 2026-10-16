@@ -10,6 +10,14 @@ Most of Mirage's behavior is identical across Python and TypeScript. The two TS 
   `python3` has its own set of WASM-runtime-level divergences from Python Mirage's subprocess model. See [Python](/typescript/python#limitations) for the full list.
 </Note>
 
+## Node versions
+
+The Node SDK and packages that use it require Node `^22.20 || ^24.12 || >=25`,
+matching the [XZ streaming codec](https://www.npmjs.com/package/@napi-rs/lzma)
+shipped with the SDK. Node 20, 23, and early Node 22/24 releases are outside
+that range. The runtime-agnostic core and browser packages do not acquire this
+Node requirement.
+
 ## Shell traps (Python, Node and Browser)
 
 `trap 'commands' EXIT` (or `0`) registers cleanup for the shell that ends. It runs at `exit`, in the frame that called it, so a function's locals and `$1` are still in scope. It also runs when a child shell ends (`bash -c`, a script, `( ... )`, a pipeline stage, `$( )`, a background job) or when `set -e` or a fatal expansion error ends the shell. `$?` starts at the ending status. The status stays that unless the cleanup calls `exit N` or fails under `set -e`.
@@ -217,3 +225,35 @@ Queued calls have not started execution: cancelling one removes its waiter immed
 Cancellation itself has one seam. Python runs the whole line as one task, cancels it and joins it, so every await in the line unwinds before `execute` raises; the line's own flush and history record get the same 250 ms grace after the cancel and are cancelled too if a store holds them past it. A JavaScript promise cannot be cancelled, so TypeScript fires the signal, joins the tree for a short grace (250 ms) while responsive leaves close their producers and settle, then releases the caller. `execute` always rejects with an `AbortError` whose `cause` is the signal's reason. A leaf that does not observe the signal within the grace (a custom handler, a backend call with no signal parameter) keeps running in the background until it settles on its own; its output is dropped and it cannot change `$?` (the status entry point refuses a statement that settles after the release), but any write it completes still lands on the backend. A handler that loops over operands reaches its backend through slots (a generic-bound command such as `rm`, `cp` or `mkdir`) or through the dispatcher (a namespace-routed one such as `chmod`, `touch` or `rm` of a link), and both refuse to start once the signal has fired, so a released line begins no further read or write between operands; only a custom handler that reaches its backend directly can. Python's cancelled task never reaches the next operand, and a Python handler or store must let `CancelledError` propagate: one that swallows both deliveries holds `execute` until it returns, as it would hold `asyncio.wait_for`, and a warning is logged while it does. A caller cancelled from outside (`asyncio.wait_for` around `execute`) gets the same grace as the event. Loading workspace state, parsing, routing, the fetch of a managed variable's secret, the history record and the session flush are raced against the signal as well, so a stalled state store or secret source cannot hold the caller either. A line is recorded in history once it has been parsed; an abort that lands while workspace state is still loading records nothing, in both languages. A command timeout is the line's own answer (exit 124), never an abort of the invocation: neither language writes the caller's signal or event. A background job, and every line it evaluates, runs without the caller's signal or event; only `kill` reaches it.
 
 The cancellation boundary is caller completion, not proof that every custom handler has stopped. TypeScript retains the evaluation and its owned parser programs until the command tree settles, even after the grace releases the caller. An uncooperative mount handler can keep running after that tree settles. An embedding that needs a hard stop for arbitrary handlers must provide process or worker isolation.
+
+
+## Streaming resource bounds
+
+Named gzip/gunzip/zgrep, `iconv -o`, archive commands, deferred redirects and
+script output, external sort, split/csplit and record reordering use incremental
+I/O or replayable scratch storage. Known-size tar members can emit immediately;
+unknown-size members must be spooled before writing their headers. ZIP updates
+copy unchanged compressed members, but archive indexing and updates still read
+the existing archive in full. They do not yet use remote range reads to fetch
+only the central directory or selected members.
+
+Streaming bounds payload memory in supported host packages; it does not make
+every algorithm constant-memory. A single large record, archive metadata,
+AWK arrays, regex `tac`, `diff`/`patch` and `jq --slurp` retain their algorithmic
+working data. Whole-byte results still collect output. Custom whole-byte
+compression codecs also retain their buffering behavior; the Node XZ and
+bzip2 decoders use incremental codecs.
+
+Native write paths cover disk, SSH, OPFS, GridFS and the upload-session APIs for
+Drive, Dropbox, OneDrive, SharePoint and Box. Uploads that require a length or
+replay stage their input first. Provider sessions are cleaned up where the API
+supports it; this is not a durable upload-resume service across process restarts.
+S3 uses 8 MiB multipart parts, with a 10,000-part limit (about 78.1 GiB with this
+fixed part size). Presigned uploads and conditional writes to custom S3 endpoints
+retain a single PUT, backed by scratch storage and limited to 5 GiB. Store-native
+append is unavailable on S3: it still downloads and uploads the object again.
+
+Async I/O lets another request run while an operation waits. Compression and
+comparison still consume CPU; spooling adds local I/O. Reductions in peak memory
+or time to first output do not imply an equal increase in server throughput or
+lower cloud network bills.

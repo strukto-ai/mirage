@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -33,6 +33,8 @@ async def read_stream(
     accessor: S3Accessor,
     path_spec: PathSpec,
     chunk_size: int = 8192,
+    *,
+    on_version: Callable[[str | None], None] | None = None,
 ) -> AsyncIterator[bytes]:
     """Async generator yielding chunks of an S3 object.
 
@@ -40,12 +42,12 @@ async def read_stream(
         accessor (S3Accessor): S3 accessor.
         path_spec (PathSpec): Object path.
         chunk_size (int): Size of each chunk in bytes.
+        on_version (Callable | None): receive the token of this exact stream.
     """
     virtual = path_spec.virtual
     path = path_spec.mount_path
     pinned_revision = revision_for(virtual)
     config = accessor.config
-    rec = record_stream("read", virtual, "s3")
     # The accessor's cached client, not a fresh one. It outlives this
     # generator, which is what a stream needs: the body is consumed after
     # the call that produced it returns.
@@ -64,8 +66,11 @@ async def read_stream(
         if is_not_found(exc):
             raise enoent(virtual) from exc
         raise
+    rec = record_stream("read", virtual, "s3")
+    fingerprint, revision = _fp_rev_from_s3_response(response)
+    if on_version is not None:
+        on_version(fingerprint)
     if rec is not None:
-        fingerprint, revision = _fp_rev_from_s3_response(response)
         rec.fingerprint = fingerprint
         rec.revision = revision
     body = response["Body"]

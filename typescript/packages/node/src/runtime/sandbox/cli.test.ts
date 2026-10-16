@@ -204,7 +204,18 @@ describe('runCli', () => {
       },
     }
     const run = runCli('sh', null, ['-c', 'exit 0'], input, { children })
+    const exited = Promise.all(
+      [...children].map(
+        (child) =>
+          new Promise<void>((resolve) => {
+            child.once('close', () => {
+              resolve()
+            })
+          }),
+      ),
+    )
     await entered
+    await exited
     await closeChildren(children)
     release()
     expect((await run).code).toBe(0)

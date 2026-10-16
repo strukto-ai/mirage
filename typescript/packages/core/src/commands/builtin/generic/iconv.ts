@@ -18,7 +18,8 @@ import type { FlagValue } from '../../spec/types.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { ByteSpool } from '../../../io/spool.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -323,7 +324,7 @@ export async function iconvGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  write: (p: PathSpec, data: Uint8Array) => Promise<void>,
+  write: (p: PathSpec, data: ByteSource) => Promise<void>,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, opts.stdin)
   const parsed = parseFlags(opts.flags)
@@ -386,7 +387,13 @@ export async function iconvGeneric(
   }
   const converted = output()
   if (parsed.outputPath !== null) {
-    await write(parsed.outputPath, await materialize(converted))
+    const spool = new ByteSpool()
+    try {
+      await spool.fill(converted)
+      await write(parsed.outputPath, spool.stream())
+    } finally {
+      await spool.close()
+    }
     return [null, io]
   }
   return [converted, io]

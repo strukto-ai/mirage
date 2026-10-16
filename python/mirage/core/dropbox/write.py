@@ -19,16 +19,17 @@ from mirage.core.dropbox.client import DropboxApiError, dropbox_upload
 from mirage.core.dropbox.fingerprint import live_of
 from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.core.dropbox.readdir import stat_from_entry
+from mirage.io.spool import ByteSpool
+from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import FileStat, PathSpec
 from mirage.utils.upload import upload_stat
 
 
 async def write(
-    accessor: DropboxAccessor, path: PathSpec, data: bytes
+    accessor: DropboxAccessor, path: PathSpec, data: bytes | ByteSpool
 ) -> FileStat | None:
-    """Upload in a single call; Dropbox caps it at ~150 MB (larger files
-    need upload sessions, not supported here).
+    """Upload a body, using sessions for large spooled inputs.
 
     A held version costs one get_metadata and goes out as the file's rev
     in ``update`` mode.
@@ -59,8 +60,16 @@ async def write(
         "write",
         path.virtual,
         "dropbox",
-        len(data),
+        data.size if isinstance(data, ByteSpool) else len(data),
         timer,
         fingerprint=None if stored is None else stored.fingerprint,
     )
     return stored
+
+
+async def write_stream(
+    accessor: DropboxAccessor, path: PathSpec, data: ByteSource
+) -> FileStat | None:
+    async with ByteSpool() as spool:
+        await spool.fill(data)
+        return await write(accessor, path, spool)

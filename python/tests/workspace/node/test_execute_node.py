@@ -112,7 +112,7 @@ async def _sort_run_command(
 ):
     """Mock run_command that sorts stdin for sort command."""
     if name == "sort" and context.stdin:
-        data = context.stdin if isinstance(context.stdin, bytes) else b""
+        data = await materialize(context.stdin)
         lines = data.decode().strip().split("\n")
         lines.sort()
         return "\n".join(lines).encode() + b"\n", IOResult()

@@ -12,14 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CHUNK_SIZE, chunks } from '../../../../io/cooperative.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
+import { ByteSpool } from '../../../../io/spool.ts'
+import { OutputStream, asyncChain, primeStream, closeQuietly } from '../../../../io/stream.ts'
+import { gzipCompressStream, gunzipStream } from '../../../../utils/compress.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
-import { gzip, gunzipPartial, getCompressionCodec } from '../../../../utils/compress.ts'
+import { gzip, getCompressionCodec } from '../../../../utils/compress.ts'
 import type { CommandFnResult, CommandOpts } from '../../../config.ts'
-import { readTar, writeTar, type TarEntry } from '../../tar_helper.ts'
+import {
+  readTarSpool,
+  writeTarStream,
+  type StreamingTarEntry,
+  type TarEntry,
+} from '../../tar_helper.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import {
   CHILD_NAME,
@@ -124,7 +133,7 @@ function outParts(name: string, stripN: number, notices: string[]): string[] {
 // mistaken for an absent one.
 export interface TarDeps {
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>
-  write: (p: PathSpec, data: Uint8Array) => Promise<void>
+  write: (p: PathSpec, data: ByteSource) => Promise<void>
   mkdir: (p: PathSpec, parents?: boolean) => Promise<void>
   stat: StatFn
   walk: WalkFn
@@ -232,6 +241,22 @@ export function parseFlags(bag: Record<string, FlagValue>): TarFlags {
   }
 }
 
+function compressArchive(
+  raw: AsyncIterable<Uint8Array>,
+  kind: Exclude<Compression, null>,
+): AsyncIterable<Uint8Array> {
+  const codec = getCompressionCodec(kind)
+  if (codec?.compressStream !== undefined) return codec.compressStream(raw)
+  return bufferedCompress(raw, kind)
+}
+
+async function* bufferedCompress(
+  raw: AsyncIterable<Uint8Array>,
+  kind: Compression,
+): AsyncGenerator<Uint8Array> {
+  yield await compress(await materialize(raw), kind)
+}
+
 async function compress(raw: Uint8Array, kind: Compression): Promise<Uint8Array> {
   if (kind === null) return raw
   if (kind === 'gzip') return gzip(raw)
@@ -260,48 +285,74 @@ function unsupportedKind(compression: Compression, create: boolean): Compression
  * it and stops there. Mirrors Python's _open_archive for listing and
  * extraction.
  */
-async function readArchive(data: Uint8Array, kind: Compression): Promise<ReadResult> {
-  const foreign = kind !== null ? FOREIGN_INPUT[kind] : undefined
-  if (
-    foreign !== undefined &&
-    !foreign.magic.every((byte, at) => data[at] === byte) &&
-    (data.byteLength > 0 || foreign.emptyToo)
-  ) {
-    // The child refuses the input before tar reads a block.
-    return {
-      entries: [],
-      failure: new GzipDataError([foreign.line], true, foreign.status),
-      notices: [],
-      cut: null,
-    }
-  }
-  const detected = kind ?? detectCompression(data)
-  let failure: GzipDataError | null = null
-  if (detected === 'gzip') {
-    ;[data, failure] = await gunzipPartial(data)
-    if (failure !== null && data.byteLength === 0)
-      return { entries: [], failure, notices: [], cut: null }
-  } else if (detected !== null) {
-    const codec = getCompressionCodec(detected)
-    if (codec !== undefined) data = await codec.decompress(data)
-  }
-  const whole = data.byteLength - (data.byteLength % 512)
+async function readArchive(
+  raw: ByteSpool,
+  kind: Compression,
+  contents: ByteSpool,
+): Promise<ReadResult> {
+  const decoded = new ByteSpool()
+  let data = raw
   try {
-    const entries = await readTar(whole > 0 ? data.subarray(0, whole) : data)
-    const cut = entries.findIndex((e) => (e.header?.size ?? 0) > e.data.byteLength)
-    return { entries, failure, notices: [], cut: cut === -1 ? null : cut }
-  } catch (err) {
-    if (!(err instanceof Error)) throw err
-    return {
-      entries: [],
-      failure,
-      cut: null,
-      notices:
-        data.byteLength >= 512
-          ? [...INVALID_ARCHIVE]
-          : failure === null
-            ? INVALID_ARCHIVE.slice(0, 1)
-            : [],
+    const first = await raw.read(0, 6)
+    const foreign = kind !== null ? FOREIGN_INPUT[kind] : undefined
+    if (
+      foreign !== undefined &&
+      !foreign.magic.every((byte, at) => first[at] === byte) &&
+      (raw.size > 0 || foreign.emptyToo)
+    ) {
+      return {
+        entries: [],
+        failure: new GzipDataError([foreign.line], true, foreign.status),
+        notices: [],
+        cut: null,
+      }
+    }
+    const detected = kind ?? detectCompression(first)
+    let failure: GzipDataError | null = null
+    if (detected === 'gzip') {
+      try {
+        await decoded.fill(gunzipStream(raw.stream()))
+      } catch (error) {
+        if (!(error instanceof GzipDataError)) throw error
+        failure = error
+      }
+      data = decoded
+      if (failure !== null && data.size === 0)
+        return { entries: [], failure, notices: [], cut: null }
+    } else if (detected !== null) {
+      const codec = getCompressionCodec(detected)
+      if (codec !== undefined) {
+        await decoded.fill(
+          codec.decompressStream === undefined
+            ? await codec.decompress(await raw.read(0, raw.size))
+            : codec.decompressStream(raw.stream()),
+        )
+        data = decoded
+      }
+    }
+    try {
+      const entries = await readTarSpool(data, contents)
+      const cut = entries.findIndex((e) => (e.header?.size ?? 0) > (e.body?.size ?? 0))
+      return { entries, failure, notices: [], cut: cut < 0 ? null : cut }
+    } catch (error) {
+      if (!(error instanceof Error)) throw error
+      return {
+        entries: [],
+        failure,
+        cut: null,
+        notices:
+          data.size >= 512
+            ? [...INVALID_ARCHIVE]
+            : failure === null
+              ? INVALID_ARCHIVE.slice(0, 1)
+              : [],
+      }
+    }
+  } finally {
+    try {
+      await decoded.close()
+    } finally {
+      await raw.close()
     }
   }
 }
@@ -377,10 +428,13 @@ async function readArchiveBytes(
   archive: PathSpec,
   isDir: DirProbe,
   compression: Compression,
-): Promise<Uint8Array | IOResult> {
+): Promise<ByteSpool | IOResult> {
+  const spool = new ByteSpool()
   try {
-    return await materialize(stream(archive))
+    await spool.fill(stream(archive))
+    return spool
   } catch (err) {
+    await spool.close()
     if (!isFsError(err)) throw err
     const missing = (err as { code?: string }).code === 'ENOENT'
     const failure =
@@ -396,56 +450,89 @@ async function writeArchive(
   verbose: boolean,
   deps: TarDeps,
 ): Promise<CommandFnResult> {
-  const entries: TarEntry[] = []
   const names: string[] = []
-  // A file the session may not read (a rule refused it below the
-  // operand) is GNU's "Cannot open": the member is left out, the run
-  // fails, and the one trailer closes the notices. The plan's notices
-  // come first, so a directory the scan could not open is reported
-  // before a file the write could not read.
   const notices = plan.notices.filter((n) => n !== ERROR_TRAILER)
-  let exitCode = plan.exitCode
-  for (const member of plan.members) {
-    let data: Uint8Array = new Uint8Array(0)
-    if (member.path !== null) {
+  const result = new IOResult({ exitCode: plan.exitCode })
+  async function* entries(): AsyncGenerator<StreamingTarEntry> {
+    for (const member of plan.members) {
+      const spool = new ByteSpool()
+      let source: ByteSource = new Uint8Array()
       try {
-        data = await materialize(deps.stream(member.path))
-      } catch (err) {
-        if (!isEacces(err)) throw err
-        notices.push(
-          `tar: ${member.spelled ?? member.name}: Cannot open: ${String(fsStrerror(err))}`,
-        )
-        exitCode = CREATE_ERROR_EXIT
-        continue
+        let size = member.size ?? null
+        if (member.path !== null) {
+          try {
+            if (size === null) {
+              await spool.fill(deps.stream(member.path))
+              source = spool.stream()
+              size = spool.size
+            } else source = await primeStream(deps.stream(member.path))
+          } catch (error) {
+            if (!isEacces(error)) throw error
+            notices.push(
+              `tar: ${member.spelled ?? member.name}: Cannot open: ${String(fsStrerror(error))}`,
+            )
+            result.exitCode = CREATE_ERROR_EXIT
+            continue
+          }
+        } else size = 0
+        const length = size
+        async function* body(): AsyncGenerator<Uint8Array> {
+          let seen = 0
+          for await (const data of chunks(source)) {
+            const remaining = Math.max(0, length - seen)
+            if (remaining > 0) yield data.subarray(0, remaining)
+            seen += data.length
+          }
+          if (seen !== length) {
+            const warning =
+              seen < length
+                ? `File shrank by ${String(length - seen)} bytes; padding with zeros`
+                : 'file changed as we read it'
+            notices.push(`tar: ${member.spelled ?? member.name}: ${warning}`)
+            result.exitCode = Math.max(result.exitCode, 1)
+            while (seen < length) {
+              const count = Math.min(CHUNK_SIZE, length - seen)
+              yield new Uint8Array(count)
+              seen += count
+            }
+          }
+        }
+        yield {
+          header: {
+            name: member.name,
+            size: length,
+            mtime: new Date(0),
+            type: member.kind === 'dir' ? 'directory' : member.kind === 'link' ? 'symlink' : 'file',
+            mode: member.kind === 'dir' ? 0o755 : member.kind === 'link' ? 0o777 : 0o644,
+            linkname: member.kind === 'link' ? member.target : '',
+          },
+          body: body(),
+        }
+        names.push(member.name)
+      } finally {
+        await closeQuietly(source)
+        await spool.close()
       }
     }
-    entries.push({
-      name: member.name,
-      data,
-      isFile: member.kind === 'file',
-      isDir: member.kind === 'dir',
-      linkname: member.kind === 'link' ? member.target : '',
-    })
-    names.push(member.name)
+    if (result.exitCode >= CREATE_ERROR_EXIT) notices.push(ERROR_TRAILER)
+    result.stderr = stderrOf([...notices, ...(verbose && archivePath.rawPath === '-' ? names : [])])
   }
-  if (exitCode !== 0) notices.push(ERROR_TRAILER)
-  const raw = await writeTar(entries)
-  const archive = await compress(raw, compression)
-  if (archivePath.rawPath === '-') {
-    const stderr = stderrOf([...notices, ...(verbose ? names : [])])
-    return [archive, new IOResult({ exitCode, ...(stderr !== null ? { stderr } : {}) })]
-  }
+  const raw = writeTarStream(entries())
+  const archive =
+    compression === 'gzip'
+      ? gzipCompressStream(raw)
+      : compression === null
+        ? raw
+        : compressArchive(raw, compression)
+  if (archivePath.rawPath === '-') return [archive, result]
   try {
     await deps.write(archivePath, archive)
-  } catch (err) {
-    if (!isFsError(err)) throw err
-    // GNU opens the archive before it reads a member, so an archive it
-    // cannot create is the whole run's one fatal line.
-    return [null, openFailure(archivePath.rawPath, err, compression, false)]
+  } catch (error) {
+    if (!isFsError(error)) throw error
+    return [null, openFailure(archivePath.rawPath, error, compression, false)]
   }
-  const stderr = stderrOf(notices)
   const stdout = verbose && names.length > 0 ? ENC.encode(`${names.join('\n')}\n`) : null
-  return [stdout, new IOResult({ exitCode, ...(stderr !== null ? { stderr } : {}) })]
+  return [stdout, result]
 }
 
 function longMember(entry: TarEntry, name: string): string {
@@ -546,179 +633,178 @@ export async function tarGeneric(
     return writeArchive(plan, archiveSpec, compression, verbose, deps)
   }
 
-  if (list) {
-    const raw = await readArchiveBytes(archiveStream, archiveSpec, deps.isDir, compression)
-    if (raw instanceof IOResult) return [null, raw]
-    const { entries, failure, notices, cut } = await readArchive(raw, compression)
-    const names = entries.map((e) => (e.isDir === true ? `${rstripSlash(e.name)}/` : e.name))
-    const { keep, misses } = selectedMembers(names, selectors)
-    if (keep.size > 0) {
-      const errors = await checkDirectories(directories, deps.isDir, deps.stat)
-      if (errors.length > 0) return [null, new IOResult({ exitCode: 2, stderr: stderrOf(errors) })]
+  const contents = new ByteSpool()
+  let handedOff = false
+  try {
+    if (list) {
+      const raw = await readArchiveBytes(archiveStream, archiveSpec, deps.isDir, compression)
+      if (raw instanceof IOResult) return [null, raw]
+      const { entries, failure, notices, cut } = await readArchive(raw, compression, contents)
+      const names = entries.map((e) => (e.isDir === true ? `${rstripSlash(e.name)}/` : e.name))
+      const { keep, misses } = selectedMembers(names, selectors)
+      if (keep.size > 0) {
+        const errors = await checkDirectories(directories, deps.isDir, deps.stat)
+        if (errors.length > 0)
+          return [null, new IOResult({ exitCode: 2, stderr: stderrOf(errors) })]
+      }
+      const shown = entries.flatMap((entry, index) => {
+        const name = names[index] ?? entry.name
+        const reached = cut === null || index <= cut
+        return keep.has(index) && reached ? [verbose ? longMember(entry, name) : name] : []
+      })
+      const out: ByteSource | null = shown.length > 0 ? ENC.encode(shown.join('\n') + '\n') : null
+      if (cut !== null) {
+        return [out, new IOResult({ exitCode: 2, stderr: cutShort(failure, notices) })]
+      }
+      if (failure !== null) {
+        return [out, new IOResult({ exitCode: 2, stderr: childFailure(failure, notices) })]
+      }
+      if (notices.length > 0 || misses.length > 0) {
+        const missStderr = stderrOf([...notices, ...misses, ERROR_TRAILER])
+        return [
+          out,
+          new IOResult({
+            exitCode: 2,
+            ...(missStderr !== null ? { stderr: missStderr } : {}),
+          }),
+        ]
+      }
+      return [out, new IOResult()]
     }
-    const shown = entries.flatMap((entry, index) => {
-      const name = names[index] ?? entry.name
-      const reached = cut === null || index <= cut
-      return keep.has(index) && reached ? [verbose ? longMember(entry, name) : name] : []
-    })
-    const out: ByteSource | null = shown.length > 0 ? ENC.encode(shown.join('\n') + '\n') : null
-    if (cut !== null) {
-      return [out, new IOResult({ exitCode: 2, stderr: cutShort(failure, notices) })]
-    }
-    if (failure !== null) {
-      return [out, new IOResult({ exitCode: 2, stderr: childFailure(failure, notices) })]
-    }
-    if (notices.length > 0 || misses.length > 0) {
-      const missStderr = stderrOf([...notices, ...misses, ERROR_TRAILER])
-      return [
-        out,
-        new IOResult({
-          exitCode: 2,
-          ...(missStderr !== null ? { stderr: missStderr } : {}),
-        }),
-      ]
-    }
-    return [out, new IOResult()]
-  }
 
-  if (extract) {
-    const raw = await readArchiveBytes(archiveStream, archiveSpec, deps.isDir, compression)
-    if (raw instanceof IOResult) return [null, raw]
-    const { entries, failure, notices, cut } = await readArchive(raw, compression)
-    const listed = entries.map((e) => (e.isDir === true ? `${rstripSlash(e.name)}/` : e.name))
-    const { keep, misses } = selectedMembers(listed, selectors)
-    if (keep.size > 0) {
-      const errors = await checkDirectories(directories, deps.isDir, deps.stat)
-      if (errors.length > 0) return [null, new IOResult({ exitCode: 2, stderr: stderrOf(errors) })]
-    }
-    const made = new Set<string>()
-    const chunks: Uint8Array[] = []
-    // A member GNU cannot create (a read-only region, a missing op) is
-    // reported by its own name and the run goes on to the next one,
-    // closing with the one trailer and exit 2.
-    let failed = notices.length > 0
-    const toSpec = (virtual: string): PathSpec => makePathSpec(virtual, mountPrefix)
-    for (const [index, entry] of entries.entries()) {
-      if (cut !== null && index > cut) break
-      if (!keep.has(index)) continue
-      // Only the whole blocks that arrived are written.
-      if (index === cut) notices.push(UNEXPECTED_EOF)
-      // A symlink member has no bytes to write and no namespace to write
-      // into from here (links are workspace state, not the backend's),
-      // so extraction skips it rather than dropping an empty file where
-      // a link belongs.
-      const isDir = entry.isDir === true
-      if (!entry.isFile && !isDir) continue
-      if (isDir) {
-        if (!toStdout) {
-          // A directory member is the only record an empty directory
-          // leaves, so it has to be recreated even though nothing is
-          // written inside it. Under -O nothing reaches the
-          // filesystem at all.
-          const parts = outParts(entry.name, stripN, notices)
-          if (parts.length > 0) {
-            const outDir = `${rstripSlash(destPath)}/${parts.join('/')}`
-            try {
-              await ensureDir(outDir, toSpec, deps.mkdir, deps.stat, made)
-            } catch (err) {
-              if (!isFsError(err)) throw err
-              notices.push(`tar: ${parts.join('/')}: Cannot mkdir: ${String(fsStrerror(err))}`)
-              failed = true
-              continue
+    if (extract) {
+      const raw = await readArchiveBytes(archiveStream, archiveSpec, deps.isDir, compression)
+      if (raw instanceof IOResult) return [null, raw]
+      const { entries, failure, notices, cut } = await readArchive(raw, compression, contents)
+      const listed = entries.map((e) => (e.isDir === true ? `${rstripSlash(e.name)}/` : e.name))
+      const { keep, misses } = selectedMembers(listed, selectors)
+      if (keep.size > 0) {
+        const errors = await checkDirectories(directories, deps.isDir, deps.stat)
+        if (errors.length > 0)
+          return [null, new IOResult({ exitCode: 2, stderr: stderrOf(errors) })]
+      }
+      const made = new Set<string>()
+      const outputs: ByteSource[] = []
+      // A member GNU cannot create (a read-only region, a missing op) is
+      // reported by its own name and the run goes on to the next one,
+      // closing with the one trailer and exit 2.
+      let failed = notices.length > 0
+      const toSpec = (virtual: string): PathSpec => makePathSpec(virtual, mountPrefix)
+      for (const [index, entry] of entries.entries()) {
+        if (cut !== null && index > cut) break
+        if (!keep.has(index)) continue
+        // Only the whole blocks that arrived are written.
+        if (index === cut) notices.push(UNEXPECTED_EOF)
+        // A symlink member has no bytes to write and no namespace to write
+        // into from here (links are workspace state, not the backend's),
+        // so extraction skips it rather than dropping an empty file where
+        // a link belongs.
+        const isDir = entry.isDir === true
+        if (!entry.isFile && !isDir) continue
+        if (isDir) {
+          if (!toStdout) {
+            // A directory member is the only record an empty directory
+            // leaves, so it has to be recreated even though nothing is
+            // written inside it. Under -O nothing reaches the
+            // filesystem at all.
+            const parts = outParts(entry.name, stripN, notices)
+            if (parts.length > 0) {
+              const outDir = `${rstripSlash(destPath)}/${parts.join('/')}`
+              try {
+                await ensureDir(outDir, toSpec, deps.mkdir, deps.stat, made)
+              } catch (err) {
+                if (!isFsError(err)) throw err
+                notices.push(`tar: ${parts.join('/')}: Cannot mkdir: ${String(fsStrerror(err))}`)
+                failed = true
+                continue
+              }
+              if (verbose) verboseLines.push(`${rstripSlash(entry.name)}/`)
             }
-            if (verbose) verboseLines.push(`${rstripSlash(entry.name)}/`)
+          }
+          continue
+        }
+        if (toStdout) {
+          outputs.push(entry.body?.stream() ?? entry.data)
+          if (verbose) verboseLines.push(entry.name)
+          continue
+        }
+        const parts = outParts(entry.name, stripN, notices)
+        if (parts.length === 0) continue
+        const outPath = `${rstripSlash(destPath)}/${parts.join('/')}`
+        const parent = outPath.slice(0, outPath.lastIndexOf('/')) || '/'
+        if (parent !== '/') {
+          try {
+            await ensureDir(parent, toSpec, deps.mkdir, deps.stat, made)
+          } catch (err) {
+            if (!isFsError(err)) throw err
+            // GNU tar 1.35 (debian:stable-slim) reports ENOENT for the
+            // member after its parent mkdir failed.
+            notices.push(
+              `tar: ${parts.slice(0, -1).join('/')}: Cannot mkdir: ${String(fsStrerror(err))}`,
+              `tar: ${parts.join('/')}: Cannot open: No such file or directory`,
+            )
+            failed = true
+            continue
           }
         }
-        continue
-      }
-      if (toStdout) {
-        chunks.push(entry.data)
-        if (verbose) verboseLines.push(entry.name)
-        continue
-      }
-      const parts = outParts(entry.name, stripN, notices)
-      if (parts.length === 0) continue
-      const outPath = `${rstripSlash(destPath)}/${parts.join('/')}`
-      const parent = outPath.slice(0, outPath.lastIndexOf('/')) || '/'
-      if (parent !== '/') {
         try {
-          await ensureDir(parent, toSpec, deps.mkdir, deps.stat, made)
+          await deps.write(makePathSpec(outPath, mountPrefix), entry.body?.stream() ?? entry.data)
         } catch (err) {
           if (!isFsError(err)) throw err
-          // GNU tar 1.35 (debian:stable-slim) reports ENOENT for the
-          // member after its parent mkdir failed.
-          notices.push(
-            `tar: ${parts.slice(0, -1).join('/')}: Cannot mkdir: ${String(fsStrerror(err))}`,
-            `tar: ${parts.join('/')}: Cannot open: No such file or directory`,
-          )
+          notices.push(`tar: ${parts.join('/')}: Cannot open: ${String(fsStrerror(err))}`)
           failed = true
           continue
         }
+        if (verbose) verboseLines.push(entry.name)
       }
-      try {
-        await deps.write(makePathSpec(outPath, mountPrefix), entry.data)
-      } catch (err) {
-        if (!isFsError(err)) throw err
-        notices.push(`tar: ${parts.join('/')}: Cannot open: ${String(fsStrerror(err))}`)
-        failed = true
-        continue
-      }
-      if (verbose) verboseLines.push(entry.name)
-    }
-    if (toStdout) {
-      // GNU moves the verbose listing to stderr when stdout carries the
-      // member bytes.
-      const total = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0)
-      const merged = new Uint8Array(total)
-      let offset = 0
-      for (const chunk of chunks) {
-        merged.set(chunk, offset)
-        offset += chunk.byteLength
-      }
-      const errLines = [...notices, ...(verbose ? verboseLines : [])]
-      if (cut !== null) {
+      if (toStdout) {
+        // GNU moves the verbose listing to stderr when stdout carries the
+        // member bytes.
+        const merged =
+          outputs.length > 0
+            ? new OutputStream(asyncChain(outputs)[Symbol.asyncIterator](), () => contents.close())
+            : null
+        handedOff = merged !== null
+        const errLines = [...notices, ...(verbose ? verboseLines : [])]
+        if (cut !== null) {
+          return [merged, new IOResult({ exitCode: 2, stderr: cutShort(failure, errLines) })]
+        }
+        if (failure !== null) {
+          return [merged, new IOResult({ exitCode: 2, stderr: childFailure(failure, errLines) })]
+        }
+        if (misses.length > 0) errLines.push(...misses, ERROR_TRAILER)
+        const stderr = stderrOf(errLines)
         return [
-          merged.byteLength > 0 ? merged : null,
-          new IOResult({ exitCode: 2, stderr: cutShort(failure, errLines) }),
+          merged,
+          new IOResult({
+            exitCode: misses.length > 0 ? 2 : 0,
+            ...(stderr !== null ? { stderr } : {}),
+          }),
         ]
+      }
+      const stdout =
+        verbose && verboseLines.length > 0 ? ENC.encode(verboseLines.join('\n') + '\n') : null
+      if (cut !== null) {
+        return [stdout, new IOResult({ exitCode: 2, stderr: cutShort(failure, notices) })]
       }
       if (failure !== null) {
-        return [
-          merged.byteLength > 0 ? merged : null,
-          new IOResult({ exitCode: 2, stderr: childFailure(failure, errLines) }),
-        ]
+        return [stdout, new IOResult({ exitCode: 2, stderr: childFailure(failure, notices) })]
       }
-      if (misses.length > 0) errLines.push(...misses, ERROR_TRAILER)
+      const errLines = [
+        ...notices,
+        ...(misses.length > 0 || failed ? [...misses, ERROR_TRAILER] : []),
+      ]
       const stderr = stderrOf(errLines)
       return [
-        merged.byteLength > 0 ? merged : null,
+        stdout,
         new IOResult({
-          exitCode: misses.length > 0 ? 2 : 0,
+          exitCode: misses.length > 0 || failed ? 2 : 0,
           ...(stderr !== null ? { stderr } : {}),
         }),
       ]
     }
-    const stdout =
-      verbose && verboseLines.length > 0 ? ENC.encode(verboseLines.join('\n') + '\n') : null
-    if (cut !== null) {
-      return [stdout, new IOResult({ exitCode: 2, stderr: cutShort(failure, notices) })]
-    }
-    if (failure !== null) {
-      return [stdout, new IOResult({ exitCode: 2, stderr: childFailure(failure, notices) })]
-    }
-    const errLines = [
-      ...notices,
-      ...(misses.length > 0 || failed ? [...misses, ERROR_TRAILER] : []),
-    ]
-    const stderr = stderrOf(errLines)
-    return [
-      stdout,
-      new IOResult({
-        exitCode: misses.length > 0 || failed ? 2 : 0,
-        ...(stderr !== null ? { stderr } : {}),
-      }),
-    ]
+  } finally {
+    if (!handedOff) await contents.close()
   }
-
   throw new UsageError(`${NO_MODE}\n${USAGE_HINT}`, CREATE_ERROR_EXIT)
 }

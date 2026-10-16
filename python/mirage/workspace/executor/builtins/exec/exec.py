@@ -22,9 +22,19 @@ from mirage.context import reset_program_invocation, set_program_invocation
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io import IOResult
-from mirage.io.async_line_iterator import PipeInput, SharedInput, share
+from mirage.io.async_line_iterator import (
+    PipeInput,
+    SharedInput,
+    release_inputs,
+    share,
+)
 from mirage.io.errors import PipeClosed
-from mirage.io.stream import close_quietly, materialize
+from mirage.io.stream import (
+    async_chain,
+    close_quietly,
+    discard_streams,
+    materialize,
+)
 from mirage.io.types import ByteSource, PipeStream
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
@@ -186,20 +196,30 @@ async def install_exec_redirects(
     bad_fd = unsupported_descriptor(redirects)
     if bad_fd is not None:
         return _exec_failure(bad_descriptor_line(bad_fd))
+    before = session.open_inputs()
+    owned: list[SharedInput] = []
     saved = {name: getattr(session, name) for name in EXEC_STREAM_FIELDS}
     saved["descriptors"] = dict(session.descriptors)
     try:
-        err = await _install(dispatch, session, redirects, stdin, expand)
+        err = await _install(
+            owned, dispatch, session, redirects, stdin, expand
+        )
     except BaseException:
         for name, value in saved.items():
             setattr(session, name, value)
+        await release_inputs(owned, before)
         raise
     if err is None:
+        await release_inputs(before + owned, session.open_inputs())
         return None, IOResult(), ExecutionNode(command="exec", exit_code=0)
-    return await _roll_back(dispatch, session, saved, err)
+    try:
+        return await _roll_back(dispatch, session, saved, err)
+    finally:
+        await release_inputs(before + owned, session.open_inputs())
 
 
 async def _install(
+    owned: list[SharedInput],
     dispatch: DispatchFn,
     session: SessionState,
     redirects: list[Redirect],
@@ -209,13 +229,16 @@ async def _install(
     for redirect in redirects:
         if expand is not None:
             redirect = await expand(redirect)
-        error = await _install_descriptor(dispatch, session, redirect, stdin)
+        error = await _install_descriptor(
+            owned, dispatch, session, redirect, stdin
+        )
         if error is not None:
             return error
     return None
 
 
 async def _install_descriptor(
+    owned: list[SharedInput],
     dispatch: DispatchFn,
     session: SessionState,
     redirect: Redirect,
@@ -276,18 +299,15 @@ async def _install_descriptor(
         if redirect.kind in (RedirectKind.STDIN, RedirectKind.READWRITE):
             try:
                 data, _ = await dispatch("read", scope, stream=True)
-                # A pipe streams, as under any redirect; a file is read
-                # whole here.
-                if not isinstance(data, PipeStream):
-                    data = await materialize(data) or b""
             except FileNotFoundError:
                 if redirect.kind != RedirectKind.READWRITE:
                     raise
                 data = b""
             if redirect.kind == RedirectKind.READWRITE:
-                await create_file(dispatch, session, scope, b"", append=True)
                 file = FileDescription(scope, opened=True)
-                file.source = FileInput(file, await materialize(data) or b"")
+                file.source = FileInput(file, data or b"")
+                owned.append(file.source)
+                await create_file(dispatch, session, scope, b"", append=True)
                 _bind(
                     session,
                     fd,
@@ -301,12 +321,17 @@ async def _install_descriptor(
                     # The descriptor keeps the pipe; each read takes it anew.
                     await close_quietly(data)
                     reading = PipeInput(data.path, data.end)
+                source = SharedInput(
+                    reading, seekable=not isinstance(data, PipeStream)
+                )
+                if not isinstance(data, PipeStream):
+                    owned.append(source)
                 _bind(
                     session,
                     fd,
                     OPEN_FOR_READING + scope.virtual,
                     False,
-                    SharedInput(reading),
+                    source,
                 )
         else:
             pipe = await create_file(
@@ -360,7 +385,9 @@ async def _roll_back(
     out, err_bytes, _ = await _route(
         dispatch, session, partial, err, TO_STDERR
     )
-    return _exec_failure(err_bytes, out)
+    return _exec_failure(
+        await materialize(err_bytes) or None, await materialize(out) or None
+    )
 
 
 def _error_line(label: str, exc: OSError) -> bytes:
@@ -515,9 +542,9 @@ async def _route(
     dispatch: DispatchFn,
     session: SessionState,
     binding: str | None,
-    data: bytes,
+    data: ByteSource,
     own: str,
-) -> tuple[bytes | None, bytes | None, bool]:
+) -> tuple[ByteSource | None, ByteSource | None, bool]:
     """Deliver one stream's bytes where its binding points.
 
     To the terminal's stdout, to the terminal's stderr, into a file, or
@@ -558,8 +585,11 @@ async def _route(
     if target == TO_STDERR:
         return None, data, False
     if target == TO_STDIN or target.startswith(OPEN_FOR_READING):
+        await discard_streams(data)
         return None, None, True
-    if target != CLOSED:
+    if target == CLOSED:
+        await discard_streams(data)
+    else:
         await _append(dispatch, session, target, data)
     return None, None, False
 
@@ -630,7 +660,7 @@ async def divert_statement(
     rest: list[Written] = []
     failed = unwritable = False
     runs = [
-        (channel, kept, b"".join(chunk[1] for chunk in run))
+        (channel, kept, async_chain([chunk[1] for chunk in run]))
         for (channel, kept), run in groupby(written, key=itemgetter(0, 2))
     ]
     for index, (channel, kept, data) in enumerate(runs):
@@ -681,7 +711,7 @@ async def _routed(
     dispatch: DispatchFn,
     session: SessionState,
     channel: Channel,
-    data: bytes,
+    data: ByteSource,
     rest: list[Written],
 ) -> bool:
     """Route one run of output through its stream's binding, adding what
@@ -711,7 +741,7 @@ async def _routed(
 
 
 async def _append(
-    dispatch: DispatchFn, session: SessionState, target: str, data: bytes
+    dispatch: DispatchFn, session: SessionState, target: str, data: ByteSource
 ) -> None:
     """Append bytes to an `exec` target, or drop them if it is closed.
 

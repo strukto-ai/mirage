@@ -11,9 +11,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import aclosing
 from enum import Enum, auto
 from functools import partial
 
@@ -24,9 +24,11 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io import IOResult
-from mirage.io.async_line_iterator import SharedInput, share
+from mirage.io.async_line_iterator import SharedInput, release_inputs, share
+from mirage.io.cooperative import chunks as byte_chunks
 from mirage.io.errors import PipeClosed
-from mirage.io.stream import materialize
+from mirage.io.spool import ByteSpool
+from mirage.io.stream import async_chain, discard_streams, materialize
 from mirage.io.types import ByteSource, DeviceInput, PipeStream
 from mirage.io.writer import ByteWriter
 from mirage.runtime.types import DispatchFn
@@ -328,9 +330,11 @@ class JobRoute(JobOutput):
             held = self.recorder
             while isinstance(held, Recorder) and held.chunks:
                 self.recorder = Recorder()
-                for key, data in held.chunks:
+                for key, source in await held.take():
                     try:
-                        await self._write(key, data)
+                        async with aclosing(byte_chunks(source)) as stream:
+                            async for data in stream:
+                                await self._write(key, data)
                     except FS_ERRORS as exc:
                         logger.debug("held job write failed: %s", exc)
                 held = self.recorder
@@ -454,6 +458,46 @@ async def handle_redirect(
         forked (bool): whether bash forks to run the command, so a
             closed pipe ends it alone.
     """
+    owned: list[SharedInput] = []
+    try:
+        return await _handle_redirect(
+            owned,
+            execute_node,
+            dispatch,
+            command,
+            redirects,
+            context,
+            stdin,
+            call_stack,
+            capture_input,
+            sink,
+            expand,
+            guard,
+            name,
+            args,
+            forked,
+        )
+    finally:
+        await release_inputs(owned, context.session.open_inputs())
+
+
+async def _handle_redirect(
+    owned: list[SharedInput],
+    execute_node,
+    dispatch,
+    command: TSNodeLike | None,
+    redirects: list[Redirect],
+    context: EvaluationContext,
+    stdin: ByteSource | None = None,
+    call_stack: CallStack | None = None,
+    capture_input: bool = False,
+    sink: JobConsole | None = None,
+    expand: Callable[[Redirect], Awaitable[Redirect]] | None = None,
+    guard: RedirectGuard | None = None,
+    name: str = "",
+    args: tuple[str, ...] = (),
+    forked: bool = False,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
     bad_fd = unsupported_descriptor(redirects)
     if bad_fd is not None:
@@ -618,10 +662,6 @@ async def handle_redirect(
                     inputs[r.fd], outputs[r.fd] = stdin, _CLOSED
                     continue
                 data, _ = await dispatch("read", scope, stream=True)
-                # A file is read whole here, so a read failing partway
-                # fails the redirect; a pipe streams.
-                if not isinstance(data, PipeStream):
-                    data = await materialize(data) or b""
             except FileNotFoundError as exc:
                 if r.kind != RedirectKind.READWRITE:
                     return await failed(_redirect_failure(scope, exc))
@@ -632,29 +672,36 @@ async def handle_redirect(
             read_paths.pop(r.fd, None)
             outputs[r.fd] = _CLOSED
             if r.kind == RedirectKind.READWRITE:
+                file = FileDescription(scope, append=True, opened=True)
+                file.source = FileInput(file, data or b"")
+                owned.append(file.source)
                 try:
                     await create_file(
                         dispatch, session, scope, b"", append=True
                     )
                 except FS_ERRORS as exc:
                     return await failed(_redirect_failure(scope, exc))
-                file = FileDescription(scope, append=True, opened=True)
-                file.source = FileInput(file, await materialize(data) or b"")
                 files.append(file)
                 inputs[r.fd], outputs[r.fd] = file.source, file
             else:
                 read_paths[r.fd] = scope.virtual
                 if isinstance(data, PipeStream):
                     piped.add(r.fd)
-                inputs[r.fd] = (
-                    DeviceInput()
-                    if data == b""
+                reading = SharedInput(
+                    data or b"", seekable=not isinstance(data, PipeStream)
+                )
+                if not isinstance(data, PipeStream):
+                    owned.append(reading)
+                if (
+                    not isinstance(data, PipeStream)
+                    and not await reading.lines.peek()
                     and await _stat_type(dispatch, scope)
                     == FileType.CHAR_DEVICE
-                    else data
-                    if r.fd == 0
-                    else SharedInput(data)
-                )
+                ):
+                    await reading.discard()
+                    inputs[r.fd] = DeviceInput()
+                    continue
+                inputs[r.fd] = reading
         else:
             token = (
                 set_redirect_paths(command.id, targets)
@@ -823,7 +870,7 @@ async def handle_redirect(
                 session.descriptors[fd] = saved[fd]
             else:
                 session.descriptors.pop(fd, None)
-    stdout: bytes | None = None
+    stdout: ByteSource | None = None
     route.recorder = Recorder()
     if recorder.failure is not None and recorder.file is not None:
         out, error, _ = await failed(
@@ -831,13 +878,15 @@ async def handle_redirect(
             failed_file=recorder.file,
         )
         if out:
-            recorder.chunks.append((Channel.STDOUT, await materialize(out)))
+            async with aclosing(byte_chunks(out)) as source:
+                async for data in source:
+                    await recorder.emit(Channel.STDOUT, data)
         diagnostic = await error.materialize_stderr()
         if diagnostic:
-            recorder.chunks.append((Channel.STDERR, diagnostic))
+            await recorder.emit(Channel.STDERR, diagnostic)
         io.exit_code = 1
     try:
-        chunks = recorder.chunks
+        chunks = await recorder.take()
         if refused:
             outputs = {0: _CLOSED, 1: _TO_STDOUT, 2: _TO_STDERR}
             for r in redirects:
@@ -862,7 +911,7 @@ async def handle_redirect(
                 return key
             return _TO_STDOUT if key.channel == Channel.STDOUT else _TO_STDERR
 
-        routed: list[tuple[Channel | Inherited, bytes]] = []
+        routed: list[tuple[Channel | Inherited, ByteSource]] = []
         write_token = (
             set_redirect_paths(command.id, targets)
             if command is not None
@@ -870,14 +919,29 @@ async def handle_redirect(
         )
 
         async def write(
-            file: FileDescription, data: bytes, *, replace: bool = False
+            file: FileDescription, data: ByteSource, *, replace: bool = False
         ) -> None:
             try:
                 if replace and file.source is None and file.offset == 0:
+                    size = 0
+
+                    async def counted() -> AsyncIterator[bytes]:
+                        nonlocal size
+                        async with aclosing(byte_chunks(data)) as source:
+                            async for part in source:
+                                size += len(part)
+                                yield part
+
                     await create_file(
-                        dispatch, session, file.scope, data, append=file.append
+                        dispatch,
+                        session,
+                        file.scope,
+                        data if isinstance(data, bytes) else counted(),
+                        append=file.append,
                     )
-                    file.offset += len(data)
+                    if isinstance(data, bytes):
+                        size = len(data)
+                    file.offset += size
                 else:
                     await write_description(dispatch, session, file, data)
             except OSError as exc:
@@ -907,7 +971,11 @@ async def handle_redirect(
                         chunk = next(pending, None)
                     await write(
                         target,
-                        b"".join(parts),
+                        b"".join(p for p in parts if isinstance(p, bytes))
+                        if all(isinstance(p, bytes) for p in parts)
+                        and sum(len(p) for p in parts if isinstance(p, bytes))
+                        <= 1048576
+                        else async_chain(parts),
                         replace=not refused
                         and target is complete_output
                         and len(parts) == len(chunks),
@@ -918,29 +986,43 @@ async def handle_redirect(
                     routed.append((Channel.STDERR, data))
                 elif isinstance(target, Inherited):
                     routed.append((target, data))
+                else:
+                    await discard_streams(data)
         finally:
             if write_token is not None:
                 reset_redirect_paths(write_token)
         io.stderr = None
-        kept: list[tuple[Channel, bytes]] = []
+        kept: list[tuple[Channel, ByteSource]] = []
         for key, data in routed:
             if isinstance(key, Inherited):
                 if not await deliver(sink, key, data):
                     kept.append((key.channel, data))
             elif sink is not None:
-                await sink.emit(key, data)
+                async with aclosing(byte_chunks(data)) as source:
+                    async for part in source:
+                        await sink.emit(key, part)
             else:
                 kept.append((key, data))
         if sink is not None:
             for channel, data in kept:
-                await sink.emit(channel, data)
+                async with aclosing(byte_chunks(data)) as source:
+                    async for part in source:
+                        await sink.emit(channel, part)
         else:
-            stdout = (
-                b"".join(d for c, d in kept if c == Channel.STDOUT) or None
-            )
-            io.stderr = (
-                b"".join(d for c, d in kept if c == Channel.STDERR) or None
-            )
+            out_store, err_store = ByteSpool(), ByteSpool()
+            try:
+                for channel, data in kept:
+                    await (
+                        out_store if channel == Channel.STDOUT else err_store
+                    ).fill(data)
+                stdout, io.stderr = (
+                    await out_store.output(),
+                    await err_store.output(),
+                )
+            except BaseException:
+                await out_store.close()
+                await err_store.close()
+                raise
     finally:
         await route.release()
     if unwound is not None:

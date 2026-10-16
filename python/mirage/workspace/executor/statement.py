@@ -13,14 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable, Callable, Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import aclosing, contextmanager
 from dataclasses import dataclass
 
 from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.errors.render import format_fs_error
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput
+from mirage.io.cooperative import chunks
 from mirage.io.errors import PipeClosed
+from mirage.io.spool import ByteSpool
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.console import Channel, JobConsole
@@ -446,7 +449,7 @@ def assignment_status(frame: ExecutionFrame, seq_before: int) -> int:
 # One piece of what a statement wrote, in order: its channel, its
 # bytes, and whether it went to the terminal through a copy, which an
 # `exec` diversion of the shell's own output leaves where it is.
-Written = tuple[Channel, bytes, bool]
+Written = tuple[Channel, ByteSource, bool]
 
 
 def as_written(stdout: bytes | None, stderr: bytes | None) -> list[Written]:
@@ -510,16 +513,27 @@ async def statement_output(
         sink (JobConsole | None): where the loop writes, if anywhere.
     """
     written: list[Written] = []
-    chunks, recorder.chunks = recorder.chunks, []
-    for key, data in chunks:
+    for key, data in await recorder.take():
         if not isinstance(key, Inherited):
             written.append((key, data, False))
         elif key.owner is own or not await deliver(sink, key, data):
             written.append((key.channel, data, True))
-    out = await materialize(stdout)
+    out_store = ByteSpool()
+    try:
+        await out_store.fill(stdout or b"")
+        out = await out_store.output()
+    except BaseException:
+        await out_store.close()
+        raise
     if out:
         written.append((Channel.STDOUT, out, False))
-    err = await materialize(io.stderr)
+    err_store = ByteSpool()
+    try:
+        await err_store.fill(io.stderr or b"")
+        err = await err_store.output()
+    except BaseException:
+        await err_store.close()
+        raise
     io.stderr = None
     if err:
         written.append((Channel.STDERR, err, False))
@@ -545,20 +559,20 @@ async def land(
     if sink is not None:
         for index, (channel, data, _) in enumerate(written):
             try:
-                await sink.emit(channel, data)
+                async with aclosing(chunks(data)) as source:
+                    async for part in source:
+                        await sink.emit(channel, part)
             except PipeClosed:
                 # SIGPIPE keeps what the writer already said on stderr.
                 for later, more, _ in written[index + 1 :]:
                     if later == Channel.STDERR:
-                        await sink.emit(later, more)
+                        async with aclosing(chunks(more)) as source:
+                            async for part in source:
+                                await sink.emit(later, part)
                 raise
         return merged_io
-    stdout = b"".join(d for c, d, _ in written if c == Channel.STDOUT)
-    if stdout:
-        all_stdout.append(stdout)
-    stderr = b"".join(d for c, d, _ in written if c == Channel.STDERR)
-    if not stderr:
-        return merged_io
-    return await merged_io.merge(
-        IOResult(stderr=stderr, exit_code=merged_io.exit_code)
-    )
+    all_stdout.extend(d for c, d, _ in written if c == Channel.STDOUT)
+    errors = [d for c, d, _ in written if c == Channel.STDERR]
+    if errors:
+        merged_io.stderr = async_chain([merged_io.stderr, *errors])
+    return merged_io

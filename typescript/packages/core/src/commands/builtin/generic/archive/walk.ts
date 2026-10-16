@@ -172,7 +172,7 @@ async function follow(
     return [[], [], posixPhrase(isEnotdir(err) ? 'ENOTDIR' : 'ENOENT'), []]
   }
   if (targetStat.type !== FileType.DIRECTORY) {
-    return [[{ namePath: virtual, kind: 'file', read: spec }], [], '', []]
+    return [[{ namePath: virtual, kind: 'file', read: spec, size: targetStat.size }], [], '', []]
   }
   if (!deps.recurse) return [[{ namePath: virtual, kind: 'dir' }], [], '', []]
   const [entries, crossings, unreadable] = await subtree(root, target, virtual, deps)
@@ -241,7 +241,7 @@ export async function scanOperand(path: PathSpec, deps: ScanDeps): Promise<Scan>
       }
     }
     if (rootStat.type !== FileType.DIRECTORY) {
-      entries.push({ namePath: base, kind: 'file', read: path })
+      entries.push({ namePath: base, kind: 'file', read: path, size: rootStat.size })
     } else {
       entries.push({ namePath: base, kind: 'dir' })
       if (deps.recurse) {

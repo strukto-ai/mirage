@@ -16,18 +16,19 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { fsStrerror, isFsError, isEnoent, isEisdir } from '../../../errors/fs.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import { crc32, deflateRaw } from '../../../utils/compress.ts'
+import { crc32, deflateRawStream } from '../../../utils/compress.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { lstripSlash, rstripSlash } from '../../../utils/slash.ts'
 import { respellOne } from '../../../utils/path.ts'
-import { readArchive, updateArchive } from './archive/zip_update.ts'
+import { ByteSpool, ByteSlice } from '../../../io/spool.ts'
+import { chunks } from '../../../io/cooperative.ts'
+import { readSpooledArchive, updateSpooledArchive } from './archive/zip_update.ts'
 import { ZipUpdateError } from './archive/errors.ts'
-import type { MemberKind, ZipArchive, ZipRecord } from './archive/types.ts'
+import type { MemberKind, SpoolZipArchive, SpoolZipRecord } from './archive/types.ts'
 import { OTHER_FILESYSTEM, scanOperand, type StatFn, type WalkFn } from './archive/walk.ts'
-import { concat } from '../../../utils/bytes.ts'
 import { linksOf, mountsOf } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
@@ -47,7 +48,7 @@ function writeU32LE(buf: Uint8Array, offset: number, value: number): void {
 interface ZipItem {
   name: string
   size: number
-  compressed: Uint8Array
+  compressed: ByteSlice
   crc: number
   method: number
   // Unix mode bits in the high half of external_attr, which is where
@@ -79,9 +80,17 @@ interface ZipPlan {
 // A zero date has month 0 and day 0, which is no date at all.
 const DOS_EPOCH_DATE = (1 << 5) | 1
 
-function buildZip(items: ZipItem[], original: ZipArchive | null): Uint8Array {
-  const records: ZipRecord[] = items.map((item) => {
+async function buildZip(
+  items: ZipItem[],
+  original: SpoolZipArchive | null,
+  spool: ByteSpool,
+): Promise<AsyncGenerator<Uint8Array>> {
+  const records: SpoolZipRecord[] = []
+  for (const item of items) {
     const name = ENC.encode(item.name)
+    if (Math.max(item.size, item.compressed.size) >= 0xffffffff || name.length > 0xffff) {
+      throw new ZipUpdateError('ZIP32 member limit exceeded')
+    }
     const header = new Uint8Array(30 + name.length)
     writeU32LE(header, 0, 0x04034b50)
     writeU16LE(header, 4, 20)
@@ -89,7 +98,7 @@ function buildZip(items: ZipItem[], original: ZipArchive | null): Uint8Array {
     writeU16LE(header, 8, item.method)
     writeU16LE(header, 12, DOS_EPOCH_DATE)
     writeU32LE(header, 14, item.crc)
-    writeU32LE(header, 18, item.compressed.length)
+    writeU32LE(header, 18, item.compressed.size)
     writeU32LE(header, 22, item.size)
     writeU16LE(header, 26, name.length)
     header.set(name, 30)
@@ -102,9 +111,16 @@ function buildZip(items: ZipItem[], original: ZipArchive | null): Uint8Array {
     central.set(header.subarray(4, 30), 6)
     writeU32LE(central, 38, item.externalAttr)
     central.set(name, 46)
-    return { name: item.name, local: concat([header, item.compressed]), central }
-  })
-  return updateArchive(original, records)
+    const start = spool.size
+    await spool.append(header)
+    await spool.fill(item.compressed.stream())
+    records.push({
+      name: item.name,
+      local: new ByteSlice(spool, start, spool.size - start),
+      central,
+    })
+  }
+  return updateSpooledArchive(original, records)
 }
 
 // Info-ZIP 3.0's wording, pinned on debian:stable-slim. A warning is
@@ -136,7 +152,7 @@ const LINK_MODE = (0o120777 << 16) >>> 0
 // make a directory operand archivable at all.
 export interface ZipDeps {
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>
-  write: (p: PathSpec, data: Uint8Array) => Promise<void>
+  write: (p: PathSpec, data: ByteSource) => Promise<void>
   stat: StatFn
   walk: WalkFn
 }
@@ -340,77 +356,104 @@ export async function zipGeneric(
   }
   const archivePath = paths[0]
   if (archivePath === undefined) return [null, new IOResult()]
-  let original: ZipArchive | null = null
+  const originalSpool = new ByteSpool()
+  const compressedSpool = new ByteSpool()
+  const additionsSpool = new ByteSpool()
+  const outputSpool = new ByteSpool()
   try {
-    original = readArchive(await materialize(deps.stream(archivePath)))
-  } catch (err) {
-    if (err instanceof ZipUpdateError || isEisdir(err)) return invalidArchive(archivePath)
-    // Only absence means create; a refused or broken read must not overwrite.
-    if (!isEnoent(err)) {
-      if (!isFsError(err)) throw err
-      return createError(archivePath, String(fsStrerror(err)))
+    let original: SpoolZipArchive | null = null
+    try {
+      await originalSpool.fill(deps.stream(archivePath))
+      original = await readSpooledArchive(originalSpool)
+    } catch (err) {
+      if (err instanceof ZipUpdateError || isEisdir(err)) return invalidArchive(archivePath)
+      // Only absence means create; a refused or broken read must not overwrite.
+      if (!isEnoent(err)) {
+        if (!isFsError(err)) throw err
+        return createError(archivePath, String(fsStrerror(err)))
+      }
     }
-  }
-  const quiet = parsed.quiet
-  const plan = await planZip(paths.slice(1), archivePath, deps, opts, parsed)
-  if (plan.repeated !== '') {
-    const message = warningText([...plan.warnings, plan.repeated], quiet) + REPEATED_ERROR
-    return [null, new IOResult({ exitCode: REPEATED_EXIT, stderr: ENC.encode(message) })]
-  }
-  if (!plan.write) {
-    // Info-ZIP writes no archive when nothing matched, and the error is
-    // not a warning: -q does not silence it.
-    const message =
-      warningText(plan.warnings, quiet) + `\nzip error: Nothing to do! (${archivePath.rawPath})\n`
-    return [null, new IOResult({ exitCode: NOTHING_TO_DO_EXIT, stderr: ENC.encode(message) })]
-  }
+    const quiet = parsed.quiet
+    const plan = await planZip(paths.slice(1), archivePath, deps, opts, parsed)
+    if (plan.repeated !== '') {
+      const message = warningText([...plan.warnings, plan.repeated], quiet) + REPEATED_ERROR
+      return [null, new IOResult({ exitCode: REPEATED_EXIT, stderr: ENC.encode(message) })]
+    }
+    if (!plan.write) {
+      // Info-ZIP writes no archive when nothing matched, and the error is
+      // not a warning: -q does not silence it.
+      const message =
+        warningText(plan.warnings, quiet) + `\nzip error: Nothing to do! (${archivePath.rawPath})\n`
+      return [null, new IOResult({ exitCode: NOTHING_TO_DO_EXIT, stderr: ENC.encode(message) })]
+    }
 
-  const items: ZipItem[] = []
-  const outputLines: string[] = []
-  // A member the session may not read (a rule refused it below the
-  // operand) aborts the run with zip's name on the refusal and writes no
-  // archive. Deliberate divergence: Info-ZIP writes the rest, echoes
-  // `could not open for reading` beside the adding line, and closes with
-  // a read/skipped summary that needs every member's size and exit 18;
-  // none of that is reproduced.
-  const oldOrder = new Map(original?.records.map((entry, i) => [entry.name, i]))
-  const members = [...plan.members].sort(
-    (a, b) => (oldOrder.get(a.name) ?? oldOrder.size) - (oldOrder.get(b.name) ?? oldOrder.size),
-  )
-  for (const member of members) {
-    let data: Uint8Array = new Uint8Array(0)
-    if (member.kind === 'link') {
-      data = ENC.encode(member.target)
-    } else if (member.path !== null) {
-      data = await materialize(deps.stream(member.path))
+    const items: ZipItem[] = []
+    const outputLines: string[] = []
+    // A member the session may not read (a rule refused it below the
+    // operand) aborts the run with zip's name on the refusal and writes no
+    // archive. Deliberate divergence: Info-ZIP writes the rest, echoes
+    // `could not open for reading` beside the adding line, and closes with
+    // a read/skipped summary that needs every member's size and exit 18;
+    // none of that is reproduced.
+    const oldOrder = new Map(original?.records.map((entry, i) => [entry.name, i]))
+    const members = [...plan.members].sort(
+      (a, b) => (oldOrder.get(a.name) ?? oldOrder.size) - (oldOrder.get(b.name) ?? oldOrder.size),
+    )
+    for (const member of members) {
+      const source =
+        member.path !== null
+          ? deps.stream(member.path)
+          : chunks(member.kind === 'link' ? ENC.encode(member.target) : new Uint8Array())
+      let size = 0
+      let crc = 0
+      async function* counted(): AsyncGenerator<Uint8Array> {
+        for await (const data of chunks(source)) {
+          size += data.length
+          crc = crc32(data, crc)
+          yield data
+        }
+      }
+      const start = compressedSpool.size
+      await compressedSpool.fill(member.kind === 'dir' ? counted() : deflateRawStream(counted()))
+      items.push({
+        name: member.name,
+        size,
+        crc,
+        compressed: new ByteSlice(compressedSpool, start, compressedSpool.size - start),
+        method: member.kind === 'dir' ? 0 : 8,
+        externalAttr:
+          member.kind === 'dir' ? DIR_MODE : member.kind === 'link' ? LINK_MODE : FILE_MODE,
+      })
+      outputLines.push(`${oldOrder.has(member.name) ? 'updating:' : '  adding:'} ${member.name}`)
     }
-    const stored = member.kind === 'dir'
-    const compressed = stored ? data : await deflateRaw(data)
-    items.push({
-      name: member.name,
-      size: data.length,
-      compressed,
-      crc: crc32(data),
-      method: stored ? 0 : 8,
-      externalAttr:
-        member.kind === 'dir' ? DIR_MODE : member.kind === 'link' ? LINK_MODE : FILE_MODE,
-    })
-    outputLines.push(`${oldOrder.has(member.name) ? 'updating:' : '  adding:'} ${member.name}`)
+    try {
+      await outputSpool.fill(await buildZip(items, original, additionsSpool))
+    } catch (err) {
+      if (!(err instanceof ZipUpdateError)) throw err
+      return invalidArchive(archivePath)
+    }
+    try {
+      await deps.write(archivePath, outputSpool.stream())
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      return createError(archivePath, String(fsStrerror(err)), warningText(plan.warnings, quiet))
+    }
+    const stdout: ByteSource | null =
+      !quiet && outputLines.length > 0 ? ENC.encode(outputLines.join('\n') + '\n') : null
+    return [stdout, new IOResult({ stderr: ENC.encode(warningText(plan.warnings, quiet)) })]
+  } finally {
+    try {
+      await originalSpool.close()
+    } finally {
+      try {
+        await compressedSpool.close()
+      } finally {
+        try {
+          await additionsSpool.close()
+        } finally {
+          await outputSpool.close()
+        }
+      }
+    }
   }
-  let archive: Uint8Array
-  try {
-    archive = buildZip(items, original)
-  } catch (err) {
-    if (!(err instanceof ZipUpdateError)) throw err
-    return invalidArchive(archivePath)
-  }
-  try {
-    await deps.write(archivePath, archive)
-  } catch (err) {
-    if (!isFsError(err)) throw err
-    return createError(archivePath, String(fsStrerror(err)), warningText(plan.warnings, quiet))
-  }
-  const stdout: ByteSource | null =
-    !quiet && outputLines.length > 0 ? ENC.encode(outputLines.join('\n') + '\n') : null
-  return [stdout, new IOResult({ stderr: ENC.encode(warningText(plan.warnings, quiet)) })]
 }

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import base64
+import hashlib
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -22,6 +24,7 @@ from mirage.core.box.client import (
     BoxTokenManager,
     api_base_of,
     box_get_bytes,
+    box_upload_session,
     conflict_of,
     token_url_of,
     upload_base_of,
@@ -31,6 +34,7 @@ from mirage.core.box.constants import (
     BOX_TOKEN_URL,
     BOX_UPLOAD_BASE,
 )
+from mirage.io.spool import ByteSpool
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.box.config import BoxConfig
 
@@ -186,3 +190,64 @@ async def test_no_window_sends_no_header_and_reads_whole():
 )
 def test_conflict_of_reads_the_item_a_409_names(text, kind):
     assert conflict_of(text) == kind
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail", [False, True])
+async def test_upload_session_digests_commit_condition_and_abort(fail):
+    tm = BoxTokenManager(BoxConfig(access_token="token"))
+    base = "https://example.test/session"
+    async with ByteSpool(0) as spool:
+        await spool.append(b"abcdefg")
+        with aioresponses() as mock:
+            mock.post(
+                base,
+                payload={
+                    "part_size": 4,
+                    "session_endpoints": {
+                        "upload_part": base + "/part",
+                        "commit": base + "/commit",
+                        "abort": base,
+                    },
+                },
+            )
+            mock.put(
+                base + "/part",
+                payload={"part": {"part_id": "1", "offset": 0, "size": 4}},
+            )
+            mock.put(
+                base + "/part",
+                payload={"part": {"part_id": "2", "offset": 4, "size": 3}},
+            )
+            mock.post(
+                base + "/commit",
+                status=500 if fail else 201,
+                payload={"entries": [{"id": "done"}]},
+            )
+            mock.delete(base, status=204)
+            if fail:
+                with pytest.raises(Exception):
+                    await box_upload_session(tm, base, {}, spool, '"version"')
+            else:
+                assert await box_upload_session(
+                    tm, base, {}, spool, '"version"'
+                ) == {"entries": [{"id": "done"}]}
+            calls = mock.requests[("PUT", URL(base + "/part"))]
+            assert [call.kwargs["data"] for call in calls] == [b"abcd", b"efg"]
+            for call in calls:
+                assert (
+                    call.kwargs["headers"]["Digest"]
+                    == "sha="
+                    + base64.b64encode(
+                        hashlib.sha1(call.kwargs["data"]).digest()
+                    ).decode()
+                )
+            commit = mock.requests[("POST", URL(base + "/commit"))][0]
+            assert commit.kwargs["headers"]["If-Match"] == '"version"'
+            assert (
+                commit.kwargs["headers"]["Digest"]
+                == "sha="
+                + base64.b64encode(hashlib.sha1(b"abcdefg").digest()).decode()
+            )
+            assert (("DELETE", URL(base)) in mock.requests) == fail
+    await tm.pool.close()

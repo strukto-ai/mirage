@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteSpool } from '../../io/spool.ts'
+import { DropboxApiError } from './client.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   DropboxTokenManager,
@@ -191,3 +193,49 @@ describe('dropboxUpload', () => {
     expect(await upload('not json', 'text/plain')).toBe('not json')
   })
 })
+
+it.each([false, true])(
+  'upload sessions chunk and preserve conditional commit (failure %s)',
+  async (fail) => {
+    const requests: { url: string; init: RequestInit }[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit) => {
+        await Promise.resolve()
+        requests.push({ url, init })
+        if (url.endsWith('/start')) return Response.json({ session_id: 'session' })
+        if (url.endsWith('/finish'))
+          return Response.json(fail ? { error_summary: 'path/conflict' } : { name: 'file' }, {
+            status: fail ? 409 : 200,
+          })
+        return Response.json(null)
+      }),
+    )
+    const spool = new ByteSpool()
+    try {
+      await spool.append(new Uint8Array(8 * 1024 * 1024 + 7).fill(120))
+      const uploading = dropboxUpload(tokenManager(), '/file', spool, 'rev1')
+      if (fail) await expect(uploading).rejects.toBeInstanceOf(DropboxApiError)
+      else expect(await uploading).toEqual({ name: 'file' })
+      const appends = requests.filter((r) => r.url.endsWith('/append_v2'))
+      expect(appends.slice(0, 2).map((r) => (r.init.body as Uint8Array).length)).toEqual([
+        8 * 1024 * 1024,
+        7,
+      ])
+      const finish = requests.find((r) => r.url.endsWith('/finish'))
+      const arg = JSON.parse(new Headers(finish?.init.headers).get('Dropbox-API-Arg') ?? '{}') as {
+        cursor: { offset: number }
+        commit: { mode: unknown }
+      }
+      expect(arg.cursor.offset).toBe(spool.size)
+      expect(arg.commit.mode).toEqual({ '.tag': 'update', update: 'rev1' })
+      expect(appends).toHaveLength(fail ? 3 : 2)
+      if (fail)
+        expect(
+          JSON.parse(new Headers(appends.at(-1)?.init.headers).get('Dropbox-API-Arg') ?? '{}'),
+        ).toMatchObject({ close: true })
+    } finally {
+      await spool.close()
+    }
+  },
+)

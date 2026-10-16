@@ -37,24 +37,60 @@ interface FileNode {
 }
 
 class MockWritable {
-  constructor(private readonly file: FileNode) {}
-  async write(data: Blob | BufferSource | string): Promise<void> {
-    if (typeof data === 'string') {
-      this.file.data = new TextEncoder().encode(data)
-    } else if (data instanceof Blob) {
-      const buf = new Uint8Array(await data.arrayBuffer())
-      this.file.data = buf
-    } else if (data instanceof ArrayBuffer) {
-      this.file.data = new Uint8Array(data)
-    } else if (ArrayBuffer.isView(data)) {
-      const view = data as ArrayBufferView
-      this.file.data = new Uint8Array(view.buffer, view.byteOffset, view.byteLength).slice()
-    } else {
-      throw new TypeError('MockWritable.write: unsupported data type')
+  private data: Uint8Array
+  private position = 0
+  constructor(
+    private readonly file: FileNode,
+    keep = false,
+  ) {
+    this.data = keep ? file.data.slice() : new Uint8Array()
+  }
+  async write(input: FileSystemWriteChunkType): Promise<void> {
+    if (
+      typeof input === 'object' &&
+      !(input instanceof Blob) &&
+      !(input instanceof ArrayBuffer) &&
+      !ArrayBuffer.isView(input)
+    ) {
+      if (input.type === 'seek') {
+        await this.seek(input.position ?? 0)
+        return
+      }
+      if (input.type === 'truncate') {
+        const data = new Uint8Array(input.size ?? 0)
+        data.set(this.data.subarray(0, data.length))
+        this.data = data
+        this.position = Math.min(this.position, data.length)
+        return
+      }
+      if (input.position != null) this.position = input.position
+      if (input.data == null) throw new TypeError('missing write data')
+      input = input.data
     }
-    this.file.modified = new Date()
+    const part =
+      typeof input === 'string'
+        ? new TextEncoder().encode(input)
+        : input instanceof Blob
+          ? new Uint8Array(await input.arrayBuffer())
+          : input instanceof ArrayBuffer
+            ? new Uint8Array(input)
+            : new Uint8Array(input.buffer, input.byteOffset, input.byteLength)
+    const next = new Uint8Array(Math.max(this.data.length, this.position + part.length))
+    next.set(this.data)
+    next.set(part, this.position)
+    this.data = next
+    this.position += part.length
+  }
+  seek(position: number): Promise<void> {
+    this.position = position
+    return Promise.resolve()
+  }
+  abort(): Promise<void> {
+    return Promise.resolve()
   }
   close(): Promise<void> {
+    this.file.data = this.data
+    this.file.modified = new Date()
     return Promise.resolve()
   }
 }
@@ -70,8 +106,8 @@ class MockFileHandle {
     const file = new File([blob], this.node.name, { lastModified: this.node.modified.getTime() })
     return Promise.resolve(file)
   }
-  createWritable(): Promise<MockWritable> {
-    return Promise.resolve(new MockWritable(this.node))
+  createWritable(options: { keepExistingData?: boolean } = {}): Promise<MockWritable> {
+    return Promise.resolve(new MockWritable(this.node, options.keepExistingData))
   }
 }
 

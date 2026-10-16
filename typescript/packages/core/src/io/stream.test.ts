@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { SharedInput } from './async_line_iterator.ts'
 import {
   SharedStdin,
+  OutputStream,
   asyncChain,
   closeQuietly,
   discardStreams,
@@ -155,3 +156,23 @@ it('shares a lazy cursor across early exit and concurrent readers', async () => 
   expect((await shared[Symbol.asyncIterator]().next()).done).toBe(true)
   expect(pulls).toEqual(['', 'abc', '', 'def'])
 })
+
+it.each([false, true])(
+  'closes every owned chain source after cancellation: %s',
+  async (started) => {
+    const closed: string[] = []
+    const chain = asyncChain([
+      new OutputStream(fromChunks([encode('a')])[Symbol.asyncIterator](), () => {
+        closed.push('first')
+        return Promise.resolve()
+      }),
+      new OutputStream(fromChunks([encode('b')])[Symbol.asyncIterator](), () => {
+        closed.push('second')
+        return Promise.resolve()
+      }),
+    ])
+    if (started) expect((await chain[Symbol.asyncIterator]().next()).value).toEqual(encode('a'))
+    await closeQuietly(chain)
+    expect(closed).toEqual(['first', 'second'])
+  },
+)

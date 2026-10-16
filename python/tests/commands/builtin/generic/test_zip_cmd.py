@@ -9,6 +9,7 @@ from mirage.commands.builtin.generic.zip_cmd import (
     member_name,
     zip_cmd,
 )
+from mirage.io.types import materialize
 from mirage.types import (
     LINK_TARGET_KEY,
     ContentType,
@@ -58,7 +59,7 @@ class _Tree:
         return self.files[key]
 
     async def write_bytes(self, path, data):
-        self.files[path.virtual] = data
+        self.files[path.virtual] = await materialize(data)
 
     async def stat(self, path):
         key = path.virtual.rstrip("/") or "/"

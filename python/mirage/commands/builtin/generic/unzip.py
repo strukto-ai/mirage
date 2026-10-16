@@ -1,9 +1,8 @@
 import dataclasses
 import fnmatch
-import io
 import logging
 import zipfile
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 from mirage.commands.builtin.generic.archive.extract import (
@@ -20,6 +19,7 @@ from mirage.commands.builtin.generic.archive.zipinfo import (
     zipinfo_layout,
 )
 from mirage.commands.builtin.utils.copy import is_directory, path_exists
+from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
@@ -27,11 +27,15 @@ from mirage.commands.spec.constants import OPERAND
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.standard import version_line
 from mirage.commands.spec.types import FlagValue
+from mirage.concurrency.limiter import run_blocking
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import error_path, fs_strerror
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.cooperative import CHUNK_SIZE
+from mirage.io.spool import ByteSpool
+from mirage.io.stream import OutputStream, async_chain
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import PathSpec, PolymorphicReadFn
 
 logger = logging.getLogger(__name__)
 
@@ -518,7 +522,7 @@ def _extracted_line(info: zipfile.ZipInfo, shown: str) -> str:
 async def unzip(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_bytes: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
     mkdir_fn: Callable[..., Awaitable[None]],
     stat: StatFn | None = None,
@@ -564,21 +568,60 @@ async def unzip(
         archive_path = dataclasses.replace(
             archive_path, vfs_path=archive_path.virtual.strip("/")
         )
-    data = await read_bytes(archive_path)
-    if not _central_directory_tiles(data):
-        return None, _refusal(data, archive_path.raw_path, zipinfo=Z, pipe=p)
+    spool = ByteSpool()
+    zf: zipfile.ZipFile | None = None
+    handed_off = False
+
+    async def close() -> None:
+        try:
+            if zf is not None:
+                await run_blocking(zf.close)
+        finally:
+            await spool.close()
+
     try:
-        zf = zipfile.ZipFile(io.BytesIO(data), "r")
-    except zipfile.BadZipFile:
-        return None, _refusal(data, archive_path.raw_path, zipinfo=Z, pipe=p)
-    slack = _offset_slack(data)
-    warning, floor = (
-        _slack_warning(slack, archive_path.raw_path) if slack else ("", 0)
-    )
-    with zf:
+        await spool.fill(normalized_read(read_bytes)(archive_path))
+        tail = await spool.read(max(0, spool.size - EOCD_SEARCH), EOCD_SEARCH)
+        at = tail.rfind(EOCD_SIGNATURE)
+        valid = at >= 0 and at + 22 <= len(tail)
+        slack = 0
+        if valid:
+            end = max(0, spool.size - EOCD_SEARCH) + at
+            count = int.from_bytes(tail[at + 10 : at + 12], "little")
+            cd_size = int.from_bytes(tail[at + 12 : at + 16], "little")
+            cd_offset = int.from_bytes(tail[at + 16 : at + 20], "little")
+            slack = end - cd_size - cd_offset
+            pos = end - cd_size
+            for _ in range(count):
+                if pos < 0 or pos + 46 > end:
+                    valid = False
+                    break
+                header = await spool.read(pos, 46)
+                if header[:4] != CENTRAL_SIGNATURE:
+                    valid = False
+                    break
+                pos += 46 + sum(
+                    int.from_bytes(header[i : i + 2], "little")
+                    for i in (28, 30, 32)
+                )
+            valid = valid and pos == end
+        if not valid:
+            return None, _refusal(
+                tail, archive_path.raw_path, zipinfo=Z, pipe=p
+            )
+        try:
+            file = await spool.file()
+            zf = await run_blocking(zipfile.ZipFile, file, "r")
+        except zipfile.BadZipFile:
+            return None, _refusal(
+                tail, archive_path.raw_path, zipinfo=Z, pipe=p
+            )
+        warning, floor = (
+            _slack_warning(slack, archive_path.raw_path) if slack else ("", 0)
+        )
         out, result = await _run(
             zf,
-            data,
+            spool.size,
             archive_path,
             members,
             x,
@@ -604,6 +647,12 @@ async def unzip(
             never=n,
             stdin=stdin,
         )
+        if out is not None and not isinstance(out, bytes):
+            out = OutputStream(out, close)
+            handed_off = True
+    finally:
+        if not handed_off:
+            await close()
     # A mode that writes nothing says so about -d first.
     caution = (NO_AND_O if o and n else "") + (
         D_IGNORED if d is not None and (Z or t or p or args_l or v) else ""
@@ -622,9 +671,20 @@ async def unzip(
     )
 
 
+async def _member_stream(
+    zf: zipfile.ZipFile, info: zipfile.ZipInfo
+) -> AsyncIterator[bytes]:
+    file = await run_blocking(zf.open, info)
+    try:
+        while data := await run_blocking(file.read, CHUNK_SIZE):
+            yield data
+    finally:
+        await run_blocking(file.close)
+
+
 async def _run(
     zf: zipfile.ZipFile,
-    data: bytes,
+    data_size: int,
     archive_path: PathSpec,
     members: tuple[str, ...],
     excludes: tuple[str, ...],
@@ -693,7 +753,7 @@ async def _run(
     if Z:
         return _zipinfo(
             archive_path.virtual,
-            len(data),
+            data_size,
             infos,
             selected,
             unmatched,
@@ -745,18 +805,16 @@ async def _run(
         if nothing_left:
             msg = head + cautions + ZERO_TESTED.format(typed_archive)
             return msg.encode(), IOResult(exit_code=11)
-        if filtered:
-            bad = None
-            for info in selected:
-                if info.is_dir():
-                    continue
-                try:
-                    zf.read(info)
-                except zipfile.BadZipFile:
-                    bad = info.filename
-                    break
-        else:
-            bad = zf.testzip()
+        bad = None
+        for info in selected:
+            if info.is_dir():
+                continue
+            try:
+                async for _ in _member_stream(zf, info):
+                    pass
+            except zipfile.BadZipFile:
+                bad = info.filename
+                break
         if bad is not None:
             return (head + f"first bad file: {bad}\n").encode(), IOResult()
         tested = (
@@ -772,13 +830,9 @@ async def _run(
     cautions = _cautions(unmatched, unmatched_excludes)
     exit_code = 11 if unmatched or nothing_left else 0
     if p:
-        chunks: list[bytes] = []
-        for info in selected:
-            if not info.is_dir():
-                # Read the selected ZipInfo, not its name: a name
-                # lookup resolves every duplicate to the last one.
-                chunks.append(zf.read(info))
-        return b"".join(chunks), IOResult(
+        return async_chain(
+            _member_stream(zf, info) for info in selected if not info.is_dir()
+        ), IOResult(
             exit_code=exit_code, stderr=cautions.encode() if cautions else None
         )
     dest = extract_dest(d, cwd, relay)
@@ -952,9 +1006,12 @@ async def _run(
                 )
                 continue
         out_path = target
-        content = zf.read(info)
         try:
-            await write_bytes(PathSpec.from_str_path(out_path), data=content)
+            async with ByteSpool() as content:
+                await content.fill(_member_stream(zf, info))
+                await write_bytes(
+                    PathSpec.from_str_path(out_path), data=content.stream()
+                )
         except FS_ERRORS as exc:
             # -o unlinks a file already there before it writes, so a
             # refusal of that is its own verb.
@@ -1070,7 +1127,7 @@ async def unzip_generic(
     paths: list[PathSpec],
     texts: list[str],
     opts: CommandOpts,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_bytes: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
     mkdir_fn: Callable[..., Awaitable[None]],
     stat: StatFn | None = None,

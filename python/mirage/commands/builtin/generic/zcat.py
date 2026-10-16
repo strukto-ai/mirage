@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator
 
 from mirage.commands.builtin.constants import GZIP_SUFFIX
 from mirage.commands.builtin.generic.decompress import decompress_inputs
@@ -15,7 +15,7 @@ from mirage.types import FileType, PathSpec, PolymorphicReadFn, StatFn
 async def zcat(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_bytes: PolymorphicReadFn,
     stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     return await decompress_inputs(

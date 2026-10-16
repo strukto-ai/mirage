@@ -11,13 +11,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import asyncio
 import copy
 from collections.abc import Mapping
 from typing import Any
 
 from mirage.context.session_context import SessionOwner
+from mirage.io.async_line_iterator import release_inputs
 from mirage.policy.profile import CompiledProfile
 from mirage.policy.types import AdmissionRules, Decision, ProfileScripts
 from mirage.secrets.config import EnvVar
@@ -507,6 +507,14 @@ class SessionManager(SessionOwner):
         if session_id not in self._sessions:
             raise KeyError(session_id)
         async with self._locks[session_id]:
+            closing = self._sessions[session_id]
+            keep = [
+                source
+                for key, session in self._sessions.items()
+                if key != session_id
+                for source in session.open_inputs()
+            ]
+            await release_inputs(closing.open_inputs(), keep)
             del self._sessions[session_id]
         del self._locks[session_id]
         self._line_locks.pop(session_id, None)

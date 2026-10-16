@@ -13,34 +13,41 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createRequire } from 'node:module'
+import { Readable, type Duplex } from 'node:stream'
 import { registerCompressionCodec } from '@struktoai/mirage-core/utils/compress'
-
-interface BunzipModule {
-  decode(input: Uint8Array): Uint8Array
-}
+import { materialize } from '@struktoai/mirage-core/io/types'
+import { chunks } from '@struktoai/mirage-core/io/cooperative'
 
 interface XzModule {
-  compress(input: Uint8Array): Promise<Uint8Array>
-  decompress(input: Uint8Array): Promise<Uint8Array>
+  createCompressStream(): Duplex
+  createDecompressStream(): Duplex
 }
 
-// seek-bzip and @napi-rs/lzma are CommonJS; load them via createRequire so
-// the built ESM output resolves their exports without named-import interop
-// pitfalls (mirrors the createRequire usage in workspace.ts).
 const requireCjs = createRequire(import.meta.url)
-const bunzip = requireCjs('seek-bzip') as BunzipModule
-const { xz } = requireCjs('@napi-rs/lzma') as { xz: XzModule }
+const bunzip = requireCjs('unbzip2-stream') as () => Duplex
+const xz = requireCjs('@napi-rs/lzma/xz') as XzModule
 
-// bzip2 is decompress-only on purpose: seek-bzip is the maintained
-// permissively licensed implementation and it only decodes, so `tar -cj`
-// reports unsupported while `-xj` / `-tj` work. The pure-JS compressor that
-// used to sit here (compressjs) is GPL, which an Apache-2.0 package cannot
-// ship.
+async function* transform(
+  source: AsyncIterable<Uint8Array>,
+  codec: Duplex,
+): AsyncGenerator<Uint8Array> {
+  const stream = Readable.from(chunks(source)).compose(codec) as Readable
+  try {
+    yield* chunks(stream as AsyncIterable<Uint8Array>)
+  } finally {
+    stream.destroy()
+  }
+}
+
+// The permissively licensed bzip2 codec decodes only.
 registerCompressionCodec('bzip2', {
-  decompress: (bytes) => Promise.resolve(Uint8Array.from(bunzip.decode(bytes))),
+  decompress: (bytes) => materialize(transform(chunks(bytes), bunzip())),
+  decompressStream: (source) => transform(source, bunzip()),
 })
 
 registerCompressionCodec('xz', {
-  compress: async (bytes) => new Uint8Array(await xz.compress(Buffer.from(bytes))),
-  decompress: async (bytes) => new Uint8Array(await xz.decompress(Buffer.from(bytes))),
+  compress: (bytes) => materialize(transform(chunks(bytes), xz.createCompressStream())),
+  decompress: (bytes) => materialize(transform(chunks(bytes), xz.createDecompressStream())),
+  compressStream: (source) => transform(source, xz.createCompressStream()),
+  decompressStream: (source) => transform(source, xz.createDecompressStream()),
 })

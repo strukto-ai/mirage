@@ -28,6 +28,9 @@ import { read as boxRead, readStream as boxStream } from '../../core/box/read.ts
 import { checksum as boxChecksum } from '../../core/box/checksum.ts'
 import { stat as boxStat } from '../../core/box/stat.ts'
 import { exists as boxExists } from '../../core/box/exists.ts'
+import type { ByteSource } from '../../io/types.ts'
+import { chunks } from '../../io/cooperative.ts'
+import { writeStream } from '../../core/box/write.ts'
 import { write as boxWrite } from '../../core/box/write.ts'
 import { create as boxCreate } from '../../core/box/create.ts'
 import { mkdir as boxMkdir } from '../../core/box/mkdir.ts'
@@ -136,6 +139,16 @@ export class BoxVFS extends BaseVFS {
     handed: Handed = {},
   ): Promise<FileStat | null> {
     return boxWrite(this.accessor, path, data, handed)
+  }
+
+  override async writeStream(
+    path: PathSpec,
+    data: ByteSource,
+    signal?: AbortSignal,
+    _atomic = false,
+    handed: Handed = {},
+  ): Promise<FileStat | null> {
+    return await writeStream(this.accessor, path, chunks(data, signal), handed)
   }
 
   override create(path: PathSpec, handed: Handed = {}): Promise<FileStat | null> {

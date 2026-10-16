@@ -330,6 +330,7 @@ async def plan_create(
                     path=entry.read,
                     target=entry.target,
                     spelled=spelled,
+                    size=entry.size,
                 )
             )
     if exit_code:

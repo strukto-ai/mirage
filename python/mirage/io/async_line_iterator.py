@@ -77,6 +77,8 @@ class PipeInput:
 
 class AsyncLineIterator:
     def __init__(self, source: ByteSource) -> None:
+        self._input = source
+        self._started = False
         self._source: AsyncGenerator[bytes, None] | PipeInput = (
             source if isinstance(source, PipeInput) else chunks(source)
         )
@@ -93,11 +95,17 @@ class AsyncLineIterator:
     def position(self) -> int:
         return self._loaded - len(self._buf)
 
+    def unread(self, data: bytes) -> None:
+        """Return a lookahead suffix to a seekable descriptor."""
+        self._buf = data + self._buf
+        self._view = None
+
     @property
     def loaded(self) -> int:
         return self._loaded
 
     async def _next_chunk(self) -> bytes:
+        self._started = True
         data = await self._source.__anext__()
         self._loaded += len(data)
         return data
@@ -314,6 +322,9 @@ class AsyncLineIterator:
         self._buf = b""
         self._exhausted = True
         await self._source.aclose()
+        close = getattr(self._input, "aclose", None)
+        if not self._started and close is not None:
+            await close()
 
     async def load_rest(self) -> None:
         """Read what the source has left into the buffer, for a descriptor
@@ -417,7 +428,10 @@ class SharedInput:
         self,
         source: ByteSource | AsyncLineIterator,
         pipe: PathSpec | None = None,
+        *,
+        seekable: bool = False,
     ) -> None:
+        self.seekable = seekable
         self.lines = (
             source
             if isinstance(source, AsyncLineIterator)
@@ -435,7 +449,7 @@ class SharedInput:
     def dup(self) -> "SharedInput":
         """Another descriptor on the same open file, as ``dup`` makes:
         a read through either moves the one offset."""
-        return SharedInput(self.lines, self.pipe)
+        return SharedInput(self.lines, self.pipe, seekable=self.seekable)
 
     async def __anext__(self) -> bytes:
         chunk = await self.lines.read_chunk()
@@ -473,3 +487,19 @@ def line_buffer(stdin: ByteSource) -> AsyncLineIterator:
     if isinstance(stdin, SharedInput):
         return stdin.lines
     return AsyncLineIterator(stdin)
+
+
+async def release_inputs(
+    inputs: list[SharedInput], keep: list[SharedInput] | None = None
+) -> None:
+    """Close unreferenced read cursors once, preserving duplicate descriptors.
+
+    Args:
+        inputs (list[SharedInput]): cursors whose owner finished.
+        keep (list[SharedInput] | None): cursors another owner still holds.
+    """
+    retained = {id(source.lines) for source in keep or []}
+    for source in inputs:
+        if id(source.lines) not in retained:
+            retained.add(id(source.lines))
+            await source.discard()

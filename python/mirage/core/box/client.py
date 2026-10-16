@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import base64
+import hashlib
 import json
 import logging
 from collections.abc import AsyncIterator
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
 import aiohttp
 
@@ -28,6 +31,8 @@ from mirage.core.box.constants import (
     BOX_UPLOAD_BASE,
     TOKEN_BUFFER_SECONDS,
 )
+from mirage.io.cooperative import chunks
+from mirage.io.spool import ByteSpool
 from mirage.types import JsonValue
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.box.config import BoxConfig
@@ -391,3 +396,79 @@ async def box_upload_multipart(
         session=tm.pool,
     )
     return payload
+
+
+async def box_upload_session(
+    tm: BoxTokenManager,
+    url: str,
+    metadata: dict[str, Any],
+    spool: ByteSpool,
+    etag: str | None = None,
+) -> JsonValue:
+    created = await box_post_json(
+        tm, url, {**metadata, "file_size": spool.size}
+    )
+    endpoints = created["session_endpoints"]
+    part_size = created["part_size"]
+    parts: list[dict[str, Any]] = []
+    digest = hashlib.sha1()
+    try:
+        if (
+            not isinstance(part_size, int)
+            or part_size <= 0
+            or part_size > 64 * 1024 * 1024
+        ):
+            raise RuntimeError("Invalid Box upload part size")
+        for offset in range(0, spool.size, part_size):
+            data = await spool.read(offset, part_size)
+            part_hash = hashlib.sha1()
+            async for chunk in chunks(data):
+                digest.update(chunk)
+                part_hash.update(chunk)
+            part_digest = base64.b64encode(part_hash.digest()).decode()
+            response = await api_request(
+                "PUT",
+                endpoints["upload_part"],
+                error_of=partial(_error_of, label="upload part", url=url),
+                headers={
+                    **await box_auth_headers(tm),
+                    "Content-Type": "application/octet-stream",
+                    "Digest": f"sha={part_digest}",
+                    "Content-Range": (
+                        f"bytes {offset}-{offset + len(data) - 1}/{spool.size}"
+                    ),
+                },
+                data=data,
+                session=tm.pool,
+            )
+            parts.append(response["part"])
+        headers = {
+            "Digest": "sha=" + base64.b64encode(digest.digest()).decode()
+        }
+        if etag is not None:
+            headers["If-Match"] = etag
+        for _ in range(10):
+            response = await api_request(
+                "POST",
+                endpoints["commit"],
+                error_of=partial(_error_of, label="commit upload", url=url),
+                headers={**await box_auth_headers(tm), **headers},
+                json_body=cast(dict[str, JsonValue], {"parts": parts}),
+                read="response",
+                session=tm.pool,
+            )
+            if response.status == 201:
+                return cast(JsonValue, response.data)
+            if response.status != 202:
+                raise RuntimeError(
+                    f"Unexpected Box commit status: {response.status}"
+                )
+            delay = float(response.headers.get("retry-after", "1"))
+            await asyncio.sleep(max(0, min(delay, 30)))
+        raise TimeoutError("Box upload commit did not complete")
+    except BaseException:
+        try:
+            await box_delete(tm, endpoints["abort"])
+        except Exception:
+            logger.debug("Could not abort Box upload session", exc_info=True)
+        raise

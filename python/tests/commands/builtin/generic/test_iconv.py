@@ -1,7 +1,7 @@
 import pytest
 
 from mirage.commands.builtin.generic.iconv import iconv
-from mirage.io.types import materialize
+from mirage.io.types import ByteSource, materialize
 from mirage.types import PathSpec
 
 
@@ -12,8 +12,8 @@ async def _unused_read_stream(path):
 def _store():
     store: dict[str, bytes] = {}
 
-    async def write_bytes(path: PathSpec, data: bytes) -> None:
-        store[path.virtual] = data
+    async def write_bytes(path: PathSpec, data: ByteSource) -> None:
+        store[path.virtual] = await materialize(data)
 
     return store, write_bytes
 

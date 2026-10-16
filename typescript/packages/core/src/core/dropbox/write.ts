@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteSpool } from '../../io/spool.ts'
+import type { ByteSource } from '../../io/types.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { nativeCondition, writeCondition } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
@@ -23,14 +25,13 @@ import { dropboxUpload } from './client.ts'
 import { dropboxPathOf } from './paths.ts'
 import { statFromEntry } from './readdir.ts'
 
-// Single-call upload; Dropbox caps it at ~150 MB (larger files need
-// upload sessions, not supported here). A held version costs one
+// Large spooled inputs use upload sessions. A held version costs one
 // get_metadata and goes out as the file's rev in `update` mode. Answers the
 // stored file's stat, null for a reply that names none.
 export async function write(
   accessor: DropboxAccessor,
   path: PathSpec,
-  data: Uint8Array,
+  data: Uint8Array | ByteSpool,
 ): Promise<FileStat | null> {
   const tm = accessor.tokenManager
   const apiPath = dropboxPathOf(accessor, path)
@@ -47,8 +48,29 @@ export async function write(
     throw (await refused(path, err, cond, rev)) ?? err
   }
   const stored = uploadStat(entry as DropboxEntry | null, statFromEntry, path.virtual)
-  record('write', path.virtual, 'dropbox', data.byteLength, timer, {
-    fingerprint: stored?.fingerprint ?? null,
-  })
+  record(
+    'write',
+    path.virtual,
+    'dropbox',
+    data instanceof ByteSpool ? data.size : data.byteLength,
+    timer,
+    {
+      fingerprint: stored?.fingerprint ?? null,
+    },
+  )
   return stored
+}
+
+export async function writeStream(
+  accessor: DropboxAccessor,
+  path: PathSpec,
+  data: ByteSource,
+): Promise<FileStat | null> {
+  const spool = new ByteSpool()
+  try {
+    await spool.fill(data)
+    return await write(accessor, path, spool)
+  } finally {
+    await spool.close()
+  }
 }

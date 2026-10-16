@@ -19,45 +19,46 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { resolveSource, stdinStream } from '../utils/stream.ts'
-import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
+import { reportedStream } from '../utils/operands.ts'
+import { asyncChain } from '../../../io/stream.ts'
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
+import { RecordSpool } from '../../../io/record_spool.ts'
 import { encodeText } from '../../../shell/bytes.ts'
-import { concat, findBytes } from '../../../utils/bytes.ts'
+import { concat } from '../../../utils/bytes.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-/**
- * `data` cut into tac's records, in file order. A record ends with the
- * separator, or with `before` (`-b`) starts with it; the text before the first
- * separator, or after the last, is a record without one. Mirrors Python's
- * _records.
- */
-function records(data: Uint8Array, separator: Uint8Array, before: boolean): Uint8Array[] {
-  const texts: Uint8Array[] = []
-  let from = 0
-  for (let at = findBytes(data, separator); at !== -1; at = findBytes(data, separator, from)) {
-    texts.push(data.subarray(from, at))
-    from = at + separator.byteLength
-  }
-  texts.push(data.subarray(from))
-  const out = before
-    ? [texts[0] ?? new Uint8Array(), ...texts.slice(1).map((text) => concat([separator, text]))]
-    : [
-        ...texts.slice(0, -1).map((text) => concat([text, separator])),
-        texts.at(-1) ?? new Uint8Array(),
-      ]
-  return out.filter((record) => record.byteLength > 0)
-}
-
-async function reverseSource(
+async function* reverseSource(
   source: AsyncIterable<Uint8Array>,
   separator: string,
   before: boolean,
   regex: boolean,
-): Promise<Uint8Array> {
-  const data = await materialize(source)
-  if (!regex) return concat(records(data, encodeText(separator), before).reverse())
-  const text = DEC.decode(data)
+): AsyncGenerator<Uint8Array> {
+  if (!regex) {
+    const delimiter = encodeText(separator)
+    const reader = new AsyncLineIterator(source)
+    const records = new RecordSpool()
+    try {
+      let prefix: Uint8Array = new Uint8Array()
+      try {
+        for (;;) {
+          const [raw, found] = await reader.readUntil(delimiter)
+          const record = before ? concat([prefix, raw]) : found ? concat([raw, delimiter]) : raw
+          if (record.length > 0) await records.append(record)
+          if (!found) break
+          prefix = delimiter
+        }
+      } finally {
+        await reader.discard()
+      }
+      for (let index = records.count - 1; index >= 0; index--) yield* records.stream(index)
+    } finally {
+      await records.close()
+    }
+    return
+  }
+  const text = DEC.decode(await materialize(source))
   const matcher = new RegExp(`(${separator})`, 'g')
   const parts = text.split(matcher)
   const found: string[] = []
@@ -69,7 +70,7 @@ async function reverseSource(
     )
   }
   if (parts.length % 2 === 1 && parts.at(-1) !== '') found.push(parts.at(-1) ?? '')
-  return ENC.encode(found.reverse().join(''))
+  yield ENC.encode(found.reverse().join(''))
 }
 
 /** `-s` as tac reads it: a newline when absent, and NUL when empty, as the
@@ -94,40 +95,23 @@ function parseFlags(bag: Record<string, FlagValue>): TacFlags {
   }
 }
 
-export async function tacGeneric(
+export function tacGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<[ByteSource | null, IOResult]> {
   stream = stdinStream(stream, opts.stdin)
   const { separator, before, regex } = parseFlags(opts.flags)
+  const io = new IOResult()
   if (paths.length > 0) {
-    // A missing operand is reported and skipped; the remaining operands
-    // still reverse (GNU tac).
-    const [ok, err] = await readOperands(paths, stream, 'tac')
-    const io = operandsIo(err)
-    if (ok.length === 0 && err !== '') return [null, io]
-    const parts: Uint8Array[] = []
-    let total = 0
-    for (const o of ok) {
-      const part = await reverseSource(singleChunk(o.data), separator, before, regex)
-      parts.push(part)
-      total += part.byteLength
-    }
-    const out = new Uint8Array(total)
-    let offset = 0
-    for (const part of parts) {
-      out.set(part, offset)
-      offset += part.byteLength
-    }
-    const result: ByteSource = out
-    return [result, io]
+    return Promise.resolve([
+      asyncChain(
+        paths.map((path) =>
+          reportedStream(reverseSource(stream(path), separator, before, regex), io, path, 'tac'),
+        ),
+      ),
+      io,
+    ])
   }
-  const result: ByteSource = await reverseSource(
-    resolveSource(opts.stdin),
-    separator,
-    before,
-    regex,
-  )
-  return [result, new IOResult()]
+  return Promise.resolve([reverseSource(resolveSource(opts.stdin), separator, before, regex), io])
 }

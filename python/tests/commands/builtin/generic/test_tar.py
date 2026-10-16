@@ -11,6 +11,10 @@ from mirage.commands.builtin.generic.tar import (
     strip_prefix,
     tar,
 )
+from mirage.commands.builtin.generic.tar.tar import _write_archive
+from mirage.commands.builtin.generic.tar.types import CreateResult, Member
+from mirage.io.stream import close_quietly, ensure_stream
+from mirage.io.types import materialize
 from mirage.types import (
     LINK_TARGET_KEY,
     ContentType,
@@ -62,7 +66,7 @@ class _Tree:
         return self.files[key]
 
     async def write_bytes(self, path, data):
-        self.files[path.virtual] = data
+        self.files[path.virtual] = await materialize(data)
 
     async def mkdir(self, path, parents=False):
         self.dirs.add(path.virtual.rstrip("/"))
@@ -333,3 +337,36 @@ async def test_create_reports_what_it_may_not_open_and_exits_two():
         "d/locked/",
         "d/sealed/",
     ]
+
+
+@pytest.mark.asyncio
+async def test_known_size_archive_emits_before_reading_the_whole_file():
+    pulled, closed = [], []
+
+    async def source(path):
+        try:
+            for part in [b"abc", b"def"]:
+                pulled.append(part)
+                yield part
+        finally:
+            closed.append(True)
+
+    async def no_write(*args):
+        raise AssertionError("stdout archive must not write a path")
+
+    plan = CreateResult(
+        (Member(name="a", kind="file", path=_spec("/a"), size=6),), (), 0
+    )
+    output, result = await _write_archive(
+        plan, _raw("-", "-"), "", False, source, no_write
+    )
+    stream = ensure_stream(output)
+    first = await anext(stream)
+    assert first[:2] == b"a\0"
+    assert pulled == [b"abc"]
+    data = first + await materialize(stream)
+    with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+        assert archive.extractfile("a").read() == b"abcdef"
+    assert result.exit_code == 0
+    assert closed == [True]
+    await close_quietly(stream)

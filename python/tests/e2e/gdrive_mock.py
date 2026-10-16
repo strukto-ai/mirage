@@ -11,11 +11,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import hashlib
 from collections import Counter
 from contextlib import ExitStack
 from unittest.mock import patch
+
+from mirage.io.spool import ByteSpool
 
 _FAKE_TOKEN = "fake-gdrive-token"
 _FAKE_EXPIRES_IN = 9999999999
@@ -513,7 +514,13 @@ def _build_fakes(registry):
         if fake is None:
             raise FileNotFoundError(parent_id)
         fake.calls["upload_file"] += 1
-        return fake.upload(parent_id, name, data)
+        return fake.upload(
+            parent_id,
+            name,
+            await data.read(0, data.size)
+            if isinstance(data, ByteSpool)
+            else data,
+        )
 
     async def fake_update_file_content(
         token_manager, file_id: str, data: bytes, mime_type: str = _FILE_MIME
@@ -523,7 +530,12 @@ def _build_fakes(registry):
         if fake is None:
             raise FileNotFoundError(file_id)
         fake.calls["update_file_content"] += 1
-        return fake.update(file_id, data)
+        return fake.update(
+            file_id,
+            await data.read(0, data.size)
+            if isinstance(data, ByteSpool)
+            else data,
+        )
 
     async def fake_create_folder(
         token_manager, name: str, parent_id: str

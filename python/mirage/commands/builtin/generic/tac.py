@@ -5,8 +5,7 @@ from dataclasses import dataclass
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
     normalized_read,
-    operands_io,
-    read_operands,
+    reported_stream,
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import (
@@ -18,8 +17,10 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.io.stream import yield_bytes
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.record_spool import RecordSpool
+from mirage.io.stream import async_chain
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
@@ -52,47 +53,46 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TacFlags:
     )
 
 
-def _records(data: bytes, separator: bytes, before: bool) -> list[bytes]:
-    """``data`` cut into tac's records, in file order.
-
-    A record ends with the separator, or with ``before`` (``-b``) starts
-    with it; the text before the first separator, or after the last, is
-    a record without one.
-
-    Args:
-        data (bytes): the bytes to cut.
-        separator (bytes): the separator.
-        before (bool): -b.
-    """
-    texts = data.split(separator)
-    if before:
-        records = [texts[0], *(separator + text for text in texts[1:])]
-    else:
-        records = [text + separator for text in texts[:-1]] + [texts[-1]]
-    return [record for record in records if record]
-
-
 async def _reverse_source(
-    source: AsyncIterator[bytes], separator: str, before: bool, regex: bool
-) -> bytes:
-    data = b"".join([chunk async for chunk in source])
+    source: ByteSource, separator: str, before: bool, regex: bool
+) -> AsyncIterator[bytes]:
     if not regex:
-        return b"".join(
-            reversed(_records(data, encode_text(separator), before))
-        )
-    text = data.decode(errors="replace")
+        delimiter = encode_text(separator)
+        reader = AsyncLineIterator(source)
+        async with RecordSpool() as records:
+            try:
+                prefix = b""
+                while True:
+                    raw, found = await reader.read_until(delimiter)
+                    record = (
+                        prefix + raw
+                        if before
+                        else raw + (delimiter if found else b"")
+                    )
+                    if record:
+                        await records.append(record)
+                    if not found:
+                        break
+                    prefix = delimiter
+            finally:
+                await reader.discard()
+            for index in range(records.count - 1, -1, -1):
+                async for part in records.stream(index):
+                    yield part
+        return
+    text = (await materialize(source)).decode(errors="replace")
     parts = re.split(f"({separator})", text)
-    records: list[str] = []
+    pieces: list[str] = []
     for index in range(0, len(parts) - 1, 2):
-        records.append(
+        pieces.append(
             parts[index + 1] + parts[index]
             if before
             else parts[index] + parts[index + 1]
         )
     if len(parts) % 2 == 1 and parts[-1]:
-        records.append(parts[-1])
-    records.reverse()
-    return "".join(records).encode()
+        pieces.append(parts[-1])
+    pieces.reverse()
+    yield "".join(pieces).encode()
 
 
 async def tac(
@@ -104,19 +104,22 @@ async def tac(
     before: bool = False,
     regex: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
+    io = IOResult()
     if paths:
-        ok, err = await read_operands(paths, read_stream, "tac")
-        parts: list[bytes] = []
-        for operand in ok:
-            parts.append(
-                await _reverse_source(
-                    yield_bytes(operand.data), separator, before, regex
+        return async_chain(
+            [
+                reported_stream(
+                    _reverse_source(
+                        read_stream(path), separator, before, regex
+                    ),
+                    io,
+                    path,
+                    "tac",
                 )
-            )
-        return b"".join(parts), operands_io(err)
-
-    source = resolve_source(stdin)
-    return await _reverse_source(source, separator, before, regex), IOResult()
+                for path in paths
+            ]
+        ), io
+    return _reverse_source(resolve_source(stdin), separator, before, regex), io
 
 
 async def tac_generic(

@@ -57,8 +57,12 @@ Streaming writes are covered by the shared lifecycle corpus and mirrored
 writer, dispatcher, disk and S3 tests. They pin named outputs, duplicate
 tee destinations, split's unterminated final record, sed's buffered
 read/write ordering, backpressure, failed uploads and cache invalidation.
-The new `io/writer` modules run through the existing whole-host core and
-TypeScript filters.
+The `io/writer`, `io/spool`, record spool, archive/codec and upload
+modules run through the existing whole-host core and TypeScript filters,
+including their Node/browser providers. `unix/arch/streaming_remaining.json`
+adds named compression, archive updates, descriptor reuse and deferred
+script output round trips. Spool spill/cleanup and upload protocol failures
+are covered by mirrored unit tests.
 
 The streamed read probes in `vfs/ranges/stream.json` accept
 `max_chunk_size` to bound every returned chunk and `take_bytes` to close

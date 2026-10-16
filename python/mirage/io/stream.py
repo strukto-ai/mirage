@@ -15,6 +15,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from functools import partial
 from typing import TypeVar
 
 from mirage.concurrency.limiter import settle
@@ -116,6 +117,11 @@ class OutputStream:
         self._pull = pull
         try:
             return await pull
+        except BaseException:
+            if self._pull is pull:
+                self._pull = None
+            await self.aclose()
+            raise
         finally:
             if self._pull is pull:
                 self._pull = None
@@ -151,21 +157,21 @@ async def discard_io(io: IOResult) -> None:
     await discard_streams(io.stdout, io.stderr)
 
 
-async def async_chain(
-    streams: Iterable[ByteSource | None],
-) -> AsyncIterator[bytes]:
-    for stream in streams:
-        if stream is None:
-            continue
-        if isinstance(stream, bytes):
-            if stream:
-                yield stream
-        else:
-            try:
-                async for chunk in stream:
-                    yield chunk
-            finally:
-                await close_quietly(stream)
+def async_chain(streams: Iterable[ByteSource | None]) -> AsyncIterator[bytes]:
+    sources = list(streams)
+
+    async def output() -> AsyncIterator[bytes]:
+        for source in sources:
+            if source is None:
+                continue
+            async for part in ensure_stream(source):
+                yield part
+
+    async def close() -> None:
+        for source in sources:
+            await close_quietly(source)
+
+    return OutputStream(output(), close)
 
 
 async def yield_bytes(data: bytes) -> AsyncIterator[bytes]:
@@ -217,3 +223,35 @@ async def prime_stream(
             await close_quietly(source)
 
     return OutputStream(rest(), lambda: close_quietly(source))
+
+
+def slice_stream(
+    source: ByteSource, offset: int = 0, size: int | None = None
+) -> OutputStream:
+    """Take a byte window without materializing its prefix or suffix.
+
+    Args:
+        source (ByteSource): input owned by this window.
+        offset (int): bytes to skip.
+        size (int | None): maximum bytes to yield, None for the remainder.
+    """
+    if offset < 0 or (size is not None and size < 0):
+        raise ValueError("stream window must be nonnegative")
+
+    async def window() -> AsyncIterator[bytes]:
+        skipped, remaining = offset, size
+        if remaining == 0:
+            return
+        async for part in ensure_stream(source):
+            cut = min(skipped, len(part))
+            skipped -= cut
+            part = part[cut:]
+            if remaining is not None:
+                part = part[:remaining]
+                remaining -= len(part)
+            if part:
+                yield part
+            if remaining == 0:
+                return
+
+    return OutputStream(window(), partial(close_quietly, source))
