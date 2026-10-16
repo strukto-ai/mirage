@@ -92,11 +92,18 @@ class BytePipe:
     def release(self) -> None:
         self.close_reader()
 
+    async def asked(self) -> None:
+        """Wait until the reader first asks for bytes or closes."""
+        while not (self._reading or self._reader_closed):
+            self._changed.clear()
+            await self._changed.wait()
+
     async def stream(self) -> AsyncIterator[bytes]:
         """Read once; abandoning the iterator closes its endpoint."""
         if self._reading:
             raise RuntimeError("byte pipe already has a reader")
         self._reading = True
+        self._changed.set()
         try:
             while not self._reader_closed:
                 if self._chunks:

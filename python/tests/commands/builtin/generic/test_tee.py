@@ -1,3 +1,4 @@
+import asyncio
 import errno
 
 import pytest
@@ -234,6 +235,45 @@ async def test_an_unprobed_output_is_opened_in_order_before_any_data(
     assert sunk == written
     assert io.exit_code == 1
     assert await materialize(io.stderr) == stderr
+
+
+class _QuietInput:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def __aiter__(self) -> "_QuietInput":
+        return self
+
+    async def __anext__(self) -> bytes:
+        await asyncio.Event().wait()
+        raise StopAsyncIteration
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_a_refused_open_ends_exit_mode_while_the_input_is_quiet():
+    async def _refuse(_p, _data):
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    async def _stat(p: PathSpec) -> FileStat:
+        return FileStat(name=p.virtual[1:], type=FileType.FILE)
+
+    stdin = _QuietInput()
+    source, io = await tee_generic(
+        [_spec("/locked")],
+        (),
+        read_stream=_empty,
+        write_bytes=_refuse,
+        stdin=stdin,
+        flags={"output_error": "exit"},
+        stat=_stat,
+    )
+    assert await asyncio.wait_for(materialize(source), 5) == b""
+    assert io.exit_code == 1
+    assert await materialize(io.stderr) == b"tee: /locked: Permission denied\n"
+    assert stdin.closed
 
 
 @pytest.mark.asyncio

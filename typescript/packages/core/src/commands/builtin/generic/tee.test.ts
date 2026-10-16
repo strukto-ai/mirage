@@ -15,7 +15,9 @@
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { eacces, enoent } from '../../../errors/fs.ts'
-import { PipeErrors, parseFlags, writeOutput } from './tee.ts'
+import { materialize } from '../../../io/types.ts'
+import type { CommandOpts } from '../../config.ts'
+import { PipeErrors, parseFlags, teeGeneric, writeOutput } from './tee.ts'
 
 const DEC = new TextDecoder()
 
@@ -217,5 +219,42 @@ describe('writeOutput', () => {
       s.write,
     )
     expect(s.written).toEqual({ '/n': 'oldadd' })
+  })
+})
+
+describe('teeGeneric', () => {
+  it('ends under exit on a refused open while its input is quiet', async () => {
+    let closed = false
+    const quiet: AsyncIterableIterator<Uint8Array> = {
+      [Symbol.asyncIterator]() {
+        return this
+      },
+      next: () => new Promise<IteratorResult<Uint8Array>>(() => undefined),
+      return() {
+        closed = true
+        return Promise.resolve({ done: true, value: undefined })
+      },
+    }
+    const result = await teeGeneric(
+      [PathSpec.fromStrPath('/locked')],
+      [],
+      {
+        stdin: quiet,
+        flags: { output_error: 'exit' },
+        cwd: '/',
+        vfs: {},
+      } as unknown as CommandOpts,
+      () => {
+        throw enoent('/unused')
+      },
+      (p) => Promise.reject(eacces(p)),
+      undefined,
+      (p) => Promise.resolve(new FileStat({ name: p.virtual.slice(1), type: FileType.FILE })),
+    )
+    const [out, io] = result ?? [null, null]
+    expect(DEC.decode(await materialize(out))).toBe('')
+    expect(io?.exitCode).toBe(1)
+    expect(DEC.decode(io?.stderr as Uint8Array)).toBe('tee: /locked: Permission denied\n')
+    expect(closed).toBe(true)
   })
 })

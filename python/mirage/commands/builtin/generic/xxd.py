@@ -620,7 +620,11 @@ async def _write_output(
             stderr=fs_error_line("xxd", paths[0], exc).encode(),
             exit_code=read_fail_exit_code("xxd", exc),
         )
-    if not reverse and paths[0].virtual == target.virtual:
+    if (
+        not reverse
+        and not is_stdin(paths[0])
+        and paths[0].virtual == target.virtual
+    ):
         await close_quietly(data)
         data = b""
     if reverse and pwrite_bytes is not None:

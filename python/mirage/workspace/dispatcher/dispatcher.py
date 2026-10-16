@@ -2175,7 +2175,7 @@ class Dispatcher:
                 call,
                 mount,
                 mine,
-                before,
+                before if payload is None or payload.moved else None,
                 call.kwargs.get("data")
                 if payload is None
                 else payload.whole(),
@@ -2235,7 +2235,8 @@ class Dispatcher:
         one that appends by itself, proves nothing, so the copy stays
         dropped. An append of nothing that wrote nothing (``cmd >> f``
         opening ``f``) leaves the copy as it was; one that made the file
-        anew drops it.
+        anew drops it, and so does a streamed one, whose name another
+        writer could take while it waited.
 
         Args:
             call (_Call): the write that ran.

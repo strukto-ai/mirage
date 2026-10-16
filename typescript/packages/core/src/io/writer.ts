@@ -33,6 +33,14 @@ export class ByteWriter {
     }
   }
 
+  /** Wait until the consumer asks for its first bytes; one that ended first, as a refused open does, throws its error. */
+  async opened(): Promise<void> {
+    await this.pipe.asked()
+    if (!this.pipe.closedReader) return
+    await this.task
+    if (this.failed) throw this.failure
+  }
+
   async finish(): Promise<void> {
     this.pipe.end()
     await this.task

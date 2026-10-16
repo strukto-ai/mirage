@@ -439,6 +439,17 @@ async def _tee_stream(
     cancelled = False
     try:
         async with aclosing(chunks(source)) as stream:
+            # GNU's tee opens every output before it reads: a refused one
+            # is reported (or ends it under exit) while the input is quiet.
+            for key, (path, writer, _) in list(writers.items()):
+                try:
+                    await writer.opened()
+                except Exception as exc:
+                    await writer.abort()
+                    del writers[key]
+                    if failed(path, exc):
+                        await close_quietly(source)
+                        return
             try:
                 async for chunk in stream:
                     if not await feed(chunk):

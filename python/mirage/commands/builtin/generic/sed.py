@@ -230,7 +230,8 @@ class _ScriptWrites:
     GNU opens each spelling of a file (``w out``, ``w ./out``) as its own
     buffered stream from offset 0, and the first opened is flushed last:
     its bytes win, and a later spelling's show only past its end. The
-    first spelling writes here; the others are kept for that tail.
+    first spelling writes here; the others keep only the bytes past what
+    it has written so far, for that tail.
     """
 
     def __init__(
@@ -245,10 +246,12 @@ class _ScriptWrites:
         self.errors = ""
         self.first: dict[str, str] = {}
         self.later: dict[str, bytearray] = {}
+        self.dropped: dict[str, int] = {}
         self.sent: dict[str, int] = {}
         for name in machine.wfiles:
             if self.first.setdefault(access.spec(name).virtual, name) != name:
                 self.later[name] = bytearray()
+                self.dropped[name] = 0
 
     async def flush(self, final: bool = False) -> None:
         if self.defer and not final:
@@ -262,9 +265,19 @@ class _ScriptWrites:
             if name in self.failed or path in self.edited:
                 continue
             if name in self.later:
-                self.later[name] += data
+                self._keep(name, path, data)
             else:
                 await self._send(name, data)
+
+    def _keep(self, name: str, path: str, data: bytes) -> None:
+        kept = self.later[name]
+        kept += data
+        covered = min(
+            self.sent.get(self.first[path], 0) - self.dropped[name], len(kept)
+        )
+        if covered > 0:
+            del kept[:covered]
+            self.dropped[name] += covered
 
     async def _send(self, name: str, data: bytes) -> None:
         writer = self.writers.get(name)
@@ -287,19 +300,15 @@ class _ScriptWrites:
     async def finish(self) -> None:
         tails: dict[str, bytearray] = {}
         for name, data in reversed(self.later.items()):
-            tail = tails.setdefault(
-                self.access.spec(name).virtual, bytearray()
-            )
-            tail[: len(data)] = data
+            path = self.access.spec(name).virtual
+            sent = self.sent.get(self.first[path], 0)
+            piece = data[sent - self.dropped[name] :]
+            tail = tails.setdefault(path, bytearray())
+            tail[: len(piece)] = piece
         for path, tail in tails.items():
             first = self.first[path]
-            sent = self.sent.get(first, 0)
-            if (
-                len(tail) > sent
-                and first not in self.failed
-                and path not in self.edited
-            ):
-                await self._send(first, bytes(tail[sent:]))
+            if tail and first not in self.failed and path not in self.edited:
+                await self._send(first, bytes(tail))
         writers, self.writers = self.writers, {}
         for name, writer in writers.items():
             try:

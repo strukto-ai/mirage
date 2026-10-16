@@ -410,6 +410,21 @@ async function* teeStream(
   let interrupted = false
   let closed = true
   try {
+    // GNU's tee opens every output before it reads: a refused one is
+    // reported (or ends it under exit) while the input is quiet.
+    for (const [key, { path, writer }] of writers) {
+      try {
+        await writer.opened()
+      } catch (error) {
+        await writer.abort()
+        writers.delete(key)
+        if (failed(path, error)) {
+          closed = false
+          await closeQuietly(source)
+          return
+        }
+      }
+    }
     for (;;) {
       const next = await input.next()
       if (next.done === true || !(await feed(next.value))) {

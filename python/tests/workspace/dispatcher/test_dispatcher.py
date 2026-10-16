@@ -2738,6 +2738,38 @@ async def test_streamed_writes_record_the_bytes_they_sent():
         await ws.close()
 
 
+class QuietSource:
+    def __init__(self):
+        self.asked = asyncio.Event()
+        self.done = asyncio.Event()
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        self.asked.set()
+        await self.done.wait()
+        raise StopAsyncIteration
+
+
+@pytest.mark.asyncio
+async def test_an_empty_streamed_append_keeps_no_copy_from_before_it_waited():
+    ws = Workspace({"/dst": StreamWritingRAM()}, mode=MountMode.WRITE)
+    source = QuietSource()
+    try:
+        await ws.vfs.write("/dst/f", b"old")
+        await ws.cache.set("/dst/f", b"old", fingerprint="v1")
+        quiet = asyncio.create_task(ws.vfs.append("/dst/f", source))
+        await source.asked.wait()
+        await ws.vfs.append("/dst/f", b"new")
+        source.done.set()
+        await quiet
+        assert await ws.cache.get("/dst/f") != b"old"
+        assert await ws.vfs.read("/dst/f") == b"oldnew"
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "line,expected",

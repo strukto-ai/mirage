@@ -544,7 +544,7 @@ class LentPayload {
         if (next.done === true) return
         this.moved += next.value.byteLength
         if (this.kept !== null && this.moved > this.budget) this.kept = null
-        this.kept?.push(next.value)
+        this.kept?.push(next.value.slice())
         yield next.value
       }
     } finally {
@@ -1927,7 +1927,7 @@ export class Dispatcher {
                 mount,
                 payload === null ? fullArgs[0] : payload.whole(),
                 mine,
-                before,
+                payload === null || payload.moved > 0 ? before : null,
               )
             },
             async () => {
@@ -2009,8 +2009,9 @@ export class Dispatcher {
    * copy's length plus the appended bytes. A store with no tokens, or one
    * that appends by itself, proves nothing, so the copy stays dropped. An
    * append of nothing that wrote nothing (`cmd >> f` opening `f`) leaves the
-   * copy as it was; one that made the file anew drops it. Mirrors Python's
-   * Dispatcher._keep_written.
+   * copy as it was; one that made the file anew drops it, and so does a
+   * streamed one, whose name another writer could take while it waited.
+   * Mirrors Python's Dispatcher._keep_written.
    */
   private async keepWritten(
     call: Call,

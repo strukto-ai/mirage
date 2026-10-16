@@ -6057,11 +6057,11 @@
         },
         {
           "op": "exec",
-          "command": "cat /a/input > /b/self; xxd -p /b/self /b/self; wc -c < /b/self",
+          "command": "cat /a/input > /b/self; xxd -p /b/self /b/self; wc -c < /b/self; (cd /b && printf AB | xxd -p - /b/- && cat /b/-)",
           "expect": {
             "value": {
               "exit_code": 0,
-              "stdout": "0\n",
+              "stdout": "0\n4142\n",
               "stderr": ""
             }
           }

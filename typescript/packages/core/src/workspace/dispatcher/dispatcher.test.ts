@@ -233,11 +233,51 @@ it.each([
   try {
     await ws.vfs.write('/dst/f', 'old')
     await ws.cache.set('/dst/f', new TextEncoder().encode('old'), { fingerprint: 'v1' })
-    await ws.vfs.write('/dst/f', yieldBytes(new TextEncoder().encode('new')))
+    const reused = async function* (): AsyncIterable<Uint8Array> {
+      const buffer = new Uint8Array(1)
+      for (const byte of new TextEncoder().encode('new')) {
+        await Promise.resolve()
+        buffer[0] = byte
+        yield buffer
+      }
+    }
+    await ws.vfs.write('/dst/f', reused())
     expect(tokens).toEqual(['v1'])
     const cached = await ws.cache.get('/dst/f')
     expect(cached === null ? null : new TextDecoder().decode(cached)).toBe(kept)
     expect(await ws.cache.fingerprint('/dst/f')).toBe('v2')
+  } finally {
+    await ws.close()
+  }
+})
+
+it('keeps no copy from before an empty streamed append waited', async () => {
+  const ws = new Workspace({ '/dst': new StreamWritingRAM() }, { mode: MountMode.WRITE })
+  let asked = (): void => undefined
+  let done = (): void => undefined
+  const waiting = new Promise<void>((resolve) => (asked = resolve))
+  const ended = new Promise<void>((resolve) => (done = resolve))
+  const quiet: AsyncIterableIterator<Uint8Array> = {
+    [Symbol.asyncIterator]() {
+      return this
+    },
+    async next() {
+      asked()
+      await ended
+      return { done: true, value: undefined }
+    },
+  }
+  try {
+    await ws.vfs.write('/dst/f', 'old')
+    await ws.cache.set('/dst/f', new TextEncoder().encode('old'), { fingerprint: 'v1' })
+    const pending = ws.vfs.append('/dst/f', quiet)
+    await waiting
+    await ws.vfs.append('/dst/f', new TextEncoder().encode('new'))
+    done()
+    await pending
+    const cached = await ws.cache.get('/dst/f')
+    expect(cached === null ? null : new TextDecoder().decode(cached)).not.toBe('old')
+    expect(await ws.vfs.cat('/dst/f')).toBe('oldnew')
   } finally {
     await ws.close()
   }
@@ -302,7 +342,7 @@ class StreamWritingRAM extends RAMVFS {
         await super.write(path, chunk)
         throw Object.assign(new Error('write failed after a prefix'), { code: 'EIO' })
       }
-      content.push(chunk)
+      content.push(chunk.slice())
     }
     const combined = new Uint8Array(content.reduce((size, chunk) => size + chunk.length, 0))
     let offset = 0

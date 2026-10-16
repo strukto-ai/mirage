@@ -95,10 +95,16 @@ export class BytePipe {
     }, 0)
   }
 
+  /** Wait until the reader first asks for bytes or closes. */
+  async asked(): Promise<void> {
+    while (!this.reading && !this.readerClosed) await this.changed()
+  }
+
   /** Read once; abandoning the iterator closes its endpoint. */
   async *stream(): AsyncGenerator<Uint8Array> {
     if (this.reading) throw new Error('byte pipe already has a reader')
     this.reading = true
+    this.notify()
     try {
       while (!this.readerClosed) {
         const chunk = this.chunks.shift()

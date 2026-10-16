@@ -37,6 +37,13 @@ class ByteWriter:
             await self.task
             raise
 
+    async def opened(self) -> None:
+        """Wait until the consumer asks for its first bytes; one that
+        ended first, as a refused open does, raises its error."""
+        await self.pipe.asked()
+        if self.task.done():
+            await self.task
+
     async def finish(self) -> None:
         self.pipe.end()
         await self.task
