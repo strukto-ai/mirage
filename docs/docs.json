@@ -158,21 +158,12 @@
               },
               {
                 "group": "Integration",
+                "icon": "plug",
                 "pages": [
                   "home/integration/search",
                   "home/integration/lines",
                   "home/integration/checksums",
                   "home/integration/walks"
-                ]
-              },
-              {
-                "group": "FUSE",
-                "icon": "folder-open",
-                "pages": [
-                  "home/setup/fuse",
-                  "home/setup/macos",
-                  "home/setup/linux",
-                  "home/setup/windows"
                 ]
               }
             ]
@@ -286,8 +277,18 @@
                   "home/access/mcp",
                   "home/access/rpc",
                   "home/access/ssh",
-                  "home/access/fuse",
                   "home/access/cli"
+                ]
+              },
+              {
+                "group": "FUSE",
+                "icon": "folder-open",
+                "pages": [
+                  "home/access/fuse",
+                  "home/setup/fuse",
+                  "home/setup/macos",
+                  "home/setup/linux",
+                  "home/setup/windows"
                 ]
               }
             ]
