@@ -340,7 +340,7 @@ rename or delete leaves that path. An item seen for the first time is a
 otherwise. [`dropbox/events.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/dropbox/events.py)
 and [`dropbox/events.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/events.ts)
 answer each `list_folder/longpoll` with one pull; the
-[Notification support](/home/events-matrix#the-dropbox-longpoll-example) has the setup.
+[Notification support](/home/notifications/support#the-dropbox-longpoll-example) has the setup.
 
 ## Queues
 
@@ -401,7 +401,7 @@ end cleanly, and the workspace returns to its idle state. The next `events()` or
   stays per backend, so each mount needs its own signal feeding
   `ws.notify`.
 - Mappers and ping handlers ship for the backends in the
-  [Notification support](/home/events-matrix); `ws.notify` accepts events from any
+  [Notification support](/home/notifications/support); `ws.notify` accepts events from any
   detection you run, so every backend can deliver events.
 - Events are in-memory and at-most-once per subscriber unless you provide a
   durable queue.

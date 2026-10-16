@@ -254,8 +254,8 @@
           {
             "group": "Notifications",
             "pages": [
-              "home/events",
-              "home/events-matrix"
+              "home/notifications",
+              "home/notifications/support"
             ]
           },
           {
@@ -685,28 +685,36 @@
   },
   "redirects": [
     {
+      "source": "/home/events-matrix",
+      "destination": "/home/notifications/support"
+    },
+    {
+      "source": "/home/events",
+      "destination": "/home/notifications"
+    },
+    {
       "source": "/python/watch",
-      "destination": "/home/events"
+      "destination": "/home/notifications"
     },
     {
       "source": "/python/watch-matrix",
-      "destination": "/home/events-matrix"
+      "destination": "/home/notifications/support"
     },
     {
       "source": "/typescript/watch",
-      "destination": "/home/events"
+      "destination": "/home/notifications"
     },
     {
       "source": "/home/watch",
-      "destination": "/home/events"
+      "destination": "/home/notifications"
     },
     {
       "source": "/typescript/watch-matrix",
-      "destination": "/home/events-matrix"
+      "destination": "/home/notifications/support"
     },
     {
       "source": "/home/watch-matrix",
-      "destination": "/home/events-matrix"
+      "destination": "/home/notifications/support"
     },
     {
       "source": "/home/setup/runtime/python",

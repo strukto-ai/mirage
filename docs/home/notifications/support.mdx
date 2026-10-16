@@ -43,7 +43,7 @@ Events split into two halves, and they have different support stories:
 | SSH, Hugging Face, Postgres, RAM, others | none Mirage can receive | |
 
 Where each mapper is imported from, on both hosts, is in the
-[Notifications overview](/home/events#payloads).
+[Notifications overview](/home/notifications#payloads).
 
 A mapper reads the payload and, at most, the backend for what the payload
 leaves out (GridFS counts the revisions a name has left; MongoDB lists a
@@ -118,7 +118,7 @@ the iterator drops the event.
 The guarantee is identical on every backend: caches for the changed path and
 its ancestor listings are invalidated before delivery, plus the cached subtree
 of a removed folder that still has a listing cached at or under it, so reads
-after an event are fresh within the limit the [Notifications overview](/home/events)
+after an event are fresh within the limit the [Notifications overview](/home/notifications)
 describes.
 
 ## The Dropbox Longpoll Example
