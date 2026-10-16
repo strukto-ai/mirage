@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -21,9 +22,11 @@ async def main() -> None:
             token=os.environ["GITHUB_TOKEN"],
             owner=owner,
             repo=repo,
-            ref=os.environ.get("GITHUB_REF", "main")
-            .removeprefix("refs/heads/")
-            .removeprefix("refs/tags/"),
+            ref=re.sub(
+                r"^refs/(heads|tags)/",
+                "",
+                os.environ.get("GITHUB_REF", "main"),
+            ),
         )
     )
     ws = Workspace({"/github": vfs})
