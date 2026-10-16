@@ -19,22 +19,27 @@ virtual files changed, and the agent reacts.
 <CodeGroup>
 ```python Python
 async for change in ws.events("/data"):
-    print(change.kind, change.path.virtual)
+    print(f"Event: {change.kind.value}")
+    print(f"Virtual path: {change.path.virtual}")
 ```
 
 ```typescript TypeScript
 for await (const change of ws.events('/data')) {
-  console.log(change.kind, change.path.virtual)
+  console.log(`Event: ${change.kind}`)
+  console.log(`Virtual path: ${change.path.virtual}`)
 }
 ```
 </CodeGroup>
 
-For example, when your application reports an update to `/data/report.csv`,
-the listener prints:
+For example, someone edits `report.csv` in your connected storage. When your
+application reports that change, the listener prints:
 
 ```text Output
-update /data/report.csv
+Event: update
+Virtual path: /data/report.csv
 ```
+
+`update` means the existing file's contents or metadata changed.
 
 Start the listener before calling `ws.notify(change)` from your notification
 receiver in a separate task. Mirage does not start a file watcher or webhook
@@ -68,7 +73,8 @@ await ws.notify(change)
 This reports that `/data/report.csv` was updated. The running listener above prints:
 
 ```text Listener output
-update /data/report.csv
+Event: update
+Virtual path: /data/report.csv
 ```
 
 `notify()` does not print anything or edit the file itself.
