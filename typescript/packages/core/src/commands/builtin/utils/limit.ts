@@ -117,6 +117,13 @@ export function maybeWithTimeout(
   return new OutputStream(withTimeout(stream, timeout, command), () => closeQuietly(stream))
 }
 
+/**
+ * Wait for `promise` until its deadline, then throw a timeout error. The call
+ * itself runs on, and a stream it answers after the deadline is closed, since
+ * no one reads it and it may hold the backend open (an SSH follow's remote
+ * `tail`). Mirrors Python's `run_with_timeout`, whose deadline cancels the
+ * call itself.
+ */
 export async function runWithTimeout<T>(
   promise: Promise<T>,
   seconds: number | null,
@@ -124,7 +131,19 @@ export async function runWithTimeout<T>(
 ): Promise<T> {
   if (seconds === null || seconds <= 0) return await promise
   const result = await withDeadline(promise, seconds * 1000)
-  if (result === TIMED_OUT) throw new CommandTimeoutError(name || '?', seconds)
+  if (result === TIMED_OUT) {
+    void promise.then(
+      async (late) => {
+        if (late !== null && typeof late === 'object' && Symbol.asyncIterator in late) {
+          await closeQuietly(late as AsyncIterable<unknown>)
+        }
+      },
+      (err: unknown) => {
+        console.debug(`${name}: a timed-out call failed after its deadline: ${String(err)}`)
+      },
+    )
+    throw new CommandTimeoutError(name || '?', seconds)
+  }
   return result
 }
 

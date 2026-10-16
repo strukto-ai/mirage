@@ -15,7 +15,8 @@
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { Limit, OnExceed } from '../../../types.ts'
-import { applyLimit, maybeWithTimeout } from './limit.ts'
+import { applyLimit, maybeWithTimeout, runWithTimeout } from './limit.ts'
+import { CommandTimeoutError } from '../../../errors/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -159,3 +160,36 @@ it.each([false, true])(
     expect(closed).toBe(true)
   },
 )
+
+describe('runWithTimeout', () => {
+  it('closes a stream the call answers after its deadline', async () => {
+    let closed = 0
+    let answer: (value: AsyncIterableIterator<Uint8Array>) => void = () => undefined
+    const late = new Promise<AsyncIterableIterator<Uint8Array>>((resolve) => {
+      answer = resolve
+    })
+    await expect(runWithTimeout(late, 0.01, 'follow')).rejects.toBeInstanceOf(CommandTimeoutError)
+    answer({
+      next: () => Promise.resolve({ value: new Uint8Array(), done: false }),
+      return: () => {
+        closed += 1
+        return Promise.resolve({ value: undefined, done: true })
+      },
+      [Symbol.asyncIterator]() {
+        return this
+      },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(closed).toBe(1)
+  })
+
+  it('leaves a late answer that does not stream alone', async () => {
+    let answer: (value: number) => void = () => undefined
+    const late = new Promise<number>((resolve) => {
+      answer = resolve
+    })
+    await expect(runWithTimeout(late, 0.01, 'stat')).rejects.toBeInstanceOf(CommandTimeoutError)
+    answer(1)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+})

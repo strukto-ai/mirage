@@ -223,3 +223,18 @@ async def _connection_timeout():
 async def test_an_inner_timeout_keeps_its_own_reason():
     with pytest.raises(TimeoutError, match="connect failed"):
         await run_with_timeout(_connection_timeout(), 1, "ssh")
+
+
+@pytest.mark.asyncio
+async def test_run_with_timeout_cancels_the_call_it_gives_up_on():
+    closed = asyncio.Event()
+
+    async def follow():
+        try:
+            await asyncio.Event().wait()
+        finally:
+            closed.set()
+
+    with pytest.raises(CommandTimeoutError):
+        await run_with_timeout(follow(), 0.05, "follow")
+    assert closed.is_set()
