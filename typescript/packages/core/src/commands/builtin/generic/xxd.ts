@@ -464,6 +464,11 @@ async function writeOutput(
     if (!isFsError(err)) throw err
     return failed(input, err, readFailExitCode('xxd', err))
   }
+  if (dump !== null && input.virtual === target.virtual) {
+    // xxd opens OUTFILE before it reads INFILE: the same file reads empty.
+    await closeQuietly(data)
+    data = new Uint8Array(0)
+  }
   if (dump === null && pwriteBytes !== null) {
     try {
       const stretches: [number, Uint8Array][] =

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { ByteWriter } from '../../../io/writer.ts'
+import { concat } from '../../../utils/bytes.ts'
 
 import { isStdin, stdinStream } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -167,7 +168,11 @@ async function readScriptFiles(
  * stays open until the run ends: finishing one at each switch between files
  * would make every switch an append, which a store without native appends
  * rewrites whole. A `w` file that -i then edited keeps the edit: GNU's stream
- * still points at the file -i renamed over. Mirrors Python's `_ScriptWrites`.
+ * still points at the file -i renamed over. GNU opens each spelling of a file
+ * (`w out`, `w ./out`) as its own buffered stream from offset 0, and the first
+ * opened is flushed last: its bytes win, and a later spelling's show only past
+ * its end. The first spelling writes here; the others are kept for that tail.
+ * Mirrors Python's `_ScriptWrites`.
  */
 class ScriptWrites {
   private writers = new Map<string, ByteWriter>()
@@ -175,12 +180,22 @@ class ScriptWrites {
   readonly edited = new Set<string>()
   errors = ''
 
+  private readonly first = new Map<string, string>()
+  private readonly later = new Map<string, Uint8Array[]>()
+  private readonly sent = new Map<string, number>()
+
   constructor(
     private readonly machine: SedMachine,
     private readonly access: ScriptFiles,
     private readonly utf8: boolean,
     private readonly defer: boolean,
-  ) {}
+  ) {
+    for (const name of machine.wfiles.keys()) {
+      const path = access.virtual(name)
+      if (!this.first.has(path)) this.first.set(path, name)
+      else this.later.set(name, [])
+    }
+  }
 
   async flush(final = false): Promise<void> {
     if (this.defer && !final) return
@@ -189,23 +204,47 @@ class ScriptWrites {
       const data = fromByteView(out.chunks.join(''), this.utf8)
       out.chunks.length = 0
       if (this.failedNames.has(name) || this.edited.has(this.access.virtual(name))) continue
-      let writer = this.writers.get(name)
-      if (writer === undefined) {
-        writer = new ByteWriter((source) => this.access.write(name, source, false, true))
-        this.writers.set(name, writer)
-      }
-      try {
-        await writer.write(data)
-      } catch (error) {
-        if (!isFsError(error)) throw error
-        this.failed(name, error)
-        this.writers.delete(name)
-        await writer.abort()
-      }
+      const kept = this.later.get(name)
+      if (kept !== undefined) kept.push(data)
+      else await this.send(name, data)
+    }
+  }
+
+  private async send(name: string, data: Uint8Array): Promise<void> {
+    let writer = this.writers.get(name)
+    if (writer === undefined) {
+      writer = new ByteWriter((source) => this.access.write(name, source, false, true))
+      this.writers.set(name, writer)
+    }
+    try {
+      await writer.write(data)
+      this.sent.set(name, (this.sent.get(name) ?? 0) + data.byteLength)
+    } catch (error) {
+      if (!isFsError(error)) throw error
+      this.failed(name, error)
+      this.writers.delete(name)
+      await writer.abort()
     }
   }
 
   async finish(): Promise<void> {
+    const tails = new Map<string, Uint8Array>()
+    for (const [name, parts] of [...this.later].reverse()) {
+      const path = this.access.virtual(name)
+      const data = concat(parts)
+      const tail = tails.get(path) ?? new Uint8Array()
+      tails.set(
+        path,
+        data.byteLength >= tail.byteLength ? data : concat([data, tail.subarray(data.byteLength)]),
+      )
+    }
+    for (const [path, tail] of tails) {
+      const first = this.first.get(path) ?? ''
+      const sent = this.sent.get(first) ?? 0
+      if (tail.byteLength > sent && !this.failedNames.has(first) && !this.edited.has(path)) {
+        await this.send(first, tail.subarray(sent))
+      }
+    }
     const writers = this.writers
     this.writers = new Map()
     for (const [name, writer] of writers) {

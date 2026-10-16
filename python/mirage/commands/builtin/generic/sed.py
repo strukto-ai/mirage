@@ -226,6 +226,11 @@ class _ScriptWrites:
     A writer stays open until the run ends: finishing one at each switch
     between files would make every switch an append, which a store
     without native appends rewrites whole.
+
+    GNU opens each spelling of a file (``w out``, ``w ./out``) as its own
+    buffered stream from offset 0, and the first opened is flushed last:
+    its bytes win, and a later spelling's show only past its end. The
+    first spelling writes here; the others are kept for that tail.
     """
 
     def __init__(
@@ -238,6 +243,12 @@ class _ScriptWrites:
         self.failed: set[str] = set()
         self.edited: set[str] = set()
         self.errors = ""
+        self.first: dict[str, str] = {}
+        self.later: dict[str, bytearray] = {}
+        self.sent: dict[str, int] = {}
+        for name in machine.wfiles:
+            if self.first.setdefault(access.spec(name).virtual, name) != name:
+                self.later[name] = bytearray()
 
     async def flush(self, final: bool = False) -> None:
         if self.defer and not final:
@@ -250,23 +261,45 @@ class _ScriptWrites:
             path = self.access.spec(name).virtual
             if name in self.failed or path in self.edited:
                 continue
-            writer = self.writers.get(name)
-            if writer is None:
-                writer = self.writers[name] = ByteWriter(
-                    partial(self.access.write, name, append=True)
-                )
-            try:
-                await writer.write(data)
-            except FS_ERRORS as exc:
-                self._failed(name, exc)
-                del self.writers[name]
-                await writer.abort()
+            if name in self.later:
+                self.later[name] += data
+            else:
+                await self._send(name, data)
+
+    async def _send(self, name: str, data: bytes) -> None:
+        writer = self.writers.get(name)
+        if writer is None:
+            writer = self.writers[name] = ByteWriter(
+                partial(self.access.write, name, append=True)
+            )
+        try:
+            await writer.write(data)
+            self.sent[name] = self.sent.get(name, 0) + len(data)
+        except FS_ERRORS as exc:
+            self._failed(name, exc)
+            del self.writers[name]
+            await writer.abort()
 
     def _failed(self, name: str, exc: BaseException) -> None:
         self.failed.add(name)
         self.errors += _open_failure(name, exc)
 
     async def finish(self) -> None:
+        tails: dict[str, bytearray] = {}
+        for name, data in reversed(self.later.items()):
+            tail = tails.setdefault(
+                self.access.spec(name).virtual, bytearray()
+            )
+            tail[: len(data)] = data
+        for path, tail in tails.items():
+            first = self.first[path]
+            sent = self.sent.get(first, 0)
+            if (
+                len(tail) > sent
+                and first not in self.failed
+                and path not in self.edited
+            ):
+                await self._send(first, bytes(tail[sent:]))
         writers, self.writers = self.writers, {}
         for name, writer in writers.items():
             try:

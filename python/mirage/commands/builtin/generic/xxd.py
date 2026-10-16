@@ -572,7 +572,8 @@ async def _write_output(
 ) -> tuple[ByteSource | None, IOResult]:
     """Write the dump (or with ``-r`` the bytes) to OUTFILE.
 
-    INFILE is read first, as xxd opens it first.
+    INFILE is read first, as xxd opens it first. xxd opens OUTFILE
+    before it reads, so the same file as both reads empty.
 
     Args:
         paths (list[PathSpec]): INFILE and OUTFILE.
@@ -619,6 +620,9 @@ async def _write_output(
             stderr=fs_error_line("xxd", paths[0], exc).encode(),
             exit_code=read_fail_exit_code("xxd", exc),
         )
+    if not reverse and paths[0].virtual == target.virtual:
+        await close_quietly(data)
+        data = b""
     if reverse and pwrite_bytes is not None:
         try:
             for start, chunk in segments or [(0, b"")]:

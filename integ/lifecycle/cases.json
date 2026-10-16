@@ -6057,6 +6057,28 @@
         },
         {
           "op": "exec",
+          "command": "cat /a/input > /b/self; xxd -p /b/self /b/self; wc -c < /b/self",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "0\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "printf 'a\\nbbbb\\n' > /b/sin; sed -n -e '/a/w /b/sout' -e '/bbbb/w /b/./sout' /b/sin; sed -n -e 'w /b/same' -e 'w /b/./same' /b/sin; cat /b/sout /b/same",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "a\nbb\na\nbbbb\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
           "command": "mv /b/edit /a/moved; cat /a/moved",
           "expect": {
             "value": {

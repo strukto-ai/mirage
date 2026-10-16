@@ -279,9 +279,11 @@ class _LentPayload:
     The producer may wait on another writer of the same name (``tee -a f
     | tee -a f``, a loop appending to the file it pipes into), so the
     write holds the name only while the store takes a chunk, and writers
-    interleave between chunks as appends do on one file. What the store
-    took is kept while it fits the cache's drain budget, so the next read
-    is served what was written, as a whole write's is.
+    interleave between chunks as two descriptors of one file do: a
+    replacement landing there leaves the stream's later chunks at its own
+    offset, as Linux does. What the store took is kept while it fits the
+    cache's drain budget, so the next read is served what was written, as
+    a whole write's is.
 
     Args:
         source (ByteSource): the producer's bytes.
