@@ -1323,6 +1323,20 @@
         },
         "route_policy": "route.py"
       }
+    },
+    {
+      "name": "route_policy: a program with a null runtime",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "route_policy": {
+          "script": "route.py",
+          "runtime": null
+        }
+      }
     }
   ]
 }

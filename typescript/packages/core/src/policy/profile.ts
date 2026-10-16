@@ -616,7 +616,7 @@ export function parseProgram(raw: unknown, at: string, code = false): ProfilePol
   if (!(script instanceof ScriptSource) && typeof script !== 'string') {
     throw new Error(`${at}.script must be a script path or source`)
   }
-  const runtime = program.runtime ?? PROGRAM_RUNTIME
+  const runtime = program.runtime === undefined ? PROGRAM_RUNTIME : program.runtime
   if (typeof runtime === 'string') return { script, runtime }
   const named = asObject(runtime, `${at}.runtime`)
   const settings = named.config

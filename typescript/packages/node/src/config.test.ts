@@ -349,6 +349,12 @@ describe('configToWorkspaceArgs', () => {
     expect(() =>
       loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } }, route_policy: 'route.py' }),
     ).toThrow(/route_policy must be a mapping/)
+    expect(() =>
+      loadWorkspaceConfig({
+        mounts: { '/': { vfs: 'ram' } },
+        route_policy: { script: 'r.py', runtime: null },
+      }),
+    ).toThrow(/route_policy.runtime must be a mapping/)
   })
 
   // The camelCase spelling of a snake_case config key is a key Python

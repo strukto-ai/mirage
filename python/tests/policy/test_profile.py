@@ -2925,6 +2925,19 @@ def test_a_policy_program_without_a_runtime_runs_on_monty():
     assert profile.policy["pre_command"][0].runtime == "monty"
 
 
+def test_a_policy_program_with_a_null_runtime_is_refused():
+    with pytest.raises(ValidationError, match="runtime"):
+        SessionProfile.model_validate(
+            {
+                "policy": {
+                    "pre_command": [
+                        {"script": ScriptSource("pass"), "runtime": None}
+                    ]
+                }
+            }
+        )
+
+
 @pytest.mark.parametrize(
     "runtime",
     [{"config": {}}, {"name": "wasi", "captures": ["python3"]}, {"name": 1}],
