@@ -20,7 +20,6 @@ A Mirage virtual terminal is a workspace: one virtual terminal over your mounted
 | [RPC](/home/access/rpc) | programs that run lines and move bytes | `/v1/workspaces/{id}/rpc`, or `mirage rpc` on stdio |
 | [CLI](/home/access/cli) | people and scripts | `mirage <verb>` |
 | [SSH](/home/access/ssh) | people and tools that speak SSH | `ssh`, `sftp`, `scp`, on the SSH port or through `mirage ssh-proxy` |
-| [FUSE](/home/access/fuse) | local file tools connecting to a remote workspace | Not yet supported |
 
 HTTP, MCP, RPC, CLI and SSH connections go through the Mirage server, a FastAPI app in [Python](/python/access/server) and a Fastify app in [TypeScript](/typescript/access/server) that speak the same protocol. It serves HTTP, and SSH on its own port when `ssh_port` is set or over HTTP through `mirage ssh-proxy`. The CLI starts the server on your machine when it needs one. In-app access reaches the workspace directly.
 

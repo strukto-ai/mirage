@@ -276,8 +276,7 @@
               "home/access/mcp",
               "home/access/rpc",
               "home/access/ssh",
-              "home/access/cli",
-              "home/access/fuse"
+              "home/access/cli"
             ]
           },
           {
