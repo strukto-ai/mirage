@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type * as asyncContextModule from '../utils/async_context.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { MountMode } from '../types.ts'
+import { type JsonValue, MountMode } from '../types.ts'
 import { Session, Workspace } from '../workspace/workspace/workspace.ts'
 import { getTestParser } from '../workspace/fixtures/workspace_fixture.ts'
 import { ScriptSource } from '../runtime/types.ts'
@@ -28,6 +28,7 @@ import {
   type VfsContext,
 } from './types.ts'
 import { currentCaller, runWithCaller } from '../context/session_context.ts'
+import { scriptContext } from './script.ts'
 
 // The browser-runtime branch under node's test runner: no task isolation,
 // so a method cannot run as a policy deciding.
@@ -43,17 +44,19 @@ vi.mock('../utils/async_context.ts', async (importOriginal) => {
 })
 
 describe('a method without task isolation', () => {
-  it('reads the session, writes none of it and gets no files', async () => {
+  it('reads the session and its mounts, and writes or reads no file', async () => {
     const refused: string[] = []
-    let files: unknown = null
+    let mounts: JsonValue = null
     const writer: Policy = {
       async preCommand(ctx: CommandContext): Promise<Action | null> {
         if (ctx.command !== 'echo' || ctx.session === undefined) return null
-        files = ctx.vfs
-        try {
-          await ctx.session.set('TEAM', 'me')
-        } catch (err) {
-          refused.push((err as { code?: string }).code ?? '')
+        mounts = scriptContext(ctx).mounts ?? null
+        for (const call of [() => ctx.session?.set('TEAM', 'me'), () => ctx.vfs?.read('/data')]) {
+          try {
+            await call()
+          } catch (err) {
+            refused.push((err as { code?: string }).code ?? '')
+          }
         }
         return null
       },
@@ -65,8 +68,8 @@ describe('a method without task isolation', () => {
     try {
       await ws.shell('export TEAM=core')
       expect((await ws.shell('echo $TEAM')).stdoutText).toBe('core\n')
-      expect(refused).toEqual(['EACCES'])
-      expect(files).toBeUndefined()
+      expect(refused).toEqual(['EACCES', 'EACCES'])
+      expect(mounts).toContain('/data')
       expect((await ws.shell('echo $TEAM')).stdoutText).toBe('core\n')
     } finally {
       await ws.close()

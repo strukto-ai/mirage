@@ -643,7 +643,9 @@ class MountRegistry:
         return list(self._mounts)
 
     def visible_mounts(self) -> list[MountEntry]:
-        return [m for m in self._mounts if m.visible is None or m.visible()]
+        return [
+            m for m in self._mounts if m.visible is None or m.visible(None)
+        ]
 
     def mount_rows(self) -> list[MountRow]:
         """One row per registered mount, for the ``Files`` facade."""

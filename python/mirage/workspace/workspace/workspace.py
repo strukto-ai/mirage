@@ -535,9 +535,8 @@ class Workspace:
             self._registry,
             self._files,
             self._session_mgr,
-            lambda: (
-                get_current_session_unless_foreign(self._session_mgr)
-                or self._call_session()
+            lambda session_id: (
+                self._facade_session(session_id) or self._call_session()
             ),
             lambda name: compile_profile(self._base_profile(name), name),
             lambda: self.ensure_sessions_loaded(),
@@ -2189,23 +2188,32 @@ class Workspace:
 
     # ── mount management ────────────────────────────────────────────────────
 
-    def _facade_visibility(self, session_id: str | None) -> Visibility | None:
-        """What the session a facade's call would run as sees: the bound
-        one, else ``session_id``, the default for None, as
-        ``_bind_session`` picks it. A session not loaded yet answers
-        with the default profile's, which every session starts from.
+    def _facade_session(self, session_id: str | None) -> SessionState | None:
+        """The session a facade's call would run as: the bound one, else
+        ``session_id``, the default for None, as ``_bind_session`` picks
+        it; None for one not loaded yet.
 
         Args:
             session_id (str | None): the facade's own session.
         """
         bound = get_current_session_unless_foreign(self._session_mgr)
         if bound is not None:
-            return bound.visibility
+            return bound
         wanted = session_id or self._session_mgr.default_id
-        found = next(
+        return next(
             (s for s in self._session_mgr.list() if s.session_id == wanted),
             None,
         )
+
+    def _facade_visibility(self, session_id: str | None) -> Visibility | None:
+        """What the session a facade's call would run as sees. A session
+        not loaded yet answers with the default profile's, which every
+        session starts from.
+
+        Args:
+            session_id (str | None): the facade's own session.
+        """
+        found = self._facade_session(session_id)
         if found is not None:
             return found.visibility
         default = self._session_mgr.default_profile

@@ -18,7 +18,7 @@ import type { OpRecord } from '../observe/record.ts'
 import { finishRecord, type OpTimer, startOp } from '../observe/context.ts'
 import type { FileStat, SetAttrFields, Visibility } from '../types.ts'
 import { FileType, PathSpec } from '../types.ts'
-import { isEnotdir, isMissingPath } from '../errors/fs.ts'
+import { eacces, isEnotdir, isMissingPath } from '../errors/fs.ts'
 import {
   type Caller,
   type CallerDispatchFn,
@@ -55,9 +55,9 @@ export interface FilesOptions {
   dispatchAs?: ((owner: SessionAccess) => CallerDispatchFn) | null
   sessionId?: string | null
   records?: OpRecord[]
-  // The prefixes of the mounts the running session is told of, read live;
-  // a session's hides are applied over them.
-  prefixes?: (() => readonly string[]) | null
+  // The prefixes of the mounts the session a call through a facade of this
+  // session id runs as is told of, read live; its hides are applied over them.
+  prefixes?: ((sessionId: string | null) => readonly string[]) | null
   // What the session a call would run as sees, given this facade's own; the
   // bound session's when unset.
   visibility?: ((sessionId: string | null) => Visibility | null) | null
@@ -151,13 +151,7 @@ export class Files {
   private readonly bind: SessionBind | null
   private readonly dispatchAs: ((owner: SessionAccess) => CallerDispatchFn) | null
   private readonly caller: Partial<Caller> | null
-  /**
-   * The prefixes of the mounts the running session is told of at all,
-   * hides aside.
-   *
-   * @internal Not part of the supported surface; Python keeps it private.
-   */
-  readonly prefixes: () => readonly string[]
+  private readonly prefixesOf: (sessionId: string | null) => readonly string[]
   private readonly visibilityOf: ((sessionId: string | null) => Visibility | null) | null
   /** The session this facade runs as; null for the workspace's default. */
   readonly sessionId: string | null
@@ -184,7 +178,7 @@ export class Files {
     this.caller = options.caller ?? null
     this.sessionId = options.sessionId ?? null
     this.records = options.records ?? []
-    this.prefixes = options.prefixes ?? (() => [])
+    this.prefixesOf = options.prefixes ?? (() => [])
     this.visibilityOf = options.visibility ?? null
   }
 
@@ -194,7 +188,7 @@ export class Files {
       dispatchAs: this.dispatchAs,
       sessionId: this.sessionId,
       records: this.records,
-      prefixes: this.prefixes,
+      prefixes: this.prefixesOf,
       visibility: this.visibilityOf,
     }
   }
@@ -234,6 +228,35 @@ export class Files {
       ...this.options(),
       caller: { ...this.caller, ...changes },
     })
+  }
+
+  /**
+   * The same facade with every op refused (EACCES), its mount table still
+   * answered: a policy method's files where it cannot run as a policy deciding,
+   * so a program still reads which mounts its session sees.
+   *
+   * @internal The mechanism behind a method's files without task isolation;
+   * Python always isolates tasks.
+   */
+  refusingOps(): Files {
+    return new Files(
+      (_op, path) => Promise.reject(eacces(path)),
+      this.sink,
+      this.links,
+      this.ownerOf,
+      { ...this.options(), bind: null },
+    )
+  }
+
+  /**
+   * The prefixes of the mounts the session an op would run as is told of at
+   * all, hides aside: a session's own documents mount is one only it is told
+   * of.
+   *
+   * @internal Not part of the supported surface; Python keeps it private.
+   */
+  prefixes(): readonly string[] {
+    return this.prefixesOf(this.sessionId)
   }
 
   /**

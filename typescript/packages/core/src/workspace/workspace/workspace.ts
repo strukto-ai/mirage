@@ -420,13 +420,16 @@ export class Workspace {
       }
       if (session === null) return null
       const view = sessionView(session, this.policies)
-      if (asyncContextIsolatesTasks) {
-        return { session: view, vfs: this.vfs.forSession(session.sessionId) }
-      }
+      const vfs = this.vfs.forSession(session.sessionId)
+      if (asyncContextIsolatesTasks) return { session: view, vfs }
       // Without task isolation a method cannot run as a policy deciding: its
-      // own calls could not be told from the ones it judges. There it gets
-      // no `vfs`, and a session that refuses every write.
-      return { session: { ...view, set: refuseWrite, unset: refuseWrite, mark: refuseWrite } }
+      // own calls could not be told from the ones it judges. There its files
+      // answer the mount table and refuse every op, and its session refuses
+      // every write.
+      return {
+        session: { ...view, set: refuseWrite, unset: refuseWrite, mark: refuseWrite },
+        vfs: vfs.refusingOps(),
+      }
     }
     // Installed CLIs, fully separate from mounts: a spec name resolves
     // against the named registry and every entry installs through the
@@ -516,7 +519,7 @@ export class Workspace {
       (path) => this.registry.mountOwner(path),
       {
         bind: (sessionId, run) => this.bindSession(sessionId, run),
-        prefixes: () => this.registry.visibleMounts().map((m) => m.prefix),
+        prefixes: (sessionId) => this.registry.visibleMounts(sessionId).map((m) => m.prefix),
         visibility: (sessionId) => this.facadeVisibility(sessionId),
         // A facade that bound its own session dispatches as that owner,
         // so on the fallback storage a newer binding cannot judge its op.
@@ -533,7 +536,7 @@ export class Workspace {
       this.registry,
       this.vfs,
       this.sessionManager,
-      () => getCurrentSessionUnlessForeign(this.sessionManager) ?? this.callSession(),
+      (sessionId) => this.facadeSession(sessionId) ?? this.callSession(),
       (name) => compileProfile(this.baseProfile(name), name),
       () => this.ensureSessionsLoaded(),
       (path) => this.unmount(path),
@@ -1481,16 +1484,26 @@ export class Workspace {
   }
 
   /**
-   * What the session a facade's call would run as sees, as `sessionForOps`
-   * picks it. A session not loaded yet answers with the default profile's,
-   * which every session starts from. Mirrors Python's `_facade_visibility`.
+   * The session a facade's call would run as, as `sessionForOps` picks it;
+   * null for one not loaded yet. Mirrors Python's `_facade_session`.
+   */
+  private facadeSession(sessionId: string | null): SessionState | null {
+    const wanted = sessionId ?? this.sessionManager.defaultId
+    return (
+      this.ambientFor(sessionId) ??
+      this.sessionManager.list().find((s) => s.sessionId === wanted) ??
+      null
+    )
+  }
+
+  /**
+   * What the session a facade's call would run as sees. A session not loaded
+   * yet answers with the default profile's, which every session starts from.
+   * Mirrors Python's `_facade_visibility`.
    */
   private facadeVisibility(sessionId: string | null): Visibility | null {
-    const ambient = this.ambientFor(sessionId)
-    if (ambient !== null) return ambient.visibility
-    const wanted = sessionId ?? this.sessionManager.defaultId
-    const found = this.sessionManager.list().find((s) => s.sessionId === wanted)
-    if (found !== undefined) return found.visibility
+    const found = this.facadeSession(sessionId)
+    if (found !== null) return found.visibility
     return this.sessionManager.defaultProfile?.visibility ?? null
   }
 

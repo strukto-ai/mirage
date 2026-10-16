@@ -35,7 +35,7 @@ export class Documents {
     private readonly registry: MountRegistry,
     private readonly files: Files,
     private readonly manager: SessionManager,
-    private readonly session: () => SessionState,
+    private readonly session: (sessionId: string | null) => SessionState,
     private readonly profile: (name: string) => CompiledProfile,
     private readonly ensureLoaded: () => Promise<void>,
     private readonly unmount: (path: string) => Promise<void>,
@@ -43,7 +43,7 @@ export class Documents {
   ) {}
 
   render(kind: 'vfs' | 'skill'): string {
-    return (kind === 'vfs' ? render.vfsMd : render.skillMd)(this.registry, this.session())
+    return (kind === 'vfs' ? render.vfsMd : render.skillMd)(this.registry, this.session(null))
   }
 
   /** Drop every binding; a snapshot load restores none. */
@@ -76,7 +76,7 @@ export class Documents {
     if (profile !== undefined) {
       session = new SessionState({ sessionId: '' })
       applyProfile(session, this.profile(profile))
-    } else session = sessionId === undefined ? this.session() : this.manager.get(sessionId)
+    } else session = sessionId === undefined ? this.session(null) : this.manager.get(sessionId)
     return runWithSession(
       session,
       async () => {
@@ -133,9 +133,10 @@ export class Documents {
       const mount = this.registry.mount(path, view, MountMode.READ, DEFAULT_READ_SPEC, {
         write: WritePolicy.UNCONDITIONAL,
       })
-      mount.visible = () =>
+      mount.visible = (sessionId) =>
         document.globalView ||
-        document.sessions.get(this.session().sessionId) === this.session().createdAt
+        document.sessions.get(this.session(sessionId).sessionId) ===
+          this.session(sessionId).createdAt
       this.views.set(path, view)
     }
     if (session === null) view.globalView = true

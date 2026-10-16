@@ -5,6 +5,7 @@ import pytest
 from mirage.commands.builtin.generic.head import head, head_generic, head_multi
 from mirage.commands.config import CommandOpts
 from mirage.errors.fs import eacces, efbig
+from mirage.errors.types import FileTooLargeError
 from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -256,3 +257,32 @@ async def test_head_prints_no_header_for_an_operand_it_may_not_open(
     assert await materialize(io.stderr) == (
         b"head: cannot open '/locked' for reading: Permission denied\n"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name,header,error",
+    [
+        ("/big", b"==> /big <==\n", FileTooLargeError),
+        ("/locked", b"", PermissionError),
+    ],
+)
+async def test_head_v_heads_one_failed_read_but_no_refused_open(
+    name, header, error
+):
+    async def first_lines(p: PathSpec, n: int) -> bytes:
+        raise efbig(p) if p.virtual == "/big" else eacces(p)
+
+    out, _ = await head_generic(
+        [PathSpec.from_str_path(name)],
+        [],
+        CommandOpts(flags={"lines": "1", "verbose": True}),
+        _file_stat,
+        _counted_reads(b"", []),
+        first_lines,
+    )
+    printed: list[bytes] = []
+    with pytest.raises(error):
+        async for chunk in out:
+            printed.append(chunk)
+    assert b"".join(printed) == header

@@ -42,7 +42,9 @@ class Documents:
         registry (MountRegistry): the workspace's mounts.
         files (Files): the workspace's ``ws.vfs``.
         manager (SessionManager): the workspace's sessions.
-        session (Callable[[], SessionState]): the session a call runs as.
+        session (Callable[[str | None], SessionState]): the session a
+            call through a facade of this session id runs as, None for
+            the default facade.
         profile (Callable[[str], CompiledProfile]): a named profile,
             compiled.
         ensure_loaded (Callable[[], Awaitable[None]]): hydrates the
@@ -57,7 +59,7 @@ class Documents:
         registry: MountRegistry,
         files: Files,
         manager: SessionManager,
-        session: Callable[[], SessionState],
+        session: Callable[[str | None], SessionState],
         profile: Callable[[str], CompiledProfile],
         ensure_loaded: Callable[[], Awaitable[None]],
         unmount: Callable[[str], Awaitable[None]],
@@ -76,7 +78,7 @@ class Documents:
 
     def render(self, kind: Literal["vfs", "skill"]) -> str:
         renderer = render.vfs_md if kind == "vfs" else render.skill_md
-        return renderer(self._registry, self._session())
+        return renderer(self._registry, self._session(None))
 
     async def clear(self) -> None:
         """Drop every binding; a snapshot load restores none."""
@@ -112,7 +114,7 @@ class Documents:
             session = (
                 self._manager.get(session_id)
                 if session_id is not None
-                else self._session()
+                else self._session(None)
             )
         token = set_current_session(session, self._manager)
         try:
@@ -185,10 +187,10 @@ class Documents:
                 write=WritePolicy.UNCONDITIONAL,
                 store=NULL_INDEX,
             )
-            mount.visible = lambda: (
+            mount.visible = lambda session_id: (
                 view.global_view
-                or view.sessions.get(self._session().session_id)
-                == self._session().created_at
+                or view.sessions.get(self._session(session_id).session_id)
+                == self._session(session_id).created_at
             )
             self.views[path] = view
             self._files.set_mounts(self._registry.mount_rows())

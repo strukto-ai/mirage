@@ -116,9 +116,17 @@ async function noteInfo(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
   const vfs = view.vfs
   const path = inv.paths[0]
   const data = await vfs.read(path)
-  let target = path
-  if ((await vfs.stat(path, undefined, { nofollow: true })).type === FileType.SYMLINK) {
-    target = PathSpec.fromStrPath(await vfs.readlink(path), undefined, path.parent)
+  let target = '/'
+  const rest = path.virtual.split('/')
+  for (let name = rest.shift(); name !== undefined; name = rest.shift()) {
+    const step = PathSpec.fromStrPath(name, undefined, target).virtual
+    if ((await vfs.stat(step, undefined, { nofollow: true })).type !== FileType.SYMLINK) {
+      target = step
+      continue
+    }
+    const link = await vfs.readlink(step)
+    rest.unshift(...link.split('/'))
+    if (link.startsWith('/')) target = '/'
   }
   const mount = vfs.mountOf(target)
   const reader = view.sessionView.get('READER') || 'anonymous'
@@ -188,6 +196,8 @@ async function main(): Promise<void> {
       'grep BaseVFS /notes/todo.txt',
       'export READER=demo; note-info /latest',
       'note-info /notes/status/health.txt',
+      'ln -s /notes /n; ln -s /n/status /alias',
+      'note-info /alias/health.txt',
     ]) {
       await show(ws, line)
     }

@@ -121,8 +121,10 @@ async def test_closed_session_does_not_leave_a_view_for_reused_id():
         (await ws.shell("df", session_id=name)).stdout for name in ("a", "b")
     ]
     assert b" /VFS.md\n" in owner and b"/VFS.md" not in other
+    assert a.vfs.is_mount("/VFS.md") and "/VFS.md" in a.vfs.submounts("/")
+    assert not ws.vfs.is_mount("/VFS.md")
     await ws.close_session("a")
-    await ws.session("a")
+    assert not (await ws.session("a")).vfs.is_mount("/VFS.md")
     with pytest.raises(FileNotFoundError):
         await ws.vfs.read("/VFS.md", session_id="a")
     await ws.close()

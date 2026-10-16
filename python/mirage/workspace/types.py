@@ -39,9 +39,10 @@ class MountRow:
             sizes files only on read.
         anchor (bool): the scratch root the workspace adds when no mount
             claims ``/``, which nobody mounted.
-        visible (Callable[[], bool] | None): whether the running session
-            is told of the mount at all, None for always (a session's own
-            documents mount answers it).
+        visible (Callable[[str | None], bool] | None): whether the
+            session a call through a facade of the given session id runs
+            as (None: the default facade) is told of the mount at all,
+            None for always (a session's own documents mount answers it).
         max_du_entries (int | None): the mount VFS's ``du`` walk budget,
             None for no cap.
     """
@@ -51,7 +52,7 @@ class MountRow:
     mode: MountMode
     sizes_always_known: bool = False
     anchor: bool = False
-    visible: Callable[[], bool] | None = None
+    visible: Callable[[str | None], bool] | None = None
     max_du_entries: int | None = None
 
 

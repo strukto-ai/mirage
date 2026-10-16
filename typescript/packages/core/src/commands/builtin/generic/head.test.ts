@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { eacces, efbig } from '../../../errors/fs.ts'
+import { ensureStream } from '../../../io/stream.ts'
 import { materialize } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
@@ -236,5 +237,31 @@ describe('head asks the mount for the first lines', () => {
     expect(DEC.decode(await materialize(result?.[1].stderr ?? null))).toBe(
       "head: cannot open '/locked' for reading: Permission denied\n",
     )
+  })
+
+  it.each([
+    ['/big', '==> /big <==\n', 'EFBIG'],
+    ['/locked', '', 'EACCES'],
+  ])('-v heads one failed read but no refused open: %s', async (name, header, code) => {
+    const result = await headGeneric(
+      [PathSpec.fromStrPath(name)],
+      [],
+      opts({ lines: '1', verbose: true }),
+      fileStat,
+      // eslint-disable-next-line require-yield
+      async function* () {
+        await Promise.resolve()
+        throw new Error('read a file')
+      },
+      (p) => Promise.reject(p.virtual === '/big' ? efbig(p) : eacces(p)),
+    )
+    const printed: string[] = []
+    const drain = async (): Promise<void> => {
+      for await (const chunk of ensureStream(result?.[0] ?? new Uint8Array())) {
+        printed.push(DEC.decode(chunk))
+      }
+    }
+    await expect(drain()).rejects.toMatchObject({ code })
+    expect(printed.join('')).toBe(header)
   })
 })

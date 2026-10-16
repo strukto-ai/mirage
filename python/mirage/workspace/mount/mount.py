@@ -408,7 +408,7 @@ class MountEntry:
                     f"{type(vfs).__name__}.renderers maps {filetype!r} to "
                     f"{renderer!r}, which is not a method"
                 )
-        self.visible: Callable[[], bool] | None = None
+        self.visible: Callable[[str | None], bool] | None = None
         self.mount_id = uuid7()
         self.prefix = prefix
         self.vfs = vfs

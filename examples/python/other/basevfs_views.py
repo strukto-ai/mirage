@@ -118,11 +118,15 @@ async def note_info(inv: CLIInvocation[None]) -> tuple[bytes, IOResult]:
     vfs = view.vfs
     path = inv.paths[0]
     data = await vfs.read(path)
-    target = path
-    if (await vfs.stat(path, nofollow=True)).type is FileType.SYMLINK:
-        target = PathSpec.from_str_path(
-            await vfs.readlink(path), cwd=path.parent
-        )
+    target, rest = "/", path.virtual.split("/")
+    while rest:
+        step = PathSpec.from_str_path(rest.pop(0), cwd=target).virtual
+        if (await vfs.stat(step, nofollow=True)).type is not FileType.SYMLINK:
+            target = step
+            continue
+        link = await vfs.readlink(step)
+        rest[:0] = link.split("/")
+        target = "/" if link.startswith("/") else target
     mount = vfs.mount_of(target)
     reader = view.session_view.get("READER") or "anonymous"
     header = f"mount={mount} reader={reader} bytes={len(data)}\n"
@@ -193,6 +197,8 @@ async def main() -> None:
             "grep BaseVFS /notes/todo.txt",
             "export READER=demo; note-info /latest",
             "note-info /notes/status/health.txt",
+            "ln -s /notes /n; ln -s /n/status /alias",
+            "note-info /alias/health.txt",
         ):
             await show(ws, line)
         await show_search(ws, notes)

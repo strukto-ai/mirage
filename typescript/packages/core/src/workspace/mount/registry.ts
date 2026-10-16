@@ -532,8 +532,10 @@ export class MountRegistry {
     return { prefix: mount.prefix, kind: mount.vfs.name, maxDuEntries: mount.vfs.maxDuEntries }
   }
 
-  visibleMounts(): MountEntry[] {
-    return this.mountList.filter((m) => m.visible === null || m.visible())
+  /** The mounts the session a call through a facade of `sessionId` runs as
+   * (null: the default facade) is told of at all, hides aside. */
+  visibleMounts(sessionId: string | null = null): MountEntry[] {
+    return this.mountList.filter((m) => m.visible === null || m.visible(sessionId))
   }
 
   allMounts(): readonly MountEntry[] {

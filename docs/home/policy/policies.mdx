@@ -134,7 +134,7 @@ Every `ctx` also carries:
 | --- | --- |
 | `session_id` | the session the action runs as |
 | `session` | the session, read only: `get(name)`, `snapshot()`, `cwd()`, `is_readonly(name)`, `profile()` |
-| `vfs` | the session's files, read only: `read`, `stat`, `readdir`, `exists`, and where the mounts are (`mount_of`, `is_mount`, `submounts`), hides applied; unset on a TypeScript runtime that does not isolate async tasks (the browser fallback) |
+| `vfs` | the session's files, read only: `read`, `stat`, `readdir`, `exists`, and where the mounts are (`mount_of`, `is_mount`, `submounts`), hides applied; on a TypeScript runtime that does not isolate async tasks (the browser fallback) it answers only where the mounts are and refuses every file call |
 
 `words` is the command line word by word, after expansion. Each word has
 a `text`, a `kind` (`name`, `subcommand`, `option`, `value`, `operand` or

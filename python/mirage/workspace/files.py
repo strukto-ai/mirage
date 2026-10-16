@@ -148,11 +148,16 @@ class Files:
         return derived
 
     def _served(self) -> list[MountRow]:
-        """The mounts the running session is told of at all, hides aside.
+        """The mounts the session an op would run as is told of at all,
+        hides aside.
 
         A session's own documents mount is one only it is told of.
         """
-        return [m for m in self._mounts if m.visible is None or m.visible()]
+        return [
+            m
+            for m in self._mounts
+            if m.visible is None or m.visible(self._session_id)
+        ]
 
     def _vis(self) -> Visibility | None:
         """The visibility of the session an op would run as: the bound
