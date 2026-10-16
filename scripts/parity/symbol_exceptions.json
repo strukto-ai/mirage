@@ -755,6 +755,11 @@
    "typescript_only": {
     "keyTexts": "A TypeScript driver's key value need not be exact (pg-types parses a jsonb number as a double, and a browser mount takes any driver), so a TypeScript keyset page starts after the key's text form; asyncpg's values are exact, so Python pages from the row itself."
    }
+  },
+  "core/postgres/search": {
+   "typescript_only": {
+    "TEXT_PROBE": "A browser mount takes any driver, so TypeScript asks whether its driver reads date and time types as Postgres text before a LIKE over their cast; Python's one driver always does (read_as_text in accessor/postgres.py)."
+   }
   }
  }
 }

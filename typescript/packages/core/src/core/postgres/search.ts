@@ -55,6 +55,16 @@ const SPELLED_WITH: Readonly<Record<string, string>> = {
   float8: NUMBER,
   numeric: `${NUMBER}nainfty`,
 }
+// A value of each date and time type and of an array of each, which a driver
+// that reads them as Postgres text (`readAsText`) answers as text. Only then
+// does a LIKE over their cast see what the line spells: a browser mount takes
+// any driver, and one that parses them (into a `Date`) leaves them to the scan.
+const TEXT_PROBE =
+  "SELECT 'epoch'::date AS d, 'epoch'::timestamp AS ts, 'epoch'::timestamptz AS tz, " +
+  "'allballs'::time AS t, 'allballs'::timetz AS ttz, '0'::interval AS i, " +
+  "'{epoch}'::date[] AS da, '{epoch}'::timestamp[] AS tsa, " +
+  "'{epoch}'::timestamptz[] AS tza, '{allballs}'::time[] AS ta, " +
+  "'{allballs}'::timetz[] AS ttza, '{0}'::interval[] AS ia"
 // What a line spells around and between values: a text holding one can match
 // where no single value holds it (`:4` after a key).
 const STRUCTURAL: ReadonlySet<string> = new Set(['"', '\\', ':', ',', '{', '}'])
@@ -167,9 +177,10 @@ function searches(
  * index or a parallel scan returns them otherwise); any other relation's
  * numbered as a plain read returns them before the filter. Null for any other
  * file, when the columns or the text keep a LIKE from seeing every match
- * (`searches`), or past `maxReadRows` rows or `maxReadBytes` bytes, where
- * reading the file refuses it as too large. Mirrors `lines_containing` in
- * `mirage/core/postgres/search.py`.
+ * (`searches`), when a date or time column is searched and the driver does not
+ * read those types as text (`TEXT_PROBE`), or past `maxReadRows` rows or
+ * `maxReadBytes` bytes, where reading the file refuses it as too large.
+ * Mirrors `lines_containing` in `mirage/core/postgres/search.py`.
  */
 export async function linesContaining(
   accessor: PostgresAccessor,
@@ -195,6 +206,20 @@ export async function linesContaining(
   const searched = searches(columns, text, ignoreCase)
   if (searched === null) return null
   if (searched.length === 0) return new Uint8Array(0)
+  if (
+    columns.some(
+      (c) =>
+        Object.hasOwn(TEXT_TYPES, c.type) ||
+        (c.category === 'A' && c.element !== null && Object.hasOwn(TEXT_TYPES, c.element)),
+    ) &&
+    !Object.values((await accessor.store.query(TEXT_PROBE)).rows[0] ?? {}).every(
+      (value) =>
+        typeof value === 'string' ||
+        (Array.isArray(value) && value.every((element) => typeof element === 'string')),
+    )
+  ) {
+    return null
+  }
   const op = ignoreCase ? 'ILIKE' : 'LIKE'
   const clauses: string[] = []
   for (const [name, how] of searched) {

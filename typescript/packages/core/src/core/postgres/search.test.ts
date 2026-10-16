@@ -43,9 +43,15 @@ function path(p: string = ROWS): PathSpec {
 
 const TABLE: Row[] = [{ relkind: 'r', relhassubclass: false }]
 
-// A driver that answers the relation, then its columns, then its primary
-// key, then the bounded row query, recording the SQL and parameters it was
-// asked.
+// What `TEXT_PROBE` reads back from a driver that keeps date and time types as
+// Postgres text, and from one that parses them.
+const TEXT_ROW: Row = { tz: '1970-01-01 00:00:00+00', tza: ['1970-01-01 00:00:00+00'] }
+const DATE_ROW: Row = { tz: new Date(0), tza: ['1970-01-01 00:00:00+00'] }
+const DATE_ARRAY_ROW: Row = { tz: '1970-01-01 00:00:00+00', tza: [new Date(0)] }
+
+// A driver that answers the relation, then its columns, then (with a date or
+// time column) the text probe, then its primary key, then the bounded row
+// query, recording the SQL and parameters it was asked.
 function makeAccessor(
   cols: Row[],
   rows: Row[],
@@ -53,11 +59,13 @@ function makeAccessor(
   databaseBytes = 100,
   relation: Row[] = TABLE,
   key: string[] = [],
+  probe: Row = TEXT_ROW,
 ): { accessor: PostgresAccessor; calls: [string, unknown[]][] } {
   const calls: [string, unknown[]][] = []
   const driver: PgDriver = {
     query: ((sql: string, params: unknown[] = []) => {
       calls.push([sql, params])
+      if (sql.includes("'epoch'")) return Promise.resolve({ rows: [probe], rowCount: 1 })
       if (sql.includes("contype = 'p'")) {
         const named = key.map((name) => ({ column_name: name }))
         return Promise.resolve({ rows: named, rowCount: named.length })
@@ -207,7 +215,7 @@ describe('linesContaining', () => {
   ])('searches a column whose cast holds the text: %j', async (column, clauses) => {
     const { accessor, calls } = makeAccessor(columns(column), [])
     expect(await lines(accessor, 'ada')).toBe('')
-    const sql = calls[3]?.[0] ?? ''
+    const sql = calls.at(-1)?.[0] ?? ''
     const name = `"${column[0] ?? ''}"::text`
     expect(['LIKE', '~'].filter((op) => sql.includes(`${name} ${op}`))).toEqual(clauses)
   })
@@ -223,6 +231,24 @@ describe('linesContaining', () => {
     const sql = calls[3]?.[0] ?? ''
     expect(sql).toContain('"name"::text LIKE')
     for (const name of ['"rating"', '"price"']) expect(sql).not.toContain(name)
+  })
+
+  // A driver that parses a date or time value (a browser mount takes any)
+  // spells it in the line otherwise than its cast, so the scan reads the file.
+  it.each<[string[], Row]>([
+    [['at', 'timestamptz'], DATE_ROW],
+    [['days', '_date', 'A', 'date'], DATE_ARRAY_ROW],
+  ])('declines a date or time column its driver parses: %j', async (column, probe) => {
+    const { accessor, calls } = makeAccessor(columns(column), [], {}, 100, TABLE, [], probe)
+    expect(await lines(accessor, '2026')).toBeNull()
+    expect(calls).toHaveLength(3)
+    expect(calls[2]?.[0]).toContain("'epoch'::timestamptz")
+  })
+
+  it('asks the driver nothing more when no column is a date or time', async () => {
+    const { accessor, calls } = makeAccessor(USERS, [], {}, 100, TABLE, [], DATE_ROW)
+    expect(await lines(accessor, 'ada')).toBe('')
+    expect(calls.some(([sql]) => sql.includes("'epoch'"))).toBe(false)
   })
 
   it('answers nothing when no column can spell the text', async () => {
