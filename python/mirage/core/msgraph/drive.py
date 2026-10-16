@@ -636,7 +636,9 @@ async def delta_tree(
     listing shows as a file (a package's contents) is left out, as a
     listing of that file would leave it. None when no folder is at
     ``loc``, so the walk's readdir reports what is there, when Graph
-    refuses the feed, when the feed holds a folder shared from another
+    refuses the feed, when the feed does not list the folder the first
+    request found (another folder took its path in between, and the feed
+    describes that one), when the feed holds a folder shared from another
     drive, whose items only that drive's feed lists, and when a file comes
     without the ``cTag`` its listing row carries (OneDrive for Business
     and SharePoint leave it out of the feed), since the mount keeps the
@@ -674,9 +676,13 @@ async def delta_tree(
         for item_id, item in items.items()
         if "folder" in item and "deleted" not in item
     }
-    if any(_remote_folder(item) for item in folders.values()) or any(
-        "file" in item and "deleted" not in item and not item.get("cTag")
-        for item in items.values()
+    if (
+        top_id not in folders
+        or any(_remote_folder(item) for item in folders.values())
+        or any(
+            "file" in item and "deleted" not in item and not item.get("cTag")
+            for item in items.values()
+        )
     ):
         return None
     places: dict[str, str | None] = {top_id: ""}

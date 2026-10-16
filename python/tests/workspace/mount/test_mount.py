@@ -481,3 +481,47 @@ class _HeldSource:
         if self._on_close is not None:
             self._on_close()
             self._on_close = None
+
+
+class _OpenStream:
+    """A stream that holds something open before it is pulled."""
+
+    def __init__(self) -> None:
+        self.closed = 0
+
+    def __aiter__(self) -> "_OpenStream":
+        return self
+
+    async def __anext__(self) -> bytes:
+        return b"x\n"
+
+    async def aclose(self) -> None:
+        self.closed += 1
+
+
+class _EagerFollow(RAMVFS):
+    def __init__(self) -> None:
+        super().__init__()
+        self.opened = _OpenStream()
+
+    async def follow(self, path: PathSpec, n: int, interval: float):
+        return self.opened
+
+
+@pytest.mark.asyncio
+async def test_a_stream_closed_before_its_first_pull_closes_its_source():
+    vfs = _EagerFollow()
+    mount = MountEntry("/", vfs, MountMode.WRITE)
+    stream = await mount.call("follow", "/a.txt", 1, 1.0)
+    await stream.aclose()
+    assert vfs.opened.closed >= 1
+
+
+@pytest.mark.asyncio
+async def test_a_pulled_stream_closes_its_source_once_through_the_wrappers():
+    vfs = _EagerFollow()
+    mount = MountEntry("/", vfs, MountMode.WRITE)
+    stream = await mount.call("follow", "/a.txt", 1, 1.0)
+    assert await anext(stream) == b"x\n"
+    await stream.aclose()
+    assert vfs.opened.closed >= 1

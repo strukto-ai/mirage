@@ -63,38 +63,39 @@ SUMS = {
 FOLLOW_POLL = 0.05
 
 
-def followable_shape(target: str) -> list[str]:
-    """The probe an ssh mount sends before ``tail -f``, split as the shell
-    splits it.
+def follow_shape(target: str, count: str) -> list[str]:
+    """The follow command an ssh mount sends for ``tail -f``, split as the
+    shell splits it: the shell opens the file, says so with an empty
+    line, and tail follows the descriptor it opened.
 
     Args:
         target (str): The file, as the client named it.
+        count (str): The ``-n`` count, as the client wrote it.
     """
     return [
         "test",
         "-f",
         target,
         "&&",
-        "test",
-        "-r",
+        "exec",
+        "3<",
         target,
         "&&",
         "command",
         "-v",
         "tail",
         ">/dev/null",
+        "&&",
+        "echo",
+        "&&",
+        "exec",
+        "tail",
+        "-n",
+        count,
+        "-f",
+        "<&3",
+        "3<&-",
     ]
-
-
-def follow_shape(target: str, count: str) -> list[str]:
-    """The follow command an ssh mount sends for ``tail -f``, split as the
-    shell splits it.
-
-    Args:
-        target (str): The file, as the client named it.
-        count (str): The ``-n`` count, as the client wrote it.
-    """
-    return ["exec", "tail", "-n", count, "-f", "--", target]
 
 
 FIND_KINDS = (
@@ -355,10 +356,11 @@ def last_lines(data: bytes, count: int) -> bytes:
 async def follow_file(
     root: str, target: str, count: int, process: asyncssh.SSHServerProcess
 ) -> None:
-    """What ``tail -f`` does under the chroot: a regular readable file's
-    last ``count`` lines, then what it gains until the client closes the
-    channel, from the top again once it shrinks. Anything else is tail's
-    refusal and exit 1.
+    """What the follow command does under the chroot: an empty line once a
+    regular readable file is open at ``target``, its last ``count`` lines,
+    then what it gains until the client closes the channel, from the top
+    again once it shrinks, as ``tail -f`` does. Anything else is the
+    shell's refusal and exit 1.
 
     Args:
         root (str): Local directory served as the SFTP root.
@@ -369,15 +371,13 @@ async def follow_file(
     root = os.path.realpath(root)
     path = os.path.join(root, target.lstrip("/"))
     if not _followable(root, target):
-        process.stderr.write(
-            f"tail: cannot open '{target}' for reading\n".encode()
-        )
+        process.stderr.write(f"sh: {target}: cannot open\n".encode())
         process.exit(1)
         return
     data = await asyncio.to_thread(_read_bytes, path)
     position = len(data)
     try:
-        process.stdout.write(last_lines(data, count))
+        process.stdout.write(b"\n" + last_lines(data, count))
         while not process.channel.is_closing():
             await asyncio.sleep(FOLLOW_POLL)
             try:
@@ -395,8 +395,8 @@ async def follow_file(
 
 
 def _followable(root: str, target: str) -> bool:
-    """Whether a regular file the server can read is at ``target`` under
-    the chroot, which is what the follow's probe asks.
+    """Whether a regular file the server can open for reading is at
+    ``target`` under the chroot, which is what the follow command checks.
 
     Args:
         root (str): Local directory served as the SFTP root.
@@ -540,14 +540,11 @@ async def run_command(root: str, process: asyncssh.SSHServerProcess) -> None:
     """
     argv = shlex.split(process.command or "")
     if (
-        len(argv) == 7
-        and argv[3].isdigit()
-        and argv == follow_shape(argv[6], argv[3])
+        len(argv) == 22
+        and argv[18].isdigit()
+        and argv == follow_shape(argv[2], argv[18])
     ):
-        await follow_file(root, argv[6], int(argv[3]), process)
-        return
-    if len(argv) == 12 and argv == followable_shape(argv[2]):
-        process.exit(0 if _followable(root, argv[2]) else 1)
+        await follow_file(root, argv[2], int(argv[18]), process)
         return
     answer = await asyncio.to_thread(_answer, root, argv)
     if answer is None:

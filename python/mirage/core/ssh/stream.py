@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 
 import asyncssh
 
@@ -25,8 +25,10 @@ from mirage.utils.quote import single_quote
 
 logger = logging.getLogger(__name__)
 
-FOLLOWABLE = "test -f {path} && test -r {path} && command -v tail >/dev/null"
-FOLLOW = "exec tail -n {n} -f -- {path}"
+FOLLOW = (
+    "test -f {path} && exec 3< {path} && command -v tail >/dev/null"
+    " && echo && exec tail -n {n} -f <&3 3<&-"
+)
 
 
 async def read_stream(
@@ -60,16 +62,17 @@ async def follow(
     ``tail -f`` on the server over the mount's connection, so the file is
     not read again on each poll.
 
-    One short command asks the server for a regular file it can read at
-    the path and a tail to run; anything else (a server that runs no
-    commands or has no tail, a missing file, a directory) leaves the file
-    to tail's poll, which reports it. The server's ``tail -f`` starts at
-    the first pull and ends when the stream closes, so a stream closed
-    before it is pulled leaves nothing running. The bytes are the server
-    tail's own: whole lines, and the last line as it stands while the file
-    has not ended it, as a tail there prints them. The server's tail waits
-    for growth its own way (inotify where it has it), so ``interval`` goes
-    unused, and what it says on stderr (a truncation) is not shown.
+    The server's shell opens the file itself and, once it holds it open
+    and finds a tail to run, says so with an empty line, and tail follows
+    the descriptor it opened, so the file the open found is the file
+    followed. Anything else (a server that runs no commands or has no
+    tail, a missing or unreadable file, a directory, a file gone before
+    the open) leaves the file to tail's poll, which reports it the way a
+    failed open is reported and, under ``--retry``, waits for it. The bytes
+    are the server tail's own: whole lines, and the last line as it stands
+    while the file has not ended it, as a tail there prints them. Its wait
+    for growth is its own, so ``interval`` goes unused, and what it says on
+    stderr (a truncation) is not shown.
 
     Args:
         accessor (SSHAccessor): the mount's connection.
@@ -80,29 +83,45 @@ async def follow(
     remote = single_quote(
         join_root(accessor.config.root, path_spec.mount_path)
     )
+    stream = accessor.run_stream(FOLLOW.format(path=remote, n=n))
     try:
-        status, out, err = await accessor.run(FOLLOWABLE.format(path=remote))
+        first = await anext(stream, b"")
     except (asyncssh.Error, OSError) as exc:
         logger.debug("ssh follow left to the poll: %s", exc)
+        await stream.aclose()
         return None
-    if status != 0 or out or err:
+    if not first.startswith(b"\n"):
+        await stream.aclose()
         return None
-    return _followed(accessor, FOLLOW.format(path=remote, n=n))
+    return _Followed(first[1:], stream)
 
 
-async def _followed(
-    accessor: SSHAccessor, command: str
-) -> AsyncIterator[bytes]:
-    """The server tail's output, its command started at the first pull and
-    closed however the caller stops.
+class _Followed:
+    """``head``, then the rest of the server tail's output. An iterator
+    rather than a generator: a generator closed before its first pull
+    runs nothing, and this one holds the command open already, so its
+    ``aclose`` closes the command whether it was pulled or not.
 
     Args:
-        accessor (SSHAccessor): the mount's connection.
-        command (str): the server's ``tail -f``.
+        head (bytes): what came after the shell's empty line.
+        stream (AsyncGenerator[bytes, None]): the remote tail's output.
     """
-    stream = accessor.run_stream(command)
-    try:
-        async for chunk in stream:
-            yield chunk
-    finally:
-        await stream.aclose()
+
+    def __init__(
+        self, head: bytes, stream: AsyncGenerator[bytes, None]
+    ) -> None:
+        self._head = head
+        self._stream = stream
+
+    def __aiter__(self) -> "_Followed":
+        return self
+
+    async def __anext__(self) -> bytes:
+        if self._head:
+            head, self._head = self._head, b""
+            return head
+        return await anext(self._stream)
+
+    async def aclose(self) -> None:
+        self._head = b""
+        await self._stream.aclose()

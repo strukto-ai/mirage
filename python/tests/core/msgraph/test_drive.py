@@ -375,6 +375,7 @@ async def test_delta_tree_places_every_item_by_its_parents(monkeypatch):
 @pytest.mark.asyncio
 async def test_delta_tree_ignores_a_parent_loop(monkeypatch):
     rows = [
+        _row("T", "", "", root={}, folder={}),
         _row("X", "x", "Y", folder={}),
         _row("Y", "y", "X", folder={}),
         _row("f", "f.txt", "X", size=1, file={}, cTag="c1"),
@@ -423,6 +424,7 @@ async def test_delta_tree_leaves_a_folder_from_another_drive_to_the_walk(
     monkeypatch,
 ):
     rows = [
+        _row("T", "", "", root={}, folder={}),
         _row("S", "shared", "T", folder={}, remoteItem={"folder": {}}),
         _row("g", "g.txt", "T", size=1, file={}, cTag="c1"),
     ]
@@ -455,6 +457,7 @@ async def test_delta_tree_leaves_a_feed_without_ctags_to_the_walk(
     monkeypatch,
 ):
     rows = [
+        _row("T", "", "", root={}, folder={}),
         _row("a", "a.txt", "T", size=1, file={}, cTag="c1"),
         _row("b", "b.txt", "T", size=1, file={}),
     ]
@@ -463,5 +466,22 @@ async def test_delta_tree_leaves_a_feed_without_ctags_to_the_walk(
     monkeypatch.setattr(drive_ops, "graph_list", listing)
     found = await drive_ops.delta_tree(
         MsGraphConfig(access_token="token"), _loc("d1", "")
+    )
+    assert found is None
+
+
+@pytest.mark.asyncio
+async def test_delta_tree_leaves_a_feed_of_another_folder_to_the_walk(
+    monkeypatch,
+):
+    rows = [
+        _row("N", "reports", "OUT", folder={}),
+        _row("a", "a.txt", "N", size=1, file={}, cTag="c1"),
+    ]
+    get, listing, _ = _feed({"id": "T", "folder": {}}, rows)
+    monkeypatch.setattr(drive_ops, "graph_get", get)
+    monkeypatch.setattr(drive_ops, "graph_list", listing)
+    found = await drive_ops.delta_tree(
+        MsGraphConfig(access_token="token"), _loc("d1", "team/reports")
     )
     assert found is None

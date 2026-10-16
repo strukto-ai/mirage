@@ -332,6 +332,7 @@ describe('deltaTree', () => {
         url: itemUrl('', '/delta'),
         body: {
           value: [
+            row('T', '', '', { root: {}, folder: {} }),
             row('X', 'x', 'Y', { folder: {} }),
             row('Y', 'y', 'X', { folder: {} }),
             row('f', 'f.txt', 'X', { size: 1, file: {}, cTag: 'c1' }),
@@ -369,6 +370,7 @@ describe('deltaTree', () => {
         url: itemUrl('', '/delta'),
         body: {
           value: [
+            row('T', '', '', { root: {}, folder: {} }),
             row('S', 'shared', 'T', { folder: {}, remoteItem: { folder: {} } }),
             row('g', 'g.txt', 'T', { size: 1, file: {}, cTag: 'c1' }),
           ],
@@ -399,6 +401,7 @@ describe('deltaTree', () => {
         url: itemUrl('', '/delta'),
         body: {
           value: [
+            row('T', '', '', { root: {}, folder: {} }),
             row('a', 'a.txt', 'T', { size: 1, file: {}, cTag: 'c1' }),
             row('b', 'b.txt', 'T', { size: 1, file: {} }),
           ],
@@ -406,6 +409,23 @@ describe('deltaTree', () => {
       },
     ])
     expect(await deltaTree(config, loc(''))).toBeNull()
+  })
+
+  it('leaves a feed of another folder to the walk', async () => {
+    stubFetch([
+      { method: 'GET', url: selected(itemUrl('team/reports')), body: { id: 'T', folder: {} } },
+      {
+        method: 'GET',
+        url: itemUrl('team/reports', '/delta'),
+        body: {
+          value: [
+            row('N', 'reports', 'OUT', { folder: {} }),
+            row('a', 'a.txt', 'N', { size: 1, file: {}, cTag: 'c1' }),
+          ],
+        },
+      },
+    ])
+    expect(await deltaTree(config, loc('team/reports'))).toBeNull()
   })
 
   it('raises what Graph refuses', async () => {

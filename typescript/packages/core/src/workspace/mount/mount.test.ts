@@ -616,3 +616,35 @@ class HeldSource implements AsyncIterableIterator<Uint8Array> {
     return Promise.resolve({ done: true, value: undefined })
   }
 }
+
+// A follow whose stream holds something open before it is pulled.
+class EagerFollow extends RAMVFS {
+  closed = 0
+
+  override follow(): Promise<AsyncIterable<Uint8Array> | null> {
+    return Promise.resolve({
+      next: () => Promise.resolve({ value: new TextEncoder().encode('x\n'), done: false }),
+      return: () => {
+        this.closed += 1
+        return Promise.resolve({ value: undefined, done: true })
+      },
+      [Symbol.asyncIterator]() {
+        return this
+      },
+    } as AsyncIterableIterator<Uint8Array>)
+  }
+}
+
+describe('MountEntry streamed op results', () => {
+  it('closes the source of a stream closed before its first pull', async () => {
+    const vfs = new EagerFollow()
+    const mount = new MountEntry({ prefix: '/', vfs, mode: MountMode.WRITE })
+    const stream = (await mount.call(
+      'follow',
+      '/a.txt',
+      [1, 1],
+    )) as AsyncIterableIterator<Uint8Array>
+    await stream.return?.()
+    expect(vfs.closed).toBeGreaterThanOrEqual(1)
+  })
+})

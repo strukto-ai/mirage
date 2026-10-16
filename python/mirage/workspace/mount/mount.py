@@ -199,7 +199,11 @@ def _wrap_stream(result: Any, mount_id: str, activity: VFSActivity) -> Any:
     An op that returns an async iterator has not run its body yet: the
     backend opens the file on the first ``__anext__``, after the frame
     that called it (and its ``host_io`` scope) is gone. Same reason
-    ``_wrap_mount_streams`` re-establishes the recorder state.
+    ``_wrap_mount_streams`` re-establishes the recorder state. A result
+    may hold something open already (a follow that started its command
+    to learn it can), and the wrappers are generators that close nothing
+    until they are pulled, so closing the stream closes the result too,
+    pulled or not.
 
     Args:
         result (Any): whatever the op returned.
@@ -207,7 +211,10 @@ def _wrap_stream(result: Any, mount_id: str, activity: VFSActivity) -> Any:
     """
     if hasattr(result, "__aiter__"):
         return activity.hold(
-            with_host_io(with_mount_context(result, mount_id))
+            OutputStream(
+                with_host_io(with_mount_context(result, mount_id)),
+                functools.partial(close_quietly, result),
+            )
         )
     return result
 

@@ -20,8 +20,9 @@ import type { ReadStream } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { isNoSuchFile, joinRoot, stripPrefix } from './utils.ts'
 
-export const FOLLOWABLE = 'test -f {path} && test -r {path} && command -v tail >/dev/null'
-export const FOLLOW = 'exec tail -n {n} -f -- {path}'
+export const FOLLOW =
+  'test -f {path} && exec 3< {path} && command -v tail >/dev/null' +
+  ' && echo && exec tail -n {n} -f <&3 3<&-'
 
 async function waitForClose(rs: ReadStream): Promise<Error | null> {
   try {
@@ -65,16 +66,17 @@ export async function* readStream(accessor: SSHAccessor, p: PathSpec): AsyncIter
  * server over the mount's connection, so the file is not read again on each
  * poll.
  *
- * One short command asks the server for a regular file it can read at the
- * path and a tail to run; anything else (a server that runs no commands or has
- * no tail, a missing file, a directory) leaves the file to tail's poll, which
- * reports it. The server's `tail -f` starts at the first pull and ends when
- * the stream closes, so a stream closed before it is pulled leaves nothing
- * running. The bytes are the server tail's own: whole lines, and the last line
- * as it stands while the file has not ended it, as a tail there prints them.
- * The server's tail waits for growth its own way (inotify where it has it), so
- * `interval` goes unused, and what it says on stderr (a truncation) is not
- * shown. Mirrors Python's `follow`.
+ * The server's shell opens the file itself and, once it holds it open and
+ * finds a tail to run, says so with an empty line, and tail follows the
+ * descriptor it opened, so the file the open found is the file followed.
+ * Anything else (a server that runs no commands or has no tail, a missing or
+ * unreadable file, a directory, a file gone before the open) leaves the file
+ * to tail's poll, which reports it the way a failed open is reported and,
+ * under `--retry`, waits for it. The bytes are the server tail's own: whole
+ * lines, and the last line as it stands while the file has not ended it, as a
+ * tail there prints them. Its wait for growth is its own, so `interval` goes
+ * unused, and what it says on stderr (a truncation) is not shown. Mirrors
+ * Python's `follow`.
  */
 export async function follow(
   accessor: SSHAccessor,
@@ -83,41 +85,48 @@ export async function follow(
   _interval: number,
 ): Promise<AsyncIterable<Uint8Array> | null> {
   const remote = singleQuote(joinRoot(accessor.config.root ?? '/', stripPrefix(p)))
-  const fill = (template: string): string =>
-    template.replaceAll(/\{path\}|\{n\}/g, (slot) => (slot === '{path}' ? remote : String(n)))
-  let status: number | null
-  let out: Uint8Array
-  let err: Uint8Array
+  const command = FOLLOW.replaceAll(/\{path\}|\{n\}/g, (slot) =>
+    slot === '{path}' ? remote : String(n),
+  )
+  const stream = accessor.runStream(command)
+  let first: IteratorResult<Uint8Array>
   try {
-    ;[status, out, err] = await accessor.run(fill(FOLLOWABLE))
+    first = await stream.next()
   } catch (error) {
     console.debug(`ssh follow left to the poll: ${String(error)}`)
+    await stream.return?.()
     return null
   }
-  if (status !== 0 || out.length > 0 || err.length > 0) return null
-  return followed(accessor, fill(FOLLOW))
+  if (first.done === true || first.value[0] !== 0x0a) {
+    await stream.return?.()
+    return null
+  }
+  return followed(first.value.subarray(1), stream)
 }
 
 /**
- * The server tail's output, its command started at the first pull. An
- * iterator rather than a generator: a generator queues `return` behind a pull
- * waiting for the next line, so an idle `tail -f` could never close its
- * channel; `return` here closes it at once, and before the first pull leaves
- * nothing to close. Mirrors Python's `_followed`.
+ * `head`, then the rest of the server tail's output. An iterator rather than a
+ * generator: a generator queues `return` behind a pull waiting for the next
+ * line and runs nothing when closed before its first pull, and this one holds
+ * the command open already, so `return` closes it at once, pulled or not.
+ * Mirrors Python's `_Followed`.
  */
-function followed(accessor: SSHAccessor, command: string): AsyncIterableIterator<Uint8Array> {
-  let stream: AsyncIterableIterator<Uint8Array> | null = null
-  let closed = false
+function followed(
+  head: Uint8Array,
+  stream: AsyncIterableIterator<Uint8Array>,
+): AsyncIterableIterator<Uint8Array> {
+  let pending: Uint8Array | null = head.byteLength > 0 ? head : null
   const done: IteratorResult<Uint8Array> = { value: undefined, done: true }
   return {
     next(): Promise<IteratorResult<Uint8Array>> {
-      if (closed) return Promise.resolve(done)
-      stream ??= accessor.runStream(command)
-      return stream.next()
+      if (pending === null) return stream.next()
+      const value = pending
+      pending = null
+      return Promise.resolve({ value, done: false })
     },
     async return(): Promise<IteratorResult<Uint8Array>> {
-      closed = true
-      await stream?.return?.()
+      pending = null
+      await stream.return?.()
       return done
     },
     [Symbol.asyncIterator]() {

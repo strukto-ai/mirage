@@ -531,8 +531,10 @@ export function parentId(item: { parentReference?: unknown }): string {
  * its parents up to the folder. An item under one a listing shows as a file (a
  * package's contents) is left out, as a listing of that file would leave it.
  * Null when no folder is at `loc`, so the walk's readdir reports what is
- * there, when Graph refuses the feed, when the feed holds a folder shared from
- * another drive, whose items only that drive's feed lists, and when a file
+ * there, when Graph refuses the feed, when the feed does not list the folder
+ * the first request found (another folder took its path in between, and the
+ * feed describes that one), when the feed holds a folder shared from another
+ * drive, whose items only that drive's feed lists, and when a file
  * comes without the `cTag` its listing row carries (OneDrive for Business and
  * SharePoint leave it out of the feed), since the mount keeps the answer as
  * the folders' listings. Mirrors Python's `delta_tree`.
@@ -569,6 +571,7 @@ export async function deltaTree(
   for (const [id, item] of items) {
     if (isFolder(item) && item.deleted === undefined) folders.set(id, item)
   }
+  if (!folders.has(topId)) return null
   for (const item of folders.values()) if (remoteFolder(item)) return null
   for (const item of items.values()) {
     const live = item.file !== undefined && item.deleted === undefined
