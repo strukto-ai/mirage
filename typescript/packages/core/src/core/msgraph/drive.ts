@@ -600,8 +600,10 @@ export async function deltaTree(
  * The folder's own children are its listing (`readdirItems`), so a folder that
  * is not there raises what a listing raises. A listing the batch does not
  * answer with its first page (Graph throttled or failed that one) is asked on
- * its own once the wait it was given has passed, and a listing's later pages
- * are read as a listing reads them. Null when Graph refuses a batch, or when a
+ * its own, once the longest wait the batch's answers asked for has passed since
+ * it arrived (one wait a batch, each answer's counted from the same moment),
+ * and a listing's later pages are read as a listing reads them. Null when
+ * Graph refuses a batch, or when a
  * listing below the folder fails (a folder gone, or one the account may not
  * open), so the walk lists what is there and reports, or skips, each folder on
  * its own. Mirrors Python's `batch_tree`.
@@ -621,8 +623,12 @@ export async function batchTree(
       const listed: Record<string, unknown>[][] = []
       try {
         const answers = await graphBatch(config, urls)
+        let pause = 0
+        for (const [status, , wait] of answers) if (status !== 200) pause = Math.max(pause, wait)
+        if (pause > 0) await sleep(pause * 1000)
         for (const [i, url] of urls.entries()) {
-          listed.push(await batchPage(config, url, answers[i] ?? [0, {}, 0]))
+          const [status, body] = answers[i] ?? [0, {}, 0]
+          listed.push(await batchPage(config, url, status, body))
         }
       } catch (err) {
         const failed =
@@ -645,20 +651,16 @@ export async function batchTree(
 
 /**
  * A folder's whole listing from its answer in a batch: the page the batch held
- * and the pages after it, or the listing asked again on its own, after the
- * wait the answer asked for, when the batch did not answer it. Mirrors
- * Python's `_batch_page`.
+ * and the pages after it, or the listing asked again on its own when the batch
+ * did not answer it. Mirrors Python's `_batch_page`.
  */
 async function batchPage(
   config: MsGraphConfigResolved,
   url: string,
-  answer: [number, Record<string, unknown>, number],
+  status: number,
+  body: Record<string, unknown>,
 ): Promise<Record<string, unknown>[]> {
-  const [status, body, wait] = answer
-  if (status !== 200) {
-    if (wait > 0) await sleep(wait * 1000)
-    return graphList(config, url)
-  }
+  if (status !== 200) return graphList(config, url)
   const items: Record<string, unknown>[] = []
   if (Array.isArray(body.value)) {
     for (const item of body.value) {

@@ -520,7 +520,7 @@ describe('batchTree', () => {
     expect(rec.bodies.map((b) => (b.requests as unknown[]).length)).toEqual([20, 5])
   })
 
-  it('asks a listing the batch left unanswered on its own, after its wait', async () => {
+  it('waits once for the longest Retry-After before asking unanswered listings alone', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout'] })
     try {
       const rec = stubFetch([
@@ -530,18 +530,22 @@ describe('batchTree', () => {
           url: BATCH,
           body: {
             responses: [
-              { id: '0', status: 200, body: { value: [] } },
+              { id: '0', status: 429, headers: { 'Retry-After': '2' }, body: {} },
               { id: '1', status: 429, headers: { 'Retry-After': '3' }, body: {} },
             ],
           },
         },
+        { method: 'GET', url: children('top/a'), body: { value: UNDER_A } },
         { method: 'GET', url: children('top/b'), body: { value: UNDER_B } },
+        { method: 'POST', url: BATCH, body: batched({ value: UNDER_C }) },
       ])
       const pending = batchTree(config, loc('top'), SPEC)
       await vi.advanceTimersByTimeAsync(2900)
-      expect(rec.calls.some(([, url]) => url === children('top/b'))).toBe(false)
+      expect(rec.calls).toHaveLength(2)
       await vi.advanceTimersByTimeAsync(200)
+      expect(rec.calls).toHaveLength(5)
       const found = await pending
+      expect(found?.has('a/c/z.txt')).toBe(true)
       expect(found?.has('b/y.txt')).toBe(true)
       expect(rec.pending()).toBe(0)
     } finally {

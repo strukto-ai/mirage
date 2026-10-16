@@ -597,7 +597,7 @@ async def test_batch_tree_splits_a_wide_level(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_listing_the_batch_left_unanswered_is_asked_alone(
+async def test_unanswered_listings_wait_once_for_the_longest_retry(
     monkeypatch,
 ):
     slept: list[float] = []
@@ -607,7 +607,8 @@ async def test_a_listing_the_batch_left_unanswered_is_asked_alone(
         asked["list"].append(f"slept {seconds}")
 
     listing, batch, asked = _listings(
-        _graph_tree(), throttled={_children("top/b"): 3.0}
+        _graph_tree(),
+        throttled={_children("top/a"): 2.0, _children("top/b"): 3.0},
     )
     monkeypatch.setattr(drive_ops, "graph_list", listing)
     monkeypatch.setattr(drive_ops, "graph_batch", batch)
@@ -615,11 +616,13 @@ async def test_a_listing_the_batch_left_unanswered_is_asked_alone(
     found = await drive_ops.batch_tree(
         MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
     )
+    assert "a/c/z.txt" in found
     assert "b/y.txt" in found
     assert slept == [3.0]
     assert asked["list"] == [
         _children("top"),
         "slept 3.0",
+        _children("top/a"),
         _children("top/b"),
     ]
 

@@ -721,8 +721,10 @@ async def batch_tree(
     The folder's own children are its listing (``readdir_items``), so a
     folder that is not there raises what a listing raises. A listing the
     batch does not answer with its first page (Graph throttled or failed
-    that one) is asked on its own once the wait it was given has passed,
-    and a listing's later pages are read as a listing reads them. None
+    that one) is asked on its own, once the longest wait the batch's
+    answers asked for has passed since it arrived (one wait a batch, each
+    answer's counted from the same moment), and a listing's later pages
+    are read as a listing reads them. None
     when Graph refuses a batch, or when a listing below the folder fails
     (a folder gone, or one the account may not open), so the walk lists
     what is there and reports, or skips, each folder on its own.
@@ -743,9 +745,15 @@ async def batch_tree(
             urls = [folder.item("/children") for _, folder in chunk]
             try:
                 answers = await graph_batch(config, urls, session=session)
+                pause = max(
+                    (wait for status, _, wait in answers if status != 200),
+                    default=0.0,
+                )
+                if pause:
+                    await asyncio.sleep(pause)
                 listed = [
-                    await _batch_page(config, url, answer, session)
-                    for url, answer in zip(urls, answers)
+                    await _batch_page(config, url, status, body, session)
+                    for url, (status, body, _) in zip(urls, answers)
                 ]
             except (GraphError, aiohttp.ClientError, OSError) as exc:
                 logger.debug(
@@ -762,25 +770,22 @@ async def batch_tree(
 async def _batch_page(
     config: MsGraphConfig,
     url: str,
-    answer: tuple[int, dict[str, Any], float],
+    status: int,
+    body: dict[str, Any],
     session: SessionArg,
 ) -> list[dict[str, Any]]:
     """A folder's whole listing from its answer in a batch: the page the
     batch held and the pages after it, or the listing asked again on its
-    own, after the wait the answer asked for, when the batch did not
-    answer it.
+    own when the batch did not answer it.
 
     Args:
         config (MsGraphConfig): Graph config.
         url (str): the listing's URL.
-        answer (tuple[int, dict[str, Any], float]): its status, body and
-            the seconds it asked to be waited before asking again.
+        status (int): the answer's status.
+        body (dict[str, Any]): the answer's body.
         session (SessionArg): pool or live session to ride.
     """
-    status, body, wait = answer
     if status != 200:
-        if wait:
-            await asyncio.sleep(wait)
         return await graph_list(config, url, session=session)
     value = body.get("value")
     items = [
