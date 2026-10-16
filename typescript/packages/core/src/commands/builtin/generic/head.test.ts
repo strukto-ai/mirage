@@ -125,6 +125,12 @@ function opts(flags: Record<string, string | boolean>): CommandOpts {
 const fileStat = (p: PathSpec): Promise<FileStat> =>
   Promise.resolve(new FileStat({ name: p.virtual, type: FileType.FILE }))
 
+const firstLinesOrFail = (p: PathSpec): Promise<Uint8Array> => {
+  if (p.virtual === '/big') return Promise.reject(efbig(p))
+  if (p.virtual === '/locked') return Promise.reject(eacces(p))
+  return Promise.resolve(ENC.encode('ok\n'))
+}
+
 // Mirrors the head_generic cases in test_head.py.
 describe('head asks the mount for the first lines', () => {
   it.each([
@@ -203,8 +209,7 @@ describe('head asks the mount for the first lines', () => {
         await Promise.resolve()
         throw new Error('read a file')
       },
-      (p) =>
-        p.virtual === '/big' ? Promise.reject(efbig(p)) : Promise.resolve(ENC.encode('ok\n')),
+      firstLinesOrFail,
     )
     expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe(
       '==> /big <==\n\n==> /small <==\nok\n',
@@ -229,8 +234,7 @@ describe('head asks the mount for the first lines', () => {
         await Promise.resolve()
         throw new Error('read a file')
       },
-      (p) =>
-        p.virtual === '/locked' ? Promise.reject(eacces(p)) : Promise.resolve(ENC.encode('ok\n')),
+      firstLinesOrFail,
     )
     expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe(expected)
     expect(result?.[1].exitCode).toBe(1)
@@ -255,7 +259,7 @@ describe('head asks the mount for the first lines', () => {
           await Promise.resolve()
           throw new Error('read a file')
         },
-        (p) => Promise.reject(p.virtual === '/big' ? efbig(p) : eacces(p)),
+        firstLinesOrFail,
       )
       const out = ensureStream(result?.[0] ?? new Uint8Array())[Symbol.asyncIterator]()
       const first = await out.next()

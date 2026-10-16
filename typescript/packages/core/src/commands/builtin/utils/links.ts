@@ -208,23 +208,19 @@ export function linkView(files: Files | undefined): LinkView | undefined {
         return (
           (await resolvePathStat(dispatch, PathSpec.fromStrPath(path, undefined, '/'))) !== null
         )
-      } catch {
+      } catch (err) {
+        console.debug(`link probe at ${path} failed: ${String(err)}`)
         return false
       }
     },
     targetStat: async (path: string) => {
       if (!files.isVisible(path)) return null
-      let target: string
       try {
-        target = posixNormpath(table.follow(path))
-      } catch {
-        return null
-      }
-      try {
-        return await files.stat(target)
+        return await files.stat(posixNormpath(table.follow(path)))
       } catch (err) {
-        if (isEnoent(err) || isEnotdir(err)) return null
-        throw err
+        if (!(err instanceof CycleError) && !isEnoent(err) && !isEnotdir(err)) throw err
+        console.debug(`link target of ${path} has no row: ${String(err)}`)
+        return null
       }
     },
   }

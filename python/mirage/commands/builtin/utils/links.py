@@ -310,7 +310,8 @@ def link_view(files: Files | None) -> LinkView | None:
         spec = PathSpec.from_str_path(virtual, cwd="/")
         try:
             return await resolve_path_stat(seen.dispatch, spec) is not None
-        except (OSError, ValueError):
+        except (OSError, ValueError) as exc:
+            logger.debug("link probe at %s failed: %s", virtual, exc)
             return False
 
     async def target_stat(virtual: str | PathSpec) -> FileStat | None:
@@ -319,9 +320,8 @@ def link_view(files: Files | None) -> LinkView | None:
             return None
         try:
             return await seen.stat(posixpath.normpath(links.follow(path)))
-        except CycleError:
-            return None
-        except _MISSES:
+        except (CycleError, *_MISSES) as exc:
+            logger.debug("link target of %s has no row: %s", path, exc)
             return None
 
     return LinkView(

@@ -133,6 +133,14 @@ def _counted_reads(body: bytes, reads: list[str]):
     return stream
 
 
+async def _first_lines_or_fail(p: PathSpec, n: int) -> bytes:
+    if p.virtual == "/big":
+        raise efbig(p)
+    if p.virtual == "/locked":
+        raise eacces(p)
+    return b"ok\n"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "flags, asked",
@@ -205,18 +213,13 @@ async def test_head_reads_standard_input_without_first_lines():
 
 @pytest.mark.asyncio
 async def test_head_reports_a_failed_operand_and_prints_the_next():
-    async def first_lines(p: PathSpec, n: int) -> bytes:
-        if p.virtual == "/big":
-            raise efbig(p)
-        return b"ok\n"
-
     out, io = await head_generic(
         [PathSpec.from_str_path("/big"), PathSpec.from_str_path("/small")],
         [],
         CommandOpts(flags={"lines": "1"}),
         _file_stat,
         _counted_reads(b"", []),
-        first_lines,
+        _first_lines_or_fail,
     )
     assert await materialize(out) == (b"==> /big <==\n\n==> /small <==\nok\n")
     assert io.exit_code == 1
@@ -239,18 +242,13 @@ async def test_head_reports_a_failed_operand_and_prints_the_next():
 async def test_head_prints_no_header_for_an_operand_it_may_not_open(
     names, expected
 ):
-    async def first_lines(p: PathSpec, n: int) -> bytes:
-        if p.virtual == "/locked":
-            raise eacces(p)
-        return b"ok\n"
-
     out, io = await head_generic(
         [PathSpec.from_str_path(name) for name in names],
         [],
         CommandOpts(flags={"lines": "1"}),
         _file_stat,
         _counted_reads(b"", []),
-        first_lines,
+        _first_lines_or_fail,
     )
     assert await materialize(out) == expected
     assert io.exit_code == 1
@@ -278,16 +276,13 @@ async def test_head_prints_no_header_for_an_operand_it_may_not_open(
 async def test_head_v_keeps_one_failure_when_the_reader_stops_at_the_header(
     name, header, stderr
 ):
-    async def first_lines(p: PathSpec, n: int) -> bytes:
-        raise efbig(p) if p.virtual == "/big" else eacces(p)
-
     out, io = await head_generic(
         [PathSpec.from_str_path(name)],
         [],
         CommandOpts(flags={"lines": "1", "verbose": True}),
         _file_stat,
         _counted_reads(b"", []),
-        first_lines,
+        _first_lines_or_fail,
     )
     first = await anext(out, b"")
     await close_quietly(out)
