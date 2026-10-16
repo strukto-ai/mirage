@@ -21,7 +21,7 @@ class Workspace {
 }
 ```
 
-One terminal over the backends mounted at each prefix.
+One virtual terminal over the backends mounted at each prefix.
 
 <ResponseField name="mounts" type="Record<string, VFS>" required>
   The backend at each prefix, such as `{ '/': new RAMVFS(), '/s3': new S3VFS(config) }`.

@@ -1,6 +1,6 @@
 ---
 title: OpenHands
-description: Run the All-Hands OpenHands SDK against a Mirage workspace using MirageWorkspace and the Mirage terminal tool.
+description: Run the All-Hands OpenHands SDK against a Mirage workspace using MirageWorkspace and the Mirage virtual terminal tool.
 icon: /images/openhands-logo.svg
 ---
 
@@ -54,8 +54,8 @@ asyncio.run(main())
 | Symbol | Purpose |
 | --- | --- |
 | `MirageWorkspace` | OpenHands `Workspace` implementation backed by a Mirage workspace. |
-| `MirageTerminalExecutor` | Terminal executor that pipes through `Workspace.shell()`. |
-| `register_mirage_terminal` | Registers the Mirage terminal tool so the agent can `Tool(name=...)` it. |
+| `MirageTerminalExecutor` | Virtual terminal executor that pipes through `Workspace.shell()`. |
+| `register_mirage_terminal` | Registers the Mirage virtual terminal tool so the agent can `Tool(name=...)` it. |
 
 ## Examples
 

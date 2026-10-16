@@ -20,7 +20,7 @@ class Workspace(
 )
 ```
 
-One terminal over the backends mounted at each prefix.
+One virtual terminal over the backends mounted at each prefix.
 
 <ResponseField name="mounts" type="dict[str, VFS]" required>
   The backend at each prefix, such as `{"/": RAMVFS(), "/s3": S3VFS(config)}`.

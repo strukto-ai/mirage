@@ -26,7 +26,7 @@ Mirage has no OS signals. Cancellation, `kill`, timeouts and closing a workspace
 
 A background job writes where the shell that started it writes, as it writes, so its lines and the foreground's come out in the order they were written, as in bash. `wait` prints none of a job's output, and `fg` prints only the job's command line.
 
-A `shell()` call answers with what reached the session's terminal while the line ran. A job that writes after the call has returned has no line to show it, so that output waits and comes first in the next call on the session; bash prints it right away. With `sink`, the output goes to the console while a line runs, and between lines it waits the same way.
+A `shell()` call answers with what reached the session's virtual terminal while the line ran. A job that writes after the call has returned has no line to show it, so that output waits and comes first in the next call on the session; bash prints it right away. With `sink`, the output goes to the console while a line runs, and between lines it waits the same way.
 
 `$( )` and every pipeline stage but the last wait for the jobs they start, as bash reads a pipe until every writer has closed it. Inside `$( )`, `jobs` still lists the caller's jobs, but `wait` and `kill` reach only its own. `bash -c` sees only its own jobs.
 

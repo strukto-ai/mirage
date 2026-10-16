@@ -4,7 +4,7 @@ description: Drive a workspace session from a program over JSON-RPC 2.0.
 icon: brackets-curly
 ---
 
-RPC is a workspace session's in-app API over [JSON-RPC 2.0](https://www.jsonrpc.org/specification). Each method is named after the call it makes: `shell` is `session.shell`, `vfs/read` is `session.vfs.read`. Use it when a program drives the terminal: it moves bytes, and gets a line's stdout, stderr and exit code apart.
+RPC is a workspace session's in-app API over [JSON-RPC 2.0](https://www.jsonrpc.org/specification). Each method is named after the call it makes: `shell` is `session.shell`, `vfs/read` is `session.vfs.read`. Use it when a program drives the virtual terminal: it moves bytes, and gets a line's stdout, stderr and exit code apart.
 
 Every workspace on the Mirage server answers RPC at:
 
