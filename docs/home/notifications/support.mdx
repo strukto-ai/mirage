@@ -16,10 +16,6 @@ virtual files changed, and the agent reacts.
 | Listen for file and directory changes under a path | `ws.events("/data")` | `ws.events('/data')` |
 | Tell Mirage that a file or directory changed | `await ws.notify(change)` | `await ws.notify(change)` |
 
-`change` is a [FileEvent](/home/notifications#the-event): the virtual path and
-what happened, such as a create, update, move or deletion. `notify()` reports
-the change to listeners; it does not modify the file.
-
 <CodeGroup>
 ```python Python
 async for change in ws.events("/data"):
@@ -37,12 +33,36 @@ Start the listener before calling `ws.notify(change)` from your notification
 receiver in a separate task. Mirage does not start a file watcher or webhook
 server for you.
 
-## Connect a notification service
+<CodeGroup>
+```python Python
+from datetime import datetime, timezone
+from mirage.types import FileChangeKind, FileEvent, PathSpec
 
-Use the helper for your VFS to turn a service notification into file changes,
-then pass each change to `ws.notify()`. The columns below name the helper
-class and its method; see the [Python and TypeScript example](/home/notifications#payloads)
-for imports and arguments.
+change = FileEvent(
+    kind=FileChangeKind.UPDATE,
+    path=PathSpec.from_str_path("/data/report.csv"),
+    timestamp=datetime.now(timezone.utc),
+)
+await ws.notify(change)
+```
+
+```typescript TypeScript
+import { FileChangeKind, FileEvent, PathSpec } from '@struktoai/mirage-node'
+
+const change = new FileEvent({
+  kind: FileChangeKind.UPDATE,
+  path: PathSpec.fromStrPath('/data/report.csv'),
+  timestamp: new Date(),
+})
+await ws.notify(change)
+```
+</CodeGroup>
+
+## Push
+
+Receive file changes through webhooks, streams or file watchers. Convert them
+with the functions below, then call `ws.notify()` for each change.
+See the [Python and TypeScript example](/home/notifications#payloads).
 
 | VFS | Notification service | Python method | TypeScript method |
 | --- | --- | --- | --- |
@@ -59,21 +79,20 @@ for imports and arguments.
 | Trello | [Webhooks](https://developer.atlassian.com/cloud/trello/guides/rest-api/webhooks/) | `TrelloEventHook.to_events` | `TrelloEventHook.toEvents` |
 | Notion | [Webhooks](https://developers.notion.com/reference/webhooks) | `NotionEventHook.to_events` | `NotionEventHook.toEvents` |
 | Email | [IMAP IDLE](https://datatracker.ietf.org/doc/html/rfc2177) | `EmailEventHook.to_events` | `EmailEventHook.toEvents` |
-| Box | [Events API](https://developer.box.com/guides/events/user-events/polling) | `BoxEventHook.to_events` | `BoxEventHook.toEvents` |
 
-S3-compatible storage can use `S3EventHook` when it sends S3-format notifications.
+## Poll
 
-## Services that require fetching changes
-
-These services announce that something changed. Use `vfs.delta_hook()` in
-Python or `vfs.deltaHook()` in TypeScript, then call `await hook.pull(root, checkpoint)`
-to fetch the changed paths. Send each item in `result.changes` to `ws.notify()`
-and save `result.checkpoint` for the next call. See the [example](/home/notifications#pings).
+Fetch changed files from the service, on a schedule or after a notification.
+Create `hook` with `vfs.delta_hook()` (Python) or `vfs.deltaHook()` (TypeScript).
+Call `await hook.pull(root, checkpoint)`, send each item in `result.changes`
+to `ws.notify()`, and save `result.checkpoint` for the next call.
+See the [Python and TypeScript example](/home/notifications#pings).
 
 | VFS | Notification service | Python | TypeScript |
 | --- | --- | --- | --- |
 | Airtable | [Webhooks API](https://airtable.com/developers/web/api/webhooks-overview) | `vfs.delta_hook()` | `vfs.deltaHook()` |
 | Box | [Long-poll events](https://developer.box.com/guides/events/user-events/polling) | `vfs.delta_hook()` | `vfs.deltaHook()` |
+| Box | [Events API responses](https://developer.box.com/guides/events/user-events/polling) | `BoxEventHook.to_events` | `BoxEventHook.toEvents` |
 | Dropbox | [Webhooks or long polling](https://docs.dropboxapi.com/dropbox-api/docs/detecting-changes) | `vfs.delta_hook()` | `vfs.deltaHook()` |
 | Gmail | [Pub/Sub notifications](https://developers.google.com/workspace/gmail/api/guides/push) | `vfs.delta_hook()` | `vfs.deltaHook()` |
 | Google Calendar | [Push notifications](https://developers.google.com/workspace/calendar/api/guides/push) | `vfs.delta_hook()` | `vfs.deltaHook()` |
@@ -83,7 +102,7 @@ and save `result.checkpoint` for the next call. See the [example](/home/notifica
 For other VFS types, your application can detect changes and report them
 directly with `ws.notify()`.
 
-## The Dropbox longpoll example
+### Dropbox example
 
 The [Python example](https://github.com/strukto-ai/mirage/blob/main/examples/python/dropbox/events.py)
 and [TypeScript example](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/events.ts)
