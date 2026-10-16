@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import Sequence
 
 from mirage.accessor.trello import TrelloAccessor
 from mirage.core.trello.client import (
+    TrelloAPIError,
     get_board,
     get_card,
     get_list,
@@ -29,6 +31,8 @@ from mirage.core.trello.pathing import (
 )
 from mirage.types import FileChangeKind, FileEvent, JsonValue, PathSpec
 from mirage.watch.events import event_at, field, text_field
+
+logger = logging.getLogger(__name__)
 
 _CARD_FILES = ("card.json", "comments.jsonl")
 
@@ -87,7 +91,8 @@ class TrelloEventHook:
     deletes its directory; a deleted card names no name, so where the
     hook saw it last is used, and a card it never saw makes its list's
     ``cards`` UNKNOWN. An action on a card that does not name its list
-    (a label or a member added) reads the card and its list once. A card
+    (a label or a member added) reads the card and its list once, and
+    one Trello no longer has makes the board UNKNOWN. A card
     renamed or moved to another list moves both files. A comment updates
     ``comments.jsonl``, and a change to what ``card.json`` renders (its
     fields, labels or members) updates that.
@@ -204,23 +209,29 @@ class TrelloEventHook:
         self._cards[card_id] = place
         return place
 
-    async def _located(self, board_dir: str, card: JsonValue) -> str | None:
+    async def _located(self, board_dir: str, card_id: str) -> str | None:
         """Where a card an action names without its list is, read from
-        the card and its list.
+        the card and its list, or None when Trello no longer has either,
+        as for a delivery that arrives after the card was deleted.
 
         Args:
             board_dir (str): The card's board directory.
-            card (JsonValue): The card as the action names it.
+            card_id (str): The card's id.
         """
-        card_id = text_field(card, "id")
-        if card_id is None:
-            return None
         config = self._accessor.config
-        found = await get_card(config, card_id, session=self._accessor.pool)
-        list_id = text_field(found, "idList")
-        if list_id is None:
+        try:
+            found = await get_card(
+                config, card_id, session=self._accessor.pool
+            )
+            list_id = text_field(found, "idList")
+            if list_id is None:
+                return None
+            lst = await get_list(config, list_id, session=self._accessor.pool)
+        except TrelloAPIError as exc:
+            if exc.status != 404:
+                raise
+            logger.debug("trello watch: card %s is gone: %s", card_id, exc)
             return None
-        lst = await get_list(config, list_id, session=self._accessor.pool)
         return self._card_dir(board_dir, found, lst)
 
     def _rebase(self, old: str, new: str | None) -> None:
@@ -276,8 +287,11 @@ class TrelloEventHook:
             text_field(old, "name"),
         )
         now = self._card_dir(board_dir, card, lst if after is None else after)
-        if now is None:
-            now = await self._located(board_dir, card)
+        card_id = text_field(card, "id")
+        if now is None and card_id is not None:
+            now = await self._located(board_dir, card_id)
+            if now is None:
+                return (event_at(root, board_dir, FileChangeKind.UNKNOWN),)
         if now is None:
             return ()
         if field(old, "closed") is not None:
@@ -321,8 +335,11 @@ class TrelloEventHook:
                 return ()
             cards = f"{board_dir}/lists/{list_dirname(_named(lst))}/cards"
             return (event_at(root, cards, FileChangeKind.UNKNOWN),)
-        if place is None:
-            place = await self._located(board_dir, card)
+        card_id = text_field(card, "id")
+        if place is None and card_id is not None:
+            place = await self._located(board_dir, card_id)
+            if place is None:
+                return (event_at(root, board_dir, FileChangeKind.UNKNOWN),)
         if place is None:
             return ()
         if kind in _CARD_MADE:

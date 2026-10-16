@@ -15,6 +15,7 @@
 import asyncio
 
 from mirage.accessor.trello import TrelloAccessor
+from mirage.core.trello.client import TrelloAPIError
 from mirage.core.trello.watch import TrelloEventHook
 from mirage.types import FileChangeKind, PathSpec
 from mirage.vfs.trello.config import TrelloConfig
@@ -52,6 +53,8 @@ def _hook(monkeypatch, **config) -> tuple[TrelloEventHook, list[str]]:
 
     async def fake_card(config, card_id, session=None):
         calls.append(f"card {card_id}")
+        if card_id != "c1":
+            raise TrelloAPIError("not found", status=404)
         return {**CARD, "idList": "l1"}
 
     async def fake_list(config, list_id, session=None):
@@ -234,3 +237,11 @@ def test_a_board_leaving_the_workspace_is_deleted_where_it_was(monkeypatch):
         old={"idOrganization": "w1"},
     )
     assert _map(hook, left) == [(D, BOARD_DIR)]
+
+
+def test_a_late_delivery_for_a_deleted_card_is_unknown_on_its_board(
+    monkeypatch,
+):
+    hook, _ = _hook(monkeypatch)
+    late = _body("commentCard", card={"id": "c9", "name": "Gone"})
+    assert _map(hook, late) == [(X, BOARD_DIR)]

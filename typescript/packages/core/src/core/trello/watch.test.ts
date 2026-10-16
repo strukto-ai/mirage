@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { TrelloAccessor } from '../../accessor/trello.ts'
 import { FileChangeKind, PathSpec, type JsonValue } from '../../types.ts'
-import type { TrelloTransport } from './client.ts'
+import { TrelloApiError, type TrelloTransport } from './client.ts'
 import { TrelloEventHook } from './watch.ts'
 
 const { CREATE: C, UPDATE: U, DELETE: D, MOVE: M, UNKNOWN: X } = FileChangeKind
@@ -42,6 +42,7 @@ function fake(options: { workspaceId?: string; boardIds?: string[] } = {}): {
       const [, kind, id] = path.split('/')
       if (kind === 'cards') {
         calls.push(`card ${id ?? ''}`)
+        if (id !== 'c1') return Promise.reject(new TrelloApiError(path, 404, 'not found'))
         return Promise.resolve({ ...CARD, idList: 'l1' })
       }
       if (kind === 'lists') {
@@ -220,5 +221,11 @@ describe('TrelloEventHook', () => {
       { id: 'b1', name: 'Roadmap', idOrganization: 'w2' },
     )
     expect(await map(hook, left)).toEqual([[D, BOARD_DIR]])
+  })
+
+  it('is UNKNOWN on the board for a late delivery about a deleted card', async () => {
+    const { hook } = fake()
+    const late = body('commentCard', { card: { id: 'c9', name: 'Gone' } })
+    expect(await map(hook, late)).toEqual([[X, BOARD_DIR]])
   })
 })

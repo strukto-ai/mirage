@@ -15,7 +15,7 @@
 import type { TrelloAccessor } from '../../accessor/trello.ts'
 import { FileChangeKind, type FileEvent, type JsonValue, type PathSpec } from '../../types.ts'
 import { eventAt, field, textField } from '../../watch/events.ts'
-import { getBoard, getCard, getList, listWorkspaces } from './client.ts'
+import { TrelloApiError, getBoard, getCard, getList, listWorkspaces } from './client.ts'
 import { boardDirname, cardDirname, listDirname, workspaceDirname } from './pathing.ts'
 
 const CARD_FILES = ['card.json', 'comments.jsonl'] as const
@@ -70,10 +70,11 @@ function named(entity: JsonValue, name?: string): Record<string, string> {
  * archived or moved to another board deletes its directory; a deleted card
  * names no name, so where the hook saw it last is used, and a card it never
  * saw makes its list's `cards` UNKNOWN. An action on a card that does not name
- * its list (a label or a member added) reads the card and its list once. A
- * card renamed or moved to another list moves both files. A comment updates
- * `comments.jsonl`, and a change to what `card.json` renders (its fields,
- * labels or members) updates that.
+ * its list (a label or a member added) reads the card and its list once, and
+ * one Trello no longer has makes the board UNKNOWN. A card renamed or moved
+ * to another list moves both files. A comment updates `comments.jsonl`, and a
+ * change to what `card.json` renders (its fields, labels or members) updates
+ * that.
  *
  * A list or a board renamed moves everything below it, which no action lists,
  * so the old and new directory are UNKNOWN, and the cards the hook remembers
@@ -147,15 +148,20 @@ export class TrelloEventHook {
   }
 
   // Where a card an action names without its list is, read from the card and
-  // its list.
-  private async located(boardDir: string, card: JsonValue): Promise<string | null> {
-    const cardId = textField(card, 'id')
-    if (cardId === undefined) return null
-    const found = (await getCard(this.accessor.transport, cardId)) as JsonValue
-    const listId = textField(found, 'idList')
-    if (listId === undefined) return null
-    const lst = (await getList(this.accessor.transport, listId)) as JsonValue
-    return this.cardDir(boardDir, found, lst)
+  // its list, or null when Trello no longer has either, as for a delivery
+  // that arrives after the card was deleted.
+  private async located(boardDir: string, cardId: string): Promise<string | null> {
+    try {
+      const found = (await getCard(this.accessor.transport, cardId)) as JsonValue
+      const listId = textField(found, 'idList')
+      if (listId === undefined) return null
+      const lst = (await getList(this.accessor.transport, listId)) as JsonValue
+      return this.cardDir(boardDir, found, lst)
+    } catch (err) {
+      if (!(err instanceof TrelloApiError) || err.status !== 404) throw err
+      console.debug(`trello watch: card ${cardId} is gone: ${err.message}`)
+      return null
+    }
   }
 
   // Carry each remembered card below a list or board that moved to its new
@@ -186,9 +192,12 @@ export class TrelloEventHook {
       field(data, 'listBefore') ?? lst,
       textField(old, 'name'),
     )
-    const now =
-      this.cardDir(boardDir, card, field(data, 'listAfter') ?? lst) ??
-      (await this.located(boardDir, card))
+    let now = this.cardDir(boardDir, card, field(data, 'listAfter') ?? lst)
+    const cardId = textField(card, 'id')
+    if (now === null && cardId !== undefined) {
+      now = await this.located(boardDir, cardId)
+      if (now === null) return [eventAt(root, boardDir, FileChangeKind.UNKNOWN)]
+    }
     if (now === null) return []
     if (field(old, 'closed') !== undefined && field(old, 'closed') !== null) {
       if (field(card, 'closed') === true) {
@@ -222,7 +231,11 @@ export class TrelloEventHook {
       const cards = `${boardDir}/lists/${listDirname(named(lst))}/cards`
       return [eventAt(root, cards, FileChangeKind.UNKNOWN)]
     }
-    place ??= await this.located(boardDir, card)
+    const cardId = textField(card, 'id')
+    if (place === null && cardId !== undefined) {
+      place = await this.located(boardDir, cardId)
+      if (place === null) return [eventAt(root, boardDir, FileChangeKind.UNKNOWN)]
+    }
     if (place === null) return []
     if (CARD_MADE.has(kind)) return this.files(root, place, FileChangeKind.CREATE)
     const name = COMMENT_EDITS.has(kind) ? 'comments.jsonl' : 'card.json'
