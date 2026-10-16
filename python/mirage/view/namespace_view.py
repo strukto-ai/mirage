@@ -109,8 +109,17 @@ def _link_names(
     if links is None:
         return []
     targets = links.symlink_targets()
+    below = norm_dir(parent)
     return visible_child_segments(
-        vis, [p for p in targets if not leads_hidden(vis, p, targets)], parent
+        vis,
+        [
+            p
+            for p in targets
+            if p.startswith(below)
+            and path_visible(vis, p)
+            and not leads_hidden(vis, p, targets)
+        ],
+        parent,
     )
 
 

@@ -76,8 +76,9 @@ def link_view(
     of symlink-aware commands to keep in step here or anywhere else.
     Filtered by the session's hides, as the dispatcher's own answers
     are: a hidden link, or one that leads where the session cannot see,
-    has no row, no listing entry and no target, and resolving one leaves
-    the path as typed, for the dispatcher to refuse.
+    has no row, no listing entry and no target. Resolving a hidden path
+    leaves it as typed, for the dispatcher to refuse; a visible one
+    resolves, so a walker judges where it lands.
 
     Args:
         namespace (Namespace | None): addressing authority holding the
@@ -107,7 +108,7 @@ def link_view(
         ]
 
     def resolve(virtual: str) -> str:
-        if not shown(virtual):
+        if not path_visible(vis, virtual):
             return virtual
         return resolve_link(links, virtual)
 

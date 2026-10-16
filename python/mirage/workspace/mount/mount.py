@@ -911,7 +911,7 @@ class MountEntry:
                 for cmd in handlers:
                     refusal = self._read_only_refusal(
                         cmd_name, cmd, flags
-                    ) or self._unenforced_refusal(cmd_name, cmd, context)
+                    ) or self._unenforced_refusal(cmd_name, cmd)
                     if refusal is not None:
                         return None, refusal
                     result = await self._run_handler(
@@ -1183,7 +1183,7 @@ class MountEntry:
         return None
 
     def _unenforced_refusal(
-        self, cmd_name: str, cmd: Command, context: ExecContext
+        self, cmd_name: str, cmd: Command
     ) -> IOResult | None:
         """Refuse a command the VFS was handed while the session restricts
         this mount.
@@ -1191,14 +1191,14 @@ class MountEntry:
         Such a command reaches its backend through its own handle, past
         the dispatcher, so no hide, path rule or mode cap sees what it
         reads or writes; like a runtime that cannot enforce them, it does
-        not run. The commands a builtin backend serves are mirage's own
+        not run. The handle reaches the whole store, a part another mount
+        shadows included, so a restriction anywhere below the prefix
+        counts. The commands a builtin backend serves are mirage's own
         and run.
 
         Args:
             cmd_name (str): command name.
             cmd (Command): the handler about to run.
-            context (ExecContext): the invocation's execution context,
-                whose namespace view lists every mount.
         """
         key = (cmd.name, cmd.filetype)
         handed = {
@@ -1209,12 +1209,9 @@ class MountEntry:
         if key not in handed or self._cmds.get(key) is not cmd:
             return None
         session = current_caller().session
-        if session is None:
-            return None
-        mounts = context.ns.mounts if context.ns is not None else None
-        prefixes = [] if mounts is None else mounts.descendants("/")
-        restricted = restricted_mounts_for(session, [*prefixes, self.prefix])
-        if norm(self.prefix) not in {norm(p) for p in restricted}:
+        if session is None or norm(self.prefix) not in {
+            norm(p) for p in restricted_mounts_for(session, [self.prefix])
+        }:
             return None
         return IOResult(
             exit_code=127,

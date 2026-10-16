@@ -94,7 +94,10 @@ export function childMountNames(
 function linkNames(vis: Visibility | null, links: NamespaceLinks | null, parent: string): string[] {
   if (links === null) return []
   const targets = links.symlinkTargets()
-  const shown = [...targets.keys()].filter((path) => !leadsHidden(vis, path, targets))
+  const below = normDir(parent)
+  const shown = [...targets.keys()].filter(
+    (path) => path.startsWith(below) && pathVisible(vis, path) && !leadsHidden(vis, path, targets),
+  )
   return visibleChildSegments(vis, shown, parent)
 }
 

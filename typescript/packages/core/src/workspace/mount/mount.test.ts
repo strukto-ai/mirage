@@ -667,7 +667,7 @@ describe('handed commands under restrictions', () => {
   it('do not run where the session restricts their mount', async () => {
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/data/': new HandedRAM(), '/other/': new RAMVFS() },
+      { '/data/': new HandedRAM(), '/data/nested/': new RAMVFS(), '/other/': new RAMVFS() },
       { mode: MountMode.WRITE, shellParser: parser },
     )
     const refused = "cat: command cannot enforce this session's file restrictions\n"
@@ -675,12 +675,14 @@ describe('handed commands under restrictions', () => {
       await ws.shell('echo hi > /data/n.txt; echo o > /other/o.txt')
       ws.createSession('here', { profile: { paths: { hide: ['/data/secret'] } } })
       ws.createSession('pattern', { profile: { paths: { hide: ['*.key'] } } })
+      ws.createSession('nested', { profile: { paths: { hide: ['/data/nested/secret.txt'] } } })
       ws.createSession('elsewhere', { profile: { paths: { hide: ['/other/x'] } } })
       for (const [sid, out, err, code] of [
         [undefined, 'handed\n', '', 0],
         ['elsewhere', 'handed\n', '', 0],
         ['here', '', refused, 127],
         ['pattern', '', refused, 127],
+        ['nested', '', refused, 127],
       ] as const) {
         const io = await ws.shell('cat /data/n.txt', sid === undefined ? {} : { sessionId: sid })
         const dec = new TextDecoder()

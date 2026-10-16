@@ -24,13 +24,7 @@ from mirage.types import (
     weaker_mode,
 )
 from mirage.utils.fnmatch import fnmatch
-from mirage.utils.path import (
-    CycleError,
-    norm,
-    parent,
-    resolve_path,
-    resolve_symlinks,
-)
+from mirage.utils.path import MAX_SYMLINK_HOPS
 
 # The characters that make a document entry a pattern rather than an
 # exact name; the permissions document has one grammar for every path
@@ -457,11 +451,13 @@ def leads_hidden(
     vis: Visibility | None, virtual: str, links: Mapping[str, str]
 ) -> bool:
     """Whether a visible name leads where the session cannot see: the
-    link at it names a hidden path, or following it lands on one.
+    walk that follows it, link by link, names a hidden path.
 
-    Such a link is as hidden as its target, since its listing row,
-    ``readlink`` and ``ls -l`` would print the hidden name; a link that
-    leads nowhere (dangling, or a loop) leads nowhere hidden.
+    Every name is judged as the walk meets it, before a later ``..``
+    takes it back, so a link whose stored target spells a hidden
+    directory (``/data/secret/../pub``) leads there too: its listing
+    row, ``readlink`` and ``ls -l`` would print the hidden name. A link
+    that leads nowhere (dangling, or a loop) leads nowhere hidden.
 
     Args:
         vis (Visibility | None): the session's visibility, None for an
@@ -471,17 +467,31 @@ def leads_hidden(
     """
     if vis is None or not links:
         return False
-    key = norm(virtual)
-    target = links.get(key)
-    if target is not None and not path_visible(
-        vis, resolve_path(target, parent(key))
-    ):
-        return True
-    try:
-        landed = resolve_symlinks(key, links)
-    except CycleError:
-        return False
-    return landed != key and not path_visible(vis, landed)
+    pending = list(reversed(virtual.split("/")))
+    walked: list[str] = []
+    hops = 0
+    while pending:
+        part = pending.pop()
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if walked:
+                walked.pop()
+            continue
+        name = "/" + "/".join([*walked, part])
+        if not path_visible(vis, name):
+            return True
+        target = links.get(name)
+        if target is None:
+            walked.append(part)
+            continue
+        hops += 1
+        if hops > MAX_SYMLINK_HOPS:
+            return False
+        if target.startswith("/"):
+            walked.clear()
+        pending.extend(reversed(target.split("/")))
+    return False
 
 
 def hidden_under(vis: Visibility | None, virtual: str) -> bool:

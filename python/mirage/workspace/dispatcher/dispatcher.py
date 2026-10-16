@@ -1405,18 +1405,24 @@ class Dispatcher:
         """
         vis = caller.visibility
         links = self._namespace.symlink_targets()
-        if not path_visible(vis, path.virtual) or leads_hidden(
-            vis, path.virtual, links
-        ):
+        hidden = not path_visible(vis, path.virtual)
+        if hidden or leads_hidden(vis, path.virtual, links):
+            # An op that follows a link into hidden space lands there,
+            # so it answers as a create under a hidden directory does.
+            follows = name not in NO_FOLLOW_OPS and not kwargs.get("nofollow")
             raise hidden_refusal(
-                vis, path.virtual, name in HIDDEN_CREATE_OPS, links
+                vis,
+                path.virtual,
+                name in HIDDEN_CREATE_OPS and (hidden or not follows),
+                links,
             )
         dst = kwargs.get("dst") if name in DESTINATION_OPS else None
-        if isinstance(dst, PathSpec) and (
-            not path_visible(vis, dst.virtual)
-            or leads_hidden(vis, dst.virtual, links)
-        ):
-            raise hidden_refusal(vis, dst.virtual, True, links)
+        if isinstance(dst, PathSpec):
+            dst_hidden = not path_visible(vis, dst.virtual)
+            if dst_hidden or leads_hidden(vis, dst.virtual, links):
+                raise hidden_refusal(
+                    vis, dst.virtual, dst_hidden or name not in COPY_OPS, links
+                )
         # An operand the walk already refused (the empty name, a link
         # loop) names nothing an op can reach, whatever `virtual` says.
         for walked in (path, dst):
@@ -2448,12 +2454,14 @@ class Dispatcher:
                 # serial order (a link synthesizes its parents), and
                 # the purge taking the directory's hidden nodes must
                 # not take it too.
+                links = self._namespace.symlink_targets()
                 arrived = frozenset(
                     link
                     for link, _ in self._namespace.link_stats_below(
                         path.virtual
                     )
                     if path_visible(vis, link)
+                    and not leads_hidden(vis, link, links)
                 )
                 await self._namespace.purge_under(path.virtual, keep=arrived)
         if name == "rename" and isinstance(kwargs.get("dst"), PathSpec):

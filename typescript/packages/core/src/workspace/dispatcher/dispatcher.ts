@@ -1219,15 +1219,24 @@ export class Dispatcher {
   ): Promise<Call> {
     const vis = sessionVisibility(this.access)
     const links = this.namespace.symlinkTargets()
-    if (!pathVisible(vis, path.virtual) || leadsHidden(vis, path.virtual, links)) {
-      throw hiddenRefusal(vis, path.virtual, HIDDEN_CREATE_OPS.has(name), links)
+    const hidden = !pathVisible(vis, path.virtual)
+    if (hidden || leadsHidden(vis, path.virtual, links)) {
+      // An op that follows a link into hidden space lands there, so it
+      // answers as a create under a hidden directory does.
+      const follows = !NO_FOLLOW_OPS.has(name) && kwargs?.nofollow !== true
+      throw hiddenRefusal(
+        vis,
+        path.virtual,
+        HIDDEN_CREATE_OPS.has(name) && (hidden || !follows),
+        links,
+      )
     }
     let dstArg = DESTINATION_OPS.has(name) ? args?.[0] : undefined
-    if (
-      dstArg instanceof PathSpec &&
-      (!pathVisible(vis, dstArg.virtual) || leadsHidden(vis, dstArg.virtual, links))
-    ) {
-      throw hiddenRefusal(vis, dstArg.virtual, true, links)
+    if (dstArg instanceof PathSpec) {
+      const dstHidden = !pathVisible(vis, dstArg.virtual)
+      if (dstHidden || leadsHidden(vis, dstArg.virtual, links)) {
+        throw hiddenRefusal(vis, dstArg.virtual, dstHidden || !COPY_OPS.has(name), links)
+      }
     }
     // An operand the walk already refused (the empty name, a link loop)
     // names nothing an op can reach, whatever `virtual` says.
@@ -2286,8 +2295,9 @@ export class Dispatcher {
         // must not take it too.
         const arrived = new Set<string>()
         const vis = sessionVisibility(this.access)
+        const links = this.namespace.symlinkTargets()
         for (const [link] of this.namespace.linkStatsBelow(p.virtual)) {
-          if (pathVisible(vis, link)) arrived.add(link)
+          if (pathVisible(vis, link) && !leadsHidden(vis, link, links)) arrived.add(link)
         }
         await this.namespace.purgeUnder(p.virtual, arrived)
       }

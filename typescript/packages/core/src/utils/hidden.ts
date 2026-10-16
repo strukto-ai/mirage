@@ -22,7 +22,7 @@ import type {
 } from '../types.ts'
 import { weakerMode } from '../types.ts'
 import { fnmatch } from './fnmatch.ts'
-import { CycleError, norm, parent, resolvePath, resolveSymlinks } from './path.ts'
+import { MAX_SYMLINK_HOPS } from './path.ts'
 import { stripSlash } from './slash.ts'
 
 /**
@@ -321,11 +321,13 @@ export function classifyShows(entries: readonly ShowEntry[]): ShownPaths | null 
 }
 
 /**
- * Whether a visible name leads where the session cannot see: the link at
- * it names a hidden path, or following it lands on one. Such a link is as
- * hidden as its target, since its listing row, `readlink` and `ls -l` would
- * print the hidden name; a link that leads nowhere (dangling, or a loop)
- * leads nowhere hidden. Mirrors Python's leads_hidden.
+ * Whether a visible name leads where the session cannot see: the walk that
+ * follows it, link by link, names a hidden path. Every name is judged as the
+ * walk meets it, before a later `..` takes it back, so a link whose stored
+ * target spells a hidden directory (`/data/secret/../pub`) leads there too:
+ * its listing row, `readlink` and `ls -l` would print the hidden name. A
+ * link that leads nowhere (dangling, or a loop) leads nowhere hidden.
+ * Mirrors Python's leads_hidden.
  */
 export function leadsHidden(
   vis: Visibility | null | undefined,
@@ -333,17 +335,28 @@ export function leadsHidden(
   links: ReadonlyMap<string, string>,
 ): boolean {
   if (vis === null || vis === undefined || links.size === 0) return false
-  const key = norm(virtual)
-  const target = links.get(key)
-  if (target !== undefined && !pathVisible(vis, resolvePath(target, parent(key)))) return true
-  let landed: string
-  try {
-    landed = resolveSymlinks(key, links)
-  } catch (err) {
-    if (err instanceof CycleError) return false
-    throw err
+  const pending = virtual.split('/').reverse()
+  const walked: string[] = []
+  let hops = 0
+  while (pending.length > 0) {
+    const part = pending.pop() ?? ''
+    if (part === '' || part === '.') continue
+    if (part === '..') {
+      walked.pop()
+      continue
+    }
+    const name = '/' + [...walked, part].join('/')
+    if (!pathVisible(vis, name)) return true
+    const target = links.get(name)
+    if (target === undefined) {
+      walked.push(part)
+      continue
+    }
+    if (++hops > MAX_SYMLINK_HOPS) return false
+    if (target.startsWith('/')) walked.length = 0
+    pending.push(...target.split('/').reverse())
   }
-  return landed !== key && !pathVisible(vis, landed)
+  return false
 }
 
 /**

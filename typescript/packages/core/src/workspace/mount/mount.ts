@@ -1445,7 +1445,7 @@ export class MountEntry {
         for (const cmd of handlers) {
           const refusal =
             this.readOnlyRefusal(cmdName, cmd, flags, context.access) ??
-            this.unenforcedRefusal(cmdName, cmd, context)
+            this.unenforcedRefusal(cmdName, cmd)
           if (refusal !== null) return [null, refusal]
           const result = await this.runHandler(cmdName, cmd, keyedPaths, texts, cmdOpts, context)
           if (result !== null) return this.wrapOutput(cmdName, cmd, keyedPaths, result)
@@ -1666,10 +1666,12 @@ export class MountEntry {
    * mount. Such a command reaches its backend through its own handle, past
    * the dispatcher, so no hide, path rule or mode cap sees what it reads or
    * writes; like a runtime that cannot enforce them, it does not run. The
-   * commands a builtin backend serves are mirage's own and run. Mirrors
-   * Python's MountEntry._unenforced_refusal.
+   * handle reaches the whole store, a part another mount shadows included, so
+   * a restriction anywhere below the prefix counts. The commands a builtin
+   * backend serves are mirage's own and run. Mirrors Python's
+   * MountEntry._unenforced_refusal.
    */
-  private unenforcedRefusal(cmdName: string, cmd: Command, context: ExecContext): IOResult | null {
+  private unenforcedRefusal(cmdName: string, cmd: Command): IOResult | null {
     const key = cmdKey(cmd.name, cmd.filetype)
     const handed = this.vfs
       .commands()
@@ -1679,10 +1681,12 @@ export class MountEntry {
       )
     if (!handed || this.cmds.get(key) !== cmd) return null
     const session = currentCaller().session
-    if (session === null) return null
-    const prefixes = context.ns?.mounts?.descendants('/') ?? []
-    const restricted = restrictedMountsFor(session, [...prefixes, this.prefix]).map(norm)
-    if (!restricted.includes(norm(this.prefix))) return null
+    if (
+      session === null ||
+      !restrictedMountsFor(session, [this.prefix]).map(norm).includes(norm(this.prefix))
+    ) {
+      return null
+    }
     return new IOResult({
       exitCode: 127,
       stderr: encodeText(`${cmdName}: command cannot enforce this session's file restrictions\n`),

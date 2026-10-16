@@ -1464,6 +1464,26 @@ async def test_a_link_into_hidden_space_is_hidden_with_its_target():
 
 
 @pytest.mark.asyncio
+async def test_rmdir_takes_a_link_into_hidden_space_with_the_directory():
+    with Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell(
+            "mkdir -p /data/secret /data/d; echo s > /data/secret/f; "
+            "ln -s /data/secret/f /data/d/l"
+        )
+        session = ws.create_session(
+            "remover", profile={"paths": {"hide": ["/data/secret"]}}
+        )
+        token = set_current_session(session)
+        try:
+            await ws.vfs.rmdir("/data/d")
+        finally:
+            reset_current_session(token)
+        assert not ws.namespace.is_link("/data/d/l")
+        listed = await ws.shell("ls /data")
+        assert await listed.stdout_str() == "secret\n"
+
+
+@pytest.mark.asyncio
 async def test_rmdir_keeps_a_link_created_while_the_backend_removes():
     with Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE) as ws:
         await ws.shell("mkdir /data/d; ln -s nowhere /data/d/old")

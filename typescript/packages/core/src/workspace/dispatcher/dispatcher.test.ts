@@ -1201,6 +1201,27 @@ describe('rmdir namespace entries', () => {
     },
   )
 
+  it('takes a link into hidden space with the directory', async () => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: parser },
+    )
+    try {
+      await ws.shell(
+        'mkdir -p /data/secret /data/d; echo s > /data/secret/f; ln -s /data/secret/f /data/d/l',
+      )
+      const session = ws.createSession('remover', {
+        profile: { paths: { hide: ['/data/secret'] } },
+      })
+      await runWithSession(session, () => ws.vfs.rmdir('/data/d'))
+      expect(ws.namespace.isLink('/data/d/l')).toBe(false)
+      expect(DEC.decode((await ws.shell('ls /data')).stdout)).toBe('secret\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('keeps a link created while the backend removes the directory', async () => {
     const parser = await getTestParser()
     const ws = new Workspace(

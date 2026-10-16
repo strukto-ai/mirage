@@ -105,8 +105,9 @@ export function linkViewFor(
 
 // Filtered by the session's hides, as the dispatcher's own answers are: a
 // hidden link, or one that leads where the session cannot see, has no row,
-// no listing entry and no target, and resolving one leaves the path as
-// typed, for the dispatcher to refuse.
+// no listing entry and no target. Resolving a hidden path leaves it as
+// typed, for the dispatcher to refuse; a visible one resolves, so a walker
+// judges where it lands.
 function linkView(
   namespace: Namespace | null,
   dispatch: DispatchFn,
@@ -120,7 +121,7 @@ function linkView(
     statAt: (path: string) => (shown(path) ? namespace.linkStatAt(path) : null),
     subtree: (directory: string) =>
       namespace.linkStatsBelow(directory).filter(([path]) => shown(path)),
-    resolve: (path: string) => (shown(path) ? resolveLink(namespace, path) : path),
+    resolve: (path: string) => (pathVisible(vis, path) ? resolveLink(namespace, path) : path),
     exists: (path: string) => pathExists(dispatch, path),
     targetStat: (path: string) =>
       shown(path) ? linkTargetStat(namespace, dispatch, path, overlay) : Promise.resolve(null),

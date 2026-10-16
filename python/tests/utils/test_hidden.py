@@ -402,6 +402,9 @@ LINKS = {
     "/data/shared/to_pub": "/data/pub/n.txt",
     "/data/shared/dangling": "/data/nope",
     "/data/shared/loop": "/data/shared/loop",
+    "/data/shared/through": "/data/secret/../pub/n.txt",
+    "/data/alias": "/data/secret",
+    "/data/shared/via_alias": "/data/alias/f",
 }
 
 
@@ -413,6 +416,8 @@ def test_leads_hidden_follows_a_link_into_hidden_space():
         "/data/shared/dirlink",
         "/data/shared/dirlink/f",
         "/data/shared/chain",
+        "/data/shared/through",
+        "/data/shared/via_alias",
     ):
         assert leads_hidden(vis, path, LINKS), path
     for path in (

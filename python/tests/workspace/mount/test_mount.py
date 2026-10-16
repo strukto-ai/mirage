@@ -149,10 +149,15 @@ async def test_a_handed_command_does_not_run_where_the_session_restricts():
     profiles = {
         "here": {"paths": {"hide": ["/data/secret"]}},
         "pattern": {"paths": {"hide": ["*.key"]}},
+        "nested": {"paths": {"hide": ["/data/nested/secret.txt"]}},
         "elsewhere": {"paths": {"hide": ["/other/x"]}},
     }
     ws = Workspace(
-        {"/data/": HandedRAM(), "/other/": RAMVFS()},
+        {
+            "/data/": HandedRAM(),
+            "/data/nested/": RAMVFS(),
+            "/other/": RAMVFS(),
+        },
         mode=MountMode.WRITE,
         profiles=profiles,
     )
@@ -166,6 +171,7 @@ async def test_a_handed_command_does_not_run_where_the_session_restricts():
             ("elsewhere", b"handed\n", b"", 0),
             ("here", b"", refused, 127),
             ("pattern", b"", refused, 127),
+            ("nested", b"", refused, 127),
         ):
             io = await ws.shell("cat /data/n.txt", session_id=sid)
             got = (

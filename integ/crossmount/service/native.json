@@ -347,9 +347,9 @@
       ],
       "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -r hit /a",
       "expect": {
-        "exit": 0,
-        "stdout": "/a/inner/i.txt:hit child\n/a/top.txt:hit\n/a/top.txt:hit\n",
-        "stderr": ""
+        "exit": 127,
+        "stdout": "",
+        "stderr": "calls: command cannot enforce this session's file restrictions\ncalls: command cannot enforce this session's file restrictions\ncalls: command cannot enforce this session's file restrictions\ngrep: command cannot enforce this session's file restrictions\ngrep: command cannot enforce this session's file restrictions\ngrep: command cannot enforce this session's file restrictions\n"
       },
       "session": "blind",
       "explain_blind": true
@@ -648,9 +648,9 @@
       ],
       "command": "rg --sort path -g \"*.txt\" hit /a/inner",
       "expect": {
-        "exit": 0,
-        "stdout": "/a/inner/i.txt:hit child\n",
-        "stderr": ""
+        "exit": 127,
+        "stdout": "",
+        "stderr": "rg: command cannot enforce this session's file restrictions\n"
       },
       "session": "blind"
     },
@@ -731,6 +731,20 @@
         "stdout": "partial\ncba",
         "stderr": "rev: cannot open /a/test.broken: Permission denied\n"
       }
+    },
+    {
+      "id": "xm_native_handed_command_refused_where_the_session_restricts",
+      "seq": 961117,
+      "targets": [
+        "command-service"
+      ],
+      "command": "meter /b/x; meter /a/top.txt",
+      "expect": {
+        "exit": 127,
+        "stdout": "/b/x\n",
+        "stderr": "meter: command cannot enforce this session's file restrictions\n"
+      },
+      "session": "blind"
     },
     {
       "id": "xm_native_metadata_only_child",

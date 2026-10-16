@@ -22,9 +22,9 @@
       "session": "narrowed",
       "command": "cat /data/sessvis/vault/token.txt; realpath -m /data/sessvis/.alias; realpath /data/sessvis/.alias",
       "expect": {
-        "exit": 1,
-        "stdout": "/data/sessvis/vault/inner\n",
-        "stderr": "cat: /data/sessvis/vault/token.txt: No such file or directory\nrealpath: /data/sessvis/.alias: No such file or directory\n"
+        "exit": 0,
+        "stdout": "/data/sessvis/.alias\n/data/sessvis/.alias\n",
+        "stderr": "cat: /data/sessvis/vault/token.txt: No such file or directory\n"
       }
     },
     {
@@ -47,7 +47,7 @@
       "command": "find /data/sessvis",
       "expect": {
         "exit": 0,
-        "stdout": "/data/sessvis\n/data/sessvis/.alias\n/data/sessvis/pub.txt\n",
+        "stdout": "/data/sessvis\n/data/sessvis/pub.txt\n",
         "stderr": ""
       }
     },
