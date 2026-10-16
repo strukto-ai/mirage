@@ -177,7 +177,10 @@ export async function storedTree(
  * Keep a subtree read as the listings it proves: it names everything below the
  * directory, so it is a complete listing of the directory and of each
  * directory below it. The directory's own stat, which a read may name under
- * `''`, is kept where a stat of it finds it. Mirrors Python's `keep_tree`.
+ * `''`, is kept where a stat of it finds it. A folder whose listing is live
+ * keeps it: one that landed while the read ran may be newer than the read, and
+ * replacing it would report its newer children gone. Mirrors Python's
+ * `keep_tree`.
  */
 export async function keepTree(
   index: IndexCacheStore,
@@ -202,5 +205,7 @@ export async function keepTree(
       listings.set(`${base}/${relative}`, [])
     }
   }
-  for (const [folder, rows] of listings) await index.setDir(folder, rows)
+  for (const [folder, rows] of listings) {
+    if ((await index.listDir(folder)).entries == null) await index.setDir(folder, rows)
+  }
 }

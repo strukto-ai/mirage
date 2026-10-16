@@ -1821,6 +1821,42 @@ describe('dispatch runs writers to one path one at a time', () => {
     }
   })
 
+  it('drops what a read cached once a timed-out write lands', async () => {
+    // The timeout evicts, but the store's call goes on: a read before it
+    // lands caches the old bytes, so the landing evicts again.
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    class LateRAMVFS extends RAMVFS {
+      override readonly cachesReads: boolean = true
+      override readonly local: boolean = false
+      held = false
+      override async write(path: PathSpec, data: Uint8Array): Promise<void> {
+        if (this.held) await gate
+        await super.write(path, data)
+      }
+    }
+    const store = new LateRAMVFS()
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/data': [store, MountMode.WRITE, { write: new Limit({ timeoutSeconds: 0.01 }) }] },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.dispatch('write', '/data/f', [ENC.encode('old')])
+      store.held = true
+      await expect(ws.dispatch('write', '/data/f', [ENC.encode('new')])).rejects.toThrow()
+      expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('old')
+      release()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('new')
+    } finally {
+      release()
+      await ws.close()
+    }
+  })
+
   it('reports a call that fails after its timeout', async () => {
     // The caller already has its timeout, so the store's own failure
     // reaches no one else: it is reported, not dropped.

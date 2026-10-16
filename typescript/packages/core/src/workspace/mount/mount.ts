@@ -1015,8 +1015,9 @@ export class MountEntry {
     try {
       return this.whole(await storedStat(index, key))
     } catch (err) {
-      if (isEnoent(err) && (await this.unproven(index, key))) return null
-      throw err
+      if (!isEnoent(err) || !(await this.unproven(index, key))) throw err
+      console.debug(`${key} left to the backend: ${String(err)}`)
+      return null
     }
   }
 
@@ -1144,6 +1145,7 @@ export class MountEntry {
         (name === 'stat' && handed.entry == null)
       )
         throw err
+      console.debug(`${name} ${scope.virtual} missed its handed rows, asking again: ${String(err)}`)
     }
     await this.forget(scope, dst, index)
     const again = await this.handedFor(name, scope, dst, index)

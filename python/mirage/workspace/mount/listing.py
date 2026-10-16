@@ -234,7 +234,9 @@ async def keep_tree(
     A subtree read names everything below the directory, so it is a
     complete listing of the directory and of each directory below it.
     The directory's own stat, which a read may name under ``""``, is
-    kept where a stat of it finds it.
+    kept where a stat of it finds it. A folder whose listing is live
+    keeps it: one that landed while the read ran may be newer than the
+    read, and replacing it would report its newer children gone.
 
     Args:
         index (IndexCacheStore): the mount's index.
@@ -254,4 +256,5 @@ async def keep_tree(
         if row.type is FileType.DIRECTORY:
             listings.setdefault(f"{base}/{relative}", [])
     for folder, rows in listings.items():
-        await index.set_dir(folder, rows)
+        if (await index.list_dir(folder)).entries is None:
+            await index.set_dir(folder, rows)

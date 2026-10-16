@@ -1488,8 +1488,9 @@ class MountEntry:
         """
         try:
             return self._whole(await stored_stat(index, key))
-        except FileNotFoundError:
+        except FileNotFoundError as exc:
             if await self._unproven(index, key):
+                logger.debug("%s left to the backend: %s", key, exc)
                 return None
             raise
 
@@ -1850,11 +1851,17 @@ class MountEntry:
             return await self._invoke(
                 name, fn, scope, args, {**kwargs, **handed}, op_timeout
             )
-        except FileNotFoundError:
+        except FileNotFoundError as exc:
             if all(stat is None for stat in handed.values()) or (
                 name == "stat" and handed.get("entry") is None
             ):
                 raise
+            logger.debug(
+                "%s %s missed its handed rows, asking again: %s",
+                name,
+                scope.virtual,
+                exc,
+            )
         await self._forget(scope, kwargs, index)
         handed = await self._handed(fn, scope, kwargs, index)
         return await self._invoke(

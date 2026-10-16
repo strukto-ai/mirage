@@ -1397,6 +1397,10 @@ export class Dispatcher {
         async () => {
           await this.settleWrite('copy', call.path, dst, [dst], [])
         },
+        async () => {
+          if (this.namespace.tryMountFor(rstripSlash(dst.virtual) || '/') !== other) return
+          await this.evictFailedWrite('copy', call.path, dst, [], null)
+        },
       )
     } catch (err) {
       await this.evictFailedWrite('copy', call.path, dst, [], lostPaths(activeRecords()))
@@ -1842,6 +1846,10 @@ export class Dispatcher {
               )
               await this.keepWritten(call, mount, fullArgs, mine, before)
             },
+            async () => {
+              if (this.namespace.tryMountFor(rstripSlash(p.virtual) || '/') !== mount) return
+              await this.evictFailedWrite(name, p, dst, operands(name, call.args, kwargs), null)
+            },
           )
         } catch (err) {
           await this.evictFailedWrite(
@@ -2070,9 +2078,10 @@ export class Dispatcher {
    * call and a timed-out pwrite still writes back what it read; the
    * mount's activity ends at the timeout as for any op, so an unmount
    * does not wait on it. `after` runs only for a caller still waiting: a
-   * call that lands after its timeout changes nothing beside the store, as
-   * every timed-out op, since by then the names it touched may belong to
-   * other mounts; a failure nobody waits for any more is reported.
+   * call that lands after its timeout runs `landed` instead, which drops what
+   * the landing made stale where its names still belong to the mount that
+   * ran it (a read between the timeout and the landing may have cached the
+   * old bytes); a failure nobody waits for any more is reported.
    *
    * Args:
    *   keys: the names to hold, in the one order every writer takes them.
@@ -2081,6 +2090,7 @@ export class Dispatcher {
    *   label: the op and path, for a late failure's report.
    *   call: runs the op, handing over the store's own call once it starts.
    *   after: the bookkeeping, run while the caller still waits.
+   *   landed: run once a call that outlived its timeout settles.
    */
   private async holdWrite(
     keys: readonly string[],
@@ -2089,6 +2099,7 @@ export class Dispatcher {
     label: string,
     call: (onCall: (storeCall: Promise<unknown>) => void) => Promise<unknown>,
     after: (value: unknown) => Promise<void>,
+    landed: () => Promise<void>,
   ): Promise<unknown> {
     const turn = { entered: false, abandoned: false, late: false, started: false, settled: false }
     let giveUp = (): void => undefined
@@ -2120,9 +2131,16 @@ export class Dispatcher {
           () => started.call ?? answer,
           () => started.call ?? answer,
         )
-        finished = stored.then(async (value) => {
-          if (!turn.late) await after(value)
-        })
+        finished = stored.then(
+          async (value) => {
+            if (turn.late) await landed()
+            else await after(value)
+          },
+          async (err: unknown) => {
+            if (turn.late) await landed()
+            throw err
+          },
+        )
         enter()
         await finished.catch((err: unknown) => {
           if (turn.late) console.warn(`${label} failed after its timeout: ${String(err)}`)

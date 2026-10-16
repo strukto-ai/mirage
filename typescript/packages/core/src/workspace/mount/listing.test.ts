@@ -27,6 +27,7 @@ import {
   entryAt,
   indexKey,
   keepListing,
+  keepTree,
   storedListing,
   storedStat,
   storedTree,
@@ -457,6 +458,25 @@ class Days extends BaseVFS {
     return Promise.reject(enoent(path.virtual))
   }
 }
+
+describe('a tree read', () => {
+  it('leaves a live listing alone', async () => {
+    // A listing that landed while the tree read ran may be newer than it: the
+    // read fills only the folders no live listing holds.
+    const index = new RAMIndexCacheStore({ ttl: 600 })
+    const fresh = new FileStat({ name: 'new.txt', type: FileType.FILE, size: 1 })
+    await index.setDir('/m/d', [['new.txt', fresh]])
+    const tree = new Map<string, FileStat>([
+      ['d', new FileStat({ name: 'd', type: FileType.DIRECTORY })],
+      ['d/old.txt', new FileStat({ name: 'old.txt', type: FileType.FILE, size: 1 })],
+      ['e', new FileStat({ name: 'e', type: FileType.DIRECTORY })],
+    ])
+    await keepTree(index, '/m', tree)
+    expect(await storedListing(index, '/m/d')).toEqual(['/m/d/new.txt'])
+    expect(await storedListing(index, '/m')).toEqual(['/m/d', '/m/e'])
+    expect(await storedListing(index, '/m/e')).toEqual([])
+  })
+})
 
 describe('a window', () => {
   it('proves nothing absent and answers no glob', async () => {

@@ -27,6 +27,7 @@ from mirage.workspace.mount.listing import (
     entry_at,
     index_key,
     keep_listing,
+    keep_tree,
     stored_listing,
     stored_stat,
     stored_tree,
@@ -375,6 +376,24 @@ async def test_a_window_proves_nothing_absent_and_answers_no_glob():
     assert await beyond_window(index, "/w/d1")
     assert not await beyond_window(index, "/w/d3")
     assert await stored_tree(index, "/w") is None
+
+
+@pytest.mark.asyncio
+async def test_a_tree_read_leaves_a_live_listing_alone():
+    # A listing that landed while the tree read ran may be newer than it:
+    # the read fills only the folders no live listing holds.
+    index = RAMIndexCacheStore(ttl=600)
+    new = FileStat(name="new.txt", type=FileType.FILE, size=1)
+    await index.set_dir("/m/d", [("new.txt", new)])
+    tree = {
+        "d": FileStat(name="d", type=FileType.DIRECTORY),
+        "d/old.txt": FileStat(name="old.txt", type=FileType.FILE, size=1),
+        "e": FileStat(name="e", type=FileType.DIRECTORY),
+    }
+    await keep_tree(index, "/m", tree)
+    assert await stored_listing(index, "/m/d") == ["/m/d/new.txt"]
+    assert await stored_listing(index, "/m") == ["/m/d", "/m/e"]
+    assert await stored_listing(index, "/m/e") == []
 
 
 class Days(BaseVFS):
