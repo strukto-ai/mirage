@@ -253,8 +253,7 @@ export async function trackingRef(
   branch: string,
   known: ReadonlySet<string>,
 ): Promise<RefUpstream | null> {
-  const values = (path: string): Promise<string[]> =>
-    configValues(repo.dispatch, repo.location, path)
+  const values = (path: string): Promise<string[]> => configValues(repo.vfs, repo.location, path)
   const remote = (await values(`branch.${branch}.remote`)).at(-1)
   const merge = (await values(`branch.${branch}.merge`))[0]
   if (remote === undefined || merge === undefined) return null
@@ -314,7 +313,7 @@ async function withUpstreams(
 
 /** The names at the top of this checkout's git directory. */
 async function rootNames(repo: Repo): Promise<string[]> {
-  return (await readNames(repo.dispatch, repo.location.gitdir)).map((entry) => entryName(entry))
+  return (await readNames(repo.vfs, repo.location.gitdir)).map((entry) => entryName(entry))
 }
 
 /**
@@ -327,7 +326,7 @@ async function worktreeHeads(repo: Repo): Promise<Map<string, string>> {
   const heads = new Map<string, string>()
   const { gitdir, commondir, worktree } = repo.location
   const note = async (dir: PathSpec, path: string): Promise<void> => {
-    const data = await readOptional(repo.dispatch, dir.join(HEAD_FILE))
+    const data = await readOptional(repo.vfs, dir.join(HEAD_FILE))
     const text = DEC.decode(data ?? new Uint8Array()).trim()
     if (text.startsWith(SYMREF_PREFIX) && path) {
       const ref = text.slice(SYMREF_PREFIX.length).trim()
@@ -340,9 +339,9 @@ async function worktreeHeads(repo: Repo): Promise<Map<string, string>> {
       entryName(commondir.virtual) === '.git' ? commondir.virtual.slice(0, -'/.git'.length) : ''
   await note(commondir, main)
   const root = commondir.join(WORKTREES)
-  for (const entry of await readNames(repo.dispatch, root)) {
+  for (const entry of await readNames(repo.vfs, root)) {
     const linked = root.join(entryName(entry))
-    const data = await readOptional(repo.dispatch, linked.join(GITDIR_FILE))
+    const data = await readOptional(repo.vfs, linked.join(GITDIR_FILE))
     if (data === null) continue
     const path = DEC.decode(data).trim()
     await note(linked, path.endsWith('/.git') ? path.slice(0, -'/.git'.length) : path)
@@ -356,7 +355,7 @@ async function worktreeHeads(repo: Repo): Promise<Map<string, string>> {
  * remote-tracking branch by its short name), the abbreviated id otherwise.
  */
 async function detachedLabel(repo: Repo, target: string, moved: string): Promise<string> {
-  const refs = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+  const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
   const found = [...new Set(DWIM_RULES.map((rule) => rule.replace('{}', target)))].filter((name) =>
     refs.has(name),
   )
@@ -379,7 +378,7 @@ async function detachedLabel(repo: Repo, target: string, moved: string): Promise
  * detached HEAD reads (pinned against git 2.47.3 and 2.50.1).
  */
 export async function detachedLine(repo: Repo, head: HeadRef): Promise<string> {
-  const log = await readOptional(repo.dispatch, repo.location.gitdir.join('logs/HEAD'))
+  const log = await readOptional(repo.vfs, repo.location.gitdir.join('logs/HEAD'))
   const rows = DEC.decode(log ?? new Uint8Array())
     .split('\n')
     .filter(Boolean)
@@ -498,12 +497,12 @@ export async function refListing(
   date: DateMode,
   roots = false,
 ): Promise<[RefItem[], RefContext, string]> {
-  const table = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+  const table = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
   const names = await rootNames(repo)
   if (roots) {
     for (const name of names) {
       if (name === HEAD_FILE || !isRootRef(name)) continue
-      const data = await readOptional(repo.dispatch, repo.location.gitdir.join(name))
+      const data = await readOptional(repo.vfs, repo.location.gitdir.join(name))
       if (data?.length) table.set(name, DEC.decode(data).split('\n', 1)[0] ?? '')
     }
   }
@@ -527,8 +526,7 @@ export async function refListing(
     const heads = await worktreeHeads(repo)
     items = items.map((item) => ({ ...item, worktree: heads.get(item.name) ?? '' }))
   }
-  const values = (path: string): Promise<string[]> =>
-    configValues(repo.dispatch, repo.location, path)
+  const values = (path: string): Promise<string[]> => configValues(repo.vfs, repo.location, path)
   const suffixes = await values('versionsort.suffix')
   const mailmapped = fields.some(
     (field) => field.option === 'mailmap' || field.words.has('mailmap'),
@@ -540,7 +538,7 @@ export async function refListing(
     headDescription: '',
     abbrev: repo.abbrev,
     abbreviations: new Map(),
-    mailmap: mailmapped ? await loadMailmap(repo.dispatch, repo.location) : [],
+    mailmap: mailmapped ? await loadMailmap(repo.vfs, repo.location) : [],
     date,
     suffixes: suffixes.length ? suffixes : await values('versionsort.prereleasesuffix'),
   }
@@ -571,7 +569,7 @@ export function sortKeys(fl: FlagView, defaults: readonly string[]): RefSortKey[
  * says otherwise, `refname` when unset.
  */
 export async function configuredSort(repo: Repo, verb: string): Promise<string[]> {
-  const values = await configValues(repo.dispatch, repo.location, `${verb}.sort`)
+  const values = await configValues(repo.vfs, repo.location, `${verb}.sort`)
   return values.length ? values : ['refname']
 }
 

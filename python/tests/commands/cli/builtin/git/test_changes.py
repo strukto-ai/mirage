@@ -218,7 +218,7 @@ def test_each_surviving_stage_combination_has_its_code(stages, code):
 @pytest.mark.asyncio
 async def test_a_missing_file_is_an_unstaged_deletion(workspace):
     entries = {b"gone.txt": entry(b"a" * 40)}
-    changes = await work_changes(workspace.dispatch, REPO, entries, WorkTree())
+    changes = await work_changes(workspace.vfs, REPO, entries, WorkTree())
     assert changes == {"gone.txt": "D"}
 
 
@@ -226,7 +226,7 @@ async def test_a_missing_file_is_an_unstaged_deletion(workspace):
 async def test_a_size_that_moved_needs_no_read(workspace):
     entries = {b"a.txt": entry(b"a" * 40, size=99)}
     found = WorkTree(files={"a.txt": stat(size=4)})
-    changes = await work_changes(workspace.dispatch, REPO, entries, found)
+    changes = await work_changes(workspace.vfs, REPO, entries, found)
     assert changes == {"a.txt": "M"}
 
 
@@ -237,7 +237,7 @@ async def test_matching_content_is_no_change(workspace, repo_path: Path):
         b"a.txt": entry(Blob.from_string(content).id, size=len(content))
     }
     found = WorkTree(files={"a.txt": stat(size=len(content))})
-    changes = await work_changes(workspace.dispatch, REPO, entries, found)
+    changes = await work_changes(workspace.vfs, REPO, entries, found)
     assert changes == {}
 
 
@@ -250,7 +250,7 @@ async def test_the_executable_bit_moving_is_a_modification(
         b"a.txt": entry(Blob.from_string(content).id, size=len(content))
     }
     found = WorkTree(files={"a.txt": stat(size=len(content), mode=0o755)})
-    changes = await work_changes(workspace.dispatch, REPO, entries, found)
+    changes = await work_changes(workspace.vfs, REPO, entries, found)
     assert changes == {"a.txt": "M"}
 
 
@@ -267,7 +267,7 @@ async def test_a_mount_with_no_modes_claims_nothing_about_them(
         )
     }
     found = WorkTree(files={"a.txt": stat(size=len(content), mode=None)})
-    changes = await work_changes(workspace.dispatch, REPO, entries, found)
+    changes = await work_changes(workspace.vfs, REPO, entries, found)
     assert changes == {}
 
 
@@ -289,7 +289,7 @@ def test_an_unmerged_path_sorts_among_the_tracked_ones():
 
 @pytest.mark.asyncio
 async def test_head_entries_reads_the_committed_tree(workspace):
-    repo = await open_repo(workspace.dispatch, LOCATION)
+    repo = await open_repo(workspace.vfs, LOCATION)
     tree = head_entries(repo)
     assert tree is not None
     assert sorted(tree) == [b"a.txt", b"b.txt"]
@@ -300,14 +300,14 @@ async def test_head_entries_is_none_before_the_first_commit(
     workspace, repo_path: Path
 ):
     (repo_path / ".git" / "refs" / "heads" / "main").unlink()
-    repo = await open_repo(workspace.dispatch, LOCATION)
+    repo = await open_repo(workspace.vfs, LOCATION)
     assert head_entries(repo) is None
 
 
 @pytest.mark.asyncio
 async def test_the_index_and_the_tree_agree_on_a_clean_repository(workspace):
-    repo = await open_repo(workspace.dispatch, LOCATION)
-    state = await read_index(workspace.dispatch, GITDIR)
+    repo = await open_repo(workspace.vfs, LOCATION)
+    state = await read_index(workspace.vfs, GITDIR)
     assert (
         stage_changes(
             repo.object_store, head_entries(repo), state.entries, set()

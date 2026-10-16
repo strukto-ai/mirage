@@ -134,8 +134,7 @@ Every `ctx` also carries:
 | --- | --- |
 | `session_id` | the session the action runs as |
 | `session` | the session, read only: `get(name)`, `snapshot()`, `cwd()`, `is_readonly(name)`, `profile()` |
-| `ns` | the session's namespace, as commands get it: mounts, links, the stat overlay, hides applied |
-| `vfs` | the session's files, read only: `read`, `stat`, `readdir`, `exists`; unset on a TypeScript runtime that does not isolate async tasks (the browser fallback) |
+| `vfs` | the session's files, read only: `read`, `stat`, `readdir`, `exists`, and where the mounts are (`mount_of`, `is_mount`, `submounts`), hides applied; unset on a TypeScript runtime that does not isolate async tasks (the browser fallback) |
 
 `words` is the command line word by word, after expansion. Each word has
 a `text`, a `kind` (`name`, `subcommand`, `option`, `value`, `operand` or
@@ -184,7 +183,7 @@ claim to check, not as a credential:
 | `exit_code`, `stderr`, `output`, `records`, `result`, `old` | what its own command or call produced |
 
 The host sets `session_id`, `profile`, `mounts`, `prefix` and `mode`, and
-what `ns` and `vfs` show: the agent cannot change them from inside the
+what `vfs` shows: the agent cannot change them from inside the
 session. Decide who may do what from those, and from a variable only
 when the profile marks it read-only.
 

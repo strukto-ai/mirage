@@ -34,6 +34,7 @@ from mirage.types import PathSpec
 from mirage.view.types import FollowOperands
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.command.flags import parse_flags
+from mirage.workspace.files import Files
 from mirage.workspace.mount import (
     MountCommandUnsupported,
     MountEntry,
@@ -320,6 +321,7 @@ async def run_on_mount(
                 stdin=stdin,
                 cwd=session.cwd,
                 dispatch=dispatch,
+                vfs=Files(registry.mount_rows(), dispatch, links=namespace),
                 session_id=session.session_id,
                 env=env_snapshot(session),
                 session_view=session_view(

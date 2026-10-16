@@ -121,6 +121,7 @@ from mirage.types import (
     MountMode,
     PathSpec,
     ReadSpec,
+    Visibility,
     WritePolicy,
     parse_mount_mode,
 )
@@ -131,7 +132,7 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.bin import BinViewVFS
 from mirage.vfs.history import HISTORY_PREFIX, HistoryViewVFS
 from mirage.vfs.s3.config import S3Config
-from mirage.view.types import NamespaceView, SessionView
+from mirage.view.types import SessionView
 from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.documentation.documents import Documents
@@ -417,7 +418,7 @@ class Workspace:
         # nothing for an id this workspace holds no session for.
         def views(
             session_id: str, session: SessionState | None = None
-        ) -> tuple[SessionView, NamespaceView, Files] | None:
+        ) -> tuple[SessionView, Files] | None:
             if session is None:
                 session = get_current_session_unless_foreign(self._session_mgr)
             if session is None or session_id not in ("", session.session_id):
@@ -434,9 +435,6 @@ class Workspace:
                 return None
             return (
                 session_view(session, self.policies),
-                namespace_view_of(
-                    self._registry, self._namespace, self.dispatch, session
-                ),
                 self.vfs._for_session(session.session_id),
             )
 
@@ -531,6 +529,7 @@ class Workspace:
             links=self._namespace,
             dispatch=self._dispatcher.dispatch,
             bind=self._bind_session,
+            visibility=self._facade_visibility,
         )
         self._kernel_mounts = KernelMounts(self._files, self._session_mgr)
         self._documents = Documents(
@@ -2187,6 +2186,28 @@ class Workspace:
         self._reads.pop(session_id, None)
 
     # ── mount management ────────────────────────────────────────────────────
+
+    def _facade_visibility(self, session_id: str | None) -> Visibility | None:
+        """What the session a facade's call would run as sees: the bound
+        one, else ``session_id``, the default for None, as
+        ``_bind_session`` picks it. A session not loaded yet answers
+        with the default profile's, which every session starts from.
+
+        Args:
+            session_id (str | None): the facade's own session.
+        """
+        bound = get_current_session_unless_foreign(self._session_mgr)
+        if bound is not None:
+            return bound.visibility
+        wanted = session_id or self._session_mgr.default_id
+        found = next(
+            (s for s in self._session_mgr.list() if s.session_id == wanted),
+            None,
+        )
+        if found is not None:
+            return found.visibility
+        default = self._session_mgr.default_profile
+        return default.visibility if default is not None else None
 
     async def _bind_session(
         self, session_id: str | None, run: Callable[[], Awaitable[Any]]

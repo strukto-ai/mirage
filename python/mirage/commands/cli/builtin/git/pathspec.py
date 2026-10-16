@@ -24,10 +24,7 @@ from mirage.commands.cli.builtin.git.errors import (
 )
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.shell.bytes import byte_view
-from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
-from mirage.utils.hidden import path_visible
-from mirage.utils.path import CycleError
 
 logger = logging.getLogger(__name__)
 
@@ -180,28 +177,11 @@ def visible_path(location: RepoLocation, relative: str) -> bool:
     """Whether a repository entry belongs to the session's visible tree.
 
     Args:
-        location (RepoLocation): repository and its namespace visibility.
+        location (RepoLocation): repository and the session's files.
         relative (str): Git's repository-relative entry name.
     """
-    ns = location.ns
-    if ns is None or ns.visibility is None:
-        return True
-    path = location.worktree.join(relative)
-    if not path_visible(ns.visibility, path.virtual):
-        return False
-    try:
-        parent = (
-            ns.links.resolve(path.directory) if ns.links else path.directory
-        )
-    except CycleError as exc:
-        logger.debug(
-            "Index visibility uses the stored path for a link cycle: %s", exc
-        )
-        return True
-    followed = PathSpec.from_str_path(parent, cwd="/").join(
-        posixpath.basename(path.virtual)
-    )
-    return path_visible(ns.visibility, followed.virtual)
+    vfs = location.vfs
+    return vfs is None or vfs.is_visible(location.worktree.join(relative))
 
 
 def visible_entries(

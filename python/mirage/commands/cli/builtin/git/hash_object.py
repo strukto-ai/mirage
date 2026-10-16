@@ -37,8 +37,8 @@ from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
-from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
+from mirage.workspace.files import Files
 
 OBJECT_CLASSES: dict[str, type[ShaFile]] = {
     "blob": Blob,
@@ -122,18 +122,16 @@ def object_id(kind: str, data: bytes) -> bytes:
     )
 
 
-async def _content(dispatch: DispatchFn, base: PathSpec, name: str) -> bytes:
+async def _content(vfs: Files, base: PathSpec, name: str) -> bytes:
     """A file's bytes, in git's words when it cannot be read.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         base (PathSpec): the directory a relative name starts from.
         name (str): the path as typed.
     """
     try:
-        return await read_file(
-            dispatch, PathSpec.from_str_path(name, cwd=base)
-        )
+        return await read_file(vfs, PathSpec.from_str_path(name, cwd=base))
     except IsADirectoryError as exc:
         raise GitError(f"Unable to hash {name}") from exc
     except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
@@ -156,10 +154,10 @@ async def hash_object(
     """
     fl = FlagView(inv.flags)
     view = inv.view or CLIView()
-    dispatch = view.dispatch
+    vfs = view.vfs
     texts = tuple(inv.texts)
     try:
-        if dispatch is None:
+        if vfs is None:
             raise NoWorkspaceError()
         check_switches(inv, texts)
         kind = fl.as_str("t") or "blob"
@@ -177,7 +175,7 @@ async def hash_object(
             )
             names += [line for line in listed.split("\n") if line]
         for name in names:
-            contents.append(await _content(dispatch, base, name))
+            contents.append(await _content(vfs, base, name))
         if not literally and not all(well_formed(kind, d) for d in contents):
             raise GitError("refusing to create malformed object")
         if fl.as_bool("w") and contents:

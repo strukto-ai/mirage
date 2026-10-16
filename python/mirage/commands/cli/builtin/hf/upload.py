@@ -56,36 +56,33 @@ async def collect(
     the names reached through the source directory.
 
     Args:
-        view (CLIView): the workspace dispatcher entry points.
+        view (CLIView): the invocation's view, whose files are read.
         local (PathSpec): the resolved source file or directory.
 
     Returns:
         tuple[list[Addition], bool]: sorted files and whether the source
         was a directory, which determines the destination semantics.
     """
-    dispatch = view.dispatch
-    if dispatch is None:
+    vfs = view.vfs
+    if vfs is None:
         raise UsageError("hf upload: no workspace to read from")
-    stat, _ = await dispatch("stat", local)
-    if getattr(stat, "type", None) is not FileType.DIRECTORY:
-        data, _ = await dispatch("read", local)
+    if (await vfs.stat(local)).type is not FileType.DIRECTORY:
+        data = await vfs.read(local)
         name = posixpath.basename(local.virtual.rstrip("/"))
         return [Addition(name, bytes(data))], False
     rows: list[Addition] = []
     pending = [(local, "")]
     while pending:
         current, prefix = pending.pop()
-        entries, _ = await dispatch("readdir", current)
-        for entry in entries:
+        for entry in await vfs.readdir(current):
             child = current.join(entry)
             name = posixpath.join(
                 prefix, posixpath.basename(child.virtual.rstrip("/"))
             )
-            child_stat, _ = await dispatch("stat", child)
-            if getattr(child_stat, "type", None) is FileType.DIRECTORY:
+            if (await vfs.stat(child)).type is FileType.DIRECTORY:
                 pending.append((child, name))
                 continue
-            data, _ = await dispatch("read", child)
+            data = await vfs.read(child)
             rows.append(Addition(name, bytes(data)))
     return sorted(rows, key=attrgetter("path")), True
 
@@ -127,7 +124,7 @@ async def upload_cmd(
     require_operands(inv, ["repo_id"])
     require_token(inv, "upload")
     fl = FlagView(inv.flags)
-    if inv.view is None or inv.view.dispatch is None:
+    if inv.view is None or inv.view.vfs is None:
         raise UsageError("hf upload needs a workspace to read from")
     repo_id = inv.texts[0]
     # LOCAL_PATH is path-typed, so the parser resolved it against the cwd;

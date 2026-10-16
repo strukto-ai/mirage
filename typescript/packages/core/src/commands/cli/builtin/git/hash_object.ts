@@ -26,7 +26,8 @@ import { GitError, NoWorkspaceError, ObjectWriteReadOnlyError } from './errors.t
 import { readFile } from './io.ts'
 import { repoArgs } from './repo.ts'
 import { opened } from './session.ts'
-import type { Dispatch, RepoLocation } from './types.ts'
+import type { RepoLocation } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 import { checkSwitches, fatal, startPoint } from './util.ts'
 
 const ENC = new TextEncoder()
@@ -103,9 +104,9 @@ async function objectId(kind: string, data: Uint8Array): Promise<string> {
 }
 
 /** A file's bytes, in git's words when it cannot be read. */
-async function content(dispatch: Dispatch, base: PathSpec, name: string): Promise<Uint8Array> {
+async function content(vfs: Files, base: PathSpec, name: string): Promise<Uint8Array> {
   try {
-    return await readFile(dispatch, PathSpec.fromStrPath(name, undefined, base))
+    return await readFile(vfs, PathSpec.fromStrPath(name, undefined, base))
   } catch (err) {
     if (isEisdir(err)) throw new GitError(`Unable to hash ${name}`)
     if (isMissingPath(err) || isEnotdir(err) || isEacces(err)) {
@@ -125,10 +126,10 @@ async function content(dispatch: Dispatch, base: PathSpec, name: string): Promis
 export async function hashObject(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   const view = inv.view ?? {}
-  const dispatch = view.dispatch
+  const vfs = view.vfs
   const texts = [...inv.texts]
   try {
-    if (dispatch === undefined) throw new NoWorkspaceError()
+    if (vfs === undefined) throw new NoWorkspaceError()
     checkSwitches(inv, texts)
     const asked = fl.asStr('t') ?? 'blob'
     const kind = OBJECT_TYPES.find((type) => type === asked)
@@ -145,7 +146,7 @@ export async function hashObject(inv: CLIInvocation): Promise<CommandFnResult> {
       )
       names.push(...listed.split('\n').filter((line) => line !== ''))
     }
-    for (const name of names) contents.push(await content(dispatch, base, name))
+    for (const name of names) contents.push(await content(vfs, base, name))
     if (!fl.asBool('literally') && !contents.every((data) => wellFormed(kind, data))) {
       throw new GitError('refusing to create malformed object')
     }

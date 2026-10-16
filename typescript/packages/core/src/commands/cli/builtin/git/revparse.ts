@@ -250,7 +250,7 @@ async function namedObject(repo: Repo, base: string, revision: string): Promise<
  */
 export async function noteAmbiguity(repo: Repo, name: string): Promise<void> {
   if (repo.ambiguous === null) return
-  const table = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+  const table = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
   if (refsNamed(table, name).length > 1) {
     repo.ambiguous.push(`warning: refname '${name}' is ambiguous.\n`)
   }
@@ -370,7 +370,7 @@ async function atPath(repo: Repo, rev: string, path: string, revision: string): 
 async function onDisk(repo: Repo, path: string): Promise<boolean> {
   if (path === '') return false
   try {
-    return await exists(repo.dispatch, repo.location.worktree.join(path))
+    return await exists(repo.vfs, repo.location.worktree.join(path))
   } catch (err) {
     if (isEnotdir(err)) return false
     throw err
@@ -390,7 +390,7 @@ async function inIndex(repo: Repo, spec: string): Promise<GitObject> {
   const staged = STAGED.exec(spec)
   const stage = staged === null ? 0 : Number(spec.charAt(0))
   const path = staged === null ? spec : spec.slice(staged[0].length)
-  const state = await readIndex(repo, repo.dispatch)
+  const state = await readIndex(repo, repo.vfs)
   const conflicted = state.conflicts.get(path)
   const stages = [
     state.entries.get(path),
@@ -505,7 +505,7 @@ export async function mergeBases(
   other: CommitFacts,
   others: readonly CommitFacts[] = [],
 ): Promise<CommitFacts[]> {
-  const data = await readOptional(repo.dispatch, repo.location.commondir.join('shallow'))
+  const data = await readOptional(repo.vfs, repo.location.commondir.join('shallow'))
   const shallow = new Set(
     new TextDecoder()
       .decode(data ?? new Uint8Array())

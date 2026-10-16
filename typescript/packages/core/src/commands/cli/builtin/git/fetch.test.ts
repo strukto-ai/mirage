@@ -28,7 +28,6 @@ import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 
-import { IOResult } from '../../../../io/types.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
@@ -36,7 +35,6 @@ import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { ignoreFunny, prettify, summaryLines, type Wanted } from './fetch.ts'
 import { GIT } from './index.ts'
 import { ensureDir } from './io.ts'
-import type { Dispatch } from './types.ts'
 
 const SCENARIO = fileURLToPath(
   new URL('../../../../../../../../integ/fixtures/git/remote.sh', import.meta.url),
@@ -83,10 +81,7 @@ function walk(root: string, base = root): string[] {
 /** Copy one directory of the seed tree into the RAM mount, replacing it. */
 async function load(name: string): Promise<void> {
   await ws.shell(`rm -rf /w/${name}`)
-  const dispatch: Dispatch = async (op, path, args = [], kwargs = {}) => [
-    await ws.dispatch(op, path.virtual, args, kwargs),
-    new IOResult(),
-  ]
+  const dispatch = ws.vfs
   await ensureDir(dispatch, PathSpec.fromStrPath(`/w/${name}`))
   for (const rel of walk(join(seed, name))) {
     const target = `/w/${name}/${rel}`

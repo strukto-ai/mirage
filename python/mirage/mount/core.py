@@ -1116,7 +1116,7 @@ class MountCore:
                 which may loop.
         """
         virtual = self.resolve(path)
-        links = self._files.links
+        links = self._files._links
         if links is None:
             return virtual
         if follow:

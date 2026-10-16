@@ -25,7 +25,11 @@ from mirage.commands.cli.builtin.git.errors import (
     UsageError,
 )
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
-from mirage.commands.cli.builtin.git.io import remove_file, rename_path
+from mirage.commands.cli.builtin.git.io import (
+    lstat,
+    remove_file,
+    rename_path,
+)
 from mirage.commands.cli.builtin.git.pathspec import (
     repo_relative,
     under,
@@ -36,8 +40,6 @@ from mirage.commands.cli.builtin.git.types import IndexState, RepoLocation
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
     fatal,
-    links_of,
-    mounts_of,
     start_point,
     verb_usage,
 )
@@ -48,9 +50,8 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, FileType, PathSpec
-from mirage.view.types import LinkView, MountView, StatPath
+from mirage.types import FileType, PathSpec
+from mirage.workspace.files import Files
 
 # git's own wording for each way a source can be refused, in the shape
 # ``fatal: <reason>, source=<src>, destination=<dst>``.
@@ -119,23 +120,6 @@ class Move:
     directory: bool
 
 
-async def lstat(
-    stat_path: StatPath, links: LinkView | None, path: PathSpec
-) -> FileStat | None:
-    """What sits at a path, without following a link.
-
-    Args:
-        stat_path (StatPath): dispatcher-backed stat, both channels.
-        links (LinkView | None): the name plane's link facts.
-        path (PathSpec): absolute virtual path.
-    """
-    if links is not None:
-        link = links.stat_at(path.virtual)
-        if link is not None:
-            return link
-    return await stat_path(path)
-
-
 def moved_path(move: Move, path: str) -> str:
     """Where one tracked path lands after a move.
 
@@ -191,9 +175,7 @@ def clashing(move: Move, claimed: set[str]) -> tuple[str, str] | None:
     return None
 
 
-def spanning(
-    mounts: MountView | None, path: PathSpec, landing: PathSpec
-) -> bool:
+def spanning(vfs: Files, path: PathSpec, landing: PathSpec) -> bool:
     """Whether renaming a path would leave a mount behind.
 
     A mount nested in the repository is served by another VFS, and
@@ -212,21 +194,18 @@ def spanning(
     names the new path, which is the same broken pair one level down.
 
     Args:
-        mounts (MountView | None): the name plane's mount boundaries,
-            None outside a workspace.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path of the source.
         landing (PathSpec): absolute virtual path the source moves to.
     """
-    if mounts is None:
-        return False
-    if mounts.is_root(path.virtual) or bool(mounts.descendants(path.virtual)):
+    if vfs.is_mount(path) or bool(vfs.submounts(path)):
         return True
-    return mounts.root_of(path.virtual) != mounts.root_of(landing.virtual)
+    there = vfs.mount_of(landing)
+    return there is not None and vfs.mount_of(path) != there
 
 
 async def check(
-    stat_path: StatPath,
-    links: LinkView | None,
+    vfs: Files,
     location: RepoLocation,
     source: str,
     destination: str,
@@ -243,8 +222,7 @@ async def check(
     destination that already exists.
 
     Args:
-        stat_path (StatPath): dispatcher-backed stat, both channels.
-        links (LinkView | None): the name plane's link facts.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         source (str): repository-relative source.
         destination (str): repository-relative destination.
@@ -257,7 +235,7 @@ async def check(
         tuple: the refusal wording or None, the tracked paths that move,
         and whether the source is a directory.
     """
-    info = await lstat(stat_path, links, location.worktree.join(source))
+    info = await lstat(vfs, location.worktree.join(source))
     if info is None:
         return BAD_SOURCE, (), False
     if destination == source or destination.startswith(f"{source}/"):
@@ -275,7 +253,7 @@ async def check(
             return posix_phrase(FsCondition.EACCES), (), True
         if any(path in conflicted for path in inside):
             return CONFLICTED, inside, True
-        if await lstat(stat_path, links, landing) is not None:
+        if await lstat(vfs, landing) is not None:
             return DESTINATION_ALREADY_EXISTS, (), True
         if not inside:
             return SOURCE_DIRECTORY_EMPTY, (), True
@@ -284,7 +262,7 @@ async def check(
         return NOT_UNDER_VERSION_CONTROL, (), False
     if source in conflicted:
         return CONFLICTED, (source,), False
-    target = await lstat(stat_path, links, landing)
+    target = await lstat(vfs, landing)
     if target is not None and (not force or target.type is FileType.DIRECTORY):
         return DESTINATION_EXISTS, (), False
     return None, (source,), False
@@ -317,9 +295,7 @@ def overlapping(moves: list[Move]) -> tuple[str, str] | None:
 
 
 async def plan(
-    stat_path: StatPath,
-    links: LinkView | None,
-    mounts: MountView | None,
+    vfs: Files,
     location: RepoLocation,
     start: str,
     operands: tuple[str, ...],
@@ -334,9 +310,7 @@ async def plan(
     the source under its own name and anything else is the new name.
 
     Args:
-        stat_path (StatPath): dispatcher-backed stat, both channels.
-        links (LinkView | None): the name plane's link facts.
-        mounts (MountView | None): the name plane's mount boundaries.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         start (str): absolute virtual path git is running in.
         operands (tuple[str, ...]): the operands as typed.
@@ -346,7 +320,7 @@ async def plan(
         flags (MvFlags): the parsed flags.
     """
     destination = repo_relative(location, start, operands[-1])
-    target = await lstat(stat_path, links, location.worktree.join(destination))
+    target = await lstat(vfs, location.worktree.join(destination))
     into = destination == "" or (
         target is not None and target.type is FileType.DIRECTORY
     )
@@ -362,8 +336,7 @@ async def plan(
             else destination
         )
         reason, paths, directory = await check(
-            stat_path,
-            links,
+            vfs,
             location,
             source,
             landing,
@@ -387,7 +360,7 @@ async def plan(
             if clash is not None:
                 reason, named = MULTIPLE_SOURCES, clash
         if reason is None and spanning(
-            mounts,
+            vfs,
             location.worktree.join(source),
             location.worktree.join(landing),
         ):
@@ -419,7 +392,7 @@ async def plan(
 
 
 async def apply(
-    dispatch: DispatchFn,
+    vfs: Files,
     location: RepoLocation,
     state: IndexState,
     move: Move,
@@ -434,7 +407,7 @@ async def apply(
     beside an add.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         state (IndexState): the index, updated in place.
         move (Move): the move to make.
@@ -444,9 +417,9 @@ async def apply(
     source = location.worktree.join(move.source)
     destination = location.worktree.join(move.destination)
     if force and not move.directory:
-        await remove_file(dispatch, destination)
+        await remove_file(vfs, destination)
     try:
-        await rename_path(dispatch, source, destination)
+        await rename_path(vfs, source, destination)
     except MISS_ERRORS as exc:
         raise RenameFailedError(move.source) from exc
     for path in move.paths:
@@ -474,19 +447,18 @@ async def mv(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             ``inv.view``.
     """
     view = inv.view or CLIView()
-    dispatch = view.dispatch
-    stat_path = view.stat_path
+    vfs = view.vfs
     texts = inv.texts
     fl = FlagView(inv.flags)
     try:
-        if dispatch is None or stat_path is None:
+        if vfs is None:
             raise NoWorkspaceError()
         check_switches(inv, texts)
         flags = parse_flags(fl)
         if len(texts) < 2:
             raise UsageError("", verb_usage(inv))
         repo, location = await opened(fl, view, work_tree=True)
-        state = await read_index(dispatch, location.gitdir)
+        state = await read_index(vfs, location.gitdir)
         conflicted = {
             path.decode("utf-8", errors="replace") for path in state.conflicts
         }
@@ -497,9 +469,7 @@ async def mv(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             path.decode("utf-8", errors="replace") for path in state.entries
         } | conflicted
         moves = await plan(
-            stat_path,
-            links_of(view),
-            mounts_of(view),
+            vfs,
             location,
             start_point(fl).virtual,
             texts,
@@ -520,8 +490,8 @@ async def mv(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             )
         if not flags.dry_run:
             for move in moves:
-                await apply(dispatch, location, state, move, flags.force)
-            await write_index(dispatch, location.gitdir, state)
+                await apply(vfs, location, state, move, flags.force)
+            await write_index(vfs, location.gitdir, state)
     except GitError as exc:
         return fatal(exc)
     if not lines:

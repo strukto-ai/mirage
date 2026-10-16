@@ -65,8 +65,6 @@ from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
     fatal,
-    links_of,
-    mounts_of,
 )
 from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
@@ -138,12 +136,11 @@ async def switch(
             ``inv.view``.
     """
     view = inv.view or CLIView()
-    dispatch = view.dispatch
-    stat_path = view.stat_path
+    vfs = view.vfs
     texts = inv.texts
     fl = FlagView(inv.flags)
     try:
-        if dispatch is None or stat_path is None:
+        if vfs is None:
             raise NoWorkspaceError()
         check_switches(inv, texts)
         flags = parse_flags(fl)
@@ -157,8 +154,8 @@ async def switch(
         if not creating and not texts and not flags.detach:
             raise MissingBranchArgumentError()
         repo, location = await opened(fl, view, work_tree=True)
-        mode = await track_mode(dispatch, location)
-        head = await read_head(dispatch, location.gitdir)
+        mode = await track_mode(vfs, location)
+        head = await read_head(vfs, location.gitdir)
         known = repo.refs.allkeys()
         if flags.create is not None:
             target = flags.create
@@ -185,9 +182,7 @@ async def switch(
                 except GitError as exc:
                     raise InvalidReferenceError(start or HEAD) from exc
                 if start is not None:
-                    await refuse_ambiguous(
-                        dispatch, location, repo, start, False
-                    )
+                    await refuse_ambiguous(vfs, location, repo, start, False)
             # After the start point and before anything is written,
             # which is git's own order. A ref is a path below .git, so
             # an unchecked name reaches write_ref as one: -c
@@ -203,7 +198,7 @@ async def switch(
                 raise RefLockError(ref.decode(), held)
             attached = True
             if unborn:
-                await set_head(dispatch, location.gitdir, ref.decode())
+                await set_head(vfs, location.gitdir, ref.decode())
                 return yield_bytes(b""), IOResult(
                     stderr=b""
                     if fl.as_bool("quiet")
@@ -226,7 +221,7 @@ async def switch(
                 # check: git dies on an unresolved index here too, so
                 # the shortcut reads it before it answers. Every ref
                 # check above comes first, which is git's own order.
-                refuse_unresolved(await read_index(dispatch, location.gitdir))
+                refuse_unresolved(await read_index(vfs, location.gitdir))
                 return None, IOResult(
                     stderr=b""
                     if fl.as_bool("quiet")
@@ -256,10 +251,7 @@ async def switch(
             if not flags.detach and not attached:
                 raise BranchExpectedError(expected_kind(known, target), target)
         moved = await move_head(
-            dispatch,
-            stat_path,
-            links_of(view),
-            mounts_of(view),
+            vfs,
             repo,
             location,
             head,
@@ -272,7 +264,7 @@ async def switch(
         )
         tracking, warning = (
             await set_up_tracking(
-                dispatch, repo, location, target, start, mode, head
+                vfs, repo, location, target, start, mode, head
             )
             if creating
             else ("", "")
@@ -291,7 +283,7 @@ async def switch(
         verb = "Switched to a new branch" if creating else "Switched to branch"
         note += f"{verb} '{target}'\n"
         if not creating:
-            carried += await tracking_report(dispatch, location, target)
+            carried += await tracking_report(vfs, location, target)
     else:
         note += (
             f"HEAD is now at {short(commit.id, abbrev_for(repo))} "

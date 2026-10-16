@@ -654,6 +654,7 @@ class MountRegistry:
                 mode=m.mode,
                 sizes_always_known=m.vfs.sizes_always_known,
                 anchor=m is self._anchor,
+                visible=m.visible,
             )
             for m in self._mounts
         ]

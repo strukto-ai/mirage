@@ -90,8 +90,8 @@ async def shortlog(
             raise ShortlogOptionError(word, verb_usage(inv))
         view = inv.view or CLIView()
         repo, location = await opened(fl, view)
-        assert view.dispatch is not None
-        mailmap = await load_mailmap(view.dispatch, location)
+        assert view.vfs is not None
+        mailmap = await load_mailmap(view.vfs, location)
         out = await asyncio.to_thread(
             _summary,
             repo,

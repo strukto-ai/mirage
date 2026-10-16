@@ -1672,14 +1672,13 @@ class ReadsAround(Policy):
         if ctx.command != "echo":
             return None
         assert ctx.session is not None
-        assert ctx.ns is not None and ctx.ns.mounts is not None
         assert ctx.vfs is not None
         self.seen.append(
             (
                 ctx.session.cwd(),
                 ctx.session.get("TEAM"),
                 await ctx.vfs.read("/data/owner.txt"),
-                ctx.ns.mounts.is_root("/data"),
+                ctx.vfs.is_mount("/data"),
             )
         )
         try:

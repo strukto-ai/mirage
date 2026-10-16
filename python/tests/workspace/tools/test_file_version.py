@@ -27,7 +27,7 @@ class _RenderingOps:
 
     def __init__(self, ops):
         self._ops = ops
-        self.links = ops.links
+        self._links = ops._links
 
     async def read(self, path):
         return b"rendered:" + await self._ops.read(path)
@@ -47,7 +47,7 @@ class _HeldOps:
 
     def __init__(self, ops, hold_at):
         self._ops = ops
-        self.links = ops.links
+        self._links = ops._links
         self._reads = 0
         self.fetched = {n: asyncio.Event() for n in hold_at}
         self.release = {n: asyncio.Event() for n in hold_at}

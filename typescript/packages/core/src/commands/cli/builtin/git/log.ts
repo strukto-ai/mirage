@@ -219,7 +219,7 @@ export async function log(inv: CLIInvocation): Promise<CommandFnResult> {
     const repo = await opened(fl, view)
     const parsed = {
       ...flags,
-      mailmap: await loadMailmap(repo.dispatch, repo.location),
+      mailmap: await loadMailmap(repo.vfs, repo.location),
       useMailmap: useMailmap(fl, await configBool(repo, 'log.mailmap', true)),
       decorate: await decorationFor(repo, fl, flags.pretty),
     }

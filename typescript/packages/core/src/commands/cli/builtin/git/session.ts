@@ -68,7 +68,7 @@ function gitWouldRefuse(
   path: string | undefined,
 ): boolean {
   if (location === null || path === undefined || path === '') return true
-  const root = inv.view?.ns?.mounts?.rootOf(location.commondir.virtual) ?? '/'
+  const root = inv.view?.vfs?.mountOf(location.commondir) ?? '/'
   return [root, location.gitdir.virtual].some(
     (base) => path === base || path.startsWith(`${rstripSlash(base)}/`),
   )
@@ -109,31 +109,19 @@ export function verb(fn: CLIVerbFn, refused: ReadOnlyRefusal | null = null): CLI
  *   work tree to enter, as git's `NEED_WORK_TREE` asks
  */
 export async function opened(fl: FlagView, view: CLIView, workTree = false): Promise<Repo> {
-  const dispatch = view.dispatch
-  const statPath = view.statPath
-  // The mount root comes from the name plane rather than a field of its own:
-  // `ns.mounts.rootOf` is the same fact the command tier reads, and a second
-  // field holding the same callable is a second thing to keep in step.
-  const mounts = view.ns?.mounts
-  if (statPath === undefined || mounts === undefined || dispatch === undefined) {
-    throw new NoWorkspaceError()
-  }
+  // The mount root is the session's files' `mountOf`, the same answer a
+  // runtime's guest gets.
+  const vfs = view.vfs
+  if (vfs === undefined) throw new NoWorkspaceError()
   const chosen = fl.asPath('work_tree')
-  const found = await discover(
-    dispatch,
-    statPath,
-    (path: string) => mounts.rootOf(path),
-    startPoint(fl),
-    fl.asPath('git_dir'),
-    chosen,
-  )
-  const location = { ...found, ns: view.ns ?? null }
+  const found = await discover(vfs, startPoint(fl), fl.asPath('git_dir'), chosen)
+  const location = { ...found, vfs }
   LOCATIONS.set(view, location)
-  if (workTree) await requireWorkTree(dispatch, statPath, location, chosen !== undefined)
+  if (workTree) await requireWorkTree(vfs, location, chosen !== undefined)
   const warn = gitBool(
-    await configValues(dispatch, location, 'core.warnAmbiguousRefs'),
+    await configValues(vfs, location, 'core.warnAmbiguousRefs'),
     'core.warnambiguousrefs',
     true,
   )
-  return openRepo(dispatch, location, warn ? (AMBIGUOUS.get(view) ?? null) : null)
+  return openRepo(vfs, location, warn ? (AMBIGUOUS.get(view) ?? null) : null)
 }

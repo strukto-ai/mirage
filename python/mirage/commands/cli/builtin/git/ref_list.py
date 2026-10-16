@@ -60,10 +60,10 @@ from mirage.commands.cli.builtin.git.types import (
 from mirage.commands.cli.builtin.git.util import git_bool
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import IOResult
-from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
+from mirage.workspace.files import Files
 
 SYMREF_PREFIX = "ref: "
 # git follows a chain of symbolic refs this deep before it gives up.
@@ -441,37 +441,31 @@ def with_upstreams(
     return out
 
 
-async def read_config(
-    dispatch: DispatchFn, location: RepoLocation
-) -> ConfigFile:
+async def read_config(vfs: Files, location: RepoLocation) -> ConfigFile:
     """The repository's own config, empty when it has none.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
     """
-    data = await read_optional(dispatch, location.commondir.join("config"))
+    data = await read_optional(vfs, location.commondir.join("config"))
     return ConfigFile.from_file(BytesIO(data or b""))
 
 
-async def root_names(
-    dispatch: DispatchFn, location: RepoLocation
-) -> list[str]:
+async def root_names(vfs: Files, location: RepoLocation) -> list[str]:
     """The names at the top of this checkout's git directory.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
     """
     return [
         posixpath.basename(entry)
-        for entry in await read_names(dispatch, location.gitdir)
+        for entry in await read_names(vfs, location.gitdir)
     ]
 
 
-async def worktree_heads(
-    dispatch: DispatchFn, location: RepoLocation
-) -> dict[str, str]:
+async def worktree_heads(vfs: Files, location: RepoLocation) -> dict[str, str]:
     """``get_worktrees``: the branch each worktree has checked out, and
     where that worktree is.
 
@@ -480,13 +474,13 @@ async def worktree_heads(
     ``gitdir`` file git keeps for it, less its ``/.git``.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
     """
     heads: dict[str, str] = {}
 
     async def note(gitdir: PathSpec, path: str) -> None:
-        data = await read_optional(dispatch, gitdir.join(f"{HEAD_FILE}"))
+        data = await read_optional(vfs, gitdir.join(f"{HEAD_FILE}"))
         text = (data or b"").decode("utf-8", "replace").strip()
         if text.startswith(SYMREF_PREFIX) and path:
             heads.setdefault(text[len(SYMREF_PREFIX) :].strip(), path)
@@ -502,9 +496,9 @@ async def worktree_heads(
         )
     await note(common, main)
     root = common.join(WORKTREES)
-    for entry in await read_names(dispatch, root):
+    for entry in await read_names(vfs, root):
         linked = root.join(posixpath.basename(entry))
-        data = await read_optional(dispatch, linked.join(GITDIR_FILE))
+        data = await read_optional(vfs, linked.join(GITDIR_FILE))
         if data is None:
             continue
         path = data.decode("utf-8", "replace").strip()
@@ -549,7 +543,7 @@ def _detached_label(repo: BaseRepo, target: str, moved: bytes) -> str:
 
 
 async def detached_line(
-    dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation, head: HeadRef
+    vfs: Files, repo: BaseRepo, location: RepoLocation, head: HeadRef
 ) -> str:
     """The first line of a status on a detached HEAD, read off the reflog.
 
@@ -560,12 +554,12 @@ async def detached_line(
     git 2.47.3 and 2.50.1).
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         head (HeadRef): what HEAD points at.
     """
-    log = await read_optional(dispatch, location.gitdir.join("logs/HEAD"))
+    log = await read_optional(vfs, location.gitdir.join("logs/HEAD"))
     for row in reversed((log or b"").splitlines()):
         record, _, message = row.partition(b"\t")
         text = message.decode("utf-8", "replace")
@@ -580,18 +574,18 @@ async def detached_line(
 
 
 async def head_description(
-    dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation, head: HeadRef
+    vfs: Files, repo: BaseRepo, location: RepoLocation, head: HeadRef
 ) -> str:
     """``get_head_description``: how a detached HEAD row names itself
     in a branch listing, the status line in parentheses.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         head (HeadRef): what HEAD points at.
     """
-    line = await detached_line(dispatch, repo, location, head)
+    line = await detached_line(vfs, repo, location, head)
     return "(no branch)" if line == NO_BRANCH else f"({line})"
 
 
@@ -674,7 +668,7 @@ def unique_abbreviations(
 
 
 async def ref_listing(
-    dispatch: DispatchFn,
+    vfs: Files,
     repo: BaseRepo,
     location: RepoLocation,
     cfg: ConfigFile,
@@ -691,7 +685,7 @@ async def ref_listing(
     worktrees and the mailmap.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         cfg (ConfigFile): the repository's config.
@@ -707,14 +701,12 @@ async def ref_listing(
         the listing's facts, and git's errors about skipped refs.
     """
     table = ref_table(repo)
-    names = await root_names(dispatch, location)
+    names = await root_names(vfs, location)
     if roots:
         for name in names:
             if name == HEAD_FILE or not is_root_ref(name):
                 continue
-            data = await read_optional(
-                dispatch, location.gitdir.join(f"{name}")
-            )
+            data = await read_optional(vfs, location.gitdir.join(f"{name}"))
             if data:
                 table[name] = data.decode("utf-8", "replace").split("\n", 1)[0]
     known = known_names(table, names)
@@ -734,7 +726,7 @@ async def ref_listing(
             with_upstreams, repo, cfg, items, table, known, counted
         )
     if any(field.field == "worktreepath" for field in fields):
-        heads = await worktree_heads(dispatch, location)
+        heads = await worktree_heads(vfs, location)
         items = [
             replace(item, worktree=heads.get(item.name, "")) for item in items
         ]
@@ -750,7 +742,7 @@ async def ref_listing(
         ),
         head=head_ref(table),
         abbrev=abbrev_for(repo),
-        mailmap=await load_mailmap(dispatch, location)
+        mailmap=await load_mailmap(vfs, location)
         if _mailmapped(fields)
         else (),
         date=date,

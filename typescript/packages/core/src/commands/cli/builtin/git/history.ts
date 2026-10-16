@@ -393,7 +393,7 @@ export async function peelToCommit(repo: Repo, oid: string): Promise<CommitFacts
 
 /** A ref table with symrefs resolved to the ids they name. */
 export async function resolvedRefs(repo: Repo): Promise<Map<string, string>> {
-  const refs = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+  const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
   const out = new Map<string, string>()
   for (const [name, value] of refs) {
     const target = value.startsWith(SYMREF_PREFIX)
@@ -464,7 +464,7 @@ export async function decorationFor(
     }
   }
   if (style === null && pretty.kind !== 'raw') {
-    const configured = (await configValues(repo.dispatch, repo.location, 'log.decorate')).at(-1)
+    const configured = (await configValues(repo.vfs, repo.location, 'log.decorate')).at(-1)
     if (configured !== undefined) style = decorationStyle(configured)
   }
   style ??= Decoration.NONE
@@ -488,7 +488,7 @@ export async function decorations(
   repo: Repo,
   style: Decoration = Decoration.SHORT,
 ): Promise<Map<string, string[]>> {
-  const refs = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+  const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
   const resolved = await resolvedRefs(repo)
   const full = style === Decoration.FULL
   const labels = new Map<string, string[]>()

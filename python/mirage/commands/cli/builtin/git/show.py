@@ -354,34 +354,30 @@ async def show(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             ``inv.view``.
     """
     view = inv.view or CLIView()
-    dispatch = view.dispatch
+    vfs = view.vfs
     texts = inv.texts
     flags = inv.flags
     fl = FlagView(flags)
     try:
-        if dispatch is None:
+        if vfs is None:
             raise NoWorkspaceError()
         check_operands(inv, texts)
         revisions, paths = split_marked(tuple(texts), inv.argv)
         repo, location = await opened(fl, view)
         parsed = parse_show_flags(
             fl,
-            await renames_enabled(dispatch, location),
-            await config_bool(dispatch, location, b"core", b"quotepath", True),
+            await renames_enabled(vfs, location),
+            await config_bool(vfs, location, b"core", b"quotepath", True),
             inv.env,
         )
         parsed = replace(
             parsed,
-            mailmap=await load_mailmap(dispatch, location),
+            mailmap=await load_mailmap(vfs, location),
             use_mailmap=use_mailmap(
                 fl,
-                await config_bool(
-                    dispatch, location, b"log", b"mailmap", True
-                ),
+                await config_bool(vfs, location, b"log", b"mailmap", True),
             ),
-            decorate=await decoration_for(
-                dispatch, location, fl, parsed.pretty
-            ),
+            decorate=await decoration_for(vfs, location, fl, parsed.pretty),
         )
         objects = [
             (name, await asyncio.to_thread(resolve_object, repo, name))
@@ -443,13 +439,13 @@ async def diff_tree(
     fl = FlagView(inv.flags)
     view = inv.view or CLIView()
     try:
-        if view.dispatch is None:
+        if view.vfs is None:
             raise NoWorkspaceError()
         if option_operand(inv, inv.texts) is not None:
             raise UsageError("", verb_usage(inv))
         repo, location = await opened(fl, view)
         fully = await config_bool(
-            view.dispatch, location, b"core", b"quotepath", True
+            view.vfs, location, b"core", b"quotepath", True
         )
         parsed = parse_diff_flags(
             fl,

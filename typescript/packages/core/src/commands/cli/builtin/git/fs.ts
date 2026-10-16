@@ -16,11 +16,11 @@ import { GitConfigManager } from 'isomorphic-git/managers'
 import { FileSystem } from 'isomorphic-git/models'
 
 import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
-import { enoent } from '../../../../errors/fs.ts'
 import { ensureDir, exists, readNames, removeFile, writeFile as writePath } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 import { posixNormpath } from '../../../../utils/path.ts'
-import type { Dispatch, RepoLocation } from './types.ts'
+import type { RepoLocation } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -135,7 +135,7 @@ class GitStat {
  * follows one inside a `.git` directory.
  */
 export function gitFs(
-  source: Dispatch,
+  source: Files,
   location?: RepoLocation,
 ): {
   promises: Record<string, (...args: never[]) => Promise<unknown>>
@@ -149,9 +149,10 @@ export function gitFs(
       : [location.gitdir, location.commondir, location.worktree].sort(
           (a, b) => b.virtual.length - a.virtual.length,
         )
-  const dispatch: Dispatch = (op, path, args, kwargs) => {
-    if (location === undefined) return source(op, path, args, kwargs)
-    const virtual = posixNormpath(path.virtual)
+  const route = (path: string): PathSpec => {
+    const spec = PathSpec.fromStrPath(path)
+    if (location === undefined) return spec
+    const virtual = posixNormpath(spec.virtual)
     for (const root of roots) {
       const prefix = `${root.virtual.replace(/\/$/, '')}/`
       if (virtual !== root.virtual && !virtual.startsWith(prefix)) continue
@@ -163,48 +164,38 @@ export function gitFs(
         (name) => relative === name || relative.startsWith(`${name}/`),
       )
       const base = root === location.gitdir && shared && !local ? location.commondir : root
-      return source(op, relative ? base.join(relative) : base, args, kwargs)
+      return relative ? base.join(relative) : base
     }
-    return source(op, path, args, kwargs)
+    return spec
   }
 
   const readFile = async (path: string, options?: string | { encoding?: string }) => {
     const encoding = typeof options === 'string' ? options : options?.encoding
-    const [data] = await dispatch('read', PathSpec.fromStrPath(path))
-    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBufferLike)
+    const bytes = await source.read(route(path))
     return encoding === undefined ? bytes : DEC.decode(bytes)
   }
 
   const writeFile = async (path: string, data: Uint8Array | string) => {
-    await writePath(
-      dispatch,
-      PathSpec.fromStrPath(path),
-      typeof data === 'string' ? ENC.encode(data) : data,
-    )
+    await writePath(source, route(path), typeof data === 'string' ? ENC.encode(data) : data)
   }
 
-  const stat = async (path: string) => {
-    const [got] = await dispatch('stat', PathSpec.fromStrPath(path))
-    if (got === null) throw enoent(path)
-    return new GitStat(got as FileStat)
-  }
+  const stat = async (path: string) => new GitStat(await source.stat(route(path)))
 
   return {
     promises: {
       readFile,
       writeFile,
       unlink: async (path: string) => {
-        await removeFile(dispatch, PathSpec.fromStrPath(path))
+        await removeFile(source, route(path))
       },
       // isomorphic-git wants bare names; backends may report either those or
       // whole paths, with or without a trailing slash.
-      readdir: async (path: string) =>
-        (await readNames(dispatch, PathSpec.fromStrPath(path))).map(entryName),
+      readdir: async (path: string) => (await readNames(source, route(path))).map(entryName),
       mkdir: async (path: string) => {
-        await ensureDir(dispatch, PathSpec.fromStrPath(path))
+        await ensureDir(source, route(path))
       },
       rmdir: async (path: string) => {
-        await dispatch('rmdir', PathSpec.fromStrPath(path))
+        await source.rmdir(route(path))
       },
       stat,
       // A mount has no links below it, so lstat is stat.
@@ -214,7 +205,7 @@ export function gitFs(
       // git chmods a loose object to 0444; the mount decides its own modes and
       // writeOnce never rewrites one, so there is nothing to enforce.
       chmod: () => Promise.resolve(),
-      exists: (path: string) => exists(dispatch, PathSpec.fromStrPath(path)),
+      exists: (path: string) => exists(source, route(path)),
     } as unknown as Record<string, (...args: never[]) => Promise<unknown>>,
   }
 }
@@ -227,17 +218,17 @@ export function gitFs(
  * `[Core] Bare = true` came back a string and `bare = 1` threw. A linked
  * worktree's config is its repository's.
  *
- * @param dispatch workspace op dispatcher
+ * @param vfs the session's files
  * @param location the discovered repository
  * @param path the variable, e.g. `core.bare`; its section and name in any case
  */
 export async function configValues(
-  dispatch: Dispatch,
+  vfs: Files,
   location: RepoLocation,
   path: string,
 ): Promise<string[]> {
   const config = await GitConfigManager.get({
-    fs: new FileSystem(gitFs(dispatch, location)) as never,
+    fs: new FileSystem(gitFs(vfs, location)) as never,
     gitdir: location.commondir.virtual,
   })
   // Section and name fold case; a subsection between them does not.

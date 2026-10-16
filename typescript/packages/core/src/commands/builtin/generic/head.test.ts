@@ -43,7 +43,7 @@ describe('headGeneric line counts', () => {
       }
     }
     const abort = new AbortController()
-    const opts = { stdin: ready(), flags: { lines }, cwd: '/', vfs: {}, signal: abort.signal }
+    const opts = { stdin: ready(), flags: { lines }, cwd: '/', signal: abort.signal }
     const result = await headGeneric(
       [],
       [],
@@ -69,7 +69,6 @@ describe('headGeneric line counts', () => {
       stdin: new TextEncoder().encode('\n'.repeat(20_000_000)),
       flags: { lines: '-20000000' },
       cwd: '/',
-      vfs: {},
       timeoutSeconds: 0.02,
       command: 'head',
     }
@@ -92,7 +91,7 @@ describe('headGeneric line counts', () => {
     '%o ends a stalled pull at the abort',
     async (flags) => {
       const abort = new AbortController()
-      const opts = { stdin: stalled(), flags, cwd: '/', vfs: {}, signal: abort.signal }
+      const opts = { stdin: stalled(), flags, cwd: '/', signal: abort.signal }
       const result = await headGeneric(
         [],
         [],

@@ -66,9 +66,9 @@ from mirage.types import JsonValue, PathSpec
 logger = logging.getLogger(__name__)
 
 # The live handles every context carries, which a program reads as
-# data instead: the session as its cwd, env and profile, the namespace
-# as the mounts it shows, the files through the program's own open().
-_LIVE = frozenset({"session", "ns", "vfs"})
+# data instead: the session as its cwd, env and profile, the files as
+# the mounts they show and through the program's own open().
+_LIVE = frozenset({"session", "vfs"})
 
 
 def _plain(value: Any) -> JsonValue:
@@ -111,8 +111,8 @@ def script_context(
     policy reads, under the same name, as plain data.
 
     The live handles become data: the session its ``cwd``, ``env`` and
-    ``profile``, the namespace the ``mounts`` the session sees. The
-    files are the program's own ``open()``, which reads as the session.
+    ``profile``, the files the ``mounts`` the session sees, which are
+    otherwise the program's own ``open()``, reading as the session.
 
     Args:
         ctx (CommandContext | RouteContext | VfsContext | SessionContext):
@@ -120,7 +120,7 @@ def script_context(
     """
     data = _plain(ctx)
     assert isinstance(data, dict)
-    session, ns = ctx.session, ctx.ns
+    session, vfs = ctx.session, ctx.vfs
     if session is not None:
         data["cwd"] = session.cwd()
         data["env"] = dict(session.snapshot())
@@ -130,8 +130,12 @@ def script_context(
         data["env"] = {}
         data["profile"] = ""
     data["mounts"] = (
-        list(ns.mounts.visible_descendants("/"))
-        if ns is not None and ns.mounts is not None
+        [
+            root
+            for root in vfs.submounts("/")
+            if root != "/" and vfs.is_mount(root)
+        ]
+        if vfs is not None
         else []
     )
     return data

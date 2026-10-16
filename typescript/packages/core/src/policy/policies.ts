@@ -469,8 +469,8 @@ export async function preSessionGate(
  * error, not a refusal.
  *
  * The chain holds the decision ledger an Ask is put to (`decisions`), and
- * `views`, which the workspace sets to fill a method's read-only `session`,
- * `ns` and `vfs`.
+ * `views`, which the workspace sets to fill a method's read-only `session`
+ * and `vfs`.
  */
 export class Policies {
   private readonly policies: Policy[]
@@ -483,7 +483,7 @@ export class Policies {
     | ((
         sessionId: string,
         session?: SessionState,
-      ) => (Required<Pick<RouteContext, 'session' | 'ns'>> & Pick<RouteContext, 'vfs'>) | null)
+      ) => (Required<Pick<RouteContext, 'session'>> & Pick<RouteContext, 'vfs'>) | null)
     | null = null
 
   constructor(policies?: readonly Policy[]) {

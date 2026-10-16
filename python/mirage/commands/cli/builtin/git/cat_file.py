@@ -182,7 +182,7 @@ async def cat_file(
     view = inv.view or CLIView()
     texts = tuple(inv.texts)
     try:
-        if view.dispatch is None:
+        if view.vfs is None:
             raise NoWorkspaceError()
         check_switches(inv, texts)
         modes = fl.typed_order(*QUERIES)

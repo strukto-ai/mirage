@@ -24,9 +24,9 @@ async def stash_list(
     try:
         view = inv.view or CLIView()
         _, location = await opened(FlagView(inv.flags), view)
-        assert view.dispatch is not None
+        assert view.vfs is not None
         data = await read_optional(
-            view.dispatch, location.commondir.join("logs/refs/stash")
+            view.vfs, location.commondir.join("logs/refs/stash")
         )
         lines = (data or b"").splitlines()
         text = b"".join(
@@ -49,12 +49,12 @@ async def stash_show(
     try:
         view = inv.view or CLIView()
         repo, location = await opened(FlagView(inv.flags), view)
-        assert view.dispatch is not None
+        assert view.vfs is not None
         selector = inv.texts[0] if inv.texts else "stash@{0}"
         match = re.fullmatch(r"(?:stash@\{(\d+)\}|(\d+))", selector)
         if match is not None:
             data = await read_optional(
-                view.dispatch, location.commondir.join("logs/refs/stash")
+                view.vfs, location.commondir.join("logs/refs/stash")
             )
             rows = list(reversed((data or b"").splitlines()))
             index = int(match.group(1) or match.group(2))

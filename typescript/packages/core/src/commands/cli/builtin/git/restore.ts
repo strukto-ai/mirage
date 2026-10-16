@@ -35,6 +35,7 @@ import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
 import {
   blockingAncestor,
   dropGitlink,
+  isLink,
   keepGitlink,
   readOptional,
   refuseReplacedMounts,
@@ -42,6 +43,7 @@ import {
   removeFile,
   removeTree,
   restoreEntry,
+  statOf,
 } from './io.ts'
 
 import { repoArgs, type Repo } from './repo.ts'
@@ -108,7 +110,7 @@ export async function sourceTree(
   // A local branch of that name wins over every other reading, as it does for
   // checkout's own operand: `--source=main` reads the branch even where a tag
   // `main` is what rev-parse would answer (pinned against git 2.50.1).
-  const refs = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+  const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
   const branch = refs.get(`${BRANCH_PREFIX}${revision}`)
   if (branch !== undefined && !branch.startsWith(SYMREF_PREFIX)) {
     found = { oid: branch, type: COMMIT }
@@ -142,9 +144,8 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   let notes: string[] = []
   try {
-    const dispatch = view.dispatch
-    const statPath = view.statPath
-    if (statPath === undefined || dispatch === undefined) {
+    const vfs = view.vfs
+    if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
     checkSwitches(inv, texts)
@@ -213,12 +214,11 @@ export async function restorePaths(
   worktree: boolean,
   overlay: boolean,
 ): Promise<[string[], number]> {
-  const dispatch = view.dispatch
-  const statPath = view.statPath
-  if (statPath === undefined || dispatch === undefined) throw new NoWorkspaceError()
+  const vfs = view.vfs
+  if (vfs === undefined) throw new NoWorkspaceError()
   const notes: string[] = []
   let updated = 0
-  const state = await readIndex(repo, dispatch)
+  const state = await readIndex(repo, vfs)
   const held = indexTree(state.entries)
   const tree = source ?? held
   // The conflict stages name paths too. An unmerged path has no stage-0
@@ -249,8 +249,6 @@ export async function restorePaths(
   // simply removed.
   const unmerged = absent.filter((name) => state.conflicts.has(name))
   if (unmerged.length > 0) throw new UnmergedPathError(unmerged)
-  const links = view.ns?.links ?? null
-  const mounts = view.ns?.mounts ?? null
   // Before the index is written, not at the entry that meets it: `-SW`
   // stages first and restores after, so a refusal in the working-tree pass
   // would leave the index moved and the tree exactly as it was, which is the
@@ -269,7 +267,7 @@ export async function restorePaths(
   const linked = present.filter((name) => tree.get(name)?.mode === GITLINK_MODE)
   const dropped = absent.filter((name) => !linked.some((root) => inside(name, root)))
   if (worktree) {
-    await refuseReplacedMounts(statPath, repo.location.worktree, replacing, links, mounts)
+    await refuseReplacedMounts(vfs, repo.location.worktree, replacing)
   }
   if (staged) {
     const staged = new Map<string, StagedEntry>()
@@ -292,26 +290,26 @@ export async function restorePaths(
       // inside whatever it points at, which no branch named. git checks the
       // leading path and removes nothing when it finds one, so neither does
       // this.
-      const blocked = await blockingAncestor(statPath, repo.location.worktree, name, links)
+      const blocked = await blockingAncestor(vfs, repo.location.worktree, name)
       if (blocked !== null) continue
       // What stands at a gitlink is a directory, so taking it away is an
       // rmdir that may legitimately fail: unlink died on it with the index
       // already written, which is the half-restore this verb has no wording
       // for.
       if (held.get(name)?.mode === GITLINK_MODE) {
-        const warned = await dropGitlink(dispatch, statPath, path, name, links)
+        const warned = await dropGitlink(vfs, path, name)
         if (warned !== null) notes.push(warned)
       } else {
-        await removeFile(dispatch, path)
+        await removeFile(vfs, path)
       }
-      await removeEmptyParents(dispatch, path, repo.location.worktree, mounts)
+      await removeEmptyParents(vfs, path, repo.location.worktree)
     }
     for (const name of present) {
       const entry = tree.get(name)
       if (entry === undefined) continue
       const where = repo.location.worktree.join(name)
       if (entry.mode === GITLINK_MODE) {
-        await keepGitlink(dispatch, statPath, where, links)
+        await keepGitlink(vfs, where)
         continue
       }
       const { blob } = await git.readBlob({ ...repoArgs(repo), oid: entry.oid })
@@ -321,8 +319,8 @@ export async function restorePaths(
       // exactly as it was, and an untracked file standing there is replaced
       // in silence, which is what git's create_directories does to any
       // leading non-directory.
-      const above = await blockingAncestor(statPath, repo.location.worktree, name, links)
-      if (above !== null) await removeFile(dispatch, above)
+      const above = await blockingAncestor(vfs, repo.location.worktree, name)
+      if (above !== null) await removeFile(vfs, above)
       // A directory can still stand here after the loop above: it removed
       // the tracked children, but an untracked one keeps it alive and the
       // write would fail on it with the index already updated. git replaces
@@ -330,17 +328,17 @@ export async function restorePaths(
       // restoreEntry, which retargets it; following one to a directory here
       // would delete a tree no branch named.
       let current: Uint8Array | null = null
-      if ((links?.statAt(where.virtual) ?? null) === null) {
-        const info = await statPath(where)
+      if (!(await isLink(vfs, where))) {
+        const info = await statOf(vfs, where)
         if (info !== null && info.type === FileType.DIRECTORY) {
-          await removeTree(dispatch, where, links, mounts)
+          await removeTree(vfs, where)
         } else if (info !== null && above === null) {
-          current = await readOptional(dispatch, where)
+          current = await readOptional(vfs, where)
         }
       }
       if (current?.length !== blob.length || current.some((byte, at) => byte !== blob[at]))
         updated += 1
-      await restoreEntry(dispatch, where, entry.mode, blob, links)
+      await restoreEntry(vfs, where, entry.mode, blob)
     }
   }
   return [notes, updated]

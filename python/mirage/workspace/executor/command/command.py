@@ -102,6 +102,7 @@ from mirage.workspace.executor.jobs import (
     handle_wait,
 )
 from mirage.workspace.expand.globs import glob_options, resolve_globs
+from mirage.workspace.files import Files
 from mirage.workspace.lookup import (
     JOB_BUILTINS,
     Consumer,
@@ -294,10 +295,9 @@ async def handle_command(
     # Installed CLIs: dispatch by name, never by operand path. Sits
     # below functions (a user can wrap an installed CLI, bash-style)
     # and above every mount branch (a CLI consults no mount). A CLI that
-    # works on files rather than an API (`git`) reads the workspace
-    # facts it needs off `inv.view`; the rest never look. The entry points are
-    # the same ones `run_on_mount` puts on `CommandOpts`, built the same
-    # way, so a CLI leaf and a command handler see one plane alike.
+    # works on files rather than an API (`git`) reaches them through
+    # `inv.view.vfs`, the session's files made by the command; the rest
+    # never look.
     cli_install = registry.clis.get(cmd_name)
     if cli_install is not None:
         return await handle_cli(
@@ -315,13 +315,11 @@ async def handle_command(
                 ),
                 command_limits=registry.command_limits,
                 entries=registry.runtime_entries,
-                dispatch=dispatch,
-                stat_path=(
-                    functools.partial(path_stat, dispatch)
+                vfs=(
+                    Files(registry.mount_rows(), dispatch, links=namespace)
                     if dispatch is not None
                     else None
                 ),
-                ns=namespace_view_of(registry, namespace, dispatch, session),
                 session_view=session_view(
                     session,
                     registry.policies,

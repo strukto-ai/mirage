@@ -14,20 +14,20 @@ import {
   NoWorkspaceError,
   NoWorkingDirectoryError,
 } from './errors.ts'
-import { ensureDir, readOptional, takeLock, writeFile } from './io.ts'
+import { ensureDir, readOptional, statOf, takeLock, writeFile } from './io.ts'
 import { validRefName } from './refs.ts'
-import type { Dispatch } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 import { fatal, startPoint } from './util.ts'
 
 /** Write a new git directory's skeleton, keeping what is there. */
 export async function layOut(
-  dispatch: Dispatch,
+  vfs: Files,
   gitdir: PathSpec,
   branch: string,
   config: string,
 ): Promise<void> {
   for (const directory of ['objects/info', 'objects/pack', 'refs/heads', 'refs/tags', 'info'])
-    await ensureDir(dispatch, gitdir.join(directory))
+    await ensureDir(vfs, gitdir.join(directory))
   const files = {
     HEAD: `ref: refs/heads/${branch}\n`,
     config,
@@ -35,8 +35,8 @@ export async function layOut(
   }
   for (const [name, text] of Object.entries(files)) {
     const path = gitdir.join(name)
-    if ((await readOptional(dispatch, path)) === null)
-      await writeFile(dispatch, path, new TextEncoder().encode(text))
+    if ((await readOptional(vfs, path)) === null)
+      await writeFile(vfs, path, new TextEncoder().encode(text))
   }
 }
 
@@ -66,12 +66,10 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   const view = inv.view ?? {}
   try {
-    if (view.dispatch === undefined || view.statPath === undefined || view.ns?.mounts === undefined)
-      throw new NoWorkspaceError()
-    const dispatch = view.dispatch
-    const mounts = view.ns.mounts
+    if (view.vfs === undefined) throw new NoWorkspaceError()
+    const vfs = view.vfs
     const start = startPoint(fl)
-    const here = await view.statPath(start)
+    const here = await statOf(vfs, start)
     if (here?.type !== FileType.DIRECTORY)
       throw new NoWorkingDirectoryError(start.rawPath, here === null ? 'ENOENT' : 'ENOTDIR')
     const target = PathSpec.fromStrPath(inv.texts[0] ?? '.', undefined, start)
@@ -82,34 +80,26 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
     const branch = fl.asStr('initial_branch') ?? 'master'
     if (!validRefName(`refs/heads/${branch}`) || branch.startsWith('-'))
       throw new GitError(`invalid branch name: '${branch}'`)
-    const info = await view.statPath(gitdir)
+    const info = await statOf(vfs, gitdir)
     if (
       info !== null &&
-      (info.type !== FileType.DIRECTORY ||
-        (await readOptional(dispatch, gitdir.join('HEAD'))) !== null)
+      (info.type !== FileType.DIRECTORY || (await readOptional(vfs, gitdir.join('HEAD'))) !== null)
     ) {
-      const location = await discover(
-        dispatch,
-        view.statPath,
-        (path) => mounts.rootOf(path),
-        target,
-        gitdir,
-        fl.asPath('work_tree') ?? null,
-      )
+      const location = await discover(vfs, target, gitdir, fl.asPath('work_tree') ?? null)
       gitdir = location.commondir
     }
-    const existing = (await readOptional(dispatch, gitdir.join('HEAD'))) !== null
+    const existing = (await readOptional(vfs, gitdir.join('HEAD'))) !== null
     const [typed] = inv.texts
-    const made = typed !== undefined && (await view.statPath(target)) === null
+    const made = typed !== undefined && (await statOf(vfs, target)) === null
     const settings = gitdir.join('config')
     try {
       await layOut(
-        dispatch,
+        vfs,
         gitdir,
         branch,
         `[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = ${bare ? 'true' : 'false'}\n`,
       )
-      if (existing) await takeLock(dispatch, settings)
+      if (existing) await takeLock(vfs, settings)
     } catch (err) {
       const path = (err as { virtualPath?: string }).virtualPath
       const locked = path === `${settings.virtual}.lock`

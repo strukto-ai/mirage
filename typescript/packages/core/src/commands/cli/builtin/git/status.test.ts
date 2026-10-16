@@ -28,14 +28,12 @@ import { dirname, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 
-import { IOResult } from '../../../../io/types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
 import { ensureDir } from './io.ts'
-import type { Dispatch } from './types.ts'
 
 const BUILDER = fileURLToPath(
   new URL('../../../../../../../../integ/fixtures/git/build.sh', import.meta.url),
@@ -86,10 +84,7 @@ async function stage(setup: Setup): Promise<[Workspace, string]> {
 
   const ram = new RAMVFS()
   const ws = new Workspace({ '/repo': ram }, { mode: MountMode.WRITE, shellParser: parser })
-  const dispatch: Dispatch = async (op, path, args = [], kwargs = {}) => [
-    await ws.dispatch(op, path.virtual, args, kwargs),
-    new IOResult(),
-  ]
+  const dispatch = ws.vfs
   for (const rel of walk(repo)) {
     const target = `/repo/${rel}`
     await ensureDir(dispatch, PathSpec.fromStrPath(target).parent)

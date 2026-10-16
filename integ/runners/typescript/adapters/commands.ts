@@ -170,8 +170,7 @@ export const CLI = new CLIProgram({
       fn: async (inv) => {
         let size = 0
         for (const path of inv.paths) {
-          const [stat] = await inv.view.dispatch('stat', path)
-          size += (stat as FileStat).size ?? 0
+          size += (await inv.view.vfs.stat(path)).size ?? 0
         }
         return [
           new TextEncoder().encode(`${size}:${inv.paths.map((p) => p.virtual).join(',')}\n`),

@@ -184,7 +184,7 @@ async function receive(repo: Repo, transport: Transport, wants: readonly string[
     tips.size ? (oid) => holds(repo, oid) : () => Promise.resolve(false),
   )
   await storePack(repo, pack)
-  return openRepo(repo.dispatch, repo.location, repo.ambiguous)
+  return openRepo(repo.vfs, repo.location, repo.ambiguous)
 }
 
 /**
@@ -307,10 +307,10 @@ export async function updateRefs(
     rows.push(line)
     rejected ||= line.code === '!'
     if (why === null) continue
-    await writeRef(repo.dispatch, repo.location.commondir, want.local, want.oid)
+    await writeRef(repo.vfs, repo.location.commondir, want.local, want.oid)
     if (logged && !want.local.startsWith(TAGS))
       await append(
-        repo.dispatch,
+        repo.vfs,
         repo.location.commondir,
         `logs/${want.local}`,
         entry(old ?? ZERO, want.oid, IDENTITY, now, `${reason}: ${why}`),
@@ -435,7 +435,7 @@ export async function configuredHeaders(
         if (line.path === 'http.extraheader') values.push(line.value ?? '')
   }
   if (repo !== null)
-    values.push(...(await configValues(repo.dispatch, repo.location, 'http.extraheader')))
+    values.push(...(await configValues(repo.vfs, repo.location, 'http.extraheader')))
   return extraHeaders(values)
 }
 
@@ -448,7 +448,7 @@ export function leafArgs(argv: readonly string[], verb: string): readonly string
 /** Delete the remote-tracking refs whose remote ref is gone. */
 async function prune(repo: Repo, adv: Advertisement, specs: readonly Refspec[]): Promise<Row[]> {
   const rows: Row[] = []
-  const refs = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+  const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
   const names = [...refs.entries()]
     .filter(([, value]) => !value.startsWith(SYMREF_PREFIX))
     .map(([name]) => name)
@@ -458,7 +458,7 @@ async function prune(repo: Repo, adv: Advertisement, specs: readonly Refspec[]):
       if (!spec.dst?.includes('*')) continue
       const source = mapped({ src: spec.dst, dst: spec.src, force: false }, name)
       if (source && !adv.refs.has(source)) {
-        await deleteRef(repo.dispatch, repo.location.commondir, name)
+        await deleteRef(repo.vfs, repo.location.commondir, name)
         rows.push(row('-', '[deleted]', '(none)', prettify(name)))
         break
       }
@@ -480,11 +480,11 @@ export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
   try {
     checkSwitches(inv, inv.texts)
     const view = inv.view ?? {}
-    if (view.dispatch === undefined) throw new NoWorkspaceError()
+    if (view.vfs === undefined) throw new NoWorkspaceError()
     const repo = await opened(fl, view)
     const { location } = repo
-    const values = (path: string): Promise<string[]> => configValues(repo.dispatch, location, path)
-    const head = await readHead(repo.dispatch, location.gitdir)
+    const values = (path: string): Promise<string[]> => configValues(repo.vfs, location, path)
+    const head = await readHead(repo.vfs, location.gitdir)
     const texts = [...inv.texts]
     let name = texts[0] ?? null
     if (name === null) {
@@ -504,7 +504,7 @@ export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
       if (remotes.at(-1) === name)
         merge = (await values(`branch.${head.branch}.merge`)).at(-1) ?? null
     }
-    const bare = await isBare(repo.dispatch, location)
+    const bare = await isBare(repo.vfs, location)
     const start = bare ? location.gitdir : location.worktree
     let transport: Transport
     try {
@@ -529,11 +529,7 @@ export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
     const pruned = fl.asBool('prune') && !typed.length ? await prune(fetched, adv, configured) : []
     const reason = ['fetch', ...leafArgs(inv.argv, 'fetch')].join(' ')
     const [rows, rejected] = await updateRefs(fetched, taken, reason, !bare)
-    await writeFile(
-      repo.dispatch,
-      location.gitdir.join(FETCH_HEAD),
-      ENC.encode(fetchHead(url, taken)),
-    )
+    await writeFile(repo.vfs, location.gitdir.join(FETCH_HEAD), ENC.encode(fetchHead(url, taken)))
     const shown = [...pruned, ...rows.filter((line) => line.code !== '=' || fl.asBool('verbose'))]
     const err = notes + (fl.asBool('quiet') ? '' : summaryLines(url, shown, fetched.abbrev))
     return [null, new IOResult({ exitCode: rejected ? 1 : 0, stderr: ENC.encode(err) })]

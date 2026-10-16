@@ -15,7 +15,7 @@
 import type { PathSpec } from '../../../../types.ts'
 import { readOptional } from './io.ts'
 
-import type { Dispatch } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 
 const GITIGNORE = '.gitignore'
 const INFO_EXCLUDE = 'info/exclude'
@@ -204,20 +204,20 @@ export class IgnoreStack {
  * that machine's home directory; honoring it would mean reading the operator's
  * own file and applying it to somebody else's repository.
  *
- * @param dispatch workspace op dispatcher
+ * @param vfs the session's files
  * @param commondir the shared git directory, whose `info` a linked worktree
  *   reads too
  * @param worktree the working tree root
  */
 export async function loadIgnores(
-  dispatch: Dispatch,
+  vfs: Files,
   commondir: PathSpec,
   worktree: PathSpec,
 ): Promise<IgnoreStack> {
   let stack = new IgnoreStack()
-  const private_ = await readOptional(dispatch, commondir.join(INFO_EXCLUDE))
+  const private_ = await readOptional(vfs, commondir.join(INFO_EXCLUDE))
   if (private_ !== null) stack = stack.push('', private_)
-  const root = await readOptional(dispatch, worktree.join(GITIGNORE))
+  const root = await readOptional(vfs, worktree.join(GITIGNORE))
   if (root !== null) stack = stack.push('', root)
   return stack
 }

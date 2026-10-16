@@ -55,15 +55,15 @@ async function loadAttachments(
   paths: readonly PathSpec[],
 ): Promise<Attachment[]> {
   if (paths.length === 0) return []
-  const dispatch = view?.dispatch
-  if (dispatch === undefined) {
+  const vfs = view?.vfs
+  if (vfs === undefined) {
     throw new Error('--attach needs a workspace to read files from')
   }
   const attachments: Attachment[] = []
   for (const path of paths) {
     let data: unknown
     try {
-      ;[data] = await dispatch('read', path)
+      data = await vfs.read(path)
     } catch (err) {
       if (isMissingPath(err) || isEnotdir(err)) {
         const strerror = fsStrerror(err) ?? posixPhrase('ENOENT')

@@ -92,7 +92,7 @@ async def for_each_ref(
     try:
         check_switches(inv, texts)
         repo, location = await opened(fl, view)
-        assert view.dispatch is not None
+        assert view.vfs is not None
         filt = await asyncio.to_thread(ref_filter, repo, words)
         count = fl.as_int("count") or 0
         if count < 0:
@@ -126,10 +126,10 @@ async def for_each_ref(
             )
 
         items, ctx, errors = await ref_listing(
-            view.dispatch,
+            view.vfs,
             repo,
             location,
-            await read_config(view.dispatch, location),
+            await read_config(view.vfs, location),
             used_fields(fmt, keys or ()),
             wanted,
             filt,

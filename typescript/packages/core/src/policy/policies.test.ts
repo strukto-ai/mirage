@@ -1179,15 +1179,15 @@ describe('what a method sees', () => {
 
     async preCommand(ctx: CommandContext): Promise<Action | null> {
       if (ctx.command !== 'echo') return null
-      const { session, ns, vfs } = ctx
-      if (session === undefined || ns?.mounts === undefined || vfs === undefined) {
+      const { session, vfs } = ctx
+      if (session === undefined || vfs === undefined) {
         throw new Error('a method was asked without its handles')
       }
       this.seen.push([
         session.cwd(),
         session.get('TEAM'),
         new TextDecoder().decode(await vfs.read('/data/owner.txt')),
-        ns.mounts.isRoot('/data'),
+        vfs.isMount('/data'),
       ])
       for (const write of [
         () => vfs.write('/data/owner.txt', 'me\n'),

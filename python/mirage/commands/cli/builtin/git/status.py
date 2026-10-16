@@ -35,7 +35,7 @@ from mirage.commands.cli.builtin.git.types import (
     RepoLocation,
     StatusEntry,
 )
-from mirage.commands.cli.builtin.git.util import fatal, links_of, start_point
+from mirage.commands.cli.builtin.git.util import fatal, start_point
 from mirage.commands.cli.builtin.git.worktree import (
     UNTRACKED_ALL,
     UNTRACKED_NO,
@@ -45,8 +45,7 @@ from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.runtime.types import DispatchFn
-from mirage.view.types import LinkView, StatPath
+from mirage.workspace.files import Files
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +96,7 @@ def parse_flags(fl: FlagView) -> StatusFlags:
 
 
 async def displayed(
-    dispatch: DispatchFn,
+    vfs: Files,
     location: RepoLocation,
     start: str,
     rows: list[StatusEntry],
@@ -109,26 +108,22 @@ async def displayed(
     the work tree they stay relative to its root.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         start (str): absolute virtual path git is running in.
         rows (list[StatusEntry]): repository-relative status entries.
     """
-    if not await config_bool(
-        dispatch, location, b"status", b"relativepaths", True
-    ):
+    if not await config_bool(vfs, location, b"status", b"relativepaths", True):
         return rows
     return relative_entries(rows, repo_relative(location, start, "."))
 
 
 async def render_report(
-    dispatch: DispatchFn,
-    stat_path: StatPath,
+    vfs: Files,
     repo: BaseRepo,
     location: RepoLocation,
     head: HeadRef,
     start: str,
-    links: LinkView | None = None,
 ) -> str:
     """The default status report, as a string.
 
@@ -137,30 +132,25 @@ async def render_report(
     two renderings of the same thing would drift.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
-        stat_path (StatPath): dispatcher-backed stat, both channels.
+        vfs (Files): the session's files.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         head (HeadRef): what HEAD points at.
         start (str): absolute virtual path git is running in, which the
             report's paths are relative to.
-        links (LinkView | None): the name plane's link facts, so the
-            walk lstats as git does.
     """
     rows, state, no_commits = await collect(
-        dispatch, stat_path, repo, location, UNTRACKED_NORMAL, links
+        vfs, repo, location, UNTRACKED_NORMAL
     )
-    fully = await config_bool(dispatch, location, b"core", b"quotepath", True)
+    fully = await config_bool(vfs, location, b"core", b"quotepath", True)
     detached = (
         ""
         if head.branch is not None
-        else await detached_line(dispatch, repo, location, head)
+        else await detached_line(vfs, repo, location, head)
     )
-    upstream = await branch_upstream(
-        dispatch, repo, location, head, no_commits
-    )
+    upstream = await branch_upstream(vfs, repo, location, head, no_commits)
     return long_format(
-        await displayed(dispatch, location, start, rows),
+        await displayed(vfs, location, start, rows),
         head.branch,
         detached,
         no_commits,
@@ -188,39 +178,32 @@ async def status(
             ``inv.view``.
     """
     view = inv.view or CLIView()
-    dispatch = view.dispatch
-    stat_path = view.stat_path
+    vfs = view.vfs
     flags = inv.flags
     fl = FlagView(flags)
     try:
-        if dispatch is None or stat_path is None:
+        if vfs is None:
             raise NoWorkspaceError()
         parsed = parse_flags(fl)
         repo, location = await opened(fl, view, work_tree=True)
-        head = await read_head(dispatch, location.gitdir)
+        head = await read_head(vfs, location.gitdir)
         rows, state, no_commits = await collect(
-            dispatch,
-            stat_path,
+            vfs,
             repo,
             location,
             parsed.untracked,
-            links_of(view),
             parsed.ignored,
         )
-        fully = await config_bool(
-            dispatch, location, b"core", b"quotepath", True
-        )
+        fully = await config_bool(vfs, location, b"core", b"quotepath", True)
         if not parsed.porcelain:
             rows = await displayed(
-                dispatch, location, start_point(fl).virtual, rows
+                vfs, location, start_point(fl).virtual, rows
             )
-        upstream = await branch_upstream(
-            dispatch, repo, location, head, no_commits
-        )
+        upstream = await branch_upstream(vfs, repo, location, head, no_commits)
         detached = (
             ""
             if head.branch is not None
-            else await detached_line(dispatch, repo, location, head)
+            else await detached_line(vfs, repo, location, head)
         )
     except GitError as exc:
         return fatal(exc)

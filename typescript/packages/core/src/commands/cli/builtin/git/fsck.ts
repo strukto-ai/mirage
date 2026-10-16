@@ -1,7 +1,6 @@
 import git from 'isomorphic-git'
 import Hash from 'sha.js'
-import type { StatPath } from '../../../../view/types.ts'
-import { type PathSpec, FileType, type FileStat } from '../../../../types.ts'
+import { type PathSpec, FileType } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { sha1Hex } from '../../../../utils/hash.ts'
@@ -12,32 +11,27 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { GitError, NoWorkspaceError } from './errors.ts'
 import { readIndex } from './index_file.ts'
-import { readFile, readNames, readOptional, readRange } from './io.ts'
+import { readFile, readNames, readOptional, readRange, statOf } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 
 import { loadRefs } from './refs.ts'
 import { repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
-import type { Dispatch } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 import { fatal } from './util.ts'
 
 const PACK_BLOCK = 1 << 18
 
 /** Hash bounded ranges, retaining only the trailing SHA-1 between reads. */
-export async function checkPack(
-  dispatch: Dispatch,
-  path: PathSpec,
-  expected: Uint8Array,
-): Promise<void> {
+export async function checkPack(vfs: Files, path: PathSpec, expected: Uint8Array): Promise<void> {
   const digest = new Hash.sha1()
   let tail = new Uint8Array()
   let offset = 0
   try {
-    const [info] = await dispatch('stat', path)
-    const size = (info as FileStat | null)?.size ?? null
+    const size = (await vfs.stat(path)).size
     while (size === null || offset < size) {
       const count = size === null ? PACK_BLOCK : Math.min(PACK_BLOCK, size - offset)
-      const chunk = await readRange(dispatch, path, offset, count)
+      const chunk = await readRange(vfs, path, offset, count)
       if (chunk.length === 0) {
         if (size !== null && offset < size) throw new GitError(`truncated pack: ${path.virtual}`)
         break
@@ -67,23 +61,23 @@ export async function checkPack(
 async function objectIds(repo: Repo): Promise<Set<string>> {
   const root = repo.location.commondir.join('objects')
   const ids = new Set<string>()
-  for (const entry of await readNames(repo.dispatch, root)) {
+  for (const entry of await readNames(repo.vfs, root)) {
     const fanout = entryName(entry)
     if (!/^[0-9a-f]{2}$/.test(fanout)) continue
-    for (const name of await readNames(repo.dispatch, root.join(fanout))) {
+    for (const name of await readNames(repo.vfs, root.join(fanout))) {
       const oid = fanout + entryName(name)
       if (/^[0-9a-f]{40}$/.test(oid)) ids.add(oid)
     }
   }
-  for (const entry of await readNames(repo.dispatch, root.join('pack'))) {
+  for (const entry of await readNames(repo.vfs, root.join('pack'))) {
     const name = entryName(entry)
     if (!name.endsWith('.idx')) continue
-    const data = await readFile(repo.dispatch, root.join(`pack/${name}`))
+    const data = await readFile(repo.vfs, root.join(`pack/${name}`))
     if (data.length < 1064) throw new GitError(`truncated pack index: ${name}`)
     if ((await sha1Hex(data.subarray(0, -20))) !== toHex(data.subarray(-20)))
       throw new GitError(`pack index checksum mismatch: ${name}`)
     const packName = name.slice(0, -4) + '.pack'
-    await checkPack(repo.dispatch, root.join(`pack/${packName}`), data.subarray(-40, -20))
+    await checkPack(repo.vfs, root.join(`pack/${packName}`), data.subarray(-40, -20))
     const view = new DataView(data.buffer, data.byteOffset, data.length)
     const v2 = view.getUint32(0) === 0xff744f63
     if (v2 && view.getUint32(4) !== 2) throw new GitError(`unsupported pack index: ${name}`)
@@ -97,18 +91,14 @@ async function objectIds(repo: Repo): Promise<Set<string>> {
   return ids
 }
 
-async function logRoots(
-  dispatch: Dispatch,
-  statPath: StatPath,
-  path: PathSpec,
-): Promise<Set<string>> {
+async function logRoots(vfs: Files, path: PathSpec): Promise<Set<string>> {
   const found = new Set<string>()
-  for (const entry of await readNames(dispatch, path)) {
+  for (const entry of await readNames(vfs, path)) {
     const target = path.join(entryName(entry))
-    if ((await statPath(target))?.type === FileType.DIRECTORY) {
-      for (const oid of await logRoots(dispatch, statPath, target)) found.add(oid)
+    if ((await statOf(vfs, target))?.type === FileType.DIRECTORY) {
+      for (const oid of await logRoots(vfs, target)) found.add(oid)
     } else {
-      const data = await readOptional(dispatch, target)
+      const data = await readOptional(vfs, target)
       for (const line of new TextDecoder().decode(data ?? new Uint8Array()).split('\n')) {
         for (const oid of line.split(' ').slice(0, 2))
           if (/^[0-9a-f]{40}$/.test(oid) && oid !== '0'.repeat(40)) found.add(oid)
@@ -138,21 +128,20 @@ export async function fsck(inv: CLIInvocation): Promise<CommandFnResult> {
   try {
     const fl = new FlagView(inv.flags)
     const view = inv.view ?? {}
-    const statPath = view.statPath
-    if (statPath === undefined) throw new NoWorkspaceError()
+    const vfs = view.vfs
+    if (vfs === undefined) throw new NoWorkspaceError()
     const repo = await opened(fl, view)
     const args = repoArgs(repo)
-    const refs = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+    const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
     const roots = new Set([...refs.values()].filter((oid) => !oid.startsWith('ref: ')))
-    const index = await readIndex(repo, repo.dispatch)
+    const index = await readIndex(repo, repo.vfs)
     for (const entry of index.entries.values()) if (entry.mode !== 0o160000) roots.add(entry.oid)
     for (const conflict of index.conflicts.values()) {
       for (const entry of [conflict.ancestor, conflict.this, conflict.other])
         if (entry !== null && entry.mode !== 0o160000) roots.add(entry.oid)
     }
     for (const directory of new Set([repo.location.gitdir, repo.location.commondir])) {
-      for (const oid of await logRoots(repo.dispatch, statPath, directory.join('logs')))
-        roots.add(oid)
+      for (const oid of await logRoots(repo.vfs, directory.join('logs'))) roots.add(oid)
     }
     const referenced = new Set(roots)
     const edges = new Map<string, string[]>()
@@ -193,7 +182,7 @@ export async function fsck(inv: CLIInvocation): Promise<CommandFnResult> {
       if (!objects.has(oid) && !roots.has(oid)) errors.push(`missing object ${oid}\n`)
     let stderr = errors.join('')
     if (roots.size === 0) {
-      const head = await readOptional(repo.dispatch, repo.location.gitdir.join('HEAD'))
+      const head = await readOptional(repo.vfs, repo.location.gitdir.join('HEAD'))
       const branch = new TextDecoder()
         .decode(head ?? new Uint8Array())
         .trim()

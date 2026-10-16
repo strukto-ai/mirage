@@ -60,8 +60,8 @@ from mirage.commands.cli.builtin.git.util import (
 from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
+from mirage.workspace.files import Files
 
 REFS_PREFIX = "refs/"
 LOGS_DIR = "logs"
@@ -112,27 +112,27 @@ def symbolic_ref_read_only(
 
 
 async def object_of(
-    dispatch: DispatchFn, gitdir: PathSpec, table: DictRefsContainer, name: str
+    vfs: Files, gitdir: PathSpec, table: DictRefsContainer, name: str
 ) -> bytes | None:
     """The object id a ref ends at, through any symbolic hops.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         gitdir (PathSpec): this checkout's git directory.
         table (DictRefsContainer): every ref, as load_refs reads them.
         name (str): the full ref name.
     """
-    end = await resolve_symbolic(dispatch, gitdir, table, name, True)
+    end = await resolve_symbolic(vfs, gitdir, table, name, True)
     if end is None:
         return None
-    raw = await raw_ref(dispatch, gitdir, table, end.name)
+    raw = await raw_ref(vfs, gitdir, table, end.name)
     if raw is None or raw.startswith(SYMREF_PREFIX):
         return None
     return raw.encode()
 
 
 async def set_symbolic(
-    dispatch: DispatchFn,
+    vfs: Files,
     location: RepoLocation,
     table: DictRefsContainer,
     name: str,
@@ -148,7 +148,7 @@ async def set_symbolic(
     message leaves the line without one.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         table (DictRefsContainer): every ref, as load_refs reads them.
         name (str): the ref to write.
@@ -166,19 +166,19 @@ async def set_symbolic(
     if held is not None:
         raise SymbolicRefLockError(name, held)
     gitdir = location.gitdir
-    before = await object_of(dispatch, gitdir, table, name)
+    before = await object_of(vfs, gitdir, table, name)
     owner = owner_of(location, name)
     await write_file(
-        dispatch,
+        vfs,
         owner.join(name),
         f"{SYMREF_PREFIX}{target}\n".encode(),
     )
-    after = await object_of(dispatch, gitdir, table, target)
+    after = await object_of(vfs, gitdir, table, target)
     log = owner.join(LOGS_DIR, name)
-    if after is None or not await logged(dispatch, location, name, log):
+    if after is None or not await logged(vfs, location, name, log):
         return
     await append(
-        dispatch,
+        vfs,
         owner,
         f"{LOGS_DIR}/{name}",
         entry(before or ZERO, after, who, int(time.time()), message),
@@ -203,9 +203,9 @@ async def symbolic_ref(
     """
     fl = FlagView(inv.flags)
     view = inv.view or CLIView()
-    dispatch = view.dispatch
+    vfs = view.vfs
     try:
-        if dispatch is None:
+        if vfs is None:
             raise NoWorkspaceError()
         check_switches(inv, inv.texts)
         _, location = await opened(fl, view)
@@ -214,15 +214,13 @@ async def symbolic_ref(
             raise EmptyUpdateMessageError()
         quiet = _switched(fl, "quiet", False)
         gitdir = location.gitdir
-        table = await load_refs(dispatch, gitdir, location.commondir)
+        table = await load_refs(vfs, gitdir, location.commondir)
         names = tuple(inv.texts)
         name = names[0] if names else ""
         if _switched(fl, "delete", False):
             if len(names) != 1:
                 raise UsageError("", verb_usage(inv))
-            found = await resolve_symbolic(
-                dispatch, gitdir, table, name, False
-            )
+            found = await resolve_symbolic(vfs, gitdir, table, name, False)
             if found is None:
                 raise NoSuchRefError(name)
             if not found.symbolic:
@@ -230,8 +228,8 @@ async def symbolic_ref(
             if name == HEAD:
                 raise DeleteHeadError()
             owner = owner_of(location, name)
-            await delete_ref(dispatch, owner, name)
-            await remove_file(dispatch, owner.join(LOGS_DIR, name))
+            await delete_ref(vfs, owner, name)
+            await remove_file(vfs, owner.join(LOGS_DIR, name))
             return None, IOResult()
         if len(names) == 2:
             target = names[1]
@@ -241,13 +239,13 @@ async def symbolic_ref(
                 raise InvalidSymbolicTargetError(name, target)
             who = identity(fl, view.session_view)
             await set_symbolic(
-                dispatch, location, table, name, target, who, message or ""
+                vfs, location, table, name, target, who, message or ""
             )
             return None, IOResult()
         if len(names) != 1:
             raise UsageError("", verb_usage(inv))
         found = await resolve_symbolic(
-            dispatch, gitdir, table, name, _switched(fl, "recurse", True)
+            vfs, gitdir, table, name, _switched(fl, "recurse", True)
         )
         if found is None:
             raise NoSuchRefError(name)

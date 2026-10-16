@@ -24,6 +24,7 @@ from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import IOResult, materialize
 from mirage.types import PathSpec
+from mirage.workspace.files import Files
 
 CONFIG = EmailConfig(
     imap_host="h", smtp_host="h", username="me@example.com", password="p"
@@ -41,7 +42,7 @@ async def fake_dispatch(op, path, *args, **kwargs):
 
 
 def view_with_files() -> CLIView:
-    return CLIView(dispatch=fake_dispatch)
+    return CLIView(vfs=Files([], fake_dispatch))
 
 
 @pytest.fixture

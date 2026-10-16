@@ -28,6 +28,8 @@ from mirage.commands.cli.builtin.git.rm import (
     shadowed,
 )
 from mirage.commands.spec.flag_view import FlagView
+from mirage.types import FileStat, FileType, PathSpec
+from mirage.workspace.files import Files
 
 from .conftest import LOCATION, REPO
 
@@ -279,43 +281,33 @@ async def test_a_tracked_link_to_a_directory_is_removed_as_a_link(
     assert (repo_path / "real" / "child").exists()
 
 
-class Hiding:
-    """A link view where ``slot`` is a link and ``slot/child`` is live.
+def hiding(present: bool = True, linked: bool = True) -> Files:
+    """The session's files where ``slot`` is a link and ``slot/child``
+    is what lies through it.
 
-    ``resolve`` is the name plane's own walk, so a path under the link
-    comes back respelled; ``exists`` answers through the dispatcher, so
-    a target that is not there answers False.
+    Args:
+        present (bool): whether the link's target holds the file.
+        linked (bool): whether ``slot`` is a link at all.
     """
 
-    def __init__(self, present: bool = True) -> None:
-        self.present = present
+    async def dispatch(op: str, path: PathSpec, **kwargs):
+        assert op == "stat", op
+        name = path.virtual.rsplit("/", 1)[-1]
+        if path.virtual == "/repo/slot" and linked and kwargs.get("nofollow"):
+            return FileStat(name=name, type=FileType.SYMLINK), None
+        if path.virtual == "/repo/slot/child":
+            if not present:
+                raise FileNotFoundError(path.virtual)
+            return FileStat(name=name, type=FileType.FILE), None
+        return FileStat(name=name, type=FileType.DIRECTORY), None
 
-    def resolve(self, path: str) -> str:
-        """Where a path really points.
-
-        Args:
-            path (str): absolute virtual path.
-        """
-        if path.startswith("/repo/slot"):
-            return path.replace("/repo/slot", "/away", 1)
-        return path
-
-    async def exists(self, path: str) -> bool:
-        """Whether anything is there once the links are resolved.
-
-        Asked with the path as typed, since the real view resolves for
-        itself: that is what lets a link across mounts answer at all.
-
-        Args:
-            path (str): absolute virtual path.
-        """
-        return self.present and self.resolve(path).startswith("/away")
+    return Files([], dispatch)
 
 
 @pytest.mark.asyncio
 async def test_a_link_above_a_deleted_path_makes_it_a_local_change():
     hidden = await shadowed(
-        Hiding(), REPO, ["slot/child"], {"slot/child": DELETED}
+        hiding(), REPO, ["slot/child"], {"slot/child": DELETED}
     )
     assert hidden == {"slot/child"}
 
@@ -325,7 +317,7 @@ async def test_a_link_pointing_at_nothing_leaves_the_path_deleted():
     # git lstats through the leading link and gets ENOENT, so there is
     # no local change to lose and the removal goes through.
     hidden = await shadowed(
-        Hiding(present=False), REPO, ["slot/child"], {"slot/child": DELETED}
+        hiding(present=False), REPO, ["slot/child"], {"slot/child": DELETED}
     )
     assert hidden == set()
 
@@ -333,15 +325,17 @@ async def test_a_link_pointing_at_nothing_leaves_the_path_deleted():
 @pytest.mark.asyncio
 async def test_a_path_the_walk_found_is_never_shadowed():
     hidden = await shadowed(
-        Hiding(), REPO, ["slot/child"], {"slot/child": MODIFIED}
+        hiding(), REPO, ["slot/child"], {"slot/child": MODIFIED}
     )
     assert hidden == set()
 
 
 @pytest.mark.asyncio
-async def test_without_a_namespace_nothing_is_shadowed():
+async def test_without_a_link_above_nothing_is_shadowed():
     assert (
-        await shadowed(None, REPO, ["slot/child"], {"slot/child": DELETED})
+        await shadowed(
+            hiding(linked=False), REPO, ["slot/child"], {"slot/child": DELETED}
+        )
         == set()
     )
 

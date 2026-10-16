@@ -27,7 +27,8 @@ import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 
 import { configValues, gitFs } from './fs.ts'
 import { ensureDir } from './io.ts'
-import type { Dispatch } from './types.ts'
+import type { CallerDispatchFn } from '../../../../context/session_context.ts'
+import { Files } from '../../../../workspace/files.ts'
 
 // The integ fixture builder, which is also what the differential harness hands
 // the real git binary: one repository, half packed and half loose, so both read
@@ -39,7 +40,7 @@ const BUILDER = fileURLToPath(
 let tmp: string
 let ws: Workspace
 let fs: ReturnType<typeof gitFs>
-let dispatch: Dispatch
+let dispatch: Files
 
 /** Every file under a directory, as repository-relative POSIX paths. */
 function walk(root: string, base = root): string[] {
@@ -62,12 +63,9 @@ beforeAll(async () => {
   // Copied into RAM rather than mounted from disk on purpose: a repository that
   // reads correctly out of a keyed store is proof the bridge goes through the
   // dispatcher and not through the filesystem underneath it.
-  // The dispatcher's own contract: PathSpec in, [result, io] out, which is what
-  // a CLI leaf is handed inside a workspace.
-  dispatch = async (op, path, args = [], kwargs = {}) => [
-    await ws.dispatch(op, path.virtual, args, kwargs),
-    new IOResult(),
-  ]
+  // The session's files, which is what a CLI leaf is handed inside a
+  // workspace.
+  dispatch = ws.vfs
   for (const rel of walk(repo)) {
     const target = `/repo/${rel}`
     await ensureDir(dispatch, PathSpec.fromStrPath(target).parent)
@@ -157,11 +155,11 @@ describe('configValues', () => {
 
 it('restores typed repository roots across the library string boundary', async () => {
   const seen: PathSpec[] = []
-  const source: Dispatch = (_op, path) => {
+  const source: CallerDispatchFn = (_op, path) => {
     seen.push(path)
     return Promise.resolve([new Uint8Array(), new IOResult()])
   }
-  const fs = gitFs(source, {
+  const fs = gitFs(new Files(source), {
     gitdir: PathSpec.fromStrPath('/hidden/../checkout', undefined, '/'),
     commondir: PathSpec.fromStrPath('/blocked/../shared', undefined, '/'),
     worktree: PathSpec.fromStrPath('/private/../work', undefined, '/'),

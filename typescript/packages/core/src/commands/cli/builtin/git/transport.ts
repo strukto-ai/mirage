@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { statOf } from './io.ts'
 import { PathSpec } from '../../../../types.ts'
 
 import git from 'isomorphic-git'
@@ -209,7 +210,7 @@ export class LocalTransport implements Transport {
   /** The source's refs, as upload-pack would advertise them. */
   async advertise(): Promise<Advertisement> {
     const loaded = await loadRefs(
-      this.repo.dispatch,
+      this.repo.vfs,
       this.repo.location.gitdir,
       this.repo.location.commondir,
     )
@@ -419,10 +420,8 @@ export async function openTransport(
     throw new GitError(`Unable to find remote helper for '${helper}'`)
   if (helper === null && SCP_LIKE.test(url))
     throw new GitError("Unable to find remote helper for 'ssh'")
-  const { dispatch, statPath } = view
-  const mounts = view.ns?.mounts
-  if (dispatch === undefined || statPath === undefined || mounts === undefined)
-    throw new NoWorkspaceError()
+  const { vfs } = view
+  if (vfs === undefined) throw new NoWorkspaceError()
   const raw = helper === null ? url : decodeURIComponent(new URL(url).pathname)
   const path = PathSpec.fromStrPath(raw, undefined, start)
   for (const suffix of REPO_SUFFIXES) {
@@ -431,22 +430,16 @@ export async function openTransport(
       undefined,
       '/',
     )
-    if ((await statPath(candidate)) === null) continue
+    if ((await statOf(vfs, candidate)) === null) continue
     let location
     try {
-      location = await discover(
-        dispatch,
-        statPath,
-        (where) => mounts.rootOf(where),
-        candidate.parent,
-        candidate,
-      )
+      location = await discover(vfs, candidate.parent, candidate)
     } catch (err) {
       if (err instanceof GitError) continue
       throw err
     }
-    const head = await readHead(dispatch, location.gitdir)
-    return new LocalTransport(await openRepo(dispatch, location), head.ref)
+    const head = await readHead(vfs, location.gitdir)
+    return new LocalTransport(await openRepo(vfs, location), head.ref)
   }
   throw new MissingRepositoryError(url)
 }

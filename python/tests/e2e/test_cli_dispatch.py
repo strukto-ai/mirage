@@ -305,9 +305,9 @@ async def test_policy_sees_the_cli_verbs():
 
 
 async def put(inv: CLIInvocation[None]):
-    assert inv.view is not None and inv.view.dispatch is not None
+    assert inv.view is not None and inv.view.vfs is not None
     path = PathSpec.from_str_path(inv.texts[0])
-    await inv.view.dispatch("write", path, data=b"hi\n")
+    await inv.view.vfs.write(path, b"hi\n")
     return None, IOResult()
 
 
@@ -347,10 +347,8 @@ async def test_a_cli_write_into_a_read_only_mount_is_refused():
 
 
 async def peek(inv: CLIInvocation[None]):
-    assert inv.view is not None and inv.view.dispatch is not None
-    data, _ = await inv.view.dispatch(
-        "read", PathSpec.from_str_path("/data/secret.txt")
-    )
+    assert inv.view is not None and inv.view.vfs is not None
+    data = await inv.view.vfs.read(PathSpec.from_str_path("/data/secret.txt"))
     return data, IOResult()
 
 
@@ -358,14 +356,11 @@ PEEK = CLI(spec=CommandSpec(name="peek"), handlers={"": CLIHandler(fn=peek)})
 
 
 async def later(inv: CLIInvocation[None]):
-    assert inv.view is not None and inv.view.dispatch is not None
-    dispatch = inv.view.dispatch
+    assert inv.view is not None and inv.view.vfs is not None
+    vfs = inv.view.vfs
 
     async def pulled():
-        data, _ = await dispatch(
-            "read", PathSpec.from_str_path("/data/secret.txt")
-        )
-        yield data
+        yield await vfs.read(PathSpec.from_str_path("/data/secret.txt"))
 
     return pulled(), IOResult()
 

@@ -26,7 +26,9 @@ from mirage.commands.cli.builtin.git.errors import (
     NoWorkingDirectoryError,
     WorkTreeChdirError,
 )
-from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
+from mirage.workspace.files import Files
+from mirage.workspace.types import MountRow
 
 
 def _stat_over(present: set[str], files: set[str] = frozenset()):
@@ -74,6 +76,28 @@ def _no_reads():
     return _reads({})
 
 
+def _files(dispatch, stat_path, root: str = "/repo/") -> Files:
+    """The session's files over a fake: stats from ``stat_path``, every
+    other call from ``dispatch``, one mount at ``root``.
+
+    Args:
+        dispatch (DispatchFn): the dispatcher serving reads.
+        stat_path (StatPath): the stat answering existence.
+        root (str): the mount prefix serving the start.
+    """
+
+    async def both(op: str, path: PathSpec, **kwargs):
+        if op != "stat":
+            return await dispatch(op, path, **kwargs)
+        found = await stat_path(path)
+        if found is None:
+            raise FileNotFoundError(path.virtual)
+        return found, None
+
+    row = MountRow(prefix=root, resource_type="ram", mode=MountMode.READ)
+    return Files([row], both)
+
+
 async def _discover(
     dispatch,
     stat_path,
@@ -90,13 +114,11 @@ async def _discover(
         start (str): the directory git starts in.
         gitdir (str | None): ``--git-dir``, relative to ``start``.
         worktree (str | None): ``--work-tree``, relative to ``start``.
-        root (str): the mount prefix reported for every path.
+        root (str): the mount prefix serving the start.
     """
     here = PathSpec.from_str_path(start, cwd="/")
     return await discover(
-        dispatch,
-        stat_path,
-        lambda path: root,
+        _files(dispatch, stat_path, root),
         here,
         None if gitdir is None else PathSpec.from_str_path(gitdir, cwd=here),
         None
@@ -296,8 +318,8 @@ async def test_a_bare_repository_has_no_work_tree_to_enter():
     stat_path = _stat_over({"/repo", "/repo/.git"})
     repo = await _discover(dispatch, stat_path, "/repo")
     with pytest.raises(NotAWorkTreeError):
-        await require_work_tree(dispatch, stat_path, repo, False)
-    await require_work_tree(dispatch, stat_path, repo, True)
+        await require_work_tree(_files(dispatch, stat_path), repo, False)
+    await require_work_tree(_files(dispatch, stat_path), repo, True)
 
 
 @pytest.mark.asyncio
@@ -306,7 +328,7 @@ async def test_a_named_work_tree_must_be_a_directory(worktree):
     stat_path = _stat_over({"/repo", "/repo/.git"}, files={"/repo/a.txt"})
     repo = await _discover(_no_reads(), stat_path, "/repo", worktree=worktree)
     with pytest.raises(NotAWorkTreeError):
-        await require_work_tree(_no_reads(), stat_path, repo, True)
+        await require_work_tree(_files(_no_reads(), stat_path), repo, True)
 
 
 @pytest.mark.asyncio
@@ -323,7 +345,7 @@ async def test_core_bare_is_read_as_git_reads_a_boolean(config):
     stat_path = _stat_over({"/repo", "/repo/.git"})
     repo = await _discover(dispatch, stat_path, "/repo")
     with pytest.raises(NotAWorkTreeError):
-        await require_work_tree(dispatch, stat_path, repo, False)
+        await require_work_tree(_files(dispatch, stat_path), repo, False)
 
 
 @pytest.mark.asyncio
@@ -356,7 +378,7 @@ async def test_a_linked_worktree_ignores_core_bare_but_still_parses_it():
         "/repo/.git/config": b"[core]\n\tbare = true\n",
     }
     repo = await _discover(_reads(contents), stat_path, "/repo/wt")
-    await require_work_tree(_reads(contents), stat_path, repo, False)
+    await require_work_tree(_files(_reads(contents), stat_path), repo, False)
     contents["/repo/.git/config"] += b"\tbare = maybe\n"
     with pytest.raises(BadConfigValueError):
         await _discover(_reads(contents), stat_path, "/repo/wt")

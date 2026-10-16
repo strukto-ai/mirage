@@ -236,7 +236,7 @@ export async function show(inv: CLIInvocation): Promise<CommandFnResult> {
       await configBool(repo, 'core.quotepath', true),
       inv.env,
     )
-    const mailmap = await loadMailmap(repo.dispatch, repo.location)
+    const mailmap = await loadMailmap(repo.vfs, repo.location)
     const mapped = useMailmap(fl, await configBool(repo, 'log.mailmap', true))
     const decorate = await decorationFor(repo, fl, base.pretty)
     const names = revisions.length > 0 ? revisions : [HEAD]

@@ -14,6 +14,7 @@
 
 import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
+import { Files } from '@struktoai/mirage-core/workspace/files'
 import { ensureDir } from './download.ts'
 
 function exists(code: string, path: string): Error {
@@ -44,8 +45,8 @@ describe('ensureDir', () => {
       throw new Error(`unexpected op ${op}`)
     }
     await Promise.all([
-      ensureDir(dispatch as never, PathSpec.fromStrPath('/work/out')),
-      ensureDir(dispatch as never, PathSpec.fromStrPath('/work/out')),
+      ensureDir(new Files(dispatch as never), PathSpec.fromStrPath('/work/out')),
+      ensureDir(new Files(dispatch as never), PathSpec.fromStrPath('/work/out')),
     ])
     expect([...dirs].sort()).toEqual(['/work', '/work/out'])
   })
@@ -55,8 +56,8 @@ describe('ensureDir', () => {
       if (op === 'stat') return Promise.reject(exists('ENOENT', spec.virtual))
       return Promise.reject(exists('EACCES', spec.virtual))
     }
-    await expect(ensureDir(dispatch as never, PathSpec.fromStrPath('/work/out'))).rejects.toThrow(
-      /work/,
-    )
+    await expect(
+      ensureDir(new Files(dispatch as never), PathSpec.fromStrPath('/work/out')),
+    ).rejects.toThrow(/work/)
   })
 })

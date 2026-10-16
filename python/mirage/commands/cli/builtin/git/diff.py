@@ -56,7 +56,6 @@ from mirage.commands.cli.builtin.git.tree import tree_entries
 from mirage.commands.cli.builtin.git.util import (
     STDERR,
     fatal,
-    links_of,
     option_operand,
     split_marked,
     start_point,
@@ -193,13 +192,13 @@ async def diff(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             ``inv.view``.
     """
     view = inv.view or CLIView()
-    dispatch, stat_path = view.dispatch, view.stat_path
+    vfs = view.vfs
     texts = inv.texts
     fl = FlagView(inv.flags)
     cached = fl.as_bool("cached") or fl.as_bool("staged")
     revisions, paths = split_marked(tuple(texts), inv.argv)
     try:
-        if dispatch is None or stat_path is None:
+        if vfs is None:
             raise NoWorkspaceError()
         word = option_operand(inv, texts, STDERR)
         if word is not None and (
@@ -211,14 +210,14 @@ async def diff(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         repo, location = await opened(fl, view)
         parsed = parse_diff_flags(
             fl,
-            default_renames=await renames_enabled(dispatch, location),
+            default_renames=await renames_enabled(vfs, location),
             quote_path_fully=await config_bool(
-                dispatch, location, b"core", b"quotepath", True
+                vfs, location, b"core", b"quotepath", True
             ),
         )
         warning = b""
         if cached:
-            state = await read_index(dispatch, location.gitdir)
+            state = await read_index(vfs, location.gitdir)
             refuse_unresolved(state)
             before = await asyncio.to_thread(_base, repo, revisions)
             after = staged_entries(state)
@@ -227,10 +226,8 @@ async def diff(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 _sides, repo, revisions
             )
             if new is None:
-                state = await read_index(dispatch, location.gitdir)
-                after = await work_entries(
-                    dispatch, stat_path, repo, location, state, links_of(view)
-                )
+                state = await read_index(vfs, location.gitdir)
+                after = await work_entries(vfs, repo, location, state)
                 if old is None:
                     for path in state.conflicts:
                         after.pop(path, None)

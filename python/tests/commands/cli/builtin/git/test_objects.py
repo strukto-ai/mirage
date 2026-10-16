@@ -32,7 +32,7 @@ async def loose_of(workspace) -> LooseObjects:
     Args:
         workspace (Workspace): the workspace under test.
     """
-    return LooseObjects(workspace.dispatch, GITDIR, asyncio.get_running_loop())
+    return LooseObjects(workspace.vfs, GITDIR, asyncio.get_running_loop())
 
 
 @pytest.mark.asyncio
@@ -60,9 +60,7 @@ async def test_an_absent_id_reads_as_absent_rather_than_raising(workspace):
 
 @pytest.mark.asyncio
 async def test_pack_directory_is_empty_before_packing(workspace):
-    packs = await load_packs(
-        workspace.dispatch, GITDIR, asyncio.get_running_loop()
-    )
+    packs = await load_packs(workspace.vfs, GITDIR, asyncio.get_running_loop())
     assert packs == []
 
 
@@ -71,7 +69,7 @@ async def test_packed_objects_are_served_from_the_pack(repo_path, workspace):
     pack_everything(repo_path)
     with mounted(repo_path) as packed_ws:
         packs = await load_packs(
-            packed_ws.dispatch, GITDIR, asyncio.get_running_loop()
+            packed_ws.vfs, GITDIR, asyncio.get_running_loop()
         )
         assert len(packs) == 1
         assert await asyncio.to_thread(len, packs[0]) > 0
@@ -81,7 +79,7 @@ async def test_packed_objects_are_served_from_the_pack(repo_path, workspace):
 async def test_the_store_serves_the_same_objects_either_way(
     repo_path, workspace
 ):
-    before = await load_object_store(workspace.dispatch, GITDIR)
+    before = await load_object_store(workspace.vfs, GITDIR)
     shas = await asyncio.to_thread(lambda: set(before))
     # Read them out before packing, not after: a lazy store reflects
     # what is on the backend now, and packing deletes the loose files.
@@ -90,7 +88,7 @@ async def test_the_store_serves_the_same_objects_either_way(
         raws[sha] = await asyncio.to_thread(before.get_raw, sha)
     pack_everything(repo_path)
     with mounted(repo_path) as packed_ws:
-        after = await load_object_store(packed_ws.dispatch, GITDIR)
+        after = await load_object_store(packed_ws.vfs, GITDIR)
         assert await asyncio.to_thread(lambda: set(after)) == shas
         for sha in shas:
             assert await asyncio.to_thread(after.get_raw, sha) == raws[sha]
@@ -98,7 +96,7 @@ async def test_the_store_serves_the_same_objects_either_way(
 
 @pytest.mark.asyncio
 async def test_missing_object_raises_key_error(workspace):
-    store = await load_object_store(workspace.dispatch, GITDIR)
+    store = await load_object_store(workspace.vfs, GITDIR)
     with pytest.raises(KeyError):
         await asyncio.to_thread(store.get_raw, b"0" * 40)
 
@@ -107,12 +105,12 @@ async def test_missing_object_raises_key_error(workspace):
 async def test_contains_loose_distinguishes_the_two_forms(
     repo_path, workspace
 ):
-    store = await load_object_store(workspace.dispatch, GITDIR)
+    store = await load_object_store(workspace.vfs, GITDIR)
     sha = (await asyncio.to_thread(lambda: list(store)))[0]
     assert await asyncio.to_thread(store.contains_loose, sha)
     pack_everything(repo_path)
     with mounted(repo_path) as packed_ws:
-        packed = await load_object_store(packed_ws.dispatch, GITDIR)
+        packed = await load_object_store(packed_ws.vfs, GITDIR)
         assert not await asyncio.to_thread(packed.contains_loose, sha)
         assert await asyncio.to_thread(lambda: sha in packed)
 
@@ -121,7 +119,7 @@ async def test_contains_loose_distinguishes_the_two_forms(
 async def test_prefix_search_narrows_to_one_fanout_directory(workspace):
     # The inherited iter_prefix walks the whole store, which on a lazy
     # database means fetching every object to resolve an abbreviated id.
-    store = await load_object_store(workspace.dispatch, GITDIR)
+    store = await load_object_store(workspace.vfs, GITDIR)
     sha = (await asyncio.to_thread(lambda: list(store)))[0]
     found = await asyncio.to_thread(lambda: list(store.iter_prefix(sha[:7])))
     assert sha in found
@@ -129,11 +127,11 @@ async def test_prefix_search_narrows_to_one_fanout_directory(workspace):
 
 @pytest.mark.asyncio
 async def test_prefix_search_finds_packed_ids_too(repo_path, workspace):
-    store = await load_object_store(workspace.dispatch, GITDIR)
+    store = await load_object_store(workspace.vfs, GITDIR)
     sha = (await asyncio.to_thread(lambda: list(store)))[0]
     pack_everything(repo_path)
     with mounted(repo_path) as packed_ws:
-        packed = await load_object_store(packed_ws.dispatch, GITDIR)
+        packed = await load_object_store(packed_ws.vfs, GITDIR)
         found = await asyncio.to_thread(
             lambda: list(packed.iter_prefix(sha[:7]))
         )
@@ -149,7 +147,7 @@ async def test_packed_prefix_search_reads_the_fanout_bucket(
     # prefixes included, and finds exactly what a full walk finds.
     pack_everything(repo_path)
     with mounted(repo_path) as packed_ws:
-        packed = await load_object_store(packed_ws.dispatch, GITDIR)
+        packed = await load_object_store(packed_ws.vfs, GITDIR)
         every = await asyncio.to_thread(lambda: list(packed))
         prefix = every[0][:width]
         found = await asyncio.to_thread(
@@ -166,7 +164,7 @@ async def test_a_prefix_search_never_walks_a_whole_pack(
     # made a verbose listing of many branches quadratic.
     pack_everything(repo_path)
     with mounted(repo_path) as packed_ws:
-        packed = await load_object_store(packed_ws.dispatch, GITDIR)
+        packed = await load_object_store(packed_ws.vfs, GITDIR)
         sha = (await asyncio.to_thread(lambda: list(packed)))[0]
 
         def walked(self):
@@ -186,7 +184,7 @@ async def test_a_prefix_that_is_not_lowercase_hex_names_nothing(
 ):
     pack_everything(repo_path)
     with mounted(repo_path) as packed_ws:
-        packed = await load_object_store(packed_ws.dispatch, GITDIR)
+        packed = await load_object_store(packed_ws.vfs, GITDIR)
         found = await asyncio.to_thread(
             lambda: list(packed.iter_prefix(prefix))
         )

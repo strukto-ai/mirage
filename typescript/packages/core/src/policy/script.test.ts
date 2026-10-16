@@ -16,12 +16,15 @@ import {
   type CapacityResult,
   CapacityState,
   ContentType,
+  DEFAULT_VISIBILITY,
   FileStat,
   FileType,
   type JsonValue,
   PathSpec,
 } from '../types.ts'
-import type { NamespaceView, SessionView } from '../view/types.ts'
+import type { SessionView } from '../view/types.ts'
+import { classifyPaths } from '../utils/hidden.ts'
+import { Files } from '../workspace/files.ts'
 import { CALLS } from '../workspace/dispatcher/constants.ts'
 import type { VfsCall } from '../vfs/types.ts'
 import { CTX_ENV, DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
@@ -187,15 +190,18 @@ function sessionView(cwd = '/data'): SessionView {
   }
 }
 
-function ns(): NamespaceView {
-  return {
-    mounts: {
-      descendants: () => ['/data', '/vault'],
-      visibleDescendants: () => ['/data'],
-      isRoot: (path) => path === '/data' || path === '/vault',
-      rootOf: () => '/data',
+function files(): Files {
+  const vis = { ...DEFAULT_VISIBILITY, paths: classifyPaths(['/vault']) }
+  return new Files(
+    () => Promise.reject(new Error('no file calls here')),
+    null,
+    null,
+    () => null,
+    {
+      prefixes: () => ['/', '/data/', '/vault/'],
+      visibility: () => vis,
     },
-  }
+  )
 }
 
 function ctx(
@@ -314,7 +320,7 @@ describe('scriptAction', () => {
 
 describe('scriptContext', () => {
   it('reads a context as its fields, with the session as data', () => {
-    const data = scriptContext(ctx('cat', { session: sessionView(), ns: ns() }))
+    const data = scriptContext(ctx('cat', { session: sessionView(), vfs: files() }))
     expect(data.command).toBe('cat')
     expect(data.line).toBe('cat /repo/sealed/k')
     expect(data.paths).toEqual(['/repo/sealed/k'])
@@ -391,7 +397,7 @@ describe('ScriptPolicy', () => {
   it('runs a program unedited, with its context in the env and on stdin', async () => {
     const engine = new FakeProgram(answer({ kind: 'deny', reason: 'sealed' }))
     const policy = policyWith('preCommand', engine)
-    const judged = ctx('cat', { session: sessionView('/'), ns: ns() })
+    const judged = ctx('cat', { session: sessionView('/'), vfs: files() })
     expect(await policy.preCommand(judged)).toEqual([{ kind: 'deny', reason: 'sealed' }])
     const [request] = engine.requests
     if (request === undefined) throw new Error('the program never ran')

@@ -13,6 +13,7 @@ from mirage.commands.cli.builtin.git.io import (
     read_names,
     read_optional,
     read_range,
+    stat_of,
 )
 from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.builtin.git.session import located
@@ -22,21 +23,18 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import WALK_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
-from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
 from mirage.utils.remnants import entry_name
-from mirage.view.types import StatPath
+from mirage.workspace.files import Files
 
 PACK_BLOCK = 1 << 18
 
 
-async def check_pack(
-    dispatch: DispatchFn, path: PathSpec, expected: bytes
-) -> None:
+async def check_pack(vfs: Files, path: PathSpec, expected: bytes) -> None:
     """Hash bounded ranges, retaining only the trailing SHA-1 between reads.
 
     Args:
-        dispatch (DispatchFn): repository dispatcher.
+        vfs (Files): the session's files.
         path (PathSpec): virtual pack path.
         expected (bytes): pack checksum recorded by the index.
     """
@@ -44,12 +42,12 @@ async def check_pack(
     tail = b""
     offset = 0
     try:
-        size = await file_size(dispatch, path)
+        size = await file_size(vfs, path)
         while size is None or offset < size:
             count = (
                 PACK_BLOCK if size is None else min(PACK_BLOCK, size - offset)
             )
-            chunk = await read_range(dispatch, path, offset, count)
+            chunk = await read_range(vfs, path, offset, count)
             if not chunk:
                 if size is not None and offset < size:
                     raise GitError(f"truncated pack: {path.virtual}")
@@ -71,21 +69,21 @@ async def check_pack(
         raise GitError(f"pack checksum mismatch: {path.virtual}")
 
 
-async def check_packs(dispatch: DispatchFn, commondir: PathSpec) -> None:
+async def check_packs(vfs: Files, commondir: PathSpec) -> None:
     """Validate indexes and stream packs before opening the object database.
 
     Args:
-        dispatch (DispatchFn): repository dispatcher.
+        vfs (Files): the session's files.
         commondir (PathSpec): shared Git directory.
     """
     root = commondir.join("objects/pack")
-    for entry in await read_names(dispatch, root):
+    for entry in await read_names(vfs, root):
         name = entry_name(entry)
         if not name.endswith(".idx"):
             continue
         path = root.join(name)
         try:
-            data = await read_file(dispatch, path)
+            data = await read_file(vfs, path)
         except WALK_ERRORS as exc:
             detail = fs_strerror(exc) or str(exc)
             raise GitError(
@@ -95,30 +93,25 @@ async def check_packs(dispatch: DispatchFn, commondir: PathSpec) -> None:
             raise GitError(f"truncated pack index: {path.virtual}")
         if hashlib.sha1(data[:-20]).digest() != data[-20:]:
             raise GitError(f"pack index checksum mismatch: {path.virtual}")
-        await check_pack(
-            dispatch, root.join(f"{name[:-4]}.pack"), data[-40:-20]
-        )
+        await check_pack(vfs, root.join(f"{name[:-4]}.pack"), data[-40:-20])
 
 
-async def log_roots(
-    dispatch: DispatchFn, stat_path: StatPath, path: PathSpec
-) -> set[bytes]:
+async def log_roots(vfs: Files, path: PathSpec) -> set[bytes]:
     """Collect reflog roots without assuming names or storage layout.
 
     Args:
-        dispatch (DispatchFn): repository dispatcher.
-        stat_path (StatPath): namespace-aware entry classification.
+        vfs (Files): the session's files.
         path (PathSpec): logs directory or a log file.
     """
     found: set[bytes] = set()
-    for entry in await read_names(dispatch, path):
+    for entry in await read_names(vfs, path):
         name = entry_name(entry)
         target = path.join(name)
-        info = await stat_path(target)
+        info = await stat_of(vfs, target)
         if info is not None and info.type is FileType.DIRECTORY:
-            found.update(await log_roots(dispatch, stat_path, target))
+            found.update(await log_roots(vfs, target))
         else:
-            data = await read_optional(dispatch, target)
+            data = await read_optional(vfs, target)
             for line in (data or b"").splitlines():
                 found.update(
                     oid
@@ -224,11 +217,11 @@ async def fsck(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         view = inv.view or CLIView()
         fl = FlagView(inv.flags)
         location = await located(fl, view)
-        assert view.dispatch is not None and view.stat_path is not None
-        await check_packs(view.dispatch, location.commondir)
-        repo = await open_repo(view.dispatch, location)
+        assert view.vfs is not None and view.vfs is not None
+        await check_packs(view.vfs, location.commondir)
+        repo = await open_repo(view.vfs, location)
         roots: set[bytes] = set(repo.refs.as_dict().values())
-        index = await read_index(view.dispatch, location.gitdir)
+        index = await read_index(view.vfs, location.gitdir)
         roots.update(
             entry.sha
             for entry in index.entries.values()
@@ -241,11 +234,7 @@ async def fsck(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 if entry is not None and entry.mode != 0o160000
             )
         for directory in {location.gitdir, location.commondir}:
-            roots.update(
-                await log_roots(
-                    view.dispatch, view.stat_path, directory.join("logs")
-                )
-            )
+            roots.update(await log_roots(view.vfs, directory.join("logs")))
         out, io = await asyncio.to_thread(
             check,
             repo,
@@ -254,9 +243,7 @@ async def fsck(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             fl.as_bool("unreachable"),
         )
         if not roots:
-            head = await read_optional(
-                view.dispatch, location.gitdir.join("HEAD")
-            )
+            head = await read_optional(view.vfs, location.gitdir.join("HEAD"))
             branch = (
                 (head or b"").decode().strip().removeprefix("ref: refs/heads/")
             )

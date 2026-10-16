@@ -33,7 +33,7 @@ from mirage.runtime.routing import RouteDecision, RouteError
 from mirage.runtime.table import bind_commands, catch_all, runtime_bindings_for
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.utils.abort import MirageAbortError
-from mirage.view.types import NamespaceView, SessionView
+from mirage.view.types import SessionView
 from mirage.workspace.files import Files
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.node.explain import Judged, Walked
@@ -295,25 +295,24 @@ class Router:
 
         def handles(
             walked: SessionState,
-        ) -> tuple[SessionView | None, NamespaceView | None, Files | None]:
+        ) -> tuple[SessionView | None, Files | None]:
             found = views(walked.session_id, walked) if views else None
-            return found or (None, None, None)
+            return found or (None, None)
 
         commands: list[CommandContext] = []
         for item, explained in judged:
             for one in explained:
                 if one.ctx is None:
                     continue
-                view, ns, vfs = handles(one.session or item.session)
+                view, vfs = handles(one.session or item.session)
                 commands.append(
-                    dataclasses.replace(one.ctx, session=view, ns=ns, vfs=vfs)
+                    dataclasses.replace(one.ctx, session=view, vfs=vfs)
                 )
-        view, ns, vfs = handles(session)
+        view, vfs = handles(session)
         return RouteContext(
             line=line,
             commands=tuple(commands),
             session_id=session.session_id,
             session=view,
-            ns=ns,
             vfs=vfs,
         )

@@ -1631,6 +1631,7 @@ export class MountEntry {
         ...(probe === null ? {} : { walkProbe: probe }),
       },
       ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
+      ...(context.vfs !== undefined ? { vfs: context.vfs } : {}),
       ...(context.sessionId !== undefined ? { sessionId: context.sessionId } : {}),
       ...(context.env !== undefined ? { env: context.env } : {}),
       ...(context.sessionView !== undefined ? { sessionView: context.sessionView } : {}),

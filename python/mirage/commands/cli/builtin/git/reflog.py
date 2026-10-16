@@ -32,8 +32,8 @@ from mirage.commands.cli.builtin.git.util import (
 from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
+from mirage.workspace.files import Files
 
 LOGS_DIR = "logs"
 HEAD_LOG = "logs/HEAD"
@@ -67,9 +67,7 @@ def entry(
     return b"%s %s %s %d +0000%s\n" % (before, after, who, when, tail)
 
 
-async def append(
-    dispatch: DispatchFn, gitdir: PathSpec, path: str, line: bytes
-) -> None:
+async def append(vfs: Files, gitdir: PathSpec, path: str, line: bytes) -> None:
     """Add one line to a reflog, creating it if it is not there.
 
     Read-modify-write rather than an append op, because not every
@@ -79,19 +77,19 @@ async def append(
     perfectly good checkout read as ``(no branch)``.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         gitdir (PathSpec): absolute virtual path of the git directory owning
             the log.
         path (str): log path relative to it, e.g. ``logs/HEAD``.
         line (bytes): the line to add, newline included.
     """
     target = gitdir.join(path)
-    existing = await read_optional(dispatch, target)
-    await write_file(dispatch, target, (existing or b"") + line)
+    existing = await read_optional(vfs, target)
+    await write_file(vfs, target, (existing or b"") + line)
 
 
 async def logged(
-    dispatch: DispatchFn, location: RepoLocation, name: str, log: PathSpec
+    vfs: Files, location: RepoLocation, name: str, log: PathSpec
 ) -> bool:
     """Whether an update to a ref is logged.
 
@@ -101,27 +99,25 @@ async def logged(
     nothing in one (``should_autocreate_reflog``).
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         name (str): the full ref name.
         log (PathSpec): the path of its log.
     """
-    if await read_optional(dispatch, log) is not None:
+    if await read_optional(vfs, log) is not None:
         return True
-    values = await config_values(
-        dispatch, location, b"core", b"logallrefupdates"
-    )
+    values = await config_values(vfs, location, b"core", b"logallrefupdates")
     if values and values[-1].lower() == b"always":
         return True
     if values:
         normal = bool(maybe_bool(values[-1]))
     else:
-        normal = not await is_bare(dispatch, location)
+        normal = not await is_bare(vfs, location)
     return normal and (name == HEAD or name.startswith(LOGGED_PREFIXES))
 
 
 async def record(
-    dispatch: DispatchFn,
+    vfs: Files,
     gitdir: PathSpec,
     commondir: PathSpec,
     ref: str | None,
@@ -139,7 +135,7 @@ async def record(
     repository, so a linked worktree splits them the way git does.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         gitdir (PathSpec): absolute virtual path of this checkout's git
             directory, which owns HEAD's log.
         commondir (PathSpec): absolute virtual path of the shared git
@@ -153,27 +149,27 @@ async def record(
         message (str): what happened.
     """
     line = entry(before or ZERO, after, who, when, message)
-    await append(dispatch, gitdir, HEAD_LOG, line)
+    await append(vfs, gitdir, HEAD_LOG, line)
     if ref is not None:
-        await append(dispatch, commondir, posixpath.join(LOGS_DIR, ref), line)
+        await append(vfs, commondir, posixpath.join(LOGS_DIR, ref), line)
 
 
 async def _log_of(
-    dispatch: DispatchFn, location: RepoLocation, ref: str
+    vfs: Files, location: RepoLocation, ref: str
 ) -> bytes | None:
     """A ref's reflog, from the git directory that owns it.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         ref (str): the ref name, ``HEAD`` or a full ``refs/`` name.
     """
     root = location.gitdir if ref == HEAD else location.commondir
-    return await read_optional(dispatch, root.join(LOGS_DIR, ref))
+    return await read_optional(vfs, root.join(LOGS_DIR, ref))
 
 
 async def _named_log(
-    dispatch: DispatchFn, location: RepoLocation, revision: str
+    vfs: Files, location: RepoLocation, revision: str
 ) -> tuple[str, bytes | None]:
     """The log a reflog walk reads, and the name its rows print.
 
@@ -183,12 +179,12 @@ async def _named_log(
     printed by its full name (git 2.47.3 and 2.50.1).
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         revision (str): the ref as typed.
     """
     for ref in (revision, f"refs/{revision}", f"refs/heads/{revision}"):
-        data = await _log_of(dispatch, location, ref)
+        data = await _log_of(vfs, location, ref)
         if data:
             return revision, data
     for ref in (
@@ -196,7 +192,7 @@ async def _named_log(
         f"refs/remotes/{revision}",
         f"refs/remotes/{revision}/HEAD",
     ):
-        data = await _log_of(dispatch, location, ref)
+        data = await _log_of(vfs, location, ref)
         if data:
             return ref, data
     return revision, None
@@ -216,10 +212,10 @@ async def reflog(
         check_operands(inv, texts)
         view = inv.view or CLIView()
         repo, location = await opened(fl, view)
-        assert view.dispatch is not None
+        assert view.vfs is not None
         revision = texts[0] if texts else HEAD
         await asyncio.to_thread(resolve_commit, repo, revision)
-        name, data = await _named_log(view.dispatch, location, revision)
+        name, data = await _named_log(view.vfs, location, revision)
         rows = list(reversed((data or b"").splitlines()))
         limit = fl.as_int("max_count")
         if limit is not None and limit >= 0:

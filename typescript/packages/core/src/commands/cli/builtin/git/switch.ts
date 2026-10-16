@@ -102,9 +102,8 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
   let note: string
   let warnings = ''
   try {
-    const dispatch = view.dispatch
-    const statPath = view.statPath
-    if (statPath === undefined || dispatch === undefined) {
+    const vfs = view.vfs
+    if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
     checkSwitches(inv, texts)
@@ -120,8 +119,8 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
     }
     const repo = await opened(fl, view, true)
     const mode = await trackMode(repo)
-    const head = await readHead(dispatch, repo.location.gitdir)
-    const known = await loadRefs(dispatch, repo.location.gitdir, repo.location.commondir)
+    const head = await readHead(vfs, repo.location.gitdir)
+    const known = await loadRefs(vfs, repo.location.gitdir, repo.location.commondir)
     let target: string
     let oid: string
     let attached: boolean
@@ -159,7 +158,7 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
       if (held !== null) throw new RefLockError(`${BRANCH_PREFIX}${target}`, held)
       attached = true
       if (unborn) {
-        await setHead(dispatch, repo.location.gitdir, `${BRANCH_PREFIX}${target}`)
+        await setHead(vfs, repo.location.gitdir, `${BRANCH_PREFIX}${target}`)
         return [
           ENC.encode(''),
           new IOResult({
@@ -182,7 +181,7 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
         // Moving nothing is not the same as having nothing to check: git dies
         // on an unresolved index here too, so the shortcut reads it before it
         // answers. Every ref check above comes first, which is git's own order.
-        refuseUnresolved(await readIndex(repo, dispatch))
+        refuseUnresolved(await readIndex(repo, vfs))
         return [
           null,
           new IOResult({
@@ -214,10 +213,7 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
       }
     }
     const moved = await moveHead(
-      dispatch,
-      statPath,
-      view.ns?.links ?? null,
-      view.ns?.mounts ?? null,
+      vfs,
       repo,
       known,
       head,

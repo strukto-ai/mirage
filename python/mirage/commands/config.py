@@ -15,7 +15,7 @@
 import functools
 from collections.abc import Awaitable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Protocol, TypeAlias, overload
+from typing import TYPE_CHECKING, Any, Callable, Protocol, TypeAlias, overload
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -73,6 +73,9 @@ from mirage.view.types import (
     StatPath,
 )
 
+if TYPE_CHECKING:
+    from mirage.workspace.files import Files
+
 
 @dataclass(frozen=True, slots=True)
 class ExecContext:
@@ -96,6 +99,7 @@ class ExecContext:
     stdin: ByteSource | None = None
     cwd: str = "/"
     dispatch: DispatchFn | None = None
+    vfs: "Files | None" = None
     session_id: str | None = None
     env: dict[str, str] | None = None
     exec_allowed: bool = True
@@ -205,6 +209,8 @@ class CommandOpts:
         io (CommandIO | None): The mount's backend table, built from its
             VFS; None outside a mount.
         dispatch (DispatchFn | None): The workspace op dispatcher.
+        vfs (Files | None): The session's files, made by the command:
+            the API a CLI gets as ``inv.view.vfs``.
         session_id (str | None): The calling session.
         env (dict[str, str] | None): A snapshot of the session
             environment.
@@ -243,6 +249,7 @@ class CommandOpts:
     index: IndexCacheStore = NULL_INDEX
     io: CommandIO | None = None
     dispatch: DispatchFn | None = None
+    vfs: "Files | None" = None
     session_id: str | None = None
     env: dict[str, str] | None = None
     exec_allowed: bool = True

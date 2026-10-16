@@ -42,6 +42,7 @@ from mirage.commands.cli.builtin.git.init import lay_out
 from mirage.commands.cli.builtin.git.io import (
     read_names,
     remove_tree,
+    stat_of,
     write_file,
 )
 from mirage.commands.cli.builtin.git.reflog import (
@@ -69,8 +70,6 @@ from mirage.commands.cli.builtin.git.util import (
     check_switches,
     config_section,
     fatal,
-    links_of,
-    mounts_of,
     start_point,
     verb_usage,
 )
@@ -167,7 +166,7 @@ async def clone(
     """
     fl = FlagView(inv.flags)
     view = inv.view or CLIView()
-    dispatch, stat_path = view.dispatch, view.stat_path
+    vfs = view.vfs
     try:
         check_switches(inv, inv.texts)
         if not inv.texts:
@@ -182,14 +181,14 @@ async def clone(
     name = inv.texts[1] if len(inv.texts) > 1 else default_directory(url)
     quiet = fl.as_bool("quiet")
     try:
-        if dispatch is None or stat_path is None:
+        if vfs is None:
             raise NoWorkspaceError()
         start = start_point(fl)
         target = start.join(name)
-        info = await stat_path(target)
+        info = await stat_of(vfs, target)
         if info is not None and (
             info.type is not FileType.DIRECTORY
-            or await read_names(dispatch, target)
+            or await read_names(vfs, target)
         ):
             raise GitError(
                 f"destination path '{name}' already exists and "
@@ -215,17 +214,13 @@ async def clone(
         )
     except GitError as exc:
         if info is None:
-            await remove_tree(
-                dispatch, target, links_of(view), mounts_of(view)
-            )
+            await remove_tree(vfs, target)
         else:
-            for entry in await read_names(dispatch, target):
+            for entry in await read_names(vfs, target):
                 child = posixpath.basename(entry.rstrip("/"))
                 await remove_tree(
-                    dispatch,
+                    vfs,
                     target.join(child),
-                    links_of(view),
-                    mounts_of(view),
                 )
         refusal = str(exc) if exc.prefix is None else f"{exc.prefix}: {exc}"
         return None, IOResult(
@@ -256,22 +251,19 @@ async def _populate(
         str: what the clone prints to stderr after ``Cloning into``.
     """
     fl = FlagView(inv.flags)
-    dispatch, stat_path = view.dispatch, view.stat_path
-    assert dispatch is not None and stat_path is not None
-    mounts = view.ns.mounts if view.ns is not None else None
+    vfs = view.vfs
+    assert vfs is not None
     gitdir = target.join(".git")
     remote = fl.as_str("origin") or "origin"
     if not valid_ref_name(f"refs/remotes/{remote}/test"):
         raise GitError(f"'{remote}' is not a valid remote name")
-    await lay_out(dispatch, gitdir, DEFAULT_BRANCH, "")
+    await lay_out(vfs, gitdir, DEFAULT_BRANCH, "")
     advertised = await transport.advertise()
     location = RepoLocation(
         gitdir,
         gitdir,
         target,
-        PathSpec.from_str_path(
-            mounts.root_of(target.virtual) if mounts else "/", cwd="/"
-        ),
+        PathSpec.from_str_path(vfs.mount_of(target) or "/", cwd="/"),
     )
     wanted, notes = ignore_funny(
         [
@@ -313,59 +305,54 @@ async def _populate(
             and valid_ref_name(head)
             else f"{HEADS}{DEFAULT_BRANCH}"
         )[len(HEADS) :]
-    repo, _ = await fetch_objects(
-        dispatch, location, transport, adv, wanted, False
-    )
+    repo, _ = await fetch_objects(vfs, location, transport, adv, wanted, False)
     for want in wanted:
         assert want.local is not None
-        await write_ref(dispatch, gitdir, want.local, want.oid.encode())
+        await write_ref(vfs, gitdir, want.local, want.oid.encode())
     reason = f"clone: from {url}"
     now = int(time.time())
     if adv.head is not None and adv.head in adv.refs:
         tracking = f"refs/remotes/{remote}/HEAD"
         await write_file(
-            dispatch,
+            vfs,
             gitdir.join(tracking),
             f"ref: refs/remotes/{remote}/{adv.head[len(HEADS) :]}\n".encode(),
         )
         await append(
-            dispatch,
+            vfs,
             gitdir,
             f"logs/{tracking}",
             entry(ZERO, adv.refs[adv.head].encode(), IDENTITY, now, reason),
         )
     await write_file(
-        dispatch,
+        vfs,
         gitdir.join("config"),
         _config(url, remote, branch).encode(),
     )
     if local:
         notes += "done.\n"
     if commit is None:
-        await set_head(dispatch, gitdir, f"{HEADS}{branch}")
+        await set_head(vfs, gitdir, f"{HEADS}{branch}")
         return notes
     line = entry(ZERO, commit.encode(), IDENTITY, now, reason)
     if branch is not None:
-        await write_ref(dispatch, gitdir, f"{HEADS}{branch}", commit.encode())
-        await set_head(dispatch, gitdir, f"{HEADS}{branch}")
-        await append(dispatch, gitdir, f"logs/{HEADS}{branch}", line)
+        await write_ref(vfs, gitdir, f"{HEADS}{branch}", commit.encode())
+        await set_head(vfs, gitdir, f"{HEADS}{branch}")
+        await append(vfs, gitdir, f"logs/{HEADS}{branch}", line)
     else:
-        await detach_head(dispatch, gitdir, commit.encode())
+        await detach_head(vfs, gitdir, commit.encode())
         notes += f"Note: switching to '{commit}'.\n\n{DETACHED_ADVICE}\n"
-    await append(dispatch, gitdir, "logs/HEAD", line)
+    await append(vfs, gitdir, "logs/HEAD", line)
     if not fl.as_bool("no_checkout"):
         tree = await asyncio.to_thread(
             tree_of, repo, ObjectID(commit.encode())
         )
         await switch_to(
-            dispatch,
-            stat_path,
+            vfs,
             repo,
             location,
             {},
             tree,
-            links_of(view),
-            mounts,
         )
     return notes
 

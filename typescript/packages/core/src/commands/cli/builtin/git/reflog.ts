@@ -26,7 +26,8 @@ import { readOptional, writeFile } from './io.ts'
 import { HEAD } from './constants.ts'
 import { isBare } from './discover.ts'
 import { configValues } from './fs.ts'
-import type { Dispatch, RepoLocation } from './types.ts'
+import type { RepoLocation } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 
 const LOGS_DIR = 'logs'
 const HEAD_LOG = 'logs/HEAD'
@@ -72,17 +73,17 @@ export function entry(
  * so an absent log makes a perfectly good checkout read as `(no branch)`.
  */
 export async function append(
-  dispatch: Dispatch,
+  vfs: Files,
   gitdir: PathSpec,
   path: string,
   line: Uint8Array,
 ): Promise<void> {
   const target = gitdir.join(path)
-  const existing = (await readOptional(dispatch, target)) ?? new Uint8Array(0)
+  const existing = (await readOptional(vfs, target)) ?? new Uint8Array(0)
   const merged = new Uint8Array(existing.length + line.length)
   merged.set(existing)
   merged.set(line, existing.length)
-  await writeFile(dispatch, target, merged)
+  await writeFile(vfs, target, merged)
 }
 
 const LOGGED_PREFIXES = ['refs/heads/', 'refs/remotes/', 'refs/notes/']
@@ -93,22 +94,21 @@ const LOGGED_PREFIXES = ['refs/heads/', 'refs/remotes/', 'refs/notes/']
  * branch, remote and notes refs outside a bare repository, and to nothing in
  * one (`should_autocreate_reflog`).
  *
- * @param dispatch workspace op dispatcher
+ * @param vfs the session's files
  * @param location the discovered repository
  * @param name the full ref name
  * @param log the path of its log
  */
 export async function logged(
-  dispatch: Dispatch,
+  vfs: Files,
   location: RepoLocation,
   name: string,
   log: PathSpec,
 ): Promise<boolean> {
-  if ((await readOptional(dispatch, log)) !== null) return true
-  const value = (await configValues(dispatch, location, 'core.logAllRefUpdates')).at(-1)
+  if ((await readOptional(vfs, log)) !== null) return true
+  const value = (await configValues(vfs, location, 'core.logAllRefUpdates')).at(-1)
   if (value?.toLowerCase() === 'always') return true
-  const normal =
-    value === undefined ? !(await isBare(dispatch, location)) : (maybeBool(value) ?? false)
+  const normal = value === undefined ? !(await isBare(vfs, location)) : (maybeBool(value) ?? false)
   return normal && (name === HEAD || LOGGED_PREFIXES.some((prefix) => name.startsWith(prefix)))
 }
 
@@ -120,7 +120,7 @@ export async function logged(
  * to the checkout and a branch's to the repository, so a linked worktree splits
  * them the way git does.
  *
- * @param dispatch workspace op dispatcher
+ * @param vfs the session's files
  * @param gitdir this checkout's git directory, which owns HEAD's log
  * @param commondir the shared git directory, which owns the branches' logs
  * @param ref the branch ref that also moved, null when HEAD is detached
@@ -131,7 +131,7 @@ export async function logged(
  * @param message what happened
  */
 export async function record(
-  dispatch: Dispatch,
+  vfs: Files,
   gitdir: PathSpec,
   commondir: PathSpec,
   ref: string | null,
@@ -142,18 +142,14 @@ export async function record(
   message: string,
 ): Promise<void> {
   const line = entry(before ?? ZERO, after, who, when, message)
-  await append(dispatch, gitdir, HEAD_LOG, line)
-  if (ref !== null) await append(dispatch, commondir, `${LOGS_DIR}/${ref}`, line)
+  await append(vfs, gitdir, HEAD_LOG, line)
+  if (ref !== null) await append(vfs, commondir, `${LOGS_DIR}/${ref}`, line)
 }
 
 /** A ref's reflog, from the git directory that owns it. */
-async function logOf(
-  dispatch: Dispatch,
-  location: RepoLocation,
-  ref: string,
-): Promise<Uint8Array | null> {
+async function logOf(vfs: Files, location: RepoLocation, ref: string): Promise<Uint8Array | null> {
   const root = ref === HEAD ? location.gitdir : location.commondir
-  return readOptional(dispatch, root.join(LOGS_DIR, ref))
+  return readOptional(vfs, root.join(LOGS_DIR, ref))
 }
 
 /**
@@ -165,12 +161,12 @@ async function logOf(
  * 2.47.3 and 2.50.1).
  */
 async function namedLog(
-  dispatch: Dispatch,
+  vfs: Files,
   location: RepoLocation,
   revision: string,
 ): Promise<[string, Uint8Array | null]> {
   for (const ref of [revision, `refs/${revision}`, `refs/heads/${revision}`]) {
-    const data = await logOf(dispatch, location, ref)
+    const data = await logOf(vfs, location, ref)
     if (data?.length) return [revision, data]
   }
   for (const ref of [
@@ -178,7 +174,7 @@ async function namedLog(
     `refs/remotes/${revision}`,
     `refs/remotes/${revision}/HEAD`,
   ]) {
-    const data = await logOf(dispatch, location, ref)
+    const data = await logOf(vfs, location, ref)
     if (data?.length) return [ref, data]
   }
   return [revision, null]
@@ -193,7 +189,7 @@ export async function reflog(inv: CLIInvocation): Promise<CommandFnResult> {
     const repo = await opened(fl, inv.view ?? {})
     const revision = texts[0] ?? HEAD
     await resolveCommit(repo, revision)
-    const [name, data] = await namedLog(repo.dispatch, repo.location, revision)
+    const [name, data] = await namedLog(repo.vfs, repo.location, revision)
     let rows = new TextDecoder()
       .decode(data ?? new Uint8Array())
       .split('\n')

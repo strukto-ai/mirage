@@ -23,7 +23,7 @@ import { DETACHED_ADVICE, switchTo } from './checkout.ts'
 import { CloneReadOnlyError, GitError, NoWorkspaceError, UsageError } from './errors.ts'
 import { configuredHeaders, fetchObjects, HEADS, ignoreFunny, TAGS } from './fetch.ts'
 import { layOut } from './init.ts'
-import { readNames, removeTree, writeFile } from './io.ts'
+import { readNames, removeTree, statOf, writeFile } from './io.ts'
 import { append, entry, IDENTITY, ZERO } from './reflog.ts'
 import { detachHead, setHead, validRefName, writeRef } from './refs.ts'
 import { openRepo } from './repo.ts'
@@ -116,14 +116,14 @@ export async function clone(
   let transport: Transport
   let start: PathSpec
   try {
-    const { dispatch, statPath } = view
-    if (dispatch === undefined || statPath === undefined) throw new NoWorkspaceError()
+    const { vfs } = view
+    if (vfs === undefined) throw new NoWorkspaceError()
     start = startPoint(fl)
     target = PathSpec.fromStrPath(name, undefined, start)
-    const info = await statPath(target)
+    const info = await statOf(vfs, target)
     if (
       info !== null &&
-      (info.type !== FileType.DIRECTORY || (await readNames(dispatch, target)).length)
+      (info.type !== FileType.DIRECTORY || (await readNames(vfs, target)).length)
     )
       throw new GitError(`destination path '${name}' already exists and is not an empty directory.`)
     fresh = info === null
@@ -147,14 +147,12 @@ export async function clone(
     notes += await populate(inv, view, transport, target, stored, local && !quiet)
   } catch (err) {
     if (!(err instanceof GitError)) throw err
-    const { dispatch } = view
-    const links = view.ns?.links ?? null
-    const mounts = view.ns?.mounts ?? null
-    if (fresh && dispatch !== undefined) await removeTree(dispatch, target, links, mounts)
-    else if (dispatch !== undefined)
-      for (const entry of await readNames(dispatch, target)) {
+    const { vfs } = view
+    if (fresh && vfs !== undefined) await removeTree(vfs, target)
+    else if (vfs !== undefined)
+      for (const entry of await readNames(vfs, target)) {
         const child = entry.replace(/\/+$/, '').split('/').at(-1) ?? ''
-        if (child) await removeTree(dispatch, target.join(child), links, mounts)
+        if (child) await removeTree(vfs, target.join(child))
       }
     const refusal = err.prefix === null ? err.message : `${err.prefix}: ${err.message}`
     return [null, new IOResult({ exitCode: err.code, stderr: ENC.encode(`${notes}${refusal}\n`) })]
@@ -172,20 +170,19 @@ async function populate(
   local: boolean,
 ): Promise<string> {
   const fl = new FlagView(inv.flags)
-  const { dispatch, statPath } = view
-  if (dispatch === undefined || statPath === undefined) throw new NoWorkspaceError()
-  const mounts = view.ns?.mounts ?? null
+  const { vfs } = view
+  if (vfs === undefined) throw new NoWorkspaceError()
   const gitdir = target.join('.git')
   const remote = fl.asStr('origin') ?? 'origin'
   if (!validRefName(`refs/remotes/${remote}/test`))
     throw new GitError(`'${remote}' is not a valid remote name`)
-  await layOut(dispatch, gitdir, DEFAULT_BRANCH, '')
+  await layOut(vfs, gitdir, DEFAULT_BRANCH, '')
   const advertised = await transport.advertise()
   const location: RepoLocation = {
     gitdir,
     commondir: gitdir,
     worktree: target,
-    mountRoot: PathSpec.fromStrPath(mounts?.rootOf(target.virtual) ?? '/', undefined, '/'),
+    mountRoot: PathSpec.fromStrPath(vfs.mountOf(target) ?? '/', undefined, '/'),
   }
   const [wants, funny] = ignoreFunny(
     [...advertised.refs]
@@ -221,53 +218,39 @@ async function populate(
       head?.startsWith(HEADS) && validRefName(head) ? head : `${HEADS}${DEFAULT_BRANCH}`
     ).slice(HEADS.length)
   }
-  const [repo] = await fetchObjects(
-    await openRepo(dispatch, location),
-    transport,
-    adv,
-    wants,
-    false,
-  )
+  const [repo] = await fetchObjects(await openRepo(vfs, location), transport, adv, wants, false)
   for (const want of wants)
-    if (want.local !== null) await writeRef(dispatch, gitdir, want.local, want.oid)
+    if (want.local !== null) await writeRef(vfs, gitdir, want.local, want.oid)
   const reason = `clone: from ${url}`
   const now = Math.floor(Date.now() / 1000)
   const headOid = adv.head === null ? undefined : adv.refs.get(adv.head)
   if (adv.head !== null && headOid !== undefined) {
     const tracking = `refs/remotes/${remote}/HEAD`
     await writeFile(
-      dispatch,
+      vfs,
       gitdir.join(tracking),
       ENC.encode(`ref: refs/remotes/${remote}/${adv.head.slice(HEADS.length)}\n`),
     )
-    await append(dispatch, gitdir, `logs/${tracking}`, entry(ZERO, headOid, IDENTITY, now, reason))
+    await append(vfs, gitdir, `logs/${tracking}`, entry(ZERO, headOid, IDENTITY, now, reason))
   }
-  await writeFile(dispatch, gitdir.join('config'), ENC.encode(config(url, remote, branch)))
+  await writeFile(vfs, gitdir.join('config'), ENC.encode(config(url, remote, branch)))
   if (local) notes += 'done.\n'
   if (commit === null) {
-    await setHead(dispatch, gitdir, `${HEADS}${branch ?? DEFAULT_BRANCH}`)
+    await setHead(vfs, gitdir, `${HEADS}${branch ?? DEFAULT_BRANCH}`)
     return notes
   }
   const line = entry(ZERO, commit, IDENTITY, now, reason)
   if (branch !== null) {
-    await writeRef(dispatch, gitdir, `${HEADS}${branch}`, commit)
-    await setHead(dispatch, gitdir, `${HEADS}${branch}`)
-    await append(dispatch, gitdir, `logs/${HEADS}${branch}`, line)
+    await writeRef(vfs, gitdir, `${HEADS}${branch}`, commit)
+    await setHead(vfs, gitdir, `${HEADS}${branch}`)
+    await append(vfs, gitdir, `logs/${HEADS}${branch}`, line)
   } else {
-    await detachHead(dispatch, gitdir, commit)
+    await detachHead(vfs, gitdir, commit)
     notes += `Note: switching to '${commit}'.\n\n${DETACHED_ADVICE}\n`
   }
-  await append(dispatch, gitdir, 'logs/HEAD', line)
+  await append(vfs, gitdir, 'logs/HEAD', line)
   if (!fl.asBool('no_checkout'))
-    await switchTo(
-      repo,
-      dispatch,
-      statPath,
-      new Map(),
-      await commitEntries(repo, commit),
-      view.ns?.links ?? null,
-      mounts,
-    )
+    await switchTo(repo, vfs, new Map(), await commitEntries(repo, commit))
   return notes
 }
 

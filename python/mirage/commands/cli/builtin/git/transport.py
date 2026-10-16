@@ -34,6 +34,9 @@ from mirage.commands.cli.builtin.git.errors import (
     MissingRepositoryError,
     NoWorkspaceError,
 )
+from mirage.commands.cli.builtin.git.io import (
+    stat_of,
+)
 from mirage.commands.cli.builtin.git.refs import read_head
 from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.types import CLIView
@@ -487,9 +490,8 @@ async def open_transport(
         raise GitError(f"Unable to find remote helper for '{scheme.group(1)}'")
     if scheme is None and SCP_LIKE.match(url):
         raise GitError("Unable to find remote helper for 'ssh'")
-    dispatch, stat_path = view.dispatch, view.stat_path
-    mounts = view.ns.mounts if view.ns is not None else None
-    if dispatch is None or stat_path is None or mounts is None:
+    vfs = view.vfs
+    if vfs is None:
         raise NoWorkspaceError()
     path = urlsplit(url).path if scheme is not None else url
     scope = PathSpec.from_str_path(unquote(path), cwd=start)
@@ -497,21 +499,19 @@ async def open_transport(
         candidate = PathSpec.from_str_path(
             (scope.dotted or scope.virtual).rstrip("/") + suffix, cwd="/"
         )
-        info = await stat_path(candidate)
+        info = await stat_of(vfs, candidate)
         if info is None:
             continue
         try:
             location = await discover(
-                dispatch,
-                stat_path,
-                mounts.root_of,
+                vfs,
                 candidate.parent,
                 candidate,
             )
         except GitError:
             continue
-        head = await read_head(dispatch, location.gitdir)
-        return LocalTransport(await open_repo(dispatch, location), head.ref)
+        head = await read_head(vfs, location.gitdir)
+        return LocalTransport(await open_repo(vfs, location), head.ref)
     raise MissingRepositoryError(url)
 
 

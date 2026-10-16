@@ -25,10 +25,10 @@ import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
+import { Files } from '../../../../workspace/files.ts'
 import { GIT } from './index.ts'
 import * as gitFsModule from './fs.ts'
 import { ensureDir } from './io.ts'
-import type { Dispatch } from './types.ts'
 
 const BUILDER = fileURLToPath(
   new URL('../../../../../../../../integ/fixtures/git/build.sh', import.meta.url),
@@ -72,10 +72,7 @@ beforeAll(async () => {
   const ram = new RAMVFS()
   parser = await createShellParser({ engineWasm, grammarWasm })
   ws = new Workspace({ '/repo': ram }, { mode: MountMode.WRITE, shellParser: parser })
-  const dispatch: Dispatch = async (op, path, args = [], kwargs = {}) => [
-    await ws.dispatch(op, path.virtual, args, kwargs),
-    new IOResult(),
-  ]
+  const dispatch = ws.vfs
   for (const rel of walk(repoPath)) {
     const target = `/repo/${rel}`
     await ensureDir(dispatch, PathSpec.fromStrPath(target).parent)
@@ -118,13 +115,16 @@ it.each([
 ])('reads each pack and index once per invocation: %s', async (command) => {
   const reads = new Map<string, number>()
   const original = gitFsModule.gitFs
-  const spy = vi.spyOn(gitFsModule, 'gitFs').mockImplementation((dispatch, location) =>
-    original((op, path, args, kwargs) => {
-      if (op === 'read' && (path.virtual.endsWith('.pack') || path.virtual.endsWith('.idx'))) {
-        reads.set(path.virtual, (reads.get(path.virtual) ?? 0) + 1)
-      }
-      return dispatch(op, path, args, kwargs)
-    }, location),
+  const spy = vi.spyOn(gitFsModule, 'gitFs').mockImplementation((vfs, location) =>
+    original(
+      new Files(async (op, path, args, kwargs) => {
+        if (op === 'read' && (path.virtual.endsWith('.pack') || path.virtual.endsWith('.idx'))) {
+          reads.set(path.virtual, (reads.get(path.virtual) ?? 0) + 1)
+        }
+        return [await vfs.dispatch(op, path, args, kwargs), new IOResult()]
+      }),
+      location,
+    ),
   )
   try {
     for (let invocation = 0; invocation < 2; invocation++) {
@@ -461,10 +461,7 @@ it('matches native remote URLs and tracking branches', async () => {
     realGit(['branch', '--set-upstream-to=origin/main', 'main'])
     const ram = new RAMVFS()
     const remoteWs = new Workspace({ '/repo': ram }, { mode: MountMode.WRITE, shellParser: parser })
-    const dispatch: Dispatch = async (op, path, args = [], kwargs = {}) => [
-      await remoteWs.dispatch(op, path.virtual, args, kwargs),
-      new IOResult(),
-    ]
+    const dispatch = remoteWs.vfs
     for (const rel of walk(repoPath)) {
       const target = `/repo/${rel}`
       await ensureDir(dispatch, PathSpec.fromStrPath(target).parent)

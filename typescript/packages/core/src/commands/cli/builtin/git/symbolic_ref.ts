@@ -90,9 +90,9 @@ async function objectOf(
   table: ReadonlyMap<string, string>,
   name: string,
 ): Promise<string | null> {
-  const end = await resolveSymbolic(repo.dispatch, repo.location.gitdir, table, name, true)
+  const end = await resolveSymbolic(repo.vfs, repo.location.gitdir, table, name, true)
   if (end === null) return null
-  const raw = await rawRef(repo.dispatch, repo.location.gitdir, table, end.name)
+  const raw = await rawRef(repo.vfs, repo.location.gitdir, table, end.name)
   return raw === null || raw.startsWith(SYMREF_PREFIX) ? null : raw
 }
 
@@ -116,12 +116,12 @@ async function setSymbolic(
   if (held !== null) throw new SymbolicRefLockError(name, held)
   const before = await objectOf(repo, table, name)
   const owner = ownerOf(repo.location, name)
-  await writeFile(repo.dispatch, owner.join(name), ENC.encode(`${SYMREF_PREFIX}${target}\n`))
+  await writeFile(repo.vfs, owner.join(name), ENC.encode(`${SYMREF_PREFIX}${target}\n`))
   const after = await objectOf(repo, table, target)
   const log = owner.join(LOGS_DIR, name)
-  if (after === null || !(await logged(repo.dispatch, repo.location, name, log))) return
+  if (after === null || !(await logged(repo.vfs, repo.location, name, log))) return
   await append(
-    repo.dispatch,
+    repo.vfs,
     owner,
     `${LOGS_DIR}/${name}`,
     entry(before ?? ZERO, after, who, Math.floor(Date.now() / 1000), message),
@@ -146,17 +146,17 @@ export async function symbolicRef(inv: CLIInvocation): Promise<CommandFnResult> 
     const message = fl.asStr('m')
     if (message === '') throw new EmptyUpdateMessageError()
     const quiet = switched(fl, 'quiet', false)
-    const table = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+    const table = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
     const [name = '', target] = inv.texts
     if (switched(fl, 'delete', false)) {
       if (inv.texts.length !== 1) throw new UsageError('', verbUsage(inv))
-      const found = await resolveSymbolic(repo.dispatch, repo.location.gitdir, table, name, false)
+      const found = await resolveSymbolic(repo.vfs, repo.location.gitdir, table, name, false)
       if (found === null) throw new NoSuchRefError(name)
       if (!found.symbolic) throw new NotSymbolicDeleteError(name)
       if (name === HEAD) throw new DeleteHeadError()
       const owner = ownerOf(repo.location, name)
-      await deleteRef(repo.dispatch, owner, name)
-      await removeFile(repo.dispatch, owner.join(LOGS_DIR, name))
+      await deleteRef(repo.vfs, owner, name)
+      await removeFile(repo.vfs, owner.join(LOGS_DIR, name))
       return [null, new IOResult()]
     }
     if (inv.texts.length === 2 && target !== undefined) {
@@ -168,7 +168,7 @@ export async function symbolicRef(inv: CLIInvocation): Promise<CommandFnResult> 
     }
     if (inv.texts.length !== 1) throw new UsageError('', verbUsage(inv))
     const found = await resolveSymbolic(
-      repo.dispatch,
+      repo.vfs,
       repo.location.gitdir,
       table,
       name,

@@ -14,7 +14,8 @@
 
 import type { FlagView } from '../../../spec/flag_view.ts'
 import { readOptional } from './io.ts'
-import type { Dispatch, MailmapEntry, RepoLocation } from './types.ts'
+import type { MailmapEntry, RepoLocation } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 
 const MAILMAP_LINE = /^\s*([^<>]*?)\s*<([^<>]+)>(?:\s*([^<>]*?)\s*<([^<>]*)>)?/
 const IDENTITY = /(.*?)\s*<([^<>]*)>/
@@ -75,10 +76,10 @@ export function mappedIdentity(identity: string, entries: readonly MailmapEntry[
 
 /** Read the worktree mailmap through the workspace data plane. */
 export async function loadMailmap(
-  dispatch: Dispatch,
+  vfs: Files,
   location: RepoLocation,
 ): Promise<readonly MailmapEntry[]> {
-  const data = await readOptional(dispatch, location.worktree.join(`.mailmap`))
+  const data = await readOptional(vfs, location.worktree.join(`.mailmap`))
   return parseMailmap(new TextDecoder().decode(data ?? new Uint8Array()))
 }
 

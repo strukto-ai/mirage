@@ -46,7 +46,7 @@ async def opened(ws) -> LazyFile:
         ws (Workspace): the workspace holding the blob.
     """
     return LazyFile(
-        ws.dispatch,
+        ws.vfs,
         PathSpec.from_str_path(PATH, cwd="/"),
         len(CONTENT),
         asyncio.get_running_loop(),

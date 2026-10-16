@@ -86,7 +86,7 @@ class FileVersionTracker:
             str: The path with symlink prefixes resolved and its dots
             collapsed.
         """
-        links = self.vfs.links
+        links = self.vfs._links
         if links is None:
             return resolve_path(path, "/")
         return links.follow(resolve_path(links.follow(path), "/"))

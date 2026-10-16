@@ -22,7 +22,8 @@ import { entryName } from '../../../../utils/remnants.ts'
 
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { gitBool } from './util.ts'
-import type { Dispatch, RepoLocation } from './types.ts'
+import type { RepoLocation } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 
 const PACK_DIR = 'objects/pack'
 const IDX_SUFFIX = '.idx'
@@ -52,7 +53,7 @@ const LOOSE_NAME_LENGTH = 38
  */
 export interface Repo {
   readonly fs: ReturnType<typeof gitFs>
-  readonly dispatch: Dispatch
+  readonly vfs: Files
   readonly location: RepoLocation
   /** Parsed packs shared by this invocation, never retained across commands. */
   readonly cache: Record<symbol, unknown>
@@ -91,13 +92,13 @@ export function repoArgs(repo: Repo): {
  * counted: git's own estimate ignores them, and matching that is what makes an
  * abbreviated id agree with real git.
  */
-async function packedCount(dispatch: Dispatch, commondir: PathSpec): Promise<number> {
+async function packedCount(vfs: Files, commondir: PathSpec): Promise<number> {
   const root = commondir.join(PACK_DIR)
   let total = 0
-  for (const entry of await readNames(dispatch, root)) {
+  for (const entry of await readNames(vfs, root)) {
     const name = entryName(entry)
     if (!name.endsWith(IDX_SUFFIX)) continue
-    const head = await readRange(dispatch, root.join(name), FANOUT_END - 4, 4)
+    const head = await readRange(vfs, root.join(name), FANOUT_END - 4, 4)
     if (head.byteLength < 4) continue
     total += new DataView(head.buffer, head.byteOffset, 4).getUint32(0, false)
   }
@@ -113,11 +114,11 @@ function hex(bytes: Uint8Array): string {
  * says where that bucket of the sorted names starts and ends, so only the
  * bucket is read rather than every name.
  */
-async function packedUnder(dispatch: Dispatch, path: PathSpec, byte: number): Promise<string[]> {
-  const head = await readRange(dispatch, path, 0, IDX_MAGIC.length)
+async function packedUnder(vfs: Files, path: PathSpec, byte: number): Promise<string[]> {
+  const head = await readRange(vfs, path, 0, IDX_MAGIC.length)
   const v2 = IDX_MAGIC.every((value, i) => head[i] === value)
   const fanoutAt = v2 ? FANOUT_END - FANOUT_SIZE : 0
-  const fanout = await readRange(dispatch, path, fanoutAt, FANOUT_SIZE)
+  const fanout = await readRange(vfs, path, fanoutAt, FANOUT_SIZE)
   if (fanout.byteLength < FANOUT_SIZE) return []
   const table = new DataView(fanout.buffer, fanout.byteOffset, FANOUT_SIZE)
   const start = byte === 0 ? 0 : table.getUint32((byte - 1) * 4, false)
@@ -126,7 +127,7 @@ async function packedUnder(dispatch: Dispatch, path: PathSpec, byte: number): Pr
   const stride = v2 ? SHA_BYTES : SHA_BYTES + V1_OFFSET_BYTES
   const skip = v2 ? 0 : V1_OFFSET_BYTES
   const names = await readRange(
-    dispatch,
+    vfs,
     path,
     fanoutAt + FANOUT_SIZE + start * stride,
     (end - start) * stride,
@@ -148,13 +149,13 @@ export async function idsUnder(repo: Repo, fanout: string): Promise<string[]> {
   const found = new Set<string>()
   const byte = parseInt(fanout, 16)
   const root = repo.location.commondir.join(PACK_DIR)
-  for (const entry of await readNames(repo.dispatch, root)) {
+  for (const entry of await readNames(repo.vfs, root)) {
     const name = entryName(entry)
     if (!name.endsWith(IDX_SUFFIX)) continue
-    for (const oid of await packedUnder(repo.dispatch, root.join(name), byte)) found.add(oid)
+    for (const oid of await packedUnder(repo.vfs, root.join(name), byte)) found.add(oid)
   }
   const loose = repo.location.commondir.join(`${OBJECTS_DIR}/${fanout}`)
-  for (const entry of await readNames(repo.dispatch, loose)) {
+  for (const entry of await readNames(repo.vfs, loose)) {
     const name = entryName(entry)
     if (name.length === LOOSE_NAME_LENGTH) found.add(`${fanout}${name}`)
   }
@@ -188,28 +189,28 @@ export async function storePack(repo: Repo, data: Uint8Array): Promise<void> {
     .join('')
   const dir = repo.location.commondir.join(PACK_DIR)
   const name = `pack-${checksum}.pack`
-  if (await exists(repo.dispatch, dir.join(name.replace(/\.pack$/, IDX_SUFFIX)))) return
-  await writeFile(repo.dispatch, dir.join(name), data)
+  if (await exists(repo.vfs, dir.join(name.replace(/\.pack$/, IDX_SUFFIX)))) return
+  await writeFile(repo.vfs, dir.join(name), data)
   await git.indexPack({ ...repoArgs(repo), dir: dir.virtual, filepath: name })
 }
 
 /**
  * Open a repository living in a mount.
  *
- * @param dispatch workspace op dispatcher
+ * @param vfs the session's files
  * @param location the discovered repository
  */
 export async function openRepo(
-  dispatch: Dispatch,
+  vfs: Files,
   location: RepoLocation,
   ambiguous: string[] | null = null,
 ): Promise<Repo> {
   return {
-    fs: gitFs(dispatch, location),
-    dispatch,
+    fs: gitFs(vfs, location),
+    vfs,
     location,
     cache: {},
-    abbrev: abbrevLength(await packedCount(dispatch, location.commondir)),
+    abbrev: abbrevLength(await packedCount(vfs, location.commondir)),
     held: new Map(),
     ambiguous,
   }
@@ -257,6 +258,6 @@ export async function commitFacts(repo: Repo, oid: string): Promise<CommitFacts>
  * @param fallback the answer when the variable is unset
  */
 export async function configBool(repo: Repo, path: string, fallback: boolean): Promise<boolean> {
-  const values = await configValues(repo.dispatch, repo.location, path)
+  const values = await configValues(repo.vfs, repo.location, path)
   return gitBool(values, path.toLowerCase(), fallback)
 }

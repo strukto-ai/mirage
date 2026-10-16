@@ -28,6 +28,7 @@ import { issueComments } from '../../../../core/github/issue.ts'
 import { commentsFor, commentsText } from './issue.ts'
 import { GH } from './index.ts'
 import { PathSpec } from '../../../../types.ts'
+import { Files } from '../../../../workspace/files.ts'
 import { PartialOutputError } from '../../../errors.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import { api } from './api.ts'
@@ -431,14 +432,16 @@ describe('gh file input', () => {
       vfsPath: 'body.md',
       rawPath: './body.md',
     })
-    const content = ['first ', 'second']
-    const dispatch = vi.fn(async function* () {
-      for (const chunk of content) yield await Promise.resolve(new TextEncoder().encode(chunk))
-    })
-    const read = vi.fn(() => Promise.resolve([dispatch(), new IOResult()] as [unknown, IOResult]))
-    const call = inv([], {}, { token: 't' }, { view: { dispatch: read } })
+    const read = vi.fn((_op: string, _spec: PathSpec) =>
+      Promise.resolve([new TextEncoder().encode('first second'), new IOResult()] as [
+        unknown,
+        IOResult,
+      ]),
+    )
+    const call = inv([], {}, { token: 't' }, { view: { vfs: new Files(read) } })
     expect(DEC.decode(await readCliFile(call, path, '--body-file'))).toBe('first second')
-    expect(read).toHaveBeenCalledWith('read', path)
+    expect(read.mock.calls[0]?.[0]).toBe('read')
+    expect(read.mock.calls[0]?.[1]).toBe(path)
   })
 
   it('reads short -F - from standard input after path resolution', async () => {

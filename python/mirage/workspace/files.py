@@ -13,10 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import posixpath
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
-from mirage.context import get_current_session
+from mirage.context import get_current_session, session_visibility
 from mirage.errors.types import NoMountError
 from mirage.io import IOResult, OpReport
 from mirage.io.stream import close_quietly, ensure_stream
@@ -24,8 +25,9 @@ from mirage.io.types import ByteSource
 from mirage.observe import OpRecord
 from mirage.observe.context import OpTimer, finish_record, start_op
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, FileType, MountMode, PathSpec
-from mirage.utils.path import owner_prefix
+from mirage.types import FileStat, FileType, MountMode, PathSpec, Visibility
+from mirage.utils.hidden import leads_hidden, path_visible
+from mirage.utils.path import norm, norm_dir, owner_prefix
 from mirage.view.types import NamespaceLinks, SessionBind
 from mirage.workspace.types import MountRow
 
@@ -100,6 +102,7 @@ class Files:
         links: NamespaceLinks | None = None,
         bind: SessionBind | None = None,
         records: list[OpRecord] | None = None,
+        visibility: Callable[[str | None], Visibility | None] | None = None,
     ) -> None:
         self._mounts: list[MountRow] = []
         self.set_mounts(mounts)
@@ -108,6 +111,7 @@ class Files:
         self._links = links
         self._dispatch = dispatch
         self._bind = bind
+        self._visibility = visibility
         self.records: list[OpRecord] = records if records is not None else []
 
     @property
@@ -138,27 +142,115 @@ class Files:
             links=self._links,
             bind=self._bind,
             records=self.records,
+            visibility=self._visibility,
         )
         derived._mounts = self._mounts
         return derived
 
-    @property
-    def links(self) -> NamespaceLinks | None:
-        """The workspace symlink table, when this facade fronts one.
+    def _served(self) -> list[MountRow]:
+        """The mounts the running session is told of at all, hides aside.
 
-        The mount core follows it to recognise one file opened through a
-        link and through its target; None when the workspace has no link
-        table.
+        A session's own documents mount is one only it is told of.
         """
-        return self._links
+        return [m for m in self._mounts if m.visible is None or m.visible()]
+
+    def _vis(self) -> Visibility | None:
+        """The visibility of the session an op would run as: the bound
+        one, else this facade's own."""
+        if self._visibility is None:
+            return session_visibility()
+        return self._visibility(self._session_id)
+
+    def _shown(self) -> list[MountRow]:
+        """The mounts whose root the session sees.
+
+        A hidden mount is left out of every list here, as it is left out
+        of a listing, so no list names it.
+        """
+        vis = self._vis()
+        return [m for m in self._served() if path_visible(vis, norm(m.prefix))]
 
     def mount_prefixes(self) -> list[str]:
-        """Return the mount prefixes in resolution order.
+        """Return the prefixes of the mounts the session sees.
 
         Returns:
             list[str]: mount prefixes, longest first.
         """
-        return [m.prefix for m in self._mounts]
+        return [m.prefix for m in self._shown()]
+
+    def mount_of(self, path: str | PathSpec) -> str | None:
+        """The mount prefix serving ``path``, without a trailing slash.
+
+        The one ``RuntimeFiles.mount_of`` gives a guest: where a walk up
+        a tree stops, as git stops looking for ``.git`` at a filesystem
+        boundary. None for a path the session cannot see. A path a show
+        carve-out opens inside a hidden mount names that mount, whose
+        root the path itself runs through.
+
+        Args:
+            path (str | PathSpec): virtual path.
+        """
+        virtual = PathSpec.from_str_path(path, cwd="/").virtual
+        if not path_visible(self._vis(), virtual):
+            return None
+        owner = owner_prefix((m.prefix for m in self._served()), virtual)
+        return None if owner is None else norm(owner)
+
+    def is_visible(self, path: str | PathSpec) -> bool:
+        """Whether the session sees ``path``: it is not hidden, and no
+        link on it leads where the session cannot see.
+
+        The rule the dispatcher refuses a call by, for a caller holding
+        paths in data of its own (git's index, a manifest), so what it
+        prints of them honours the same hides.
+
+        Args:
+            path (str | PathSpec): virtual path.
+        """
+        virtual = PathSpec.from_str_path(path, cwd="/").virtual
+        vis = self._vis()
+        if not path_visible(vis, virtual):
+            return False
+        if vis is None or self._links is None:
+            return True
+        return not leads_hidden(vis, virtual, self._links.symlink_targets())
+
+    def is_mount(self, path: str | PathSpec) -> bool:
+        """Whether ``path`` is the root of a mount the session sees.
+
+        Args:
+            path (str | PathSpec): virtual path.
+        """
+        virtual = norm(PathSpec.from_str_path(path, cwd="/").virtual)
+        return any(norm(m.prefix) == virtual for m in self._shown())
+
+    def submounts(self, path: str | PathSpec) -> list[str]:
+        """The mount roots strictly under ``path``, sorted, without a
+        trailing slash, as ``findmnt --submounts`` lists them.
+
+        A mount the session hides still stands where it is: whatever
+        removes or renames the folder holding it would take it along. It
+        is reported by the nearest folder above it the session sees,
+        ``path`` itself when nothing between is visible, so a caller
+        refuses that folder without learning the mount's name.
+
+        Args:
+            path (str | PathSpec): virtual directory path.
+        """
+        virtual = norm(PathSpec.from_str_path(path, cwd="/").virtual)
+        vis = self._vis()
+        if not path_visible(vis, virtual):
+            return []
+        below = norm_dir(virtual)
+        found: set[str] = set()
+        for m in self._served():
+            root = norm(m.prefix)
+            if root == virtual or not norm_dir(root).startswith(below):
+                continue
+            while root != virtual and not path_visible(vis, root):
+                root = posixpath.dirname(root)
+            found.add(root)
+        return sorted(found)
 
     def set_mounts(self, mounts: list[MountRow]) -> None:
         """Refresh mount metadata without replacing the facade or its ledger.
@@ -173,7 +265,8 @@ class Files:
         )
 
     def unsized_mounts(self, root_prefix: str = "") -> list[tuple[str, str]]:
-        """Mounts whose files cannot be sized without reading them.
+        """Mounts the session sees whose files cannot be sized without
+        reading them.
 
         Args:
             root_prefix (str): when non-empty, only consider the mount
@@ -186,7 +279,7 @@ class Files:
         """
         root = root_prefix.rstrip("/")
         found = []
-        for m in self._mounts:
+        for m in self._shown():
             if root and not (
                 m.prefix.rstrip("/") == root or m.prefix.startswith(root + "/")
             ):
@@ -196,7 +289,8 @@ class Files:
         return found
 
     def writable_mounts(self, root_prefix: str = "") -> list[tuple[str, str]]:
-        """Mounts that accept writes, in mount resolution order.
+        """Mounts the session sees that accept writes, in mount
+        resolution order.
 
         Args:
             root_prefix (str): when non-empty, only consider the mount
@@ -208,7 +302,7 @@ class Files:
         """
         root = root_prefix.rstrip("/")
         found = []
-        for m in self._mounts:
+        for m in self._shown():
             if root and not (
                 m.prefix.rstrip("/") == root or m.prefix.startswith(root + "/")
             ):
@@ -440,7 +534,7 @@ class Files:
 
     async def read(
         self,
-        path: str,
+        path: str | PathSpec,
         offset: int = 0,
         size: int | None = None,
         raw: bool = False,
@@ -458,7 +552,7 @@ class Files:
         ``readFile(path, {raw: true})``.
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             offset (int): Byte offset for range reads.
             size (int | None): Number of bytes for range reads.
             raw (bool): Read stored bytes rather than a rendered form.
@@ -476,7 +570,7 @@ class Files:
 
     async def read_stream(
         self,
-        path: str,
+        path: str | PathSpec,
         raw: bool = False,
         *,
         session_id: str | None = None,
@@ -490,7 +584,7 @@ class Files:
         backend with no stream) arrives as one chunk.
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             raw (bool): Read stored bytes rather than a rendered form.
             session_id (str | None): Session to run as outside a line.
         """
@@ -501,24 +595,32 @@ class Files:
         return ensure_stream(result)
 
     async def write(
-        self, path: str, data: ByteSource, *, session_id: str | None = None
+        self,
+        path: str | PathSpec,
+        data: ByteSource,
+        *,
+        session_id: str | None = None,
     ) -> None:
         """Write file content.
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             data (ByteSource): Bytes or a single-consumer async byte source.
             session_id (str | None): Session to run as outside a line.
         """
         await self._call("write", path, session_id, data=data)
 
     async def append(
-        self, path: str, data: ByteSource, *, session_id: str | None = None
+        self,
+        path: str | PathSpec,
+        data: ByteSource,
+        *,
+        session_id: str | None = None,
     ) -> None:
         """Append data to a file.
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             data (ByteSource): Bytes or a single-consumer async byte source.
             session_id (str | None): Session to run as outside a line.
         """
@@ -526,7 +628,7 @@ class Files:
 
     async def pwrite(
         self,
-        path: str,
+        path: str | PathSpec,
         data: bytes,
         offset: int,
         *,
@@ -540,7 +642,7 @@ class Files:
         write the file and not read it can still do it.
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             data (bytes): The bytes to write.
             offset (int): Where the first of them lands.
             session_id (str | None): Session to run as outside a line.
@@ -549,7 +651,7 @@ class Files:
 
     async def stat(
         self,
-        path: str,
+        path: str | PathSpec,
         *,
         nofollow: bool = False,
         session_id: str | None = None,
@@ -557,7 +659,7 @@ class Files:
         """One path's row.
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             nofollow (bool): Report a trailing symlink itself rather
                 than its target (lstat), which is how an exclusive open
                 learns a dangling link is a name that is there.
@@ -568,7 +670,7 @@ class Files:
         return await self._call("stat", path, session_id)
 
     async def readdir(
-        self, path: str, *, session_id: str | None = None
+        self, path: str | PathSpec, *, session_id: str | None = None
     ) -> list[str]:
         return await self._call("readdir", path, session_id)
 
@@ -579,12 +681,12 @@ class Files:
     # question; swallowing it would let a caller act on a false
     # "missing" (overwrite, recreate, skip). Mirrors the TS facade.
     async def exists(
-        self, path: str, *, session_id: str | None = None
+        self, path: str | PathSpec, *, session_id: str | None = None
     ) -> bool:
         """True when a stat answers for the path.
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             session_id (str | None): Session to run as outside a line.
         """
         try:
@@ -594,12 +696,12 @@ class Files:
         return True
 
     async def is_dir(
-        self, path: str, *, session_id: str | None = None
+        self, path: str | PathSpec, *, session_id: str | None = None
     ) -> bool:
         """True when the path stats as a directory.
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             session_id (str | None): Session to run as outside a line.
         """
         try:
@@ -609,12 +711,12 @@ class Files:
         return st.type == FileType.DIRECTORY
 
     async def is_file(
-        self, path: str, *, session_id: str | None = None
+        self, path: str | PathSpec, *, session_id: str | None = None
     ) -> bool:
         """True when the path stats as anything but a directory.
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             session_id (str | None): Session to run as outside a line.
         """
         try:
@@ -623,23 +725,25 @@ class Files:
             return False
         return st.type != FileType.DIRECTORY
 
-    async def cat(self, path: str, *, session_id: str | None = None) -> str:
+    async def cat(
+        self, path: str | PathSpec, *, session_id: str | None = None
+    ) -> str:
         """The file's content as text (the TS facade's ``cat``).
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             session_id (str | None): Session to run as outside a line.
         """
         data = await self.read(path, session_id=session_id)
         return data.decode("utf-8", errors="replace")
 
     async def list_files(
-        self, path: str, *, session_id: str | None = None
+        self, path: str | PathSpec, *, session_id: str | None = None
     ) -> list[str]:
         """Basenames of the directory's files, directories dropped.
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             session_id (str | None): Session to run as outside a line.
         """
         files = []
@@ -648,25 +752,33 @@ class Files:
                 files.append(entry.rstrip("/").rsplit("/", 1)[-1])
         return files
 
-    async def mkdir(self, path: str, *, session_id: str | None = None) -> None:
+    async def mkdir(
+        self, path: str | PathSpec, *, session_id: str | None = None
+    ) -> None:
         await self._call("mkdir", path, session_id)
 
     async def unlink(
-        self, path: str, *, session_id: str | None = None
+        self, path: str | PathSpec, *, session_id: str | None = None
     ) -> None:
         """Delete file.
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             session_id (str | None): Session to run as outside a line.
         """
         await self._call("unlink", path, session_id)
 
-    async def rmdir(self, path: str, *, session_id: str | None = None) -> None:
+    async def rmdir(
+        self, path: str | PathSpec, *, session_id: str | None = None
+    ) -> None:
         await self._call("rmdir", path, session_id)
 
     async def rename(
-        self, src: str, dst: str, *, session_id: str | None = None
+        self,
+        src: str | PathSpec,
+        dst: str | PathSpec,
+        *,
+        session_id: str | None = None,
     ) -> None:
         """Rename file or directory within one mount.
 
@@ -676,8 +788,8 @@ class Files:
         `mv` between two backends falls back to its copy+unlink path.
 
         Args:
-            src (str): Source virtual path.
-            dst (str): Destination virtual path.
+            src (str | PathSpec): Source virtual path.
+            dst (str | PathSpec): Destination virtual path.
             session_id (str | None): Session to run as outside a line.
 
         Raises:
@@ -689,12 +801,16 @@ class Files:
         )
 
     async def create(
-        self, path: str, *, session_id: str | None = None
+        self, path: str | PathSpec, *, session_id: str | None = None
     ) -> None:
         await self._call("create", path, session_id)
 
     async def symlink(
-        self, path: str, target: str, *, session_id: str | None = None
+        self,
+        path: str | PathSpec,
+        target: str,
+        *,
+        session_id: str | None = None,
     ) -> None:
         """Create a namespace symlink at ``path``.
 
@@ -703,7 +819,7 @@ class Files:
         on the ledger. The target is stored verbatim as typed.
 
         Args:
-            path (str): Virtual path of the link.
+            path (str | PathSpec): Virtual path of the link.
             target (str): What the link points to, as typed.
             session_id (str | None): Session to run as outside a line.
 
@@ -720,12 +836,12 @@ class Files:
         await self._call("symlink", path, session_id, target=target)
 
     async def readlink(
-        self, path: str, *, session_id: str | None = None
+        self, path: str | PathSpec, *, session_id: str | None = None
     ) -> str:
         """The stored target of the link at ``path``.
 
         Args:
-            path (str): Virtual path of the link.
+            path (str | PathSpec): Virtual path of the link.
             session_id (str | None): Session to run as outside a line.
 
         Raises:
@@ -735,7 +851,7 @@ class Files:
 
     async def setattr(
         self,
-        path: str,
+        path: str | PathSpec,
         *,
         mode: int | None = None,
         uid: int | str | None = None,
@@ -755,7 +871,7 @@ class Files:
         mount mode is the access control.
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             mode (int | None): permission bits (e.g. 0o644).
             uid (int | str | None): owner id or name.
             gid (int | str | None): group id or name.
@@ -783,7 +899,7 @@ class Files:
 
     async def getxattr(
         self,
-        path: str,
+        path: str | PathSpec,
         name: str,
         *,
         nofollow: bool = False,
@@ -794,7 +910,7 @@ class Files:
         The node table answers with what a caller set.
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             name (str): Attribute name.
             nofollow (bool): read a link entry's own attributes rather
                 than its target's.
@@ -810,7 +926,7 @@ class Files:
 
     async def listxattr(
         self,
-        path: str,
+        path: str | PathSpec,
         *,
         nofollow: bool = False,
         session_id: str | None = None,
@@ -818,7 +934,7 @@ class Files:
         """Every extended attribute name a path carries, sorted.
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             nofollow (bool): list a link entry's own attributes.
             session_id (str | None): Session to run as outside a line.
         """
@@ -828,7 +944,7 @@ class Files:
 
     async def setxattr(
         self,
-        path: str,
+        path: str | PathSpec,
         name: str,
         value: bytes,
         *,
@@ -843,7 +959,7 @@ class Files:
         backend and moves with a rename.
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             name (str): Attribute name.
             value (bytes): Attribute value.
             create (bool): fail with EEXIST when the attribute is set
@@ -866,7 +982,7 @@ class Files:
 
     async def removexattr(
         self,
-        path: str,
+        path: str | PathSpec,
         name: str,
         *,
         nofollow: bool = False,
@@ -875,7 +991,7 @@ class Files:
         """Drop an extended attribute from a path.
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             name (str): Attribute name.
             nofollow (bool): drop from a link entry itself.
             session_id (str | None): Session to run as outside a line.
@@ -888,12 +1004,16 @@ class Files:
         )
 
     async def truncate(
-        self, path: str, length: int, *, session_id: str | None = None
+        self,
+        path: str | PathSpec,
+        length: int,
+        *,
+        session_id: str | None = None,
     ) -> None:
         """Truncate file to given length.
 
         Args:
-            path (str): Virtual path.
+            path (str | PathSpec): Virtual path.
             length (int): Target length in bytes.
             session_id (str | None): Session to run as outside a line.
         """
@@ -923,6 +1043,9 @@ class Files:
         interception leaves alone whatever is mounted. Routing to the anchor
         for ops themselves still happens at the dispatcher; this gate is only
         about what the interception should leave alone.
+
+        A mount the session hides counts as well: its paths route to
+        the dispatcher, which refuses them, never to the real filesystem.
 
         Args:
             path (str): Virtual path.

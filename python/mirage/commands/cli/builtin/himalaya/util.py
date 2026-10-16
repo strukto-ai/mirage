@@ -73,12 +73,12 @@ async def load_attachments(
     """
     if not paths:
         return ()
-    if view is None or view.dispatch is None:
+    if view is None or view.vfs is None:
         raise ValueError("--attach needs a workspace to read files from")
     attachments: list[Attachment] = []
     for spec in paths:
         try:
-            data, _ = await view.dispatch("read", spec)
+            data = await view.vfs.read(spec)
         except (FileNotFoundError, NotADirectoryError) as exc:
             raise ValueError(
                 f"read attachment {spec.virtual}: {fs_strerror(exc)}"

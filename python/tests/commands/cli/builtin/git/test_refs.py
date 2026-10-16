@@ -28,6 +28,7 @@ from mirage.commands.cli.builtin.git.refs import (
 )
 from mirage.commands.cli.builtin.git.types import Refspec
 from mirage.io import IOResult
+from mirage.workspace.files import Files
 
 from .conftest import GITDIR, make_branch, mounted, pack_refs
 
@@ -46,7 +47,7 @@ def _dispatch_returning(data: bytes):
         assert path.virtual == "/repo/.git/HEAD"
         return data, IOResult()
 
-    return dispatch
+    return Files([], dispatch)
 
 
 @pytest.mark.asyncio
@@ -86,7 +87,7 @@ async def test_ref_outside_refs_heads_keeps_its_full_name():
 
 @pytest.mark.asyncio
 async def test_load_refs_reads_loose_branches(workspace):
-    refs = await load_refs(workspace.dispatch, GITDIR)
+    refs = await load_refs(workspace.vfs, GITDIR)
     keys = refs.allkeys()
     assert b"refs/heads/main" in keys
     assert b"HEAD" in keys
@@ -98,7 +99,7 @@ async def test_load_refs_reads_packed_refs(repo_path, workspace):
     # packed-refs, so a loose-only reader would miss them entirely.
     pack_refs(repo_path)
     with mounted(repo_path) as ws:
-        refs = await load_refs(ws.dispatch, GITDIR)
+        refs = await load_refs(ws.vfs, GITDIR)
     assert b"refs/heads/main" in refs.allkeys()
 
 
@@ -106,13 +107,13 @@ async def test_load_refs_reads_packed_refs(repo_path, workspace):
 async def test_load_refs_walks_nested_ref_names(repo_path, workspace):
     make_branch(repo_path, "feat/git-cli")
     with mounted(repo_path) as ws:
-        refs = await load_refs(ws.dispatch, GITDIR)
+        refs = await load_refs(ws.vfs, GITDIR)
     assert b"refs/heads/feat/git-cli" in refs.allkeys()
 
 
 @pytest.mark.asyncio
 async def test_head_symref_resolves_through_the_container(workspace):
-    refs = await load_refs(workspace.dispatch, GITDIR)
+    refs = await load_refs(workspace.vfs, GITDIR)
     assert refs[b"HEAD"] == refs[b"refs/heads/main"]
 
 

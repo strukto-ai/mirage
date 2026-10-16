@@ -221,7 +221,7 @@ def make_rmtree(
         loop (asyncio.AbstractEventLoop | None): the block's loop.
     """
     original = shutil.rmtree
-    links = files.links
+    links = files._links
 
     async def follow(path: str) -> str:
         return posixpath.normpath(
@@ -247,13 +247,14 @@ def make_rmtree(
             kwargs.get("onerror", args[1] if len(args) > 1 else None),
             kwargs.get("onexc"),
         )
-        root = posixpath.normpath(spelled).rstrip("/")
-        for prefix in files.mount_prefixes():
-            mount = prefix.rstrip("/")
-            if mount == root or mount.startswith(root + "/"):
-                busy = mount or "/"
-                onexc(_real_os.rmdir, busy, as_raised(ebusy(busy)))
-                return
+        root = posixpath.normpath(spelled).rstrip("/") or "/"
+        held = files.submounts(root)
+        if files.is_mount(root):
+            held.append(root)
+        if held:
+            busy = max(held, key=len)
+            onexc(_real_os.rmdir, busy, as_raised(ebusy(busy)))
+            return
         try:
             if _real_os.path.islink(spelled):
                 raise OSError("Cannot call rmtree on a symbolic link")
@@ -313,7 +314,9 @@ class HostFs:
         # there; mirrors mount/core.py.
         self._uid = _real_os.getuid() if hasattr(_real_os, "getuid") else 0
         self._gid = _real_os.getgid() if hasattr(_real_os, "getgid") else 0
-        self._descriptors = Descriptors(self._adapter, self._host, files.links)
+        self._descriptors = Descriptors(
+            self._adapter, self._host, files._links
+        )
 
     @property
     def files(self) -> Files:

@@ -16,13 +16,16 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import tzinfo
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from dulwich.index import ConflictedIndexEntry, IndexEntry
 
 from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.types import CLIInvocation
 from mirage.types import FileStat, PathSpec
-from mirage.view.types import NamespaceView
+
+if TYPE_CHECKING:
+    from mirage.workspace.files import Files
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,14 +71,15 @@ class RepoLocation:
         worktree (PathSpec): absolute virtual path of the working tree root.
         mount_root (PathSpec): the mount prefix both live under, which
             bounded the discovery walk.
-        ns (NamespaceView | None): session namespace for repository entry views.
+        vfs (Files | None): the session's files, whose hides the
+            repository's entries are shown under.
     """
 
     gitdir: PathSpec
     commondir: PathSpec
     worktree: PathSpec
     mount_root: PathSpec
-    ns: NamespaceView | None = None
+    vfs: "Files | None" = None
 
 
 # git's refusal for a verb a read-only mount turned down, built from the

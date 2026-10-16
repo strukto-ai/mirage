@@ -44,6 +44,7 @@ from mirage.core.github.config import GhConfig
 from mirage.core.github.repo import RepoRef, edit_repo, repository_fields
 from mirage.io.types import materialize
 from mirage.types import PathSpec
+from mirage.workspace.files import Files
 
 CONFIG = GhConfig(token="t")
 CALLS: list[dict] = []
@@ -241,7 +242,7 @@ def _view(files: dict[str, bytes]) -> CLIView:
         assert op == "read"
         return files[path.virtual], None
 
-    return CLIView(dispatch=dispatch)
+    return CLIView(vfs=Files([], dispatch))
 
 
 @pytest.mark.asyncio
@@ -1292,26 +1293,21 @@ async def test_comment_metadata_matches_gh(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_file_reader_keeps_resolved_path_and_materializes_stream():
+async def test_file_reader_keeps_resolved_path():
     path = PathSpec(
         virtual="/scratch/body.md",
         directory="/scratch/",
         vfs_path="body.md",
         raw_path="./body.md",
     )
-    content = [b"first ", b"second"]
-
-    async def chunks():
-        for chunk in content:
-            yield chunk
 
     async def dispatch(op, spec, *args, **kwargs):
         assert op == "read"
         assert spec is path
-        return chunks(), None
+        return b"first second", None
 
     value = await read_cli_file(
-        _inv(view=CLIView(dispatch=dispatch)), path, "--body-file"
+        _inv(view=CLIView(vfs=Files([], dispatch))), path, "--body-file"
     )
     assert value == b"first second"
 

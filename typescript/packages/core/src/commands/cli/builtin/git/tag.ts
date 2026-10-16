@@ -176,8 +176,8 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
   let was: string | undefined
   let abbrev: number
   try {
-    const dispatch = view.dispatch
-    if (dispatch === undefined) throw new NoWorkspaceError()
+    const vfs = view.vfs
+    if (vfs === undefined) throw new NoWorkspaceError()
     checkSwitches(inv, texts)
     const flags = parseFlags(fl)
     if (flags.listing && flags.remove) throw new IncompatibleOptionsError('-l', '-d')
@@ -201,7 +201,7 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
     abbrev = repo.abbrev
     const keys = sortKeys(fl, await configuredSort(repo, 'tag'))
     const filter = await refFilter(repo, words)
-    const known = await loadRefs(dispatch, repo.location.gitdir, repo.location.commondir)
+    const known = await loadRefs(vfs, repo.location.gitdir, repo.location.commondir)
     if (flags.remove) {
       const out: string[] = []
       const err: string[] = []
@@ -232,7 +232,7 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
         return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(err.join('')) })]
       }
       for (const { name: each, ref, sha } of doomed) {
-        await deleteRef(dispatch, repo.location.commondir, ref)
+        await deleteRef(vfs, repo.location.commondir, ref)
         out.push(`Deleted tag '${each}' (was ${short(sha, repo.abbrev)})\n`)
       }
       return [
@@ -289,7 +289,7 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
     // left there unreferenced.
     const held = blockingRef(new Set(known.keys()), ref)
     if (held !== null) throw new RefLockError(ref, held)
-    await writeRef(dispatch, repo.location.commondir, ref, pointed)
+    await writeRef(vfs, repo.location.commondir, ref, pointed)
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
     throw err

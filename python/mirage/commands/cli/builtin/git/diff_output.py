@@ -44,8 +44,8 @@ from mirage.commands.cli.builtin.git.summary import (
 from mirage.commands.cli.builtin.git.tree import tree_entries
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.spec.flag_view import FlagView
-from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
+from mirage.workspace.files import Files
 
 RENAME_SCORE = 50
 
@@ -705,10 +705,8 @@ def text_lines(data: bytes) -> list[str]:
     return [line + "\n" for line in whole] + ([rest] if rest else [])
 
 
-async def renames_enabled(
-    dispatch: DispatchFn, location: RepoLocation
-) -> bool:
-    data = await read_optional(dispatch, location.commondir.join("config"))
+async def renames_enabled(vfs: Files, location: RepoLocation) -> bool:
+    data = await read_optional(vfs, location.commondir.join("config"))
     if data is None:
         return True
     cfg = ConfigFile.from_file(BytesIO(data))

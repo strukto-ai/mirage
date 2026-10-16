@@ -113,29 +113,20 @@ class NotesVFS(BaseVFS):
 
 async def note_info(inv: CLIInvocation[None]) -> tuple[bytes, IOResult]:
     view = inv.view
-    if (
-        view is None
-        or view.dispatch is None
-        or view.ns is None
-        or view.ns.mounts is None
-        or view.session_view is None
-    ):
+    if view is None or view.vfs is None or view.session_view is None:
         raise RuntimeError("note-info needs workspace entry points")
+    vfs = view.vfs
     path = inv.paths[0]
-    target = (
-        view.ns.links.resolve(path.virtual)
-        if view.ns.links is not None
-        else path.virtual
-    )
-    data, result = await view.dispatch("read", path)
-    if result.exit_code != 0:
-        return b"", result
-    if not isinstance(data, bytes):
-        raise TypeError("expected file bytes")
-    mount = view.ns.mounts.root_of(target)
+    data = await vfs.read(path)
+    target = path
+    if (await vfs.stat(path, nofollow=True)).type is FileType.SYMLINK:
+        target = PathSpec.from_str_path(
+            await vfs.readlink(path), cwd=path.parent
+        )
+    mount = vfs.mount_of(target)
     reader = view.session_view.get("READER") or "anonymous"
     header = f"mount={mount} reader={reader} bytes={len(data)}\n"
-    return header.encode() + data, result
+    return header.encode() + data, IOResult()
 
 
 async def show(ws: Workspace, line: str) -> None:

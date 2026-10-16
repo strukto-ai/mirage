@@ -22,21 +22,22 @@ from mirage.commands.cli.builtin.git.errors import (
     NoWorkingDirectoryError,
     WorkTreeChdirError,
 )
-from mirage.commands.cli.builtin.git.io import read_file, read_optional
+from mirage.commands.cli.builtin.git.io import (
+    read_file,
+    read_optional,
+    stat_of,
+)
 from mirage.commands.cli.builtin.git.repo import config_bool, config_values
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.errors.types import FsCondition
-from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
-from mirage.view.types import MountRoot, StatPath
+from mirage.workspace.files import Files
 
 GITDIR_PREFIX = "gitdir:"
 COMMON_DIR = "commondir"
 
 
-async def _follow_gitfile(
-    dispatch: DispatchFn, stat_path: StatPath, gitfile: PathSpec
-) -> PathSpec:
+async def _follow_gitfile(vfs: Files, gitfile: PathSpec) -> PathSpec:
     """Read a ``.git`` file and return the directory it points at.
 
     A ``.git`` that is a file rather than a directory holds one
@@ -46,13 +47,10 @@ async def _follow_gitfile(
     file as if it were a directory is how this used to fail.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
-        stat_path (StatPath): dispatcher-backed stat, both channels.
+        vfs (Files): the session's files.
         gitfile (PathSpec): absolute virtual path of the ``.git`` file.
     """
-    text = (await read_file(dispatch, gitfile)).decode(
-        "utf-8", errors="replace"
-    )
+    text = (await read_file(vfs, gitfile)).decode("utf-8", errors="replace")
     line = text.strip()
     if not line.startswith(GITDIR_PREFIX):
         raise InvalidGitFileError(gitfile.virtual)
@@ -60,7 +58,7 @@ async def _follow_gitfile(
     if not target:
         raise InvalidGitFileError(gitfile.virtual)
     resolved = PathSpec.from_str_path(target, cwd=gitfile.parent)
-    if await stat_path(resolved) is None:
+    if await stat_of(vfs, resolved) is None:
         # An absolute pointer names a path on the backend's own
         # filesystem, which is only reachable when the mount happens to
         # span it: a worktree mounted alone cannot see the repository it
@@ -69,7 +67,7 @@ async def _follow_gitfile(
     return resolved
 
 
-async def _common_dir(dispatch: DispatchFn, gitdir: PathSpec) -> PathSpec:
+async def _common_dir(vfs: Files, gitdir: PathSpec) -> PathSpec:
     """The shared git directory behind a per-worktree one.
 
     A linked worktree's git directory carries a ``commondir`` file
@@ -79,50 +77,47 @@ async def _common_dir(dispatch: DispatchFn, gitdir: PathSpec) -> PathSpec:
     own common directory.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         gitdir (PathSpec): absolute virtual path of the git directory.
     """
-    data = await read_optional(dispatch, gitdir.join(COMMON_DIR))
+    data = await read_optional(vfs, gitdir.join(COMMON_DIR))
     if data is None:
         return gitdir
     target = data.decode("utf-8", errors="replace").strip()
     return PathSpec.from_str_path(target, cwd=gitdir) if target else gitdir
 
 
-async def _validated(
-    dispatch: DispatchFn, stat_path: StatPath, gitdir: PathSpec
-) -> PathSpec | None:
+async def _validated(vfs: Files, gitdir: PathSpec) -> PathSpec | None:
     """git's ``is_git_directory``: the common directory, or None.
 
     A git directory holds its own HEAD and finds objects and refs in its
     common directory, which is itself unless it is a linked worktree's.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
-        stat_path (StatPath): dispatcher-backed stat, both channels.
+        vfs (Files): the session's files.
         gitdir (PathSpec): absolute virtual path of the candidate.
     """
-    common = await _common_dir(dispatch, gitdir)
+    common = await _common_dir(vfs, gitdir)
     signatures = (
         (gitdir.join("HEAD"), FileType.FILE),
         (common.join("objects"), FileType.DIRECTORY),
         (common.join("refs"), FileType.DIRECTORY),
     )
     for path, kind in signatures:
-        entry = await stat_path(path)
+        entry = await stat_of(vfs, path)
         if entry is None or entry.type is not kind:
             return None
     return common
 
 
-async def _enter(stat_path: StatPath, start: PathSpec) -> None:
+async def _enter(vfs: Files, start: PathSpec) -> None:
     """Refuse a start git cannot change into, in ``-C``'s words.
 
     Args:
-        stat_path (StatPath): dispatcher-backed stat, both channels.
+        vfs (Files): the session's files.
         start (PathSpec): the directory git starts in.
     """
-    here = await stat_path(start)
+    here = await stat_of(vfs, start)
     if here is not None and here.type is FileType.DIRECTORY:
         return
     raise NoWorkingDirectoryError(
@@ -132,9 +127,7 @@ async def _enter(stat_path: StatPath, start: PathSpec) -> None:
 
 
 async def discover(
-    dispatch: DispatchFn,
-    stat_path: StatPath,
-    mount_root: MountRoot,
+    vfs: Files,
     start: PathSpec,
     gitdir: PathSpec | None = None,
     worktree: PathSpec | None = None,
@@ -158,56 +151,48 @@ async def discover(
     carried separately rather than derived again by each verb.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher, for the two files
-            that redirect a git directory.
-        stat_path (StatPath): dispatcher-backed stat asking both channels
-            a backend can answer on; None means nothing is there.
-        mount_root (MountRoot): the mount prefix serving a path.
+        vfs (Files): the session's files.
         start (PathSpec): absolute virtual path to start from, normally the
             session cwd or the argument of ``-C``.
         gitdir (PathSpec | None): explicit repository path; keeps the typed
             spelling for refusals and skips upward discovery.
         worktree (PathSpec | None): explicit working tree, relative to start.
     """
-    root = PathSpec.from_str_path(mount_root(start.virtual), cwd="/")
+    root = PathSpec.from_str_path(vfs.mount_of(start) or "/", cwd="/")
     if gitdir is not None:
-        await _enter(stat_path, start)
+        await _enter(vfs, start)
         candidate = gitdir
-        info = await stat_path(candidate)
+        info = await stat_of(vfs, candidate)
         if info is None:
             raise NotARepositoryError(gitdir.raw_path)
         # git names the target a pointer leads to unquoted, as it does for
         # one met on the way up.
         pointer = info.type is not FileType.DIRECTORY
         resolved = (
-            await _follow_gitfile(dispatch, stat_path, candidate)
-            if pointer
-            else candidate
+            await _follow_gitfile(vfs, candidate) if pointer else candidate
         )
-        common = await _validated(dispatch, stat_path, resolved)
+        common = await _validated(vfs, resolved)
         if common is None:
             raise (
                 NotARepositoryError(resolved.virtual, quoted=False)
                 if pointer
                 else NotARepositoryError(gitdir.raw_path)
             )
-        return await _location(
-            dispatch, stat_path, resolved, common, start, worktree, root
-        )
+        return await _location(vfs, resolved, common, start, worktree, root)
     current = start
     first = True
     while True:
         candidate = current.join(GIT_DIR)
-        info = await stat_path(candidate)
+        info = await stat_of(vfs, candidate)
         if info is not None:
             gitdir = (
                 candidate
                 if info.type is FileType.DIRECTORY
-                else await _follow_gitfile(dispatch, stat_path, candidate)
+                else await _follow_gitfile(vfs, candidate)
             )
-            common = await _common_dir(dispatch, gitdir)
+            common = await _common_dir(vfs, gitdir)
             return await _location(
-                dispatch, stat_path, gitdir, common, current, worktree, root
+                vfs, gitdir, common, current, worktree, root
             )
         if first:
             # git enters ``-C`` before it looks for anything, so a path it
@@ -218,7 +203,7 @@ async def discover(
             # repository the caller did not name. Asked only after the
             # first probe missed, because a hit already proves the
             # directory is there.
-            await _enter(stat_path, start)
+            await _enter(vfs, start)
             first = False
         if current.virtual == root.virtual or current.virtual == "/":
             raise NotARepositoryError()
@@ -226,8 +211,7 @@ async def discover(
 
 
 async def _location(
-    dispatch: DispatchFn,
-    stat_path: StatPath,
+    vfs: Files,
     gitdir: PathSpec,
     common: PathSpec,
     default_worktree: PathSpec,
@@ -248,8 +232,7 @@ async def _location(
     git's "do not make sense" warning.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
-        stat_path (StatPath): dispatcher-backed stat, both channels.
+        vfs (Files): the session's files.
         gitdir (PathSpec): resolved checkout metadata directory.
         common (PathSpec): shared repository directory.
         default_worktree (PathSpec): discovered root, or start for explicit gitdir.
@@ -261,18 +244,18 @@ async def _location(
         WorkTreeChdirError: a relative core.worktree git cannot enter.
     """
     located = RepoLocation(gitdir, common, default_worktree, root)
-    bare = await config_bool(dispatch, located, b"core", b"bare", False)
+    bare = await config_bool(vfs, located, b"core", b"bare", False)
     if worktree is not None:
         return replace(located, worktree=worktree)
     if gitdir.virtual != common.virtual or bare:
         return located
-    configured = await config_values(dispatch, located, b"core", b"worktree")
+    configured = await config_values(vfs, located, b"core", b"worktree")
     if not configured:
         return located
     spelled = configured[-1].decode("utf-8", errors="replace")
     selected = PathSpec.from_str_path(spelled, cwd=gitdir)
     if not spelled.startswith("/"):
-        info = await stat_path(selected)
+        info = await stat_of(vfs, selected)
         if info is None:
             raise WorkTreeChdirError(spelled)
         if info.type is not FileType.DIRECTORY:
@@ -280,7 +263,7 @@ async def _location(
     return replace(located, worktree=selected)
 
 
-async def is_bare(dispatch: DispatchFn, location: RepoLocation) -> bool:
+async def is_bare(vfs: Files, location: RepoLocation) -> bool:
     """Whether core.bare leaves the repository without a work tree.
 
     git reads core.bare, like core.worktree, only from a repository's own
@@ -288,18 +271,17 @@ async def is_bare(dispatch: DispatchFn, location: RepoLocation) -> bool:
     linked worktree is never bare. A named work tree overrides it.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
     """
     return (
         location.gitdir.virtual == location.commondir.virtual
-        and await config_bool(dispatch, location, b"core", b"bare", False)
+        and await config_bool(vfs, location, b"core", b"bare", False)
     )
 
 
 async def require_work_tree(
-    dispatch: DispatchFn,
-    stat_path: StatPath,
+    vfs: Files,
     location: RepoLocation,
     named: bool,
 ) -> None:
@@ -310,8 +292,7 @@ async def require_work_tree(
     as a tree with every file deleted.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
-        stat_path (StatPath): dispatcher-backed stat, both channels.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         named (bool): ``--work-tree`` or ``GIT_WORK_TREE`` chose the tree.
 
@@ -319,8 +300,8 @@ async def require_work_tree(
         NotAWorkTreeError: the repository is bare or the tree is not a
             directory.
     """
-    if not named and await is_bare(dispatch, location):
+    if not named and await is_bare(vfs, location):
         raise NotAWorkTreeError()
-    info = await stat_path(location.worktree)
+    info = await stat_of(vfs, location.worktree)
     if info is None or info.type is not FileType.DIRECTORY:
         raise NotAWorkTreeError()

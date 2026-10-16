@@ -16,7 +16,7 @@ import type { CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
 import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
 import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
-import type { DispatchFn } from '@struktoai/mirage-core/runtime/types'
+import type { Files } from '@struktoai/mirage-core/workspace/files'
 import { boundedMap } from '@struktoai/mirage-core/concurrency/limiter'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
@@ -69,12 +69,12 @@ export function selected(
  * a per-backend capability: the ops factory only wires `parents: true` for
  * backends that declare it, so a plain `mkdir` of `a/b` fails on the rest.
  */
-export async function ensureDir(dispatch: DispatchFn, path: PathSpec): Promise<void> {
+export async function ensureDir(vfs: Files, path: PathSpec): Promise<void> {
   const missing: PathSpec[] = []
   let current = path
   while (current.virtual !== '/') {
     try {
-      await dispatch('stat', current)
+      await vfs.stat(current)
       break
     } catch (err) {
       if (!isMissingPath(err)) throw err
@@ -84,7 +84,7 @@ export async function ensureDir(dispatch: DispatchFn, path: PathSpec): Promise<v
   }
   for (const target of missing.reverse()) {
     try {
-      await dispatch('mkdir', target)
+      await vfs.mkdir(target)
     } catch (err) {
       // A parallel download fans out over files that share parents, so two
       // workers can read the same parent as missing and then both create
@@ -98,7 +98,7 @@ export async function ensureDir(dispatch: DispatchFn, path: PathSpec): Promise<v
 
 /** Fetch one file and store it under the workspace directory. */
 async function writeFile(
-  dispatch: DispatchFn,
+  vfs: Files,
   accessor: HfHubAccessor,
   repoPath: string,
   localDir: PathSpec,
@@ -112,15 +112,15 @@ async function writeFile(
   )
   const data = await hubBytes(accessor.token, url, undefined, accessor.timeoutMs)
   const target = localDir.join(repoPath)
-  await ensureDir(dispatch, target.parent)
-  await dispatch('write', target, [data])
+  await ensureDir(vfs, target.parent)
+  await vfs.write(target, data)
   return target.virtual
 }
 
 /** Whether anything is at a virtual path. */
-async function pathExists(dispatch: DispatchFn, path: PathSpec): Promise<boolean> {
+async function pathExists(vfs: Files, path: PathSpec): Promise<boolean> {
   try {
-    await dispatch('stat', path)
+    await vfs.stat(path)
   } catch (err) {
     if (isMissingPath(err)) return false
     throw err
@@ -138,7 +138,7 @@ async function pathExists(dispatch: DispatchFn, path: PathSpec): Promise<boolean
  * because a symlink here is namespace state, so no backend has to support one.
  */
 async function cacheFile(
-  dispatch: DispatchFn,
+  vfs: Files,
   accessor: HfHubAccessor,
   entry: TreeEntry,
   cacheDir: PathSpec,
@@ -148,7 +148,7 @@ async function cacheFile(
 ): Promise<string> {
   const etag = etagOf(entry)
   const blob = blobPath(cacheDir, folder, etag)
-  if (force || !(await pathExists(dispatch, blob))) {
+  if (force || !(await pathExists(vfs, blob))) {
     const url = resolveUrl(
       accessor.endpoint,
       accessor.repoType,
@@ -157,27 +157,25 @@ async function cacheFile(
       entry.path,
     )
     const data = await hubBytes(accessor.token, url, undefined, accessor.timeoutMs)
-    await ensureDir(dispatch, blob.parent)
-    await dispatch('write', blob, [data])
+    await ensureDir(vfs, blob.parent)
+    await vfs.write(blob, data)
   }
   const link = snapshotPath(cacheDir, folder, sha, entry.path)
-  if (force || !(await pathExists(dispatch, link))) {
-    await ensureDir(dispatch, link.parent)
+  if (force || !(await pathExists(vfs, link))) {
+    await ensureDir(vfs, link.parent)
     try {
-      await dispatch('unlink', link)
+      await vfs.unlink(link)
     } catch (err) {
       if (!isMissingPath(err)) throw err
     }
-    await dispatch('symlink', link, [], {
-      target: linkTarget(entry.path, etag),
-    })
+    await vfs.symlink(link, linkTarget(entry.path, etag))
   }
   return link.virtual
 }
 
 /** Populate the cache for one revision, bounded the same way. */
 async function fetchIntoCache(
-  dispatch: DispatchFn,
+  vfs: Files,
   accessor: HfHubAccessor,
   tree: Map<string, TreeEntry>,
   paths: readonly string[],
@@ -195,15 +193,15 @@ async function fetchIntoCache(
   // behind.
   if (accessor.revision !== sha) {
     const ref = refPath(cacheDir, folder, accessor.revision)
-    await ensureDir(dispatch, ref.parent)
-    await dispatch('write', ref, [new TextEncoder().encode(sha)])
+    await ensureDir(vfs, ref.parent)
+    await vfs.write(ref, new TextEncoder().encode(sha))
   }
   const written = await boundedMap(
     paths,
     async (path) => {
       const entry = tree.get(path)
       if (entry === undefined) throw new Error(`missing tree entry: ${path}`)
-      return cacheFile(dispatch, accessor, entry, cacheDir, folder, sha, force)
+      return cacheFile(vfs, accessor, entry, cacheDir, folder, sha, force)
     },
     workers,
   )
@@ -247,13 +245,13 @@ export function refuseVariadic(
  * `--max-workers` names it the way upstream does.
  */
 async function fetchAll(
-  dispatch: DispatchFn,
+  vfs: Files,
   accessor: HfHubAccessor,
   paths: readonly string[],
   localDir: PathSpec,
   workers: number,
 ): Promise<string[]> {
-  return boundedMap(paths, (path) => writeFile(dispatch, accessor, path, localDir), workers)
+  return boundedMap(paths, (path) => writeFile(vfs, accessor, path, localDir), workers)
 }
 
 /**
@@ -339,8 +337,8 @@ export async function downloadCmd(inv: CLIInvocation): Promise<CommandFnResult> 
         'default a cache under',
     )
   }
-  const dispatch = inv.view?.dispatch
-  if (dispatch === undefined) {
+  const vfs = inv.view?.vfs
+  if (vfs === undefined) {
     throw new UsageError('hf download needs a workspace to write into')
   }
   const [repoId, ...names] = inv.texts
@@ -360,10 +358,10 @@ export async function downloadCmd(inv: CLIInvocation): Promise<CommandFnResult> 
     // between; that is what upstream does too, which is why --force-download
     // only means anything in cache mode.
     base = localDir.virtual
-    written = await fetchAll(dispatch, accessor, paths, localDir, workers)
+    written = await fetchAll(vfs, accessor, paths, localDir, workers)
   } else {
     ;[base, written] = await fetchIntoCache(
-      dispatch,
+      vfs,
       accessor,
       tree,
       paths,

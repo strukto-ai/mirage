@@ -18,8 +18,8 @@ from typing import BinaryIO, cast
 from dulwich.ignore import IgnoreFilter, read_ignore_patterns
 
 from mirage.commands.cli.builtin.git.io import read_optional
-from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
+from mirage.workspace.files import Files
 
 GITIGNORE = ".gitignore"
 INFO_EXCLUDE = "info/exclude"
@@ -88,7 +88,7 @@ class IgnoreStack:
 
 
 async def load_ignores(
-    dispatch: DispatchFn, commondir: PathSpec, worktree: PathSpec
+    vfs: Files, commondir: PathSpec, worktree: PathSpec
 ) -> IgnoreStack:
     """The root of the ignore stack: the repository's own two files.
 
@@ -103,16 +103,16 @@ async def load_ignores(
     else's repository.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         commondir (PathSpec): absolute virtual path of the shared git
             directory, whose ``info`` a linked worktree reads too.
         worktree (PathSpec): absolute virtual path of the working tree root.
     """
     stack = IgnoreStack([])
-    private = await read_optional(dispatch, commondir.join(INFO_EXCLUDE))
+    private = await read_optional(vfs, commondir.join(INFO_EXCLUDE))
     if private is not None:
         stack = stack.push("", private)
-    root = await read_optional(dispatch, worktree.join(GITIGNORE))
+    root = await read_optional(vfs, worktree.join(GITIGNORE))
     if root is not None:
         stack = stack.push("", root)
     return stack

@@ -13,9 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { visiblePath, repoRelative, under as inside } from './pathspec.ts'
-import { type PathSpec, FileType, type FileStat } from '../../../../types.ts'
+import { type PathSpec, FileType } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { LinkView, MountView, StatPath } from '../../../../view/types.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 import { isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import type { CommandFnResult } from '../../../config.ts'
@@ -31,11 +30,12 @@ import {
   UsageError,
 } from './errors.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
-import { removeFile, renamePath } from './io.ts'
+import { lstat, removeFile, renamePath } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 
 import { opened } from './session.ts'
-import type { Dispatch, IndexEntry, RepoLocation } from './types.ts'
+import type { IndexEntry, RepoLocation } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 import { checkSwitches, fatal, startPoint, verbUsage } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -98,17 +98,6 @@ interface Verdict {
   readonly reason: string | null
   readonly paths: readonly string[]
   readonly directory: boolean
-}
-
-/** What sits at a path, without following a link. */
-async function lstat(
-  statPath: StatPath,
-  links: LinkView | null,
-  path: PathSpec,
-): Promise<FileStat | null> {
-  const link = links?.statAt(path.virtual) ?? null
-  if (link !== null) return link
-  return statPath(path)
 }
 
 /** Where one tracked path lands after a move. */
@@ -176,8 +165,7 @@ export function overlapping(moves: readonly Move[]): [string, string] | null {
  * for that rather than for a destination that already exists.
  */
 export async function check(
-  statPath: StatPath,
-  links: LinkView | null,
+  vfs: Files,
   location: RepoLocation,
   source: string,
   destination: string,
@@ -185,7 +173,7 @@ export async function check(
   conflicted: ReadonlySet<string>,
   force: boolean,
 ): Promise<Verdict> {
-  const info = await lstat(statPath, links, location.worktree.join(source))
+  const info = await lstat(vfs, location.worktree.join(source))
   if (info === null) return { reason: BAD_SOURCE, paths: [], directory: false }
   if (destination === source || destination.startsWith(`${source}/`)) {
     return { reason: INTO_ITSELF, paths: [], directory: false }
@@ -207,7 +195,7 @@ export async function check(
     if (held.some((path) => conflicted.has(path))) {
       return { reason: CONFLICTED, paths: held, directory: true }
     }
-    if ((await lstat(statPath, links, landing)) !== null) {
+    if ((await lstat(vfs, landing)) !== null) {
       return { reason: DESTINATION_ALREADY_EXISTS, paths: [], directory: true }
     }
     if (held.length === 0) return { reason: SOURCE_DIRECTORY_EMPTY, paths: [], directory: true }
@@ -216,7 +204,7 @@ export async function check(
   if (!tracked.has(source) || !visiblePath(location, source))
     return { reason: NOT_UNDER_VERSION_CONTROL, paths: [], directory: false }
   if (conflicted.has(source)) return { reason: CONFLICTED, paths: [source], directory: false }
-  const target = await lstat(statPath, links, landing)
+  const target = await lstat(vfs, landing)
   if (target !== null && (!force || target.type === FileType.DIRECTORY)) {
     return { reason: DESTINATION_EXISTS, paths: [], directory: false }
   }
@@ -241,10 +229,10 @@ export async function check(
  * the other mount while the index names the new path, which is the same broken
  * pair one level down.
  */
-function spanning(mounts: MountView | null, path: PathSpec, landing: PathSpec): boolean {
-  if (mounts === null) return false
-  if (mounts.isRoot(path.virtual) || mounts.descendants(path.virtual).length > 0) return true
-  return mounts.rootOf(path.virtual) !== mounts.rootOf(landing.virtual)
+function spanning(vfs: Files, path: PathSpec, landing: PathSpec): boolean {
+  if (vfs.isMount(path) || vfs.submounts(path).length > 0) return true
+  const there = vfs.mountOf(landing)
+  return there !== null && vfs.mountOf(path) !== there
 }
 
 /**
@@ -255,9 +243,7 @@ function spanning(mounts: MountView | null, path: PathSpec, landing: PathSpec): 
  * under its own name and anything else is the new name.
  */
 export async function plan(
-  statPath: StatPath,
-  links: LinkView | null,
-  mounts: MountView | null,
+  vfs: Files,
   location: RepoLocation,
   start: string,
   operands: readonly string[],
@@ -266,7 +252,7 @@ export async function plan(
   flags: MvFlags,
 ): Promise<Move[]> {
   const destination = repoRelative(location, start, operands[operands.length - 1] ?? '')
-  const target = await lstat(statPath, links, location.worktree.join(destination))
+  const target = await lstat(vfs, location.worktree.join(destination))
   const into = destination === '' || target?.type === FileType.DIRECTORY
   if (operands.length > 2 && !into) throw new NotADirectoryDestinationError(destination)
   const moves: Move[] = []
@@ -278,16 +264,7 @@ export async function plan(
         ? entryName(source)
         : `${destination}/${entryName(source)}`
       : destination
-    const verdict = await check(
-      statPath,
-      links,
-      location,
-      source,
-      landing,
-      tracked,
-      conflicted,
-      flags.force,
-    )
+    const verdict = await check(vfs, location, source, landing, tracked, conflicted, flags.force)
     const move: Move = {
       source,
       destination: landing,
@@ -314,7 +291,7 @@ export async function plan(
     }
     if (
       reason === null &&
-      spanning(mounts, location.worktree.join(source), location.worktree.join(landing))
+      spanning(vfs, location.worktree.join(source), location.worktree.join(landing))
     ) {
       // Last, after every check git itself makes, so a source git would refuse
       // anyway is refused in git's own words. `-k` skips it like any other
@@ -350,16 +327,16 @@ export async function plan(
  * mount renames over one.
  */
 async function apply(
-  dispatch: Dispatch,
+  vfs: Files,
   location: RepoLocation,
   move: Move,
   force: boolean,
 ): Promise<void> {
   const source = location.worktree.join(move.source)
   const destination = location.worktree.join(move.destination)
-  if (force && !move.directory) await removeFile(dispatch, destination)
+  if (force && !move.directory) await removeFile(vfs, destination)
   try {
-    await renamePath(dispatch, source, destination)
+    await renamePath(vfs, source, destination)
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err))
       throw new RenameFailedError(move.source)
@@ -380,25 +357,22 @@ export async function mv(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   const lines: string[] = []
   try {
-    const dispatch = view.dispatch
-    const statPath = view.statPath
-    if (statPath === undefined || dispatch === undefined) {
+    const vfs = view.vfs
+    if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
     checkSwitches(inv, texts)
     const flags = parseFlags(fl)
     if (texts.length < 2) throw new UsageError('', verbUsage(inv))
     const repo = await opened(fl, view, true)
-    const state = await readIndex(repo, dispatch)
+    const state = await readIndex(repo, vfs)
     const conflicted = new Set(state.conflicts.keys())
     // An unmerged path holds no ordinary entry, so a tracked set built from the
     // entries alone would call it untracked and let a directory holding one
     // move with its stages left behind.
     const tracked = new Set([...state.entries.keys(), ...conflicted])
     const moves = await plan(
-      statPath,
-      view.ns?.links ?? null,
-      view.ns?.mounts ?? null,
+      vfs,
       repo.location,
       startPoint(fl).virtual,
       texts,
@@ -418,7 +392,7 @@ export async function mv(inv: CLIInvocation): Promise<CommandFnResult> {
       const staged = new Map<string, StagedEntry>()
       const removed: string[] = []
       for (const move of moves) {
-        await apply(dispatch, repo.location, move, flags.force)
+        await apply(vfs, repo.location, move, flags.force)
         for (const path of move.paths) {
           const entry: IndexEntry | undefined = state.entries.get(path)
           if (entry === undefined) continue

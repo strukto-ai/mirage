@@ -20,7 +20,6 @@ import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 
-import { IOResult } from '../../../../io/types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
@@ -28,7 +27,6 @@ import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
 import { VERSION } from '../../../../version.ts'
 import { ensureDir } from './io.ts'
-import type { Dispatch } from './types.ts'
 
 const BUILDER = fileURLToPath(
   new URL('../../../../../../../../integ/fixtures/git/read-only.sh', import.meta.url),
@@ -69,10 +67,7 @@ beforeAll(async () => {
   const ram = new RAMVFS()
   parser = await createShellParser({ engineWasm, grammarWasm })
   ws = new Workspace({ '/repo': ram }, { mode: MountMode.WRITE, shellParser: parser })
-  const dispatch: Dispatch = async (op, path, args = [], kwargs = {}) => [
-    await ws.dispatch(op, path.virtual, args, kwargs),
-    new IOResult(),
-  ]
+  const dispatch = ws.vfs
   for (const rel of walk(repoPath)) {
     const target = `/repo/${rel}`
     await ensureDir(dispatch, PathSpec.fromStrPath(target).parent)

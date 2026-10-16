@@ -57,9 +57,9 @@ const DECODER = new TextDecoder()
 const ENCODER = new TextEncoder()
 
 // The live handles every context carries, which a program reads as data
-// instead: the session as its cwd, env and profile, the namespace as the
-// mounts it shows, the files through the program's own open().
-const LIVE = new Set(['session', 'ns', 'vfs'])
+// instead: the session as its cwd, env and profile, the files as the mounts
+// they show and through the program's own open().
+const LIVE = new Set(['session', 'vfs'])
 
 /**
  * A value as a program reads it: JSON-shaped data, bytes as text, a path
@@ -129,7 +129,9 @@ export function scriptContext(
     data.env = {}
     data.profile = ''
   }
-  data.mounts = [...(ctx.ns?.mounts?.visibleDescendants('/') ?? [])]
+  const vfs = ctx.vfs
+  data.mounts =
+    vfs === undefined ? [] : vfs.submounts('/').filter((root) => root !== '/' && vfs.isMount(root))
   return data
 }
 

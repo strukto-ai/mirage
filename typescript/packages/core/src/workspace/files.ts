@@ -16,7 +16,7 @@ import { type ByteSource, type IOResult, OpReport } from '../io/types.ts'
 import { closeQuietly, ensureStream } from '../io/stream.ts'
 import type { OpRecord } from '../observe/record.ts'
 import { finishRecord, type OpTimer, startOp } from '../observe/context.ts'
-import type { FileStat, SetAttrFields } from '../types.ts'
+import type { FileStat, SetAttrFields, Visibility } from '../types.ts'
 import { FileType, PathSpec } from '../types.ts'
 import { isEnotdir, isMissingPath } from '../errors/fs.ts'
 import {
@@ -24,7 +24,12 @@ import {
   type CallerDispatchFn,
   currentCaller,
   getCurrentSession,
+  sessionVisibility,
 } from '../context/session_context.ts'
+import { leadsHidden, pathVisible } from '../utils/hidden.ts'
+import { norm } from '../utils/path.ts'
+import { normDir, ownerPrefix } from '../utils/slash.ts'
+import { compareCodePoints } from '../utils/sort.ts'
 import type { NamespaceLinks, OpKwargs, SessionAccess, SessionBind } from '../view/types.ts'
 
 /** Receives each record with the id of the session the op ran as. */
@@ -48,6 +53,12 @@ export interface FilesOptions {
   dispatchAs?: ((owner: SessionAccess) => CallerDispatchFn) | null
   sessionId?: string | null
   records?: OpRecord[]
+  // The prefixes of the mounts the running session is told of, read live;
+  // a session's hides are applied over them.
+  prefixes?: (() => readonly string[]) | null
+  // What the session a call would run as sees, given this facade's own; the
+  // bound session's when unset.
+  visibility?: ((sessionId: string | null) => Visibility | null) | null
 }
 
 // The op's byte count for recording: the result first, else the input
@@ -120,13 +131,21 @@ async function* recorded(
 export class Files {
   private readonly dispatchFn: CallerDispatchFn
   private readonly sink: OpSink | null
-  // Injected namespace seam (workspace wires it); the mount core follows
-  // `links` to recognise one file opened through a link and its target.
+  /**
+   * The workspace link table, unfiltered by any session's hides: the mount
+   * core and the file tool follow it to map a path the way the dispatcher
+   * does, so one file opened through a link and through its target is
+   * recognised as one.
+   *
+   * @internal Not part of the supported surface; Python keeps it private.
+   */
   readonly links: NamespaceLinks | null
   private readonly ownerOf: OwnerOf
   private readonly bind: SessionBind | null
   private readonly dispatchAs: ((owner: SessionAccess) => CallerDispatchFn) | null
   private readonly caller: Partial<Caller> | null
+  private readonly prefixes: () => readonly string[]
+  private readonly visibilityOf: ((sessionId: string | null) => Visibility | null) | null
   /** The session this facade runs as; null for the workspace's default. */
   readonly sessionId: string | null
   /**
@@ -152,6 +171,19 @@ export class Files {
     this.caller = options.caller ?? null
     this.sessionId = options.sessionId ?? null
     this.records = options.records ?? []
+    this.prefixes = options.prefixes ?? (() => [])
+    this.visibilityOf = options.visibility ?? null
+  }
+
+  private options(): FilesOptions {
+    return {
+      bind: this.bind,
+      dispatchAs: this.dispatchAs,
+      sessionId: this.sessionId,
+      records: this.records,
+      prefixes: this.prefixes,
+      visibility: this.visibilityOf,
+    }
   }
 
   /**
@@ -168,10 +200,8 @@ export class Files {
    */
   forSession(sessionId: string): Files {
     return new Files(this.dispatchFn, this.sink, this.links, this.ownerOf, {
-      bind: this.bind,
-      dispatchAs: this.dispatchAs,
+      ...this.options(),
       sessionId,
-      records: this.records,
     })
   }
 
@@ -188,12 +218,80 @@ export class Files {
    */
   forCaller(changes: Partial<Caller>): Files {
     return new Files(this.dispatchFn, this.sink, this.links, this.ownerOf, {
-      bind: this.bind,
-      dispatchAs: this.dispatchAs,
+      ...this.options(),
       caller: { ...this.caller, ...changes },
-      sessionId: this.sessionId,
-      records: this.records,
     })
+  }
+
+  /** The visibility of the session an op would run as: the bound one, else
+   * this facade's own. */
+  private vis(): Visibility | null {
+    return this.visibilityOf === null ? sessionVisibility() : this.visibilityOf(this.sessionId)
+  }
+
+  /**
+   * Whether the session sees `path`: it is not hidden, and no link on it leads
+   * where the session cannot see. The rule the dispatcher refuses a call by,
+   * for a caller holding paths in data of its own (git's index, a manifest),
+   * so what it prints of them honours the same hides. Mirrors Python's
+   * `Files.is_visible`.
+   */
+  isVisible(path: string | PathSpec): boolean {
+    const virtual = PathSpec.fromStrPath(path, undefined, '/').virtual
+    const vis = this.vis()
+    if (!pathVisible(vis, virtual)) return false
+    if (vis === null || this.links === null) return true
+    return !leadsHidden(vis, virtual, this.links.symlinkTargets())
+  }
+
+  /**
+   * The mount prefix serving `path`, without a trailing slash: the one
+   * `RuntimeFiles.mountOf` gives a guest, where a walk up a tree stops, as git
+   * stops looking for `.git` at a filesystem boundary. null for a path the
+   * session cannot see. A path a show carve-out opens inside a hidden mount
+   * names that mount, whose root the path itself runs through. Mirrors
+   * Python's `Files.mount_of`.
+   */
+  mountOf(path: string | PathSpec): string | null {
+    const virtual = PathSpec.fromStrPath(path, undefined, '/').virtual
+    if (!pathVisible(this.vis(), virtual)) return null
+    const owner = ownerPrefix(this.prefixes(), virtual)
+    return owner === null ? null : norm(owner)
+  }
+
+  /** Whether `path` is the root of a mount the session sees. Mirrors Python's
+   * `Files.is_mount`. */
+  isMount(path: string | PathSpec): boolean {
+    const virtual = norm(PathSpec.fromStrPath(path, undefined, '/').virtual)
+    const vis = this.vis()
+    return this.prefixes().some((prefix) => norm(prefix) === virtual && pathVisible(vis, virtual))
+  }
+
+  /**
+   * The mount roots strictly under `path`, sorted, without a trailing slash,
+   * as `findmnt --submounts` lists them.
+   *
+   * A mount the session hides still stands where it is: whatever removes or
+   * renames the folder holding it would take it along. It is reported by the
+   * nearest folder above it the session sees, `path` itself when nothing
+   * between is visible, so a caller refuses that folder without learning the
+   * mount's name. Mirrors Python's `Files.submounts`.
+   */
+  submounts(path: string | PathSpec): string[] {
+    const virtual = norm(PathSpec.fromStrPath(path, undefined, '/').virtual)
+    const vis = this.vis()
+    if (!pathVisible(vis, virtual)) return []
+    const below = normDir(virtual)
+    const found = new Set<string>()
+    for (const prefix of this.prefixes()) {
+      let root = norm(prefix)
+      if (root === virtual || !normDir(root).startsWith(below)) continue
+      while (root !== virtual && !pathVisible(vis, root)) {
+        root = root.slice(0, root.lastIndexOf('/')) || '/'
+      }
+      found.add(root)
+    }
+    return [...found].sort(compareCodePoints)
   }
 
   get networkBytes(): number {
@@ -229,7 +327,7 @@ export class Files {
    */
   dispatch(
     name: string,
-    path: string,
+    path: string | PathSpec,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
@@ -246,13 +344,14 @@ export class Files {
    */
   private async through(
     op: string,
-    path: string,
+    path: string | PathSpec,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
     sessionId?: string,
   ): Promise<unknown> {
     const timer = startOp()
     const report = new OpReport()
+    const spelled = typeof path === 'string' ? path : path.virtual
     // The record names the session the op ran as: noted inside the
     // bind, since the facade's own id may be null (the default) and a
     // session bound by the caller is kept over it.
@@ -273,9 +372,9 @@ export class Files {
       const bound = sessionId ?? this.sessionId
       const [value] = await (this.bind === null ? run() : this.bind(bound, run))
       result = value
-      owner = this.ownerOf(report.path ?? path)
+      owner = this.ownerOf(report.path ?? spelled)
     } catch (err) {
-      owner = this.ownerOf(report.path ?? path)
+      owner = this.ownerOf(report.path ?? spelled)
       // Anything thrown after the op ran (a postVfs deny, a hard
       // output cap, a bookkeeping failure) suppresses the result, not
       // the effect, so observation must reflect the op before the
@@ -285,7 +384,7 @@ export class Files {
       if (report.completed && owner !== null) {
         await this.recordOp(
           op,
-          report.path ?? path,
+          report.path ?? spelled,
           owner,
           report.source,
           report.bytes,
@@ -306,7 +405,7 @@ export class Files {
     const record = (answer: unknown): Promise<void> =>
       this.recordOp(
         op,
-        report.path ?? path,
+        report.path ?? spelled,
         owner,
         report.source,
         report.bytes,
@@ -367,7 +466,7 @@ export class Files {
   // so a backend with a native range fetches one window instead of the whole
   // object. Python spells this `read(path, offset, size, raw)`.
   async read(
-    path: string,
+    path: string | PathSpec,
     options: { raw?: boolean; offset?: number; size?: number | null } = {},
     sessionId?: string,
   ): Promise<Uint8Array> {
@@ -395,7 +494,7 @@ export class Files {
    * `read_stream(path, raw)`.
    */
   async readStream(
-    path: string,
+    path: string | PathSpec,
     options: { raw?: boolean } = {},
     sessionId?: string,
   ): Promise<AsyncIterable<Uint8Array>> {
@@ -404,7 +503,11 @@ export class Files {
     return ensureStream((await this.through('read', path, [], kwargs, sessionId)) as ByteSource)
   }
 
-  async write(path: string, data: ByteSource | string, sessionId?: string): Promise<void> {
+  async write(
+    path: string | PathSpec,
+    data: ByteSource | string,
+    sessionId?: string,
+  ): Promise<void> {
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
     await this.through('write', path, [bytes], {}, sessionId)
   }
@@ -414,7 +517,7 @@ export class Files {
    * appendStream consumes incrementally; other mounts collect once before
    * their existing append or read-and-rewrite fallback.
    */
-  async append(path: string, data: ByteSource, sessionId?: string): Promise<void> {
+  async append(path: string | PathSpec, data: ByteSource, sessionId?: string): Promise<void> {
     await this.through('append', path, [data], {}, sessionId)
   }
 
@@ -425,11 +528,16 @@ export class Files {
    * one write at the dispatcher, so a session that may write the file and not
    * read it can still do it.
    */
-  async pwrite(path: string, data: Uint8Array, offset: number, sessionId?: string): Promise<void> {
+  async pwrite(
+    path: string | PathSpec,
+    data: Uint8Array,
+    offset: number,
+    sessionId?: string,
+  ): Promise<void> {
     await this.through('pwrite', path, [data, offset], {}, sessionId)
   }
 
-  async readdir(path: string, sessionId?: string): Promise<string[]> {
+  async readdir(path: string | PathSpec, sessionId?: string): Promise<string[]> {
     return ((await this.through('readdir', path, [], {}, sessionId)) as string[] | null) ?? []
   }
 
@@ -438,7 +546,7 @@ export class Files {
    * than its target (lstat), so a dangling link is a name that is there.
    */
   async stat(
-    path: string,
+    path: string | PathSpec,
     sessionId?: string,
     opts: { nofollow?: boolean } = {},
   ): Promise<FileStat> {
@@ -452,7 +560,7 @@ export class Files {
   // bug is not an answer to that question: swallowing it would let a caller
   // act on a false "missing" (overwrite, recreate, skip). Mirrors Python's
   // `(FileNotFoundError, NotADirectoryError, NoMountError)` swallow set.
-  async exists(path: string, sessionId?: string): Promise<boolean> {
+  async exists(path: string | PathSpec, sessionId?: string): Promise<boolean> {
     try {
       await this.stat(path, sessionId)
       return true
@@ -462,7 +570,7 @@ export class Files {
     }
   }
 
-  async isDir(path: string, sessionId?: string): Promise<boolean> {
+  async isDir(path: string | PathSpec, sessionId?: string): Promise<boolean> {
     try {
       const s = await this.stat(path, sessionId)
       return s.type === FileType.DIRECTORY
@@ -472,7 +580,7 @@ export class Files {
     }
   }
 
-  async isFile(path: string, sessionId?: string): Promise<boolean> {
+  async isFile(path: string | PathSpec, sessionId?: string): Promise<boolean> {
     try {
       const s = await this.stat(path, sessionId)
       return s.type !== FileType.DIRECTORY
@@ -482,11 +590,11 @@ export class Files {
     }
   }
 
-  async mkdir(path: string, sessionId?: string): Promise<void> {
+  async mkdir(path: string | PathSpec, sessionId?: string): Promise<void> {
     await this.through('mkdir', path, [], {}, sessionId)
   }
 
-  async create(path: string, sessionId?: string): Promise<void> {
+  async create(path: string | PathSpec, sessionId?: string): Promise<void> {
     await this.through('create', path, [], {}, sessionId)
   }
 
@@ -503,12 +611,12 @@ export class Files {
    * non-directory stands there or above it. Mirrors Python's
    * Files.symlink.
    */
-  async symlink(path: string, target: string, sessionId?: string): Promise<void> {
+  async symlink(path: string | PathSpec, target: string, sessionId?: string): Promise<void> {
     await this.through('symlink', path, [], { target }, sessionId)
   }
 
   /** The stored target of the link at `path`; EINVAL when not a link. */
-  async readlink(path: string, sessionId?: string): Promise<string> {
+  async readlink(path: string | PathSpec, sessionId?: string): Promise<string> {
     return (await this.through('readlink', path, [], {}, sessionId)) as string
   }
 
@@ -524,7 +632,7 @@ export class Files {
    * Mirrors Python's Files.setattr.
    */
   async setattr(
-    path: string,
+    path: string | PathSpec,
     attrs: SetAttrFields = {},
     sessionId?: string,
   ): Promise<Record<string, number | string>> {
@@ -542,7 +650,7 @@ export class Files {
    * Mirrors Python's Files.getxattr.
    */
   async getxattr(
-    path: string,
+    path: string | PathSpec,
     name: string,
     opts: { nofollow?: boolean } = {},
     sessionId?: string,
@@ -553,7 +661,7 @@ export class Files {
 
   /** Every extended attribute name a path carries, sorted. */
   async listxattr(
-    path: string,
+    path: string | PathSpec,
     opts: { nofollow?: boolean } = {},
     sessionId?: string,
   ): Promise<string[]> {
@@ -569,7 +677,7 @@ export class Files {
    * Mirrors Python's Files.setxattr.
    */
   async setxattr(
-    path: string,
+    path: string | PathSpec,
     name: string,
     value: Uint8Array,
     opts: { create?: boolean; replace?: boolean; nofollow?: boolean } = {},
@@ -587,7 +695,7 @@ export class Files {
 
   /** Drop an extended attribute; ENODATA when it is not set. */
   async removexattr(
-    path: string,
+    path: string | PathSpec,
     name: string,
     opts: { nofollow?: boolean } = {},
     sessionId?: string,
@@ -601,15 +709,15 @@ export class Files {
     )
   }
 
-  async truncate(path: string, length: number, sessionId?: string): Promise<void> {
+  async truncate(path: string | PathSpec, length: number, sessionId?: string): Promise<void> {
     await this.through('truncate', path, [length], {}, sessionId)
   }
 
-  async unlink(path: string, sessionId?: string): Promise<void> {
+  async unlink(path: string | PathSpec, sessionId?: string): Promise<void> {
     await this.through('unlink', path, [], {}, sessionId)
   }
 
-  async rmdir(path: string, sessionId?: string): Promise<void> {
+  async rmdir(path: string | PathSpec, sessionId?: string): Promise<void> {
     await this.through('rmdir', path, [], {}, sessionId)
   }
 
@@ -622,15 +730,15 @@ export class Files {
    * mount needs so `mv` between two backends falls back to its copy+unlink
    * path. Mirrors Python's Files.rename.
    */
-  async rename(src: string, dst: string, sessionId?: string): Promise<void> {
+  async rename(src: string | PathSpec, dst: string | PathSpec, sessionId?: string): Promise<void> {
     await this.through('rename', src, [PathSpec.fromStrPath(dst, undefined, '/')], {}, sessionId)
   }
 
-  async cat(path: string, sessionId?: string): Promise<string> {
+  async cat(path: string | PathSpec, sessionId?: string): Promise<string> {
     return new TextDecoder('utf-8', { fatal: false }).decode(await this.read(path, {}, sessionId))
   }
 
-  async listFiles(path: string, sessionId?: string): Promise<string[]> {
+  async listFiles(path: string | PathSpec, sessionId?: string): Promise<string[]> {
     const entries = await this.readdir(path, sessionId)
     const files: string[] = []
     for (const fullPath of entries) {

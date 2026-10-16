@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import functools
 from pathlib import Path
 
 import pytest
@@ -25,8 +24,6 @@ from mirage.commands.cli.builtin.git.worktree import (
     tracked_directories,
 )
 from mirage.types import LINK_TARGET_KEY, FileType
-from mirage.workspace.mount.namespace.probe import path_stat
-from mirage.workspace.mount.namespace.view import namespace_view_of
 
 from .conftest import LOCATION
 
@@ -41,15 +38,7 @@ async def walk(ws, tracked: set[str], mode: str = UNTRACKED_NORMAL):
         tracked (set[str]): paths to treat as held by the index.
         mode (str): which untracked files to report.
     """
-    ns = namespace_view_of(ws._registry, ws._namespace, ws.dispatch, None)
-    return await scan(
-        ws.dispatch,
-        functools.partial(path_stat, ws.dispatch),
-        LOCATION,
-        tracked,
-        mode,
-        ns.links,
-    )
+    return await scan(ws.vfs, LOCATION, tracked, mode)
 
 
 def test_a_path_contributes_every_directory_above_it():

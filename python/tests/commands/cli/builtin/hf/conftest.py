@@ -18,6 +18,7 @@ from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.core.hf_hub.config import HfConfig
 from mirage.io.stream import yield_bytes
 from mirage.types import PathSpec
+from mirage.workspace.files import Files
 
 CONFIG = HfConfig(token="hf_test")
 ANON = HfConfig()
@@ -56,7 +57,7 @@ def view():
     }
     dirs = {"/work", "/work/sub"}
 
-    async def dispatch(op, spec, **kwargs):
+    async def dispatch(op, spec, report=None, **kwargs):
         calls.append((op, spec.virtual, kwargs))
         path = spec.virtual
         if op == "read":
@@ -92,5 +93,5 @@ def view():
             return None, None
         raise AssertionError(f"unexpected op {op}")
 
-    record = CLIView(dispatch=dispatch)
+    record = CLIView(vfs=Files([], dispatch))
     return record, calls, tree, dirs

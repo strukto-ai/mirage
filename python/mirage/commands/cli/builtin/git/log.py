@@ -292,28 +292,24 @@ async def log(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             ``inv.view``.
     """
     view = inv.view or CLIView()
-    dispatch = view.dispatch
+    vfs = view.vfs
     texts = inv.texts
     flags = inv.flags
     fl = FlagView(flags)
     try:
-        if dispatch is None:
+        if vfs is None:
             raise NoWorkspaceError()
         check_operands(inv, texts)
         parsed = parse_flags(fl, inv.env)
         repo, location = await opened(fl, view)
         parsed = replace(
             parsed,
-            mailmap=await load_mailmap(dispatch, location),
+            mailmap=await load_mailmap(vfs, location),
             use_mailmap=use_mailmap(
                 fl,
-                await config_bool(
-                    dispatch, location, b"log", b"mailmap", True
-                ),
+                await config_bool(vfs, location, b"log", b"mailmap", True),
             ),
-            decorate=await decoration_for(
-                dispatch, location, fl, parsed.pretty
-            ),
+            decorate=await decoration_for(vfs, location, fl, parsed.pretty),
         )
         commits, walk, decor = await asyncio.to_thread(
             _collect, repo, tuple(texts), parsed
@@ -337,9 +333,9 @@ async def log(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         diff_flags = parse_diff_flags(
             fl,
             default_patch=False,
-            default_renames=await renames_enabled(dispatch, location),
+            default_renames=await renames_enabled(vfs, location),
             quote_path_fully=await config_bool(
-                dispatch, location, b"core", b"quotepath", True
+                vfs, location, b"core", b"quotepath", True
             ),
         )
     if walk is not None:

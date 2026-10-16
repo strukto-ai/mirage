@@ -113,11 +113,9 @@ async function filterBody(
   if (inline !== undefined && inline !== '') return parseJsonText(inline, '--filter')
   const source = fl.asPath('filter_file')
   if (source === undefined) return null
-  const dispatch = view?.dispatch
-  if (dispatch === undefined) throw new Error('--filter-file needs a workspace to read files from')
-  const [data] = await dispatch('read', source)
-  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBufferLike)
-  return parseJsonText(DEC.decode(bytes), '--filter-file')
+  const vfs = view?.vfs
+  if (vfs === undefined) throw new Error('--filter-file needs a workspace to read files from')
+  return parseJsonText(DEC.decode(await vfs.read(source)), '--filter-file')
 }
 
 export async function query(inv: CLIInvocation): Promise<CommandFnResult> {

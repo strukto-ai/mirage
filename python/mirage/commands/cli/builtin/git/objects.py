@@ -32,9 +32,9 @@ from mirage.commands.cli.builtin.git.io import (
     write_once,
 )
 from mirage.commands.cli.builtin.git.lazyfile import LazyFile
-from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 from mirage.utils.remnants import entry_name
+from mirage.workspace.files import Files
 
 OBJECTS_DIR = "objects"
 PACK_DIR = "objects/pack"
@@ -61,9 +61,7 @@ def loose_path(commondir: PathSpec, oid: ObjectID) -> PathSpec:
     return commondir.join(OBJECTS_DIR, name[:FANOUT_LEN], name[FANOUT_LEN:])
 
 
-async def store_blob(
-    dispatch: DispatchFn, commondir: PathSpec, data: bytes
-) -> ObjectID:
+async def store_blob(vfs: Files, commondir: PathSpec, data: bytes) -> ObjectID:
     """Write file contents into the object database as a blob.
 
     Written straight through the dispatcher rather than through the
@@ -73,14 +71,14 @@ async def store_blob(
     there is nothing the store would add here.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         commondir (PathSpec): absolute virtual path of the shared git
             directory.
         data (bytes): the file's contents.
     """
     blob = Blob.from_string(data)
     await write_once(
-        dispatch, loose_path(commondir, blob.id), blob.as_legacy_object()
+        vfs, loose_path(commondir, blob.id), blob.as_legacy_object()
     )
     return blob.id
 
@@ -94,18 +92,18 @@ class LooseObjects:
     that reads names rather than contents.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         gitdir (PathSpec): absolute virtual path of the ``.git`` directory.
         loop (asyncio.AbstractEventLoop): the loop serving the mount.
     """
 
     def __init__(
         self,
-        dispatch: DispatchFn,
+        vfs: Files,
         gitdir: PathSpec,
         loop: asyncio.AbstractEventLoop,
     ) -> None:
-        self._dispatch = dispatch
+        self._dispatch = vfs
         self._gitdir = gitdir
         self._root = gitdir.join(OBJECTS_DIR)
         self._loop = loop
@@ -338,7 +336,7 @@ class VfsObjectStore(PackCapableObjectStore):
 
 
 async def load_packs(
-    dispatch: DispatchFn, gitdir: PathSpec, loop: asyncio.AbstractEventLoop
+    vfs: Files, gitdir: PathSpec, loop: asyncio.AbstractEventLoop
 ) -> list[Pack]:
     """Open every packfile under ``.git/objects/pack``.
 
@@ -350,48 +348,46 @@ async def load_packs(
     whole, which is correct but costs what this exists to avoid.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         gitdir (PathSpec): absolute virtual path of the ``.git`` directory.
         loop (asyncio.AbstractEventLoop): the loop serving the mount.
     """
     root = gitdir.join(PACK_DIR)
     packs: list[Pack] = []
-    for entry in await read_names(dispatch, root):
+    for entry in await read_names(vfs, root):
         name = entry_name(entry)
         if not name.endswith(IDX_SUFFIX):
             continue
         stem = name[: -len(IDX_SUFFIX)]
-        idx_bytes = await read_file(dispatch, root.join(name))
+        idx_bytes = await read_file(vfs, root.join(name))
         index = load_pack_index_file(name, BytesIO(idx_bytes), SHA1)
         pack_path = root.join(f"{stem}{PACK_SUFFIX}")
-        size = await file_size(dispatch, pack_path)
+        size = await file_size(vfs, pack_path)
         if size is None:
-            raw = await read_file(dispatch, pack_path)
+            raw = await read_file(vfs, pack_path)
             data = PackData.from_file(BytesIO(raw), SHA1, len(raw))
         else:
             # Cast because LazyFile implements the four methods dulwich
             # actually calls on pack data (read, seek, tell, close) and
             # not the rest of IO[bytes], most of which is writing and
             # means nothing for a read-only window.
-            window = cast(IO[bytes], LazyFile(dispatch, pack_path, size, loop))
+            window = cast(IO[bytes], LazyFile(vfs, pack_path, size, loop))
             data = PackData.from_file(window, SHA1, size)
         packs.append(Pack.from_objects(data, index))
     return packs
 
 
-async def load_object_store(
-    dispatch: DispatchFn, gitdir: PathSpec
-) -> VfsObjectStore:
+async def load_object_store(vfs: Files, gitdir: PathSpec) -> VfsObjectStore:
     """Assemble the object database for one repository.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         gitdir (PathSpec): absolute virtual path of the ``.git`` directory.
     """
     loop = asyncio.get_running_loop()
     return VfsObjectStore(
-        LooseObjects(dispatch, gitdir, loop),
-        await load_packs(dispatch, gitdir, loop),
+        LooseObjects(vfs, gitdir, loop),
+        await load_packs(vfs, gitdir, loop),
     )
 
 
@@ -408,9 +404,7 @@ def _index_pack(data: bytes) -> tuple[bytes, bytes]:
     return out.getvalue(), checksum
 
 
-async def store_pack(
-    dispatch: DispatchFn, commondir: PathSpec, data: bytes
-) -> None:
+async def store_pack(vfs: Files, commondir: PathSpec, data: bytes) -> None:
     """Keep a fetched pack whole, beside the index git reads it through.
 
     Named by the pack's own checksum, as git names one it receives, and
@@ -418,7 +412,7 @@ async def store_pack(
     finds one whose pack is not there yet.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         commondir (PathSpec): absolute virtual path of the shared git
             directory, which owns the object database.
         data (bytes): the packfile; empty stores nothing.
@@ -428,10 +422,10 @@ async def store_pack(
     index, checksum = await asyncio.to_thread(_index_pack, data)
     stem = f"pack-{checksum.hex()}"
     await write_once(
-        dispatch, commondir.join(PACK_DIR, f"{stem}{PACK_SUFFIX}"), data
+        vfs, commondir.join(PACK_DIR, f"{stem}{PACK_SUFFIX}"), data
     )
     await write_once(
-        dispatch, commondir.join(PACK_DIR, f"{stem}{IDX_SUFFIX}"), index
+        vfs, commondir.join(PACK_DIR, f"{stem}{IDX_SUFFIX}"), index
     )
 
 

@@ -15,8 +15,9 @@
 import type { ProcessView } from '../../process/view.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import type { Limit, PathSpec } from '../../types.ts'
-import type { NamespaceView, SessionView, StatPath } from '../../view/types.ts'
-import { type ScriptSource, type DispatchFn } from '../../runtime/types.ts'
+import type { SessionView } from '../../view/types.ts'
+import { type ScriptSource } from '../../runtime/types.ts'
+import type { Files } from '../../workspace/files.ts'
 import type { CommandFnResult } from '../config.ts'
 import type { ZodObject, ZodRawShape } from 'zod'
 import { compileSpec } from '../spec/compile.ts'
@@ -26,12 +27,11 @@ import { CommandSpec, type CommandSpecInit, type FlagValue } from '../spec/types
 
 /** Workspace capabilities, matching CommandOpts; services use installation config. */
 export interface CLIView {
-  /** Policy-gated filesystem operations. */
-  dispatch?: DispatchFn
-  /** Stat including prefix-store directories. */
-  statPath?: StatPath
-  /** Symlinks, mount boundaries and attributes. */
-  ns?: NamespaceView
+  /**
+   * The session's files, the API `session.vfs` and a policy's `ctx.vfs` are,
+   * run as the line's session: reads, writes, links, and where the mounts are.
+   */
+  vfs?: Files
   /** Live, gated session access; CLIInvocation.env is a frozen snapshot. */
   sessionView?: SessionView
   processes?: ProcessView

@@ -34,7 +34,10 @@ from mirage.commands.cli.builtin.git.errors import (
 )
 from mirage.commands.cli.builtin.git.ignore import IgnoreStack, load_ignores
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
-from mirage.commands.cli.builtin.git.io import entry_bytes
+from mirage.commands.cli.builtin.git.io import (
+    entry_bytes,
+    stat_of,
+)
 from mirage.commands.cli.builtin.git.objects import store_blob
 from mirage.commands.cli.builtin.git.pathspec import (
     matched,
@@ -50,7 +53,6 @@ from mirage.commands.cli.builtin.git.types import (
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
     fatal,
-    links_of,
     start_point,
 )
 from mirage.commands.cli.builtin.git.worktree import (
@@ -63,9 +65,8 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.fs import fs_strerror
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType
-from mirage.view.types import LinkView, StatPath
+from mirage.workspace.files import Files
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,7 +197,7 @@ def _update_scope(
 
 
 async def _resolve(
-    stat_path: StatPath,
+    vfs: Files,
     location: RepoLocation,
     start: str,
     operands: tuple[str, ...],
@@ -214,7 +215,7 @@ async def _resolve(
     a directory is not asking for the things in it that were excluded.
 
     Args:
-        stat_path (StatPath): dispatcher-backed stat, both channels.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         start (str): absolute virtual path git is running in.
         operands (tuple[str, ...]): the pathspecs as typed.
@@ -241,7 +242,7 @@ async def _resolve(
             stage |= hits if force else keep_addable(hits, tracked, ignores)
             remove |= gone
             continue
-        info = await stat_path(location.worktree.join(target))
+        info = await stat_of(vfs, location.worktree.join(target))
         if info is None or info.type is FileType.DIRECTORY:
             raise PathspecError(operand)
         found.files[target] = info
@@ -252,7 +253,7 @@ async def _resolve(
 
 
 async def stage_changes(
-    dispatch: DispatchFn,
+    vfs: Files,
     location: RepoLocation,
     state: IndexState,
     found: WorkTree,
@@ -267,7 +268,7 @@ async def stage_changes(
     unchanged is not named (pinned against git 2.50).
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         state (IndexState): the index, updated in place.
         found (WorkTree): what the walk of the working tree found.
@@ -280,7 +281,7 @@ async def stage_changes(
         before = state.entries.get(path.encode())
         try:
             data = await entry_bytes(
-                dispatch, location.worktree.join(path), found.files[path]
+                vfs, location.worktree.join(path), found.files[path]
             )
         except PermissionError as exc:
             raise UnindexableFileError(
@@ -288,7 +289,7 @@ async def stage_changes(
                 fs_strerror(exc) or "Permission denied",
                 before is not None,
             ) from exc
-        sha = await store_blob(dispatch, location.commondir, data)
+        sha = await store_blob(vfs, location.commondir, data)
         entry = staged_entry(sha, found.files[path], len(data))
         if before is None:
             added.append(path)
@@ -304,11 +305,9 @@ async def stage_changes(
 
 
 async def stage_tracked(
-    dispatch: DispatchFn,
-    stat_path: StatPath,
+    vfs: Files,
     location: RepoLocation,
     state: IndexState,
-    links: LinkView | None,
 ) -> None:
     """Restage every path the index holds from the working tree.
 
@@ -317,22 +316,18 @@ async def stage_tracked(
     an untracked one stays untracked.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
-        stat_path (StatPath): dispatcher-backed stat, both channels.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         state (IndexState): the index, updated in place.
-        links (LinkView | None): the namespace's symlink table.
     """
     tracked = {
         path.decode("utf-8", errors="replace")
         for path in visible_entries(location, state.entries)
     }
-    found = await scan(
-        dispatch, stat_path, location, tracked, UNTRACKED_NO, links
-    )
+    found = await scan(vfs, location, tracked, UNTRACKED_NO)
     present = set(found.files)
     await stage_changes(
-        dispatch, location, state, found, tracked & present, tracked - present
+        vfs, location, state, found, tracked & present, tracked - present
     )
 
 
@@ -355,34 +350,31 @@ async def add(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             ``inv.view``.
     """
     view = inv.view or CLIView()
-    dispatch = view.dispatch
-    stat_path = view.stat_path
+    vfs = view.vfs
     texts = inv.texts
     flags = inv.flags
     fl = FlagView(flags)
     try:
-        if dispatch is None or stat_path is None:
+        if vfs is None:
             raise NoWorkspaceError()
         check_switches(inv, texts)
         parsed = parse_flags(fl)
         if not texts and not parsed.every and not parsed.update:
             raise NothingSpecifiedError()
         _repo, location = await opened(fl, view, work_tree=True)
-        state = await read_index(dispatch, location.gitdir)
+        state = await read_index(vfs, location.gitdir)
         tracked = {
             path.decode("utf-8", errors="replace")
             for path in visible_entries(location, state.entries)
         }
         found = await scan(
-            dispatch,
-            stat_path,
+            vfs,
             location,
             tracked,
             UNTRACKED_ALL,
-            links_of(view),
         )
         ignores = await load_ignores(
-            dispatch, location.commondir, location.worktree
+            vfs, location.commondir, location.worktree
         )
         if parsed.update:
             scope = (
@@ -403,7 +395,7 @@ async def add(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             remove = tracked - set(found.files)
         else:
             stage, remove = await _resolve(
-                stat_path,
+                vfs,
                 location,
                 start_point(fl).virtual,
                 texts,
@@ -412,10 +404,8 @@ async def add(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 ignores,
                 parsed.force,
             )
-        lines = await stage_changes(
-            dispatch, location, state, found, stage, remove
-        )
-        await write_index(dispatch, location.gitdir, state)
+        lines = await stage_changes(vfs, location, state, found, stage, remove)
+        await write_index(vfs, location.gitdir, state)
     except GitError as exc:
         return fatal(exc)
     if not parsed.verbose or not lines:

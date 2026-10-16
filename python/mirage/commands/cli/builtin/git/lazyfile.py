@@ -17,8 +17,8 @@ from io import SEEK_CUR, SEEK_END, SEEK_SET
 
 from mirage.bridge.sync import run_async_from_sync
 from mirage.commands.cli.builtin.git.io import read_range
-from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
+from mirage.workspace.files import Files
 
 # Measured on a 19-pack, 400 MB repository reading one commit: 64 KiB
 # costs 3.4 MB over 63 requests, 256 KiB costs 7.6 MB over 37, and 1 MiB
@@ -45,7 +45,7 @@ class LazyFile:
     onto the workspace's event loop.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         path (str): absolute virtual path of the file.
         size (int): the file's byte length.
         loop (asyncio.AbstractEventLoop): the loop serving the mount.
@@ -53,12 +53,12 @@ class LazyFile:
 
     def __init__(
         self,
-        dispatch: DispatchFn,
+        vfs: Files,
         path: PathSpec,
         size: int,
         loop: asyncio.AbstractEventLoop,
     ) -> None:
-        self._dispatch = dispatch
+        self._dispatch = vfs
         self._path = path
         self._size = size
         self._loop = loop

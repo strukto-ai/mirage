@@ -25,6 +25,7 @@ import type { CLIView, CLIInvocation } from '@struktoai/mirage-core/commands/cli
 import { materialize, type IOResult } from '@struktoai/mirage-core/io/types'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
+import { Files } from '@struktoai/mirage-core/workspace/files'
 import { EmailAccessor } from '../../../../accessor/email.ts'
 import { EmailVFS } from '../../../../vfs/email/email.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
@@ -481,11 +482,11 @@ describe('himalaya verbs', () => {
       '/scratch/note.txt': new TextEncoder().encode('the note body\n'),
     }
     const view: CLIView = {
-      dispatch: (op: string, path: PathSpec) => {
+      vfs: new Files((op: string, path: PathSpec) => {
         const data = files[path.virtual]
         if (op !== 'read' || data === undefined) return Promise.reject(enoent(path))
         return Promise.resolve([data, { exitCode: 0 }]) as never
-      },
+      }),
     }
     const [out, io] = (await import('./compose.ts').then((m) =>
       m.compose(
@@ -509,7 +510,7 @@ describe('himalaya verbs', () => {
 
   it('compose --attach of a missing file names the path', async () => {
     const view: CLIView = {
-      dispatch: (_op: string, path: PathSpec) => Promise.reject(enoent(path)),
+      vfs: new Files((_op: string, path: PathSpec) => Promise.reject(enoent(path))),
     }
     await expect(
       import('./compose.ts').then((m) =>

@@ -500,10 +500,9 @@ describe('policy cli fact', () => {
 })
 
 async function peek(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
-  const dispatch = inv.view?.dispatch
-  if (dispatch === undefined) throw new Error('no dispatch')
-  const [data] = await dispatch('read', PathSpec.fromStrPath('/data/secret.txt'))
-  return [data as Uint8Array, new IOResult()]
+  const vfs = inv.view?.vfs
+  if (vfs === undefined) throw new Error('no files')
+  return [await vfs.read(PathSpec.fromStrPath('/data/secret.txt')), new IOResult()]
 }
 
 const PEEK = new CLI({
@@ -512,12 +511,11 @@ const PEEK = new CLI({
 })
 
 function later(inv: CLIInvocation): [AsyncIterable<Uint8Array>, IOResult] {
-  const found = inv.view?.dispatch
-  if (found === undefined) throw new Error('no dispatch')
-  const dispatch = found
+  const found = inv.view?.vfs
+  if (found === undefined) throw new Error('no files')
+  const vfs = found
   async function* pulled(): AsyncIterable<Uint8Array> {
-    const [data] = await dispatch('read', PathSpec.fromStrPath('/data/secret.txt'))
-    yield data as Uint8Array
+    yield await vfs.read(PathSpec.fromStrPath('/data/secret.txt'))
   }
   return [pulled(), new IOResult()]
 }
@@ -528,11 +526,9 @@ const LATER = new CLI({
 })
 
 async function put(inv: CLIInvocation): Promise<[null, IOResult]> {
-  const dispatch = inv.view?.dispatch
-  if (dispatch === undefined) throw new Error('no dispatch')
-  await dispatch('write', PathSpec.fromStrPath(inv.texts[0] ?? ''), [
-    new TextEncoder().encode('hi\n'),
-  ])
+  const vfs = inv.view?.vfs
+  if (vfs === undefined) throw new Error('no files')
+  await vfs.write(PathSpec.fromStrPath(inv.texts[0] ?? ''), new TextEncoder().encode('hi\n'))
   return [null, new IOResult()]
 }
 

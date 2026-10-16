@@ -56,8 +56,8 @@ from mirage.core.hf_hub.tree import (
 from mirage.core.hf_hub.tree_entry import TreeEntry
 from mirage.errors.constants import MISS_ERRORS
 from mirage.io.types import ByteSource, IOResult
-from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
+from mirage.workspace.files import Files
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ def selected(
     return filter_repo_paths(files, include, exclude)
 
 
-async def ensure_dir(dispatch: DispatchFn, path: PathSpec) -> None:
+async def ensure_dir(vfs: Files, path: PathSpec) -> None:
     """Create a directory and every missing directory above it.
 
     Written out rather than delegated to ``mkdir -p`` because the
@@ -98,21 +98,21 @@ async def ensure_dir(dispatch: DispatchFn, path: PathSpec) -> None:
     of ``a/b`` fails on the rest.
 
     Args:
-        dispatch (DispatchFn): the workspace op dispatcher.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path of the directory.
     """
     missing: list[PathSpec] = []
     current = path
     while current.virtual != "/":
         try:
-            await dispatch("stat", current)
+            await vfs.stat(current)
             break
         except MISS_ERRORS:
             missing.append(current)
             current = current.parent
     for target in reversed(missing):
         try:
-            await dispatch("mkdir", target)
+            await vfs.mkdir(target)
         except FileExistsError:
             # A parallel download fans out over files that share parents,
             # so two workers can read the same parent as missing and then
@@ -123,7 +123,7 @@ async def ensure_dir(dispatch: DispatchFn, path: PathSpec) -> None:
 
 
 async def write_file(
-    dispatch: DispatchFn,
+    vfs: Files,
     accessor: HfHubAccessor,
     repo_path: str,
     local_dir: PathSpec,
@@ -131,7 +131,7 @@ async def write_file(
     """Fetch one file and store it under the workspace directory.
 
     Args:
-        dispatch (DispatchFn): the workspace op dispatcher.
+        vfs (Files): the session's files.
         accessor (HfHubAccessor): the Hub handle for the repository.
         repo_path (str): the file's repo-relative path.
         local_dir (str): where to write it, as a virtual path.
@@ -148,13 +148,13 @@ async def write_file(
     )
     data = await hub_bytes(accessor.token, url, session=accessor.pool)
     target = local_dir.join(repo_path)
-    await ensure_dir(dispatch, target.parent)
-    await dispatch("write", target, data=data)
+    await ensure_dir(vfs, target.parent)
+    await vfs.write(target, data)
     return target.virtual
 
 
 async def fetch_all(
-    dispatch: DispatchFn,
+    vfs: Files,
     accessor: HfHubAccessor,
     paths: list[str],
     local_dir: PathSpec,
@@ -169,7 +169,7 @@ async def fetch_all(
     upstream does.
 
     Args:
-        dispatch (DispatchFn): the workspace op dispatcher.
+        vfs (Files): the session's files.
         accessor (HfHubAccessor): the Hub handle for the repository.
         paths (list[str]): repo-relative file paths to fetch.
         local_dir (str): the virtual directory to write under.
@@ -180,30 +180,30 @@ async def fetch_all(
     """
 
     async def one(path: str) -> str:
-        return await write_file(dispatch, accessor, path, local_dir)
+        return await write_file(vfs, accessor, path, local_dir)
 
     return await bounded_map(paths, one, workers)
 
 
-async def path_exists(dispatch: DispatchFn, path: PathSpec) -> bool:
+async def path_exists(vfs: Files, path: PathSpec) -> bool:
     """Whether anything is at a virtual path.
 
     Args:
-        dispatch (DispatchFn): the workspace op dispatcher.
+        vfs (Files): the session's files.
         path (str): the absolute virtual path.
 
     Returns:
         bool: whether a point lookup found something.
     """
     try:
-        await dispatch("stat", path)
+        await vfs.stat(path)
     except MISS_ERRORS:
         return False
     return True
 
 
 async def cache_file(
-    dispatch: DispatchFn,
+    vfs: Files,
     accessor: HfHubAccessor,
     entry: TreeEntry,
     cache_dir: PathSpec,
@@ -221,7 +221,7 @@ async def cache_file(
     state, so no backend has to support one.
 
     Args:
-        dispatch (DispatchFn): the workspace op dispatcher.
+        vfs (Files): the session's files.
         accessor (HfHubAccessor): the Hub handle for the repository.
         entry (TreeEntry): the listing row for the file.
         cache_dir (str): the cache root.
@@ -234,7 +234,7 @@ async def cache_file(
     """
     etag = etag_of(entry)
     blob = blob_path(cache_dir, folder, etag)
-    if force or not await path_exists(dispatch, blob):
+    if force or not await path_exists(vfs, blob):
         url = resolve_url(
             accessor.endpoint,
             accessor.repo_type,
@@ -243,22 +243,22 @@ async def cache_file(
             entry.path,
         )
         data = await hub_bytes(accessor.token, url, session=accessor.pool)
-        await ensure_dir(dispatch, blob.parent)
-        await dispatch("write", blob, data=data)
+        await ensure_dir(vfs, blob.parent)
+        await vfs.write(blob, data)
     link = snapshot_path(cache_dir, folder, sha, entry.path)
-    if force or not await path_exists(dispatch, link):
-        await ensure_dir(dispatch, link.parent)
+    if force or not await path_exists(vfs, link):
+        await ensure_dir(vfs, link.parent)
         target = link_target(cache_dir, folder, sha, entry.path, etag)
         try:
-            await dispatch("unlink", link)
+            await vfs.unlink(link)
         except MISS_ERRORS:
             pass
-        await dispatch("symlink", link, target=target)
+        await vfs.symlink(link, target)
     return link.virtual
 
 
 async def fetch_into_cache(
-    dispatch: DispatchFn,
+    vfs: Files,
     accessor: HfHubAccessor,
     tree: dict[str, TreeEntry],
     paths: list[str],
@@ -269,7 +269,7 @@ async def fetch_into_cache(
     """Populate the cache for one revision, bounded the same way.
 
     Args:
-        dispatch (DispatchFn): the workspace op dispatcher.
+        vfs (Files): the session's files.
         accessor (HfHubAccessor): the Hub handle for the repository.
         tree (dict[str, TreeEntry]): the repository listing.
         paths (list[str]): repo-relative file paths to fetch.
@@ -291,12 +291,12 @@ async def fetch_into_cache(
     # binary never leaves behind.
     if accessor.revision != sha:
         ref = ref_path(cache_dir, folder, accessor.revision)
-        await ensure_dir(dispatch, ref.parent)
-        await dispatch("write", ref, data=sha.encode())
+        await ensure_dir(vfs, ref.parent)
+        await vfs.write(ref, sha.encode())
 
     async def one(path: str) -> str:
         return await cache_file(
-            dispatch, accessor, tree[path], cache_dir, folder, sha, force
+            vfs, accessor, tree[path], cache_dir, folder, sha, force
         )
 
     written = await bounded_map(paths, one, workers)
@@ -412,7 +412,7 @@ async def download_cmd(
             "(or set HF_HUB_CACHE / HF_HOME), since a workspace has no "
             "home directory to default a cache under"
         )
-    if inv.view is None or inv.view.dispatch is None:
+    if inv.view is None or inv.view.vfs is None:
         raise UsageError("hf download needs a workspace to write into")
     repo_id, *names = list(inv.texts)
     include = list(fl.as_list("include"))
@@ -444,11 +444,11 @@ async def download_cmd(
             # --force-download only means anything in cache mode.
             base = local_dir.virtual
             written = await fetch_all(
-                inv.view.dispatch, accessor, paths, local_dir, workers
+                inv.view.vfs, accessor, paths, local_dir, workers
             )
         else:
             base, written = await fetch_into_cache(
-                inv.view.dispatch,
+                inv.view.vfs,
                 accessor,
                 tree,
                 paths,

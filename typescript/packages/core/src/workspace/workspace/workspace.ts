@@ -64,7 +64,7 @@ import { classifyBarePath } from '../expand/classify/path.ts'
 import { resolveGlobs } from '../expand/globs.ts'
 import { QUIESCE_SECONDS } from '../snapshot/utils.ts'
 import type { WorkspaceStateDict, MountSnapshot } from '../snapshot/types.ts'
-import type { FileEvent } from '../../types.ts'
+import type { FileEvent, Visibility } from '../../types.ts'
 import {
   type ReadSpec,
   DEFAULT_READ_SPEC,
@@ -421,14 +421,13 @@ export class Workspace {
       }
       if (session === null) return null
       const view = sessionView(session, this.policies)
-      const ns = namespaceViewOf(this.registry, this.namespace, this.dispatcher.dispatch, session)
       if (asyncContextIsolatesTasks) {
-        return { session: view, ns, vfs: this.vfs.forSession(session.sessionId) }
+        return { session: view, vfs: this.vfs.forSession(session.sessionId) }
       }
       // Without task isolation a method cannot run as a policy deciding: its
       // own calls could not be told from the ones it judges. There it gets
       // no `vfs`, and a session that refuses every write.
-      return { session: { ...view, set: refuseWrite, unset: refuseWrite, mark: refuseWrite }, ns }
+      return { session: { ...view, set: refuseWrite, unset: refuseWrite, mark: refuseWrite } }
     }
     // Installed CLIs, fully separate from mounts: a spec name resolves
     // against the named registry and every entry installs through the
@@ -521,6 +520,8 @@ export class Workspace {
       },
       {
         bind: (sessionId, run) => this.bindSession(sessionId, run),
+        prefixes: () => this.registry.visibleMounts().map((m) => m.prefix),
+        visibility: (sessionId) => this.facadeVisibility(sessionId),
         // A facade that bound its own session dispatches as that owner,
         // so on the fallback storage a newer binding cannot judge its op.
         dispatchAs: (owner) => {
@@ -1472,6 +1473,20 @@ export class Workspace {
     await this.ensureSessionsLoaded()
     const session = this.sessionManager.get(sessionId ?? this.sessionManager.defaultId)
     return runWithSession(session, () => run(session), { owner: this.sessionManager })
+  }
+
+  /**
+   * What the session a facade's call would run as sees, as `sessionForOps`
+   * picks it. A session not loaded yet answers with the default profile's,
+   * which every session starts from. Mirrors Python's `_facade_visibility`.
+   */
+  private facadeVisibility(sessionId: string | null): Visibility | null {
+    const ambient = this.ambientFor(sessionId)
+    if (ambient !== null) return ambient.visibility
+    const wanted = sessionId ?? this.sessionManager.defaultId
+    const found = this.sessionManager.list().find((s) => s.sessionId === wanted)
+    if (found !== undefined) return found.visibility
+    return this.sessionManager.defaultProfile?.visibility ?? null
   }
 
   /** The ambient session the dispatcher keeps for a facade, or null. */

@@ -17,7 +17,7 @@ import re
 from mirage.commands.cli.builtin.git.io import read_optional
 from mirage.commands.cli.builtin.git.types import MailmapEntry, RepoLocation
 from mirage.commands.spec.flag_view import FlagView
-from mirage.runtime.types import DispatchFn
+from mirage.workspace.files import Files
 
 MAILMAP_LINE = re.compile(
     r"^\s*([^<>]*?)\s*<([^<>]+)>(?:\s*([^<>]*?)\s*<([^<>]*)>)?"
@@ -86,15 +86,15 @@ def mapped_identity(identity: str, entries: tuple[MailmapEntry, ...]) -> str:
 
 
 async def load_mailmap(
-    dispatch: DispatchFn, location: RepoLocation
+    vfs: Files, location: RepoLocation
 ) -> tuple[MailmapEntry, ...]:
     """Read the worktree mailmap through the workspace data plane.
 
     Args:
-        dispatch (DispatchFn): op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): discovered repository.
     """
-    data = await read_optional(dispatch, location.worktree.join(".mailmap"))
+    data = await read_optional(vfs, location.worktree.join(".mailmap"))
     return parse_mailmap((data or b"").decode("utf-8", "replace"))
 
 

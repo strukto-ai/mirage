@@ -12,6 +12,7 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.commands.cli.builtin.git.io import (
     ensure_dir,
     read_optional,
+    stat_of,
     take_lock,
     write_once,
 )
@@ -21,17 +22,17 @@ from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
-from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
+from mirage.workspace.files import Files
 
 
 async def lay_out(
-    dispatch: DispatchFn, gitdir: PathSpec, branch: str, config: str
+    vfs: Files, gitdir: PathSpec, branch: str, config: str
 ) -> None:
     """Write a new git directory's skeleton, keeping what is there.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         gitdir (PathSpec): absolute virtual path of the git directory.
         branch (str): the branch HEAD starts on.
         config (str): the config file's contents.
@@ -43,13 +44,13 @@ async def lay_out(
         "refs/tags",
         "info",
     ):
-        await ensure_dir(dispatch, gitdir.join(directory))
+        await ensure_dir(vfs, gitdir.join(directory))
     await write_once(
-        dispatch, gitdir.join("HEAD"), f"ref: refs/heads/{branch}\n".encode()
+        vfs, gitdir.join("HEAD"), f"ref: refs/heads/{branch}\n".encode()
     )
-    await write_once(dispatch, gitdir.join("config"), config.encode())
+    await write_once(vfs, gitdir.join("config"), config.encode())
     await write_once(
-        dispatch,
+        vfs,
         gitdir.join("description"),
         b"Unnamed repository; edit this file 'description' "
         b"to name the repository.\n",
@@ -89,17 +90,11 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(inv.flags)
     view = inv.view
     try:
-        if (
-            view is None
-            or view.dispatch is None
-            or view.stat_path is None
-            or view.ns is None
-            or view.ns.mounts is None
-        ):
+        if view is None or view.vfs is None:
             raise NoWorkspaceError()
-        dispatch = view.dispatch
+        vfs = view.vfs
         start = start_point(fl)
-        here = await view.stat_path(start)
+        here = await stat_of(vfs, start)
         if here is None or here.type is not FileType.DIRECTORY:
             raise NoWorkingDirectoryError(
                 start.raw_path,
@@ -119,33 +114,29 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             "-"
         ):
             raise GitError(f"invalid branch name: '{branch}'")
-        info = await view.stat_path(gitdir)
+        info = await stat_of(vfs, gitdir)
         if info is not None and (
             info.type is not FileType.DIRECTORY
-            or await read_optional(dispatch, gitdir.join("HEAD")) is not None
+            or await read_optional(vfs, gitdir.join("HEAD")) is not None
         ):
             location = await discover(
-                dispatch,
-                view.stat_path,
-                view.ns.mounts.root_of,
+                vfs,
                 target,
                 gitdir,
                 worktree if (worktree := fl.as_path("work_tree")) else None,
             )
             gitdir = location.commondir
-        existing = (
-            await read_optional(dispatch, gitdir.join("HEAD")) is not None
-        )
-        made = bool(inv.texts) and await view.stat_path(target) is None
+        existing = await read_optional(vfs, gitdir.join("HEAD")) is not None
+        made = bool(inv.texts) and await stat_of(vfs, target) is None
         config = (
             "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n"
             f"\tbare = {'true' if bare else 'false'}\n"
         )
         settings = gitdir.join("config")
         try:
-            await lay_out(dispatch, gitdir, branch, config)
+            await lay_out(vfs, gitdir, branch, config)
             if existing:
-                await take_lock(dispatch, settings)
+                await take_lock(vfs, settings)
         except OSError as exc:
             locked = exc.filename == f"{settings.virtual}.lock"
             if locked and exc.errno == errno.EEXIST:

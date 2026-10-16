@@ -18,7 +18,6 @@ import { visibleEntries, matched, repoRelative } from './pathspec.ts'
 
 import { fsStrerror, isEacces } from '../../../../errors/fs.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { LinkView, StatPath } from '../../../../view/types.ts'
 import { FileType, type FileStat } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -34,12 +33,13 @@ import {
 } from './errors.ts'
 import { type IgnoreStack, loadIgnores } from './ignore.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
-import { entryBytes } from './io.ts'
+import { entryBytes, statOf } from './io.ts'
 
 import { repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { EXECUTABLE, OWNER_EXECUTE, REGULAR, SYMLINK } from './constants.ts'
-import type { Dispatch, IndexEntry, IndexState, RepoLocation, WorkTree } from './types.ts'
+import type { IndexEntry, IndexState, RepoLocation, WorkTree } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 import { checkSwitches, fatal, startPoint } from './util.ts'
 import { scan, UNTRACKED_ALL, UNTRACKED_NO } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -141,7 +141,7 @@ function updateScope(
  * things in it that were excluded.
  */
 async function resolve(
-  statPath: StatPath,
+  vfs: Files,
   location: RepoLocation,
   start: string,
   operands: readonly string[],
@@ -168,7 +168,7 @@ async function resolve(
       for (const path of gone) remove.add(path)
       continue
     }
-    const info = await statPath(location.worktree.join(target))
+    const info = await statOf(vfs, location.worktree.join(target))
     if (info === null || info.type === FileType.DIRECTORY) throw new PathspecError(operand)
     found.files.set(target, info)
     stage.add(target)
@@ -187,7 +187,7 @@ async function resolve(
  */
 export async function stageChanges(
   repo: Repo,
-  dispatch: Dispatch,
+  vfs: Files,
   entries: ReadonlyMap<string, IndexEntry>,
   found: WorkTree,
   stage: ReadonlySet<string>,
@@ -202,7 +202,7 @@ export async function stageChanges(
     const before = entries.get(path)
     let data: Uint8Array
     try {
-      data = await entryBytes(dispatch, repo.location.worktree.join(path), info)
+      data = await entryBytes(vfs, repo.location.worktree.join(path), info)
     } catch (err) {
       if (!isEacces(err)) throw err
       throw new UnindexableFileError(
@@ -238,17 +238,15 @@ export async function stageChanges(
  */
 export async function stageTracked(
   repo: Repo,
-  dispatch: Dispatch,
-  statPath: StatPath,
+  vfs: Files,
   state: IndexState,
-  links: LinkView | null,
 ): Promise<[Map<string, StagedEntry>, Set<string>]> {
   const tracked = new Set(visibleEntries(repo.location, state.entries).keys())
-  const found = await scan(dispatch, statPath, repo.location, tracked, UNTRACKED_NO, links)
+  const found = await scan(vfs, repo.location, tracked, UNTRACKED_NO)
   const present = new Set(found.files.keys())
   const kept = new Set([...tracked].filter((path) => present.has(path)))
   const removed = new Set([...tracked].filter((path) => !present.has(path)))
-  const [staged] = await stageChanges(repo, dispatch, state.entries, found, kept, removed)
+  const [staged] = await stageChanges(repo, vfs, state.entries, found, kept, removed)
   for (const path of removed) state.entries.delete(path)
   for (const [path, entry] of staged) state.entries.set(path, { path, ...entry, stage: 0 })
   return [staged, removed]
@@ -271,26 +269,18 @@ export async function add(inv: CLIInvocation): Promise<CommandFnResult> {
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   try {
-    const dispatch = view.dispatch
-    const statPath = view.statPath
-    if (statPath === undefined || dispatch === undefined) {
+    const vfs = view.vfs
+    if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
     checkSwitches(inv, texts)
     const parsed = parseFlags(fl)
     if (texts.length === 0 && !parsed.every && !parsed.update) throw new NothingSpecifiedError()
     const repo: Repo = await opened(fl, view, true)
-    const state = await readIndex(repo, dispatch)
+    const state = await readIndex(repo, vfs)
     const tracked = new Set(visibleEntries(repo.location, state.entries).keys())
-    const found = await scan(
-      dispatch,
-      statPath,
-      repo.location,
-      tracked,
-      UNTRACKED_ALL,
-      view.ns?.links ?? null,
-    )
-    const ignores = await loadIgnores(dispatch, repo.location.commondir, repo.location.worktree)
+    const found = await scan(vfs, repo.location, tracked, UNTRACKED_ALL)
+    const ignores = await loadIgnores(vfs, repo.location.commondir, repo.location.worktree)
     const present = new Set(found.files.keys())
     let stage: Set<string>
     let remove: Set<string>
@@ -306,7 +296,7 @@ export async function add(inv: CLIInvocation): Promise<CommandFnResult> {
       remove = new Set([...tracked].filter((path) => !present.has(path)))
     } else {
       ;[stage, remove] = await resolve(
-        statPath,
+        vfs,
         repo.location,
         startPoint(fl).virtual,
         texts,
@@ -316,7 +306,7 @@ export async function add(inv: CLIInvocation): Promise<CommandFnResult> {
         parsed.force,
       )
     }
-    const [staged, lines] = await stageChanges(repo, dispatch, state.entries, found, stage, remove)
+    const [staged, lines] = await stageChanges(repo, vfs, state.entries, found, stage, remove)
     await updateIndex(repo, staged, remove)
     if (!parsed.verbose || lines.length === 0) return [null, new IOResult()]
     return [ENC.encode(lines.map((line) => `${line}\n`).join('')), new IOResult()]

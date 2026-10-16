@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import contextlib
-import functools
 from pathlib import Path
 
 import pytest
@@ -31,11 +30,7 @@ from mirage.commands.cli.types import CLIView
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
-from mirage.workspace.mount.namespace.probe import path_stat
-from mirage.workspace.mount.namespace.view import (
-    mount_root_of,
-    namespace_view_of,
-)
+from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import session_view
 
@@ -313,13 +308,10 @@ async def open_mounted(ws):
     Args:
         ws (Workspace): the workspace under test.
     """
-    location = await discover(
-        ws.dispatch,
-        functools.partial(path_stat, ws.dispatch),
-        functools.partial(mount_root_of, ws._registry),
-        REPO,
-    )
-    return await open_repo(ws.dispatch, location)
+    vfs = repo_view(ws).vfs
+    assert vfs is not None
+    location = await discover(vfs, REPO)
+    return await open_repo(vfs, location)
 
 
 def repo_view(ws) -> CLIView:
@@ -332,9 +324,7 @@ def repo_view(ws) -> CLIView:
         ws (Workspace): the workspace under test.
     """
     return CLIView(
-        dispatch=ws.dispatch,
-        stat_path=functools.partial(path_stat, ws.dispatch),
-        ns=namespace_view_of(ws._registry, ws._namespace, ws.dispatch, None),
+        vfs=Files(ws._registry.mount_rows(), ws.dispatch, links=ws._namespace),
         session_view=session_view(SessionState(session_id="test")),
     )
 

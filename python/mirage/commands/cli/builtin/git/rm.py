@@ -35,8 +35,11 @@ from mirage.commands.cli.builtin.git.errors import (
 )
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
 from mirage.commands.cli.builtin.git.io import (
+    blocking_ancestor,
+    is_link,
     remove_empty_parents,
     remove_file,
+    stat_of,
 )
 from mirage.commands.cli.builtin.git.pathspec import (
     matched,
@@ -48,8 +51,6 @@ from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
     fatal,
-    links_of,
-    mounts_of,
     start_point,
 )
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
@@ -57,9 +58,8 @@ from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
-from mirage.view.types import LinkView, MountView, StatPath
+from mirage.workspace.files import Files
 
 Tree = dict[bytes, tuple[int, bytes]]
 
@@ -140,7 +140,7 @@ def select(
 
 
 async def shadowed(
-    links: LinkView | None,
+    vfs: Files,
     worktree: PathSpec,
     paths: list[str],
     missing: dict[str, str],
@@ -159,35 +159,30 @@ async def shadowed(
     files, and git refuses that case too. Pinned against git 2.50.1.
 
     Args:
-        links (LinkView | None): the name plane's link facts, None when
-            no namespace is wired.
+        vfs (Files): the session's files.
         worktree (PathSpec): absolute virtual path of the working tree root.
         paths (list[str]): the selected paths that hold an index entry.
         missing (dict[str, str]): what the walk said about each path.
     """
-    if links is None:
-        return set()
     found: set[str] = set()
     for path in paths:
         if missing.get(path) != DELETED:
             continue
-        absolute = worktree.join(path)
-        if links.resolve(absolute.virtual) == absolute.virtual:
+        if await blocking_ancestor(vfs, worktree, path) is None:
             continue
-        if await links.exists(absolute.virtual):
+        if await vfs.exists(worktree.join(path)):
             found.add(path)
     return found
 
 
 async def refuse_lost_work(
-    dispatch: DispatchFn,
+    vfs: Files,
     location: RepoLocation,
     tree: Tree,
     entries: dict[bytes, IndexEntry],
     found: WorkTree,
     paths: list[str],
     cached: bool,
-    links: LinkView | None,
 ) -> None:
     """Refuse a removal that would throw away uncommitted work.
 
@@ -200,19 +195,17 @@ async def refuse_lost_work(
     against git 2.50.1.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         tree (Tree): HEAD's tree, empty before the first commit.
         entries (dict[bytes, IndexEntry]): the index.
         found (WorkTree): what the walk of the working tree found.
         paths (list[str]): the selected paths that hold an index entry.
         cached (bool): whether ``--cached`` was given.
-        links (LinkView | None): the name plane's link facts, None when
-            no namespace is wired.
     """
     chosen = {path.encode(): entries[path.encode()] for path in paths}
-    unstaged = await work_changes(dispatch, location.worktree, chosen, found)
-    hidden = await shadowed(links, location.worktree, paths, unstaged)
+    unstaged = await work_changes(vfs, location.worktree, chosen, found)
+    hidden = await shadowed(vfs, location.worktree, paths, unstaged)
     both: list[str] = []
     staged: list[str] = []
     local: list[str] = []
@@ -239,13 +232,10 @@ async def refuse_lost_work(
 
 
 async def clear_worktree(
-    dispatch: DispatchFn,
-    stat_path: StatPath,
+    vfs: Files,
     location: RepoLocation,
     selected: list[str],
     lines: str,
-    links: LinkView | None,
-    mounts: MountView | None,
 ) -> None:
     """Delete every selected path from the working tree.
 
@@ -262,33 +252,26 @@ async def clear_worktree(
 
     A tracked symlink to a directory is not this case and must not be
     read as one: it is removed as the link it is, which is why the
-    namespace is asked before the type.
+    lstat is asked before the type.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
-        stat_path (StatPath): the data plane's stat, which dereferences.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         selected (list[str]): the paths to delete, in index order.
         lines (str): the ``rm`` lines already printed, for a refusal to
             carry on stdout the way git prints them anyway.
-        links (LinkView | None): the name plane's link facts, None when
-            no namespace is wired.
-        mounts (MountView | None): the name plane's mount boundaries,
-            None when no namespace is wired.
     """
     removed = False
     for path in selected:
         absolute = location.worktree.join(path)
-        if links is None or links.stat_at(absolute.virtual) is None:
-            info = await stat_path(absolute)
+        if not await is_link(vfs, absolute):
+            info = await stat_of(vfs, absolute)
             if info is not None and info.type is FileType.DIRECTORY:
                 if not removed:
                     raise RemovePathError(path, lines)
                 continue
-        await remove_file(dispatch, absolute)
-        await remove_empty_parents(
-            dispatch, absolute, location.worktree, mounts
-        )
+        await remove_file(vfs, absolute)
+        await remove_empty_parents(vfs, absolute, location.worktree)
         removed = True
 
 
@@ -307,19 +290,18 @@ async def rm(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             ``inv.view``.
     """
     view = inv.view or CLIView()
-    dispatch = view.dispatch
-    stat_path = view.stat_path
+    vfs = view.vfs
     texts = inv.texts
     fl = FlagView(inv.flags)
     try:
-        if dispatch is None or stat_path is None:
+        if vfs is None:
             raise NoWorkspaceError()
         check_switches(inv, texts)
         flags = parse_flags(fl)
         if not texts:
             raise NoPathspecRemoveError()
         repo, location = await opened(fl, view, work_tree=not flags.cached)
-        state = await read_index(dispatch, location.gitdir)
+        state = await read_index(vfs, location.gitdir)
         tracked = {
             path.decode("utf-8", errors="replace")
             for path in (
@@ -335,23 +317,20 @@ async def rm(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 path for path in selected if path.encode() in state.entries
             ]
             found = await scan(
-                dispatch,
-                stat_path,
+                vfs,
                 location,
                 tracked,
                 UNTRACKED_NO,
-                links_of(view),
             )
             tree = await asyncio.to_thread(head_entries, repo) or {}
             await refuse_lost_work(
-                dispatch,
+                vfs,
                 location,
                 tree,
                 state.entries,
                 found,
                 checkable,
                 flags.cached,
-                links_of(view),
             )
         lines = (
             ""
@@ -360,13 +339,10 @@ async def rm(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         )
         if not flags.cached:
             await clear_worktree(
-                dispatch,
-                stat_path,
+                vfs,
                 location,
                 selected,
                 lines,
-                links_of(view),
-                mounts_of(view),
             )
         # Last, because the deletions above can fail: git writes the
         # index only once the working tree is done with, so a refused
@@ -375,7 +351,7 @@ async def rm(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         for path in selected:
             state.entries.pop(path.encode(), None)
             state.conflicts.pop(path.encode(), None)
-        await write_index(dispatch, location.gitdir, state)
+        await write_index(vfs, location.gitdir, state)
     except GitError as exc:
         return fatal(exc)
     if flags.quiet:

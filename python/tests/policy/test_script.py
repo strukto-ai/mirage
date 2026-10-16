@@ -1,6 +1,7 @@
 import asyncio
 import dataclasses
 import json
+from typing import Any
 
 import pytest
 
@@ -49,10 +50,15 @@ from mirage.types import (
     CapacityState,
     FileStat,
     FileType,
+    MountMode,
     PathSpec,
+    Visibility,
 )
-from mirage.view.types import MountView, NamespaceView, SessionView
+from mirage.utils.hidden import classify_paths
+from mirage.view.types import SessionView
 from mirage.workspace.dispatcher.constants import CALLS
+from mirage.workspace.files import Files
+from mirage.workspace.types import MountRow
 
 
 class FakeProgram(LanguageRuntime):
@@ -173,22 +179,24 @@ def _session(cwd: str = "/data") -> SessionView:
     )
 
 
-def _ns() -> NamespaceView:
-    return NamespaceView(
-        mounts=MountView(
-            descendants=lambda path: ["/data", "/vault"],
-            visible_descendants=lambda path: ["/data"],
-            is_root=lambda path: path in ("/data", "/vault"),
-            root_of=lambda path: "/data",
-        )
-    )
+async def _no_calls(name: str, path: PathSpec, /, **kwargs: Any):
+    raise AssertionError(f"unexpected {name} {path.virtual}")
+
+
+def _vfs() -> Files:
+    rows = [
+        MountRow(prefix=prefix, resource_type="ram", mode=MountMode.READ)
+        for prefix in ("/", "/data/", "/vault/")
+    ]
+    vis = Visibility(paths=classify_paths(["/vault"]))
+    return Files(rows, _no_calls, visibility=lambda _session: vis)
 
 
 def _ctx(
     command: str = "cat",
     session_id: str = "s",
     session: SessionView | None = None,
-    ns: NamespaceView | None = None,
+    vfs: Files | None = None,
 ) -> CommandContext:
     return CommandContext(
         command=command,
@@ -208,7 +216,7 @@ def _ctx(
         tokens=(command, "/repo/sealed/k"),
         program=(command,),
         session=session,
-        ns=ns,
+        vfs=vfs,
     )
 
 
@@ -297,7 +305,7 @@ def test_anything_else_is_refused(printed):
 
 
 def test_a_context_reads_as_its_fields_with_the_session_as_data():
-    data = script_context(_ctx(session=_session(), ns=_ns()))
+    data = script_context(_ctx(session=_session(), vfs=_vfs()))
     assert data["command"] == "cat"
     assert data["line"] == "cat /repo/sealed/k"
     assert data["paths"] == ["/repo/sealed/k"]
@@ -393,7 +401,7 @@ async def test_a_method_without_a_program_runs_nothing():
 async def test_a_program_runs_unedited_with_its_context_in_the_env_and_stdin():
     engine = FakeProgram(_answer(kind="deny", reason="sealed"))
     policy = _policy("pre_command", engine)
-    ctx = _ctx(session=_session(cwd="/"), ns=_ns())
+    ctx = _ctx(session=_session(cwd="/"), vfs=_vfs())
     assert await policy.pre_command(ctx) == (Deny("sealed"),)
     [request] = engine.requests
     assert request.code == "SOURCE"

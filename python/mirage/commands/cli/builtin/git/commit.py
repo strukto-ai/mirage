@@ -51,7 +51,6 @@ from mirage.commands.cli.builtin.git.types import IndexState
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
     fatal,
-    links_of,
     start_point,
 )
 from mirage.commands.cli.types import CLIInvocation, CLIView
@@ -179,12 +178,11 @@ async def commit(
             ``inv.view``.
     """
     view = inv.view or CLIView()
-    dispatch = view.dispatch
-    stat_path = view.stat_path
+    vfs = view.vfs
     flags = inv.flags
     fl = FlagView(flags)
     try:
-        if dispatch is None or stat_path is None:
+        if vfs is None:
             raise NoWorkspaceError()
         check_switches(inv, inv.texts)
         staging = fl.as_bool("all")
@@ -199,17 +197,15 @@ async def commit(
         # git takes the index's lock before it looks for anything to
         # commit, so a read-only repository refuses an empty commit too.
         try:
-            await take_lock(dispatch, location.gitdir.join("index"))
+            await take_lock(vfs, location.gitdir.join("index"))
         except FileExistsError as exc:
             raise LockExistsError(exc.filename) from exc
-        state = await read_index(dispatch, location.gitdir)
+        state = await read_index(vfs, location.gitdir)
         if state.conflicts:
             raise UnmergedIndexError()
         if staging:
-            await stage_tracked(
-                dispatch, stat_path, location, state, links_of(view)
-            )
-        head = await read_head(dispatch, location.gitdir)
+            await stage_tracked(vfs, location, state)
+        head = await read_head(vfs, location.gitdir)
         before = await asyncio.to_thread(head_entries, repo)
         after = {
             path: (entry.mode, entry.sha)
@@ -222,13 +218,11 @@ async def commit(
         ):
             raise NothingToCommitError(
                 await render_report(
-                    dispatch,
-                    stat_path,
+                    vfs,
                     repo,
                     location,
                     head,
                     start_point(fl).virtual,
-                    links_of(view),
                 )
             )
         parents = [] if before is None else [repo.refs[HEAD_REF]]
@@ -238,13 +232,13 @@ async def commit(
             build_commit, repo, state, message, who, parents, when
         )
         if head.ref is not None:
-            await write_ref(dispatch, location.commondir, head.ref, written.id)
+            await write_ref(vfs, location.commondir, head.ref, written.id)
         else:
-            await detach_head(dispatch, location.gitdir, written.id)
+            await detach_head(vfs, location.gitdir, written.id)
         if staging:
-            await write_index(dispatch, location.gitdir, state)
+            await write_index(vfs, location.gitdir, state)
         await record(
-            dispatch,
+            vfs,
             location.gitdir,
             location.commondir,
             head.ref,
@@ -255,9 +249,7 @@ async def commit(
             f"commit{ROOT_NOTE if before is None else ''}: "
             f"{message.splitlines()[0]}",
         )
-        fully = await config_bool(
-            dispatch, location, b"core", b"quotepath", True
-        )
+        fully = await config_bool(vfs, location, b"core", b"quotepath", True)
         changes = await asyncio.to_thread(
             commit_summary,
             repo,

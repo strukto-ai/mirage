@@ -21,93 +21,107 @@ from mirage.commands.cli.builtin.git.io import (
     remove_empty_parents,
     remove_tree,
 )
-from mirage.types import FileStat, FileType, PathSpec
-from mirage.view.types import MountView
+from mirage.types import FileStat, FileType, MountMode, PathSpec, Visibility
+from mirage.utils.hidden import classify_paths
+from mirage.workspace.files import Files
+from mirage.workspace.types import MountRow
 
 REPO = PathSpec.from_str_path("/repo")
 SLOT = PathSpec.from_str_path("/repo/slot")
 
 
-class Links:
-    """A link view holding one link, at ``/repo/slot``."""
+def files(
+    dispatch,
+    roots: list[str] | None = None,
+    hidden: list[str] | None = None,
+) -> Files:
+    """The session's files over a fake dispatcher and a mount table.
 
-    def stat_at(self, path: str) -> FileStat | None:
-        """What the namespace holds at a path, None when no link.
+    Args:
+        dispatch (DispatchFn): the fake answering every call.
+        roots (list[str] | None): mount roots below ``/``, without a
+            trailing slash.
+        hidden (list[str] | None): paths the session hides.
+    """
+    rows = [
+        MountRow(
+            prefix=f"{root.rstrip('/')}/",
+            resource_type="ram",
+            mode=MountMode.WRITE,
+        )
+        for root in ["/", *(roots or [])]
+    ]
+    vis = Visibility(paths=classify_paths(hidden)) if hidden else None
+    return Files(rows, dispatch, visibility=lambda _session: vis)
 
-        Args:
-            path (str): absolute virtual path.
-        """
-        if path != "/repo/slot":
-            return None
-        return FileStat(name="slot", type=FileType.SYMLINK)
+
+def stats(kind, links: set[str]):
+    """A dispatcher whose stat answers ``kind`` and whose lstat reports
+    ``links`` as symlinks.
+
+    Args:
+        kind (Callable[[PathSpec], FileType]): what a followed stat sees.
+        links (set[str]): paths holding a symlink.
+    """
+
+    async def dispatch(op: str, path: PathSpec, **kwargs):
+        assert op == "stat", op
+        name = path.virtual.rsplit("/", 1)[-1]
+        if kwargs.get("nofollow") and path.virtual in links:
+            return FileStat(name=name, type=FileType.SYMLINK), None
+        return FileStat(name=name, type=kind(path)), None
+
+    return dispatch
 
 
-async def only_dirs(path: PathSpec) -> FileStat | None:
+def only_dirs(path: PathSpec) -> FileType:
     """A data plane in which every component is a directory.
 
     Args:
         path (PathSpec): absolute virtual path.
     """
-    return FileStat(
-        name=path.virtual.rsplit("/", 1)[-1], type=FileType.DIRECTORY
-    )
+    return FileType.DIRECTORY
 
 
-async def file_at_slot(path: PathSpec) -> FileStat | None:
+def file_at_slot(path: PathSpec) -> FileType:
     """A data plane holding a regular file at ``/repo/slot``.
 
     Args:
         path (PathSpec): absolute virtual path.
     """
-    kind = (
+    return (
         FileType.FILE if path.virtual == "/repo/slot" else FileType.DIRECTORY
     )
-    return FileStat(name=path.virtual.rsplit("/", 1)[-1], type=kind)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "stat_path, name, links, expected",
+    "kind, name, links, expected",
     [
-        (only_dirs, "slot/child", Links(), "/repo/slot"),
+        (only_dirs, "slot/child", {"/repo/slot"}, "/repo/slot"),
         # The component itself is not an ancestor of itself, and a path
         # with nothing but directories above it has none.
-        (only_dirs, "slot", Links(), None),
-        (only_dirs, "other/child", Links(), None),
+        (only_dirs, "slot", {"/repo/slot"}, None),
+        (only_dirs, "other/child", {"/repo/slot"}, None),
         # No link anywhere: what is in the way is an ordinary file, which
-        # only the data plane can report.
-        (file_at_slot, "slot/child", None, "/repo/slot"),
-        (only_dirs, "slot/child", None, None),
-        # stat_path dereferences, so a link to a directory stats as a
+        # only the stat can report.
+        (file_at_slot, "slot/child", set(), "/repo/slot"),
+        (only_dirs, "slot/child", set(), None),
+        # stat dereferences, so a link to a directory stats as a
         # directory: asking it first would walk straight through the link.
-        (only_dirs, "slot/deep/child", Links(), "/repo/slot"),
+        (only_dirs, "slot/deep/child", {"/repo/slot"}, "/repo/slot"),
     ],
 )
-async def test_blocking_ancestor(stat_path, name, links, expected):
-    found = await blocking_ancestor(stat_path, REPO, name, links)
+async def test_blocking_ancestor(kind, name, links, expected):
+    found = await blocking_ancestor(files(stats(kind, links)), REPO, name)
     assert (None if found is None else found.virtual) == expected
-
-
-class TreeLinks:
-    """A link view holding one link, at ``/repo/slot/link``."""
-
-    def stat_at(self, path: str) -> FileStat | None:
-        """What the namespace holds at a path, None when no link.
-
-        Args:
-            path (str): absolute virtual path.
-        """
-        if path != "/repo/slot/link":
-            return None
-        return FileStat(name="link", type=FileType.SYMLINK)
 
 
 class Recorder:
     """A dispatcher that lists one link and records every op it is asked for.
 
-    ``readdir`` answers through the link the way the real one does: the
-    name plane owns links, so the data plane resolves the path and
-    lists what it points at.
+    ``readdir`` answers through the link the way the real one does, so
+    listing the link lists what it points at.
     """
 
     def __init__(self) -> None:
@@ -119,10 +133,15 @@ class Recorder:
         Args:
             op (str): the op name.
             path (PathSpec): the path it is asked for.
-            **kwargs (object): ignored.
+            **kwargs (object): the call's arguments.
         """
         where = path.virtual
         self.ops.append((op, where))
+        if op == "stat":
+            name = where.rsplit("/", 1)[-1]
+            if kwargs.get("nofollow") and where == "/repo/slot/link":
+                return FileStat(name=name, type=FileType.SYMLINK), None
+            return FileStat(name=name, type=FileType.DIRECTORY), None
         if op == "readdir":
             if where == "/repo/slot":
                 return ["/repo/slot/link"], None
@@ -137,7 +156,7 @@ class Recorder:
 @pytest.mark.asyncio
 async def test_removing_a_tree_unlinks_a_link_without_descending():
     calls = Recorder()
-    await remove_tree(calls, SLOT, TreeLinks(), None)
+    await remove_tree(files(calls), SLOT)
     assert ("unlink", "/repo/slot/link") in calls.ops
     # The whole point: readdir dereferences, so listing the link at all
     # is the walk stepping outside the directory being replaced.
@@ -147,41 +166,9 @@ async def test_removing_a_tree_unlinks_a_link_without_descending():
     )
 
 
-@pytest.mark.asyncio
-async def test_without_a_namespace_the_walk_has_nothing_to_ask():
-    # Outside a workspace there is no name plane, so a link cannot be
-    # told from a directory and the walk is the old one.
-    calls = Recorder()
-    await remove_tree(calls, SLOT, None, None)
-    assert ("readdir", "/repo/slot/link") in calls.ops
-
-
-def mounts(roots: list[str], hidden: list[str] | None = None) -> MountView:
-    """A mount view over a fixed list of roots.
-
-    Args:
-        roots (list[str]): every mount root, without a trailing slash.
-        hidden (list[str] | None): the ones this session may not be
-            told about, a subset of ``roots``.
-    """
-    unseen = set(hidden or [])
-    return MountView(
-        descendants=lambda path: [
-            root for root in roots if root.startswith(f"{path}/")
-        ],
-        visible_descendants=lambda path: [
-            root
-            for root in roots
-            if root.startswith(f"{path}/") and root not in unseen
-        ],
-        is_root=lambda path: path in roots,
-        root_of=lambda path: None,
-    )
-
-
 def test_a_mount_root_is_refused_as_itself():
     with pytest.raises(MountInWayError) as caught:
-        refuse_mount(mounts(["/repo/slot"]), SLOT)
+        refuse_mount(files(Recorder(), ["/repo/slot"]), SLOT)
     assert str(caught.value) == (
         "cannot remove '/repo/slot': it is a mount root"
     )
@@ -189,7 +176,7 @@ def test_a_mount_root_is_refused_as_itself():
 
 def test_a_nested_mount_is_named():
     with pytest.raises(MountInWayError) as caught:
-        refuse_mount(mounts(["/repo/slot/data"]), SLOT)
+        refuse_mount(files(Recorder(), ["/repo/slot/data"]), SLOT)
     assert str(caught.value) == (
         "cannot remove '/repo/slot': '/repo/slot/data' is a mount root"
     )
@@ -197,14 +184,14 @@ def test_a_nested_mount_is_named():
 
 def test_the_first_nested_mount_in_order_is_the_one_named():
     with pytest.raises(MountInWayError) as caught:
-        refuse_mount(mounts(["/repo/slot/z", "/repo/slot/a"]), SLOT)
+        refuse_mount(files(Recorder(), ["/repo/slot/z", "/repo/slot/a"]), SLOT)
     assert "'/repo/slot/a'" in str(caught.value)
 
 
 def test_a_hidden_mount_blocks_the_removal_without_being_named():
     # Avoiding a boundary and naming one are two different questions,
     # and a hidden mount's name is what the hide exists to withhold.
-    view = mounts(["/repo/slot/data"], hidden=["/repo/slot/data"])
+    view = files(Recorder(), ["/repo/slot/data"], hidden=["/repo/slot/data"])
     with pytest.raises(MountInWayError) as caught:
         refuse_mount(view, SLOT)
     assert str(caught.value) == (
@@ -212,18 +199,24 @@ def test_a_hidden_mount_blocks_the_removal_without_being_named():
     )
 
 
+def test_a_hidden_mount_deeper_down_is_not_named_either():
+    view = files(
+        Recorder(), ["/repo/slot/a/data"], hidden=["/repo/slot/a/data"]
+    )
+    with pytest.raises(MountInWayError) as caught:
+        refuse_mount(view, REPO)
+    assert str(caught.value) == "cannot remove '/repo': it holds a mount root"
+
+
 def test_nothing_in_the_way_is_no_refusal():
-    refuse_mount(mounts(["/other/mount"]), SLOT)
-    refuse_mount(None, SLOT)
+    refuse_mount(files(Recorder(), ["/other/mount"]), SLOT)
 
 
 @pytest.mark.asyncio
 async def test_a_tree_holding_a_mount_is_refused_before_anything_is_deleted():
     calls = Recorder()
     with pytest.raises(MountInWayError):
-        await remove_tree(
-            calls, SLOT, TreeLinks(), mounts(["/repo/slot/data"])
-        )
+        await remove_tree(files(calls, ["/repo/slot/data"]), SLOT)
     # Nothing at all: the refusal is the first thing the walk does, so
     # the directory is still whole when the caller hears about it.
     assert calls.ops == []
@@ -253,10 +246,9 @@ class Parents:
 async def test_pruning_empty_parents_stops_at_a_mount_root():
     calls = Parents()
     await remove_empty_parents(
-        calls,
+        files(calls, ["/repo/slot/data"]),
         PathSpec.from_str_path("/repo/slot/data/x.txt"),
         REPO,
-        mounts(["/repo/slot/data"]),
     )
     assert ("rmdir", "/repo/slot/data") not in calls.ops
     # And it stops rather than skipping: the directories above the
@@ -268,9 +260,8 @@ async def test_pruning_empty_parents_stops_at_a_mount_root():
 async def test_pruning_empty_parents_takes_an_ordinary_directory():
     calls = Parents()
     await remove_empty_parents(
-        calls,
+        files(calls, ["/repo/slot/data"]),
         PathSpec.from_str_path("/repo/docs/x.txt"),
         REPO,
-        mounts(["/repo/slot/data"]),
     )
     assert ("rmdir", "/repo/docs") in calls.ops

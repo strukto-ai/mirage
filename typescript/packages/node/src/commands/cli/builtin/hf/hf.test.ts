@@ -18,6 +18,7 @@ import { cliSpecFor } from '@struktoai/mirage-core/commands/cli/specs'
 import type * as CommitModule from '../../../../core/hf_hub/commit.ts'
 import type { CLIView, CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
 import { UsageError } from '@struktoai/mirage-core/commands/errors'
+import { Files } from '@struktoai/mirage-core/workspace/files'
 import { materialize } from '@struktoai/mirage-core/io/types'
 import { yieldBytes } from '@struktoai/mirage-core/io/stream'
 import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
@@ -319,7 +320,7 @@ describe('why nothing was selected', () => {
   // download folds a refused tree walk (401/403/404) into an empty listing
   // itself. Three different failures would then all read as "no files
   // matched", so the CLI asks the Hub which one it was.
-  const view = { dispatch: vi.fn() } as unknown as CLIView
+  const view: CLIView = { vfs: new Files(vi.fn()) }
 
   it.each([
     [Absence.REPO, [] as string[], 'Repository Not Found'],
@@ -345,7 +346,7 @@ describe('why nothing was selected', () => {
 describe('a tree the Hub refuses', () => {
   // The tree walk raises for a repo it cannot see; download reads that as
   // nothing listed, so the message upstream prints is unchanged.
-  const view = { dispatch: vi.fn() } as unknown as CLIView
+  const view: CLIView = { vfs: new Files(vi.fn()) }
 
   it.each([
     [401, ''],
@@ -431,8 +432,8 @@ describe('where an upload lands', () => {
     '/work/a.txt': { dir: false, data: 'alpha', kids: [] },
     '/work/sub/b.txt': { dir: false, data: 'beta', kids: [] },
   }
-  const view = {
-    dispatch: vi.fn((op: string, spec: { virtual: string }) => {
+  const view: CLIView = {
+    vfs: new Files(((op: string, spec: { virtual: string }) => {
       const node = tree[spec.virtual]
       if (node === undefined) {
         return Promise.reject(Object.assign(new Error('nope'), { code: 'ENOENT' }))
@@ -442,8 +443,8 @@ describe('where an upload lands', () => {
       }
       if (op === 'readdir') return Promise.resolve([node.kids, null])
       return Promise.resolve([new TextEncoder().encode(node.data), null])
-    }),
-  } as unknown as CLIView
+    }) as never),
+  }
 
   const additions = async (local: string, ...inRepo: string[]): Promise<string[]> => {
     await uploadCmd({

@@ -55,18 +55,19 @@ from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.routing import RouteDecision, runtime_for_language
-from mirage.runtime.types import CodeExecution, DispatchFn, ScriptSource
+from mirage.runtime.types import CodeExecution, ScriptSource
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, Limit, PathSpec, Producer, word_text
-from mirage.view.types import NamespaceView, SessionView, StatPath
+from mirage.view.types import SessionView
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.run import (
     admission_denial,
     exec_node,
 )
-from mirage.workspace.mount.namespace.probe import miss_condition
+from mirage.workspace.files import Files
+from mirage.workspace.mount.namespace.probe import miss_condition, path_stat
 from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.types import ExecutionNode
 
@@ -283,14 +284,9 @@ class CLIContext:
         entries (list[Runtime] | None): the workspace's ordered
             runtime world, which a script leaf selects its interpreter
             from; None (outside a workspace) refuses script installs.
-        dispatch (DispatchFn | None): workspace op dispatcher, for a
-            CLI whose subject is files rather than an API.
-        stat_path (StatPath | None): dispatcher-backed stat asking both
-            channels a backend can answer on.
-        ns (NamespaceView | None): the name plane's facts, which no
-            backend can see, for a verb that walks a tree itself. The
-            mount prefix serving a path is one of them
-            (``ns.mounts.root_of``), so it needs no entry point of its own.
+        vfs (Files | None): the session's files, run as the line's
+            session with the command's gate, for a CLI whose subject is
+            files rather than an API.
         session_view (SessionView | None): the session plane's live,
             gated handle; ``inv.env`` stays the frozen process view.
         routing (RouteDecision[Runtime] | None): the line's placement, which a
@@ -300,9 +296,7 @@ class CLIContext:
     shell: Callable[[str], Awaitable[IOResult]] | None = None
     command_limits: Mapping[str, Limit] | None = None
     entries: list[Runtime] | None = None
-    dispatch: DispatchFn | None = None
-    stat_path: StatPath | None = None
-    ns: NamespaceView | None = None
+    vfs: Files | None = None
     session_view: SessionView | None = None
     processes: ProcessView | None = None
     routing: RouteDecision[Runtime] | None = None
@@ -370,9 +364,7 @@ async def handle_cli(
             per-path invalidation has nothing to aim at.
     """
     entries = context.entries
-    dispatch = context.dispatch
-    stat_path = context.stat_path
-    ns = context.ns
+    vfs = context.vfs
     session_view = context.session_view
     # Words re-enter string space as typed (word_text): the walk owns
     # interpretation, so a quoted "Lunch?" must not arrive as the
@@ -404,13 +396,13 @@ async def handle_cli(
             ),
         )
 
-    if stat_path is not None and dispatch is not None:
+    if vfs is not None:
         for base in result.operand_bases:
-            info = await stat_path(base)
+            info = await path_stat(vfs.dispatch, base)
             if info is not None and info.type is FileType.DIRECTORY:
                 continue
             reason = (
-                await miss_condition(dispatch, base)
+                await miss_condition(vfs.dispatch, base)
                 if info is None
                 else FsCondition.ENOTDIR
             )
@@ -520,12 +512,10 @@ async def handle_cli(
     # CLIs never read it: an API client has no filesystem, while `git`
     # is nothing but one. None outside a workspace, so a verb that needs
     # a plane refuses there on its own.
-    opened = (dispatch, stat_path, ns, session_view, context.processes)
+    opened = (vfs, session_view, context.processes)
     view = (
         CLIView(
-            dispatch=dispatch,
-            stat_path=stat_path,
-            ns=ns,
+            vfs=vfs,
             session_view=session_view,
             processes=context.processes,
         )

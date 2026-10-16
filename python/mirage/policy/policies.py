@@ -70,7 +70,7 @@ from mirage.policy.types import (
 from mirage.types import Limit, MountMode, PathSpec, Refusal
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.types import VfsCall
-from mirage.view.types import NamespaceView, SessionView
+from mirage.view.types import SessionView
 
 if TYPE_CHECKING:
     from mirage.workspace.files import Files
@@ -611,7 +611,7 @@ class Policies:
 
     The chain holds the decision ledger an Ask is put to
     (``decisions``), and ``views``, which the workspace sets to fill a
-    method's read-only ``session``, ``ns`` and ``vfs``.
+    method's read-only ``session`` and ``vfs``.
 
     Args:
         policies (list[Policy] | None): initial policies, consulted in
@@ -629,7 +629,7 @@ class Policies:
         self.views: (
             Callable[
                 [str, "SessionState | None"],
-                tuple[SessionView, NamespaceView, "Files"] | None,
+                tuple[SessionView, "Files"] | None,
             ]
             | None
         ) = None
@@ -808,8 +808,8 @@ class Policies:
                 else None
             )
             if handles is not None:
-                session, ns, vfs = handles
-                ctx = replace(ctx, session=session, ns=ns, vfs=vfs)
+                session, vfs = handles
+                ctx = replace(ctx, session=session, vfs=vfs)
             token = set_explaining(DryRun.DECIDING)
             try:
                 answered = getattr(policy, method)(ctx)

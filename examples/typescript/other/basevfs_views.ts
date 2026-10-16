@@ -14,7 +14,7 @@ import {
   IOResult,
   MountMode,
   Argument,
-  type PathSpec,
+  PathSpec,
   RuntimeFiles,
   Workspace,
 } from '@struktoai/mirage-node'
@@ -110,21 +110,23 @@ class NotesVFS extends BaseVFS<NotesAccessor> {
 
 async function noteInfo(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
   const view = inv.view
-  if (view?.dispatch === undefined || view.ns?.mounts == null || view.sessionView === undefined) {
+  if (view?.vfs === undefined || view.sessionView === undefined) {
     throw new Error('note-info needs workspace entry points')
   }
+  const vfs = view.vfs
   const path = inv.paths[0]
-  const target = view.ns.links?.resolve(path.virtual) ?? path.virtual
-  const [data, result] = await view.dispatch('read', path)
-  if (result.exitCode !== 0) return [new Uint8Array(), result]
-  if (!(data instanceof Uint8Array)) throw new TypeError('expected file bytes')
-  const mount = view.ns.mounts.rootOf(target)
+  const data = await vfs.read(path)
+  let target = path
+  if ((await vfs.stat(path, undefined, { nofollow: true })).type === FileType.SYMLINK) {
+    target = PathSpec.fromStrPath(await vfs.readlink(path), undefined, path.parent)
+  }
+  const mount = vfs.mountOf(target)
   const reader = view.sessionView.get('READER') || 'anonymous'
   const header = ENC.encode(`mount=${mount} reader=${reader} bytes=${data.length}\n`)
   const output = new Uint8Array(header.length + data.length)
   output.set(header)
   output.set(data, header.length)
-  return [output, result]
+  return [output, new IOResult()]
 }
 
 async function show(ws: Workspace, line: string): Promise<void> {

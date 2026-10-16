@@ -130,10 +130,9 @@ async def filter_body(
     sources = fl.as_paths("filter_file")
     if not sources:
         return {}
-    if view is None or view.dispatch is None:
+    if view is None or view.vfs is None:
         raise UsageError("--filter-file needs a workspace to read files from")
-    data, _ = await view.dispatch("read", sources[0])
-    raw = data if isinstance(data, bytes) else bytes(data)
+    raw = await view.vfs.read(sources[0])
     return parse_json_text(raw.decode("utf-8", "replace"), "--filter-file")
 
 

@@ -17,7 +17,6 @@ import git from 'isomorphic-git'
 
 import { visibleEntries } from './pathspec.ts'
 
-import type { LinkView, StatPath } from '../../../../view/types.ts'
 import { fsStrerror, isEacces, isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import { UnhashableFileError } from './errors.ts'
 import { entryMode } from './add.ts'
@@ -29,14 +28,8 @@ import { readBlobBytes, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import { similarityScore } from './similarity.ts'
 import { commitEntries, type TreeEntry } from './tree.ts'
-import type {
-  ConflictedEntry,
-  Dispatch,
-  IndexEntry,
-  IndexState,
-  StatusEntry,
-  WorkTree,
-} from './types.ts'
+import type { ConflictedEntry, IndexEntry, IndexState, StatusEntry, WorkTree } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 import { scan, UNTRACKED_NO } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -333,7 +326,7 @@ function modeDiffers(entry: IndexEntry, info: FileStat): boolean {
  */
 async function differs(
   repo: Repo,
-  dispatch: Dispatch,
+  vfs: Files,
   worktree: PathSpec,
   path: string,
   entry: IndexEntry,
@@ -343,7 +336,7 @@ async function differs(
   if (info.size !== null && entry.size !== 0 && info.size !== entry.size) return true
   let data: Uint8Array
   try {
-    data = await entryBytes(dispatch, worktree.join(path), info)
+    data = await entryBytes(vfs, worktree.join(path), info)
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return true
     // git counts a file it cannot read as changed; a command that needs its
@@ -358,7 +351,7 @@ async function differs(
 /** Compare the index with the working tree: what is not staged yet. */
 export async function workChanges(
   repo: Repo,
-  dispatch: Dispatch,
+  vfs: Files,
   worktree: PathSpec,
   entries: ReadonlyMap<string, IndexEntry>,
   found: WorkTree,
@@ -378,7 +371,7 @@ export async function workChanges(
     // A symlink and a file holding its target text hash alike.
     else if ((info.type === FileType.SYMLINK) !== ((entry.mode & 0o170000) === SYMLINK)) {
       changes.set(path, TYPE_CHANGED)
-    } else if (await differs(repo, dispatch, worktree, path, entry, info)) {
+    } else if (await differs(repo, vfs, worktree, path, entry, info)) {
       changes.set(path, MODIFIED)
     }
   }
@@ -407,14 +400,12 @@ export function stagedEntries(state: IndexState): Map<string, TreeEntry> {
  */
 export async function workEntries(
   repo: Repo,
-  dispatch: Dispatch,
-  statPath: StatPath,
+  vfs: Files,
   state: IndexState,
-  links: LinkView | null = null,
 ): Promise<Map<string, TreeEntry>> {
   const tracked = new Set([...state.entries.keys(), ...state.conflicts.keys()])
-  const found = await scan(dispatch, statPath, repo.location, tracked, UNTRACKED_NO, links)
-  const changes = await workChanges(repo, dispatch, repo.location.worktree, state.entries, found)
+  const found = await scan(vfs, repo.location, tracked, UNTRACKED_NO)
+  const changes = await workChanges(repo, vfs, repo.location.worktree, state.entries, found)
   const entries = stagedEntries(state)
   for (const path of state.conflicts.keys()) {
     if (found.files.has(path)) changes.set(path, MODIFIED)
@@ -427,7 +418,7 @@ export async function workEntries(
     }
     let data: Uint8Array
     try {
-      data = await entryBytes(dispatch, repo.location.worktree.join(path), info)
+      data = await entryBytes(vfs, repo.location.worktree.join(path), info)
     } catch (err) {
       if (!isEacces(err)) throw err
       throw new UnhashableFileError(path, fsStrerror(err) ?? 'Permission denied')
@@ -488,21 +479,19 @@ function merge(
 /** Everything `status` reports, in one pass over the three sources. */
 export async function collect(
   repo: Repo,
-  dispatch: Dispatch,
-  statPath: StatPath,
+  vfs: Files,
   mode: string,
-  links: LinkView | null = null,
   showIgnored = false,
 ): Promise<[StatusEntry[], IndexState, boolean]> {
-  const state = await readIndex(repo, dispatch)
+  const state = await readIndex(repo, vfs)
   const allHead = await headEntries(repo)
   const head = allHead === null ? null : visibleEntries(repo.location, allHead)
   const entries = visibleEntries(repo.location, state.entries)
   const conflicts = visibleEntries(repo.location, state.conflicts)
   const staged = await stageChanges(repo, head, entries, new Set(conflicts.keys()))
   const tracked = new Set([...entries.keys(), ...conflicts.keys()])
-  const found = await scan(dispatch, statPath, repo.location, tracked, mode, links, showIgnored)
-  const unstaged = await workChanges(repo, dispatch, repo.location.worktree, entries, found)
+  const found = await scan(vfs, repo.location, tracked, mode, showIgnored)
+  const unstaged = await workChanges(repo, vfs, repo.location.worktree, entries, found)
   const rows = merge(staged, unstaged, conflictCodes(conflicts), found.untracked)
   rows.push(
     ...[...found.ignored]

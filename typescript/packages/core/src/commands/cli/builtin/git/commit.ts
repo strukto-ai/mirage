@@ -207,9 +207,8 @@ export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
   const view = inv.view ?? {}
   const fl = new FlagView(inv.flags)
   try {
-    const dispatch = view.dispatch
-    const statPath = view.statPath
-    if (statPath === undefined || dispatch === undefined) {
+    const vfs = view.vfs
+    if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
     const texts = [...inv.texts]
@@ -225,17 +224,15 @@ export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
     // read-only repository refuses an empty commit too.
     const index = repo.location.gitdir.join('index')
     try {
-      await takeLock(dispatch, index)
+      await takeLock(vfs, index)
     } catch (err) {
       if (isEexist(err)) throw new LockExistsError(`${index.virtual}.lock`)
       throw err
     }
-    const state = await readIndex(repo, dispatch)
+    const state = await readIndex(repo, vfs)
     if (state.conflicts.size > 0) throw new UnmergedIndexError()
-    const restaged = staging
-      ? await stageTracked(repo, dispatch, statPath, state, view.ns?.links ?? null)
-      : null
-    const head = await readHead(dispatch, repo.location.gitdir)
+    const restaged = staging ? await stageTracked(repo, vfs, state) : null
+    const head = await readHead(vfs, repo.location.gitdir)
     const before = await headEntries(repo)
     const after = indexTree(state)
     const same =
@@ -246,27 +243,18 @@ export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
         return held?.oid === entry.oid && held.mode === entry.mode
       })
     if (same && !fl.asBool('allow_empty')) {
-      throw new NothingToCommitError(
-        await renderReport(
-          repo,
-          dispatch,
-          statPath,
-          head,
-          startPoint(fl).virtual,
-          view.ns?.links ?? null,
-        ),
-      )
+      throw new NothingToCommitError(await renderReport(repo, vfs, head, startPoint(fl).virtual))
     }
     const parents =
       before === null ? [] : [await git.resolveRef({ ...repoArgs(repo), ref: 'HEAD' })]
     const who = identity(fl, view.sessionView)
     const when = Math.floor(Date.now() / 1000)
     const oid = await buildCommit(repo, state, message, who, parents, when)
-    if (head.ref !== null) await writeRef(dispatch, repo.location.commondir, head.ref, oid)
-    else await detachHead(dispatch, repo.location.gitdir, oid)
+    if (head.ref !== null) await writeRef(vfs, repo.location.commondir, head.ref, oid)
+    else await detachHead(vfs, repo.location.gitdir, oid)
     if (restaged !== null) await updateIndex(repo, restaged[0], restaged[1])
     await record(
-      dispatch,
+      vfs,
       repo.location.gitdir,
       repo.location.commondir,
       head.ref,

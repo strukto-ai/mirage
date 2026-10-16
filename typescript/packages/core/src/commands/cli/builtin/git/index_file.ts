@@ -19,7 +19,8 @@ import { ResolveIndexError } from './errors.ts'
 import { exists } from './io.ts'
 
 import type { Repo } from './repo.ts'
-import type { ConflictedEntry, Dispatch, IndexEntry, IndexState } from './types.ts'
+import type { ConflictedEntry, IndexEntry, IndexState } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 
 const MERGE_HEAD = 'MERGE_HEAD'
 
@@ -94,8 +95,8 @@ async function withIndex<T>(
  * `git add`, and every path is then untracked, which is what an empty table
  * already says.
  */
-export async function readIndex(repo: Repo, dispatch: Dispatch): Promise<IndexState> {
-  const merging = await exists(dispatch, repo.location.gitdir.join(MERGE_HEAD))
+export async function readIndex(repo: Repo, vfs: Files): Promise<IndexState> {
+  const merging = await exists(vfs, repo.location.gitdir.join(MERGE_HEAD))
   const entries = new Map<string, IndexEntry>()
   const conflicts = new Map<string, ConflictedEntry>()
   const rows = await withIndex(repo, (index) => index.entriesFlat.map(toEntry))

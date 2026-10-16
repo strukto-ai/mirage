@@ -20,14 +20,14 @@ from mirage.commands.cli.builtin.git.ignore import (
     load_ignores,
 )
 from mirage.commands.cli.builtin.git.io import (
+    lstat,
     read_names,
     read_optional,
 )
 from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
-from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.remnants import entry_name
-from mirage.view.types import LinkView, StatPath
+from mirage.workspace.files import Files
 
 # git's three untracked modes. "normal" names an untracked directory
 # once instead of everything inside it, "all" names every file, and "no"
@@ -61,33 +61,26 @@ class Scanner:
     """One walk of the working tree, carrying what the walk needs.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
-        stat_path (StatPath): dispatcher-backed stat, both channels.
+        vfs (Files): the session's files.
         worktree (PathSpec): absolute virtual path of the working tree root.
         tracked (set[str]): repository-relative paths the index holds.
         mode (str): which untracked files to report, one of
             ``UNTRACKED_NO`` / ``UNTRACKED_NORMAL`` / ``UNTRACKED_ALL``.
-        links (LinkView | None): the name plane's link facts, None
-            outside a workspace.
     """
 
     def __init__(
         self,
-        dispatch: DispatchFn,
-        stat_path: StatPath,
+        vfs: Files,
         worktree: PathSpec,
         tracked: set[str],
         mode: str,
-        links: LinkView | None,
         show_ignored: bool = False,
     ) -> None:
-        self._dispatch = dispatch
-        self._stat_path = stat_path
+        self._vfs = vfs
         self._worktree = worktree
         self._tracked = tracked
         self._directories = tracked_directories(tracked)
         self._mode = mode
-        self._links = links
         self._show_ignored = show_ignored
         self.found = WorkTree()
 
@@ -102,23 +95,10 @@ class Scanner:
     async def _entry_stat(self, relative: str) -> FileStat | None:
         """What the walk sees at one path, without following a link.
 
-        git lstats the working tree, so a symlink is an entry in its own
-        right: real git records mode 120000 and the target string, and
-        reports a link to nothing as untracked rather than as absent.
-        Symlinks are namespace state, so the backend stat behind
-        ``stat_path`` cannot see one and answers about the target
-        instead (None when the target is missing). Asking the name plane
-        first is what makes this an lstat.
-
         Args:
             relative (str): repository-relative path of the entry.
         """
-        absolute = self._absolute(relative)
-        if self._links is not None:
-            link = self._links.stat_at(absolute.virtual)
-            if link is not None:
-                return link
-        return await self._stat_path(absolute)
+        return await lstat(self._vfs, self._absolute(relative))
 
     async def _holds_a_file(
         self,
@@ -137,9 +117,7 @@ class Scanner:
             ignores (IgnoreStack): the rules governing it.
         """
         rules = await self._descend(relative, ignores)
-        for entry in await read_names(
-            self._dispatch, self._absolute(relative)
-        ):
+        for entry in await read_names(self._vfs, self._absolute(relative)):
             name = entry_name(entry)
             if not name:
                 continue
@@ -168,7 +146,7 @@ class Scanner:
         if not relative:
             return ignores
         local = await read_optional(
-            self._dispatch, self._absolute(relative).join(GITIGNORE)
+            self._vfs, self._absolute(relative).join(GITIGNORE)
         )
         return ignores if local is None else ignores.push(relative, local)
 
@@ -230,7 +208,7 @@ class Scanner:
         """
         rules = await self._descend(relative, ignores)
         for entry in sorted(
-            await read_names(self._dispatch, self._absolute(relative))
+            await read_names(self._vfs, self._absolute(relative))
         ):
             name = entry_name(entry)
             if not name or (not relative and name == GIT_DIR):
@@ -254,12 +232,10 @@ class Scanner:
 
 
 async def scan(
-    dispatch: DispatchFn,
-    stat_path: StatPath,
+    vfs: Files,
     location: RepoLocation,
     tracked: set[str],
     mode: str,
-    links: LinkView | None = None,
     show_ignored: bool = False,
 ) -> WorkTree:
     """Walk a working tree once, for both halves of a status report.
@@ -271,26 +247,18 @@ async def scan(
     alone would leave the deletions unfound.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
-        stat_path (StatPath): dispatcher-backed stat, both channels.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         tracked (set[str]): repository-relative paths the index holds.
         mode (str): which untracked files to report, one of
             ``UNTRACKED_NO`` / ``UNTRACKED_NORMAL`` / ``UNTRACKED_ALL``.
-        links (LinkView | None): the name plane's link facts, so the
-            walk lstats as git does. None outside a workspace, where
-            there is no namespace to hold a link.
     """
-    ignores = await load_ignores(
-        dispatch, location.commondir, location.worktree
-    )
+    ignores = await load_ignores(vfs, location.commondir, location.worktree)
     scanner = Scanner(
-        dispatch,
-        stat_path,
+        vfs,
         location.worktree,
         tracked,
         mode,
-        links,
         show_ignored,
     )
     await scanner.walk("", False, ignores)

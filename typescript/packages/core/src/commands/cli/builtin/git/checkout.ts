@@ -50,12 +50,14 @@ import { readIndex, refuseUnresolved, updateIndex, type StagedEntry } from './in
 import {
   blockingAncestor,
   dropGitlink,
+  isLink,
   keepGitlink,
   refuseReplacedMounts,
   removeEmptyParents,
   removeFile,
   removeTree,
   restoreEntry,
+  statOf,
 } from './io.ts'
 
 import { append, entry, IDENTITY, logged, record, ZERO } from './reflog.ts'
@@ -75,9 +77,9 @@ import { noteAmbiguity, refsNamed, resolveCommit } from './revparse.ts'
 import { restorePaths, sourceTree } from './restore.ts'
 import { restored } from './reset.ts'
 import { commitEntries, type TreeEntry } from './tree.ts'
-import type { LinkView, MountView, StatPath } from '../../../../view/types.ts'
 import { FileType } from '../../../../types.ts'
-import type { Dispatch, HeadMove, HeadRef, IndexEntry, ReadOnlyRefusal } from './types.ts'
+import type { HeadMove, HeadRef, IndexEntry, ReadOnlyRefusal } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 import { checkSwitches, fatal, splitMarked, startPoint as lineStart } from './util.ts'
 import { scan, UNTRACKED_ALL } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -272,12 +274,9 @@ function lostDirectories(
  */
 export async function switchTo(
   repo: Repo,
-  dispatch: Dispatch,
-  statPath: StatPath,
+  vfs: Files,
   before: ReadonlyMap<string, TreeEntry>,
   after: ReadonlyMap<string, TreeEntry>,
-  links: LinkView | null,
-  mounts: MountView | null,
 ): Promise<string[]> {
   const changed = written(before, after)
   // A gitlink is not written into the working tree at all, so it is neither
@@ -288,7 +287,7 @@ export async function switchTo(
   // halfway through leaves the entries already written holding the target's
   // content while HEAD and the index still name the branch being left, which
   // is the half-switch every other check above exists to prevent.
-  await refuseReplacedMounts(statPath, repo.location.worktree, replacing, links, mounts)
+  await refuseReplacedMounts(vfs, repo.location.worktree, replacing)
   // Removals first, and the emptied directories with them, because the two
   // sets name the same place whenever a branch records a file where the other
   // records a directory: writing `slot/child` while the file `slot` is still
@@ -304,18 +303,18 @@ export async function switchTo(
     // the unlink here died on it with the removals ahead of it already
     // applied.
     if (before.get(path)?.mode === GITLINK_MODE) {
-      const warned = await dropGitlink(dispatch, statPath, where, path, links)
+      const warned = await dropGitlink(vfs, where, path)
       if (warned !== null) notes.push(warned)
     } else {
-      await removeFile(dispatch, where)
+      await removeFile(vfs, where)
     }
-    await removeEmptyParents(dispatch, where, repo.location.worktree, mounts)
+    await removeEmptyParents(vfs, where, repo.location.worktree)
   }
   for (const path of [...changed.keys()].sort(compareCodePoints)) {
     const entry = changed.get(path)
     if (entry === undefined) continue
     if (entry.mode === GITLINK_MODE) {
-      await keepGitlink(dispatch, statPath, repo.location.worktree.join(path), links)
+      await keepGitlink(vfs, repo.location.worktree.join(path))
       continue
     }
     const { blob } = await git.readBlob({ ...repoArgs(repo), oid: entry.oid })
@@ -324,8 +323,8 @@ export async function switchTo(
     // and in no collision list, so it reaches here. git replaces it with the
     // directory the entry needs rather than writing through it, which is what
     // keeps a link's target tree, a path no branch named, out of the way.
-    const above = await blockingAncestor(statPath, repo.location.worktree, path, links)
-    if (above !== null) await removeFile(dispatch, above)
+    const above = await blockingAncestor(vfs, repo.location.worktree, path)
+    if (above !== null) await removeFile(vfs, above)
     const where = repo.location.worktree.join(path)
     // And the same thing standing on the name itself rather than above it: a
     // directory holding only ignored files is in no collision list either,
@@ -333,13 +332,13 @@ export async function switchTo(
     // lose. git updates ignored files by default and takes the whole directory
     // with it. A link is left to restoreEntry, which retargets it; following
     // one to a directory here would delete a tree no branch named.
-    if ((links?.statAt(where.virtual) ?? null) === null) {
-      const info = await statPath(where)
+    if (!(await isLink(vfs, where))) {
+      const info = await statOf(vfs, where)
       if (info !== null && info.type === FileType.DIRECTORY) {
-        await removeTree(dispatch, where, links, mounts)
+        await removeTree(vfs, where)
       }
     }
-    await restoreEntry(dispatch, where, entry.mode, blob, links)
+    await restoreEntry(vfs, where, entry.mode, blob)
   }
   // The index is git's two-way merge, not a copy of the target tree: only a
   // path the two trees disagree about is decided by the target, and where they
@@ -381,7 +380,7 @@ export async function previousPosition(repo: Repo, head: HeadRef): Promise<strin
  * git 2.50.1.
  */
 async function attach(
-  dispatch: Dispatch,
+  vfs: Files,
   repo: Repo,
   known: ReadonlyMap<string, string>,
   head: HeadRef,
@@ -393,18 +392,18 @@ async function attach(
 ): Promise<void> {
   const when = Math.floor(Date.now() / 1000)
   if (creating && ref !== null) {
-    await writeRef(dispatch, repo.location.commondir, ref, oid)
+    await writeRef(vfs, repo.location.commondir, ref, oid)
     const log = repo.location.commondir.join('logs', ref)
-    if (await logged(dispatch, repo.location, ref, log)) {
+    if (await logged(vfs, repo.location, ref, log)) {
       const line = entry(ZERO, oid, IDENTITY, when, `branch: Created from ${from}`)
-      await append(dispatch, repo.location.commondir, `logs/${ref}`, line)
+      await append(vfs, repo.location.commondir, `logs/${ref}`, line)
     }
   }
-  if (ref !== null) await setHead(dispatch, repo.location.gitdir, ref)
-  else await detachHead(dispatch, repo.location.gitdir, oid)
+  if (ref !== null) await setHead(vfs, repo.location.gitdir, ref)
+  else await detachHead(vfs, repo.location.gitdir, oid)
   const where = head.branch ?? head.commit ?? ''
   await record(
-    dispatch,
+    vfs,
     repo.location.gitdir,
     repo.location.commondir,
     null,
@@ -457,8 +456,7 @@ function stageLetters(
  * offer: without them a branch switch silently throws away whatever was changed
  * and not staged, and there is no reflog here to get it back from.
  *
- * @param dispatch workspace op dispatcher
- * @param statPath dispatcher-backed stat, both channels
+ * @param vfs the session's files
  * @param links the name plane's link facts, null outside a workspace
  * @param mounts the name plane's mount boundaries, null outside a workspace
  * @param repo the opened repository
@@ -475,10 +473,7 @@ function stageLetters(
  *   status letter git prints for it
  */
 export async function moveHead(
-  dispatch: Dispatch,
-  statPath: StatPath,
-  links: LinkView | null,
-  mounts: MountView | null,
+  vfs: Files,
   repo: Repo,
   known: ReadonlyMap<string, string>,
   head: HeadRef,
@@ -496,12 +491,12 @@ export async function moveHead(
   // decides it, which is git's own reading rather than a comparison of the two
   // trees. Pinned against git 2.50.1.
   if (inPlace) {
-    await attach(dispatch, repo, known, head, oid, target, ref, creating, from)
+    await attach(vfs, repo, known, head, oid, target, ref, creating, from)
     return { carried: new Map(), warnings: '' }
   }
   const before = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
   const after = await commitEntries(repo, oid)
-  const state = await readIndex(repo, dispatch)
+  const state = await readIndex(repo, vfs)
   // First, before either tree is compared and before the working tree is
   // walked, which is where git refuses it too. Every check below reads stage 0,
   // so a path held only as conflict stages is invisible to all of them and the
@@ -513,8 +508,8 @@ export async function moveHead(
   // untracked directory to one `dir/` entry, and a collision has to be
   // decided per file. git names the file inside such a directory, so the
   // list has to hold it.
-  const found = await scan(dispatch, statPath, repo.location, tracked, UNTRACKED_ALL, links)
-  const unstaged = await workChanges(repo, dispatch, repo.location.worktree, state.entries, found)
+  const found = await scan(vfs, repo.location, tracked, UNTRACKED_ALL)
+  const unstaged = await workChanges(repo, vfs, repo.location.worktree, state.entries, found)
   // Both kinds of uncommitted change count: an edit in the working tree, and
   // one already staged. Leaving the staged ones out is what silently threw
   // them away. The index column wins where a path has both, which is how git's
@@ -534,8 +529,8 @@ export async function moveHead(
   if (blocked.length > 0 || clobbered.length > 0 || lost.length > 0) {
     throw new CheckoutConflictError(blocked, clobbered, lost)
   }
-  const notes = await switchTo(repo, dispatch, statPath, before, after, links, mounts)
-  await attach(dispatch, repo, known, head, oid, target, ref, creating, from)
+  const notes = await switchTo(repo, vfs, before, after)
+  await attach(vfs, repo, known, head, oid, target, ref, creating, from)
   return { carried, warnings: notes.join('') }
 }
 
@@ -577,13 +572,8 @@ async function readsAsCommit(
 }
 
 /** Whether an operand names a path the index holds, which makes it a pathspec. */
-async function namesPath(
-  repo: Repo,
-  dispatch: Dispatch,
-  start: string,
-  operand: string,
-): Promise<boolean> {
-  const state = await readIndex(repo, dispatch)
+async function namesPath(repo: Repo, vfs: Files, start: string, operand: string): Promise<boolean> {
+  const state = await readIndex(repo, vfs)
   const names = new Set([...state.entries.keys(), ...state.conflicts.keys()])
   return matched(names, repoRelative(repo.location, start, operand)).size > 0
 }
@@ -655,9 +645,8 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
   let note: string
   let warnings = ''
   try {
-    const dispatch = view.dispatch
-    const statPath = view.statPath
-    if (statPath === undefined || dispatch === undefined) {
+    const vfs = view.vfs
+    if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
     checkSwitches(inv, texts)
@@ -669,10 +658,10 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
     if (detach && extra !== undefined) throw new DetachPathError(extra)
     const repo = await opened(fl, view, true)
     const mode = await trackMode(repo)
-    const head = await readHead(dispatch, repo.location.gitdir)
+    const head = await readHead(vfs, repo.location.gitdir)
     let creating = fl.asBool('b')
     const ref = `${BRANCH_PREFIX}${target}`
-    const known = await loadRefs(dispatch, repo.location.gitdir, repo.location.commondir)
+    const known = await loadRefs(vfs, repo.location.gitdir, repo.location.commondir)
     if (creating && texts.length > 2) throw new PathsWithBranchError(target)
     if (!creating && !detach) {
       const [leading, marked] = splitMarked(texts, inv.argv)
@@ -696,7 +685,7 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
         named = await resolveCommit(repo, target)
       } catch {
         if (detach) throw new DetachPathError(target)
-        if (await namesPath(repo, dispatch, lineStart(fl).virtual, target)) {
+        if (await namesPath(repo, vfs, lineStart(fl).virtual, target)) {
           return await checkoutPaths(repo, view, fl, null, texts, true)
         }
         guessed = await remoteBranch(repo, target)
@@ -710,7 +699,7 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
       // index: git refuses the line over an unresolved index rather than
       // answering that there is nothing to do, so a caller cannot read
       // "Already on" as proof the repository is in a state it can build on.
-      refuseUnresolved(await readIndex(repo, dispatch))
+      refuseUnresolved(await readIndex(repo, vfs))
       return [
         null,
         new IOResult({
@@ -746,10 +735,7 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
     if (held !== null) throw new RefLockError(ref, held)
     const attached = !detach && (creating || known.has(ref))
     const moved = await moveHead(
-      dispatch,
-      statPath,
-      view.ns?.links ?? null,
-      view.ns?.mounts ?? null,
+      vfs,
       repo,
       known,
       head,

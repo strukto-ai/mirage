@@ -160,12 +160,11 @@ export async function readCliFile(
     if (inv.stdin === null) throw new Error(`${option} needs standard input`)
     return materialize(inv.stdin)
   }
-  const dispatch = inv.view?.dispatch
-  if (dispatch === undefined) throw new Error(`${option} needs a workspace to read files from`)
+  const vfs = inv.view?.vfs
+  if (vfs === undefined) throw new Error(`${option} needs a workspace to read files from`)
   const spec = PathSpec.fromStrPath(raw, undefined, inv.cwd)
   try {
-    const [data] = await dispatch('read', spec)
-    return await materialize(data as ByteSource)
+    return await vfs.read(spec)
   } catch (err) {
     const strerror = isEnoent(err) || isEnotdir(err) ? fsStrerror(err) : null
     if (strerror !== null) throw new Error(`read ${path}: ${strerror}`)

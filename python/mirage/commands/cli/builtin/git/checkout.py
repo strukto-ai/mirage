@@ -62,12 +62,14 @@ from mirage.commands.cli.builtin.git.index_file import (
 from mirage.commands.cli.builtin.git.io import (
     blocking_ancestor,
     drop_gitlink,
+    is_link,
     keep_gitlink,
     refuse_replaced_mounts,
     remove_empty_parents,
     remove_file,
     remove_tree,
     restore_entry,
+    stat_of,
 )
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.pathspec import (
@@ -110,8 +112,6 @@ from mirage.commands.cli.builtin.git.types import (
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
     fatal,
-    links_of,
-    mounts_of,
     split_marked,
     start_point,
 )
@@ -120,9 +120,8 @@ from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.runtime.types import DispatchFn
 from mirage.types import FileType
-from mirage.view.types import LinkView, MountView, StatPath
+from mirage.workspace.files import Files
 
 # git's word-for-word warning when HEAD leaves a branch, kept verbatim.
 # It is the only thing telling a caller that commits made from here
@@ -324,14 +323,11 @@ def _lost_directories(writing: Tree, untracked: list[str]) -> list[str]:
 
 
 async def switch_to(
-    dispatch: DispatchFn,
-    stat_path: StatPath,
+    vfs: Files,
     repo: BaseRepo,
     location: RepoLocation,
     before: Tree,
     after: Tree,
-    links: LinkView | None,
-    mounts: MountView | None,
 ) -> list[str]:
     """Make the working tree and index match the tree being switched to.
 
@@ -344,20 +340,13 @@ async def switch_to(
     the whole decision here.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
-        stat_path (StatPath): the data plane's stat, which dereferences.
+        vfs (Files): the session's files.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         before (Tree): the tree HEAD records.
         after (Tree): the tree being switched to.
-        links (LinkView | None): the name plane's link facts, so an
-            entry that changes between a link and a file replaces what
-            is there rather than writing through it.
-        mounts (MountView | None): the name plane's mount boundaries,
-            so a directory holding a nested mount is refused rather
-            than emptied of a backend no branch recorded.
     """
-    state = await read_index(dispatch, location.gitdir)
+    state = await read_index(vfs, location.gitdir)
     state.conflicts.clear()
     changed = sorted(_written(before, after))
     # A gitlink is not written into the working tree at all, so it is
@@ -370,11 +359,9 @@ async def switch_to(
     # the branch being left, which is the half-switch every other check
     # above exists to prevent.
     await refuse_replaced_mounts(
-        stat_path,
+        vfs,
         location.worktree,
         [path.decode("utf-8", errors="replace") for path in replacing],
-        links,
-        mounts,
     )
     blobs = await asyncio.to_thread(
         contents, repo, [after[path][1] for path in replacing]
@@ -395,21 +382,17 @@ async def switch_to(
         # still in it, where the unlink here died on it with the
         # removals ahead of it already applied.
         if before[path][0] == GITLINK:
-            warned = await drop_gitlink(
-                dispatch, stat_path, where, name, links
-            )
+            warned = await drop_gitlink(vfs, where, name)
             if warned is not None:
                 notes.append(warned)
         else:
-            await remove_file(dispatch, where)
-        await remove_empty_parents(dispatch, where, location.worktree, mounts)
+            await remove_file(vfs, where)
+        await remove_empty_parents(vfs, where, location.worktree)
     for path in changed:
         name = path.decode("utf-8", errors="replace")
         mode, sha = after[path]
         if mode == GITLINK:
-            await keep_gitlink(
-                dispatch, stat_path, location.worktree.join(name), links
-            )
+            await keep_gitlink(vfs, location.worktree.join(name))
             continue
         # Whatever the removals above did not take, a component above
         # the entry may still not be a directory: an ignored file or
@@ -417,11 +400,9 @@ async def switch_to(
         # reaches here. git replaces it with the directory the entry
         # needs rather than writing through it, which is what keeps a
         # link's target tree, a path no branch named, out of the way.
-        above = await blocking_ancestor(
-            stat_path, location.worktree, name, links
-        )
+        above = await blocking_ancestor(vfs, location.worktree, name)
         if above is not None:
-            await remove_file(dispatch, above)
+            await remove_file(vfs, above)
         where = location.worktree.join(name)
         # And the same thing standing on the name itself rather than
         # above it: a directory holding only ignored files is in no
@@ -430,11 +411,11 @@ async def switch_to(
         # files by default and takes the whole directory with it. A
         # link is left to restore_entry, which retargets it; following
         # one to a directory here would delete a tree no branch named.
-        if links is None or links.stat_at(where.virtual) is None:
-            info = await stat_path(where)
+        if not await is_link(vfs, where):
+            info = await stat_of(vfs, where)
             if info is not None and info.type is FileType.DIRECTORY:
-                await remove_tree(dispatch, where, links, mounts)
-        await restore_entry(dispatch, where, mode, blobs[sha], links)
+                await remove_tree(vfs, where)
+        await restore_entry(vfs, where, mode, blobs[sha])
     # The index is git's two-way merge, not a copy of the target tree:
     # only a path the two trees disagree about is decided by the
     # target, and where they agree the entry is left exactly as it
@@ -448,7 +429,7 @@ async def switch_to(
         state.entries[path] = restored(ObjectID(sha), mode)
     for path in set(before) - set(after):
         state.entries.pop(path, None)
-    await write_index(dispatch, location.gitdir, state)
+    await write_index(vfs, location.gitdir, state)
     return notes
 
 
@@ -475,7 +456,7 @@ def previous_position(repo: BaseRepo, head: HeadRef) -> str:
 
 
 async def _attach(
-    dispatch: DispatchFn,
+    vfs: Files,
     repo: BaseRepo,
     location: RepoLocation,
     head: HeadRef,
@@ -494,7 +475,7 @@ async def _attach(
     own saying where it came from. Pinned against git 2.50.1.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         head (HeadRef): what HEAD pointed at before the move.
@@ -509,9 +490,9 @@ async def _attach(
     """
     when = int(time.time())
     if creating and ref is not None:
-        await write_ref(dispatch, location.commondir, ref.decode(), commit.id)
+        await write_ref(vfs, location.commondir, ref.decode(), commit.id)
         log = location.commondir.join("logs", ref.decode())
-        if await logged(dispatch, location, ref.decode(), log):
+        if await logged(vfs, location, ref.decode(), log):
             line = log_entry(
                 ZERO,
                 commit.id,
@@ -519,16 +500,14 @@ async def _attach(
                 when,
                 f"branch: Created from {start}",
             )
-            await append(
-                dispatch, location.commondir, f"logs/{ref.decode()}", line
-            )
+            await append(vfs, location.commondir, f"logs/{ref.decode()}", line)
     if ref is not None:
-        await set_head(dispatch, location.gitdir, ref.decode())
+        await set_head(vfs, location.gitdir, ref.decode())
     else:
-        await detach_head(dispatch, location.gitdir, commit.id)
+        await detach_head(vfs, location.gitdir, commit.id)
     where = head.branch if head.branch is not None else head.commit or ""
     await record(
-        dispatch,
+        vfs,
         location.gitdir,
         location.commondir,
         None,
@@ -574,10 +553,7 @@ def _stage_letters(
 
 
 async def move_head(
-    dispatch: DispatchFn,
-    stat_path: StatPath,
-    links: LinkView | None,
-    mounts: MountView | None,
+    vfs: Files,
     repo: BaseRepo,
     location: RepoLocation,
     head: HeadRef,
@@ -601,12 +577,7 @@ async def move_head(
     back from.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
-        stat_path (StatPath): dispatcher-backed stat, both channels.
-        links (LinkView | None): the name plane's link facts, None
-            outside a workspace.
-        mounts (MountView | None): the name plane's mount boundaries,
-            None outside a workspace.
+        vfs (Files): the session's files.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         head (HeadRef): what HEAD pointed at before the move.
@@ -634,7 +605,7 @@ async def move_head(
     # 2.50.1.
     if in_place:
         await _attach(
-            dispatch,
+            vfs,
             repo,
             location,
             head,
@@ -647,7 +618,7 @@ async def move_head(
         return HeadMove({}, "")
     before = await asyncio.to_thread(head_entries, repo) or {}
     after = await asyncio.to_thread(tree_of, repo, commit.id)
-    state = await read_index(dispatch, location.gitdir)
+    state = await read_index(vfs, location.gitdir)
     # First, before either tree is compared and before the working tree
     # is walked, which is where git refuses it too. Every check below
     # reads stage 0, so a path held only as conflict stages is invisible
@@ -661,12 +632,8 @@ async def move_head(
     # wholly untracked directory to one ``dir/`` entry, and a
     # collision has to be decided per file. git names the file
     # inside such a directory, so the list has to hold it.
-    found = await scan(
-        dispatch, stat_path, location, tracked, UNTRACKED_ALL, links
-    )
-    unstaged = await work_changes(
-        dispatch, location.worktree, state.entries, found
-    )
+    found = await scan(vfs, location, tracked, UNTRACKED_ALL)
+    unstaged = await work_changes(vfs, location.worktree, state.entries, found)
     staged = _stage_letters(before, state.entries)
     # Both kinds of uncommitted change count: an edit in the working
     # tree, and one already staged. Leaving the staged ones out is
@@ -685,17 +652,15 @@ async def move_head(
     lost = _lost_directories(writing, found.untracked)
     if blocked or overwritten or lost:
         raise CheckoutConflictError(blocked, overwritten, lost)
-    notes = await switch_to(
-        dispatch, stat_path, repo, location, before, after, links, mounts
-    )
+    notes = await switch_to(vfs, repo, location, before, after)
     await _attach(
-        dispatch, repo, location, head, commit, target, ref, creating, start
+        vfs, repo, location, head, commit, target, ref, creating, start
     )
     return HeadMove(carried, "".join(notes))
 
 
 async def tracking_report(
-    dispatch: DispatchFn, location: RepoLocation, branch: str
+    vfs: Files, location: RepoLocation, branch: str
 ) -> str:
     """What a switch onto a branch prints about its upstream, on stdout.
 
@@ -703,13 +668,13 @@ async def tracking_report(
     created by the switch has its ref to count from.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         branch (str): the branch HEAD now names.
     """
-    repo = await open_repo(dispatch, location)
+    repo = await open_repo(vfs, location)
     upstream = await branch_upstream(
-        dispatch,
+        vfs,
         repo,
         location,
         HeadRef(branch, f"refs/heads/{branch}", None),
@@ -742,18 +707,18 @@ def _reads_as_commit(repo: BaseRepo, operand: str) -> bool:
 
 
 async def _names_path(
-    dispatch: DispatchFn, location: RepoLocation, start: str, operand: str
+    vfs: Files, location: RepoLocation, start: str, operand: str
 ) -> bool:
     """Whether an operand names a path the index holds, which makes it
     a pathspec.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         start (str): the directory the line runs in.
         operand (str): the operand as typed.
     """
-    state = await read_index(dispatch, location.gitdir)
+    state = await read_index(vfs, location.gitdir)
     names = {
         path.decode("utf-8", errors="replace")
         for path in [*state.entries, *state.conflicts]
@@ -833,13 +798,12 @@ async def checkout(
             ``inv.view``.
     """
     view = inv.view or CLIView()
-    dispatch = view.dispatch
-    stat_path = view.stat_path
+    vfs = view.vfs
     texts = inv.texts
     flags = inv.flags
     fl = FlagView(flags)
     try:
-        if dispatch is None or stat_path is None:
+        if vfs is None:
             raise NoWorkspaceError()
         check_switches(inv, texts)
         detach = fl.as_bool("detach")
@@ -851,8 +815,8 @@ async def checkout(
         if detach and len(texts) > 1:
             raise DetachPathError(texts[1])
         repo, location = await opened(fl, view, work_tree=True)
-        mode = await track_mode(dispatch, location)
-        head = await read_head(dispatch, location.gitdir)
+        mode = await track_mode(vfs, location)
+        head = await read_head(vfs, location.gitdir)
         creating = fl.as_bool("b")
         ref = Ref(f"{BRANCH_PREFIX}{target}".encode())
         known = repo.refs.allkeys()
@@ -901,7 +865,7 @@ async def checkout(
                 if detach:
                     raise DetachPathError(target) from exc
                 if await _names_path(
-                    dispatch, location, start_point(fl).virtual, target
+                    vfs, location, start_point(fl).virtual, target
                 ):
                     return await _checkout_paths(
                         repo, location, view, fl, None, list(texts), True
@@ -917,7 +881,7 @@ async def checkout(
             # unresolved index rather than answering that there is
             # nothing to do, so a caller cannot read "Already on" as
             # proof the repository is in a state it can build on.
-            refuse_unresolved(await read_index(dispatch, location.gitdir))
+            refuse_unresolved(await read_index(vfs, location.gitdir))
             if fl.as_bool("quiet"):
                 return None, IOResult()
             return None, IOResult(stderr=f"Already on '{target}'\n".encode())
@@ -932,7 +896,7 @@ async def checkout(
             except GitError as exc:
                 raise BadStartPointError(start, target) from exc
             if guessed is None:
-                await refuse_ambiguous(dispatch, location, repo, start, False)
+                await refuse_ambiguous(vfs, location, repo, start, False)
         elif named is not None:
             commit = named
         elif not creating and ref in known:
@@ -948,10 +912,7 @@ async def checkout(
             raise RefLockError(ref.decode(), held)
         attached = not detach and (creating or ref in known)
         moved = await move_head(
-            dispatch,
-            stat_path,
-            links_of(view),
-            mounts_of(view),
+            vfs,
             repo,
             location,
             head,
@@ -964,7 +925,7 @@ async def checkout(
         )
         tracking, warning = (
             await set_up_tracking(
-                dispatch, repo, location, target, start, mode, head
+                vfs, repo, location, target, start, mode, head
             )
             if creating
             else ("", "")
@@ -983,7 +944,7 @@ async def checkout(
         verb = "Switched to a new branch" if creating else "Switched to branch"
         note += f"{verb} '{target}'\n"
         if not creating:
-            carried += await tracking_report(dispatch, location, target)
+            carried += await tracking_report(vfs, location, target)
     else:
         # Asked for by name, a detached HEAD needs no advice on how it
         # happened.

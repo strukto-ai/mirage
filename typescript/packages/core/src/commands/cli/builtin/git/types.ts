@@ -12,21 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { NamespaceView } from '../../../../view/types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 import { type PathSpec, type FileStat } from '../../../../types.ts'
-import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Zone } from '../../../../utils/timezone.ts'
 import type { CLIInvocation } from '../../types.ts'
 import type { GitError } from './errors.ts'
-
-/**
- * The workspace op dispatcher, as every module here consumes it.
- *
- * PathSpec-typed and tuple-returning, which is the dispatcher's own contract
- * rather than the Workspace facade's: a CLI leaf is handed the same callable a
- * mount command receives.
- */
-export type Dispatch = DispatchFn
 
 /**
  * A resolved repository: where the objects live, and over what.
@@ -52,7 +42,8 @@ export interface RepoLocation {
   readonly worktree: PathSpec
   /** The mount prefix both live under, which bounded the discovery walk. */
   readonly mountRoot: PathSpec
-  readonly ns?: NamespaceView | null
+  /** The session's files, whose hides the repository's entries are shown under. */
+  readonly vfs?: Files | null
 }
 
 /** What HEAD points at: a branch, some other ref, or a raw commit. */

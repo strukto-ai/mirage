@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type PathSpec, FileType, type FileStat } from '../../../../types.ts'
-import type { LinkView, StatPath } from '../../../../view/types.ts'
 import { GIT_DIR } from './constants.ts'
 import { type IgnoreStack, loadIgnores } from './ignore.ts'
-import { readNames, readOptional } from './io.ts'
+import { lstat, readNames, readOptional } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 
-import type { Dispatch, RepoLocation, WorkTree } from './types.ts'
+import type { RepoLocation, WorkTree } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const GITIGNORE = '.gitignore'
@@ -61,12 +61,10 @@ class Scanner {
   private readonly directories: Set<string>
 
   constructor(
-    private readonly dispatch: Dispatch,
-    private readonly statPath: StatPath,
+    private readonly vfs: Files,
     private readonly worktree: PathSpec,
     private readonly tracked: ReadonlySet<string>,
     private readonly mode: string,
-    private readonly links: LinkView | null,
     private readonly showIgnored = false,
   ) {
     this.directories = trackedDirectories(tracked)
@@ -79,19 +77,9 @@ class Scanner {
 
   /**
    * What the walk sees at one path, without following a link.
-   *
-   * git lstats the working tree, so a symlink is an entry in its own right:
-   * real git records mode 120000 and the target string, and reports a link to
-   * nothing as untracked rather than as absent. Symlinks are namespace state,
-   * so the backend stat behind `statPath` cannot see one and answers about the
-   * target instead (null when the target is missing). Asking the name plane
-   * first is what makes this an lstat.
    */
   private async entryStat(relative: string): Promise<FileStat | null> {
-    const absolute = this.absolute(relative)
-    const link = this.links?.statAt(absolute.virtual) ?? null
-    if (link !== null) return link
-    return this.statPath(absolute)
+    return lstat(this.vfs, this.absolute(relative))
   }
 
   /**
@@ -107,7 +95,7 @@ class Scanner {
     includeIgnored = false,
   ): Promise<boolean> {
     const rules = await this.descend(relative, ignores)
-    for (const entry of await readNames(this.dispatch, this.absolute(relative))) {
+    for (const entry of await readNames(this.vfs, this.absolute(relative))) {
       const name = entryName(entry)
       if (name === '') continue
       const child = relative === '' ? name : `${relative}/${name}`
@@ -124,7 +112,7 @@ class Scanner {
   /** The ignore rules inside a directory, given the ones outside. */
   private async descend(relative: string, ignores: IgnoreStack): Promise<IgnoreStack> {
     if (relative === '') return ignores
-    const local = await readOptional(this.dispatch, this.absolute(relative).join(GITIGNORE))
+    const local = await readOptional(this.vfs, this.absolute(relative).join(GITIGNORE))
     return local === null ? ignores : ignores.push(relative, local)
   }
 
@@ -182,9 +170,7 @@ class Scanner {
    */
   async walk(relative: string, ignored: boolean, ignores: IgnoreStack): Promise<void> {
     const rules = await this.descend(relative, ignores)
-    const entries = (await readNames(this.dispatch, this.absolute(relative))).sort(
-      compareCodePoints,
-    )
+    const entries = (await readNames(this.vfs, this.absolute(relative))).sort(compareCodePoints)
     for (const entry of entries) {
       const name = entryName(entry)
       if (name === '' || (relative === '' && name === GIT_DIR)) continue
@@ -211,33 +197,20 @@ class Scanner {
  * git would mention. Statting each index path instead would miss every untracked
  * file, and listing untracked files alone would leave the deletions unfound.
  *
- * @param dispatch workspace op dispatcher
- * @param statPath dispatcher-backed stat, both channels
+ * @param vfs the session's files
  * @param location the discovered repository
  * @param tracked repository-relative paths the index holds
  * @param mode which untracked files to report
- * @param links the name plane's link facts, so the walk lstats as git does;
- *   null outside a workspace, where there is no namespace to hold a link
  */
 export async function scan(
-  dispatch: Dispatch,
-  statPath: StatPath,
+  vfs: Files,
   location: RepoLocation,
   tracked: ReadonlySet<string>,
   mode: string,
-  links: LinkView | null = null,
   showIgnored = false,
 ): Promise<WorkTree> {
-  const ignores = await loadIgnores(dispatch, location.commondir, location.worktree)
-  const scanner = new Scanner(
-    dispatch,
-    statPath,
-    location.worktree,
-    tracked,
-    mode,
-    links,
-    showIgnored,
-  )
+  const ignores = await loadIgnores(vfs, location.commondir, location.worktree)
+  const scanner = new Scanner(vfs, location.worktree, tracked, mode, showIgnored)
   await scanner.walk('', false, ignores)
   return scanner.found
 }

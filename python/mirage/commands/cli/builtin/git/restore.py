@@ -36,6 +36,7 @@ from mirage.commands.cli.builtin.git.index_file import read_index, write_index
 from mirage.commands.cli.builtin.git.io import (
     blocking_ancestor,
     drop_gitlink,
+    is_link,
     keep_gitlink,
     read_optional,
     refuse_replaced_mounts,
@@ -43,6 +44,7 @@ from mirage.commands.cli.builtin.git.io import (
     remove_file,
     remove_tree,
     restore_entry,
+    stat_of,
 )
 from mirage.commands.cli.builtin.git.pathspec import (
     matched,
@@ -68,8 +70,6 @@ from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
     fatal,
-    links_of,
-    mounts_of,
     start_point,
 )
 from mirage.commands.cli.types import CLIInvocation, CLIView
@@ -190,13 +190,12 @@ async def restore(
             ``inv.view``.
     """
     view = inv.view or CLIView()
-    dispatch = view.dispatch
-    stat_path = view.stat_path
+    vfs = view.vfs
     texts = inv.texts
     fl = FlagView(inv.flags)
     notes: list[str] = []
     try:
-        if dispatch is None or stat_path is None:
+        if vfs is None:
             raise NoWorkspaceError()
         check_switches(inv, texts)
         if not texts:
@@ -274,13 +273,12 @@ async def restore_paths(
         tuple[list[str], int]: the warnings git prints, and how many
         working-tree files changed.
     """
-    dispatch = view.dispatch
-    stat_path = view.stat_path
-    if dispatch is None or stat_path is None:
+    vfs = view.vfs
+    if vfs is None:
         raise NoWorkspaceError()
     notes: list[str] = []
     updated = 0
-    state = await read_index(dispatch, location.gitdir)
+    state = await read_index(vfs, location.gitdir)
     held = index_tree(state.entries)
     tree = held if source is None else source
     # The conflict stages name paths too. An unmerged path has no
@@ -312,8 +310,6 @@ async def restore_paths(
     unmerged = [name for name in absent if name.encode() in state.conflicts]
     if unmerged:
         raise UnmergedPathError(unmerged)
-    links = links_of(view)
-    mounts = mounts_of(view)
     # Before the index is written, not at the entry that meets it:
     # ``-SW`` stages first and restores after, so a refusal in the
     # working-tree pass would leave the index moved and the tree
@@ -340,9 +336,7 @@ async def restore_paths(
         if not any(under(name, root) for root in linked)
     )
     if worktree:
-        await refuse_replaced_mounts(
-            stat_path, location.worktree, replacing, links, mounts
-        )
+        await refuse_replaced_mounts(vfs, location.worktree, replacing)
     if staged:
         for name in present:
             mode, sha = tree[name.encode()]
@@ -355,7 +349,7 @@ async def restore_paths(
         # conflicted and discards the entry just written for it.
         for name in selected:
             state.conflicts.pop(name.encode(), None)
-        await write_index(dispatch, location.gitdir, state)
+        await write_index(vfs, location.gitdir, state)
     if worktree:
         blobs = await asyncio.to_thread(
             contents, repo, [tree[name.encode()][1] for name in replacing]
@@ -374,30 +368,24 @@ async def restore_paths(
             # at, which no branch named. git checks the leading
             # path and removes nothing when it finds one, so
             # neither does this.
-            if await blocking_ancestor(
-                stat_path, location.worktree, name, links
-            ):
+            if await blocking_ancestor(vfs, location.worktree, name):
                 continue
             # What stands at a gitlink is a directory, so taking it
             # away is an rmdir that may legitimately fail: unlink
             # died on it with the index already written, which is
             # the half-restore this verb has no wording for.
             if held.get(name.encode(), (0, b""))[0] == GITLINK:
-                warned = await drop_gitlink(
-                    dispatch, stat_path, path, name, links
-                )
+                warned = await drop_gitlink(vfs, path, name)
                 if warned is not None:
                     notes.append(warned)
             else:
-                await remove_file(dispatch, path)
-            await remove_empty_parents(
-                dispatch, path, location.worktree, mounts
-            )
+                await remove_file(vfs, path)
+            await remove_empty_parents(vfs, path, location.worktree)
         for name in sorted(present):
             mode, sha = tree[name.encode()]
             where = location.worktree.join(name)
             if mode == GITLINK:
-                await keep_gitlink(dispatch, stat_path, where, links)
+                await keep_gitlink(vfs, where)
                 continue
             # The write direction takes the same component the
             # other way round: the entry needs a directory where it
@@ -406,11 +394,9 @@ async def restore_paths(
             # exactly as it was, and an untracked file standing
             # there is replaced in silence, which is what git's
             # create_directories does to any leading non-directory.
-            above = await blocking_ancestor(
-                stat_path, location.worktree, name, links
-            )
+            above = await blocking_ancestor(vfs, location.worktree, name)
             if above is not None:
-                await remove_file(dispatch, above)
+                await remove_file(vfs, above)
             # A directory can still stand here after the loop
             # above: it removed the tracked children, but an
             # untracked one keeps it alive and the write would
@@ -420,13 +406,13 @@ async def restore_paths(
             # retargets it; following one to a directory here
             # would delete a tree no branch named.
             current: bytes | None = None
-            if links is None or links.stat_at(where.virtual) is None:
-                info = await stat_path(where)
+            if not await is_link(vfs, where):
+                info = await stat_of(vfs, where)
                 if info is not None and info.type is FileType.DIRECTORY:
-                    await remove_tree(dispatch, where, links, mounts)
+                    await remove_tree(vfs, where)
                 elif info is not None and above is None:
-                    current = await read_optional(dispatch, where)
+                    current = await read_optional(vfs, where)
             if current != blobs[sha]:
                 updated += 1
-            await restore_entry(dispatch, where, mode, blobs[sha], links)
+            await restore_entry(vfs, where, mode, blobs[sha])
     return notes, updated

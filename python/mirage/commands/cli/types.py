@@ -15,7 +15,7 @@
 from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import Any, Callable, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Generic, Literal, TypeVar
 
 from pydantic import BaseModel
 
@@ -25,9 +25,12 @@ from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import CommandSpec, FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.process.view import ProcessView
-from mirage.runtime.types import DispatchFn, ScriptSource
+from mirage.runtime.types import ScriptSource
 from mirage.types import Limit, PathSpec
-from mirage.view.types import NamespaceView, SessionView, StatPath
+from mirage.view.types import SessionView
+
+if TYPE_CHECKING:
+    from mirage.workspace.files import Files
 
 # The group-level flag bag the walk accumulates, keyed by canonical
 # dashed spelling like ParsedArgs.flags.
@@ -41,20 +44,18 @@ class CLIView:
     """Workspace capabilities available to a CLI handler.
 
     Account CLIs use their own config for services and this view for files.
-    Fields match CommandOpts; direct callers may omit unused capabilities.
+    Direct callers may omit unused capabilities.
 
     Args:
-        dispatch (DispatchFn | None): policy-gated filesystem operations.
-        stat_path (StatPath | None): stat including prefix-store directories.
-        ns (NamespaceView | None): symlinks, mount boundaries and attributes.
+        vfs (Files | None): the session's files, the API ``session.vfs``
+            and a policy's ``ctx.vfs`` are, run as the line's session:
+            reads, writes, links, and where the mounts are.
         session_view (SessionView | None): live, gated session access;
             CLIInvocation.env is a frozen snapshot.
         processes (ProcessView | None): workspace process access.
     """
 
-    dispatch: DispatchFn | None = None
-    stat_path: StatPath | None = None
-    ns: NamespaceView | None = None
+    vfs: "Files | None" = None
     session_view: SessionView | None = None
     processes: ProcessView | None = None
 

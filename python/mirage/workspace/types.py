@@ -39,6 +39,9 @@ class MountRow:
             sizes files only on read.
         anchor (bool): the scratch root the workspace adds when no mount
             claims ``/``, which nobody mounted.
+        visible (Callable[[], bool] | None): whether the running session
+            is told of the mount at all, None for always (a session's own
+            documents mount answers it).
     """
 
     prefix: str
@@ -46,6 +49,7 @@ class MountRow:
     mode: MountMode
     sizes_always_known: bool = False
     anchor: bool = False
+    visible: Callable[[], bool] | None = None
 
 
 @dataclass

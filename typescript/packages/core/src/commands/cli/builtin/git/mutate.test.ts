@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PathSpec, MountMode } from '../../../../types.ts'
+import { DEFAULT_VISIBILITY, FileStat, FileType, PathSpec, MountMode } from '../../../../types.ts'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import {
@@ -46,8 +46,9 @@ import {
   removeEmptyParents,
   removeTree,
 } from './io.ts'
-import type { MountView } from '../../../../view/types.ts'
-import type { Dispatch } from './types.ts'
+import type { CallerDispatchFn } from '../../../../context/session_context.ts'
+import { classifyPaths } from '../../../../utils/hidden.ts'
+import { Files } from '../../../../workspace/files.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 
 const BUILDER = fileURLToPath(
@@ -83,7 +84,7 @@ function walkDisk(root: string, base = root): string[] {
 }
 
 /** Every file under a mounted directory, as repository-relative paths. */
-async function walkMount(dispatch: Dispatch, root: string, base = root): Promise<string[]> {
+async function walkMount(dispatch: Files, root: string, base = root): Promise<string[]> {
   const out: string[] = []
   for (const entry of await readNames(dispatch, PathSpec.fromStrPath(root))) {
     const name = rstripSlash(entry).split('/').pop() ?? ''
@@ -98,7 +99,7 @@ async function walkMount(dispatch: Dispatch, root: string, base = root): Promise
 
 interface Harness {
   ws: Workspace
-  dispatch: Dispatch
+  dispatch: Files
   repo: string
   run(line: string): Promise<[number, string, string]>
   /** The bytes at a mount path, null when nothing is there. */
@@ -134,10 +135,7 @@ async function harness(prepare?: (repo: string) => void, nested?: string): Promi
     mode: MountMode.WRITE,
     shellParser: parser,
   })
-  const dispatch: Dispatch = async (op, path, args = [], kwargs = {}) => [
-    await ws.dispatch(op, path.virtual, args, kwargs),
-    new IOResult(),
-  ]
+  const dispatch = ws.vfs
   // A mount's ancestors read as existing directories the moment the child is
   // mounted, so `ensureDir` stops at one and the parent backend never gets the
   // key. Created directly here, before anything is copied in.
@@ -1910,7 +1908,7 @@ describe('a gitlink in the tree', () => {
     const h = await harness((repo) => {
       gitlinkIndex(repo, 'sub')
     })
-    await removeTree(h.dispatch, PathSpec.fromStrPath('/repo/sub'), null, null)
+    await removeTree(h.dispatch, PathSpec.fromStrPath('/repo/sub'))
     expect(await h.run('restore sub')).toEqual([0, '', ''])
     expect(await readNames(h.dispatch, PathSpec.fromStrPath('/repo/sub'))).toEqual([])
     // A directory, not a file: readNames answers empty for both, so the write
@@ -1922,7 +1920,7 @@ describe('a gitlink in the tree', () => {
     const h = await harness((repo) => {
       gitlinkIndex(repo, 'sub')
     })
-    await removeTree(h.dispatch, PathSpec.fromStrPath('/repo/sub'), null, null)
+    await removeTree(h.dispatch, PathSpec.fromStrPath('/repo/sub'))
     await h.ws.shell("printf 'i am a file\\n' > /repo/sub")
     expect(await h.run('restore sub')).toEqual([0, '', ''])
     expect(await h.read('/repo/sub')).toBeNull()
@@ -2635,17 +2633,45 @@ describe('blockingRef', () => {
   })
 })
 
+/** The session's files over a fake dispatcher, a mount table and a hide list. */
+function filesOver(dispatch: CallerDispatchFn, roots: string[] = [], hidden: string[] = []): Files {
+  const vis = hidden.length === 0 ? null : { ...DEFAULT_VISIBILITY, paths: classifyPaths(hidden) }
+  return new Files(dispatch, null, null, () => null, {
+    prefixes: () => ['/', ...roots.map((root) => `${root}/`)],
+    visibility: () => vis,
+  })
+}
+
+/** A dispatcher that records every op and lists nothing. */
+function quiet(): { calls: [string, string][]; dispatch: CallerDispatchFn } {
+  const calls: [string, string][] = []
+  const dispatch: CallerDispatchFn = (op, path) => {
+    calls.push([op, path.virtual])
+    if (op === 'readdir') return Promise.resolve([[], new IOResult()])
+    return Promise.resolve([null, new IOResult()])
+  }
+  return { calls, dispatch }
+}
+
 describe('removeTree meeting a link', () => {
   /** A dispatcher that lists one link and records every op it is asked for. */
-  function recorder(): { calls: [string, string][]; dispatch: Dispatch } {
+  function recorder(): { calls: [string, string][]; dispatch: CallerDispatchFn } {
     const calls: [string, string][] = []
-    const dispatch = ((op: string, path: unknown) => {
-      const where = typeof path === 'string' ? path : (path as { virtual: string }).virtual
+    const dispatch: CallerDispatchFn = (op, path, _args, kwargs) => {
+      const where = path.virtual
       calls.push([op, where])
+      if (op === 'stat') {
+        const name = where.slice(where.lastIndexOf('/') + 1)
+        const linked = kwargs?.nofollow === true && where === '/repo/slot/link'
+        return Promise.resolve([
+          new FileStat({ name, type: linked ? FileType.SYMLINK : FileType.DIRECTORY }),
+          new IOResult(),
+        ])
+      }
       if (op === 'readdir') {
         if (where === '/repo/slot') return Promise.resolve([['/repo/slot/link'], new IOResult()])
-        // readdir answers through the link the way the real one does: the name
-        // plane owns links, so the data plane resolves and lists the target.
+        // readdir answers through the link the way the real one does, so
+        // listing the link lists what it points at.
         if (where === '/repo/slot/link') {
           return Promise.resolve([['/repo/outside/keep.txt'], new IOResult()])
         }
@@ -2655,53 +2681,33 @@ describe('removeTree meeting a link', () => {
         return Promise.reject(Object.assign(new Error(where), { code: 'ENOTDIR' }))
       }
       return Promise.resolve([null, new IOResult()])
-    }) as unknown as Dispatch
+    }
     return { calls, dispatch }
   }
 
-  const links = {
-    statAt: (path: string) => (path === '/repo/slot/link' ? { name: 'link' } : null),
-  } as never
-
   it('unlinks it without descending', async () => {
     const { calls, dispatch } = recorder()
-    await removeTree(dispatch, PathSpec.fromStrPath('/repo/slot'), links, null)
+    await removeTree(filesOver(dispatch), PathSpec.fromStrPath('/repo/slot'))
     expect(calls).toContainEqual(['unlink', '/repo/slot/link'])
     // The whole point: readdir dereferences, so listing the link at all is the
     // walk stepping outside the directory being replaced.
     expect(calls).not.toContainEqual(['readdir', '/repo/slot/link'])
     expect(calls.every(([, where]) => !where.startsWith('/repo/outside'))).toBe(true)
   })
-
-  it('has nothing to ask without a namespace', async () => {
-    const { calls, dispatch } = recorder()
-    await removeTree(dispatch, PathSpec.fromStrPath('/repo/slot'), null, null)
-    expect(calls).toContainEqual(['readdir', '/repo/slot/link'])
-  })
 })
 
 describe('a removal meeting a mount boundary', () => {
-  /** A mount view over a fixed list of roots. */
-  function mountsOver(roots: string[], hidden: string[] = []): MountView {
-    const unseen = new Set(hidden)
-    return {
-      descendants: (path: string) => roots.filter((root) => root.startsWith(`${path}/`)),
-      visibleDescendants: (path: string) =>
-        roots.filter((root) => root.startsWith(`${path}/`) && !unseen.has(root)),
-      isRoot: (path: string) => roots.includes(path),
-      rootOf: () => null,
-    } as unknown as MountView
-  }
+  const SLOT = PathSpec.fromStrPath('/repo/slot')
 
   it('refuses the mount root itself', () => {
     expect(() => {
-      refuseMount(mountsOver(['/repo/slot']), PathSpec.fromStrPath('/repo/slot'))
+      refuseMount(filesOver(quiet().dispatch, ['/repo/slot']), SLOT)
     }).toThrow("cannot remove '/repo/slot': it is a mount root")
   })
 
   it('names a nested mount, in order', () => {
     expect(() => {
-      refuseMount(mountsOver(['/repo/slot/z', '/repo/slot/a']), PathSpec.fromStrPath('/repo/slot'))
+      refuseMount(filesOver(quiet().dispatch, ['/repo/slot/z', '/repo/slot/a']), SLOT)
     }).toThrow("cannot remove '/repo/slot': '/repo/slot/a' is a mount root")
   })
 
@@ -2709,77 +2715,52 @@ describe('a removal meeting a mount boundary', () => {
     // Avoiding a boundary and naming one are two different questions, and a
     // hidden mount's name is what the hide exists to withhold.
     expect(() => {
-      refuseMount(
-        mountsOver(['/repo/slot/data'], ['/repo/slot/data']),
-        PathSpec.fromStrPath('/repo/slot'),
-      )
+      refuseMount(filesOver(quiet().dispatch, ['/repo/slot/data'], ['/repo/slot/data']), SLOT)
     }).toThrow("cannot remove '/repo/slot': it holds a mount root")
+  })
+
+  it('does not name a hidden mount deeper down either', () => {
+    expect(() => {
+      refuseMount(
+        filesOver(quiet().dispatch, ['/repo/slot/a/data'], ['/repo/slot/a/data']),
+        PathSpec.fromStrPath('/repo'),
+      )
+    }).toThrow("cannot remove '/repo': it holds a mount root")
   })
 
   it('lets an unobstructed path through', () => {
     expect(() => {
-      refuseMount(mountsOver(['/other/mount']), PathSpec.fromStrPath('/repo/slot'))
-    }).not.toThrow()
-    expect(() => {
-      refuseMount(null, PathSpec.fromStrPath('/repo/slot'))
+      refuseMount(filesOver(quiet().dispatch, ['/other/mount']), SLOT)
     }).not.toThrow()
   })
 
   it('refuses before the walk deletes anything', async () => {
-    const { calls, dispatch } = (() => {
-      const seen: [string, string][] = []
-      const fn = ((op: string, path: unknown) => {
-        const where = typeof path === 'string' ? path : (path as { virtual: string }).virtual
-        seen.push([op, where])
-        if (op === 'readdir') return Promise.resolve([[], new IOResult()])
-        return Promise.resolve([null, new IOResult()])
-      }) as unknown as Dispatch
-      return { calls: seen, dispatch: fn }
-    })()
-    await expect(
-      removeTree(
-        dispatch,
-        PathSpec.fromStrPath('/repo/slot'),
-        null,
-        mountsOver(['/repo/slot/data']),
-      ),
-    ).rejects.toThrow('is a mount root')
+    const { calls, dispatch } = quiet()
+    await expect(removeTree(filesOver(dispatch, ['/repo/slot/data']), SLOT)).rejects.toThrow(
+      'is a mount root',
+    )
     // Nothing at all: the refusal is the first thing the walk does, so the
     // directory is still whole when the caller hears about it.
     expect(calls).toEqual([])
   })
 
   it('stops pruning empty parents at a mount root', async () => {
-    const calls: [string, string][] = []
-    const dispatch = ((op: string, path: unknown) => {
-      const where = typeof path === 'string' ? path : (path as { virtual: string }).virtual
-      calls.push([op, where])
-      if (op === 'readdir') return Promise.resolve([[], new IOResult()])
-      return Promise.resolve([null, new IOResult()])
-    }) as unknown as Dispatch
+    const { calls, dispatch } = quiet()
     await removeEmptyParents(
-      dispatch,
+      filesOver(dispatch, ['/repo/slot/data']),
       PathSpec.fromStrPath('/repo/slot/data/x.txt'),
       PathSpec.fromStrPath('/repo'),
-      mountsOver(['/repo/slot/data']),
     )
     expect(calls).not.toContainEqual(['rmdir', '/repo/slot/data'])
     expect(calls).not.toContainEqual(['rmdir', '/repo/slot'])
   })
 
   it('still prunes an ordinary directory', async () => {
-    const calls: [string, string][] = []
-    const dispatch = ((op: string, path: unknown) => {
-      const where = typeof path === 'string' ? path : (path as { virtual: string }).virtual
-      calls.push([op, where])
-      if (op === 'readdir') return Promise.resolve([[], new IOResult()])
-      return Promise.resolve([null, new IOResult()])
-    }) as unknown as Dispatch
+    const { calls, dispatch } = quiet()
     await removeEmptyParents(
-      dispatch,
+      filesOver(dispatch),
       PathSpec.fromStrPath('/repo/docs/x.txt'),
       PathSpec.fromStrPath('/repo'),
-      mountsOver([]),
     )
     expect(calls).toContainEqual(['rmdir', '/repo/docs'])
   })

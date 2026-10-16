@@ -33,7 +33,6 @@ from mirage.commands.cli.builtin.git.types import ReadOnlyRefusal, RepoLocation
 from mirage.commands.cli.builtin.git.util import (
     fatal,
     git_bool,
-    mounts_of,
     start_point,
 )
 from mirage.commands.cli.types import CLIInvocation, CLIView
@@ -83,10 +82,10 @@ def git_would_refuse(
     """
     if location is None or not path:
         return True
-    mounts = mounts_of(inv.view or CLIView())
+    vfs = (inv.view or CLIView()).vfs
     root = (
-        "/" if mounts is None else mounts.root_of(location.commondir.virtual)
-    )
+        vfs.mount_of(location.commondir) if vfs is not None else None
+    ) or "/"
     return any(
         path == base or path.startswith(f"{base.rstrip('/')}/")
         for base in (root, location.gitdir.virtual)
@@ -156,10 +155,8 @@ async def opened(
     discovery rules rather than restating them, and so the refusal a
     verb owes outside a workspace is written once.
 
-    The mount root comes from the name plane rather than a field of its
-    own: ``ns.mounts.root_of`` is the same fact the command tier reads,
-    and a second field holding the same callable is a second thing to
-    keep in step.
+    The mount root is the session's files' ``mount_of``, the same
+    answer a runtime's guest gets.
 
     Args:
         fl (FlagView): the leaf's flag bag, read for ``-C``,
@@ -174,20 +171,18 @@ async def opened(
         NotAWorkTreeError: ``work_tree`` and there is none to enter.
     """
     location = await located(fl, view)
-    dispatch, stat_path = view.dispatch, view.stat_path
-    assert dispatch is not None and stat_path is not None
+    vfs = view.vfs
+    assert vfs is not None
     LOCATIONS.set(location)
     if work_tree:
         named = fl.as_path("work_tree") is not None
-        await require_work_tree(dispatch, stat_path, location, named)
+        await require_work_tree(vfs, location, named)
     warn = git_bool(
-        await config_values(dispatch, location, b"core", b"warnambiguousrefs"),
+        await config_values(vfs, location, b"core", b"warnambiguousrefs"),
         "core.warnambiguousrefs",
         True,
     )
-    repo = await open_repo(
-        dispatch, location, AMBIGUOUS.get() if warn else None
-    )
+    repo = await open_repo(vfs, location, AMBIGUOUS.get() if warn else None)
     return repo, location
 
 
@@ -196,16 +191,12 @@ async def located(fl: FlagView, view: CLIView) -> RepoLocation:
 
     Args:
         fl (FlagView): repository-selection flags.
-        view (CLIView): the namespace and the dispatcher.
+        view (CLIView): the invocation's view, whose files git reads.
     """
-    dispatch = view.dispatch
-    stat_path = view.stat_path
-    mounts = view.ns.mounts if view.ns is not None else None
-    if stat_path is None or mounts is None or dispatch is None:
+    vfs = view.vfs
+    if vfs is None:
         raise NoWorkspaceError()
     chosen = fl.as_path("work_tree")
     gitdir = fl.as_path("git_dir")
-    location = await discover(
-        dispatch, stat_path, mounts.root_of, start_point(fl), gitdir, chosen
-    )
-    return replace(location, ns=view.ns)
+    location = await discover(vfs, start_point(fl), gitdir, chosen)
+    return replace(location, vfs=vfs)

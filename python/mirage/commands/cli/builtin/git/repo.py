@@ -25,7 +25,7 @@ from mirage.commands.cli.builtin.git.objects import load_object_store
 from mirage.commands.cli.builtin.git.refs import load_refs
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import git_bool
-from mirage.runtime.types import DispatchFn
+from mirage.workspace.files import Files
 
 
 class Repo(BaseRepo):
@@ -39,7 +39,7 @@ class Repo(BaseRepo):
     Args:
         store (PackCapableObjectStore): the object database.
         refs (RefsContainer): every ref, as load_refs reads them.
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         loop (asyncio.AbstractEventLoop): the loop serving the mount.
         ambiguous (list[str] | None): where resolving a name two refs
@@ -52,20 +52,20 @@ class Repo(BaseRepo):
         self,
         store: PackCapableObjectStore,
         refs: RefsContainer,
-        dispatch: DispatchFn,
+        vfs: Files,
         location: RepoLocation,
         loop: asyncio.AbstractEventLoop,
         ambiguous: list[str] | None,
     ) -> None:
         super().__init__(store, refs)
-        self.dispatch = dispatch
+        self.dispatch = vfs
         self.location = location
         self.loop = loop
         self.ambiguous = ambiguous
 
 
 async def open_repo(
-    dispatch: DispatchFn,
+    vfs: Files,
     location: RepoLocation,
     ambiguous: list[str] | None = None,
 ) -> Repo:
@@ -87,20 +87,20 @@ async def open_repo(
     are per-checkout.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         ambiguous (list[str] | None): where ambiguity warnings go, None
             for nowhere.
     """
-    store = await load_object_store(dispatch, location.commondir)
-    refs = await load_refs(dispatch, location.gitdir, location.commondir)
+    store = await load_object_store(vfs, location.commondir)
+    refs = await load_refs(vfs, location.gitdir, location.commondir)
     return Repo(
-        store, refs, dispatch, location, asyncio.get_running_loop(), ambiguous
+        store, refs, vfs, location, asyncio.get_running_loop(), ambiguous
     )
 
 
 async def config_values(
-    dispatch: DispatchFn, location: RepoLocation, section: bytes, name: bytes
+    vfs: Files, location: RepoLocation, section: bytes, name: bytes
 ) -> list[bytes]:
     """Every value a variable takes in the repository's config, in order.
 
@@ -108,12 +108,12 @@ async def config_values(
     linked worktree's config is its repository's.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         section (bytes): the section, e.g. ``b"core"``.
         name (bytes): the variable, e.g. ``b"worktree"``.
     """
-    data = await read_optional(dispatch, location.commondir.join("config"))
+    data = await read_optional(vfs, location.commondir.join("config"))
     if data is None:
         return []
     config = ConfigFile.from_file(BytesIO(data))
@@ -124,7 +124,7 @@ async def config_values(
 
 
 async def config_bool(
-    dispatch: DispatchFn,
+    vfs: Files,
     location: RepoLocation,
     section: bytes,
     name: bytes,
@@ -133,7 +133,7 @@ async def config_bool(
     """A boolean from the repository's config, read the way git reads one.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         section (bytes): the section, e.g. ``b"core"``.
         name (bytes): the variable, e.g. ``b"quotepath"``.
@@ -142,6 +142,6 @@ async def config_bool(
     Raises:
         BadConfigValueError: a value git cannot read as a boolean.
     """
-    values = await config_values(dispatch, location, section, name)
+    values = await config_values(vfs, location, section, name)
     key = b".".join((section, name)).decode(errors="replace").lower()
     return git_bool(values, key, default)

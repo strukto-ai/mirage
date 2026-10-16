@@ -20,7 +20,8 @@ import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { checkPack } from './fsck.ts'
 import { GitError } from './errors.ts'
-import type { Dispatch } from './types.ts'
+import type { CallerDispatchFn } from '../../../../context/session_context.ts'
+import { Files } from '../../../../workspace/files.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { eacces } from '../../../../errors/fs.ts'
 import { GIT } from './index.ts'
@@ -160,7 +161,7 @@ it.each([32, (1 << 18) + 5, (1 << 19) + 20])(
     data.set(checksum, body.length)
     for (const knownSize of [false, true]) {
       const reads: [number, number][] = []
-      const dispatch: Dispatch = (op, _path, _args, kwargs) => {
+      const dispatch: CallerDispatchFn = (op, _path, _args, kwargs) => {
         if (op === 'stat')
           return Promise.resolve([
             new FileStat({
@@ -179,7 +180,7 @@ it.each([32, (1 << 18) + 5, (1 << 19) + 20])(
         return Promise.resolve([data.subarray(offset, offset + count), new IOResult()])
       }
       await checkPack(
-        dispatch,
+        new Files(dispatch),
         PathSpec.fromStrPath('/repo/.git/objects/pack/large.pack'),
         checksum,
       )
@@ -191,7 +192,7 @@ it.each([32, (1 << 18) + 5, (1 << 19) + 20])(
   },
 )
 it.each(['stat', 'read'])('preserves the path on pack permission errors (%s)', async (failedOp) => {
-  const dispatch: Dispatch = (op, path) => {
+  const dispatch: CallerDispatchFn = (op, path) => {
     if (op === failedOp) return Promise.reject(eacces(path))
     return Promise.resolve([
       new FileStat({ name: 'denied.pack', type: FileType.FILE, size: 100 }),
@@ -199,7 +200,7 @@ it.each(['stat', 'read'])('preserves the path on pack permission errors (%s)', a
     ])
   }
   await expect(
-    checkPack(dispatch, PathSpec.fromStrPath('/repo/denied.pack'), new Uint8Array(20)),
+    checkPack(new Files(dispatch), PathSpec.fromStrPath('/repo/denied.pack'), new Uint8Array(20)),
   ).rejects.toMatchObject({
     message: 'cannot read pack /repo/denied.pack: Permission denied',
     code: new GitError('').code,

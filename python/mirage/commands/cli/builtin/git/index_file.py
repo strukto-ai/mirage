@@ -25,14 +25,14 @@ from dulwich.index import (
 from mirage.commands.cli.builtin.git.errors import ResolveIndexError
 from mirage.commands.cli.builtin.git.io import read_optional, write_file
 from mirage.commands.cli.builtin.git.types import IndexState
-from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
+from mirage.workspace.files import Files
 
 INDEX_FILE = "index"
 MERGE_HEAD = "MERGE_HEAD"
 
 
-async def read_index(dispatch: DispatchFn, gitdir: PathSpec) -> IndexState:
+async def read_index(vfs: Files, gitdir: PathSpec) -> IndexState:
     """Read ``.git/index`` through the dispatcher.
 
     The index is the third thing ``status`` compares, and the only one
@@ -50,12 +50,12 @@ async def read_index(dispatch: DispatchFn, gitdir: PathSpec) -> IndexState:
     directory would show one checkout's staged changes in another.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         gitdir (PathSpec): absolute virtual path of this checkout's git
             directory.
     """
-    data = await read_optional(dispatch, gitdir.join(INDEX_FILE))
-    merging = await read_optional(dispatch, gitdir.join(MERGE_HEAD))
+    data = await read_optional(vfs, gitdir.join(INDEX_FILE))
+    merging = await read_optional(vfs, gitdir.join(MERGE_HEAD))
     if data is None:
         return IndexState(
             entries={}, conflicts={}, merging=merging is not None
@@ -75,9 +75,7 @@ async def read_index(dispatch: DispatchFn, gitdir: PathSpec) -> IndexState:
     )
 
 
-async def write_index(
-    dispatch: DispatchFn, gitdir: PathSpec, state: IndexState
-) -> None:
+async def write_index(vfs: Files, gitdir: PathSpec, state: IndexState) -> None:
     """Write ``.git/index`` back through the dispatcher.
 
     Written whole, because that is what the format is: a header, every
@@ -89,7 +87,7 @@ async def write_index(
     index is small and written in one call.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         gitdir (PathSpec): absolute virtual path of this checkout's git
             directory.
         state (IndexState): what the index should now say.
@@ -99,7 +97,7 @@ async def write_index(
     merged.update(state.conflicts)
     buffer = BytesIO()
     write_index_dict(cast(IO[bytes], buffer), merged)
-    await write_file(dispatch, gitdir.join(INDEX_FILE), buffer.getvalue())
+    await write_file(vfs, gitdir.join(INDEX_FILE), buffer.getvalue())
 
 
 def refuse_unresolved(state: IndexState) -> None:

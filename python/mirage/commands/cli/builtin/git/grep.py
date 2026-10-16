@@ -23,7 +23,11 @@ from mirage.commands.cli.builtin.git.errors import (
     UsageError,
 )
 from mirage.commands.cli.builtin.git.index_file import read_index
-from mirage.commands.cli.builtin.git.io import exists, read_optional
+from mirage.commands.cli.builtin.git.io import (
+    exists,
+    is_link,
+    read_optional,
+)
 from mirage.commands.cli.builtin.git.patch import blob_data
 from mirage.commands.cli.builtin.git.pathspec import (
     pathspec_patterns,
@@ -255,7 +259,7 @@ async def grep(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         flags = parse_flags(fl, patterns, origin, utf8_locale(inv.env))
         view = inv.view or CLIView()
         repo, location = await opened(fl, view)
-        assert view.dispatch is not None
+        assert view.vfs is not None
         start = start_point(fl).virtual
         prefix = repo_relative(location, start, ".")
         cached = fl.as_bool("cached")
@@ -278,7 +282,7 @@ async def grep(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 if not any(
                     char in word for char in "*?["
                 ) and not await exists(
-                    view.dispatch, location.worktree.join(relative)
+                    view.vfs, location.worktree.join(relative)
                 ):
                     raise AmbiguousArgumentError(word) from exc
                 logger.debug("Git grep operand is a pathspec: %s", word)
@@ -287,19 +291,18 @@ async def grep(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         if sources and cached:
             raise GitError("both --cached and trees are given")
         if not sources and not cached:
-            assert view.stat_path is not None
+            assert view.vfs is not None
             await require_work_tree(
-                view.dispatch,
-                view.stat_path,
+                view.vfs,
                 location,
                 fl.as_path("work_tree") is not None,
             )
         specs = pathspec_patterns(location, start, tuple(paths)) or (prefix,)
         fully = await config_bool(
-            view.dispatch, location, b"core", b"quotepath", True
+            view.vfs, location, b"core", b"quotepath", True
         )
         if not sources:
-            state = await read_index(view.dispatch, location.gitdir)
+            state = await read_index(view.vfs, location.gitdir)
             entries: Tree = {
                 path: (entry.mode, entry.sha)
                 for path, entry in state.entries.items()
@@ -338,14 +341,9 @@ async def grep(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                     )
                 else:
                     target = location.worktree.join(relative)
-                    if (
-                        location.ns is not None
-                        and location.ns.links is not None
-                        and location.ns.links.stat_at(target.virtual)
-                        is not None
-                    ):
+                    if await is_link(view.vfs, target):
                         continue
-                    data = await read_optional(view.dispatch, target)
+                    data = await read_optional(view.vfs, target)
                     if data is None:
                         continue
                 label = posixpath.relpath(relative or revision, prefix or ".")

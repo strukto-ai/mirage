@@ -16,7 +16,7 @@ import { fatal } from './util.ts'
 export async function stashList(inv: CLIInvocation): Promise<CommandFnResult> {
   try {
     const repo = await opened(new FlagView(inv.flags), inv.view ?? {})
-    const data = await readOptional(repo.dispatch, repo.location.commondir.join('logs/refs/stash'))
+    const data = await readOptional(repo.vfs, repo.location.commondir.join('logs/refs/stash'))
     const rows = new TextDecoder()
       .decode(data ?? new Uint8Array())
       .split('\n')
@@ -39,10 +39,7 @@ export async function stashShow(inv: CLIInvocation): Promise<CommandFnResult> {
     let selector = inv.texts[0] ?? 'stash@{0}'
     const match = /^(?:stash@\{(\d+)\}|(\d+))$/.exec(selector)
     if (match !== null) {
-      const data = await readOptional(
-        repo.dispatch,
-        repo.location.commondir.join('logs/refs/stash'),
-      )
+      const data = await readOptional(repo.vfs, repo.location.commondir.join('logs/refs/stash'))
       const rows = new TextDecoder()
         .decode(data ?? new Uint8Array())
         .split('\n')

@@ -19,7 +19,7 @@ import {
   clapMissingOperands,
   leafRefusal,
 } from '../../../commands/cli/refusal.ts'
-import { missCondition } from '../../mount/namespace/probe.ts'
+import { missCondition, pathStat } from '../../mount/namespace/probe.ts'
 import { FileType, wordText, PathSpec, type Limit } from '../../../types.ts'
 import { flagOccurrences } from '../../../commands/spec/flag_view.ts'
 import type { ProcessView } from '../../../process/view.ts'
@@ -28,7 +28,8 @@ import type { CLI } from '../../../commands/cli/types.ts'
 import { type CLIInvocation, type CLIView } from '../../../commands/cli/types.ts'
 import { listedNode, nodeHelp, ownsArgv, walk } from '../../../commands/cli/walk.ts'
 import { type DispatchFn, type RunResult, type ScriptSource } from '../../../runtime/types.ts'
-import type { NamespaceView, SessionView, StatPath } from '../../../view/types.ts'
+import type { SessionView } from '../../../view/types.ts'
+import type { Files } from '../../files.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { UsageStyle, Argument, type FlagValue } from '../../../commands/spec/types.ts'
 import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
@@ -244,9 +245,11 @@ export interface CLIContext {
    * installs.
    */
   entries?: readonly Runtime[]
-  dispatch?: DispatchFn
-  statPath?: StatPath
-  ns?: NamespaceView
+  /**
+   * The session's files, run as the line's session with the command's gate,
+   * for a CLI whose subject is files rather than an API.
+   */
+  vfs?: Files
   sessionView?: SessionView
   processes?: ProcessView
   /** The line's placement, which a script leaf runs its program under. */
@@ -311,11 +314,16 @@ export async function handleCli(
     return [stdout, io, new ExecutionNode({ command: cmdStr, exitCode: result.exitCode, stderr })]
   }
 
-  if (context.statPath !== undefined && context.dispatch !== undefined) {
+  if (context.vfs !== undefined) {
+    const files = context.vfs
+    const dispatch: DispatchFn = async (op, path, args, kwargs) => [
+      await files.dispatch(op, path, args, kwargs),
+      new IOResult(),
+    ]
     for (const base of result.operandBases) {
-      const info = await context.statPath(base)
+      const info = await pathStat(dispatch, base, null)
       if (info !== null && info.type === FileType.DIRECTORY) continue
-      const reason = info === null ? await missCondition(context.dispatch, base) : 'ENOTDIR'
+      const reason = info === null ? await missCondition(dispatch, base) : 'ENOTDIR'
       const [stderr, code] = directoryRefusal(
         install.name,
         base.rawPath,
@@ -417,9 +425,7 @@ export async function handleCli(
   // that needs a mount refuses there on its own.
   const view: CLIView = {
     ...(context.processes === undefined ? {} : { processes: context.processes }),
-    ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
-    ...(context.statPath !== undefined ? { statPath: context.statPath } : {}),
-    ...(context.ns !== undefined ? { ns: context.ns } : {}),
+    ...(context.vfs !== undefined ? { vfs: context.vfs } : {}),
     ...(context.sessionView !== undefined ? { sessionView: context.sessionView } : {}),
   }
   let active = true

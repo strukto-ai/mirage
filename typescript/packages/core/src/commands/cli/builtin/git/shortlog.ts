@@ -18,7 +18,7 @@ export async function shortlog(inv: CLIInvocation): Promise<CommandFnResult> {
     const word = optionOperand(inv, inv.texts)
     if (word !== null) throw new ShortlogOptionError(word, verbUsage(inv))
     const repo = await opened(fl, inv.view ?? {})
-    const mailmap = await loadMailmap(repo.dispatch, repo.location)
+    const mailmap = await loadMailmap(repo.vfs, repo.location)
     const flags = parseFlags(fl)
     const [starts, hidden] = await splitRevisions(
       repo,

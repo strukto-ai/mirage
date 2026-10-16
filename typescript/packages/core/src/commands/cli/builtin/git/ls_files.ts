@@ -47,7 +47,7 @@ export async function lsFiles(inv: CLIInvocation): Promise<CommandFnResult> {
     checkSwitches(inv, inv.texts)
     const repo = await opened(fl, inv.view ?? {})
     const fully = await configBool(repo, 'core.quotepath', true)
-    const state = await readIndex(repo, repo.dispatch)
+    const state = await readIndex(repo, repo.vfs)
     const start = startPoint(fl).virtual
     const prefix = repoRelative(repo.location, start, '.')
     const patterns = pathspecPatterns(repo.location, start, inv.texts)

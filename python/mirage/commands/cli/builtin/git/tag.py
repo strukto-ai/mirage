@@ -223,13 +223,13 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             ``inv.view``.
     """
     view = inv.view or CLIView()
-    dispatch = view.dispatch
+    vfs = view.vfs
     words = filter_words(inv)
     texts = without_filter_values(inv.texts, words)
     filtered = bool(words)
     fl = FlagView(inv.flags)
     try:
-        if dispatch is None:
+        if vfs is None:
             raise NoWorkspaceError()
         check_switches(inv, texts)
         flags = parse_flags(fl)
@@ -259,7 +259,7 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         if list_only is not None:
             raise ListModeOnlyError(list_only)
         repo, location = await opened(fl, view)
-        cfg = await read_config(dispatch, location)
+        cfg = await read_config(vfs, location)
         keys = sort_keys(fl, configured_sort(cfg, b"tag"))
         filt = await asyncio.to_thread(ref_filter, repo, words)
         known = repo.refs.allkeys()
@@ -289,7 +289,7 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 )
             for name, ref in doomed:
                 sha = repo.refs[ref]
-                await delete_ref(dispatch, location.commondir, ref.decode())
+                await delete_ref(vfs, location.commondir, ref.decode())
                 out.append(
                     f"Deleted tag '{name}' "
                     f"(was {short(sha, abbrev_for(repo))})\n"
@@ -316,7 +316,7 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 )
 
             items, ctx, errors = await ref_listing(
-                dispatch,
+                vfs,
                 repo,
                 location,
                 cfg,
@@ -367,7 +367,7 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         held = blocking_ref(known, ref.decode())
         if held is not None:
             raise RefLockError(ref.decode(), held)
-        await write_ref(dispatch, location.commondir, ref.decode(), pointed)
+        await write_ref(vfs, location.commondir, ref.decode(), pointed)
     except GitError as exc:
         return fatal(exc)
     if was is None:

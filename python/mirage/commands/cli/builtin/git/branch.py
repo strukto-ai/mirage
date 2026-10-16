@@ -111,7 +111,7 @@ from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.runtime.types import DispatchFn
+from mirage.workspace.files import Files
 
 HEADS_PREFIX = b"refs/heads/"
 REMOTES_PREFIX = b"refs/remotes/"
@@ -121,7 +121,7 @@ TRACK_WORDS = (Track.ALWAYS, Track.SIMPLE, Track.INHERIT)
 
 
 async def refuse_ambiguous(
-    dispatch: DispatchFn,
+    vfs: Files,
     location: RepoLocation,
     repo: BaseRepo,
     name: str,
@@ -135,7 +135,7 @@ async def refuse_ambiguous(
     the one checked.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         repo (BaseRepo): the opened repository.
         name (str): the start point as typed, or the current branch's
@@ -147,7 +147,7 @@ async def refuse_ambiguous(
         AmbiguousObjectNameError: two refs answer to the name.
     """
     if not await config_bool(
-        dispatch, location, b"core", b"warnambiguousrefs", True
+        vfs, location, b"core", b"warnambiguousrefs", True
     ):
         return
     known = (ref.decode(errors="replace") for ref in repo.refs.allkeys())
@@ -159,7 +159,7 @@ async def refuse_ambiguous(
 
 
 async def _create(
-    dispatch: DispatchFn,
+    vfs: Files,
     repo: BaseRepo,
     location: RepoLocation,
     name: str,
@@ -173,7 +173,7 @@ async def _create(
     on stderr.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         name (str): the branch name.
@@ -197,7 +197,7 @@ async def _create(
         found = await asyncio.to_thread(resolve_object, repo, origin)
     except AmbiguousArgumentError as exc:
         raise InvalidObjectNameError(origin) from exc
-    await refuse_ambiguous(dispatch, location, repo, origin, True)
+    await refuse_ambiguous(vfs, location, repo, origin, True)
     commit = await asyncio.to_thread(unwrapped, repo, found, origin)
     if not isinstance(commit, Commit):
         raise BranchPointError(
@@ -209,9 +209,9 @@ async def _create(
     held = blocking_ref(repo.refs.allkeys(), ref)
     if held is not None:
         raise RefLockError(ref, held)
-    await write_ref(dispatch, location.commondir, ref, commit.id)
+    await write_ref(vfs, location.commondir, ref, commit.id)
     log = location.commondir.join("logs", ref)
-    if await logged(dispatch, location, ref, log):
+    if await logged(vfs, location, ref, log):
         line = entry(
             ZERO,
             commit.id,
@@ -219,10 +219,8 @@ async def _create(
             int(time.time()),
             f"branch: Created from {origin}",
         )
-        await append(dispatch, location.commondir, f"logs/{ref}", line)
-    return await set_up_tracking(
-        dispatch, repo, location, name, start, mode, head
-    )
+        await append(vfs, location.commondir, f"logs/{ref}", line)
+    return await set_up_tracking(vfs, repo, location, name, start, mode, head)
 
 
 def remote_branch(repo: BaseRepo, name: str) -> str | None:
@@ -245,7 +243,7 @@ def remote_branch(repo: BaseRepo, name: str) -> str | None:
     return found[0] if len(found) == 1 else None
 
 
-async def track_mode(dispatch: DispatchFn, location: RepoLocation) -> Track:
+async def track_mode(vfs: Files, location: RepoLocation) -> Track:
     """``branch.autoSetupMerge`` from the repository's config.
 
     The words are case-sensitive and anything else reads as a boolean,
@@ -254,7 +252,7 @@ async def track_mode(dispatch: DispatchFn, location: RepoLocation) -> Track:
     first and fails with nothing written (pinned against git 2.50.1).
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
 
     Raises:
@@ -262,7 +260,7 @@ async def track_mode(dispatch: DispatchFn, location: RepoLocation) -> Track:
     """
     mode = Track.REMOTE
     for value in await config_values(
-        dispatch, location, b"branch", b"autosetupmerge"
+        vfs, location, b"branch", b"autosetupmerge"
     ):
         word = value.decode(errors="replace")
         if word in TRACK_WORDS:
@@ -345,7 +343,7 @@ def _tracked(
 
 
 async def set_up_tracking(
-    dispatch: DispatchFn,
+    vfs: Files,
     repo: BaseRepo,
     location: RepoLocation,
     branch: str,
@@ -363,7 +361,7 @@ async def set_up_tracking(
     git 2.47.3 and 2.50.1).
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         branch (str): the branch just created.
@@ -391,7 +389,7 @@ async def set_up_tracking(
     if ref is None:
         return "", ""
     path = location.commondir.join("config")
-    data = await read_optional(dispatch, path) or b""
+    data = await read_optional(vfs, path) or b""
     if data and not data.endswith(b"\n"):
         data += b"\n"
     remote, merges, prefix, warning = _tracked(
@@ -404,7 +402,7 @@ async def set_up_tracking(
         branch,
         [("remote", remote)] + [("merge", merge) for merge in merges],
     )
-    await write_file(dispatch, path, data + section.encode())
+    await write_file(vfs, path, data + section.encode())
     labels = [
         f"{prefix}{merge.removeprefix(HEADS_PREFIX.decode())}"
         for merge in merges
@@ -472,7 +470,7 @@ def _merged(repo: BaseRepo, sha: bytes, head: bytes | None) -> bool:
 
 
 async def _delete(
-    dispatch: DispatchFn,
+    vfs: Files,
     repo: BaseRepo,
     location: RepoLocation,
     head: HeadRef,
@@ -482,7 +480,7 @@ async def _delete(
     """Remove a branch, refusing when the removal would lose commits.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         head (HeadRef): what HEAD points at.
@@ -500,13 +498,13 @@ async def _delete(
         _merged, repo, sha, head_commit(repo, head)
     ):
         raise UnmergedBranchError(name)
-    await delete_ref(dispatch, location.commondir, ref.decode())
+    await delete_ref(vfs, location.commondir, ref.decode())
     path = location.commondir.join("config")
-    data = await read_optional(dispatch, path)
+    data = await read_optional(vfs, path)
     if data is not None:
         dropped = without_section(data, "branch", name)
         if dropped != data:
-            await write_file(dispatch, path, dropped)
+            await write_file(vfs, path, dropped)
     return (
         f"Deleted branch {name} (was {short(sha, abbrev_for(repo))}).\n"
     ).encode()
@@ -597,7 +595,7 @@ def list_width(items: list[RefItem], bonus: int, description: str) -> int:
 async def _list_branches(
     inv: CLIInvocation[None],
     fl: FlagView,
-    dispatch: DispatchFn,
+    vfs: Files,
     repo: BaseRepo,
     location: RepoLocation,
     head: HeadRef,
@@ -616,7 +614,7 @@ async def _list_branches(
     Args:
         inv (CLIInvocation[None]): the line's invocation record.
         fl (FlagView): spec-bound options.
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         head (HeadRef): what HEAD points at.
@@ -625,7 +623,7 @@ async def _list_branches(
         remotes_only (bool): ``-r``.
         include_remotes (bool): ``-r`` or ``-a``.
     """
-    cfg = await read_config(dispatch, location)
+    cfg = await read_config(vfs, location)
     keys = sort_keys(fl, configured_sort(cfg, b"branch"))
     icase = fl.as_bool("ignore_case")
     verbose = fl.as_int("verbose") or 0
@@ -645,7 +643,7 @@ async def _list_branches(
         template if template is not None else build_format(verbose, 0, prefix)
     )
     items, ctx, errors = await ref_listing(
-        dispatch,
+        vfs,
         repo,
         location,
         cfg,
@@ -657,9 +655,7 @@ async def _list_branches(
     if any(item.kind is RefKind.DETACHED for item in items):
         ctx = replace(
             ctx,
-            head_description=await head_description(
-                dispatch, repo, location, head
-            ),
+            head_description=await head_description(vfs, repo, location, head),
         )
     if template is None and verbose:
         fmt = listing_format(
@@ -709,7 +705,7 @@ async def branch(
             ``inv.view``.
     """
     view = inv.view or CLIView()
-    dispatch = view.dispatch
+    vfs = view.vfs
     words = filter_words(inv)
     texts = without_filter_values(inv.texts, words)
     flags = inv.flags
@@ -718,13 +714,13 @@ async def branch(
     include_remotes = remotes_only or fl.as_bool("a")
     listing = bool(words) or fl.as_bool("list")
     try:
-        if dispatch is None:
+        if vfs is None:
             raise NoWorkspaceError()
         check_switches(inv, texts)
         repo, location = await opened(fl, view)
-        mode = await track_mode(dispatch, location)
+        mode = await track_mode(vfs, location)
         filt = await asyncio.to_thread(ref_filter, repo, words)
-        head = await read_head(dispatch, location.gitdir)
+        head = await read_head(vfs, location.gitdir)
         if fl.as_bool("show_current"):
             return (
                 (head.branch + "\n").encode() if head.branch else b""
@@ -737,7 +733,7 @@ async def branch(
                 raise BranchNameRequiredError()
             deleted = b"".join(
                 [
-                    await _delete(dispatch, repo, location, head, name, force)
+                    await _delete(vfs, repo, location, head, name, force)
                     for name in texts
                 ]
             )
@@ -746,7 +742,7 @@ async def branch(
             return yield_bytes(deleted), IOResult()
         if texts and not listing:
             tracking, warning = await _create(
-                dispatch,
+                vfs,
                 repo,
                 location,
                 texts[0],
@@ -763,7 +759,7 @@ async def branch(
         return await _list_branches(
             inv,
             fl,
-            dispatch,
+            vfs,
             repo,
             location,
             head,
@@ -813,7 +809,7 @@ def upstream_of(
 
 
 async def branch_upstream(
-    dispatch: DispatchFn,
+    vfs: Files,
     repo: BaseRepo,
     location: RepoLocation,
     head: HeadRef,
@@ -822,7 +818,7 @@ async def branch_upstream(
     """The current branch's upstream, None when it has none or no commits.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         head (HeadRef): what HEAD points at.
@@ -830,7 +826,7 @@ async def branch_upstream(
     """
     if head.branch is None or no_commits:
         return None
-    data = await read_optional(dispatch, location.commondir.join("config"))
+    data = await read_optional(vfs, location.commondir.join("config"))
     cfg = ConfigFile.from_file(BytesIO(data or b""))
     ref = Ref(f"refs/heads/{head.branch}".encode())
     if (

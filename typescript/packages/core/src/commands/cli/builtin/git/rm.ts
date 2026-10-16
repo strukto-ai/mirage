@@ -29,15 +29,15 @@ import {
   RemovePathError,
 } from './errors.ts'
 import { readIndex, updateIndex } from './index_file.ts'
-import { removeEmptyParents, removeFile } from './io.ts'
+import { blockingAncestor, isLink, removeEmptyParents, removeFile, statOf } from './io.ts'
 
 import type { Repo } from './repo.ts'
 import { opened } from './session.ts'
 import type { TreeEntry } from './tree.ts'
-import type { Dispatch, IndexEntry, RepoLocation, WorkTree } from './types.ts'
+import type { IndexEntry, RepoLocation, WorkTree } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 import { checkSwitches, fatal, startPoint } from './util.ts'
 import { scan, UNTRACKED_NO } from './worktree.ts'
-import type { LinkView, MountView, StatPath } from '../../../../view/types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
@@ -114,24 +114,22 @@ export function select(
  * compared: two files agreeing byte for byte are still two files, and git
  * refuses that case too. Pinned against git 2.50.1.
  *
- * @param links the name plane's link facts, null when no namespace is wired
+ * @param vfs the session's files
  * @param worktree absolute virtual path of the working tree root
  * @param paths the selected paths that hold an index entry
  * @param missing what the walk said about each path
  */
 export async function shadowed(
-  links: LinkView | null,
+  vfs: Files,
   worktree: PathSpec,
   paths: readonly string[],
   missing: ReadonlyMap<string, string>,
 ): Promise<Set<string>> {
   const found = new Set<string>()
-  if (links === null) return found
   for (const path of paths) {
     if (missing.get(path) !== DELETED) continue
-    const absolute = worktree.join(path)
-    if (links.resolve(absolute.virtual) === absolute.virtual) continue
-    if (await links.exists(absolute.virtual)) found.add(path)
+    if ((await blockingAncestor(vfs, worktree, path)) === null) continue
+    if (await vfs.exists(worktree.join(path))) found.add(path)
   }
   return found
 }
@@ -148,21 +146,20 @@ export async function shadowed(
  */
 export async function refuseLostWork(
   repo: Repo,
-  dispatch: Dispatch,
+  vfs: Files,
   tree: ReadonlyMap<string, TreeEntry>,
   entries: ReadonlyMap<string, IndexEntry>,
   found: WorkTree,
   paths: readonly string[],
   cached: boolean,
-  links: LinkView | null,
 ): Promise<void> {
   const chosen = new Map<string, IndexEntry>()
   for (const path of paths) {
     const entry = entries.get(path)
     if (entry !== undefined) chosen.set(path, entry)
   }
-  const unstaged = await workChanges(repo, dispatch, repo.location.worktree, chosen, found)
-  const hidden = await shadowed(links, repo.location.worktree, paths, unstaged)
+  const unstaged = await workChanges(repo, vfs, repo.location.worktree, chosen, found)
+  const hidden = await shadowed(vfs, repo.location.worktree, paths, unstaged)
   const both: string[] = []
   const staged: string[] = []
   const local: string[] = []
@@ -200,8 +197,7 @@ export async function refuseLostWork(
  * one: it is removed as the link it is, which is why the namespace is asked
  * before the type.
  *
- * @param dispatch workspace op dispatcher
- * @param statPath the data plane's stat, which dereferences
+ * @param vfs the session's files
  * @param worktree absolute virtual path of the working tree root
  * @param selected the paths to delete, in index order
  * @param lines the `rm` lines already printed, for a refusal to carry on stdout
@@ -210,26 +206,23 @@ export async function refuseLostWork(
  * @param mounts the name plane's mount boundaries, null when none is wired
  */
 export async function clearWorktree(
-  dispatch: Dispatch,
-  statPath: StatPath,
+  vfs: Files,
   worktree: PathSpec,
   selected: readonly string[],
   lines: string,
-  links: LinkView | null,
-  mounts: MountView | null,
 ): Promise<void> {
   let removed = false
   for (const path of selected) {
     const absolute = worktree.join(path)
-    if ((links?.statAt(absolute.virtual) ?? null) === null) {
-      const info = await statPath(absolute)
+    if (!(await isLink(vfs, absolute))) {
+      const info = await statOf(vfs, absolute)
       if (info !== null && info.type === FileType.DIRECTORY) {
         if (!removed) throw new RemovePathError(path, lines)
         continue
       }
     }
-    await removeFile(dispatch, absolute)
-    await removeEmptyParents(dispatch, absolute, worktree, mounts)
+    await removeFile(vfs, absolute)
+    await removeEmptyParents(vfs, absolute, worktree)
     removed = true
   }
 }
@@ -249,16 +242,15 @@ export async function rm(inv: CLIInvocation): Promise<CommandFnResult> {
   let flags: RmFlags
   let selected: string[]
   try {
-    const dispatch = view.dispatch
-    const statPath = view.statPath
-    if (statPath === undefined || dispatch === undefined) {
+    const vfs = view.vfs
+    if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
     checkSwitches(inv, texts)
     flags = parseFlags(fl)
     if (texts.length === 0) throw new NoPathspecRemoveError()
     const repo = await opened(fl, view, !flags.cached)
-    const state = await readIndex(repo, dispatch)
+    const state = await readIndex(repo, vfs)
     const tracked = new Set([
       ...visibleEntries(repo.location, state.entries).keys(),
       ...visibleEntries(repo.location, state.conflicts).keys(),
@@ -266,37 +258,13 @@ export async function rm(inv: CLIInvocation): Promise<CommandFnResult> {
     selected = select(repo.location, startPoint(fl).virtual, texts, tracked, flags)
     if (!flags.force) {
       const checkable = selected.filter((path) => state.entries.has(path))
-      const found = await scan(
-        dispatch,
-        statPath,
-        repo.location,
-        tracked,
-        UNTRACKED_NO,
-        view.ns?.links ?? null,
-      )
+      const found = await scan(vfs, repo.location, tracked, UNTRACKED_NO)
       const tree = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
-      await refuseLostWork(
-        repo,
-        dispatch,
-        tree,
-        state.entries,
-        found,
-        checkable,
-        flags.cached,
-        view.ns?.links ?? null,
-      )
+      await refuseLostWork(repo, vfs, tree, state.entries, found, checkable, flags.cached)
     }
     const lines = flags.quiet ? '' : selected.map((path) => `rm '${path}'\n`).join('')
     if (!flags.cached) {
-      await clearWorktree(
-        dispatch,
-        statPath,
-        repo.location.worktree,
-        selected,
-        lines,
-        view.ns?.links ?? null,
-        view.ns?.mounts ?? null,
-      )
+      await clearWorktree(vfs, repo.location.worktree, selected, lines)
     }
     // Last, because the deletions above can fail: git writes the index only
     // once the working tree is done with, so a refused deletion leaves the

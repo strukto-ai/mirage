@@ -460,8 +460,8 @@ async def test_builtin_and_custom_writes_obey_mount_mode(custom):
 
 
 async def _read_cli(inv):
-    assert inv.view is not None and inv.view.dispatch is not None
-    return await inv.view.dispatch("read", inv.paths[0])
+    assert inv.view is not None and inv.view.vfs is not None
+    return await inv.view.vfs.read(inv.paths[0]), IOResult()
 
 
 @pytest.mark.asyncio

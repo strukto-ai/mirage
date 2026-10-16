@@ -60,6 +60,7 @@ import { isBuiltinGrammar, registeredSpec } from './spec/builtins.ts'
 import { OWN_OPTION_LOOP } from './spec/constants.ts'
 import { helpPage, versionLine } from './spec/standard.ts'
 import type { CommandSpec, FlagValue } from './spec/types.ts'
+import type { Files } from '../workspace/files.ts'
 
 /**
  * What the workspace hands `Mount.runCommand` for one command.
@@ -76,6 +77,7 @@ export interface ExecContext {
   stdin?: ByteSource | null
   cwd?: string
   dispatch?: DispatchFn
+  vfs?: Files
   sessionId?: string
   env?: Record<string, string>
   sessionView?: SessionView
@@ -187,6 +189,8 @@ export interface CommandOpts {
   io?: CommandIO
   /** The workspace op dispatcher. */
   dispatch?: DispatchFn
+  /** The session's files, made by the command: the API a CLI gets as `inv.view.vfs`. */
+  vfs?: Files
   /** The calling session. */
   sessionId?: string
   /** A snapshot of the session environment. */

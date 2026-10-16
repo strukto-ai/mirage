@@ -93,8 +93,8 @@ export async function diff(inv: CLIInvocation): Promise<CommandFnResult> {
   const cached = fl.asBool('cached') || fl.asBool('staged')
   const [revisions, paths] = splitMarked(texts, inv.argv)
   try {
-    const statPath = view.statPath
-    if (statPath === undefined || view.dispatch === undefined) throw new NoWorkspaceError()
+    const vfs = view.vfs
+    if (vfs === undefined || view.vfs === undefined) throw new NoWorkspaceError()
     const word = optionOperand(inv, texts, STDERR)
     if (word !== null && (cached || revisions.some((text) => !text.startsWith('-')))) {
       throw new UsageError('', verbUsage(inv))
@@ -113,7 +113,7 @@ export async function diff(inv: CLIInvocation): Promise<CommandFnResult> {
     let warning = ''
     if (cached) {
       if (revisions.length > 1) throw new GitError('--cached accepts at most one revision')
-      const state = await readIndex(repo, repo.dispatch)
+      const state = await readIndex(repo, repo.vfs)
       refuseUnresolved(state)
       before = revisions.length
         ? await commitEntries(repo, await resolveCommit(repo, revisions[0] ?? HEAD))
@@ -123,8 +123,8 @@ export async function diff(inv: CLIInvocation): Promise<CommandFnResult> {
       const [old, fresh, note] = await sides(repo, revisions)
       warning = note
       if (fresh === null) {
-        const state = await readIndex(repo, repo.dispatch)
-        after = await workEntries(repo, repo.dispatch, statPath, state, view.ns?.links ?? null)
+        const state = await readIndex(repo, repo.vfs)
+        after = await workEntries(repo, vfs, state)
         if (old === null) for (const path of state.conflicts.keys()) after.delete(path)
         before = old ?? stagedEntries(state)
       } else {

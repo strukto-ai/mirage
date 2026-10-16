@@ -456,7 +456,7 @@ async def gate(
         if views is not None and not rules_only
         else None
     )
-    view, ns, vfs = handles or (None, None, None)
+    view, vfs = handles or (None, None)
     ctx = CommandContext(
         command=name,
         paths=_seen(
@@ -488,7 +488,6 @@ async def gate(
         tool=tool,
         walks=walks_mounts(name, [name, *args]),
         session=view,
-        ns=ns,
         vfs=vfs,
     )
     said = await registry.policies.answers(

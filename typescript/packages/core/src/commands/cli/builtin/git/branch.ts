@@ -69,13 +69,13 @@ import { append, entry, IDENTITY, logged, ZERO } from './reflog.ts'
 import {
   RefKind,
   Track,
-  type Dispatch,
   type GitObject,
   type HeadRef,
   type ReadOnlyRefusal,
   type RefItem,
   type Upstream,
 } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 import { checkSwitches, configSection, fatal, gitBool, verbUsage, withoutSection } from './util.ts'
 
 const ENC = new TextEncoder()
@@ -103,7 +103,7 @@ const TRACK_WORDS: ReadonlyMap<string, Track> = new Map([
  */
 export async function refuseAmbiguous(repo: Repo, name: string, warned: boolean): Promise<void> {
   if (!(await configBool(repo, 'core.warnAmbiguousRefs', true))) return
-  const table = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+  const table = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
   if (refsNamed(table, name).length <= 1) return
   if (!warned) await noteAmbiguity(repo, name)
   throw new AmbiguousObjectNameError(name)
@@ -111,7 +111,7 @@ export async function refuseAmbiguous(repo: Repo, name: string, warned: boolean)
 
 /** Point a new branch at a commit, refusing to move an existing one. */
 async function create(
-  dispatch: Dispatch,
+  vfs: Files,
   repo: Repo,
   refs: ReadonlyMap<string, string>,
   name: string,
@@ -144,12 +144,12 @@ async function create(
   // when the lock is taken, so a bad start point is reported first.
   const held = blockingRef(new Set(refs.keys()), ref)
   if (held !== null) throw new RefLockError(ref, held)
-  await writeRef(dispatch, repo.location.commondir, ref, oid)
+  await writeRef(vfs, repo.location.commondir, ref, oid)
   const log = repo.location.commondir.join('logs', ref)
-  if (await logged(dispatch, repo.location, ref, log)) {
+  if (await logged(vfs, repo.location, ref, log)) {
     const when = Math.floor(Date.now() / 1000)
     const line = entry(ZERO, oid, IDENTITY, when, `branch: Created from ${from}`)
-    await append(dispatch, repo.location.commondir, `logs/${ref}`, line)
+    await append(vfs, repo.location.commondir, `logs/${ref}`, line)
   }
   return setUpTracking(repo, name, start ?? null, mode, head)
 }
@@ -160,7 +160,7 @@ async function create(
  * `<remote>/<name>` when exactly one remote has one.
  */
 export async function remoteBranch(repo: Repo, name: string): Promise<string | null> {
-  const refs = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+  const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
   const depth = 3 + name.split('/').length - 1
   const found = [...refs.keys()].filter(
     (ref) =>
@@ -181,7 +181,7 @@ export async function remoteBranch(repo: Repo, name: string): Promise<string | n
  */
 export async function trackMode(repo: Repo): Promise<Track> {
   let mode = Track.REMOTE
-  for (const value of await configValues(repo.dispatch, repo.location, AUTO_SETUP_MERGE)) {
+  for (const value of await configValues(repo.vfs, repo.location, AUTO_SETUP_MERGE)) {
     mode =
       TRACK_WORDS.get(value) ??
       (gitBool([value], AUTO_SETUP_MERGE, true) ? Track.REMOTE : Track.OFF)
@@ -203,8 +203,7 @@ async function tracked(
   branch: string,
   mode: Track,
 ): Promise<[string | null, string[], string, string]> {
-  const values = (path: string): Promise<string[]> =>
-    configValues(repo.dispatch, repo.location, path)
+  const values = (path: string): Promise<string[]> => configValues(repo.vfs, repo.location, path)
   if (ref.startsWith(HEADS_PREFIX)) {
     const source = ref.slice(HEADS_PREFIX.length)
     if (mode === Track.ALWAYS) return ['.', [ref], '', '']
@@ -263,20 +262,20 @@ export async function setUpTracking(
   let ref: string | null | undefined
   if (typed === HEAD) ref = head.ref
   else {
-    const refs = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+    const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
     ref = DWIM_RULES.map((rule) => rule.replace('{}', typed)).find((name) => refs.has(name))
   }
   if (ref === null || ref === undefined) return ['', '']
   const [remote, merges, prefix, warning] = await tracked(repo, ref, branch, mode)
   if (remote === null) return ['', warning]
   const path = repo.location.commondir.join('config')
-  const data = (await readOptional(repo.dispatch, path)) ?? new Uint8Array()
+  const data = (await readOptional(repo.vfs, path)) ?? new Uint8Array()
   const section = configSection('branch', branch, [
     ['remote', remote],
     ...merges.map((merge): [string, string] => ['merge', merge]),
   ])
   const tail = data.length && data[data.length - 1] !== NEWLINE ? '\n' : ''
-  await writeFile(repo.dispatch, path, new Uint8Array([...data, ...ENC.encode(tail + section)]))
+  await writeFile(repo.vfs, path, new Uint8Array([...data, ...ENC.encode(tail + section)]))
   const labels = merges.map((merge) => `${prefix}${merge.replace(/^refs\/heads\//, '')}`)
   if (labels.length === 1) return [`branch '${branch}' set up to track '${labels[0] ?? ''}'.\n`, '']
   return [
@@ -316,7 +315,7 @@ async function merged(repo: Repo, tip: string, head: string | null): Promise<boo
 
 /** Remove a branch, refusing when the removal would lose commits. */
 async function remove(
-  dispatch: Dispatch,
+  vfs: Files,
   repo: Repo,
   refs: ReadonlyMap<string, string>,
   head: HeadRef,
@@ -330,13 +329,13 @@ async function remove(
   if (!force && !(await merged(repo, sha, headCommit(refs, head)))) {
     throw new UnmergedBranchError(name)
   }
-  await deleteRef(dispatch, repo.location.commondir, ref)
+  await deleteRef(vfs, repo.location.commondir, ref)
   const path = repo.location.commondir.join('config')
-  const data = await readOptional(dispatch, path)
+  const data = await readOptional(vfs, path)
   if (data !== null) {
     const text = DEC.decode(data)
     const dropped = withoutSection(text, 'branch', name)
-    if (dropped !== text) await writeFile(dispatch, path, ENC.encode(dropped))
+    if (dropped !== text) await writeFile(vfs, path, ENC.encode(dropped))
   }
   return `Deleted branch ${name} (was ${short(sha, repo.abbrev)}).\n`
 }
@@ -478,14 +477,14 @@ export async function branch(inv: CLIInvocation): Promise<CommandFnResult> {
   const includeRemotes = remotesOnly || fl.asBool('a')
   const listing = words.length > 0 || fl.asBool('list')
   try {
-    const dispatch = view.dispatch
-    if (dispatch === undefined) throw new NoWorkspaceError()
+    const vfs = view.vfs
+    if (vfs === undefined) throw new NoWorkspaceError()
     checkSwitches(inv, texts)
     const repo = await opened(fl, view)
     const mode = await trackMode(repo)
     const filter = await refFilter(repo, words)
-    const refs = await loadRefs(dispatch, repo.location.gitdir, repo.location.commondir)
-    const head = await readHead(dispatch, repo.location.gitdir)
+    const refs = await loadRefs(vfs, repo.location.gitdir, repo.location.commondir)
+    const head = await readHead(vfs, repo.location.gitdir)
     if (fl.asBool('show_current'))
       return [ENC.encode(head.branch ? head.branch + '\n' : ''), new IOResult()]
     const force = fl.asBool('D')
@@ -493,13 +492,13 @@ export async function branch(inv: CLIInvocation): Promise<CommandFnResult> {
       if (listing) throw new UsageError('', verbUsage(inv))
       if (texts.length === 0) throw new BranchNameRequiredError()
       const parts: string[] = []
-      for (const name of texts) parts.push(await remove(dispatch, repo, refs, head, name, force))
+      for (const name of texts) parts.push(await remove(vfs, repo, refs, head, name, force))
       if (fl.asBool('quiet')) return [null, new IOResult()]
       return [ENC.encode(parts.join('')), new IOResult()]
     }
     const first = texts[0]
     if (first !== undefined && !listing) {
-      const [tracking, warning] = await create(dispatch, repo, refs, first, texts[1], mode, head)
+      const [tracking, warning] = await create(vfs, repo, refs, first, texts[1], mode, head)
       return [
         tracking && !fl.asBool('quiet') ? ENC.encode(tracking) : null,
         new IOResult({ stderr: ENC.encode(warning) }),
@@ -527,15 +526,13 @@ export async function upstreamOf(
   branch: string,
   tip: string,
 ): Promise<Upstream | null> {
-  const remote = (await configValues(repo.dispatch, repo.location, `branch.${branch}.remote`)).at(
-    -1,
-  )
-  const merge = (await configValues(repo.dispatch, repo.location, `branch.${branch}.merge`)).at(-1)
+  const remote = (await configValues(repo.vfs, repo.location, `branch.${branch}.remote`)).at(-1)
+  const merge = (await configValues(repo.vfs, repo.location, `branch.${branch}.merge`)).at(-1)
   if (remote === undefined || merge === undefined) return null
   const tracked =
     remote === '.' ? merge : `refs/remotes/${remote}/${merge.replace(/^refs\/heads\//, '')}`
   const label = tracked.replace(/^refs\/(heads|remotes)\//, '')
-  const refs = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+  const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
   if (!refs.has(tracked)) return { label, ahead: 0, behind: 0, gone: true }
   const flags = parseFlags(new FlagView())
   const ours = new Set(
@@ -561,7 +558,7 @@ export async function branchUpstream(
   noCommits: boolean,
 ): Promise<Upstream | null> {
   if (head.branch === null || noCommits) return null
-  const refs = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+  const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
   if (!refs.has(`${HEADS_PREFIX}${head.branch}`)) return null
   const tip = await resolveCommit(repo, `${HEADS_PREFIX}${head.branch}`)
   return upstreamOf(repo, head.branch, tip)

@@ -46,7 +46,8 @@ import {
 import { HELP_SWITCH, gitOptionRefusal, gitUsage, leafRefusal } from '../../refusal.ts'
 import { GIT_LONG_OPTIONS } from '../../constants.ts'
 import { isBare } from './discover.ts'
-import type { Dispatch, RepoLocation } from './types.ts'
+import type { RepoLocation } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 
 const ENC = new TextEncoder()
 const SHOW_TOPLEVEL = '--show-toplevel'
@@ -81,9 +82,7 @@ export async function remote(inv: CLIInvocation): Promise<CommandFnResult> {
       compareCodePoints(a.remote, b.remote),
     )
     const cfg = await configLines(
-      new TextDecoder().decode(
-        await readFile(repo.dispatch, repo.location.commondir.join('config')),
-      ),
+      new TextDecoder().decode(await readFile(repo.vfs, repo.location.commondir.join('config'))),
     )
     const lines: string[] = []
     for (const row of rows) {
@@ -172,9 +171,7 @@ export async function remoteGetUrl(inv: CLIInvocation): Promise<CommandFnResult>
     const fl = new FlagView(parseToKwargs(parsed), GET_URL)
     const repo = await opened(new FlagView(inv.flags), inv.view ?? {})
     const cfg = await configLines(
-      new TextDecoder().decode(
-        await readFile(repo.dispatch, repo.location.commondir.join('config')),
-      ),
+      new TextDecoder().decode(await readFile(repo.vfs, repo.location.commondir.join('config'))),
     )
     const [urls, push] = remoteUrls(cfg, name)
     if (!urls.length)
@@ -203,8 +200,8 @@ export async function globalSources(
   inv: CLIInvocation,
   listing: boolean,
 ): Promise<{ source: string; data: Uint8Array }[]> {
-  const dispatch = inv.view?.dispatch
-  if (!dispatch) throw new NoWorkspaceError()
+  const vfs = inv.view?.vfs
+  if (!vfs) throw new NoWorkspaceError()
   const home = inv.env.HOME ?? ''
   const override = inv.env.GIT_CONFIG_GLOBAL
   if (override === undefined && !home) throw new GitError('$HOME not set')
@@ -213,7 +210,7 @@ export async function globalSources(
   const xdg = configured === '' ? `${home}/.config` : configured
   const sources: { source: string; data: Uint8Array }[] = []
   for (const source of override === undefined ? [`${xdg}/git/config`, target] : [target]) {
-    const data = await readOptional(dispatch, PathSpec.fromStrPath(source, undefined, '/'))
+    const data = await readOptional(vfs, PathSpec.fromStrPath(source, undefined, '/'))
     if (data !== null) sources.push({ source, data })
   }
   if (!sources.length && listing)
@@ -292,7 +289,7 @@ export async function config(inv: CLIInvocation): Promise<CommandFnResult> {
       sources = [
         {
           source: ordinary ? '.git/config' : path.rawPath,
-          data: await readFile(repo.dispatch, path),
+          data: await readFile(repo.vfs, path),
         },
       ]
     }
@@ -346,7 +343,7 @@ export async function showRef(inv: CLIInvocation): Promise<CommandFnResult> {
   try {
     checkSwitches(inv, inv.texts)
     const repo = await opened(fl, inv.view ?? {})
-    const refs = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+    const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
     const lines: string[] = []
     for (const ref of [...refs.keys()]
       .filter((r) => r.startsWith('refs/'))
@@ -417,7 +414,7 @@ async function placeAnswers(repo: Repo, start: string): Promise<Map<string, stri
   const top = location.worktree.virtual === '/' ? '/' : `${location.worktree.virtual}/`
   const inWorkTree =
     !inGitDir &&
-    !(await isBare(repo.dispatch, location)) &&
+    !(await isBare(repo.vfs, location)) &&
     (start === location.worktree.virtual || start.startsWith(top))
   const prefix =
     inWorkTree && start !== location.worktree.virtual ? `${start.slice(top.length)}/` : ''
@@ -459,7 +456,7 @@ function shortWidth(value: unknown, fallback: number): number {
  * nothing and an error instead, while `core.warnAmbiguousRefs` is on; a
  * revision that names no ref prints nothing. Pinned against git 2.47.3.
  *
- * @param dispatch workspace op dispatcher
+ * @param vfs the session's files
  * @param gitdir this checkout's git directory
  * @param table every ref, as loadRefs reads them
  * @param revision the revision as typed
@@ -467,7 +464,7 @@ function shortWidth(value: unknown, fallback: number): number {
  * @param warn `core.warnAmbiguousRefs`
  */
 async function abbreviated(
-  dispatch: Dispatch,
+  vfs: Files,
   gitdir: PathSpec,
   table: ReadonlyMap<string, string>,
   revision: string,
@@ -478,7 +475,7 @@ async function abbreviated(
   if (warn && named.length > 1) return ['', `error: refname '${revision}' is ambiguous\n`]
   const [name] = named
   if (name === undefined) return ['', '']
-  const found = await resolveSymbolic(dispatch, gitdir, table, name, true)
+  const found = await resolveSymbolic(vfs, gitdir, table, name, true)
   if (found === null) return ['', '']
   return [`${shortenRef(found.name, new Set(table.keys()), strict)}\n`, '']
 }
@@ -531,13 +528,13 @@ export async function revParse(inv: CLIInvocation): Promise<CommandFnResult> {
       throw new NotAWorkTreeError()
     const answers = await placeAnswers(repo, start)
     if (fl.asBool('is_shallow_repository')) {
-      const shallow = await readOptional(repo.dispatch, repo.location.commondir.join('shallow'))
+      const shallow = await readOptional(repo.vfs, repo.location.commondir.join('shallow'))
       answers.set('--is-shallow-repository', `${String(shallow !== null)}\n`)
     }
     const short = fl.raw('short')
     const verify = fl.asBool('verify') || short !== undefined
     const width = shortWidth(short, repo.abbrev)
-    const refs = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
+    const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
     const warn = await configBool(repo, 'core.warnAmbiguousRefs', true)
     const strict = mode === undefined ? warn : abbrevStrict(mode, warn)
     const shown: string[] = []
@@ -565,7 +562,7 @@ export async function revParse(inv: CLIInvocation): Promise<CommandFnResult> {
         continue
       }
       const [line, error] = await abbreviated(
-        repo.dispatch,
+        repo.vfs,
         repo.location.gitdir,
         refs,
         revision,

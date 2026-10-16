@@ -66,7 +66,7 @@ from mirage.commands.cli.builtin.git.util import (
 from mirage.commands.cli.types import CLIInvocation, CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.runtime.types import DispatchFn
+from mirage.workspace.files import Files
 
 HEADS = "refs/heads/"
 TAGS = "refs/tags/"
@@ -199,7 +199,7 @@ def _is_ancestor(repo: BaseRepo, old: bytes, new: bytes) -> bool:
 
 
 async def _receive(
-    dispatch: DispatchFn,
+    vfs: Files,
     location: RepoLocation,
     transport: LocalTransport | HttpTransport,
     wants: list[str],
@@ -207,12 +207,12 @@ async def _receive(
     """Fetch what ``wants`` reaches that is missing, then reopen.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the receiving repository.
         transport (LocalTransport | HttpTransport): the remote.
         wants (list[str]): object ids asked for.
     """
-    repo = await open_repo(dispatch, location)
+    repo = await open_repo(vfs, location)
     store = repo.object_store
     tips = {oid for oid in repo.refs.as_dict().values()}
     missing = [
@@ -228,8 +228,8 @@ async def _receive(
     pack = await transport.fetch_pack(
         missing, haves, store.__contains__ if tips else (lambda _oid: False)
     )
-    await store_pack(dispatch, location.commondir, pack)
-    return await open_repo(dispatch, location)
+    await store_pack(vfs, location.commondir, pack)
+    return await open_repo(vfs, location)
 
 
 def ignore_funny(wanted: list[Wanted]) -> tuple[list[Wanted], str]:
@@ -288,7 +288,7 @@ def followed_tags(
 
 
 async def fetch_objects(
-    dispatch: DispatchFn,
+    vfs: Files,
     location: RepoLocation,
     transport: LocalTransport | HttpTransport,
     adv: Advertisement,
@@ -301,7 +301,7 @@ async def fetch_objects(
     whose target is now here but whose tag object is not.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the receiving repository.
         transport (LocalTransport | HttpTransport): the remote.
         adv (Advertisement): what the remote published.
@@ -309,7 +309,7 @@ async def fetch_objects(
         follow (bool): whether tags are auto-followed.
     """
     repo = await _receive(
-        dispatch, location, transport, [want.oid for want in wanted]
+        vfs, location, transport, [want.oid for want in wanted]
     )
     if not follow:
         return repo, wanted
@@ -318,7 +318,7 @@ async def fetch_objects(
     )
     if tags:
         repo = await _receive(
-            dispatch, location, transport, [tag.oid for tag in tags]
+            vfs, location, transport, [tag.oid for tag in tags]
         )
     return repo, wanted + tags
 
@@ -374,7 +374,7 @@ def _classify(
 
 
 async def update_refs(
-    dispatch: DispatchFn,
+    vfs: Files,
     repo: BaseRepo,
     location: RepoLocation,
     wanted: list[Wanted],
@@ -384,7 +384,7 @@ async def update_refs(
     """Move each local ref, returning the summary rows and any rejection.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         repo (BaseRepo): the repository, after the fetch.
         location (RepoLocation): where its refs live.
         wanted (list[Wanted]): the updates, in summary order.
@@ -413,12 +413,10 @@ async def update_refs(
         rejected = rejected or row.code == "!"
         if why is None:
             continue
-        await write_ref(
-            dispatch, location.commondir, want.local, want.oid.encode()
-        )
+        await write_ref(vfs, location.commondir, want.local, want.oid.encode())
         if logged and not want.local.startswith(TAGS):
             await append(
-                dispatch,
+                vfs,
                 location.commondir,
                 f"logs/{want.local}",
                 entry(
@@ -595,7 +593,7 @@ def leaf_args(argv: tuple[str, ...], verb: str) -> tuple[str, ...]:
 
 
 async def _prune(
-    dispatch: DispatchFn,
+    vfs: Files,
     repo: BaseRepo,
     location: RepoLocation,
     adv: Advertisement,
@@ -604,7 +602,7 @@ async def _prune(
     """Delete the remote-tracking refs whose remote ref is gone.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         repo (BaseRepo): the receiving repository.
         location (RepoLocation): where its refs live.
         adv (Advertisement): what the remote published.
@@ -620,7 +618,7 @@ async def _prune(
                 continue
             source = mapped(Refspec(spec.dst, spec.src, False), name)
             if source and source not in adv.refs:
-                await delete_ref(dispatch, location.commondir, name)
+                await delete_ref(vfs, location.commondir, name)
                 rows.append(Row("-", "[deleted]", "(none)", prettify(name)))
                 break
     return rows
@@ -644,13 +642,13 @@ async def fetch(
         check_switches(inv, inv.texts)
         view = inv.view or CLIView()
         _, location = await opened(fl, view)
-        dispatch = view.dispatch
-        if dispatch is None:
+        vfs = view.vfs
+        if vfs is None:
             raise NoWorkspaceError()
         config = _config(
-            await read_optional(dispatch, location.commondir.join("config"))
+            await read_optional(vfs, location.commondir.join("config"))
         )
-        head = await read_head(dispatch, location.gitdir)
+        head = await read_head(vfs, location.gitdir)
         texts = list(inv.texts)
         name = texts[0] if texts else None
         if name is None:
@@ -687,7 +685,7 @@ async def fetch(
                     config, (b"branch", head.branch.encode()), b"merge"
                 )
                 merge = merges[-1].decode() if merges else None
-        bare = await is_bare(dispatch, location)
+        bare = await is_bare(vfs, location)
         start = location.gitdir if bare else location.worktree
         try:
             transport = await open_transport(
@@ -713,17 +711,17 @@ async def fetch(
         tag_opt = multivar(config, (b"remote", name.encode()), b"tagopt")
         follow = not fl.as_bool("no_tags") and tag_opt[-1:] != [b"--no-tags"]
         repo, taken = await fetch_objects(
-            dispatch, location, transport, adv, wanted, follow
+            vfs, location, transport, adv, wanted, follow
         )
         pruned = []
         if fl.as_bool("prune") and not typed:
-            pruned = await _prune(dispatch, repo, location, adv, configured)
+            pruned = await _prune(vfs, repo, location, adv, configured)
         reason = " ".join(("fetch", *leaf_args(inv.argv, "fetch")))
         rows, rejected = await update_refs(
-            dispatch, repo, location, taken, reason, not bare
+            vfs, repo, location, taken, reason, not bare
         )
         await write_file(
-            dispatch, location.gitdir.join(FETCH_HEAD), fetch_head(url, taken)
+            vfs, location.gitdir.join(FETCH_HEAD), fetch_head(url, taken)
         )
         shown = pruned + [
             row for row in rows if row.code != "=" or fl.as_bool("verbose")

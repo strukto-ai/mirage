@@ -29,14 +29,13 @@ from mirage.commands.cli.refusal import (
     git_option_refusal,
     git_usage,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandSpec
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.view.types import LinkView, MountView
 
 ROOT = "/"
 STDOUT = "stdout"
@@ -61,35 +60,6 @@ QUOTED_HEADER = re.compile(
 )
 DOTTED_HEADER = re.compile(rb"\s*\[([A-Za-z0-9-]+)\.([^\]\s]*)\]")
 ESCAPED = re.compile(rb"\\(.)")
-
-
-def links_of(view: CLIView) -> LinkView | None:
-    """The name plane's link facts, None when no namespace is wired.
-
-    git walks the working tree itself rather than through a generic, so
-    it is one of the bespoke commands that has to ask for links or
-    silently cannot see one: without this a symlink reads as whatever
-    it points at, and a link to nothing reads as absent.
-
-    Args:
-        view (CLIView): the invocation's view, one per state plane.
-    """
-    return view.ns.links if view.ns is not None else None
-
-
-def mounts_of(view: CLIView) -> MountView | None:
-    """The name plane's mount boundaries, None when no namespace is wired.
-
-    A mount nested inside the repository is served by another VFS
-    entirely, so the backend holding the parent path cannot see it and
-    cannot carry it along in a rename. A verb that moves a directory has
-    to ask here or it silently leaves the mount at its old prefix with
-    the index pointing at files that never moved.
-
-    Args:
-        view (CLIView): the invocation's view, one per state plane.
-    """
-    return view.ns.mounts if view.ns is not None else None
 
 
 def start_point(fl: FlagView) -> PathSpec:

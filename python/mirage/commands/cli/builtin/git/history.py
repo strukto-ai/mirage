@@ -58,9 +58,9 @@ from mirage.commands.cli.builtin.git.types import (
 )
 from mirage.commands.cli.builtin.git.util import maybe_bool
 from mirage.commands.spec.flag_view import FlagView
-from mirage.runtime.types import DispatchFn
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.posix import compile_posix_regex
+from mirage.workspace.files import Files
 
 REMOTE_PREFIX = b"refs/remotes/"
 BASIC_REGEXP = "basic_regexp"
@@ -414,7 +414,7 @@ def decoration_style(value: bytes) -> Decoration | None:
 
 
 async def decoration_for(
-    dispatch: DispatchFn,
+    vfs: Files,
     location: RepoLocation,
     fl: FlagView,
     pretty: LogFormat,
@@ -431,7 +431,7 @@ async def decoration_for(
     labels at all.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         fl (FlagView): the line's flags.
         pretty (LogFormat): the line's format.
@@ -450,9 +450,7 @@ async def decoration_for(
             if style is None:
                 raise InvalidDecorateError(value)
     if style is None and pretty.kind != "raw":
-        configured = await config_values(
-            dispatch, location, b"log", b"decorate"
-        )
+        configured = await config_values(vfs, location, b"log", b"decorate")
         if configured:
             style = decoration_style(configured[-1])
     if style is None:

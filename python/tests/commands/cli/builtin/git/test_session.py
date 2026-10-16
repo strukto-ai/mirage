@@ -44,10 +44,9 @@ async def test_no_workspace_behind_the_cli_is_a_fatal():
 
 @pytest.mark.asyncio
 async def test_a_missing_plane_is_enough_to_fail(workspace):
-    # The name plane carries the mount root discovery stops at, so a
-    # record without it cannot open a repository even with the other
-    # two entry points wired.
-    view = replace(repo_view(workspace), ns=None)
+    # git reads the repository through the session's files, so a
+    # record without them cannot open one even with the session wired.
+    view = replace(repo_view(workspace), vfs=None)
     with pytest.raises(NoWorkspaceError):
         await opened(FlagView({"C": REPO}), view)
 

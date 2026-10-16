@@ -18,7 +18,7 @@ import type { VfsCall } from '../vfs/types.ts'
 import type { ScriptSource } from '../runtime/types.ts'
 import type { Limit, MountMode, PathSpec, Producer, Refusal } from '../types.ts'
 import type { WordKind } from '../commands/spec/types.ts'
-import type { NamespaceView, SessionView } from '../view/types.ts'
+import type { SessionView } from '../view/types.ts'
 
 /**
  * The one registry question policy methods may ask. MountRegistry
@@ -595,8 +595,6 @@ export interface CommandContext {
   walks?: boolean
   /** The session, read only: a write through it is refused. Filled when a method is asked. */
   session?: SessionView
-  /** The session's namespace, as a command gets it in `opts.ns`. Filled when a method is asked. */
-  ns?: NamespaceView
 }
 
 /**
@@ -624,8 +622,6 @@ export interface RouteContext {
   sessionId: string
   /** The session, read only: a write through it is refused. */
   session?: SessionView
-  /** The session's namespace. */
-  ns?: NamespaceView
 }
 
 /** Facts about one VFS op, as preVfs methods see it. Fires at the
@@ -659,8 +655,6 @@ export interface VfsContext {
   mode?: MountMode
   /** The session, read only. */
   session?: SessionView
-  /** The session's namespace. */
-  ns?: NamespaceView
 }
 
 /**
@@ -719,8 +713,6 @@ export interface SessionContext {
   sessionId: string
   /** The session, read only. */
   session?: SessionView
-  /** The session's namespace. */
-  ns?: NamespaceView
 }
 
 /**

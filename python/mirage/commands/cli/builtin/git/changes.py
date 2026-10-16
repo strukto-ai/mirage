@@ -42,9 +42,8 @@ from mirage.commands.cli.builtin.git.types import (
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import fs_strerror
-from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.view.types import LinkView, StatPath
+from mirage.workspace.files import Files
 
 UNCHANGED = " "
 MODIFIED = "M"
@@ -352,7 +351,7 @@ def _mode_differs(entry: IndexEntry, info: FileStat) -> bool:
 
 
 async def _differs(
-    dispatch: DispatchFn,
+    vfs: Files,
     worktree: PathSpec,
     path: str,
     entry: IndexEntry,
@@ -377,7 +376,7 @@ async def _differs(
     through to the hash and compares equal there.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         worktree (PathSpec): absolute virtual path of the working tree root.
         path (str): repository-relative path.
         entry (IndexEntry): what the index staged for it.
@@ -388,7 +387,7 @@ async def _differs(
     if info.size is not None and entry.size and info.size != entry.size:
         return True
     try:
-        data = await entry_bytes(dispatch, worktree.join(path), info)
+        data = await entry_bytes(vfs, worktree.join(path), info)
     except MISS_ERRORS:
         return True
     except PermissionError:
@@ -399,7 +398,7 @@ async def _differs(
 
 
 async def work_changes(
-    dispatch: DispatchFn,
+    vfs: Files,
     worktree: PathSpec,
     entries: dict[bytes, IndexEntry],
     found: WorkTree,
@@ -407,7 +406,7 @@ async def work_changes(
     """Compare the index with the working tree: what is not staged yet.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         worktree (PathSpec): absolute virtual path of the working tree root.
         entries (dict[bytes, IndexEntry]): the index.
         found (WorkTree): what the walk of the working tree found.
@@ -432,9 +431,7 @@ async def work_changes(
         ):
             # A symlink and a file holding its target text hash alike.
             changes[name] = TYPE_CHANGED
-        elif await _differs(
-            dispatch, worktree, name, entry, found.files[name]
-        ):
+        elif await _differs(vfs, worktree, name, entry, found.files[name]):
             changes[name] = MODIFIED
     return changes
 
@@ -451,12 +448,10 @@ def staged_entries(state: IndexState) -> dict[bytes, tuple[int, bytes]]:
 
 
 async def work_entries(
-    dispatch: DispatchFn,
-    stat_path: StatPath,
+    vfs: Files,
     repo: BaseRepo,
     location: RepoLocation,
     state: IndexState,
-    links: LinkView | None = None,
 ) -> dict[bytes, tuple[int, bytes]]:
     """The working tree as entries, for the side ``git diff`` compares.
 
@@ -469,24 +464,18 @@ async def work_entries(
     not offered).
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
-        stat_path (StatPath): dispatcher-backed stat, both channels.
+        vfs (Files): the session's files.
         repo (BaseRepo): the opened repository, whose store holds the
             hashed blobs.
         location (RepoLocation): the discovered repository.
         state (IndexState): the index as read.
-        links (LinkView | None): the name plane's link facts.
     """
     tracked = {
         path.decode("utf-8", errors="replace")
         for path in (set(state.entries) | set(state.conflicts))
     }
-    found = await scan(
-        dispatch, stat_path, location, tracked, UNTRACKED_NO, links
-    )
-    changes = await work_changes(
-        dispatch, location.worktree, state.entries, found
-    )
+    found = await scan(vfs, location, tracked, UNTRACKED_NO)
+    changes = await work_changes(vfs, location.worktree, state.entries, found)
     entries = staged_entries(state)
     store = repo.object_store
     assert isinstance(store, VfsObjectStore)
@@ -503,9 +492,7 @@ async def work_entries(
             del entries[path]
             continue
         try:
-            data = await entry_bytes(
-                dispatch, location.worktree.join(name), info
-            )
+            data = await entry_bytes(vfs, location.worktree.join(name), info)
         except PermissionError as exc:
             raise UnhashableFileError(
                 name, fs_strerror(exc) or "Permission denied"
@@ -556,24 +543,21 @@ def merge(
 
 
 async def collect(
-    dispatch: DispatchFn,
-    stat_path: StatPath,
+    vfs: Files,
     repo: BaseRepo,
     location: RepoLocation,
     mode: str,
-    links: LinkView | None = None,
     show_ignored: bool = False,
 ) -> tuple[list[StatusEntry], IndexState, bool]:
     """Everything ``status`` reports, in one pass over the three sources.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
-        stat_path (StatPath): dispatcher-backed stat, both channels.
+        vfs (Files): the session's files.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         mode (str): which untracked files to report.
     """
-    state = await read_index(dispatch, location.gitdir)
+    state = await read_index(vfs, location.gitdir)
     entries = visible_entries(location, state.entries)
     conflicts = visible_entries(location, state.conflicts)
     staged, no_commits = await asyncio.to_thread(
@@ -583,10 +567,8 @@ async def collect(
         path.decode("utf-8", errors="replace")
         for path in (set(entries) | set(conflicts))
     }
-    found = await scan(
-        dispatch, stat_path, location, tracked, mode, links, show_ignored
-    )
-    unstaged = await work_changes(dispatch, location.worktree, entries, found)
+    found = await scan(vfs, location, tracked, mode, show_ignored)
+    unstaged = await work_changes(vfs, location.worktree, entries, found)
     rows = merge(staged, unstaged, conflict_codes(conflicts), found.untracked)
     rows.extend(StatusEntry(path, "!", "!") for path in sorted(found.ignored))
     return rows, state, no_commits

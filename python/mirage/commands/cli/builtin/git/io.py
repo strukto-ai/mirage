@@ -18,28 +18,68 @@ from mirage.commands.cli.builtin.git.constants import PERMISSION_BITS, SYMLINK
 from mirage.commands.cli.builtin.git.errors import MountInWayError
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import eexist
-from mirage.runtime.types import DispatchFn
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
 from mirage.utils.remnants import entry_name
-from mirage.view.types import LinkView, MountView, StatPath
+from mirage.workspace.files import Files
 
 logger = logging.getLogger(__name__)
 
 
-async def read_file(dispatch: DispatchFn, path: PathSpec) -> bytes:
-    """Read one virtual path through the workspace dispatcher.
+async def read_file(vfs: Files, path: PathSpec) -> bytes:
+    """Read one virtual path through the session's files.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path.
     """
-    data, _ = await dispatch("read", path)
+    data = await vfs.read(path)
     return data if isinstance(data, bytes) else bytes(data)
 
 
-async def entry_bytes(
-    dispatch: DispatchFn, path: PathSpec, info: FileStat
-) -> bytes:
+async def stat_of(vfs: Files, path: PathSpec) -> FileStat | None:
+    """What stands at a path, a link followed, None when nothing does.
+
+    Args:
+        vfs (Files): the session's files.
+        path (PathSpec): absolute virtual path.
+    """
+    try:
+        return await vfs.stat(path)
+    except MISS_ERRORS:
+        return None
+
+
+async def lstat(vfs: Files, path: PathSpec) -> FileStat | None:
+    """What sits at a path, a link reported as itself, None when
+    nothing does.
+
+    git lstats the working tree, so a symlink is an entry in its own
+    right: it records mode 120000 and the target string, and reports a
+    link to nothing as untracked rather than as absent.
+
+    Args:
+        vfs (Files): the session's files.
+        path (PathSpec): absolute virtual path.
+    """
+    try:
+        return await vfs.stat(path, nofollow=True)
+    except MISS_ERRORS:
+        return None
+
+
+async def is_link(vfs: Files, path: PathSpec) -> bool:
+    """Whether a path names a symlink itself, the lstat a walk asks
+    before it follows anything.
+
+    Args:
+        vfs (Files): the session's files.
+        path (PathSpec): absolute virtual path.
+    """
+    info = await lstat(vfs, path)
+    return info is not None and info.type is FileType.SYMLINK
+
+
+async def entry_bytes(vfs: Files, path: PathSpec, info: FileStat) -> bytes:
     """The bytes git stores for one working-tree entry.
 
     A symlink's blob is its target string, not what the target holds, so
@@ -50,7 +90,7 @@ async def entry_bytes(
     rather than from a read.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path.
         info (FileStat): what the walk saw at that path, lstat-style.
     """
@@ -58,15 +98,14 @@ async def entry_bytes(
         target = info.extra.get(LINK_TARGET_KEY)
         if isinstance(target, str):
             return target.encode()
-    return await read_file(dispatch, path)
+    return await read_file(vfs, path)
 
 
 async def restore_entry(
-    dispatch: DispatchFn,
+    vfs: Files,
     path: PathSpec,
     mode: int,
     blob: bytes,
-    links: LinkView | None = None,
 ) -> None:
     """Materialize one tree entry into the working tree.
 
@@ -84,8 +123,8 @@ async def restore_entry(
     goes. The fourth, a link over a link, is the retarget a checkout
     does when a branch moves where a link points: symlink(2) does not
     overwrite, so the old name is removed rather than replaced in place.
-    The check is a namespace lookup, so the ordinary file-for-file case
-    costs nothing.
+    The check is one lstat, which the listing the checkout walked
+    usually answers.
 
     The permission bits are part of the entry, not decoration on it.
     git records exactly one of them, the owner's execute bit, and puts
@@ -99,35 +138,26 @@ async def restore_entry(
     actually runs on apply it natively, so nothing reaches the overlay.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path to materialize at.
         mode (int): the tree entry's mode.
         blob (bytes): the entry's blob content.
-        links (LinkView | None): the name plane's link facts, None when
-            no namespace is wired.
     """
-    linked = links is not None and links.stat_at(path.virtual) is not None
+    linked = await is_link(vfs, path)
     if mode == SYMLINK:
-        await remove_file(dispatch, path)
+        await remove_file(vfs, path)
         # symlink(2) needs the directory above the entry, as the write
         # below does, so a link alone in a new directory gets one too.
-        await ensure_dir(dispatch, path.parent)
-        await dispatch(
-            "symlink", path, target=blob.decode("utf-8", errors="replace")
-        )
+        await ensure_dir(vfs, path.parent)
+        await vfs.symlink(path, blob.decode("utf-8", errors="replace"))
         return
     if linked:
-        await remove_file(dispatch, path)
-    await write_file(dispatch, path, blob)
-    await dispatch("setattr", path, mode=mode & PERMISSION_BITS)
+        await remove_file(vfs, path)
+    await write_file(vfs, path, blob)
+    await vfs.setattr(path, mode=mode & PERMISSION_BITS)
 
 
-async def keep_gitlink(
-    dispatch: DispatchFn,
-    stat_path: StatPath,
-    path: PathSpec,
-    links: LinkView | None,
-) -> None:
+async def keep_gitlink(vfs: Files, path: PathSpec) -> None:
     """Leave a submodule's working tree alone, but make sure it has one.
 
     A 160000 entry names a commit in another repository, which this one
@@ -142,28 +172,19 @@ async def keep_gitlink(
     against git 2.50.1.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
-        stat_path (StatPath): the data plane's stat, which dereferences.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path of the submodule.
-        links (LinkView | None): the name plane's link facts, None when
-            no namespace is wired.
     """
-    linked = links is not None and links.stat_at(path.virtual) is not None
-    info = None if linked else await stat_path(path)
+    linked = await is_link(vfs, path)
+    info = None if linked else await stat_of(vfs, path)
     if info is not None and info.type is FileType.DIRECTORY:
         return
     if linked or info is not None:
-        await remove_file(dispatch, path)
-    await ensure_dir(dispatch, path)
+        await remove_file(vfs, path)
+    await ensure_dir(vfs, path)
 
 
-async def drop_gitlink(
-    dispatch: DispatchFn,
-    stat_path: StatPath,
-    path: PathSpec,
-    name: str,
-    links: LinkView | None,
-) -> str | None:
+async def drop_gitlink(vfs: Files, path: PathSpec, name: str) -> str | None:
     """Take a submodule's directory away, or say why it stays.
 
     The other direction of ``keep_gitlink``, and it is not an unlink:
@@ -177,12 +198,9 @@ async def drop_gitlink(
     Pinned against git 2.50.1.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
-        stat_path (StatPath): the data plane's stat, which dereferences.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path of the submodule.
         name (str): the path as git prints it, repository-relative.
-        links (LinkView | None): the name plane's link facts, None when
-            no namespace is wired.
 
     Returns:
         str | None: the warning line to write, None when there is
@@ -191,76 +209,74 @@ async def drop_gitlink(
     # A link is answered before the stat, which dereferences: rmdir
     # never follows one, so a link to a directory is ENOTDIR here even
     # though stat would call it a directory.
-    if links is not None and links.stat_at(path.virtual) is not None:
+    if await is_link(vfs, path):
         return f"warning: unable to rmdir '{name}': Not a directory\n"
-    info = await stat_path(path)
+    info = await stat_of(vfs, path)
     if info is None:
         return None
     if info.type is not FileType.DIRECTORY:
         return f"warning: unable to rmdir '{name}': Not a directory\n"
-    if await read_names(dispatch, path):
+    if await read_names(vfs, path):
         return f"warning: unable to rmdir '{name}': Directory not empty\n"
-    await dispatch("rmdir", path)
+    await vfs.rmdir(path)
     return None
 
 
 async def read_range(
-    dispatch: DispatchFn, path: PathSpec, offset: int, size: int
+    vfs: Files, path: PathSpec, offset: int, size: int
 ) -> bytes:
     """Read a byte range of one virtual path.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path.
         offset (int): first byte to read.
         size (int): how many bytes to read.
     """
-    data, _ = await dispatch("read", path, offset=offset, size=size)
+    data = await vfs.read(path, offset=offset, size=size)
     return data if isinstance(data, bytes) else bytes(data)
 
 
-async def file_size(dispatch: DispatchFn, path: PathSpec) -> int | None:
+async def file_size(vfs: Files, path: PathSpec) -> int | None:
     """A path's byte length, or None when the backend does not know it.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path.
     """
-    stat, _ = await dispatch("stat", path)
-    return getattr(stat, "size", None)
+    return (await vfs.stat(path)).size
 
 
-async def read_optional(dispatch: DispatchFn, path: PathSpec) -> bytes | None:
+async def read_optional(vfs: Files, path: PathSpec) -> bytes | None:
     """Read a path that a repository may legitimately not have.
 
     ``packed-refs`` and ``HEAD``-adjacent files are absent in perfectly
     valid repositories, so a miss is an answer rather than an error.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path.
     """
     try:
-        return await read_file(dispatch, path)
+        return await read_file(vfs, path)
     except MISS_ERRORS:
         return None
 
 
-async def read_names(dispatch: DispatchFn, path: PathSpec) -> list[str]:
+async def read_names(vfs: Files, path: PathSpec) -> list[str]:
     """List a directory, empty when it does not exist.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path of the directory.
     """
     try:
-        entries, _ = await dispatch("readdir", path)
+        return await vfs.readdir(path)
     except MISS_ERRORS:
         return []
-    return list(entries or [])
 
 
-async def ensure_dir(dispatch: DispatchFn, path: PathSpec) -> None:
+async def ensure_dir(vfs: Files, path: PathSpec) -> None:
     """Create a directory and every missing directory above it.
 
     Written out rather than delegated to ``mkdir -p`` because the
@@ -275,51 +291,49 @@ async def ensure_dir(dispatch: DispatchFn, path: PathSpec) -> None:
     creating one again costs a no-op rather than an error.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path of the directory.
     """
     missing: list[PathSpec] = []
     current = path
     while current.virtual != "/":
         try:
-            await dispatch("stat", current)
+            await vfs.stat(current)
             break
         except MISS_ERRORS:
             missing.append(current)
             current = current.parent
     for target in reversed(missing):
-        await dispatch("mkdir", target)
+        await vfs.mkdir(target)
 
 
-async def exists(dispatch: DispatchFn, path: PathSpec) -> bool:
+async def exists(vfs: Files, path: PathSpec) -> bool:
     """Whether a point lookup finds anything at a path.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path.
     """
     try:
-        await dispatch("stat", path)
+        await vfs.stat(path)
     except MISS_ERRORS:
         return False
     return True
 
 
-async def write_file(
-    dispatch: DispatchFn, path: PathSpec, data: bytes
-) -> None:
+async def write_file(vfs: Files, path: PathSpec, data: bytes) -> None:
     """Write one virtual path, creating the directories above it.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path.
         data (bytes): the whole contents.
     """
-    await ensure_dir(dispatch, path.parent)
-    await dispatch("write", path, data=data)
+    await ensure_dir(vfs, path.parent)
+    await vfs.write(path, data)
 
 
-async def take_lock(dispatch: DispatchFn, path: PathSpec) -> None:
+async def take_lock(vfs: Files, path: PathSpec) -> None:
     """Take a file's lock and let it go, as git does before rewriting it.
 
     git creates ``<path>.lock`` before it rewrites the index or the
@@ -332,7 +346,7 @@ async def take_lock(dispatch: DispatchFn, path: PathSpec) -> None:
     dispatcher has no exclusive create.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path of the file the lock guards.
 
     Raises:
@@ -341,15 +355,13 @@ async def take_lock(dispatch: DispatchFn, path: PathSpec) -> None:
     lock = PathSpec.from_str_path(
         f"{path.dotted or path.virtual}.lock", cwd="/"
     )
-    if await exists(dispatch, lock):
+    if await exists(vfs, lock):
         raise eexist(lock)
-    await dispatch("write", lock, data=b"")
-    await remove_file(dispatch, lock)
+    await vfs.write(lock, b"")
+    await remove_file(vfs, lock)
 
 
-async def write_once(
-    dispatch: DispatchFn, path: PathSpec, data: bytes
-) -> None:
+async def write_once(vfs: Files, path: PathSpec, data: bytes) -> None:
     """Write a path only if nothing is there yet.
 
     For content-addressed files, which is every object in the database:
@@ -360,17 +372,17 @@ async def write_once(
     unchanged file hits that on the first try.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path.
         data (bytes): the whole contents.
     """
-    if await exists(dispatch, path):
+    if await exists(vfs, path):
         return
-    await write_file(dispatch, path, data)
+    await write_file(vfs, path, data)
 
 
 async def blocking_ancestor(
-    stat_path: StatPath, worktree: PathSpec, name: str, links: LinkView | None
+    vfs: Files, worktree: PathSpec, name: str
 ) -> PathSpec | None:
     """The nearest component above an entry that is not a directory.
 
@@ -384,20 +396,17 @@ async def blocking_ancestor(
     ``create_directories`` and ``check_leading_path``, and both halves
     were probed against git 2.50.1.
 
-    The namespace is asked before the data plane, and the order is the
-    whole point: ``stat_path`` dereferences, so a link to a directory
-    stats as a directory and the walk would carry on straight through
-    it. Only the name plane can say that the component is a link.
+    The lstat is asked before the stat, and the order is the whole
+    point: ``stat`` dereferences, so a link to a directory stats as a
+    directory and the walk would carry on straight through it.
 
     An exact-path lookup cannot see any of this, since what is in the
     way sits above the name being looked up rather than on it.
 
     Args:
-        stat_path (StatPath): the data plane's stat, which dereferences.
+        vfs (Files): the session's files.
         worktree (PathSpec): absolute virtual path of the working tree root.
         name (str): the entry, repository-relative.
-        links (LinkView | None): the name plane's link facts, None when
-            no namespace is wired.
 
     Returns:
         PathSpec | None: absolute virtual path of the nearest such component,
@@ -406,15 +415,15 @@ async def blocking_ancestor(
     current = worktree
     for part in name.split("/")[:-1]:
         current = current.join(part)
-        if links is not None and links.stat_at(current.virtual) is not None:
+        if await is_link(vfs, current):
             return current
-        info = await stat_path(current)
+        info = await stat_of(vfs, current)
         if info is not None and info.type is not FileType.DIRECTORY:
             return current
     return None
 
 
-async def remove_file(dispatch: DispatchFn, path: PathSpec) -> None:
+async def remove_file(vfs: Files, path: PathSpec) -> None:
     """Delete one virtual path, tolerating one that is already gone.
 
     A miss is an answer rather than an error for every caller here:
@@ -422,18 +431,16 @@ async def remove_file(dispatch: DispatchFn, path: PathSpec) -> None:
     and a checkout removes files the other branch does not have.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path.
     """
     try:
-        await dispatch("unlink", path)
+        await vfs.unlink(path)
     except MISS_ERRORS as exc:
         logger.debug("nothing to remove at %s: %s", path, exc)
 
 
-async def rename_path(
-    dispatch: DispatchFn, source: PathSpec, target: PathSpec
-) -> None:
+async def rename_path(vfs: Files, source: PathSpec, target: PathSpec) -> None:
     """Move one virtual path, file or directory, to another name.
 
     The mount's own rename, so a directory moves with everything under
@@ -442,14 +449,14 @@ async def rename_path(
     it is missing, and the caller words that failure.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         source (PathSpec): absolute virtual path to move.
         target (PathSpec): absolute virtual path to move it to.
     """
-    await dispatch("rename", source, dst=target)
+    await vfs.rename(source, target)
 
 
-def refuse_mount(mounts: MountView | None, path: PathSpec) -> None:
+def refuse_mount(vfs: Files, path: PathSpec) -> None:
     """Refuse a removal that would take a nested mount with it.
 
     A mount nested inside the working tree is served by another
@@ -460,33 +467,26 @@ def refuse_mount(mounts: MountView | None, path: PathSpec) -> None:
     mount table is the only way to see the boundary: the parent
     backend cannot.
 
-    Two questions, two fields, the way ``MountView`` says: the
-    boundary is *avoided* by the unfiltered list, so a mount this
-    session cannot see still blocks the removal, and it is *named*
-    from the visible one, since naming a hidden mount is what the hide
-    exists to prevent.
+    A mount this session cannot see still blocks the removal:
+    ``submounts`` reports it by the nearest folder above it the session
+    sees, which is not a mount root, so only a visible one is named,
+    naming a hidden mount being what the hide exists to prevent.
 
     Args:
-        mounts (MountView | None): the name plane's mount boundaries,
-            None when no namespace is wired.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path about to be removed.
     """
-    if mounts is None:
-        return
-    if mounts.is_root(path.virtual):
+    if vfs.is_mount(path):
         raise MountInWayError(path.virtual, path.virtual)
-    if not mounts.descendants(path.virtual):
+    below = vfs.submounts(path)
+    if not below:
         return
-    named = sorted(mounts.visible_descendants(path.virtual))
-    raise MountInWayError(path.virtual, named[0] if named else None)
+    named = next((root for root in below if vfs.is_mount(root)), None)
+    raise MountInWayError(path.virtual, named)
 
 
 async def refuse_replaced_mounts(
-    stat_path: StatPath,
-    worktree: PathSpec,
-    names: list[str],
-    links: LinkView | None,
-    mounts: MountView | None,
+    vfs: Files, worktree: PathSpec, names: list[str]
 ) -> None:
     """Ask of every destination first what the write loop would meet later.
 
@@ -500,32 +500,21 @@ async def refuse_replaced_mounts(
     refused here either.
 
     Args:
-        stat_path (StatPath): the data plane's stat, which dereferences.
+        vfs (Files): the session's files.
         worktree (PathSpec): absolute virtual path of the working tree root.
         names (list[str]): repository-relative paths about to be
             written.
-        links (LinkView | None): the name plane's link facts, None when
-            no namespace is wired.
-        mounts (MountView | None): the name plane's mount boundaries,
-            None when no namespace is wired.
     """
-    if mounts is None:
-        return
     for name in sorted(names):
         where = worktree.join(name)
-        if links is not None and links.stat_at(where.virtual) is not None:
+        if await is_link(vfs, where):
             continue
-        info = await stat_path(where)
+        info = await stat_of(vfs, where)
         if info is not None and info.type is FileType.DIRECTORY:
-            refuse_mount(mounts, where)
+            refuse_mount(vfs, where)
 
 
-async def remove_tree(
-    dispatch: DispatchFn,
-    path: PathSpec,
-    links: LinkView | None,
-    mounts: MountView | None,
-) -> None:
+async def remove_tree(vfs: Files, path: PathSpec) -> None:
     """Delete a path and everything under it, tracked or not.
 
     git replaces a tree entry rather than merging with it, so a
@@ -539,8 +528,8 @@ async def remove_tree(
     since ``readdir`` reads a non-directory as nothing there and
     ``rmdir`` refuses it.
 
-    A child that is a symlink is unlinked, never descended into. The
-    name plane has to say so, because ``readdir`` dereferences: a link
+    A child that is a symlink is unlinked, never descended into. Its
+    lstat has to say so, because ``readdir`` dereferences: a link
     to a directory lists that directory's contents, and recursing on
     them deletes a tree outside the one being replaced. ``rm -r`` does
     not follow a link either, so a branch recording a file where the
@@ -549,45 +538,38 @@ async def remove_tree(
     git 2.50.1.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path to clear.
-        links (LinkView | None): the name plane's link facts, None when
-            no namespace is wired.
-        mounts (MountView | None): the name plane's mount boundaries,
-            None when no namespace is wired.
     """
     # Before the first deletion rather than at the boundary itself, so
     # a mount deep under the directory costs the caller nothing: the
     # scan sees every depth at once and the tree is still whole when
     # it refuses.
-    refuse_mount(mounts, path)
-    for entry in await read_names(dispatch, path):
+    refuse_mount(vfs, path)
+    for entry in await read_names(vfs, path):
         # A listing answers in whole paths, so the child is rebuilt from
         # the basename the way every other walk here does.
         name = entry_name(entry)
         if not name:
             continue
         child = path.join(name)
-        if links is not None and links.stat_at(child.virtual) is not None:
-            await remove_file(dispatch, child)
+        if await is_link(vfs, child):
+            await remove_file(vfs, child)
             continue
-        await remove_tree(dispatch, child, links, mounts)
+        await remove_tree(vfs, child)
     try:
-        await dispatch("rmdir", path)
+        await vfs.rmdir(path)
     except MISS_ERRORS as exc:
         # Not a directory, or already gone: the path is whatever one file
         # it is, and remove_file tolerates an absent one. A directory the
         # walk above was supposed to empty raises OSError(ENOTEMPTY),
         # which is not a miss and stays raised.
         logger.debug("no directory to remove at %s: %s", path, exc)
-        await remove_file(dispatch, path)
+        await remove_file(vfs, path)
 
 
 async def remove_empty_parents(
-    dispatch: DispatchFn,
-    path: PathSpec,
-    stop: PathSpec,
-    mounts: MountView | None,
+    vfs: Files, path: PathSpec, stop: PathSpec
 ) -> None:
     """Drop the directories a deletion left empty, up to a root.
 
@@ -597,11 +579,9 @@ async def remove_empty_parents(
     never touches ``stop`` itself.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         path (PathSpec): absolute virtual path of the file that was removed.
         stop (PathSpec): absolute virtual path of the working tree root.
-        mounts (MountView | None): the name plane's mount boundaries,
-            None when no namespace is wired.
     """
     root = stop.virtual.rstrip("/") or "/"
     current = path.parent
@@ -611,12 +591,12 @@ async def remove_empty_parents(
         # store behind it as a side effect of tidying up. The walk
         # stops rather than refusing, because nothing the caller asked
         # for has failed.
-        if mounts is not None and mounts.is_root(current.virtual):
+        if vfs.is_mount(current):
             return
-        if await read_names(dispatch, current):
+        if await read_names(vfs, current):
             return
         try:
-            await dispatch("rmdir", current)
+            await vfs.rmdir(current)
         except MISS_ERRORS as exc:
             logger.debug("no directory to remove at %s: %s", current, exc)
             return

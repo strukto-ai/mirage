@@ -80,6 +80,7 @@ import { standardRequest } from '../../../commands/spec/standard.ts'
 
 import { dropsMountCaches, handleCli } from './cli.ts'
 import { pathStat } from '../../mount/namespace/probe.ts'
+import { Files } from '../../files.ts'
 import { namespaceViewOf } from '../../mount/namespace/view.ts'
 import { dropMountCaches, findStartPoints, runOnMount, type RunOnMountCtx } from './run.ts'
 import type { NamespaceView, SessionView, StatPath } from '../../../view/types.ts'
@@ -266,10 +267,9 @@ export async function handleCommand(
   // Installed CLIs: dispatch by name, never by operand path. Sits
   // below functions (a user can wrap an installed CLI, bash-style)
   // and above every mount branch (a CLI consults no mount).
-  // A CLI that works on files rather than an API (`git`) reaches the planes
-  // through the facts below; the rest never read them. They are the same
-  // ones `runOnMount` puts on `CommandOpts`, built the same way, so a CLI
-  // leaf and a command handler see one plane alike.
+  // A CLI that works on files rather than an API (`git`) reaches them
+  // through `inv.view.vfs`, the session's files made by the command; the
+  // rest never look.
   const cliInstall = registry.clis.get(cmdName)
   if (cliInstall !== null) {
     const cliSignal = mergeSignals(signal, context.frame.abortSignal)
@@ -295,9 +295,9 @@ export async function handleCommand(
           ...(cliSignal !== undefined ? { signal: cliSignal } : {}),
           commandLimits: registry.commandLimits,
           entries: registry.runtimeEntries,
-          dispatch,
-          statPath: (path) => pathStat(dispatch, path, null),
-          ns: namespaceViewOf(registry, namespace ?? null, dispatch, session, admission),
+          vfs: new Files(dispatch, null, namespace ?? null, () => null, {
+            prefixes: () => registry.visibleMounts().map((m) => m.prefix),
+          }),
           sessionView: sessionView(session, registry.policies, context.frame.diagnostics),
           ...(registry.processView === undefined
             ? {}

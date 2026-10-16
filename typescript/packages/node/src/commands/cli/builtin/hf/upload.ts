@@ -16,7 +16,7 @@ import type { CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
 import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
 import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
-import type { DispatchFn } from '@struktoai/mirage-core/runtime/types'
+import type { Files } from '@struktoai/mirage-core/workspace/files'
 import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { fsStrerror, isEnotdir, isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { shellQuote } from '@struktoai/mirage-core/utils/quote'
@@ -41,9 +41,8 @@ import { refuseVariadic } from './download.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { posixPhrase } from '@struktoai/mirage-core/errors/posix'
 
-async function isDir(dispatch: DispatchFn, path: PathSpec): Promise<boolean> {
-  const [stat] = await dispatch('stat', path)
-  return (stat as { type?: string } | null)?.type === FileType.DIRECTORY
+async function isDir(vfs: Files, path: PathSpec): Promise<boolean> {
+  return (await vfs.stat(path)).type === FileType.DIRECTORY
 }
 
 /**
@@ -53,14 +52,14 @@ async function isDir(dispatch: DispatchFn, path: PathSpec): Promise<boolean> {
  * was a directory, which determines the destination semantics.
  */
 async function collect(
-  dispatch: DispatchFn,
+  vfs: Files,
   local: PathSpec,
 ): Promise<{ rows: Addition[]; fromDir: boolean }> {
-  if (!(await isDir(dispatch, local))) {
-    const [data] = await dispatch('read', local)
+  if (!(await isDir(vfs, local))) {
+    const data = await vfs.read(local)
     const name = rstripSlash(local.virtual)
     return {
-      rows: [{ path: name.slice(name.lastIndexOf('/') + 1), data: data as Uint8Array }],
+      rows: [{ path: name.slice(name.lastIndexOf('/') + 1), data: data }],
       fromDir: false,
     }
   }
@@ -68,17 +67,17 @@ async function collect(
   const pending: [PathSpec, string][] = [[local, '']]
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
     const [current, prefix] = next
-    const [entries] = await dispatch('readdir', current)
-    for (const entry of entries as string[]) {
+    const entries = await vfs.readdir(current)
+    for (const entry of entries) {
       const child = current.join(entry)
       const leaf = rstripSlash(child.virtual)
       const name = `${prefix}${leaf.slice(leaf.lastIndexOf('/') + 1)}`
-      if (await isDir(dispatch, child)) {
+      if (await isDir(vfs, child)) {
         pending.push([child, `${name}/`])
         continue
       }
-      const [data] = await dispatch('read', child)
-      rows.push({ path: name, data: data as Uint8Array })
+      const data = await vfs.read(child)
+      rows.push({ path: name, data: data })
     }
   }
   return {
@@ -126,8 +125,8 @@ export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   requireOperands(inv, ['repo_id'])
   requireToken(inv, 'upload')
   const fl = new FlagView(inv.flags)
-  const dispatch = inv.view?.dispatch
-  if (dispatch === undefined) {
+  const vfs = inv.view?.vfs
+  if (vfs === undefined) {
     throw new UsageError('hf upload needs a workspace to read from')
   }
   const repoId = inv.texts[0] ?? ''
@@ -153,7 +152,7 @@ export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   const inRepo = inv.texts[1] ?? ''
   let collected: { rows: Addition[]; fromDir: boolean }
   try {
-    collected = await collect(dispatch, source)
+    collected = await collect(vfs, source)
   } catch (err) {
     if (!isMissingPath(err) && !isEnotdir(err)) throw err
     throw new UsageError(

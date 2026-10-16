@@ -22,6 +22,7 @@ import type { FollowOperands, ReaddirPath, StatPath } from '../../../view/types.
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { envSnapshot, sessionView } from '../../session/state.ts'
 import { pathReaddir, pathStat } from '../../mount/namespace/probe.ts'
+import { Files } from '../../files.ts'
 import { namespaceViewOf } from '../../mount/namespace/view.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
 import { ownLimit } from '../../../policy/builtin/output_cap.ts'
@@ -278,6 +279,9 @@ export async function runOnMount(
       stdin: opts.stdin ?? null,
       cwd: session.cwd,
       dispatch,
+      vfs: new Files(dispatch, null, namespace ?? null, () => null, {
+        prefixes: () => registry.visibleMounts().map((m) => m.prefix),
+      }),
       sessionId: session.sessionId,
       env: envSnapshot(session),
       sessionView: sessionView(session, registry.policies, context.frame.diagnostics),

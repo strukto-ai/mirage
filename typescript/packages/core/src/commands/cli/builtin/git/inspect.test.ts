@@ -20,14 +20,12 @@ import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 
-import { IOResult } from '../../../../io/types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
 import { ensureDir } from './io.ts'
-import type { Dispatch } from './types.ts'
 
 const BUILDER = fileURLToPath(
   new URL('../../../../../../../../integ/fixtures/git/gaps.sh', import.meta.url),
@@ -63,10 +61,7 @@ async function mountRepo(path: string): Promise<Workspace> {
     { '/repo': new RAMVFS() },
     { mode: MountMode.WRITE, shellParser: parser },
   )
-  const dispatch: Dispatch = async (op, path, args = [], kwargs = {}) => [
-    await mounted.dispatch(op, path.virtual, args, kwargs),
-    new IOResult(),
-  ]
+  const dispatch = mounted.vfs
   for (const rel of walk(path)) {
     const target = `/repo/${rel}`
     await ensureDir(dispatch, PathSpec.fromStrPath(target).parent)

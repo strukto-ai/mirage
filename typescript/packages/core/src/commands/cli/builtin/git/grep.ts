@@ -19,7 +19,7 @@ import {
   UsageError,
 } from './errors.ts'
 import { readIndex } from './index_file.ts'
-import { exists, readOptional } from './io.ts'
+import { exists, isLink, readOptional } from './io.ts'
 import { pathspecPatterns, pathspecSelects, repoRelative, visiblePath } from './pathspec.ts'
 import { quotePath, relativePath } from './render.ts'
 import { blobData } from './patch.ts'
@@ -185,10 +185,7 @@ export async function grep(inv: CLIInvocation): Promise<CommandFnResult> {
           throw err
         if (marked) throw new GitError(`unable to resolve revision: ${word}`)
         const relative = repoRelative(repo.location, start, word)
-        if (
-          !/[*?[]/.test(word) &&
-          !(await exists(repo.dispatch, repo.location.worktree.join(relative)))
-        )
+        if (!/[*?[]/.test(word) && !(await exists(repo.vfs, repo.location.worktree.join(relative))))
           throw new AmbiguousArgumentError(word)
         console.debug('Git grep operand is a pathspec:', word)
         paths = [...words.slice(index), ...paths]
@@ -197,19 +194,14 @@ export async function grep(inv: CLIInvocation): Promise<CommandFnResult> {
     }
     if (sources.length && cached) throw new GitError('both --cached and trees are given')
     if (!sources.length && !cached) {
-      if (view.statPath === undefined) throw new NoWorkspaceError()
-      await requireWorkTree(
-        repo.dispatch,
-        view.statPath,
-        repo.location,
-        fl.asPath('work_tree') !== undefined,
-      )
+      if (view.vfs === undefined) throw new NoWorkspaceError()
+      await requireWorkTree(view.vfs, repo.location, fl.asPath('work_tree') !== undefined)
     }
     const specs = pathspecPatterns(repo.location, start, paths)
     if (!specs.length) specs.push(prefix)
     const fully = await configBool(repo, 'core.quotepath', true)
     if (!sources.length) {
-      const state = await readIndex(repo, repo.dispatch)
+      const state = await readIndex(repo, repo.vfs)
       const entries = new Map(
         [...state.entries].map(([path, entry]) => [
           path,
@@ -243,8 +235,8 @@ export async function grep(inv: CLIInvocation): Promise<CommandFnResult> {
         if (revision || cached) data = await blobData(repo, entry)
         else {
           const target = repo.location.worktree.join(path)
-          if (repo.location.ns?.links?.statAt(target.virtual)) continue
-          data = await readOptional(repo.dispatch, target)
+          if (await isLink(repo.vfs, target)) continue
+          data = await readOptional(repo.vfs, target)
           if (data === null) continue
         }
         let label = relativePath(path || revision, prefix)

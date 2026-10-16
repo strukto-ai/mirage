@@ -180,7 +180,7 @@ export async function catFile(inv: CLIInvocation): Promise<CommandFnResult> {
   const view = inv.view ?? {}
   const texts = [...inv.texts]
   try {
-    if (view.dispatch === undefined) throw new NoWorkspaceError()
+    if (view.vfs === undefined) throw new NoWorkspaceError()
     checkSwitches(inv, texts)
     const modes = fl.typedOrder(...QUERIES)
     const [first, second] = modes

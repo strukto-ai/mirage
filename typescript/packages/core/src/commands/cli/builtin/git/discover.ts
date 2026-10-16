@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { configValues } from './fs.ts'
-import type { MountRoot, StatPath } from '../../../../view/types.ts'
 import { GIT_DIR } from './constants.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
 import {
@@ -23,8 +22,9 @@ import {
   NoWorkingDirectoryError,
   WorkTreeChdirError,
 } from './errors.ts'
-import { readFile, readOptional } from './io.ts'
-import type { Dispatch, RepoLocation } from './types.ts'
+import { readFile, readOptional, statOf } from './io.ts'
+import type { RepoLocation } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 import { gitBool } from './util.ts'
 
 const GITDIR_PREFIX = 'gitdir:'
@@ -40,17 +40,13 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
  * submodule, so the real git directory sits outside the tree being worked in,
  * and reading the file as if it were a directory is how this used to fail.
  */
-async function followGitfile(
-  dispatch: Dispatch,
-  statPath: StatPath,
-  gitfile: PathSpec,
-): Promise<PathSpec> {
-  const line = DEC.decode(await readFile(dispatch, gitfile)).trim()
+async function followGitfile(vfs: Files, gitfile: PathSpec): Promise<PathSpec> {
+  const line = DEC.decode(await readFile(vfs, gitfile)).trim()
   if (!line.startsWith(GITDIR_PREFIX)) throw new InvalidGitFileError(gitfile.virtual)
   const target = line.slice(GITDIR_PREFIX.length).trim()
   if (target === '') throw new InvalidGitFileError(gitfile.virtual)
   const resolved = PathSpec.fromStrPath(target, undefined, gitfile.parent)
-  if ((await statPath(resolved)) === null) {
+  if ((await statOf(vfs, resolved)) === null) {
     // An absolute pointer names a path on the backend's own filesystem, which
     // is only reachable when the mount happens to span it: a worktree mounted
     // alone cannot see the repository it was cut from. git says the same thing
@@ -68,8 +64,8 @@ async function followGitfile(
  * branches live there; only HEAD and the index are the worktree's own. An
  * ordinary checkout has no such file and is its own common directory.
  */
-async function commonDir(dispatch: Dispatch, gitdir: PathSpec): Promise<PathSpec> {
-  const data = await readOptional(dispatch, gitdir.join(COMMON_DIR))
+async function commonDir(vfs: Files, gitdir: PathSpec): Promise<PathSpec> {
+  const data = await readOptional(vfs, gitdir.join(COMMON_DIR))
   if (data === null) return gitdir
   const target = DEC.decode(data).trim()
   return target === '' ? gitdir : PathSpec.fromStrPath(target, undefined, gitdir)
@@ -81,26 +77,22 @@ async function commonDir(dispatch: Dispatch, gitdir: PathSpec): Promise<PathSpec
  * A git directory holds its own HEAD and finds objects and refs in its common
  * directory, which is itself unless it is a linked worktree's.
  */
-async function validated(
-  dispatch: Dispatch,
-  statPath: StatPath,
-  gitdir: PathSpec,
-): Promise<PathSpec | null> {
-  const common = await commonDir(dispatch, gitdir)
+async function validated(vfs: Files, gitdir: PathSpec): Promise<PathSpec | null> {
+  const common = await commonDir(vfs, gitdir)
   for (const [path, kind] of [
     [gitdir.join('HEAD'), FileType.FILE],
     [common.join('objects'), FileType.DIRECTORY],
     [common.join('refs'), FileType.DIRECTORY],
   ] as const) {
-    const entry = await statPath(path)
+    const entry = await statOf(vfs, path)
     if (entry?.type !== kind) return null
   }
   return common
 }
 
 /** Refuse a start git cannot change into, in `-C`'s words. */
-async function enter(statPath: StatPath, start: PathSpec): Promise<void> {
-  const here = await statPath(start)
+async function enter(vfs: Files, start: PathSpec): Promise<void> {
+  const here = await statOf(vfs, start)
   if (here?.type === FileType.DIRECTORY) return
   throw new NoWorkingDirectoryError(
     start.dotted ? start.rawPath : start.virtual,
@@ -127,59 +119,43 @@ async function enter(statPath: StatPath, start: PathSpec): Promise<void> {
  * so the three paths are resolved here and carried separately rather than
  * derived again by each verb.
  *
- * @param dispatch workspace op dispatcher, for the two files that redirect a git
- *   directory
- * @param statPath dispatcher-backed stat asking both channels a backend can
- *   answer on; null means nothing is there
- * @param mountRoot the mount prefix serving a path
+ * @param vfs the session's files
  * @param start absolute virtual path to start from, normally the session cwd or
  *   the argument of `-C`
  */
 export async function discover(
-  dispatch: Dispatch,
-  statPath: StatPath,
-  mountRoot: MountRoot,
+  vfs: Files,
   start: PathSpec,
   gitdir: PathSpec | null = null,
   worktree: PathSpec | null = null,
 ): Promise<RepoLocation> {
-  const root = PathSpec.fromStrPath(mountRoot(start.virtual), undefined, '/')
+  const root = PathSpec.fromStrPath(vfs.mountOf(start) ?? '/', undefined, '/')
   if (gitdir !== null) {
-    await enter(statPath, start)
+    await enter(vfs, start)
     const candidate = gitdir
-    const info = await statPath(candidate)
+    const info = await statOf(vfs, candidate)
     if (info === null) throw new NotARepositoryError(gitdir.rawPath)
     // git names the target a pointer leads to unquoted, as it does for one met
     // on the way up.
     const pointer = info.type !== FileType.DIRECTORY
-    const resolved = pointer ? await followGitfile(dispatch, statPath, candidate) : candidate
-    const common = await validated(dispatch, statPath, resolved)
+    const resolved = pointer ? await followGitfile(vfs, candidate) : candidate
+    const common = await validated(vfs, resolved)
     if (common === null) {
       throw pointer
         ? new NotARepositoryError(resolved.virtual, false)
         : new NotARepositoryError(gitdir.rawPath)
     }
-    return location(dispatch, statPath, resolved, common, start, worktree, root)
+    return location(vfs, resolved, common, start, worktree, root)
   }
   let current = start
   let first = true
   for (;;) {
     const candidate = current.join(GIT_DIR)
-    const info = await statPath(candidate)
+    const info = await statOf(vfs, candidate)
     if (info !== null) {
       const gitdir =
-        info.type === FileType.DIRECTORY
-          ? candidate
-          : await followGitfile(dispatch, statPath, candidate)
-      return location(
-        dispatch,
-        statPath,
-        gitdir,
-        await commonDir(dispatch, gitdir),
-        current,
-        worktree,
-        root,
-      )
+        info.type === FileType.DIRECTORY ? candidate : await followGitfile(vfs, candidate)
+      return location(vfs, gitdir, await commonDir(vfs, gitdir), current, worktree, root)
     }
     if (first) {
       // git enters `-C` before it looks for anything, so a path it cannot
@@ -189,7 +165,7 @@ export async function discover(
       // mutating a repository the caller did not name. Asked only after the
       // first probe missed, because a hit already proves the directory is
       // there.
-      await enter(statPath, start)
+      await enter(vfs, start)
       first = false
     }
     if (current.virtual === root.virtual || current.virtual === '/') throw new NotARepositoryError()
@@ -211,8 +187,7 @@ export async function discover(
  * without git's "do not make sense" warning. Mirrors _location in discover.py.
  */
 async function location(
-  dispatch: Dispatch,
-  statPath: StatPath,
+  vfs: Files,
   gitdir: PathSpec,
   common: PathSpec,
   defaultWorktree: PathSpec,
@@ -225,14 +200,14 @@ async function location(
     worktree: defaultWorktree,
     mountRoot: root,
   }
-  const bare = gitBool(await configValues(dispatch, located, 'core.bare'), 'core.bare', false)
+  const bare = gitBool(await configValues(vfs, located, 'core.bare'), 'core.bare', false)
   if (worktree !== null) return { ...located, worktree }
   if (gitdir.virtual !== common.virtual || bare) return located
-  const configured = (await configValues(dispatch, located, 'core.worktree')).at(-1)
+  const configured = (await configValues(vfs, located, 'core.worktree')).at(-1)
   if (configured === undefined) return located
   const selected = PathSpec.fromStrPath(configured, undefined, gitdir)
   if (!configured.startsWith('/')) {
-    const info = await statPath(selected)
+    const info = await statOf(vfs, selected)
     if (info === null) throw new WorkTreeChdirError(configured)
     if (info.type !== FileType.DIRECTORY) throw new WorkTreeChdirError(configured, 'ENOTDIR')
   }
@@ -246,9 +221,9 @@ async function location(
  * and a linked worktree's config is its repository's, so a linked worktree is
  * never bare. A named work tree overrides it.
  */
-export async function isBare(dispatch: Dispatch, location: RepoLocation): Promise<boolean> {
+export async function isBare(vfs: Files, location: RepoLocation): Promise<boolean> {
   if (location.gitdir.virtual !== location.commondir.virtual) return false
-  return gitBool(await configValues(dispatch, location, 'core.bare'), 'core.bare', false)
+  return gitBool(await configValues(vfs, location, 'core.bare'), 'core.bare', false)
 }
 
 /**
@@ -261,12 +236,11 @@ export async function isBare(dispatch: Dispatch, location: RepoLocation): Promis
  * @param named `--work-tree` or `GIT_WORK_TREE` chose the tree
  */
 export async function requireWorkTree(
-  dispatch: Dispatch,
-  statPath: StatPath,
+  vfs: Files,
   location: RepoLocation,
   named: boolean,
 ): Promise<void> {
-  if (!named && (await isBare(dispatch, location))) throw new NotAWorkTreeError()
-  const info = await statPath(location.worktree)
+  if (!named && (await isBare(vfs, location))) throw new NotAWorkTreeError()
+  const info = await statOf(vfs, location.worktree)
   if (info?.type !== FileType.DIRECTORY) throw new NotAWorkTreeError()
 }

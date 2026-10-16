@@ -38,7 +38,6 @@ from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
     fatal,
-    links_of,
     start_point,
 )
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
@@ -116,21 +115,20 @@ async def reset(
             ``inv.view``.
     """
     view = inv.view or CLIView()
-    dispatch = view.dispatch
-    stat_path = view.stat_path
+    vfs = view.vfs
     texts = inv.texts
     flags = inv.flags
     fl = FlagView(flags)
     try:
-        if dispatch is None or stat_path is None:
+        if vfs is None:
             raise NoWorkspaceError()
         check_switches(inv, texts)
         repo, location = await opened(fl, view)
         named = fl.as_path("work_tree") is not None
-        if not named and await is_bare(dispatch, location):
+        if not named and await is_bare(vfs, location):
             raise BareResetError()
-        await require_work_tree(dispatch, stat_path, location, named)
-        state = await read_index(dispatch, location.gitdir)
+        await require_work_tree(vfs, location, named)
+        state = await read_index(vfs, location.gitdir)
         tree = await asyncio.to_thread(head_entries, repo) or {}
         start = start_point(fl).virtual
         names = {
@@ -162,17 +160,15 @@ async def reset(
         if not texts:
             for key in visible_entries(location, state.conflicts):
                 state.conflicts.pop(key)
-        await write_index(dispatch, location.gitdir, state)
+        await write_index(vfs, location.gitdir, state)
         found = await scan(
-            dispatch,
-            stat_path,
+            vfs,
             location,
             {path.decode("utf-8", errors="replace") for path in state.entries},
             UNTRACKED_NO,
-            links_of(view),
         )
         unstaged = await work_changes(
-            dispatch,
+            vfs,
             location.worktree,
             visible_entries(location, state.entries),
             found,

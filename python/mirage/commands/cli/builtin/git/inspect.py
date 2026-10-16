@@ -75,10 +75,10 @@ from mirage.commands.spec.types import (
     UsageStyle,
 )
 from mirage.io.types import ByteSource, IOResult
-from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 from mirage.utils.posix import compile_posix_regex
 from mirage.version import __version__
+from mirage.workspace.files import Files
 
 SHOW_TOPLEVEL = "--show-toplevel"
 # git's own global spells `--git-dir` too, so rev-parse cannot declare it:
@@ -105,11 +105,9 @@ GET_URL = CommandSpec(
 async def repo_config(inv: CLIInvocation[None], fl: FlagView) -> ConfigFile:
     view = inv.view or CLIView()
     _, location = await opened(fl, view)
-    assert view.dispatch is not None
+    assert view.vfs is not None
     return ConfigFile.from_file(
-        BytesIO(
-            await read_file(view.dispatch, location.commondir.join("config"))
-        )
+        BytesIO(await read_file(view.vfs, location.commondir.join("config")))
     )
 
 
@@ -258,8 +256,8 @@ async def global_sources(
             points.
         listing (bool): ``--list`` was given.
     """
-    dispatch = inv.view.dispatch if inv.view is not None else None
-    if dispatch is None:
+    vfs = inv.view.vfs if inv.view is not None else None
+    if vfs is None:
         raise NoWorkspaceError()
     home = inv.env.get("HOME", "")
     override = inv.env.get("GIT_CONFIG_GLOBAL")
@@ -275,7 +273,7 @@ async def global_sources(
     sources = []
     for source in paths:
         data = await read_optional(
-            dispatch, PathSpec.from_str_path(source, cwd="/")
+            vfs, PathSpec.from_str_path(source, cwd="/")
         )
         if data is not None:
             sources.append((source, ConfigFile.from_file(BytesIO(data))))
@@ -347,9 +345,9 @@ async def config(
         else:
             view = inv.view or CLIView()
             _, location = await opened(fl, view)
-            assert view.dispatch is not None
+            assert view.vfs is not None
             path = location.commondir.join("config")
-            data = await read_file(view.dispatch, path)
+            data = await read_file(view.vfs, path)
             source = path.raw_path
             ordinary = (
                 location.commondir.virtual
@@ -484,7 +482,7 @@ def config_key(key: str) -> str:
 
 
 async def _abbreviated(
-    dispatch: DispatchFn,
+    vfs: Files,
     gitdir: PathSpec,
     table: DictRefsContainer,
     revision: str,
@@ -503,7 +501,7 @@ async def _abbreviated(
     names no ref prints nothing. Pinned against git 2.47.3.
 
     Args:
-        dispatch (DispatchFn): workspace op dispatcher.
+        vfs (Files): the session's files.
         gitdir (PathSpec): this checkout's git directory.
         table (DictRefsContainer): every ref, as load_refs reads them.
         revision (str): the revision as typed.
@@ -517,7 +515,7 @@ async def _abbreviated(
         return b"", f"error: refname '{revision}' is ambiguous\n".encode()
     if not named:
         return b"", b""
-    found = await resolve_symbolic(dispatch, gitdir, table, named[0], True)
+    found = await resolve_symbolic(vfs, gitdir, table, named[0], True)
     if found is None:
         return b"", b""
     return f"{shorten_ref(found.name, known, strict)}\n".encode(), b""
@@ -552,7 +550,7 @@ def _in_git_dir(start: str, location: RepoLocation) -> bool:
 
 
 async def _place_answers(
-    dispatch: DispatchFn, location: RepoLocation, start: str
+    vfs: Files, location: RepoLocation, start: str
 ) -> dict[str, bytes]:
     """The answers to the options that report where the line runs.
 
@@ -563,7 +561,7 @@ async def _place_answers(
     ``--show-toplevel`` is refused.
 
     Args:
-        dispatch (DispatchFn): the workspace dispatcher.
+        vfs (Files): the session's files.
         location (RepoLocation): where the repository was found.
         start (str): the directory the line runs in.
     """
@@ -575,7 +573,7 @@ async def _place_answers(
     )
     in_work_tree = (
         not in_git_dir
-        and not await is_bare(dispatch, location)
+        and not await is_bare(vfs, location)
         and (start == location.worktree.virtual or start.startswith(top))
     )
     prefix = (
@@ -652,14 +650,14 @@ async def rev_parse(
             _abbrev_strict(mode, True)
         view = inv.view or CLIView()
         repo, location = await opened(fl, view, work_tree=toplevel)
-        assert view.dispatch is not None
+        assert view.vfs is not None
         start = start_point(fl).virtual
         if toplevel and _in_git_dir(start, location):
             raise NotAWorkTreeError()
-        answers = await _place_answers(view.dispatch, location, start)
+        answers = await _place_answers(view.vfs, location, start)
         if fl.as_bool("is_shallow_repository"):
             shallow = await read_optional(
-                view.dispatch, location.commondir.join("shallow")
+                view.vfs, location.commondir.join("shallow")
             )
             answers["--is-shallow-repository"] = (
                 f"{str(shallow is not None).lower()}\n".encode()
@@ -669,11 +667,9 @@ async def rev_parse(
         width = (
             None if short is None else _short_width(short, abbrev_for(repo))
         )
-        table = await load_refs(
-            view.dispatch, location.gitdir, location.commondir
-        )
+        table = await load_refs(view.vfs, location.gitdir, location.commondir)
         warn = await config_bool(
-            view.dispatch, location, b"core", b"warnambiguousrefs", True
+            view.vfs, location, b"core", b"warnambiguousrefs", True
         )
         strict = warn if mode is None else _abbrev_strict(mode, warn)
         shown: list[bytes] = []
@@ -703,7 +699,7 @@ async def rev_parse(
                 shown.append(f"{hexid[:length]}\n".encode())
                 continue
             line, error = await _abbreviated(
-                view.dispatch, location.gitdir, table, revision, strict, warn
+                view.vfs, location.gitdir, table, revision, strict, warn
             )
             shown.append(line)
             # git prints each name's error right after its warning, so the

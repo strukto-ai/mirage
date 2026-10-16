@@ -84,17 +84,16 @@ export async function reset(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   let unstaged: Map<string, string>
   try {
-    const dispatch = view.dispatch
-    const statPath = view.statPath
-    if (statPath === undefined || dispatch === undefined) {
+    const vfs = view.vfs
+    if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
     checkSwitches(inv, texts)
     const repo = await opened(fl, view)
     const named = fl.asPath('work_tree') !== undefined
-    if (!named && (await isBare(dispatch, repo.location))) throw new BareResetError()
-    await requireWorkTree(dispatch, statPath, repo.location, named)
-    const state = await readIndex(repo, dispatch)
+    if (!named && (await isBare(vfs, repo.location))) throw new BareResetError()
+    await requireWorkTree(vfs, repo.location, named)
+    const state = await readIndex(repo, vfs)
     const tree = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
     const start = startPoint(fl).virtual
     const names = new Set([
@@ -121,18 +120,16 @@ export async function reset(inv: CLIInvocation): Promise<CommandFnResult> {
     }
     if (texts.length === 0) removed.push(...visibleEntries(repo.location, state.conflicts).keys())
     await updateIndex(repo, staged, removed)
-    const after = await readIndex(repo, dispatch)
+    const after = await readIndex(repo, vfs)
     const found = await scan(
-      dispatch,
-      statPath,
+      vfs,
       repo.location,
       new Set(visibleEntries(repo.location, after.entries).keys()),
       UNTRACKED_NO,
-      view.ns?.links ?? null,
     )
     unstaged = await workChanges(
       repo,
-      dispatch,
+      vfs,
       repo.location.worktree,
       visibleEntries(repo.location, after.entries),
       found,

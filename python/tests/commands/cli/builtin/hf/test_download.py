@@ -29,6 +29,7 @@ from mirage.core.hf_hub.repo import Absence
 from mirage.core.hf_hub.tree import parse_entry
 from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.workspace.files import Files
 from tests.commands.cli.builtin.hf.conftest import inv
 from tests.core.hf_hub.conftest import dir_row, file_row
 
@@ -347,7 +348,7 @@ async def test_ensure_dir_tolerates_a_parent_another_worker_just_made():
         raise AssertionError(f"unexpected op {op}")
 
     await asyncio.gather(
-        ensure_dir(dispatch, PathSpec.from_str_path("/work/out")),
-        ensure_dir(dispatch, PathSpec.from_str_path("/work/out")),
+        ensure_dir(Files([], dispatch), PathSpec.from_str_path("/work/out")),
+        ensure_dir(Files([], dispatch), PathSpec.from_str_path("/work/out")),
     )
     assert dirs == {"/work", "/work/out"}

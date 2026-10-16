@@ -63,11 +63,11 @@ async def ls_files(
         check_switches(inv, inv.texts)
         view = inv.view or CLIView()
         _, location = await opened(fl, view)
-        assert view.dispatch is not None
+        assert view.vfs is not None
         fully = await config_bool(
-            view.dispatch, location, b"core", b"quotepath", True
+            view.vfs, location, b"core", b"quotepath", True
         )
-        state = await read_index(view.dispatch, location.gitdir)
+        state = await read_index(view.vfs, location.gitdir)
         start = start_point(fl).virtual
         prefix = repo_relative(location, start, ".")
         patterns = pathspec_patterns(location, start, inv.texts)
@@ -114,7 +114,7 @@ async def ls_tree(
             raise UsageError("", verb_usage(inv))
         view = inv.view or CLIView()
         repo, location = await opened(fl, view)
-        assert view.dispatch is not None
+        assert view.vfs is not None
         name, *paths = inv.texts
         try:
             tree = await asyncio.to_thread(resolve_tree, repo, name)
@@ -148,7 +148,7 @@ async def ls_tree(
             fl.as_bool("d"),
         )
         fully = await config_bool(
-            view.dispatch, location, b"core", b"quotepath", True
+            view.vfs, location, b"core", b"quotepath", True
         )
         nul = fl.as_bool("z")
         names = fl.as_bool("name_only") or fl.as_bool("name_status")

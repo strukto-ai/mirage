@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import type { LinkView, StatPath } from '../../../../view/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIInvocation } from '../../types.ts'
@@ -25,7 +24,8 @@ import { readHead } from './refs.ts'
 import { branchLine, longFormat, relativeEntries, shortFormat } from './render.ts'
 import { configBool, type Repo } from './repo.ts'
 import { opened } from './session.ts'
-import type { Dispatch, HeadRef, StatusEntry } from './types.ts'
+import type { HeadRef, StatusEntry } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 import { fatal, startPoint } from './util.ts'
 import { repoRelative } from './pathspec.ts'
 import { UNTRACKED_ALL, UNTRACKED_NO, UNTRACKED_NORMAL } from './worktree.ts'
@@ -86,13 +86,11 @@ async function displayed(repo: Repo, start: string, rows: StatusEntry[]): Promis
  */
 export async function renderReport(
   repo: Repo,
-  dispatch: Dispatch,
-  statPath: StatPath,
+  vfs: Files,
   head: HeadRef,
   start: string,
-  links: LinkView | null = null,
 ): Promise<string> {
-  const [rows, state, noCommits] = await collect(repo, dispatch, statPath, UNTRACKED_NORMAL, links)
+  const [rows, state, noCommits] = await collect(repo, vfs, UNTRACKED_NORMAL)
   const fully = await configBool(repo, 'core.quotepath', true)
   const detached = head.branch !== null ? '' : await detachedLine(repo, head)
   return longFormat(
@@ -119,22 +117,14 @@ export async function status(inv: CLIInvocation): Promise<CommandFnResult> {
   const view = inv.view ?? {}
   const fl = new FlagView(inv.flags)
   try {
-    const dispatch = view.dispatch
-    const statPath = view.statPath
-    if (statPath === undefined || dispatch === undefined) {
+    const vfs = view.vfs
+    if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
     const parsed = parseFlags(fl)
     const repo = await opened(fl, view, true)
-    const head = await readHead(dispatch, repo.location.gitdir)
-    const [rows, state, noCommits] = await collect(
-      repo,
-      dispatch,
-      statPath,
-      parsed.untracked,
-      view.ns?.links ?? null,
-      parsed.ignored,
-    )
+    const head = await readHead(vfs, repo.location.gitdir)
+    const [rows, state, noCommits] = await collect(repo, vfs, parsed.untracked, parsed.ignored)
     const fully = await configBool(repo, 'core.quotepath', true)
     const shown = parsed.porcelain ? rows : await displayed(repo, startPoint(fl).virtual, rows)
     const upstream = await branchUpstream(repo, head, noCommits)

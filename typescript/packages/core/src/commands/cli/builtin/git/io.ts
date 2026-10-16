@@ -16,17 +16,47 @@ import { FileType, LINK_TARGET_KEY, type FileStat, PathSpec } from '../../../../
 
 import { eexist, isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import type { LinkView, MountView, StatPath } from '../../../../view/types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 import { PERMISSION_BITS, SYMLINK_MODE } from './constants.ts'
 import { MountInWayError } from './errors.ts'
-import type { Dispatch } from './types.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 
-/** Read one virtual path through the workspace dispatcher. */
-export async function readFile(dispatch: Dispatch, path: PathSpec): Promise<Uint8Array> {
-  const [data] = await dispatch('read', path)
-  return data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBufferLike)
+/** Read one virtual path through the session's files. */
+export async function readFile(vfs: Files, path: PathSpec): Promise<Uint8Array> {
+  return vfs.read(path)
+}
+
+/** What stands at a path, a link followed, null when nothing does. */
+export async function statOf(vfs: Files, path: PathSpec): Promise<FileStat | null> {
+  try {
+    return await vfs.stat(path)
+  } catch (err) {
+    if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return null
+    throw err
+  }
+}
+
+/**
+ * What sits at a path, a link reported as itself, null when nothing does.
+ *
+ * git lstats the working tree, so a symlink is an entry in its own right: it
+ * records mode 120000 and the target string, and reports a link to nothing as
+ * untracked rather than as absent.
+ */
+export async function lstat(vfs: Files, path: PathSpec): Promise<FileStat | null> {
+  try {
+    return await vfs.stat(path, undefined, { nofollow: true })
+  } catch (err) {
+    if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return null
+    throw err
+  }
+}
+
+/** Whether a path names a symlink itself, the lstat a walk asks before it
+ * follows anything. */
+export async function isLink(vfs: Files, path: PathSpec): Promise<boolean> {
+  return (await lstat(vfs, path))?.type === FileType.SYMLINK
 }
 
 /**
@@ -38,16 +68,12 @@ export async function readFile(dispatch: Dispatch, path: PathSpec): Promise<Uint
  * bytes behind the link never match). The target is namespace state, which is
  * why it arrives on the stat rather than from a read.
  */
-export async function entryBytes(
-  dispatch: Dispatch,
-  path: PathSpec,
-  info: FileStat,
-): Promise<Uint8Array> {
+export async function entryBytes(vfs: Files, path: PathSpec, info: FileStat): Promise<Uint8Array> {
   if (info.type === FileType.SYMLINK) {
     const target = info.extra[LINK_TARGET_KEY]
     if (typeof target === 'string') return new TextEncoder().encode(target)
   }
-  return readFile(dispatch, path)
+  return readFile(vfs, path)
 }
 
 /**
@@ -66,8 +92,8 @@ export async function entryBytes(
  * ready to reappear when the link goes. The fourth, a link over a link, is the
  * retarget a checkout does when a branch moves where a link points: symlink(2)
  * does not overwrite, so the old name is removed rather than replaced in place.
- * The check is a namespace lookup, so the ordinary file-for-file case costs
- * nothing.
+ * The check is one lstat, which the listing the checkout walked usually
+ * answers.
  *
  * The permission bits are part of the entry, not decoration on it. git records
  * exactly one of them, the owner's execute bit, and puts it back in both
@@ -80,28 +106,23 @@ export async function entryBytes(
  * natively, so nothing reaches the overlay.
  */
 export async function restoreEntry(
-  dispatch: Dispatch,
+  vfs: Files,
   path: PathSpec,
   mode: string,
   blob: Uint8Array,
-  links: LinkView | null = null,
 ): Promise<void> {
-  const linked = links !== null && links.statAt(path.virtual) !== null
+  const linked = await isLink(vfs, path)
   if (mode === SYMLINK_MODE) {
-    await removeFile(dispatch, path)
+    await removeFile(vfs, path)
     // symlink(2) needs the directory above the entry, as the write below
     // does, so a link alone in a new directory gets one too.
-    await ensureDir(dispatch, path.parent)
-    await dispatch('symlink', path, [], {
-      target: new TextDecoder().decode(blob),
-    })
+    await ensureDir(vfs, path.parent)
+    await vfs.symlink(path, new TextDecoder().decode(blob))
     return
   }
-  if (linked) await removeFile(dispatch, path)
-  await writeFile(dispatch, path, blob)
-  await dispatch('setattr', path, [], {
-    mode: Number.parseInt(mode, 8) & PERMISSION_BITS,
-  })
+  if (linked) await removeFile(vfs, path)
+  await writeFile(vfs, path, blob)
+  await vfs.setattr(path, { mode: Number.parseInt(mode, 8) & PERMISSION_BITS })
 }
 
 /**
@@ -117,22 +138,15 @@ export async function restoreEntry(
  * link is replaced by an empty one, and a missing one is created. Pinned
  * against git 2.50.1.
  *
- * @param dispatch workspace op dispatcher
- * @param statPath the data plane's stat, which dereferences
+ * @param vfs the session's files
  * @param path absolute virtual path of the submodule
- * @param links the name plane's link facts, null when no namespace is wired
  */
-export async function keepGitlink(
-  dispatch: Dispatch,
-  statPath: StatPath,
-  path: PathSpec,
-  links: LinkView | null,
-): Promise<void> {
-  const linked = (links?.statAt(path.virtual) ?? null) !== null
-  const info = linked ? null : await statPath(path)
+export async function keepGitlink(vfs: Files, path: PathSpec): Promise<void> {
+  const linked = await isLink(vfs, path)
+  const info = linked ? null : await statOf(vfs, path)
   if (info !== null && info.type === FileType.DIRECTORY) return
-  if (linked || info !== null) await removeFile(dispatch, path)
-  await ensureDir(dispatch, path)
+  if (linked || info !== null) await removeFile(vfs, path)
+  await ensureDir(vfs, path)
 }
 
 /**
@@ -147,50 +161,42 @@ export async function keepGitlink(
  * either way, which is the whole point of warning instead of throwing. Pinned
  * against git 2.50.1.
  *
- * @param dispatch workspace op dispatcher
- * @param statPath the data plane's stat, which dereferences
+ * @param vfs the session's files
  * @param path absolute virtual path of the submodule
  * @param name the path as git prints it, repository-relative
- * @param links the name plane's link facts, null when no namespace is wired
  * @returns the warning line to write, null when there is nothing to say
  */
 export async function dropGitlink(
-  dispatch: Dispatch,
-  statPath: StatPath,
+  vfs: Files,
   path: PathSpec,
   name: string,
-  links: LinkView | null,
 ): Promise<string | null> {
   // A link is answered before the stat, which dereferences: rmdir never follows
   // one, so a link to a directory is ENOTDIR here even though stat would call
   // it a directory.
-  if ((links?.statAt(path.virtual) ?? null) !== null) {
+  if (await isLink(vfs, path)) {
     return `warning: unable to rmdir '${name}': Not a directory\n`
   }
-  const info = await statPath(path)
+  const info = await statOf(vfs, path)
   if (info === null) return null
   if (info.type !== FileType.DIRECTORY) {
     return `warning: unable to rmdir '${name}': Not a directory\n`
   }
-  if ((await readNames(dispatch, path)).length > 0) {
+  if ((await readNames(vfs, path)).length > 0) {
     return `warning: unable to rmdir '${name}': Directory not empty\n`
   }
-  await dispatch('rmdir', path)
+  await vfs.rmdir(path)
   return null
 }
 
 /** Read a byte range of one virtual path. */
 export async function readRange(
-  dispatch: Dispatch,
+  vfs: Files,
   path: PathSpec,
   offset: number,
   size: number,
 ): Promise<Uint8Array> {
-  const [data] = await dispatch('read', path, [], {
-    offset,
-    size,
-  })
-  return data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBufferLike)
+  return vfs.read(path, { offset, size })
 }
 
 /**
@@ -199,9 +205,9 @@ export async function readRange(
  * `packed-refs` and `HEAD`-adjacent files are absent in perfectly valid
  * repositories, so a miss is an answer rather than an error.
  */
-export async function readOptional(dispatch: Dispatch, path: PathSpec): Promise<Uint8Array | null> {
+export async function readOptional(vfs: Files, path: PathSpec): Promise<Uint8Array | null> {
   try {
-    return await readFile(dispatch, path)
+    return await readFile(vfs, path)
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return null
     throw err
@@ -209,10 +215,9 @@ export async function readOptional(dispatch: Dispatch, path: PathSpec): Promise<
 }
 
 /** List a directory, empty when it does not exist. */
-export async function readNames(dispatch: Dispatch, path: PathSpec): Promise<string[]> {
+export async function readNames(vfs: Files, path: PathSpec): Promise<string[]> {
   try {
-    const [entries] = await dispatch('readdir', path)
-    return [...((entries as string[] | null) ?? [])]
+    return await vfs.readdir(path)
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return []
     throw err
@@ -233,12 +238,12 @@ export async function readNames(dispatch: Dispatch, path: PathSpec): Promise<str
  * directory is the set of keys under it, so creating one again costs a no-op
  * rather than an error.
  */
-export async function ensureDir(dispatch: Dispatch, path: PathSpec): Promise<void> {
+export async function ensureDir(vfs: Files, path: PathSpec): Promise<void> {
   const missing: PathSpec[] = []
   let current = path
   while (current.virtual !== '/') {
     try {
-      await dispatch('stat', current)
+      await vfs.stat(current)
       break
     } catch (err) {
       if (!(isMissingPath(err) || isEnotdir(err) || isEisdir(err))) throw err
@@ -247,7 +252,7 @@ export async function ensureDir(dispatch: Dispatch, path: PathSpec): Promise<voi
     }
   }
   for (const target of missing.reverse()) {
-    await dispatch('mkdir', target)
+    await vfs.mkdir(target)
   }
 }
 
@@ -258,10 +263,9 @@ export async function ensureDir(dispatch: Dispatch, path: PathSpec): Promise<voi
  * directory misses on a keyed store and raises EISDIR on disk, so "the read did
  * not work" says nothing about what the path is.
  */
-export async function isDirectory(dispatch: Dispatch, path: PathSpec): Promise<boolean> {
+export async function isDirectory(vfs: Files, path: PathSpec): Promise<boolean> {
   try {
-    const [stat] = await dispatch('stat', path)
-    return (stat as { type?: string } | null)?.type === FileType.DIRECTORY
+    return (await vfs.stat(path)).type === FileType.DIRECTORY
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return false
     throw err
@@ -269,9 +273,9 @@ export async function isDirectory(dispatch: Dispatch, path: PathSpec): Promise<b
 }
 
 /** Whether a point lookup finds anything at a path. */
-export async function exists(dispatch: Dispatch, path: PathSpec): Promise<boolean> {
+export async function exists(vfs: Files, path: PathSpec): Promise<boolean> {
   try {
-    await dispatch('stat', path)
+    await vfs.stat(path)
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return false
     throw err
@@ -290,21 +294,17 @@ export async function exists(dispatch: Dispatch, path: PathSpec): Promise<boolea
  * refuses and so does this (EEXIST), untouched. The look and the create are two
  * ops, since the dispatcher has no exclusive create.
  */
-export async function takeLock(dispatch: Dispatch, path: PathSpec): Promise<void> {
+export async function takeLock(vfs: Files, path: PathSpec): Promise<void> {
   const lock = PathSpec.fromStrPath(`${path.dotted ?? path.virtual}.lock`, undefined, '/')
-  if (await exists(dispatch, lock)) throw eexist(lock.virtual)
-  await dispatch('write', lock, [new Uint8Array()])
-  await removeFile(dispatch, lock)
+  if (await exists(vfs, lock)) throw eexist(lock.virtual)
+  await vfs.write(lock, new Uint8Array())
+  await removeFile(vfs, lock)
 }
 
 /** Write one virtual path, creating the directories above it. */
-export async function writeFile(
-  dispatch: Dispatch,
-  path: PathSpec,
-  data: Uint8Array,
-): Promise<void> {
-  await ensureDir(dispatch, path.parent)
-  await dispatch('write', path, [data])
+export async function writeFile(vfs: Files, path: PathSpec, data: Uint8Array): Promise<void> {
+  await ensureDir(vfs, path.parent)
+  await vfs.write(path, data)
 }
 
 /**
@@ -314,9 +314,9 @@ export async function writeFile(
  * path deletes whatever ref or lock may or may not exist, and a checkout removes
  * files the other branch does not have.
  */
-export async function removeFile(dispatch: Dispatch, path: PathSpec): Promise<void> {
+export async function removeFile(vfs: Files, path: PathSpec): Promise<void> {
   try {
-    await dispatch('unlink', path)
+    await vfs.unlink(path)
   } catch (err) {
     if (!(isMissingPath(err) || isEnotdir(err) || isEisdir(err))) throw err
   }
@@ -334,32 +334,29 @@ export async function removeFile(dispatch: Dispatch, path: PathSpec): Promise<vo
  * git's `create_directories` and `check_leading_path`, and both halves were
  * probed against git 2.50.1.
  *
- * The namespace is asked before the data plane, and the order is the whole
- * point: `statPath` dereferences, so a link to a directory stats as a directory
- * and the walk would carry on straight through it. Only the name plane can say
- * that the component is a link.
+ * The lstat is asked before the stat, and the order is the whole point:
+ * `stat` dereferences, so a link to a directory stats as a directory and the
+ * walk would carry on straight through it.
  *
  * An exact-path lookup cannot see any of this, since what is in the way sits
  * above the name being looked up rather than on it.
  *
- * @param statPath the data plane's stat, which dereferences
+ * @param vfs the session's files
  * @param worktree absolute virtual path of the working tree root
  * @param name the entry, repository-relative
- * @param links the name plane's link facts, null when no namespace is wired
  * @returns the absolute virtual path of the nearest such component, null when
  *   every component above the entry is a directory
  */
 export async function blockingAncestor(
-  statPath: StatPath,
+  vfs: Files,
   worktree: PathSpec,
   name: string,
-  links: LinkView | null,
 ): Promise<PathSpec | null> {
   let current = worktree
   for (const part of name.split('/').slice(0, -1)) {
     current = current.join(part)
-    if ((links?.statAt(current.virtual) ?? null) !== null) return current
-    const info = await statPath(current)
+    if (await isLink(vfs, current)) return current
+    const info = await statOf(vfs, current)
     if (info !== null && info.type !== FileType.DIRECTORY) return current
   }
   return null
@@ -373,12 +370,8 @@ export async function blockingAncestor(
  * destination's directory is not created: git's rename fails when it is
  * missing, and the caller words that failure.
  */
-export async function renamePath(
-  dispatch: Dispatch,
-  source: PathSpec,
-  target: PathSpec,
-): Promise<void> {
-  await dispatch('rename', source, [target])
+export async function renamePath(vfs: Files, source: PathSpec, target: PathSpec): Promise<void> {
+  await vfs.rename(source, target)
 }
 
 /**
@@ -392,25 +385,20 @@ export async function renamePath(
  * mirrors the write loop's exactly, a link included, so a destination the loop
  * would not clear is not refused here either.
  *
- * @param statPath the data plane's stat, which dereferences
+ * @param vfs the session's files
  * @param worktree absolute virtual path of the working tree root
  * @param names repository-relative paths about to be written
- * @param links the name plane's link facts, null when no namespace is wired
- * @param mounts the name plane's mount boundaries, null when none is wired
  */
 export async function refuseReplacedMounts(
-  statPath: StatPath,
+  vfs: Files,
   worktree: PathSpec,
   names: readonly string[],
-  links: LinkView | null,
-  mounts: MountView | null,
 ): Promise<void> {
-  if (mounts === null) return
   for (const name of [...names].sort(compareCodePoints)) {
     const where = worktree.join(name)
-    if ((links?.statAt(where.virtual) ?? null) !== null) continue
-    const info = await statPath(where)
-    if (info !== null && info.type === FileType.DIRECTORY) refuseMount(mounts, where)
+    if (await isLink(vfs, where)) continue
+    const info = await statOf(vfs, where)
+    if (info !== null && info.type === FileType.DIRECTORY) refuseMount(vfs, where)
   }
 }
 
@@ -424,20 +412,19 @@ export async function refuseReplacedMounts(
  * mount root itself. Asking the mount table is the only way to see the
  * boundary: the parent backend cannot.
  *
- * Two questions, two fields, the way `MountView` says: the boundary is
- * *avoided* by the unfiltered list, so a mount this session cannot see still
- * blocks the removal, and it is *named* from the visible one, since naming a
- * hidden mount is what the hide exists to prevent.
+ * A mount this session cannot see still blocks the removal: `submounts`
+ * reports it by the nearest folder above it the session sees, which is not a
+ * mount root, so only a visible one is named, naming a hidden mount being what
+ * the hide exists to prevent.
  *
- * @param mounts the name plane's mount boundaries, null when none is wired
+ * @param vfs the session's files
  * @param path absolute virtual path about to be removed
  */
-export function refuseMount(mounts: MountView | null, path: PathSpec): void {
-  if (mounts === null) return
-  if (mounts.isRoot(path.virtual)) throw new MountInWayError(path.virtual, path.virtual)
-  if (mounts.descendants(path.virtual).length === 0) return
-  const named = [...mounts.visibleDescendants(path.virtual)].sort(compareCodePoints)
-  throw new MountInWayError(path.virtual, named[0] ?? null)
+export function refuseMount(vfs: Files, path: PathSpec): void {
+  if (vfs.isMount(path)) throw new MountInWayError(path.virtual, path.virtual)
+  const below = vfs.submounts(path)
+  if (below.length === 0) return
+  throw new MountInWayError(path.virtual, below.find((root) => vfs.isMount(root)) ?? null)
 }
 
 /**
@@ -452,32 +439,25 @@ export function refuseMount(mounts: MountView | null, path: PathSpec): void {
  * A file and an absent path both walk out through the same two steps, since
  * `readdir` reads a non-directory as nothing there and `rmdir` refuses it.
  *
- * A child that is a symlink is unlinked, never descended into. The name plane
- * has to say so, because `readdir` dereferences: a link to a directory lists
+ * A child that is a symlink is unlinked, never descended into. Its lstat has
+ * to say so, because `readdir` dereferences: a link to a directory lists
  * that directory's contents, and recursing on them deletes a tree outside the
  * one being replaced. `rm -r` does not follow a link either, so a branch
  * recording a file where the working tree has a directory takes the link away
  * with the directory and leaves whatever it pointed at exactly as it was.
  * Pinned against git 2.50.1.
  *
- * @param dispatch workspace op dispatcher
+ * @param vfs the session's files
  * @param path absolute virtual path to clear
- * @param links the name plane's link facts, null when no namespace is wired
- * @param mounts the name plane's mount boundaries, null when none is wired
  */
-export async function removeTree(
-  dispatch: Dispatch,
-  path: PathSpec,
-  links: LinkView | null,
-  mounts: MountView | null,
-): Promise<void> {
+export async function removeTree(vfs: Files, path: PathSpec): Promise<void> {
   // Before the first deletion rather than at the boundary itself, so a mount
   // deep under the directory costs the caller nothing: the scan sees every
   // depth at once and the tree is still whole when it refuses.
-  refuseMount(mounts, path)
+  refuseMount(vfs, path)
   let entries: string[] = []
   try {
-    entries = await readNames(dispatch, path)
+    entries = await readNames(vfs, path)
   } catch (err) {
     // `readNames` reads only an absent path as nothing there, where python's
     // `read_names` folds "not a directory" in as well (MISS_ERRORS carries
@@ -491,21 +471,21 @@ export async function removeTree(
     const name = entryName(entry)
     if (name === '') continue
     const child = path.join(name)
-    if ((links?.statAt(child.virtual) ?? null) !== null) {
-      await removeFile(dispatch, child)
+    if (await isLink(vfs, child)) {
+      await removeFile(vfs, child)
       continue
     }
-    await removeTree(dispatch, child, links, mounts)
+    await removeTree(vfs, child)
   }
   try {
-    await dispatch('rmdir', path)
+    await vfs.rmdir(path)
   } catch (err) {
     // A directory the walk above was supposed to empty is a real failure and
     // stays thrown. Everything else means this was no directory (or is
     // already gone), so the path is whatever one file it is and unlink
     // tolerates an absent one.
     if ((err as { code?: string }).code === 'ENOTEMPTY') throw err
-    await removeFile(dispatch, path)
+    await removeFile(vfs, path)
   }
 }
 
@@ -516,16 +496,14 @@ export async function removeTree(
  * restored away, so `rm -r docs` leaves no `docs/` behind. The walk stops at the
  * first directory that still holds something and never touches `stop` itself.
  *
- * @param dispatch workspace op dispatcher
+ * @param vfs the session's files
  * @param path the file that was removed
  * @param stop the working tree root
- * @param mounts the name plane's mount boundaries, null when none is wired
  */
 export async function removeEmptyParents(
-  dispatch: Dispatch,
+  vfs: Files,
   path: PathSpec,
   stop: PathSpec,
-  mounts: MountView | null,
 ): Promise<void> {
   const root = rstripSlash(stop.virtual) || '/'
   let current = path.parent
@@ -534,10 +512,10 @@ export async function removeEmptyParents(
     // whole backend: removing it here would destroy the store behind it as a
     // side effect of tidying up. The walk stops rather than refusing, because
     // nothing the caller asked for has failed.
-    if (mounts?.isRoot(current.virtual) === true) return
-    if ((await readNames(dispatch, current)).length > 0) return
+    if (vfs.isMount(current)) return
+    if ((await readNames(vfs, current)).length > 0) return
     try {
-      await dispatch('rmdir', current)
+      await vfs.rmdir(current)
     } catch (err) {
       if (!(isMissingPath(err) || isEnotdir(err) || isEisdir(err))) throw err
       return

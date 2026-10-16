@@ -17,7 +17,8 @@ import { compareCodePoints } from '../../../../utils/sort.ts'
 import { isDirectory, readFile, readNames, readOptional, removeFile, writeFile } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 
-import type { Dispatch, HeadRef, Refspec, SymbolicEnd } from './types.ts'
+import type { HeadRef, Refspec, SymbolicEnd } from './types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 
 const HEAD_FILE = 'HEAD'
 const PACKED_REFS = 'packed-refs'
@@ -37,8 +38,8 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
  * when the checkout is detached. A ref outside `refs/heads` keeps its full name,
  * which is what git shows for a checked-out tag or remote-tracking ref.
  */
-export async function readHead(dispatch: Dispatch, gitdir: PathSpec): Promise<HeadRef> {
-  const text = DEC.decode(await readFile(dispatch, gitdir.join(HEAD_FILE))).trim()
+export async function readHead(vfs: Files, gitdir: PathSpec): Promise<HeadRef> {
+  const text = DEC.decode(await readFile(vfs, gitdir.join(HEAD_FILE))).trim()
   if (!text.startsWith(SYMREF_PREFIX)) {
     return { branch: null, ref: null, commit: text === '' ? null : text }
   }
@@ -55,20 +56,20 @@ export async function readHead(dispatch: Dispatch, gitdir: PathSpec): Promise<He
  * level.
  */
 async function walkLooseRefs(
-  dispatch: Dispatch,
+  vfs: Files,
   root: PathSpec,
   prefix: string,
   refs: Map<string, string>,
 ): Promise<void> {
-  for (const entry of await readNames(dispatch, root)) {
+  for (const entry of await readNames(vfs, root)) {
     const name = entryName(entry)
     if (name === '') continue
     const child = root.join(name)
-    if (await isDirectory(dispatch, child)) {
-      await walkLooseRefs(dispatch, child, `${prefix}/${name}`, refs)
+    if (await isDirectory(vfs, child)) {
+      await walkLooseRefs(vfs, child, `${prefix}/${name}`, refs)
       continue
     }
-    const data = await readOptional(dispatch, child)
+    const data = await readOptional(vfs, child)
     if (data === null) continue
     const value = DEC.decode(data).trim()
     if (value !== '') refs.set(`${prefix}/${name}`, value)
@@ -87,12 +88,12 @@ async function walkLooseRefs(
  * share branches at all.
  */
 export async function writeRef(
-  dispatch: Dispatch,
+  vfs: Files,
   commondir: PathSpec,
   ref: string,
   sha: string,
 ): Promise<void> {
-  await writeFile(dispatch, commondir.join(ref), ENC.encode(`${sha}\n`))
+  await writeFile(vfs, commondir.join(ref), ENC.encode(`${sha}\n`))
 }
 
 /**
@@ -134,27 +135,23 @@ export function withoutPacked(text: string, ref: string): string | null {
  * `git pack-refs` a ref exists nowhere else, and a force-updated one exists in
  * both, where dropping the loose file would resurrect the older packed value.
  */
-export async function deleteRef(
-  dispatch: Dispatch,
-  commondir: PathSpec,
-  ref: string,
-): Promise<void> {
-  await removeFile(dispatch, commondir.join(ref))
+export async function deleteRef(vfs: Files, commondir: PathSpec, ref: string): Promise<void> {
+  await removeFile(vfs, commondir.join(ref))
   const path = commondir.join(PACKED_REFS)
-  const data = await readOptional(dispatch, path)
+  const data = await readOptional(vfs, path)
   if (data === null) return
   const rewritten = withoutPacked(DEC.decode(data), ref)
-  if (rewritten !== null) await writeFile(dispatch, path, ENC.encode(rewritten))
+  if (rewritten !== null) await writeFile(vfs, path, ENC.encode(rewritten))
 }
 
 /** Point HEAD at a branch, symbolically. */
-export async function setHead(dispatch: Dispatch, gitdir: PathSpec, ref: string): Promise<void> {
-  await writeFile(dispatch, gitdir.join(HEAD_FILE), ENC.encode(`${SYMREF_PREFIX}${ref}\n`))
+export async function setHead(vfs: Files, gitdir: PathSpec, ref: string): Promise<void> {
+  await writeFile(vfs, gitdir.join(HEAD_FILE), ENC.encode(`${SYMREF_PREFIX}${ref}\n`))
 }
 
 /** Point HEAD straight at a commit, detaching it from any branch. */
-export async function detachHead(dispatch: Dispatch, gitdir: PathSpec, sha: string): Promise<void> {
-  await writeFile(dispatch, gitdir.join(HEAD_FILE), ENC.encode(`${sha}\n`))
+export async function detachHead(vfs: Files, gitdir: PathSpec, sha: string): Promise<void> {
+  await writeFile(vfs, gitdir.join(HEAD_FILE), ENC.encode(`${sha}\n`))
 }
 
 /**
@@ -191,27 +188,27 @@ function parsePackedRefs(data: Uint8Array): Map<string, string> {
  * and per-checkout refs (`refs/bisect`, `refs/worktree`), so the shared table is
  * read first and the worktree's own overrides it, then HEAD last of all.
  *
- * @param dispatch workspace op dispatcher
+ * @param vfs the session's files
  * @param gitdir this checkout's git directory, which owns HEAD
  * @param commondir the shared git directory, which owns the branches; null means
  *   it is the same directory, which is every ordinary checkout
  */
 export async function loadRefs(
-  dispatch: Dispatch,
+  vfs: Files,
   gitdir: PathSpec,
   commondir: PathSpec | null = null,
 ): Promise<Map<string, string>> {
   const shared = commondir ?? gitdir
   const refs = new Map<string, string>()
-  const packed = await readOptional(dispatch, shared.join(PACKED_REFS))
+  const packed = await readOptional(vfs, shared.join(PACKED_REFS))
   if (packed !== null) {
     for (const [name, sha] of parsePackedRefs(packed)) refs.set(name, sha)
   }
-  await walkLooseRefs(dispatch, shared.join(REFS_DIR), REFS_DIR, refs)
+  await walkLooseRefs(vfs, shared.join(REFS_DIR), REFS_DIR, refs)
   if (gitdir.virtual !== shared.virtual) {
-    await walkLooseRefs(dispatch, gitdir.join(REFS_DIR), REFS_DIR, refs)
+    await walkLooseRefs(vfs, gitdir.join(REFS_DIR), REFS_DIR, refs)
   }
-  const head = await readHead(dispatch, gitdir)
+  const head = await readHead(vfs, gitdir)
   if (head.ref !== null) refs.set(HEAD_FILE, `${SYMREF_PREFIX}${head.ref}`)
   else if (head.commit !== null) refs.set(HEAD_FILE, head.commit)
   return refs
@@ -294,13 +291,13 @@ export function wholeRefName(name: string): boolean {
  * Read from the ref table, or for a one-level name outside it (`ORIG_HEAD` and
  * its kin) from the checkout's git directory, which is where git keeps them.
  *
- * @param dispatch workspace op dispatcher
+ * @param vfs the session's files
  * @param gitdir this checkout's git directory
  * @param table every ref, as loadRefs reads them
  * @param name the full ref name
  */
 export async function rawRef(
-  dispatch: Dispatch,
+  vfs: Files,
   gitdir: PathSpec,
   table: ReadonlyMap<string, string>,
   name: string,
@@ -308,7 +305,7 @@ export async function rawRef(
   const known = table.get(name)
   if (known !== undefined) return known
   if (name.startsWith(`${REFS_DIR}/`)) return null
-  const data = await readOptional(dispatch, gitdir.join(name))
+  const data = await readOptional(vfs, gitdir.join(name))
   return data === null ? null : DEC.decode(data).trim()
 }
 
@@ -320,14 +317,14 @@ export async function rawRef(
  * no such ref: a name its rules refuse, or a chain more than five deep. Pinned
  * against git 2.47.3.
  *
- * @param dispatch workspace op dispatcher
+ * @param vfs the session's files
  * @param gitdir this checkout's git directory
  * @param table every ref, as loadRefs reads them
  * @param name the full ref name to start from
  * @param recurse follow every hop rather than the first
  */
 export async function resolveSymbolic(
-  dispatch: Dispatch,
+  vfs: Files,
   gitdir: PathSpec,
   table: ReadonlyMap<string, string>,
   name: string,
@@ -337,7 +334,7 @@ export async function resolveSymbolic(
   let current = name
   let symbolic = false
   for (let depth = 0; depth < MAX_SYMREF_DEPTH; depth++) {
-    const raw = await rawRef(dispatch, gitdir, table, current)
+    const raw = await rawRef(vfs, gitdir, table, current)
     if (!raw?.startsWith(SYMREF_PREFIX)) return { name: current, symbolic }
     symbolic = true
     current = raw.slice(SYMREF_PREFIX.length).trim()

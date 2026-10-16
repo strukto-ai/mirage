@@ -57,7 +57,7 @@ def host_files(
 
     # No prefixes: the block routes every path itself (``HostFs``), so
     # only a listing's link marks are asked of the namespace.
-    links = files.links
+    links = files._links
     resolver = PrefixResolver(
         list, None if links is None else links.link_names_under
     )

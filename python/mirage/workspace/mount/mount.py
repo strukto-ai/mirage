@@ -1085,6 +1085,7 @@ class MountEntry:
                 access=context.access,
             ),
             dispatch=context.dispatch,
+            vfs=context.vfs,
             session_id=context.session_id,
             env=context.env,
             exec_allowed=context.exec_allowed,
