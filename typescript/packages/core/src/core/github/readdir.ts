@@ -18,7 +18,7 @@ import { DirListing, FileType, type FileStat, type PathSpec } from '../../types.
 import { stripSlash } from '../../utils/slash.ts'
 import { GitHubApiError } from './client.ts'
 import { DEFER_STATUSES } from './constants.ts'
-import { fetchDirTree, refreshTree, rowOf, treeListing } from './tree.ts'
+import { fetchDirTree, fetchHead, refreshTree, rowOf, treeListing } from './tree.ts'
 import { makeTreeEntry } from './tree_entry.ts'
 
 /**
@@ -29,7 +29,9 @@ import { makeTreeEntry } from './tree_entry.ts'
  * only some paths; the folder is then read from its own tree, asked by its
  * path at the ref so it is as current as the request (a sha from an older
  * parent listing is not), and once a mount has seen its tree truncated it asks
- * no recursive tree again.
+ * no recursive tree again. GitHub answers a repository the token can no longer
+ * read as it answers a missing path, so a folder is missing only while the ref
+ * itself still resolves.
  *
  * Mirrors Python's `readdir`.
  *
@@ -54,8 +56,9 @@ export async function readdir(
   try {
     rows = await fetchDirTree(accessor.transport, accessor.owner, accessor.repo, expression)
   } catch (err) {
-    if (err instanceof GitHubApiError && DEFER_STATUSES.has(err.status)) throw enoent(path.virtual)
-    throw err
+    if (rel === '' || !(err instanceof GitHubApiError) || !DEFER_STATUSES.has(err.status)) throw err
+    await fetchHead(accessor.transport, accessor.owner, accessor.repo, accessor.ref)
+    throw enoent(path.virtual)
   }
   return new DirListing({ entries: rows.map((row) => rowOf(makeTreeEntry(row), row.path)) })
 }

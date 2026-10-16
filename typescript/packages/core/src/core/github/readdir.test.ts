@@ -138,6 +138,22 @@ describe('the truncated walk', () => {
     await expect(readdir(walker, spec('docs', '/gh'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
+  it('is no miss while the repository is lost', async () => {
+    // GitHub answers a repository the token can no longer read as it answers
+    // a missing path; only a ref that still resolves makes a miss.
+    const gh = new FakeGitHub({ 'top.txt': 't', 'docs/sub/b.txt': 'b' })
+    const walker = truncated(gh)
+    const root = await readdir(walker, spec('', '/gh'))
+    gh.fail.set('dir', [404, 'Not Found'])
+    const err = await readdir(walker, spec('docs', '/gh'), root.entries[0]).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(GitHubApiError)
+    gh.fail.delete('dir')
+    gh.files.delete('docs/sub/b.txt')
+    await expect(readdir(walker, spec('docs', '/gh'), root.entries[0])).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
   it('refuses a directory GitHub cut short', async () => {
     const gh = new FakeGitHub({ 'top.txt': 't', 'big/a.txt': 'a', 'big/b.txt': 'b' })
     const walker = truncated(gh)

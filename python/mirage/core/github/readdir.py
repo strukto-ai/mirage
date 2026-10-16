@@ -19,6 +19,7 @@ from mirage.core.github.constants import DEFER_STATUSES
 from mirage.core.github.repo import ensure_ref
 from mirage.core.github.tree import (
     fetch_dir_tree,
+    fetch_head,
     refresh_tree,
     row_of,
     tree_listing,
@@ -39,7 +40,9 @@ async def readdir(
     truncated names only some paths; the folder is then read from its own
     tree, asked by its path at the ref so it is as current as the request
     (a sha from an older parent listing is not), and once a mount has seen
-    its tree truncated it asks no recursive tree again.
+    its tree truncated it asks no recursive tree again. GitHub answers a
+    repository the token can no longer read as it answers a missing path,
+    so a folder is missing only while the ref itself still resolves.
 
     Args:
         accessor (GitHubAccessor): backend handle.
@@ -70,7 +73,14 @@ async def readdir(
             accessor.pool,
         )
     except aiohttp.ClientResponseError as exc:
-        if exc.status not in DEFER_STATUSES:
+        if not rel or exc.status not in DEFER_STATUSES:
             raise
+        await fetch_head(
+            accessor.config,
+            accessor.owner,
+            accessor.repo,
+            ref,
+            accessor.pool,
+        )
         raise enoent(path.virtual) from exc
     return DirListing(entries=[row_of(row, row.path) for row in rows])

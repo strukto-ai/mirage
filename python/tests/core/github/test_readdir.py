@@ -14,6 +14,7 @@
 
 import asyncio
 
+import aiohttp
 import pytest
 
 from mirage.accessor.github import GitHubAccessor
@@ -159,6 +160,28 @@ async def test_a_truncated_tree_lists_each_folder_by_its_sha():
                     vfs_path="docs", virtual="/gh/docs", directory="/gh/docs"
                 ),
             )
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_folder_is_no_miss_while_its_repository_is_lost():
+    # GitHub answers a repository the token can no longer read as it
+    # answers a missing path; only a ref that still resolves makes a miss.
+    files = {"top.txt": b"t", "docs/sub/b.txt": b"b"}
+    with serve(FakeGitHub(files=files, truncated_recursive=True)) as gh:
+        accessor = _truncated(gh)
+        root = await readdir(
+            accessor, PathSpec(vfs_path="", virtual="/gh", directory="/gh")
+        )
+        docs = PathSpec(
+            vfs_path="docs", virtual="/gh/docs", directory="/gh/docs"
+        )
+        gh.fail["dir"] = (404, "Not Found")
+        with pytest.raises(aiohttp.ClientResponseError):
+            await readdir(accessor, docs, root.entries[0])
+        del gh.fail["dir"]
+        del gh.files["docs/sub/b.txt"]
+        with pytest.raises(FileNotFoundError):
+            await readdir(accessor, docs, root.entries[0])
 
 
 @pytest.mark.asyncio
