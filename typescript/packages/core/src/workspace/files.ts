@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type ByteSource, type IOResult, OpReport } from '../io/types.ts'
-import { ensureStream } from '../io/stream.ts'
+import { closeQuietly, ensureStream } from '../io/stream.ts'
 import type { OpRecord } from '../observe/record.ts'
 import { finishRecord, type OpTimer, startOp } from '../observe/context.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
@@ -296,6 +296,11 @@ export class Files {
         )
       }
       throw err
+    } finally {
+      // A write owns its source even when it never reaches the dispatcher
+      // (an unknown session refused at the bind).
+      if (op === 'write' || op === 'append')
+        await closeQuietly((args[0] ?? kwargs.data ?? null) as ByteSource | null)
     }
     if (owner === null || (op === 'write' && kwargs.admit_only === true)) return result
     const record = (answer: unknown): Promise<void> =>

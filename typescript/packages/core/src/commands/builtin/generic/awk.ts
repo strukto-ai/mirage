@@ -132,11 +132,18 @@ export class AwkStreams implements AwkHost {
     }
   }
 
-  private async *readPath(name: string | PathSpec): AsyncIterable<Uint8Array> {
+  /**
+   * Read a file once what awk printed is committed, so a file it wrote reads
+   * back what it printed. `local`: an operand this mount's backend serves.
+   */
+  private async *readPath(name: string | PathSpec, local = false): AsyncIterable<Uint8Array> {
     const dispatch = this.opts.dispatch
-    if (dispatch === undefined) throw new AwkIOError(posixPhrase('ENOENT'))
+    if (dispatch === undefined && !local) throw new AwkIOError(posixPhrase('ENOENT'))
+    const path = PathSpec.fromStrPath(name, undefined, this.opts.cwd)
     await this.flushOutput()
-    yield* callerStream(dispatch, this.caller, PathSpec.fromStrPath(name, undefined, this.opts.cwd))
+    yield* local || dispatch === undefined
+      ? this.stream(path)
+      : callerStream(dispatch, this.caller, path)
   }
 
   /** A `-f` program file: /dev/stdin reads the shared stdin cursor. */
@@ -150,8 +157,7 @@ export class AwkStreams implements AwkHost {
       const operand = this.operands[index - 1]
       if (operand?.rawPath === name) {
         if (isStdin(operand)) return guarded(this.stdinView())
-        if (servedHere(this.opts, operand)) return guarded(this.stream(operand))
-        return guarded(this.readPath(operand))
+        return guarded(this.readPath(operand, servedHere(this.opts, operand)))
       }
     }
     if (STDIN_NAMES.has(name)) return guarded(this.stdinView())
@@ -170,7 +176,6 @@ export class AwkStreams implements AwkHost {
       if (body !== '') {
         let writer = this.outputs.get(name)
         if (writer === undefined) {
-          await this.flushOutput()
           writer = new ByteWriter(async (source) => {
             await dispatch('append', path, [source])
           })
@@ -184,11 +189,6 @@ export class AwkStreams implements AwkHost {
     }
   }
 
-  /**
-   * Run a command line in a subshell of the session, as sh -c would.
-   * `eval` takes the line whole, so an empty one, a comment or a line
-   * ending in a backslash runs as `sh -c` would run it.
-   */
   async flushOutput(name?: string): Promise<void> {
     const names = name === undefined ? [...this.outputs.keys()] : [name]
     for (const key of names) {
@@ -213,6 +213,11 @@ export class AwkStreams implements AwkHost {
     for (const writer of writers) await writer.abort()
   }
 
+  /**
+   * Run a command line in a subshell of the session, as sh -c would.
+   * `eval` takes the line whole, so an empty one, a comment or a line
+   * ending in a backslash runs as `sh -c` would run it.
+   */
   async run(command: string, stdin: Uint8Array | null): Promise<CommandRun> {
     const shell = this.opts.shell
     if (shell === undefined) {

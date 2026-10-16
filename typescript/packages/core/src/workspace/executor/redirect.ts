@@ -18,7 +18,7 @@ import type { EvaluationContext } from '../evaluation.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import { type RedirectGuard, runWithRedirectPaths } from '../../context/session_context.ts'
 import { fsStrerror, isFsError, isMissingPath } from '../../errors/fs.ts'
-import { stripSlash } from '../../utils/slash.ts'
+import { ownerPrefix, stripSlash } from '../../utils/slash.ts'
 import { SharedInput, share } from '../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { DeviceInput, IOResult, PipeStream, materialize } from '../../io/types.ts'
@@ -72,13 +72,9 @@ import { Channel, JobOutput, type OwnedStream } from '../../shell/console/index.
 import { concat } from '../../utils/bytes.ts'
 import { posixPhrase } from '../../errors/posix.ts'
 
-/**
- * Send FIFO writes immediately; preserve ordinary redirect recording. While a
- * pipe is in play (`live`), terminal output goes out as it is written, through
- * a copied descriptor too, so it keeps the command's order. A write into a
- * pipe whose reader has gone throws `PipeClosed`. Mirrors Python's
- * PipeRecorder.
- */
+// These producers write no named file while their output is consumed, so
+// their output streams into a redirect's file; any other command's output is
+// replayed once it ends.
 const STREAM_OUTPUT_BUILTINS = new Set([
   'cat',
   'head',
@@ -111,6 +107,13 @@ const STREAM_OUTPUT_BUILTINS = new Set([
   'realpath',
 ])
 
+/**
+ * Send FIFO writes immediately; preserve ordinary redirect recording. While a
+ * pipe is in play (`live`), terminal output goes out as it is written, through
+ * a copied descriptor too, so it keeps the command's order. A write into a
+ * pipe whose reader has gone throws `PipeClosed`. Mirrors Python's
+ * PipeRecorder.
+ */
 class PipeRecorder extends Recorder {
   writer: ByteWriter | null = null
   file: FileDescription | null = null
@@ -612,6 +615,8 @@ export async function handleRedirect(
         refused = result[2].refused
         await runWithRedirectPaths(command, targets, async () => {
           const target = outputs.get(1)
+          // A command reading the file it writes (`cat f >> f`, `grep -r x d
+          // > d/f`) would read its own output back.
           if (
             !refused &&
             STREAM_OUTPUT_BUILTINS.has(name) &&
@@ -619,7 +624,11 @@ export async function handleRedirect(
             target instanceof FileDescription &&
             files.includes(target) &&
             target.source === null &&
-            !target.pipe
+            !target.pipe &&
+            ownerPrefix(
+              result[2].paths.map((p) => p.virtual),
+              target.scope.virtual,
+            ) === null
           )
             recorder.streamTo(target)
           const [, execIo] = await drained(recorder, ...result)

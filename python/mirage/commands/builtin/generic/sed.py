@@ -221,7 +221,12 @@ async def _read_script_files(
 
 
 class _ScriptWrites:
-    """Drain sed's named output while retaining one bounded writer."""
+    """Drain sed's named outputs, one bounded writer per file for the run.
+
+    A writer stays open until the run ends: finishing one at each switch
+    between files would make every switch an append, which a store
+    without native appends rewrites whole.
+    """
 
     def __init__(
         self, machine: SedMachine, access: _ScriptFiles, defer: bool
@@ -229,8 +234,8 @@ class _ScriptWrites:
         self.machine = machine
         self.defer = defer
         self.access = access
-        self.name: str | None = None
-        self.writer: ByteWriter | None = None
+        self.writers: dict[str, ByteWriter] = {}
+        self.failed: set[str] = set()
         self.edited: set[str] = set()
         self.errors = ""
 
@@ -242,34 +247,36 @@ class _ScriptWrites:
                 continue
             data = from_byte_view("".join(out.chunks), self.machine.opts.utf8)
             out.chunks.clear()
-            if self.access.spec(name).virtual in self.edited:
+            path = self.access.spec(name).virtual
+            if name in self.failed or path in self.edited:
                 continue
+            writer = self.writers.get(name)
+            if writer is None:
+                writer = self.writers[name] = ByteWriter(
+                    partial(self.access.write, name, append=True)
+                )
             try:
-                if name != self.name:
-                    await self.finish()
-                    self.name = name
-                    self.writer = ByteWriter(
-                        partial(self.access.write, name, append=True)
-                    )
-                assert self.writer is not None
-                await self.writer.write(data)
+                await writer.write(data)
             except FS_ERRORS as exc:
-                self.errors += _open_failure(name, exc)
-                await self.abort()
+                self._failed(name, exc)
+                del self.writers[name]
+                await writer.abort()
+
+    def _failed(self, name: str, exc: BaseException) -> None:
+        self.failed.add(name)
+        self.errors += _open_failure(name, exc)
 
     async def finish(self) -> None:
-        writer, name = self.writer, self.name
-        self.writer = self.name = None
-        if writer is not None:
+        writers, self.writers = self.writers, {}
+        for name, writer in writers.items():
             try:
                 await writer.finish()
             except FS_ERRORS as exc:
-                self.errors += _open_failure(name or "", exc)
+                self._failed(name, exc)
 
     async def abort(self) -> None:
-        writer = self.writer
-        self.writer = self.name = None
-        if writer is not None:
+        writers, self.writers = self.writers, {}
+        for writer in writers.values():
             await writer.abort()
 
 

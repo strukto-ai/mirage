@@ -162,11 +162,16 @@ async function readScriptFiles(
   return files
 }
 
-// Write out what the `w` files collected. A `w` file that -i then edited
-// keeps the edit: GNU's stream still points at the file -i renamed over.
+/**
+ * Drain sed's named outputs, one bounded writer per file for the run. A writer
+ * stays open until the run ends: finishing one at each switch between files
+ * would make every switch an append, which a store without native appends
+ * rewrites whole. A `w` file that -i then edited keeps the edit: GNU's stream
+ * still points at the file -i renamed over. Mirrors Python's `_ScriptWrites`.
+ */
 class ScriptWrites {
-  private name: string | null = null
-  private writer: ByteWriter | null = null
+  private writers = new Map<string, ByteWriter>()
+  private readonly failedNames = new Set<string>()
   readonly edited = new Set<string>()
   errors = ''
 
@@ -183,40 +188,45 @@ class ScriptWrites {
       if (out.chunks.length === 0) continue
       const data = fromByteView(out.chunks.join(''), this.utf8)
       out.chunks.length = 0
-      if (this.edited.has(this.access.virtual(name))) continue
+      if (this.failedNames.has(name) || this.edited.has(this.access.virtual(name))) continue
+      let writer = this.writers.get(name)
+      if (writer === undefined) {
+        writer = new ByteWriter((source) => this.access.write(name, source, false, true))
+        this.writers.set(name, writer)
+      }
       try {
-        if (name !== this.name) {
-          await this.finish()
-          this.name = name
-          this.writer = new ByteWriter((source) => this.access.write(name, source, false, true))
-        }
-        await this.writer?.write(data)
+        await writer.write(data)
       } catch (error) {
         if (!isFsError(error)) throw error
-        this.errors += openFailure(name, error)
-        await this.abort()
+        this.failed(name, error)
+        this.writers.delete(name)
+        await writer.abort()
       }
     }
   }
 
   async finish(): Promise<void> {
-    const writer = this.writer,
-      name = this.name
-    this.writer = null
-    this.name = null
-    try {
-      await writer?.finish()
-    } catch (error) {
-      if (!isFsError(error)) throw error
-      this.errors += openFailure(name ?? '', error)
+    const writers = this.writers
+    this.writers = new Map()
+    for (const [name, writer] of writers) {
+      try {
+        await writer.finish()
+      } catch (error) {
+        if (!isFsError(error)) throw error
+        this.failed(name, error)
+      }
     }
   }
 
   async abort(): Promise<void> {
-    const writer = this.writer
-    this.writer = null
-    this.name = null
-    await writer?.abort()
+    const writers = this.writers
+    this.writers = new Map()
+    for (const writer of writers.values()) await writer.abort()
+  }
+
+  private failed(name: string, error: unknown): void {
+    this.failedNames.add(name)
+    this.errors += openFailure(name, error)
   }
 }
 

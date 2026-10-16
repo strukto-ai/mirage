@@ -415,20 +415,42 @@ async def _tee_stream(
                 ),
                 1,
             )
+
+    async def feed(chunk: bytes) -> bool:
+        for key, (path, writer, copies) in list(writers.items()):
+            try:
+                for _ in range(copies):
+                    await writer.write(chunk)
+            except Exception as exc:
+                await writer.abort()
+                del writers[key]
+                if failed(path, exc):
+                    return False
+        return True
+
     cancelled = False
     try:
         async with aclosing(chunks(source)) as stream:
-            async for chunk in stream:
-                for key, (path, writer, copies) in list(writers.items()):
-                    try:
-                        for _ in range(copies):
-                            await writer.write(chunk)
-                    except Exception as exc:
-                        await writer.abort()
-                        del writers[key]
-                        if failed(path, exc):
-                            return
-                yield chunk
+            try:
+                async for chunk in stream:
+                    if not await feed(chunk):
+                        return
+                    yield chunk
+            except GeneratorExit:
+                # stdout's reader left: GNU's tee goes on copying its input
+                # to the files unless that ends it (SIGPIPE, or exit).
+                if not (
+                    parsed.pipe_errors is PipeErrors.SIGNAL
+                    or (
+                        parsed.pipe_errors is PipeErrors.REPORT
+                        and parsed.stop_on_error
+                    )
+                ):
+                    while writers:
+                        rest = await anext(stream, None)
+                        if rest is None or not await feed(rest):
+                            break
+                raise
     except (Exception, asyncio.CancelledError):
         cancelled = True
         raise

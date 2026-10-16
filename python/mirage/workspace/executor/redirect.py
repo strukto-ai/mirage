@@ -58,6 +58,7 @@ from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text, literal_word
 from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.path import owner_prefix
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import _to_scope
 from mirage.workspace.executor.builtins.exec.constants import (
@@ -82,9 +83,9 @@ from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
 
-# These producers do not write named files while their output is consumed.
-# Other commands retain descriptor replay, avoiding a writer holding a
-# destination lock while a nested command tries to write the same path.
+# These producers write no named file while their output is consumed, so
+# their output streams into a redirect's file; any other command's output
+# is replayed once it ends.
 STREAM_OUTPUT_BUILTINS = frozenset(
     {
         "cat",
@@ -766,6 +767,8 @@ async def handle_redirect(
                 )
                 refused = result[2].refused
                 target = outputs[1]
+                # A command reading the file it writes (`cat f >> f`, `grep
+                # -r x d > d/f`) would read its own output back.
                 if (
                     not refused
                     and name in STREAM_OUTPUT_BUILTINS
@@ -774,6 +777,11 @@ async def handle_redirect(
                     and target in files
                     and target.source is None
                     and not target.pipe
+                    and owner_prefix(
+                        (p.virtual for p in result[2].paths),
+                        target.scope.virtual,
+                    )
+                    is None
                 ):
                     recorder.stream_to(target)
                 _, io, exec_node = await drained(recorder, *result)

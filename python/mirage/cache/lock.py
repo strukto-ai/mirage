@@ -43,6 +43,30 @@ class KeyLockMixin:
         self._key_locks.clear()
 
 
+class KeyHold:
+    """One caller's hold on a ``KeyLock`` key.
+
+    Args:
+        lock (asyncio.Lock): the key's lock, acquired.
+    """
+
+    def __init__(self, lock: asyncio.Lock) -> None:
+        self._lock = lock
+        self.held = True
+
+    @asynccontextmanager
+    async def released(self) -> AsyncIterator[None]:
+        """Let the key go for the body of the ``async with``, then wait
+        for it again; a wait cancelled there leaves it let go."""
+        self._lock.release()
+        self.held = False
+        try:
+            yield
+        finally:
+            await self._lock.acquire()
+            self.held = True
+
+
 class KeyLock:
     """Per-key async mutual exclusion that keeps nothing for an idle key.
 
@@ -57,7 +81,7 @@ class KeyLock:
         self._users: dict[str, int] = {}
 
     @asynccontextmanager
-    async def with_lock(self, key: str) -> AsyncIterator[None]:
+    async def with_lock(self, key: str) -> AsyncIterator[KeyHold]:
         """Hold `key` for the body of the ``async with``.
 
         Args:
@@ -68,8 +92,13 @@ class KeyLock:
             lock = self._locks[key] = asyncio.Lock()
         self._users[key] = self._users.get(key, 0) + 1
         try:
-            async with lock:
-                yield
+            await lock.acquire()
+            hold = KeyHold(lock)
+            try:
+                yield hold
+            finally:
+                if hold.held:
+                    lock.release()
         finally:
             self._users[key] -= 1
             if self._users[key] == 0:

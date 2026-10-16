@@ -101,6 +101,7 @@ export async function teeGeneric(
       return [null, io]
     }
     const source = opts.stdin
+    const parked = { atYield: false }
     return [
       new OutputStream(
         teeStream(
@@ -112,8 +113,11 @@ export async function teeGeneric(
           append,
           io,
           outputKey ?? ((p) => opts.ns?.links?.resolve(p.virtual) ?? p.virtual),
+          parked,
         )[Symbol.asyncIterator](),
-        () => closeQuietly(source),
+        // Parked at a yield, tee's own return copies what its files still
+        // take and closes its input; otherwise nothing would.
+        () => (parked.atYield ? Promise.resolve() : closeQuietly(source)),
       ),
       io,
     ]
@@ -350,6 +354,7 @@ async function* teeStream(
   append: ((p: PathSpec, data: ByteSource) => Promise<void>) | undefined,
   io: IOResult,
   outputKey: (path: PathSpec) => string,
+  parked: { atYield: boolean },
 ): AsyncIterable<Uint8Array> {
   const writers = new Map<string, { path: PathSpec; writer: ByteWriter; copies: number }>()
   const errors = [await io.stderrStr()]
@@ -380,24 +385,55 @@ async function* teeStream(
         ),
       })
   }
-  let interrupted = false
-  try {
-    for await (const chunk of chunks(source)) {
-      for (const [key, { path, writer, copies }] of writers) {
-        try {
-          for (let n = 0; n < copies; n++) await writer.write(chunk)
-        } catch (error) {
-          await writer.abort()
-          writers.delete(key)
-          if (failed(path, error)) return
-        }
+  const feed = async (chunk: Uint8Array): Promise<boolean> => {
+    for (const [key, { path, writer, copies }] of writers) {
+      try {
+        for (let n = 0; n < copies; n++) await writer.write(chunk)
+      } catch (error) {
+        await writer.abort()
+        writers.delete(key)
+        if (failed(path, error)) return false
       }
-      yield chunk
+    }
+    return true
+  }
+  const input = chunks(source)[Symbol.asyncIterator]()
+  let interrupted = false
+  let closed = true
+  try {
+    for (;;) {
+      const next = await input.next()
+      if (next.done === true || !(await feed(next.value))) {
+        closed = false
+        return
+      }
+      parked.atYield = true
+      yield next.value
+      parked.atYield = false
     }
   } catch (error) {
+    closed = false
     interrupted = true
     throw error
   } finally {
+    // stdout's reader left: GNU's tee goes on copying its input to the
+    // files unless that ends it (SIGPIPE, or exit).
+    if (
+      closed &&
+      parsed.pipeErrors !== PipeErrors.SIGNAL &&
+      !(parsed.pipeErrors === PipeErrors.REPORT && parsed.stopOnError)
+    ) {
+      try {
+        while (writers.size > 0) {
+          const next = await input.next()
+          if (next.done === true || !(await feed(next.value))) break
+        }
+      } catch (error) {
+        console.debug('tee: input failed after its reader left:', error)
+        interrupted = true
+      }
+    }
+    await input.return?.()
     for (const { path, writer } of writers.values()) {
       try {
         if (interrupted) await writer.abort()

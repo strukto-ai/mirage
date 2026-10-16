@@ -2701,12 +2701,65 @@ class UnreadWriteSource:
 
 
 @pytest.mark.asyncio
-async def test_refused_write_closes_input_without_pulling_it():
-    ws = Workspace({"/dst": RAMVFS()}, mode=MountMode.READ)
+@pytest.mark.parametrize(
+    "mode,session_id,error",
+    [
+        (MountMode.READ, None, PermissionError),
+        (MountMode.WRITE, "missing", KeyError),
+    ],
+)
+async def test_refused_write_closes_input_without_pulling_it(
+    mode, session_id, error
+):
+    ws = Workspace({"/dst": RAMVFS()}, mode=mode)
     source = UnreadWriteSource()
     try:
-        with pytest.raises(PermissionError):
-            await ws.vfs.write("/dst/f", source)
+        with pytest.raises(error):
+            await ws.vfs.write("/dst/f", source, session_id=session_id)
         assert source.closed
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_streamed_writes_record_the_bytes_they_sent():
+    ws = Workspace({"/dst": StreamWritingRAM()}, mode=MountMode.WRITE)
+    try:
+        await ws.vfs.write("/dst/f", yield_bytes(b"new"))
+        await ws.vfs.append("/dst/f", yield_bytes(b"tail"))
+        assert [
+            (r.op, r.bytes)
+            for r in ws.vfs.records
+            if r.op in ("write", "append")
+        ] == [("write", 3), ("append", 4)]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        ("cat /dst/f >> /dst/f", {"/dst/f": b"a\nb\nca\nb\nc"}),
+        (
+            "sed -n -e 'w /dst/a' -e 'w /dst/b' /dst/f",
+            {"/dst/a": b"a\nb\nc", "/dst/b": b"a\nb\nc"},
+        ),
+    ],
+)
+async def test_streamed_writes_never_reread_or_reopen_their_output(
+    line, expected
+):
+    destination = StreamWritingRAM()
+    ws = Workspace({"/dst": destination}, mode=MountMode.WRITE)
+    try:
+        await ws.vfs.write("/dst/f", b"a\nb\nc")
+        result = await asyncio.wait_for(ws.shell(line), 5)
+        assert result.exit_code == 0, await result.stderr_str()
+        for path, data in expected.items():
+            assert await ws.vfs.read(path) == data
+        streamed = [path for _, path in destination.streamed]
+        assert "/dst/f" not in streamed
+        assert all(streamed.count(path) <= 1 for path in expected)
     finally:
         await ws.close()

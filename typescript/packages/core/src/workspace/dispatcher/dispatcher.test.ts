@@ -238,8 +238,11 @@ it('retains versions across stream invalidation without retaining upload bytes',
   }
 })
 
-it('closes a refused upload without pulling it', async () => {
-  const ws = new Workspace({ '/dst': new RAMVFS() }, { mode: MountMode.READ })
+it.each([
+  [MountMode.READ, undefined, { code: 'EROFS' }],
+  [MountMode.WRITE, 'missing', { message: 'unknown session: missing' }],
+])('closes a refused upload without pulling it (%s, %s)', async (mode, sessionId, refusal) => {
+  const ws = new Workspace({ '/dst': new RAMVFS() }, { mode })
   let closed = false
   const source: AsyncIterableIterator<Uint8Array> = {
     [Symbol.asyncIterator]() {
@@ -254,8 +257,26 @@ it('closes a refused upload without pulling it', async () => {
     },
   }
   try {
-    await expect(ws.vfs.write('/dst/f', source)).rejects.toMatchObject({ code: 'EROFS' })
+    await expect(ws.vfs.write('/dst/f', source, sessionId)).rejects.toMatchObject(refusal)
     expect(closed).toBe(true)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('records the bytes a streamed write sent', async () => {
+  const ws = new Workspace({ '/dst': new StreamWritingRAM() }, { mode: MountMode.WRITE })
+  try {
+    await ws.vfs.write('/dst/f', yieldBytes(new TextEncoder().encode('new')))
+    await ws.vfs.append('/dst/f', yieldBytes(new TextEncoder().encode('tail')))
+    expect(
+      ws.vfs.records
+        .filter((r) => r.op === 'write' || r.op === 'append')
+        .map((r) => [r.op, r.bytes]),
+    ).toEqual([
+      ['write', 3],
+      ['append', 4],
+    ])
   } finally {
     await ws.close()
   }
@@ -319,6 +340,29 @@ describe('native streamed writes', () => {
       expect(destination.streamed.some(([, path]) => path === target)).toBe(true)
       expect(await ws.vfs.cat(target)).toBe(expected)
       expect(Math.max(0, ...destination.chunkSizes)).toBeLessThanOrEqual(16384)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    ['cat /dst/f >> /dst/f', { '/dst/f': 'a\nb\nca\nb\nc' }],
+    ["sed -n -e 'w /dst/a' -e 'w /dst/b' /dst/f", { '/dst/a': 'a\nb\nc', '/dst/b': 'a\nb\nc' }],
+  ])('never rereads or reopens its output: %s', async (line, expected) => {
+    const destination = new StreamWritingRAM()
+    const ws = new Workspace(
+      { '/dst': destination },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      await ws.vfs.write('/dst/f', 'a\nb\nc')
+      const result = await ws.shell(line)
+      expect(result.exitCode, DEC.decode(await materialize(result.stderr))).toBe(0)
+      for (const [path, data] of Object.entries(expected)) expect(await ws.vfs.cat(path)).toBe(data)
+      const streamed = destination.streamed.map(([, path]) => path)
+      expect(streamed).not.toContain('/dst/f')
+      for (const path of Object.keys(expected))
+        expect(streamed.filter((p) => p === path).length).toBeLessThanOrEqual(1)
     } finally {
       await ws.close()
     }

@@ -27,7 +27,7 @@ from typing import Any
 
 from mirage.cache.file import io as cache_io
 from mirage.cache.index.ram import ListingCheckStore
-from mirage.cache.lock import KeyLock
+from mirage.cache.lock import KeyHold, KeyLock
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.paths import (
     dot_refusal,
@@ -64,8 +64,8 @@ from mirage.errors.fs import (
     walk_refusal,
 )
 from mirage.io import IOResult, OpReport
-from mirage.io.stream import close_quietly
-from mirage.io.types import PipeStream
+from mirage.io.stream import close_quietly, ensure_stream
+from mirage.io.types import ByteSource, PipeStream
 from mirage.observe.context import (
     RecordingScope,
     active_lost,
@@ -165,19 +165,23 @@ def _memory_answered(
         report.served(VFSName.RAM.value, moved)
 
 
-def _served(report: OpReport | None, result: Any) -> None:
-    """Stamp the caller's report: the owning mount answered.
+def _served(
+    report: OpReport | None, result: Any, moved: int | None = None
+) -> None:
+    """Stamp the caller's report: the owning mount answered. A report
+    already stamped (a serial write's, under its hold) keeps that.
 
     Args:
         report (OpReport | None): the caller's report, None when the
             caller does not observe ops.
         result (Any): the op's answer; bytes are the measure moved.
+        moved (int | None): bytes a streamed write sent, which neither
+            its answer nor its arguments measure.
     """
-    if report is not None:
-        report.served(
-            None,
-            len(result) if isinstance(result, (bytes, bytearray)) else None,
-        )
+    if report is not None and not report.completed:
+        if moved is None and isinstance(result, (bytes, bytearray)):
+            moved = len(result)
+        report.served(None, moved)
 
 
 async def _sized(mount: MountEntry, path: PathSpec, row: Any) -> Any:
@@ -267,6 +271,39 @@ async def _resumed(
         await close_quietly(iterator)
         if report is not None:
             report.served(None, moved)
+
+
+class _LentPayload:
+    """A streamed write's bytes, pulled with its names let go.
+
+    The producer may wait on another writer of the same name (``tee -a f
+    | tee -a f``, a loop appending to the file it pipes into), so the
+    write holds the name only while the store takes a chunk, and writers
+    interleave between chunks as appends do on one file.
+
+    Args:
+        source (ByteSource): the producer's bytes.
+        holds (list[KeyHold]): the write's names, held.
+    """
+
+    def __init__(self, source: ByteSource, holds: list[KeyHold]) -> None:
+        self.source = ensure_stream(source)
+        self.holds = holds
+        self.moved = 0
+
+    async def chunks(self) -> AsyncIterator[bytes]:
+        try:
+            while True:
+                async with AsyncExitStack() as lent:
+                    for hold in reversed(self.holds):
+                        await lent.enter_async_context(hold.released())
+                    chunk = await anext(self.source, None)
+                if chunk is None:
+                    return
+                self.moved += len(chunk)
+                yield chunk
+        finally:
+            await close_quietly(self.source)
 
 
 def _appends_nothing(name: str, kwargs: dict[str, Any]) -> bool:
@@ -2075,14 +2112,20 @@ class Dispatcher:
         prefix = mount.prefix.rstrip("/")
         keys = {f"{id(mount.vfs)}:{mount_key(name, prefix)}" for name in names}
         async with AsyncExitStack() as held:
-            for key in sorted(keys):
+            holds = [
                 await held.enter_async_context(self._writers.with_lock(key))
+                for key in sorted(keys)
+            ]
             before = await self._cached_before(call, mount)
-            streaming = call.name in ("write", "append") and not isinstance(
-                kwargs.get("data"), bytes
+            payload = (
+                _LentPayload(kwargs["data"], holds)
+                if call.name in ("write", "append")
+                and not isinstance(kwargs.get("data"), bytes)
+                else None
             )
-            if streaming:
+            if payload is not None:
                 await self._invalidate_stream(mount, call.path)
+                kwargs = {**kwargs, "data": payload.chunks()}
             scope = RecordingScope(active=active_recorder() is None)
             try:
                 with command_records() as mine:
@@ -2096,9 +2139,13 @@ class Dispatcher:
                 raise
             finally:
                 scope.close()
-                if streaming:
+                if payload is not None:
                     await self._invalidate_stream(mount, call.path)
-            _served(call.report, result)
+            _served(
+                call.report,
+                result,
+                None if payload is None else payload.moved,
+            )
             await self._settle_write(
                 mount, call.name, call.path, kwargs, call.vis, created=result
             )

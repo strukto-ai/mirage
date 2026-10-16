@@ -5991,6 +5991,50 @@
         },
         {
           "op": "exec",
+          "command": "seq 1 50000 | tee -a /b/twice | tee -a /b/twice | wc -l; wc -l < /b/twice",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "50000\n100000\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "for i in 1 2 3; do echo $i >> /b/loop; echo $i; done | cat >> /b/loop; wc -l < /b/loop",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "6\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "seq 1 50000 | tee -p /b/copy | head -c 2; wc -l < /b/copy",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "1\n50000\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "printf 'a\\n' > /b/in; : > /b/aout; awk 'NR == 1 { print \"new\" >> \"/b/aout\" } { print }' /b/in /b/aout",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "a\nnew\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
           "command": "sort -o /b/sorted /a/input; cat /b/sorted",
           "expect": {
             "value": {

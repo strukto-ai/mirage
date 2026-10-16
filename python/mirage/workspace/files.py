@@ -357,6 +357,11 @@ class Files:
                     self._session_for(seen),
                 )
             raise
+        finally:
+            # A write owns its source even when it never reaches the
+            # dispatcher (an unknown session refused at the bind).
+            if op in ("write", "append"):
+                await close_quietly(kwargs.get("data"))
         ran = report.path or typed.virtual
         owner = self._owner(ran)
         if owner is None or (op == "write" and kwargs.get("admit_only")):

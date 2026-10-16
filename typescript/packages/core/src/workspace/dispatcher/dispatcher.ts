@@ -12,14 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { closeQuietly } from '../../io/stream.ts'
+import { closeQuietly, ensureStream } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 
 import type { OpKwargs, SessionAccess } from '../../view/types.ts'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
 import { keepVersions, setCached } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
-import { KeyLock } from '../../cache/lock.ts'
+import { type KeyHold, KeyLock } from '../../cache/lock.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import {
@@ -429,9 +429,9 @@ function memoryAnswered(report: OpReport | undefined, moved: number | null = nul
  * already stamped (a namespace answer for a missing path) keeps that.
  * Mirrors Python's `_served`.
  */
-function served(report: OpReport | undefined, result: unknown): void {
+function served(report: OpReport | undefined, result: unknown, moved: number | null = null): void {
   if (report?.completed === true) return
-  report?.served(null, result instanceof Uint8Array ? result.byteLength : null)
+  report?.served(null, moved ?? (result instanceof Uint8Array ? result.byteLength : null))
 }
 
 /**
@@ -503,6 +503,40 @@ async function* resumed(
   } finally {
     await iterator.return?.()
     report?.served(null, moved)
+  }
+}
+
+/**
+ * A streamed write's bytes, pulled with its names let go. The producer may
+ * wait on another writer of the same name (`tee -a f | tee -a f`, a loop
+ * appending to the file it pipes into), so the write holds the name only
+ * while the store takes a chunk, and writers interleave between chunks as
+ * appends do on one file. Mirrors Python's `_LentPayload`.
+ */
+class LentPayload {
+  moved = 0
+
+  constructor(
+    private readonly source: ByteSource,
+    private readonly holds: readonly KeyHold[],
+  ) {}
+
+  async *chunks(): AsyncGenerator<Uint8Array> {
+    const iterator = ensureStream(this.source)[Symbol.asyncIterator]()
+    const pull = this.holds.reduce<() => Promise<IteratorResult<Uint8Array>>>(
+      (inner, hold) => () => hold.released(inner),
+      () => iterator.next(),
+    )
+    try {
+      for (;;) {
+        const next = await pull()
+        if (next.done === true) return
+        this.moved += next.value.byteLength
+        yield next.value
+      }
+    } finally {
+      await iterator.return?.()
+    }
   }
 }
 
@@ -1834,25 +1868,31 @@ export class Dispatcher {
         let mine: OpRecord[] = []
         let line: readonly OpRecord[] | undefined
         let before: [Uint8Array, string | null] | null = null
+        let payload: LentPayload | null = null
         const others = operands(name, call.args, kwargs)
         const owners = this.owners([
           p,
           ...(dst !== null ? [dst] : []),
           ...others.map(([, other]) => other),
         ])
-        const own = async (onCall: (storeCall: Promise<unknown>) => void): Promise<unknown> => {
+        const own = async (
+          onCall: (storeCall: Promise<unknown>) => void,
+          holds: readonly KeyHold[],
+        ): Promise<unknown> => {
           line = activeRecords()
           before = await this.cachedBefore(call, mount)
-          const streaming =
-            (name === 'write' || name === 'append') && !(fullArgs[0] instanceof Uint8Array)
-          if (streaming) await this.invalidateStream(mount, p)
+          if ((name === 'write' || name === 'append') && !(fullArgs[0] instanceof Uint8Array)) {
+            payload = new LentPayload(fullArgs[0] as ByteSource, holds)
+            fullArgs[0] = payload.chunks()
+            await this.invalidateStream(mount, p)
+          }
           try {
             return await commandRecords((records) => {
               mine = records
               return run(fullKwargs, onCall)
             })
           } finally {
-            if (streaming) await this.invalidateStream(mount, p)
+            if (payload !== null) await this.invalidateStream(mount, p)
           }
         }
         try {
@@ -1861,12 +1901,12 @@ export class Dispatcher {
             opTimeout,
             name,
             `${name} ${p.virtual}`,
-            (onCall) =>
+            (onCall, holds) =>
               activeRecords() === undefined
-                ? runWithRecording(() => own(onCall)).then(([value]) => value)
-                : own(onCall),
+                ? runWithRecording(() => own(onCall, holds)).then(([value]) => value)
+                : own(onCall, holds),
             async (value) => {
-              served(report, value)
+              served(report, value, payload?.moved ?? null)
               await this.settleWrite(name, p, dst, fullArgs, others, value)
               await this.keepWritten(call, mount, fullArgs, mine, before)
             },
@@ -2122,7 +2162,10 @@ export class Dispatcher {
     timeout: number | null,
     name: string,
     label: string,
-    call: (onCall: (storeCall: Promise<unknown>) => void) => Promise<unknown>,
+    call: (
+      onCall: (storeCall: Promise<unknown>) => void,
+      holds: readonly KeyHold[],
+    ) => Promise<unknown>,
     after: (value: unknown) => Promise<void>,
     landed: () => Promise<void>,
   ): Promise<unknown> {
@@ -2134,7 +2177,7 @@ export class Dispatcher {
     let answer: Promise<unknown> = Promise.resolve()
     let finished: Promise<void> = Promise.resolve()
     const entered = new Promise<void>((enter) => {
-      const held = async (): Promise<void> => {
+      const held = async (holds: readonly KeyHold[]): Promise<void> => {
         if (turn.abandoned) return
         turn.entered = true
         const started: { call?: Promise<unknown> } = {}
@@ -2149,7 +2192,7 @@ export class Dispatcher {
               turn.settled = true
             },
           )
-        })
+        }, holds)
         // The store's own call once it started, else the run's answer: a
         // timeout answers the caller, not the store.
         const stored = answer.then(
@@ -2171,11 +2214,13 @@ export class Dispatcher {
           if (turn.late) console.warn(`${label} failed after its timeout: ${String(err)}`)
         })
       }
-      void keys.reduceRight<() => Promise<void>>(
-        (inner, key) => () =>
-          this.state.writers.withLock(key, () => Promise.race([inner(), gaveUp])),
+      void keys.reduceRight<(holds: readonly KeyHold[]) => Promise<void>>(
+        (inner, key) => (holds) =>
+          this.state.writers.withLock(key, (hold) =>
+            Promise.race([inner([...holds, hold]), gaveUp]),
+          ),
         held,
-      )()
+      )([])
     })
     let value: unknown
     try {

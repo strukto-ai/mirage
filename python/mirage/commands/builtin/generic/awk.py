@@ -171,12 +171,25 @@ class AwkStreams:
         async for chunk in self.stdin:
             yield chunk
 
-    async def read_path(self, name: str | PathSpec) -> AsyncIterator[bytes]:
-        if self.dispatch is None:
+    async def read_path(
+        self, name: str | PathSpec, local: bool = False
+    ) -> AsyncIterator[bytes]:
+        """Read a file once what awk printed is committed, so a file it
+        wrote reads back what it printed.
+
+        Args:
+            name (str | PathSpec): the file.
+            local (bool): an operand this mount's backend serves.
+        """
+        if self.dispatch is None and not local:
             raise AwkIOError(posix_phrase(FsCondition.ENOENT))
         path = PathSpec.from_str_path(name, cwd=self.cwd.virtual)
         await self.flush_output()
-        stream = caller_stream(self.dispatch, self.caller, path)
+        stream = (
+            self.read_stream(path)
+            if local or self.dispatch is None
+            else caller_stream(self.dispatch, self.caller, path)
+        )
         async with aclosing(chunks(stream)) as source:
             async for chunk in source:
                 yield chunk
@@ -194,9 +207,7 @@ class AwkStreams:
             if operand.raw_path == name:
                 if is_stdin(operand):
                     return _guarded(self.stdin_view())
-                if self.local(operand):
-                    return _guarded(self.read_stream(operand))
-                return _guarded(self.read_path(operand))
+                return _guarded(self.read_path(operand, self.local(operand)))
         if name in STDIN_NAMES:
             return _guarded(self.stdin_view())
         return _guarded(self.read_path(name))
@@ -219,7 +230,6 @@ class AwkStreams:
             if body:
                 writer = self.outputs.get(name)
                 if writer is None:
-                    await self.flush_output()
                     writer = self.outputs[name] = ByteWriter(
                         partial(self._append, path)
                     )
