@@ -29,6 +29,13 @@ for await (const change of ws.events('/data')) {
 ```
 </CodeGroup>
 
+For example, when your application reports an update to `/data/report.csv`,
+the listener prints:
+
+```text Output
+update /data/report.csv
+```
+
 Start the listener before calling `ws.notify(change)` from your notification
 receiver in a separate task. Mirage does not start a file watcher or webhook
 server for you.
@@ -57,6 +64,14 @@ const change = new FileEvent({
 await ws.notify(change)
 ```
 </CodeGroup>
+
+This reports that `/data/report.csv` was updated. The running listener above prints:
+
+```text Listener output
+update /data/report.csv
+```
+
+`notify()` does not print anything or edit the file itself.
 
 ## Push
 
@@ -103,6 +118,27 @@ pnpm -C examples/typescript exec tsx notification/push/s3.ts /absolute/path/to/n
 ```
 </CodeGroup>
 
+The Disk example creates, updates and deletes local files, then prints:
+
+```text Disk output
+read before: 'first quarter'
+
+watcher events:
+  create /data/reports/q3.txt
+  update /data/reports/q1.txt
+  delete /data/reports/q2.txt
+
+read after notify: 'first quarter, revised'
+listing: q1.txt q3.txt
+```
+
+For S3, a saved `ObjectCreated:Put` notification for `report.csv` in your
+configured bucket produces:
+
+```text S3 output
+create: /s3/report.csv
+```
+
 ## Poll
 
 Fetch changed files from the service, on a schedule or after a notification.
@@ -146,3 +182,11 @@ virtual paths. Press Ctrl-C to stop. Each run starts from the current state.
 pnpm -C examples/typescript exec tsx notification/poll/box.ts
 ```
 </CodeGroup>
+
+For example, start the Box example, then upload a new `report.csv` to the
+root folder in Box:
+
+```text Example output
+Watching /box; edit files in the service (Ctrl-C to stop)
+create: /box/report.csv
+```
