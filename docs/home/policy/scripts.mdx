@@ -12,7 +12,7 @@ reads, as JSON, and prints its answer. Two places take a program:
 | Where | Asked | Answers |
 | --- | --- | --- |
 | a profile's `policy:` | at `pre_execute`, `pre_command`, `pre_vfs` and `pre_session` before the action, and at their `post_` four after it, for the sessions under that profile | deny or ask; a route at `pre_execute` |
-| [`route_policy:`](/home/policy/route-policy) | at `pre_execute`, for every session | a route, or a deny or ask |
+| [`route_policy:`](/home/policy/route-runtime) | at `pre_execute`, for every session | a route, or a deny or ask |
 
 ## A profile's policy
 

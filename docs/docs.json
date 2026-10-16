@@ -215,7 +215,7 @@
               "home/policy/policies",
               "home/policy/scripts",
               "home/policy/explain",
-              "home/policy/route-policy"
+              "home/policy/route-runtime"
             ]
           },
           {
@@ -812,6 +812,10 @@
     {
       "source": "/home/setup/local-fuse",
       "destination": "/home/setup/fuse"
+    },
+    {
+      "source": "/home/policy/route-policy",
+      "destination": "/home/policy/route-runtime"
     }
   ],
   "navbar": {

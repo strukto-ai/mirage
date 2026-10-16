@@ -23,7 +23,7 @@ it, bound the output, or choose the underlying runtime. No policy grants what an
 refuses.
 
 Policies are asked in order: the built-ins first (mount modes, hides,
-[runtime routing](/home/policy/route-policy)), then the session's profile, then the
+[runtime routing](/home/policy/route-runtime)), then the session's profile, then the
 workspace's own, in the order they were added.
 
 ## Why not a tool-call check
@@ -47,5 +47,5 @@ filesystem, so it sees what that string only implies.
   sandboxed on monty or Python on wasm, with the same context as JSON.
 - [Explain](/home/policy/explain): what the agent sees of policy, and how
   it asks what a line would do before running it.
-- [Route Runtime](/home/policy/route-policy): choose the runtime for a
+- [Route Runtime](/home/policy/route-runtime): choose the runtime for a
   line, from a script.

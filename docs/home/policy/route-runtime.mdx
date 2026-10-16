@@ -39,8 +39,8 @@ if any(p.startswith("/jobs/") for p in paths):
 
 ## Input and answers
 
-The route policy is a [policy program](/home/policy/scripts) that every
-session shares. It reads the same `ctx` a program gets at `pre_execute`:
+A runtime routing script is a [policy program](/home/policy/scripts) shared
+by every session. It reads the same `ctx` a program gets at `pre_execute`:
 the line, each of its commands with its words and resolved paths, and
 the session. It prints its answer:
 
@@ -71,9 +71,10 @@ ws = Workspace(mounts, runtimes=runtimes, route_policy=policy)
 
 ## Admit, then route
 
-The route policy is the built-in answer to the
-[policy's](/home/policy/policies#lifecycle) `pre_execute` method, asked before
-any coded policy. A coded policy places or refuses a line there:
+Runtime selection happens at
+[`pre_execute`](/home/policy/policies#lifecycle), before commands run.
+Mirage checks `route_policy` first, then any policies defined in code.
+These policies can also choose a runtime or refuse a command line:
 
 ```python
 from mirage.policy import Deny, Policy, Route, RouteContext
