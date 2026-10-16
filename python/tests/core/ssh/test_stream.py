@@ -41,6 +41,17 @@ async def test_follow_streams_what_the_servers_tail_prints():
 
 
 @pytest.mark.asyncio
+async def test_follow_quotes_a_path_holding_placeholders_as_it_is():
+    accessor = StreamAccessor("data", [])
+    await follow(accessor, _file("log{n}$&$$.txt"), 3, 1.0)
+    assert accessor.sent == [
+        "test -f 'data/log{n}$&$$.txt' && test -r 'data/log{n}$&$$.txt'"
+        " && command -v tail >/dev/null"
+        " && echo && exec tail -n 3 -f -- 'data/log{n}$&$$.txt'"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_a_follow_the_caller_stops_closes_the_command():
     accessor = StreamAccessor("data", [b"\n", b"x\n", b"y\n"])
     stream = await follow(accessor, _file("a"), 0, 1.0)

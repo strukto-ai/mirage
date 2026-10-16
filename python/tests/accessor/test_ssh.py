@@ -15,6 +15,7 @@
 import asyncio
 from unittest.mock import AsyncMock, Mock
 
+import asyncssh
 import pytest
 
 from mirage.accessor.ssh import SSHAccessor, _connect_kwargs
@@ -147,3 +148,57 @@ async def test_ssh_failed_start_closes_through_repeated_cancellation(
     assert accessor._conn is None
     conn.close.assert_called_once()
     conn.wait_closed.assert_awaited_once()
+
+
+def _streaming(read):
+    process = Mock(
+        stdout=Mock(read=AsyncMock(side_effect=read)),
+        wait_closed=AsyncMock(),
+    )
+    conn = Mock(
+        start_sftp_client=AsyncMock(return_value=Mock()),
+        create_process=AsyncMock(return_value=process),
+        is_closed=Mock(return_value=False),
+    )
+    return conn, process
+
+
+@pytest.mark.asyncio
+async def test_run_stream_discards_errors_and_closes_when_drained(monkeypatch):
+    conn, process = _streaming([b"a\n", b"b\n", b""])
+    monkeypatch.setattr(
+        "mirage.accessor.ssh.asyncssh.connect", AsyncMock(return_value=conn)
+    )
+    accessor = SSHAccessor(SSHConfig(host="unused"))
+    chunks = [chunk async for chunk in accessor.run_stream("tail -f x")]
+    assert chunks == [b"a\n", b"b\n"]
+    kwargs = conn.create_process.await_args.kwargs
+    assert kwargs["stdin"] is asyncssh.DEVNULL
+    assert kwargs["stderr"] is asyncssh.DEVNULL
+    process.close.assert_called_once()
+    process.wait_closed.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_stream_closes_when_a_waiting_read_is_cancelled(
+    monkeypatch,
+):
+    waiting = asyncio.Event()
+
+    async def read(size):
+        waiting.set()
+        await asyncio.Event().wait()
+
+    conn, process = _streaming(read)
+    monkeypatch.setattr(
+        "mirage.accessor.ssh.asyncssh.connect", AsyncMock(return_value=conn)
+    )
+    accessor = SSHAccessor(SSHConfig(host="unused"))
+    stream = accessor.run_stream("tail -f x")
+    task = asyncio.create_task(anext(stream))
+    await waiting.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    process.close.assert_called_once()
+    process.wait_closed.assert_awaited_once()

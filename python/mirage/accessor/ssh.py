@@ -97,8 +97,10 @@ class SSHAccessor(Accessor):
         self, command: str, size: int = 65536
     ) -> AsyncGenerator[bytes, None]:
         """Run ``command`` on the server over the mount's connection and
-        yield its output as it arrives, its standard input closed. Closing
-        the stream closes the command's channel.
+        yield its output as it arrives, its standard input closed and its
+        error output discarded, so unread errors never fill the channel.
+        Closing the stream, or cancelling a read in flight, closes the
+        command's channel.
 
         Args:
             command (str): the command line, as the server's shell reads it.
@@ -109,7 +111,10 @@ class SSHAccessor(Accessor):
         if conn is None:
             raise ConnectionError("the ssh connection closed")
         process = await conn.create_process(
-            command, encoding=None, stdin=asyncssh.DEVNULL
+            command,
+            encoding=None,
+            stdin=asyncssh.DEVNULL,
+            stderr=asyncssh.DEVNULL,
         )
         try:
             while chunk := await process.stdout.read(size):

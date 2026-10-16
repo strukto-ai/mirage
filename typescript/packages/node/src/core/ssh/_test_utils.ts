@@ -612,7 +612,7 @@ export class StreamAccessor extends SSHAccessor {
     super({ host: 'example.test', root })
   }
 
-  override async *runStream(command: string): AsyncGenerator<Uint8Array> {
+  override async *runStream(command: string): AsyncIterableIterator<Uint8Array> {
     this.sent.push(command)
     if (this.chunks instanceof Error) throw this.chunks
     try {

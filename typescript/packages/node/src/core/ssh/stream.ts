@@ -83,37 +83,50 @@ export async function follow(
   _interval: number,
 ): Promise<AsyncIterable<Uint8Array> | null> {
   const remote = singleQuote(joinRoot(accessor.config.root ?? '/', stripPrefix(p)))
-  const command = FOLLOW.replaceAll('{path}', remote).replace('{n}', String(n))
+  const command = FOLLOW.replaceAll(/\{path\}|\{n\}/g, (slot) =>
+    slot === '{path}' ? remote : String(n),
+  )
   const stream = accessor.runStream(command)
   let first: IteratorResult<Uint8Array>
   try {
     first = await stream.next()
   } catch (error) {
     console.debug(`ssh follow left to the poll: ${String(error)}`)
-    await stream.return(undefined)
+    await stream.return?.()
     return null
   }
   if (first.done === true || first.value[0] !== 0x0a) {
-    await stream.return(undefined)
+    await stream.return?.()
     return null
   }
   return followed(first.value.subarray(1), stream)
 }
 
 /**
- * `head`, then the rest of `stream`, which closes however the caller stops.
- * Mirrors Python's `_followed`.
+ * `head`, then the rest of `stream`. An iterator rather than a generator: a
+ * generator queues `return` behind a pull waiting for the next line, so an
+ * idle `tail -f` could never close its channel. Mirrors Python's `_followed`.
  */
-async function* followed(
+function followed(
   head: Uint8Array,
-  stream: AsyncGenerator<Uint8Array>,
-): AsyncGenerator<Uint8Array> {
-  try {
-    if (head.byteLength > 0) yield head
-    for (let next = await stream.next(); next.done !== true; next = await stream.next()) {
-      yield next.value
-    }
-  } finally {
-    await stream.return(undefined)
+  stream: AsyncIterableIterator<Uint8Array>,
+): AsyncIterableIterator<Uint8Array> {
+  let pending: Uint8Array | null = head.byteLength > 0 ? head : null
+  const done: IteratorResult<Uint8Array> = { value: undefined, done: true }
+  return {
+    next(): Promise<IteratorResult<Uint8Array>> {
+      if (pending === null) return stream.next()
+      const value = pending
+      pending = null
+      return Promise.resolve({ value, done: false })
+    },
+    async return(): Promise<IteratorResult<Uint8Array>> {
+      pending = null
+      await stream.return?.()
+      return done
+    },
+    [Symbol.asyncIterator]() {
+      return this
+    },
   }
 }

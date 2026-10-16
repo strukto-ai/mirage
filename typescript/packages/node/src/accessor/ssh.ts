@@ -128,28 +128,80 @@ export class SSHAccessor extends Accessor {
 
   /**
    * Run `command` on the server over the mount's connection and yield its
-   * output as it arrives, its standard input closed. Closing the stream closes
-   * the command's channel. Mirrors Python's `run_stream`.
+   * output as it arrives, its standard input closed and its error output
+   * discarded. An iterator rather than a generator: a generator queues
+   * `return` behind a pull waiting for output, so a quiet command could never
+   * be closed; `return` here closes the command's channel at once, a pull in
+   * flight or a channel still opening included. Mirrors Python's `run_stream`.
    */
-  async *runStream(command: string): AsyncGenerator<Uint8Array> {
-    await this.sftp()
-    const client = this.client
-    if (client === null) throw new Error('the ssh connection closed')
-    const channel = await new Promise<ClientChannel>((resolveFn, rejectFn) => {
-      client.exec(command, (err, opened) => {
-        if (err !== undefined) rejectFn(err)
-        else resolveFn(opened)
+  runStream(command: string): AsyncIterableIterator<Uint8Array> {
+    const chunks: Uint8Array[] = []
+    const done: IteratorResult<Uint8Array> = { value: undefined, done: true }
+    let channel: ClientChannel | null = null
+    let opening: Promise<void> | null = null
+    let ended = false
+    let failure: Error | null = null
+    let wake: (() => void) | null = null
+    const notify = (): void => {
+      const resume = wake
+      wake = null
+      resume?.()
+    }
+    const open = async (): Promise<void> => {
+      await this.sftp()
+      const client = this.client
+      if (client === null) throw new Error('the ssh connection closed')
+      const opened = await new Promise<ClientChannel>((resolveFn, rejectFn) => {
+        client.exec(command, (err, made) => {
+          if (err !== undefined) rejectFn(err)
+          else resolveFn(made)
+        })
       })
-    })
-    channel.stderr.resume()
-    channel.end()
-    try {
-      for await (const chunk of channel) {
-        const buf = chunk as Buffer
-        yield new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      if (ended) {
+        opened.close()
+        return
       }
-    } finally {
-      channel.close()
+      channel = opened
+      opened.stderr.resume()
+      opened.on('data', (chunk: Buffer) => {
+        chunks.push(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength))
+        notify()
+      })
+      opened.on('error', (err: unknown) => {
+        failure = err instanceof Error ? err : new Error(String(err))
+        ended = true
+        notify()
+      })
+      opened.on('close', () => {
+        ended = true
+        notify()
+      })
+      opened.end()
+    }
+    return {
+      async next(): Promise<IteratorResult<Uint8Array>> {
+        opening ??= open()
+        await opening
+        while (chunks.length === 0 && !ended) {
+          await new Promise<void>((resolveFn) => {
+            wake = resolveFn
+          })
+        }
+        const value = chunks.shift()
+        if (value !== undefined) return { value, done: false }
+        if (failure !== null) throw failure
+        return done
+      },
+      return(): Promise<IteratorResult<Uint8Array>> {
+        ended = true
+        chunks.length = 0
+        channel?.close()
+        notify()
+        return Promise.resolve(done)
+      },
+      [Symbol.asyncIterator]() {
+        return this
+      },
     }
   }
 

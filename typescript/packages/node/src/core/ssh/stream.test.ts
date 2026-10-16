@@ -156,6 +156,41 @@ describe('follow', () => {
     expect(accessor.closed).toBe(1)
   })
 
+  it('quotes a path holding placeholders and replacement patterns as it is', async () => {
+    const accessor = new StreamAccessor('data', [])
+    await follow(accessor, file('log{n}$&$$.txt'), 3, 1)
+    expect(accessor.sent).toEqual([
+      "test -f 'data/log{n}$&$$.txt' && test -r 'data/log{n}$&$$.txt'" +
+        ' && command -v tail >/dev/null' +
+        " && echo && exec tail -n 3 -f -- 'data/log{n}$&$$.txt'",
+    ])
+  })
+
+  it('closes a quiet follow at once', async () => {
+    let closed = 0
+    let pulls = 0
+    const quiet = new StreamAccessor('data', [])
+    quiet.runStream = () => ({
+      next: () => {
+        pulls += 1
+        return pulls === 1
+          ? Promise.resolve({ value: ENC.encode('\n'), done: false })
+          : new Promise<IteratorResult<Uint8Array>>(() => undefined)
+      },
+      return: () => {
+        closed += 1
+        return Promise.resolve({ value: undefined, done: true })
+      },
+      [Symbol.asyncIterator]() {
+        return this
+      },
+    })
+    const stream = (await follow(quiet, file('a'), 0, 1)) as AsyncIterableIterator<Uint8Array>
+    void stream.next()
+    await stream.return?.()
+    expect(closed).toBe(1)
+  })
+
   it('closes the command when the caller stops', async () => {
     const accessor = new StreamAccessor('data', [
       ENC.encode('\n'),
