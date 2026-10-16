@@ -20,13 +20,15 @@ import { S3EventHook } from './watch.ts'
 
 const ROOT = PathSpec.fromStrPath('/s3', '')
 
-function record(bucket: string, key: string) {
-  return { s3: { bucket: { name: bucket }, object: { key } } }
+function record(bucket: string, key: string, versionId?: string) {
+  const object = versionId === undefined ? { key } : { key, versionId }
+  return { s3: { bucket: { name: bucket }, object } }
 }
 
 // Twin of test_records_map_onto_the_mount: a key is URL-encoded with + for a
 // space; one the hook has mapped is an UPDATE, a marker removed leaves its
-// directory UNKNOWN, and a record for another bucket or outside the key prefix
+// directory UNKNOWN, a version removed leaves its key UNKNOWN while a delete
+// marker deletes it, and a record for another bucket or outside the key prefix
 // maps nothing.
 describe('S3EventHook', () => {
   it('maps records onto the mount', async () => {
@@ -39,6 +41,9 @@ describe('S3EventHook', () => {
       ['ObjectCreated:Put', record('b', 'logs/x')],
       ['ObjectCreated:Put', record('b', 'data/dir/')],
       ['ObjectRemoved:DeleteMarkerCreated', record('b', 'data/dir/')],
+      ['ObjectRemoved:Delete', record('b', 'data/v.txt', '3HL4kqtJ')],
+      ['LifecycleExpiration:Delete', record('b', 'data/v.txt', 'null')],
+      ['ObjectRemoved:DeleteMarkerCreated', record('b', 'data/v.txt', '9xYz')],
     ]
     const pairs: [string, string][] = []
     for (const [name, body] of records) {
@@ -52,6 +57,9 @@ describe('S3EventHook', () => {
       [FileChangeKind.DELETE, '/s3/a b+.txt'],
       [FileChangeKind.CREATE, '/s3/dir'],
       [FileChangeKind.UNKNOWN, '/s3/dir'],
+      [FileChangeKind.UNKNOWN, '/s3/v.txt'],
+      [FileChangeKind.UNKNOWN, '/s3/v.txt'],
+      [FileChangeKind.DELETE, '/s3/v.txt'],
     ])
   })
 })

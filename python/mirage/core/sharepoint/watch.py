@@ -17,7 +17,6 @@ from mirage.core.msgraph.client import id_segment
 from mirage.core.msgraph.config import graph_api
 from mirage.core.msgraph.watch import DeltaTarget, GraphDeltaHook
 from mirage.core.sharepoint.resolve import drive_entries, resolve, site_entries
-from mirage.errors.fs import enoent
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.watch.base import DeltaHook
@@ -30,7 +29,8 @@ def build_delta_hook(accessor: SharePointAccessor) -> DeltaHook:
     A mount scoped to one site and library reads that library's feed,
     placed under its ``key_prefix``. An unscoped mount reads the library
     the root is in, or each library of the site or tenant the root
-    names, as the baseline finds them.
+    names, found again on every ping: a library added is read from then
+    on, and one gone or no longer at the root's path is deleted.
 
     Args:
         accessor (SharePointAccessor): Backend handle.
@@ -45,7 +45,7 @@ def build_delta_hook(accessor: SharePointAccessor) -> DeltaHook:
         resolved = await resolve(accessor, root)
         if config.site is not None and config.drive is not None:
             if resolved.drive_id is None:
-                raise enoent(root)
+                return []
             return [
                 DeltaTarget(
                     drive=drive(resolved.drive_id),
@@ -67,7 +67,7 @@ def build_delta_hook(accessor: SharePointAccessor) -> DeltaHook:
         elif resolved.level == "site" and resolved.site_id is not None:
             sites = [(parts[0], resolved.site_id)]
         else:
-            raise enoent(root)
+            return []
         found: list[DeltaTarget] = []
         for site, site_id in sites:
             for name, drive_id in await drive_entries(accessor, site_id):

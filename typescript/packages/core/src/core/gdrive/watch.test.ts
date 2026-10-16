@@ -68,6 +68,43 @@ function item(
   }
 }
 
+/**
+ * Pull a baseline and then one read per page of `feed`, the root listing naming
+ * `rootNames[n]` on read `n`. Mirrors Python's `_pulls`.
+ */
+async function pulls(
+  feed: [DriveChange[], string][],
+  rootNames: string[][],
+): Promise<string[][][]> {
+  const hook = buildDeltaHook(
+    new GDriveAccessor({
+      tokenManager: { config: { clientId: 'cid', refreshToken: 'rt' } } as TokenManager,
+    }),
+  )
+  vi.mocked(drive.startPageToken).mockResolvedValue('1')
+  vi.mocked(drive.getFile).mockImplementation((_tm, id) => {
+    const found = FOLDERS[id]
+    if (found === undefined) throw new Error(`no folder ${id}`)
+    return Promise.resolve(found)
+  })
+  const listings = [...rootNames]
+  vi.mocked(drive.listFiles).mockImplementation(() =>
+    Promise.resolve(
+      (listings.shift() ?? []).map((name) => ({ id: name, name, mimeType: FOLDER_MIME })),
+    ),
+  )
+  vi.mocked(drive.listSharedDrives).mockResolvedValue([{ id: 'D', name: 'Team' }])
+  const changes = vi.mocked(drive.listChanges).mockReset()
+  for (const page of feed) changes.mockResolvedValueOnce(page)
+  let delta = await hook.pull(ROOT, null)
+  const out: string[][][] = []
+  while (out.length < feed.length) {
+    delta = await hook.pull(ROOT, delta.checkpoint)
+    out.push(delta.changes.map((c) => [c.kind, c.path.virtual]))
+  }
+  return out
+}
+
 // Twin of test_changes_are_placed_by_their_parents.
 describe('GDriveDeltaHook', () => {
   it('places changes by their parents', async () => {
@@ -121,39 +158,6 @@ describe('GDriveDeltaHook', () => {
       ['unknown', '/drive'],
     ])
   })
-
-  async function pulls(
-    feed: [DriveChange[], string][],
-    rootNames: string[][],
-  ): Promise<string[][][]> {
-    const hook = buildDeltaHook(
-      new GDriveAccessor({
-        tokenManager: { config: { clientId: 'cid', refreshToken: 'rt' } } as TokenManager,
-      }),
-    )
-    vi.mocked(drive.startPageToken).mockResolvedValue('1')
-    vi.mocked(drive.getFile).mockImplementation((_tm, id) => {
-      const found = FOLDERS[id]
-      if (found === undefined) throw new Error(`no folder ${id}`)
-      return Promise.resolve(found)
-    })
-    const listings = [...rootNames]
-    vi.mocked(drive.listFiles).mockImplementation(() =>
-      Promise.resolve(
-        (listings.shift() ?? []).map((name) => ({ id: name, name, mimeType: FOLDER_MIME })),
-      ),
-    )
-    vi.mocked(drive.listSharedDrives).mockResolvedValue([{ id: 'D', name: 'Team' }])
-    const changes = vi.mocked(drive.listChanges).mockReset()
-    for (const page of feed) changes.mockResolvedValueOnce(page)
-    let delta = await hook.pull(ROOT, null)
-    const out: string[][][] = []
-    while (out.length < feed.length) {
-      delta = await hook.pull(ROOT, delta.checkpoint)
-      out.push(delta.changes.map((c) => [c.kind, c.path.virtual]))
-    }
-    return out
-  }
 
   // Twin of test_a_child_listed_before_its_renamed_folder_lands_in_it.
   it('places a child listed before its renamed folder in that folder', async () => {

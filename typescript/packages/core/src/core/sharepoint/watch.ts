@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import { enoent } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
@@ -28,8 +27,9 @@ import { driveEntries, resolve, siteEntries } from './resolve.ts'
  *
  * A mount scoped to one site and library reads that library's feed, placed
  * under its `keyPrefix`. An unscoped mount reads the library the root is in, or
- * each library of the site or tenant the root names, as the baseline finds
- * them. Mirrors Python `build_delta_hook`.
+ * each library of the site or tenant the root names, found again on every
+ * ping: a library added is read from then on, and one gone or no longer at the
+ * root's path is deleted. Mirrors Python `build_delta_hook`.
  */
 export function buildDeltaHook(accessor: SharePointAccessor): DeltaHook {
   const config = accessor.config
@@ -39,7 +39,7 @@ export function buildDeltaHook(accessor: SharePointAccessor): DeltaHook {
     const prefix = rstripSlash(mountPrefixOf(root.virtual, root.vfsPath))
     const resolved = await resolve(accessor, root)
     if (config.site !== null && config.drive !== null) {
-      if (resolved.driveId === null) throw enoent(root)
+      if (resolved.driveId === null) return []
       return [
         {
           drive: drive(resolved.driveId),
@@ -62,7 +62,7 @@ export function buildDeltaHook(accessor: SharePointAccessor): DeltaHook {
     if (resolved.level === 'root') sites = await siteEntries(accessor)
     else if (resolved.level === 'site' && resolved.siteId !== null) {
       sites = [[parts[0] ?? '', resolved.siteId]]
-    } else throw enoent(root)
+    } else return []
     const found: DeltaTarget[] = []
     for (const [site, siteId] of sites) {
       for (const [name, driveId] of await driveEntries(accessor, siteId)) {

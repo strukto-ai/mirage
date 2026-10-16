@@ -25,10 +25,10 @@ vi.mock('./client.ts', async () => {
   return {
     ...actual,
     graphGet: (_config: unknown, url: string) => {
-      if (url === `${DRIVE}/root/delta`) {
+      if (url.endsWith('/root/delta')) {
         return Promise.resolve({ value: [], '@odata.deltaLink': 'L0' })
       }
-      if (url === `${DRIVE}/root`) return Promise.resolve({ id: 'R' })
+      if (url.endsWith('/root')) return Promise.resolve({ id: 'R' })
       if (url.startsWith(`${DRIVE}/root:/`)) {
         const found = graph.folders[url.slice(`${DRIVE}/root:/`.length)]
         if (found === undefined)
@@ -180,5 +180,61 @@ describe('GraphDeltaHook', () => {
       [FileChangeKind.CREATE, '/m/A'],
     ])
     expect(pairs(third)).toEqual([[FileChangeKind.DELETE, '/m/A/c.txt']])
+  })
+
+  // Twin of test_an_item_listed_twice_is_taken_at_its_last_row: Graph may list
+  // a folder once per rename across pages: only the last row says where it is,
+  // and what it holds follows it there.
+  it('takes an item listed twice at its last row', async () => {
+    graph.folders = {}
+    graph.pages = [
+      [item('F', 'A', 'R', { folder: {} }), item('x', 'x.txt', 'F', { file: {} })],
+      [item('F', 'B', 'R', { folder: {} }), item('F', 'C', 'R', { folder: {} })],
+      [{ id: 'x', deleted: {} }],
+    ]
+    const target = hook()
+    const [, second] = await twoPulls(target)
+    const third = await target.pull(ROOT, second.checkpoint)
+    expect(pairs(second)).toEqual([
+      [FileChangeKind.DELETE, '/m/A'],
+      [FileChangeKind.CREATE, '/m/C'],
+    ])
+    expect(pairs(third)).toEqual([[FileChangeKind.DELETE, '/m/C/x.txt']])
+  })
+
+  // Twin of test_the_drives_a_root_covers_are_found_again_each_read: a library
+  // added is created and read from then on, one renamed moves, and one gone is
+  // deleted.
+  it('finds the drives a root covers again on each read', async () => {
+    const other = 'https://graph.test/drives/e'
+    const names: [string, string][][] = [
+      [[DRIVE, '/m/Docs']],
+      [
+        [DRIVE, '/m/Docs'],
+        [other, '/m/Two'],
+      ],
+      [
+        [DRIVE, '/m/Files'],
+        [other, '/m/Two'],
+      ],
+      [[other, '/m/Two']],
+    ]
+    graph.folders = {}
+    graph.pages = [[], [], []]
+    const target = new GraphDeltaHook(resolveMsGraphConfig({ accessToken: 't' }), () =>
+      Promise.resolve(
+        (names.shift() ?? []).map(([drive, virtual]) => ({ drive, folder: '', virtual })),
+      ),
+    )
+    const baseline = await target.pull(ROOT, null)
+    const added = await target.pull(ROOT, baseline.checkpoint)
+    const renamed = await target.pull(ROOT, added.checkpoint)
+    const gone = await target.pull(ROOT, renamed.checkpoint)
+    expect(pairs(added)).toEqual([[FileChangeKind.CREATE, '/m/Two']])
+    expect(pairs(renamed)).toEqual([
+      [FileChangeKind.DELETE, '/m/Docs'],
+      [FileChangeKind.CREATE, '/m/Files'],
+    ])
+    expect(pairs(gone)).toEqual([[FileChangeKind.DELETE, '/m/Files']])
   })
 })

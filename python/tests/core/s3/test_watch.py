@@ -22,15 +22,21 @@ from mirage.vfs.s3.config import S3Config
 ROOT = PathSpec.from_str_path("/s3", vfs_path="")
 
 
-def _record(bucket: str, key: str) -> dict[str, dict[str, dict[str, str]]]:
-    return {"s3": {"bucket": {"name": bucket}, "object": {"key": key}}}
+def _record(
+    bucket: str, key: str, version: str | None = None
+) -> dict[str, dict[str, dict[str, str]]]:
+    obj = (
+        {"key": key} if version is None else {"key": key, "versionId": version}
+    )
+    return {"s3": {"bucket": {"name": bucket}, "object": obj}}
 
 
 @pytest.mark.asyncio
 async def test_records_map_onto_the_mount():
     # A key is URL-encoded with + for a space; one the hook has mapped is
-    # an UPDATE, a marker removed leaves its directory UNKNOWN, and a
-    # record for another bucket or outside the key prefix maps nothing.
+    # an UPDATE, a marker removed leaves its directory UNKNOWN, a version
+    # removed leaves its key UNKNOWN while a delete marker deletes it, and
+    # a record for another bucket or outside the key prefix maps nothing.
     hook = S3EventHook(S3Accessor(S3Config(bucket="b", key_prefix="data/")))
     records = [
         ("ObjectCreated:Put", _record("b", "data/a+b%2B.txt")),
@@ -43,6 +49,12 @@ async def test_records_map_onto_the_mount():
         ("ObjectCreated:Put", _record("b", "logs/x")),
         ("ObjectCreated:Put", _record("b", "data/dir/")),
         ("ObjectRemoved:DeleteMarkerCreated", _record("b", "data/dir/")),
+        ("ObjectRemoved:Delete", _record("b", "data/v.txt", "3HL4kqtJ")),
+        ("LifecycleExpiration:Delete", _record("b", "data/v.txt", "null")),
+        (
+            "ObjectRemoved:DeleteMarkerCreated",
+            _record("b", "data/v.txt", "9xYz"),
+        ),
     ]
     pairs = [
         (event.kind, event.path.virtual)
@@ -55,4 +67,7 @@ async def test_records_map_onto_the_mount():
         (FileChangeKind.DELETE, "/s3/a b+.txt"),
         (FileChangeKind.CREATE, "/s3/dir"),
         (FileChangeKind.UNKNOWN, "/s3/dir"),
+        (FileChangeKind.UNKNOWN, "/s3/v.txt"),
+        (FileChangeKind.UNKNOWN, "/s3/v.txt"),
+        (FileChangeKind.DELETE, "/s3/v.txt"),
     ]

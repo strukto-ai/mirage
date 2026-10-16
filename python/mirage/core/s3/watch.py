@@ -41,7 +41,10 @@ class S3EventHook:
     a key the hook has mapped before is an UPDATE and any other is a
     CREATE, as the Box hook splits an upload. A key ending in ``/`` is a
     directory marker: writing one makes the directory, and removing one
-    leaves whatever is below it, so that directory is UNKNOWN. A record
+    leaves whatever is below it, so that directory is UNKNOWN. In a
+    versioned bucket a ``Delete`` names the one version it removed, and
+    an older one may now be the object, so the key is UNKNOWN; a delete
+    marker hides the object, which is a DELETE. A record
     for another bucket, or for a key outside the mount's ``key_prefix``,
     maps to nothing.
     """
@@ -85,6 +88,9 @@ class S3EventHook:
             )
             return (event_at(root, place, kind),)
         if event_name.startswith(_REMOVED):
+            version = text_field(field(s3, "object"), "versionId")
+            if event_name.endswith(":Delete") and version is not None:
+                return (event_at(root, relative, FileChangeKind.UNKNOWN),)
             self._seen.discard(relative)
             return (event_at(root, relative, FileChangeKind.DELETE),)
         if not event_name.startswith(_WRITTEN):

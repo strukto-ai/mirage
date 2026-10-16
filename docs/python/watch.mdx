@@ -171,22 +171,27 @@ all say that something changed, not what. A mount on one of those backends has
 a `delta_hook()`, and your receiver answers each ping with one `pull` from the
 checkpoint the last one handed back. Answer pings one at a time: two pulls
 from the same checkpoint would race, and the slower one would hand back the
-older cursor.
+older cursor. Keep the checkpoint where a restart can read it (a file, Redis,
+your database), saved after the changes it covers are notified:
 
 ```python
 hook = ws.registry.mount_for("/drive").vfs.delta_hook()
 root = PathSpec.from_str_path("/drive", vfs_path="")
-checkpoint = (await hook.pull(root, None)).checkpoint
 lock = asyncio.Lock()
+checkpoint = await store.get("drive-watch")
+if checkpoint is None:
+    checkpoint = (await hook.pull(root, None)).checkpoint
+    await store.set("drive-watch", checkpoint)
 
 
 async def on_ping(request):
     global checkpoint
     async with lock:
         delta = await hook.pull(root, checkpoint)
-        checkpoint = delta.checkpoint
         for change in delta.changes:
             await ws.notify(change)
+        checkpoint = delta.checkpoint
+        await store.set("drive-watch", checkpoint)
     return web.json_response({"ok": True})
 ```
 
@@ -194,8 +199,9 @@ Each pull reads the provider's own change feed from a cursor: Gmail history,
 the Calendar sync token, Drive `changes.list`, Graph `/delta`, Dropbox
 `list_folder/continue`, Box `/events`. None of them lists the tree. The
 baseline pull (`checkpoint=None`) takes the cursor at the present and reports
-nothing, so a ping missed while your service was down is caught up by the next
-one. A cursor the provider no longer honors (a Dropbox reset, a Graph
+nothing. A service that comes back with its saved checkpoint catches up on
+everything it missed with its next pull; one that takes a new baseline instead
+starts at the present and never sees what changed while it was down. A cursor the provider no longer honors (a Dropbox reset, a Graph
 `resyncRequired`, a Gmail history id it no longer keeps) answers `unknown` on
 the watch root and starts again from the present.
 

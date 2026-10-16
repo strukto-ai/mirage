@@ -68,7 +68,9 @@ interface GraphItem {
  * first applies the feed's folder renames and moves, so an item listed before
  * its folder is still placed where the folder is now. A feed Graph asks to
  * resync reports its mount root as unknown and starts again from the present,
- * forgetting every place it kept.
+ * forgetting every place it kept. Each read finds the drives the root covers
+ * again: a library added since is created and read from then on, one gone is
+ * deleted, and one renamed moves.
  *
  * Mirrors Python `GraphDeltaHook` (`core/msgraph/watch.py`).
  */
@@ -84,29 +86,56 @@ export class GraphDeltaHook implements DeltaHook {
   async pull(root: PathSpec, checkpoint: string | null): Promise<Delta> {
     const observed = new Date()
     const state = decode(checkpoint)
+    const targets = new Map((await this.targets(root)).map((t) => [t.drive, t]))
     if (state === null) {
       const drives: Record<string, DriveState> = {}
-      for (const target of await this.targets(root)) {
-        const top = await this.top(target.drive, target.folder)
-        drives[target.drive] = {
-          virtual: target.virtual,
-          folder: target.folder,
-          top: top ?? '',
-          link: await this.latest(target.drive),
-          folders: {},
-          seen: {},
-        }
-      }
+      for (const [drive, target] of targets) drives[drive] = await this.baseline(target)
       return new Delta({ changes: [], checkpoint: encode(drives) })
     }
     const changes: [FileChangeKind, string][] = []
-    for (const [drive, kept] of Object.entries(state.drives)) {
+    const drives = state.drives
+    for (const drive of Object.keys(drives).filter((d) => !targets.has(d))) {
+      const gone = drives[drive]
+      if (gone !== undefined) changes.push([FileChangeKind.DELETE, gone.virtual])
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete drives[drive]
+    }
+    for (const [drive, target] of targets) {
+      const kept = Object.hasOwn(drives, drive) ? drives[drive] : undefined
+      if (kept === undefined) {
+        drives[drive] = await this.baseline(target)
+        changes.push([FileChangeKind.CREATE, target.virtual])
+        continue
+      }
+      const old = kept.virtual
+      if (old !== target.virtual) {
+        changes.push([FileChangeKind.DELETE, old])
+        changes.push([FileChangeKind.CREATE, target.virtual])
+        movedBelow(kept.seen, new Map([[old, target.virtual]]), new Set())
+        kept.virtual = target.virtual
+      }
       await this.read(drive, kept, changes)
     }
     return new Delta({
       changes: changesUnder(root, changes, observed),
-      checkpoint: encode(state.drives),
+      checkpoint: encode(drives),
     })
+  }
+
+  /**
+   * A drive's state at its present: the feed link that lists nothing yet, the
+   * mount root's id, and nothing placed.
+   */
+  private async baseline(target: DeltaTarget): Promise<DriveState> {
+    const top = await this.top(target.drive, target.folder)
+    return {
+      virtual: target.virtual,
+      folder: target.folder,
+      top: top ?? '',
+      link: await this.latest(target.drive),
+      folders: {},
+      seen: {},
+    }
   }
 
   /**
@@ -185,16 +214,24 @@ export class GraphDeltaHook implements DeltaHook {
     movedBelow(seen, moves, new Set(placed.map((item) => item.id)))
   }
 
-  /** Every item a feed link lists, and the link the next read starts from. */
+  /**
+   * Every item a feed link lists, once each at its last row, and the link the
+   * next read starts from. Graph may list an item more than once across pages;
+   * its last row is its state.
+   */
   private async feed(link: string): Promise<[GraphItem[], string]> {
-    const items: GraphItem[] = []
+    const items = new Map<string, GraphItem>()
     let url = link
     for (;;) {
       const data = await graphGet(this.config, url)
       const value = data.value
-      if (Array.isArray(value)) items.push(...(value as GraphItem[]))
+      for (const item of Array.isArray(value) ? (value as GraphItem[]) : []) {
+        if (typeof item.id !== 'string') continue
+        items.delete(item.id)
+        items.set(item.id, item)
+      }
       const delta = data['@odata.deltaLink']
-      if (typeof delta === 'string' && delta !== '') return [items, delta]
+      if (typeof delta === 'string' && delta !== '') return [[...items.values()], delta]
       url = String(data['@odata.nextLink'])
     }
   }

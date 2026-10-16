@@ -37,8 +37,11 @@ const REMOVED = ['ObjectRemoved:', 'LifecycleExpiration:']
  * hook has mapped before is an UPDATE and any other is a CREATE, as the Box
  * hook splits an upload. A key ending in `/` is a directory marker: writing
  * one makes the directory, and removing one leaves whatever is below it, so
- * that directory is UNKNOWN. A record for another bucket, or for a key outside
- * the mount's `keyPrefix`, maps to nothing.
+ * that directory is UNKNOWN. In a versioned bucket a `Delete` names the one
+ * version it removed, and an older one may now be the object, so the key is
+ * UNKNOWN; a delete marker hides the object, which is a DELETE. A record for
+ * another bucket, or for a key outside the mount's `keyPrefix`, maps to
+ * nothing.
  *
  * Mirrors Python `S3EventHook` (`core/s3/watch.py`).
  */
@@ -70,6 +73,10 @@ export class S3EventHook {
       return [eventAt(root, place, kind)]
     }
     if (REMOVED.some((family) => eventName.startsWith(family))) {
+      const version = textField(field(s3, 'object') ?? null, 'versionId')
+      if (eventName.endsWith(':Delete') && version !== undefined) {
+        return [eventAt(root, relative, FileChangeKind.UNKNOWN)]
+      }
       this.seen.delete(relative)
       return [eventAt(root, relative, FileChangeKind.DELETE)]
     }

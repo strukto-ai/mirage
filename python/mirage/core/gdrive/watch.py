@@ -190,6 +190,7 @@ class GDriveDeltaHook:
     applies the feed's folder renames and moves, so an item listed before
     its folder is still placed where the folder is now, and a shared
     drive is named afresh each read, as the root listing may rename it.
+    An item the feed lists more than once is taken at its last change.
     """
 
     def __init__(self, accessor: GDriveAccessor) -> None:
@@ -230,7 +231,7 @@ class GDriveDeltaHook:
         seen: dict[str, str] = dict(state.get("seen") or {})
         changes: list[tuple[FileChangeKind, str]] = []
         unknown = False
-        entries: list[tuple[str, dict[str, Any] | None, bool]] = []
+        latest: dict[str, tuple[str, dict[str, Any] | None, bool]] = {}
         for change in found:
             if change.get("changeType") == "drive":
                 unknown = unknown or not scoped
@@ -248,7 +249,9 @@ class GDriveDeltaHook:
                 if gone:
                     changes.append((FileChangeKind.DELETE, prefix or "/"))
                 continue
-            entries.append((item_id, item, gone))
+            latest.pop(item_id, None)
+            latest[item_id] = (item_id, item, gone)
+        entries = list(latest.values())
         for item_id, _, _ in entries:
             if item_id not in seen and item_id in places.folders:
                 placed = await places.folder(item_id)

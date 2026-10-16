@@ -76,7 +76,9 @@ class GraphDeltaHook:
     the feed's folder renames and moves, so an item listed before its
     folder is still placed where the folder is now. A feed Graph asks to
     resync reports its mount root as unknown and starts again from the
-    present, forgetting every place it kept.
+    present, forgetting every place it kept. Each read finds the drives
+    the root covers again: a library added since is created and read
+    from then on, one gone is deleted, and one renamed moves.
     """
 
     def __init__(
@@ -105,26 +107,52 @@ class GraphDeltaHook:
         """
         observed = datetime.now(timezone.utc)
         state = _decode(checkpoint)
+        targets = {t.drive: t for t in await self._targets(root)}
         if state is None:
             drives: dict[str, dict[str, Any]] = {}
-            for target in await self._targets(root):
-                top = await self._top(target.drive, target.folder)
-                drives[target.drive] = {
-                    "virtual": target.virtual,
-                    "folder": target.folder,
-                    "top": top or "",
-                    "link": await self._latest(target.drive),
-                    "folders": {},
-                    "seen": {},
-                }
+            for drive, target in targets.items():
+                drives[drive] = await self._baseline(target)
             return Delta((), _encode(drives))
         changes: list[tuple[FileChangeKind, str]] = []
-        for drive, kept in state["drives"].items():
+        drives = state["drives"]
+        for drive in [d for d in drives if d not in targets]:
+            changes.append(
+                (FileChangeKind.DELETE, drives.pop(drive)["virtual"])
+            )
+        for drive, target in targets.items():
+            kept = drives.get(drive)
+            if kept is None:
+                drives[drive] = await self._baseline(target)
+                changes.append((FileChangeKind.CREATE, target.virtual))
+                continue
+            old = str(kept["virtual"])
+            if old != target.virtual:
+                changes.append((FileChangeKind.DELETE, old))
+                changes.append((FileChangeKind.CREATE, target.virtual))
+                moved_below(kept["seen"], {old: target.virtual}, set())
+                kept["virtual"] = target.virtual
             await self._read(drive, kept, changes)
         return Delta(
             tuple(changes_under(root, changes, observed)),
-            _encode(state["drives"]),
+            _encode(drives),
         )
+
+    async def _baseline(self, target: DeltaTarget) -> dict[str, Any]:
+        """A drive's state at its present: the feed link that lists
+        nothing yet, the mount root's id, and nothing placed.
+
+        Args:
+            target (DeltaTarget): The drive and the root's place in it.
+        """
+        top = await self._top(target.drive, target.folder)
+        return {
+            "virtual": target.virtual,
+            "folder": target.folder,
+            "top": top or "",
+            "link": await self._latest(target.drive),
+            "folders": {},
+            "seen": {},
+        }
 
     async def _read(
         self,
@@ -216,21 +244,25 @@ class GraphDeltaHook:
         moved_below(seen, moves, {item["id"] for item in placed_items})
 
     async def _feed(self, link: str) -> tuple[list[dict[str, Any]], str]:
-        """Every item a feed link lists, and the link the next read
-        starts from.
+        """Every item a feed link lists, once each at its last row, and
+        the link the next read starts from.
+
+        Graph may list an item more than once across pages; its last row
+        is its state.
 
         Args:
             link (str): Where the last read ended.
         """
-        items: list[dict[str, Any]] = []
+        items: dict[str, dict[str, Any]] = {}
         url = link
         while True:
             data = await graph_get(self._config, url, session=self._session)
-            items.extend(
-                i for i in data.get("value", []) if isinstance(i, dict)
-            )
+            for item in data.get("value", []):
+                if isinstance(item, dict) and isinstance(item.get("id"), str):
+                    items.pop(item["id"], None)
+                    items[item["id"]] = item
             if data.get("@odata.deltaLink"):
-                return items, str(data["@odata.deltaLink"])
+                return list(items.values()), str(data["@odata.deltaLink"])
             url = str(data["@odata.nextLink"])
 
     async def _latest(self, drive: str) -> str:

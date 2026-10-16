@@ -160,7 +160,8 @@ function virtualAt(prefix: string, relative: string): string {
  * left reports the root as unknown. Each read first applies the feed's folder
  * renames and moves, so an item listed before its folder is still placed where
  * the folder is now, and a shared drive is named afresh each read, as the root
- * listing may rename it.
+ * listing may rename it. An item the feed lists more than once is taken at its
+ * last change.
  *
  * Mirrors Python `GDriveDeltaHook` (`core/gdrive/watch.py`).
  */
@@ -189,7 +190,7 @@ export class GDriveDeltaHook implements DeltaHook {
     const seen: Record<string, string> = { ...(state.seen ?? {}) }
     const changes: [FileChangeKind, string][] = []
     let unknown = false
-    const entries: [string, DriveFile | null, boolean][] = []
+    const latest = new Map<string, [string, DriveFile | null, boolean]>()
     for (const change of found) {
       if (change.changeType === 'drive') {
         unknown ||= !scoped
@@ -203,8 +204,10 @@ export class GDriveDeltaHook implements DeltaHook {
         if (gone) changes.push([FileChangeKind.DELETE, prefix === '' ? '/' : prefix])
         continue
       }
-      entries.push([itemId, item, gone])
+      latest.delete(itemId)
+      latest.set(itemId, [itemId, item, gone])
     }
+    const entries = [...latest.values()]
     for (const [itemId] of entries) {
       if (!Object.hasOwn(seen, itemId) && Object.hasOwn(places.folders, itemId)) {
         const placed = await places.folder(itemId)

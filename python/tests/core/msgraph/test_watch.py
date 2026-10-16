@@ -42,9 +42,9 @@ class FakeDrive:
         params: dict[str, str] | None = None,
         session: None = None,
     ) -> dict[str, Any]:
-        if url == f"{DRIVE}/root/delta":
+        if url.endswith("/root/delta"):
             return {"value": [], "@odata.deltaLink": "L0"}
-        if url == f"{DRIVE}/root":
+        if url.endswith("/root"):
             return {"id": "R"}
         if url.startswith(f"{DRIVE}/root:/"):
             found = self.folders.get(url.removeprefix(f"{DRIVE}/root:/"))
@@ -181,3 +181,51 @@ async def test_a_folder_taking_anothers_name_keeps_its_own_children():
         (FileChangeKind.CREATE, "/m/A"),
     ]
     assert pairs(third) == [(FileChangeKind.DELETE, "/m/A/c.txt")]
+
+
+@pytest.mark.asyncio
+async def test_an_item_listed_twice_is_taken_at_its_last_row():
+    # Graph may list a folder once per rename across pages: only the last
+    # row says where it is, and what it holds follows it there.
+    fake = FakeDrive({})
+    fake.pages = [
+        [item("F", "A", "R", folder={}), item("x", "x.txt", "F", file={})],
+        [item("F", "B", "R", folder={}), item("F", "C", "R", folder={})],
+        [{"id": "x", "deleted": {}}],
+    ]
+    _, second, third = await pulls(fake, hook(), 3)
+    assert pairs(second) == [
+        (FileChangeKind.DELETE, "/m/A"),
+        (FileChangeKind.CREATE, "/m/C"),
+    ]
+    assert pairs(third) == [(FileChangeKind.DELETE, "/m/C/x.txt")]
+
+
+@pytest.mark.asyncio
+async def test_the_drives_a_root_covers_are_found_again_each_read():
+    # A library added is created and read from then on, one renamed moves,
+    # and one gone is deleted.
+    other = "https://graph.test/drives/e"
+    names = [
+        [(DRIVE, "/m/Docs")],
+        [(DRIVE, "/m/Docs"), (other, "/m/Two")],
+        [(DRIVE, "/m/Files"), (other, "/m/Two")],
+        [(other, "/m/Two")],
+    ]
+
+    async def targets(root: PathSpec) -> list[DeltaTarget]:
+        return [
+            DeltaTarget(drive=drive, folder="", virtual=virtual)
+            for drive, virtual in names.pop(0)
+        ]
+
+    fake = FakeDrive({})
+    fake.pages = [[], [], []]
+    target = GraphDeltaHook(OneDriveConfig(access_token="t"), None, targets)
+    added, renamed, gone = await pulls(fake, target, 3)
+    assert pairs(added) == [(FileChangeKind.CREATE, "/m/Two")]
+    assert pairs(renamed) == [
+        (FileChangeKind.DELETE, "/m/Docs"),
+        (FileChangeKind.CREATE, "/m/Files"),
+    ]
+    assert pairs(gone) == [(FileChangeKind.DELETE, "/m/Files")]
