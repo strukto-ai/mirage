@@ -62,7 +62,9 @@ def _hook(monkeypatch) -> tuple[DiscordEventHook, list[str]]:
 
     monkeypatch.setattr("mirage.core.discord.watch.discord_get", fake_get)
     accessor = DiscordAccessor(DiscordConfig(token="t"))
-    return DiscordEventHook(accessor), calls
+    hook = DiscordEventHook(accessor)
+    hook.objects = objects
+    return hook, calls
 
 
 def _map(hook, event_type, payload) -> list[tuple[FileChangeKind, str]]:
@@ -185,3 +187,15 @@ def test_a_direct_message_and_an_unknown_dispatch_map_to_nothing(
     assert _map(hook, "MESSAGE_CREATE", {"id": LATE}) == []
     assert _map(hook, "TYPING_START", {"channel_id": "100"}) == []
     assert _map(hook, "MESSAGE_CREATE", "not an object") == []
+
+
+def test_a_reconnect_forgets_the_guilds_channels(monkeypatch):
+    hook, calls = _hook(monkeypatch)
+    _map(hook, "MESSAGE_CREATE", {"id": LATE, "channel_id": "100"})
+    hook.objects["/channels/100"] = {**GENERAL, "name": "lobby"}
+    _map(hook, "GUILD_CREATE", {"id": "900", "name": "Ada's Server"})
+    found = _map(hook, "MESSAGE_CREATE", {"id": LATE, "channel_id": "100"})
+    assert found == [
+        (U, "/d/Ada's Server__900/channels/lobby__100/2026-10-01/chat.jsonl")
+    ]
+    assert calls.count("/channels/100") == 2

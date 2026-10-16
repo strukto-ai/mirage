@@ -132,7 +132,8 @@ class AirtableDeltaHook:
     reads from the oldest left, which shows as a later cursor than the
     payloads read account for. That, a webhook the last pull read that
     is gone, and a payload marked ``error`` all mean changes were lost,
-    so the watch root is UNKNOWN.
+    so the watch root is UNKNOWN and the base's table names are read
+    from its schema again.
     """
 
     def __init__(self, accessor: AirtableAccessor) -> None:
@@ -224,8 +225,9 @@ class AirtableDeltaHook:
         feed: _BaseFeed,
         payload: dict[str, Any],
         changes: _Changes,
-    ) -> None:
-        """Add the changes one payload names.
+    ) -> bool:
+        """Add the changes one payload names, and say whether it is the
+        error payload a webhook leaves when it lost changes.
 
         Args:
             base_id (str): The base.
@@ -233,9 +235,8 @@ class AirtableDeltaHook:
             payload (dict[str, Any]): One webhook payload.
             changes (_Changes): Where the changes go.
         """
-        if payload.get("error"):
-            changes.lost = True
-            return
+        if payload.get("error") is True:
+            return True
         base = f"bases/{feed.dir}"
         for table_id, made in as_row(payload.get("createdTablesById")).items():
             name = text_field(as_row(made).get("metadata"), "name")
@@ -278,13 +279,14 @@ class AirtableDeltaHook:
                 changes.add(FileChangeKind.UNKNOWN, base)
                 continue
             where = f"{base}/{table}"
-            if any(body.get(key) for key in _SCHEMA_KEYS):
+            if any(body.get(key) is not None for key in _SCHEMA_KEYS):
                 changes.add(FileChangeKind.UPDATE, f"{where}/table.json")
-            if any(body.get(key) for key in _RECORD_KEYS):
+            if any(body.get(key) is not None for key in _RECORD_KEYS):
                 changes.add(FileChangeKind.UPDATE, f"{where}/records.jsonl")
                 changes.add(FileChangeKind.UNKNOWN, f"{where}/views")
-            elif body.get("changedViewsById"):
+            elif body.get("changedViewsById") is not None:
                 changes.add(FileChangeKind.UNKNOWN, f"{where}/views")
+        return False
 
     async def _read(
         self,
@@ -294,6 +296,9 @@ class AirtableDeltaHook:
         changes: _Changes,
     ) -> None:
         """Read each of a base's webhooks from its kept cursor.
+
+        A lost payload may have made, renamed or destroyed a table, so a
+        base that lost any names its tables from the schema again.
 
         Args:
             base_id (str): The base.
@@ -305,17 +310,19 @@ class AirtableDeltaHook:
             str(hook["id"])
             for hook in await list_webhooks(self._accessor, base_id)
         ]
-        if set(was) - set(listed):
-            changes.lost = True
+        lost = bool(set(was) - set(listed))
         for hook_id in listed:
-            payloads, cursor, lost = await self._payloads(
+            payloads, cursor, gap = await self._payloads(
                 base_id, hook_id, was.get(hook_id)
             )
-            changes.lost = changes.lost or lost
+            lost = lost or gap
             for payload in payloads:
-                await self._map(base_id, feed, payload, changes)
+                lost = await self._map(base_id, feed, payload, changes) or lost
             if cursor is not None:
                 feed.hooks[hook_id] = cursor
+        if lost:
+            feed.tables = await self._tables(base_id)
+            changes.lost = True
 
     async def pull(self, root: PathSpec, checkpoint: str | None) -> Delta:
         """Return the changes under ``root`` since ``checkpoint``.

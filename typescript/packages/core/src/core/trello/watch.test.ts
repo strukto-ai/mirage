@@ -39,8 +39,17 @@ function fake(options: { workspaceId?: string; boardIds?: string[] } = {}): {
         calls.push('workspaces')
         return Promise.resolve([{ id: 'w1', displayName: 'Acme' }])
       }
-      calls.push(`board ${path.split('/')[2] ?? ''}`)
-      return Promise.resolve({ id: path.split('/')[2], idOrganization: 'w1' })
+      const [, kind, id] = path.split('/')
+      if (kind === 'cards') {
+        calls.push(`card ${id ?? ''}`)
+        return Promise.resolve({ ...CARD, idList: 'l1' })
+      }
+      if (kind === 'lists') {
+        calls.push(`list ${id ?? ''}`)
+        return Promise.resolve({ ...TODO })
+      }
+      calls.push(`board ${id ?? ''}`)
+      return Promise.resolve({ id, idOrganization: 'w1' })
     },
   }
   return { hook: new TrelloEventHook(new TrelloAccessor(transport, options)), calls }
@@ -176,5 +185,40 @@ describe('TrelloEventHook', () => {
     const delivery = body('createCard', { card: CARD, list: TODO }, { id: 'c1', name: 'Ship it' })
     expect(await map(hook, delivery)).toEqual([])
     expect(calls).toEqual(['board b1'])
+  })
+
+  it('reads the card once for an action without its list', async () => {
+    const { hook, calls } = fake()
+    const labelled = body('addLabelToCard', { card: CARD, label: { id: 'x' } })
+    expect(await map(hook, labelled)).toEqual([[U, `${TODO_CARD}/card.json`]])
+    expect(await map(hook, labelled)).toEqual([[U, `${TODO_CARD}/card.json`]])
+    expect(calls).toEqual(['workspaces', 'card c1', 'list l1'])
+  })
+
+  it('moves remembered cards with a renamed list or board', async () => {
+    const { hook } = fake()
+    await map(hook, body('createCard', { card: CARD, list: TODO }))
+    const nextList = { id: 'l1', name: 'Next' }
+    await map(hook, body('updateList', { list: nextList, old: { name: 'To Do' } }))
+    const gone = body('deleteCard', { card: { id: 'c1' }, list: nextList })
+    expect(await map(hook, gone)).toEqual([[D, `${BOARD_DIR}/lists/Next__l1/cards/Ship_it__c1`]])
+    await map(hook, body('createCard', { card: CARD, list: TODO }))
+    const renamed = body('updateBoard', {
+      old: { name: 'Roadmap' },
+      board: { id: 'b1', name: 'Ideas' },
+    })
+    await map(hook, renamed)
+    const ideas = '/t/workspaces/Acme__w1/boards/Ideas__b1'
+    expect(await map(hook, gone)).toEqual([[D, `${ideas}/lists/To_Do__l1/cards/Ship_it__c1`]])
+  })
+
+  it('deletes a board that left the workspace where it was', async () => {
+    const { hook } = fake({ workspaceId: 'w1' })
+    const left = body(
+      'updateBoard',
+      { old: { idOrganization: 'w1' } },
+      { id: 'b1', name: 'Roadmap', idOrganization: 'w2' },
+    )
+    expect(await map(hook, left)).toEqual([[D, BOARD_DIR]])
   })
 })

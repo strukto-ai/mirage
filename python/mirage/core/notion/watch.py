@@ -106,12 +106,14 @@ class NotionEventHook:
     deletes its directory. A page's directory carries its title, so a
     move or a retitle moves everything below it, which the event does
     not list: the old place, when the hook saw it, and the new one are
-    UNKNOWN, and a retitle of a page it never saw is UNKNOWN on the
-    page's parent. Databases and data sources follow the same rules with
-    ``database.json`` and ``data_source.json``; a data source's rows
-    changing updates ``rows.jsonl``, and a database lists its data
-    sources, so a data source made, moved, retitled or deleted also
-    updates ``database.json``. Comments are rendered nowhere.
+    UNKNOWN. A move of one it never saw has an old place nothing names,
+    so the whole mount is UNKNOWN, and a retitle of a page it never saw
+    is UNKNOWN on the page's parent. Databases and data sources follow
+    the same rules with ``database.json`` and ``data_source.json``; a
+    data source's rows changing updates ``rows.jsonl``, and a database
+    lists its data sources, so a data source made, moved, retitled or
+    deleted also updates ``database.json``. Comments are rendered
+    nowhere.
     """
 
     def __init__(self, accessor: NotionAccessor) -> None:
@@ -277,6 +279,8 @@ class NotionEventHook:
             was = self._places.get(object_id)
             now = await self._place(kind, object_id, fresh=True)
             events: list[FileEvent] = []
+            if was is None and change == "moved" and kind != "database":
+                events.append(event_at(root, "", FileChangeKind.UNKNOWN))
             if was is not None and was != now:
                 self._forget(was)
                 events.append(event_at(root, was, FileChangeKind.UNKNOWN))

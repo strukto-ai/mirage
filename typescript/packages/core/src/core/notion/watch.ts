@@ -91,8 +91,9 @@ function parent(place: string): string {
  * A page made or restored creates its `page.json`, and one deleted deletes its
  * directory. A page's directory carries its title, so a move or a retitle
  * moves everything below it, which the event does not list: the old place,
- * when the hook saw it, and the new one are UNKNOWN, and a retitle of a page
- * it never saw is UNKNOWN on the page's parent. Databases and data sources
+ * when the hook saw it, and the new one are UNKNOWN. A move of one it never
+ * saw has an old place nothing names, so the whole mount is UNKNOWN, and a
+ * retitle of a page it never saw is UNKNOWN on the page's parent. Databases and data sources
  * follow the same rules with `database.json` and `data_source.json`; a data
  * source's rows changing updates `rows.jsonl`, and a database lists its data
  * sources, so a data source made, moved, retitled or deleted also updates
@@ -228,6 +229,9 @@ export class NotionEventHook {
       const was = this.places.get(objectId) ?? null
       const now = await this.place(kind, objectId, true)
       const events: FileEvent[] = []
+      if (was === null && change === 'moved' && kind !== 'database') {
+        events.push(eventAt(root, '', FileChangeKind.UNKNOWN))
+      }
       if (was !== null && was !== now) {
         this.forget(was)
         events.push(eventAt(root, was, FileChangeKind.UNKNOWN))

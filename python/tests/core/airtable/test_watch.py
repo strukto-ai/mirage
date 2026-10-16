@@ -243,3 +243,25 @@ async def test_a_base_the_mount_leaves_out_reads_nothing(fake):
     fake.push(_records())
     assert (await hook.pull(root, base.checkpoint)).changes == ()
     assert fake.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_base_that_lost_payloads_names_its_tables_again(fake):
+    hook = _hook()
+    base = await hook.pull(_root(), None)
+    fake.push(
+        {
+            "changedTablesById": {
+                "tblF": {"changedMetadata": {"current": {"name": "Ideas"}}}
+            }
+        }
+    )
+    fake.oldest = 2
+    fake.tables["appA"] = [{"id": "tblF", "name": "Ideas"}]
+    delta = await hook.pull(_root(), base.checkpoint)
+    assert _pairs(delta) == [(X, "/at")]
+    fake.push(_records())
+    assert _pairs(await hook.pull(_root(), delta.checkpoint)) == [
+        (U, f"{BASE}/Ideas__tblF/records.jsonl"),
+        (X, f"{BASE}/Ideas__tblF/views"),
+    ]

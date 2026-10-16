@@ -33,7 +33,11 @@ const OLD = id(2026, 9, 20)
 const LATE = id(2026, 10, 1, 23)
 const THREAD_ID = id(2026, 9, 28)
 
-function fake(): { hook: DiscordEventHook; calls: string[] } {
+function fake(): {
+  hook: DiscordEventHook
+  calls: string[]
+  objects: Record<string, Record<string, unknown>>
+} {
   const calls: string[] = []
   const objects: Record<string, Record<string, unknown>> = {
     '/guilds/900': GUILD,
@@ -47,7 +51,7 @@ function fake(): { hook: DiscordEventHook; calls: string[] } {
       return Promise.resolve({ ...objects[endpoint] })
     },
   }
-  return { hook: new DiscordEventHook(new DiscordAccessor(transport)), calls }
+  return { hook: new DiscordEventHook(new DiscordAccessor(transport)), calls, objects }
 }
 
 async function map(
@@ -159,5 +163,16 @@ describe('DiscordEventHook', () => {
     expect(await map(hook, 'MESSAGE_CREATE', { id: LATE })).toEqual([])
     expect(await map(hook, 'TYPING_START', { channel_id: '100' })).toEqual([])
     expect(await map(hook, 'MESSAGE_CREATE', 'not an object')).toEqual([])
+  })
+
+  it("forgets a guild's channels on reconnect", async () => {
+    const { hook, calls, objects } = fake()
+    await map(hook, 'MESSAGE_CREATE', { id: LATE, channel_id: '100' })
+    objects['/channels/100'] = { ...GENERAL, name: 'lobby' }
+    await map(hook, 'GUILD_CREATE', { id: '900', name: "Ada's Server" })
+    expect(await map(hook, 'MESSAGE_CREATE', { id: LATE, channel_id: '100' })).toEqual([
+      [U, "/d/Ada's Server__900/channels/lobby__100/2026-10-01/chat.jsonl"],
+    ])
+    expect(calls.filter((c) => c === '/channels/100')).toHaveLength(2)
   })
 })

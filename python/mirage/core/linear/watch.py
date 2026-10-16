@@ -89,7 +89,8 @@ class LinearEventHook:
         return f"teams/{team_dirname(known)}" if known is not None else None
 
     async def _issue_dir(self, issue: JsonValue) -> str | None:
-        """The directory an issue body places the issue at, remembered.
+        """The directory an issue body places the issue at, remembered,
+        or None, and forgotten, when the mount does not show its team.
 
         Args:
             issue (JsonValue): An issue as a delivery or ``issue(id)``
@@ -99,7 +100,10 @@ class LinearEventHook:
         team = field(issue, "team")
         team_id = text_field(issue, "teamId") or text_field(team, "id")
         team_dir = await self._team_dir(team_id, team)
-        if issue_id is None or team_dir is None or team_id is None:
+        if issue_id is None:
+            return None
+        if team_dir is None or team_id is None:
+            self._issues.pop(issue_id, None)
             return None
         key = text_field(issue, "identifier")
         number = field(issue, "number")

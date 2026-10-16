@@ -84,7 +84,11 @@ export class LinearEventHook {
     const team = field(issue, 'team') ?? null
     const teamId = textField(issue, 'teamId') ?? textField(team, 'id')
     const teamDir = await this.teamDir(teamId, team)
-    if (issueId === undefined || teamDir === null || teamId === undefined) return null
+    if (issueId === undefined) return null
+    if (teamDir === null || teamId === undefined) {
+      this.issues.delete(issueId)
+      return null
+    }
     let key = textField(issue, 'identifier')
     const number = field(issue, 'number')
     const prefix = this.teams.get(teamId)?.key

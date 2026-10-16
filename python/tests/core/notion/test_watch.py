@@ -184,3 +184,13 @@ def test_data_sources_and_databases(monkeypatch):
     assert _map(hook, _event("database.deleted", "db1")) == [
         (D, "/n/databases/Tasks__db1")
     ]
+
+
+def test_a_move_of_an_unseen_page_is_unknown_on_the_mount(monkeypatch):
+    hook, _, _ = _hook(monkeypatch)
+    assert _map(hook, _event("page.moved", "p2")) == [(X, "/n"), (X, Q4)]
+    assert _map(hook, _event("page.moved", "r1")) == [
+        (X, "/n"),
+        (X, ROW),
+        (U, f"{TASKS}/rows.jsonl"),
+    ]

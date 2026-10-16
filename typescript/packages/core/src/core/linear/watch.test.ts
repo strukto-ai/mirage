@@ -39,7 +39,8 @@ function fake(teamIds?: string[]): { hook: LinearEventHook; calls: string[] } {
       if (query === ISSUE_QUERY) {
         const issueId = String(variables?.issueId)
         calls.push(`issue ${issueId}`)
-        return Promise.resolve({ issue: { id: issueId, identifier: 'ENG-9', team: ENG } })
+        const team = issueId === 'i1' ? OPS : ENG
+        return Promise.resolve({ issue: { id: issueId, identifier: 'ENG-9', team } })
       }
       throw new Error(`unexpected query ${query}`)
     },
@@ -146,5 +147,19 @@ describe('LinearEventHook', () => {
     const { hook } = fake(['t2'])
     expect(await map(hook, 'Issue', { action: 'create', data: issue() })).toEqual([])
     expect(await map(hook, 'Project', { action: 'create', data: {} })).toEqual([])
+  })
+
+  it('forgets an issue moved to a team the mount leaves out', async () => {
+    const { hook, calls } = fake(['t1'])
+    await map(hook, 'Issue', { action: 'create', data: issue() })
+    const moved = {
+      action: 'update',
+      data: { id: 'i1', teamId: 't2', team: OPS },
+      updatedFrom: { teamId: 't1' },
+    }
+    expect(await map(hook, 'Issue', moved)).toEqual([[X, `${ENG_DIR}/issues`]])
+    const comment = { action: 'create', data: { id: 'c1', issueId: 'i1' } }
+    expect(await map(hook, 'Comment', comment)).toEqual([])
+    expect(calls).toEqual(['issue i1'])
   })
 })

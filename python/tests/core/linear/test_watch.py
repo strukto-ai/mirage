@@ -44,7 +44,8 @@ def _hook(monkeypatch, team_ids=None) -> tuple[LinearEventHook, list[str]]:
 
     async def fake_issue(config, issue_id, session=None):
         calls.append(f"issue {issue_id}")
-        return {"id": issue_id, "identifier": "ENG-9", "team": dict(ENG)}
+        team = OPS if issue_id == "i1" else ENG
+        return {"id": issue_id, "identifier": "ENG-9", "team": dict(team)}
 
     monkeypatch.setattr("mirage.core.linear.watch.list_teams", fake_teams)
     monkeypatch.setattr("mirage.core.linear.watch.get_issue", fake_issue)
@@ -159,3 +160,17 @@ def test_a_team_the_mount_leaves_out_maps_to_nothing(monkeypatch):
     hook, _ = _hook(monkeypatch, team_ids=["t2"])
     assert _map(hook, "Issue", {"action": "create", "data": _issue()}) == []
     assert _map(hook, "Project", {"action": "create", "data": {}}) == []
+
+
+def test_an_issue_moved_to_a_team_left_out_is_forgotten(monkeypatch):
+    hook, calls = _hook(monkeypatch, team_ids=["t1"])
+    _map(hook, "Issue", {"action": "create", "data": _issue()})
+    moved = {
+        "action": "update",
+        "data": {"id": "i1", "teamId": "t2", "team": dict(OPS)},
+        "updatedFrom": {"teamId": "t1"},
+    }
+    assert _map(hook, "Issue", moved) == [(X, f"{ENG_DIR}/issues")]
+    comment = {"action": "create", "data": {"id": "c1", "issueId": "i1"}}
+    assert _map(hook, "Comment", comment) == []
+    assert calls == ["issue i1"]

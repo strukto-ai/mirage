@@ -224,4 +224,20 @@ describe('AirtableDeltaHook', () => {
     expect((await hook.pull(baseRoot, base.checkpoint)).changes).toEqual([])
     expect(fake.calls).toEqual([])
   })
+
+  it('names the tables of a base that lost payloads again', async () => {
+    const fake = new FakeAirtable()
+    const hook = hookFor(fake)
+    const base = await hook.pull(root(), null)
+    fake.push({ changedTablesById: { tblF: { changedMetadata: { current: { name: 'Ideas' } } } } })
+    fake.oldest = 2
+    fake.tables.appA = [{ id: 'tblF', name: 'Ideas' }]
+    const delta = await hook.pull(root(), base.checkpoint)
+    expect(pairs(delta)).toEqual([[X, '/at']])
+    fake.push(records())
+    expect(pairs(await hook.pull(root(), delta.checkpoint))).toEqual([
+      [U, `${BASE}/Ideas__tblF/records.jsonl`],
+      [X, `${BASE}/Ideas__tblF/views`],
+    ])
+  })
 })

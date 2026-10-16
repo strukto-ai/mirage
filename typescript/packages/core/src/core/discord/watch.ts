@@ -62,8 +62,9 @@ function dayOf(messageId: string): string | null {
  * day's `files` directory is UNKNOWN. A channel, member or guild dispatch
  * changes a listing's names, so it is UNKNOWN on the listing: `channels`,
  * `members`, or the whole mount for a guild, which also fires for every guild
- * when the gateway reconnects and so re-inventories what the gap missed. A
- * direct message belongs to no guild and maps to nothing.
+ * when the gateway reconnects and so re-inventories what the gap missed; it
+ * also forgets the guild's channels, since one renamed during the gap kept its
+ * old name here. A direct message belongs to no guild and maps to nothing.
  *
  * Mirrors Python `DiscordEventHook` (`core/discord/watch.py`).
  */
@@ -205,6 +206,9 @@ export class DiscordEventHook {
     if (GUILD_EVENTS.has(eventType)) {
       if (own !== undefined) {
         this.guilds.delete(own)
+        for (const [channelId, channel] of [...this.channels]) {
+          if (channel.guild_id === own) this.channels.delete(channelId)
+        }
         const name = textField(payload, 'name')
         if (name !== undefined) this.guilds.set(own, guildDirname({ id: own, name }))
       }

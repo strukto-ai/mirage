@@ -168,4 +168,17 @@ describe('NotionEventHook', () => {
       [D, '/n/databases/Tasks__db1'],
     ])
   })
+
+  it('is UNKNOWN on the mount for a move of an unseen page', async () => {
+    const { hook } = fake()
+    expect(await map(hook, event('page.moved', 'p2'))).toEqual([
+      [X, '/n'],
+      [X, Q4],
+    ])
+    expect(await map(hook, event('page.moved', 'r1'))).toEqual([
+      [X, '/n'],
+      [X, ROW],
+      [U, `${TASKS}/rows.jsonl`],
+    ])
+  })
 })

@@ -15,7 +15,7 @@
 import type { TrelloAccessor } from '../../accessor/trello.ts'
 import { FileChangeKind, type FileEvent, type JsonValue, type PathSpec } from '../../types.ts'
 import { eventAt, field, textField } from '../../watch/events.ts'
-import { getBoard, listWorkspaces } from './client.ts'
+import { getBoard, getCard, getList, listWorkspaces } from './client.ts'
 import { boardDirname, cardDirname, listDirname, workspaceDirname } from './pathing.ts'
 
 const CARD_FILES = ['card.json', 'comments.jsonl'] as const
@@ -69,16 +69,19 @@ function named(entity: JsonValue, name?: string): Record<string, string> {
  * `comments.jsonl`. A card made or moved in creates both, and one deleted,
  * archived or moved to another board deletes its directory; a deleted card
  * names no name, so where the hook saw it last is used, and a card it never
- * saw makes its list's `cards` UNKNOWN. A card renamed or moved to another
- * list moves both files. A comment updates `comments.jsonl`, and a change to
- * what `card.json` renders (its fields, labels or members) updates that.
+ * saw makes its list's `cards` UNKNOWN. An action on a card that does not name
+ * its list (a label or a member added) reads the card and its list once. A
+ * card renamed or moved to another list moves both files. A comment updates
+ * `comments.jsonl`, and a change to what `card.json` renders (its fields,
+ * labels or members) updates that.
  *
  * A list or a board renamed moves everything below it, which no action lists,
- * so the old and new directory are UNKNOWN; one archived is deleted, and one
- * restored is UNKNOWN. Any other change to a list or a board updates its
- * `list.json` or `board.json`. A label or a board member added, changed or
- * removed is UNKNOWN on `labels` or `members`, since the file names come from
- * what changed.
+ * so the old and new directory are UNKNOWN, and the cards the hook remembers
+ * below it move with it; one archived is deleted, and one restored is UNKNOWN.
+ * A board moved out of the mount's workspace is deleted where it was. Any
+ * other change to a list or a board updates its `list.json` or `board.json`. A
+ * label or a board member added, changed or removed is UNKNOWN on `labels` or
+ * `members`, since the file names come from what changed.
  *
  * Mirrors Python `TrelloEventHook` (`core/trello/watch.py`).
  */
@@ -143,11 +146,37 @@ export class TrelloEventHook {
     return place
   }
 
+  // Where a card an action names without its list is, read from the card and
+  // its list.
+  private async located(boardDir: string, card: JsonValue): Promise<string | null> {
+    const cardId = textField(card, 'id')
+    if (cardId === undefined) return null
+    const found = (await getCard(this.accessor.transport, cardId)) as JsonValue
+    const listId = textField(found, 'idList')
+    if (listId === undefined) return null
+    const lst = (await getList(this.accessor.transport, listId)) as JsonValue
+    return this.cardDir(boardDir, found, lst)
+  }
+
+  // Carry each remembered card below a list or board that moved to its new
+  // place, or forget it when the place left the mount.
+  private rebase(old: string, now: string | null): void {
+    for (const [cardId, place] of [...this.cards]) {
+      if (!place.startsWith(`${old}/`)) continue
+      if (now === null) this.cards.delete(cardId)
+      else this.cards.set(cardId, now + place.slice(old.length))
+    }
+  }
+
   private files(root: PathSpec, place: string, kind: FileChangeKind): FileEvent[] {
     return CARD_FILES.map((name) => eventAt(root, `${place}/${name}`, kind))
   }
 
-  private updateCard(root: PathSpec, boardDir: string, data: JsonValue): readonly FileEvent[] {
+  private async updateCard(
+    root: PathSpec,
+    boardDir: string,
+    data: JsonValue,
+  ): Promise<readonly FileEvent[]> {
     const card = field(data, 'card') ?? null
     const old = field(data, 'old') ?? null
     const lst = field(data, 'list') ?? null
@@ -157,7 +186,9 @@ export class TrelloEventHook {
       field(data, 'listBefore') ?? lst,
       textField(old, 'name'),
     )
-    const now = this.cardDir(boardDir, card, field(data, 'listAfter') ?? lst)
+    const now =
+      this.cardDir(boardDir, card, field(data, 'listAfter') ?? lst) ??
+      (await this.located(boardDir, card))
     if (now === null) return []
     if (field(old, 'closed') !== undefined && field(old, 'closed') !== null) {
       if (field(card, 'closed') === true) {
@@ -174,16 +205,16 @@ export class TrelloEventHook {
     return [eventAt(root, `${now}/card.json`, FileChangeKind.UPDATE)]
   }
 
-  private card(
+  private async card(
     root: PathSpec,
     kind: string,
     boardDir: string,
     data: JsonValue,
-  ): readonly FileEvent[] {
+  ): Promise<readonly FileEvent[]> {
     if (kind === 'updateCard') return this.updateCard(root, boardDir, data)
     const card = field(data, 'card') ?? null
     const lst = field(data, 'list') ?? null
-    const place = this.cardDir(boardDir, card, lst)
+    let place = this.cardDir(boardDir, card, lst)
     if (CARD_GONE.has(kind)) {
       this.cards.delete(textField(card, 'id') ?? '')
       if (place !== null) return [eventAt(root, place, FileChangeKind.DELETE)]
@@ -191,6 +222,7 @@ export class TrelloEventHook {
       const cards = `${boardDir}/lists/${listDirname(named(lst))}/cards`
       return [eventAt(root, cards, FileChangeKind.UNKNOWN)]
     }
+    place ??= await this.located(boardDir, card)
     if (place === null) return []
     if (CARD_MADE.has(kind)) return this.files(root, place, FileChangeKind.CREATE)
     const name = COMMENT_EDITS.has(kind) ? 'comments.jsonl' : 'card.json'
@@ -211,11 +243,13 @@ export class TrelloEventHook {
     const closedChanged = field(old, 'closed') !== undefined && field(old, 'closed') !== null
     if (kind === 'createList') return [eventAt(root, `${now}/list.json`, FileChangeKind.CREATE)]
     if (kind === 'moveListFromBoard' || (closedChanged && field(lst, 'closed') === true)) {
+      this.rebase(now, null)
       return [eventAt(root, now, FileChangeKind.DELETE)]
     }
     const oldName = textField(old, 'name')
     if (oldName !== undefined) {
       const was = `${lists}/${listDirname(named(lst, oldName))}`
+      this.rebase(was, now)
       return [
         eventAt(root, was, FileChangeKind.UNKNOWN),
         eventAt(root, now, FileChangeKind.UNKNOWN),
@@ -236,8 +270,9 @@ export class TrelloEventHook {
     const board = field(data, 'board') ?? null
     const old = field(data, 'old') ?? null
     if (field(old, 'closed') !== undefined && field(old, 'closed') !== null) {
-      const kind = field(board, 'closed') === true ? FileChangeKind.DELETE : FileChangeKind.UNKNOWN
-      return [eventAt(root, boardDir, kind)]
+      if (field(board, 'closed') !== true) return [eventAt(root, boardDir, FileChangeKind.UNKNOWN)]
+      this.rebase(boardDir, null)
+      return [eventAt(root, boardDir, FileChangeKind.DELETE)]
     }
     const oldName = textField(old, 'name')
     const oldOrg = textField(old, 'idOrganization')
@@ -246,8 +281,32 @@ export class TrelloEventHook {
     }
     const events = [eventAt(root, boardDir, FileChangeKind.UNKNOWN)]
     const was = await this.boardDir(board, model, oldName, oldOrg)
-    if (was !== null && was !== boardDir) events.unshift(eventAt(root, was, FileChangeKind.UNKNOWN))
+    if (was !== null && was !== boardDir) {
+      this.rebase(was, boardDir)
+      events.unshift(eventAt(root, was, FileChangeKind.UNKNOWN))
+    }
     return events
+  }
+
+  // Map an `updateBoard` that moved a board out of the workspace the mount
+  // shows: it is deleted where it was.
+  private async left(
+    root: PathSpec,
+    data: JsonValue,
+    model: JsonValue,
+  ): Promise<readonly FileEvent[]> {
+    const old = field(data, 'old') ?? null
+    const oldOrg = textField(old, 'idOrganization')
+    if (oldOrg === undefined) return []
+    const was = await this.boardDir(
+      field(data, 'board') ?? null,
+      model,
+      textField(old, 'name'),
+      oldOrg,
+    )
+    if (was === null) return []
+    this.rebase(was, null)
+    return [eventAt(root, was, FileChangeKind.DELETE)]
   }
 
   async toEvents(
@@ -258,7 +317,9 @@ export class TrelloEventHook {
     const data = field(field(payload, 'action') ?? null, 'data') ?? null
     const model = field(payload, 'model') ?? null
     const boardDir = await this.boardDir(field(data, 'board') ?? null, model)
-    if (boardDir === null) return []
+    if (boardDir === null) {
+      return eventType === 'updateBoard' ? this.left(root, data, model) : []
+    }
     if (
       CARD_MADE.has(eventType) ||
       CARD_GONE.has(eventType) ||

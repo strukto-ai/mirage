@@ -57,14 +57,18 @@ interface BaseFeed {
 }
 
 function encode(feeds: Readonly<Record<string, BaseFeed>>): string {
-  const sorted = <T>(record: Readonly<Record<string, T>>): Record<string, T> =>
-    Object.fromEntries(Object.entries(record).sort(([a], [b]) => compareCodePoints(a, b)))
-  const airtable = Object.fromEntries(
-    Object.entries(sorted(feeds)).map(([baseId, feed]) => [
-      baseId,
-      { dir: feed.dir, hooks: sorted(feed.hooks), tables: sorted(feed.tables) },
-    ]),
-  )
+  const airtable: Record<string, BaseFeed> = {}
+  for (const [baseId, feed] of Object.entries(feeds).sort(([a], [b]) => compareCodePoints(a, b))) {
+    airtable[baseId] = {
+      dir: feed.dir,
+      hooks: Object.fromEntries(
+        Object.entries(feed.hooks).sort(([a], [b]) => compareCodePoints(a, b)),
+      ),
+      tables: Object.fromEntries(
+        Object.entries(feed.tables).sort(([a], [b]) => compareCodePoints(a, b)),
+      ),
+    }
+  }
   return JSON.stringify({ airtable })
 }
 
@@ -129,7 +133,8 @@ class Changes {
  * Airtable keeps payloads for seven days, and a cursor older than that reads
  * from the oldest left, which shows as a later cursor than the payloads read
  * account for. That, a webhook the last pull read that is gone, and a payload
- * marked `error` all mean changes were lost, so the watch root is UNKNOWN.
+ * marked `error` all mean changes were lost, so the watch root is UNKNOWN and
+ * the base's table names are read from its schema again.
  *
  * Mirrors Python `AirtableDeltaHook` (`core/airtable/watch.py`).
  */
@@ -197,15 +202,15 @@ export class AirtableDeltaHook implements DeltaHook {
     }
   }
 
-  private async map(baseId: string, feed: BaseFeed, payload: Row, changes: Changes): Promise<void> {
-    // A value Python reads as true: a non-empty object or list, or a truthy
-    // scalar.
-    const carries = (value: unknown): boolean =>
-      value !== null && typeof value === 'object' ? Object.keys(value).length > 0 : Boolean(value)
-    if (carries(payload.error)) {
-      changes.lost = true
-      return
-    }
+  // Add the changes one payload names, and say whether it is the error payload
+  // a webhook leaves when it lost changes.
+  private async map(
+    baseId: string,
+    feed: BaseFeed,
+    payload: Row,
+    changes: Changes,
+  ): Promise<boolean> {
+    if (payload.error === true) return true
     const base = `bases/${feed.dir}`
     for (const [tableId, made] of Object.entries(asRow(payload.createdTablesById))) {
       const name = textField(asRow(asRow(made).metadata) as JsonValue, 'name')
@@ -248,18 +253,22 @@ export class AirtableDeltaHook implements DeltaHook {
         continue
       }
       const where = `${base}/${table}`
-      if (SCHEMA_KEYS.some((key) => carries(body[key]))) {
+      if (SCHEMA_KEYS.some((key) => (body[key] ?? null) !== null)) {
         changes.add(FileChangeKind.UPDATE, `${where}/table.json`)
       }
-      if (RECORD_KEYS.some((key) => carries(body[key]))) {
+      if (RECORD_KEYS.some((key) => (body[key] ?? null) !== null)) {
         changes.add(FileChangeKind.UPDATE, `${where}/records.jsonl`)
         changes.add(FileChangeKind.UNKNOWN, `${where}/views`)
-      } else if (carries(body.changedViewsById)) {
+      } else if ((body.changedViewsById ?? null) !== null) {
         changes.add(FileChangeKind.UNKNOWN, `${where}/views`)
       }
     }
+    return false
   }
 
+  // Read each of a base's webhooks from its kept cursor. A lost payload may have
+  // made, renamed or destroyed a table, so a base that lost any names its
+  // tables from the schema again.
   private async read(
     baseId: string,
     feed: BaseFeed,
@@ -267,12 +276,18 @@ export class AirtableDeltaHook implements DeltaHook {
     changes: Changes,
   ): Promise<void> {
     const listed = (await listWebhooks(this.accessor, baseId)).map((hook) => String(hook.id))
-    if (Object.keys(was).some((hookId) => !listed.includes(hookId))) changes.lost = true
+    let lost = Object.keys(was).some((hookId) => !listed.includes(hookId))
     for (const hookId of listed) {
-      const { found, cursor, lost } = await this.payloads(baseId, hookId, was[hookId] ?? null)
-      changes.lost = changes.lost || lost
-      for (const payload of found) await this.map(baseId, feed, payload, changes)
-      if (cursor !== null) feed.hooks[hookId] = cursor
+      const read = await this.payloads(baseId, hookId, was[hookId] ?? null)
+      lost = lost || read.lost
+      for (const payload of read.found) {
+        lost = (await this.map(baseId, feed, payload, changes)) || lost
+      }
+      if (read.cursor !== null) feed.hooks[hookId] = read.cursor
+    }
+    if (lost) {
+      feed.tables = await this.tables(baseId)
+      changes.lost = true
     }
   }
 

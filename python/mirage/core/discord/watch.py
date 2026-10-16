@@ -74,8 +74,9 @@ class DiscordEventHook:
     member or guild dispatch changes a listing's names, so it is UNKNOWN
     on the listing: ``channels``, ``members``, or the whole mount for a
     guild, which also fires for every guild when the gateway reconnects
-    and so re-inventories what the gap missed. A direct message belongs
-    to no guild and maps to nothing.
+    and so re-inventories what the gap missed; it also forgets the
+    guild's channels, since one renamed during the gap kept its old
+    name here. A direct message belongs to no guild and maps to nothing.
     """
 
     def __init__(self, accessor: DiscordAccessor) -> None:
@@ -248,6 +249,9 @@ class DiscordEventHook:
         if event_type in GUILD_EVENTS:
             if own is not None and isinstance(payload, dict):
                 self._guilds.pop(own, None)
+                for channel_id, channel in list(self._channels.items()):
+                    if channel.get("guild_id") == own:
+                        del self._channels[channel_id]
                 if text_field(payload, "name") is not None:
                     self._guilds[own] = guild_dirname(dict(payload))
             return (event_at(root, "", FileChangeKind.UNKNOWN),)

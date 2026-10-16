@@ -50,10 +50,20 @@ def _hook(monkeypatch, **config) -> tuple[TrelloEventHook, list[str]]:
         calls.append(f"board {board_id}")
         return {"id": board_id, "idOrganization": "w1"}
 
+    async def fake_card(config, card_id, session=None):
+        calls.append(f"card {card_id}")
+        return {**CARD, "idList": "l1"}
+
+    async def fake_list(config, list_id, session=None):
+        calls.append(f"list {list_id}")
+        return dict(TODO)
+
     monkeypatch.setattr(
         "mirage.core.trello.watch.list_workspaces", fake_workspaces
     )
     monkeypatch.setattr("mirage.core.trello.watch.get_board", fake_board)
+    monkeypatch.setattr("mirage.core.trello.watch.get_card", fake_card)
+    monkeypatch.setattr("mirage.core.trello.watch.get_list", fake_list)
     accessor = TrelloAccessor(
         TrelloConfig(api_key="k", api_token="t", **config)
     )
@@ -188,3 +198,39 @@ def test_a_board_outside_the_mount_maps_to_nothing(monkeypatch):
     body = _body("createCard", model=card_model, card=CARD, list=TODO)
     assert _map(hook, body) == []
     assert calls == ["board b1"]
+
+
+def test_an_action_without_its_list_reads_the_card_once(monkeypatch):
+    hook, calls = _hook(monkeypatch)
+    labelled = _body("addLabelToCard", card=CARD, label={"id": "x"})
+    assert _map(hook, labelled) == [(U, f"{TODO_CARD}/card.json")]
+    assert _map(hook, labelled) == [(U, f"{TODO_CARD}/card.json")]
+    assert calls == ["workspaces", "card c1", "list l1"]
+
+
+def test_remembered_cards_move_with_a_renamed_list_or_board(monkeypatch):
+    hook, _ = _hook(monkeypatch)
+    _map(hook, _body("createCard", card=CARD, list=TODO))
+    next_list = {"id": "l1", "name": "Next"}
+    _map(hook, _body("updateList", list=next_list, old={"name": "To Do"}))
+    gone = _body("deleteCard", card={"id": "c1"}, list=next_list)
+    moved = f"{BOARD_DIR}/lists/Next__l1/cards/Ship_it__c1"
+    assert _map(hook, gone) == [(D, moved)]
+    _map(hook, _body("createCard", card=CARD, list=TODO))
+    renamed = _body("updateBoard", old={"name": "Roadmap"})
+    renamed["action"]["data"]["board"] = {"id": "b1", "name": "Ideas"}
+    _map(hook, renamed)
+    ideas = "/t/workspaces/Acme__w1/boards/Ideas__b1"
+    assert _map(hook, gone) == [
+        (D, f"{ideas}/lists/To_Do__l1/cards/Ship_it__c1")
+    ]
+
+
+def test_a_board_leaving_the_workspace_is_deleted_where_it_was(monkeypatch):
+    hook, _ = _hook(monkeypatch, workspace_id="w1")
+    left = _body(
+        "updateBoard",
+        model={"id": "b1", "name": "Roadmap", "idOrganization": "w2"},
+        old={"idOrganization": "w1"},
+    )
+    assert _map(hook, left) == [(D, BOARD_DIR)]

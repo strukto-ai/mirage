@@ -15,7 +15,12 @@
 from collections.abc import Sequence
 
 from mirage.accessor.trello import TrelloAccessor
-from mirage.core.trello.client import get_board, list_workspaces
+from mirage.core.trello.client import (
+    get_board,
+    get_card,
+    get_list,
+    list_workspaces,
+)
 from mirage.core.trello.pathing import (
     board_dirname,
     card_dirname,
@@ -81,15 +86,19 @@ class TrelloEventHook:
     creates both, and one deleted, archived or moved to another board
     deletes its directory; a deleted card names no name, so where the
     hook saw it last is used, and a card it never saw makes its list's
-    ``cards`` UNKNOWN. A card renamed or moved to another list moves both
-    files. A comment updates ``comments.jsonl``, and a change to what
-    ``card.json`` renders (its fields, labels or members) updates that.
+    ``cards`` UNKNOWN. An action on a card that does not name its list
+    (a label or a member added) reads the card and its list once. A card
+    renamed or moved to another list moves both files. A comment updates
+    ``comments.jsonl``, and a change to what ``card.json`` renders (its
+    fields, labels or members) updates that.
 
     A list or a board renamed moves everything below it, which no action
-    lists, so the old and new directory are UNKNOWN; one archived is
-    deleted, and one restored is UNKNOWN. Any other change to a list or
-    a board updates its ``list.json`` or ``board.json``. A label or a
-    board member added, changed or removed is UNKNOWN on ``labels`` or
+    lists, so the old and new directory are UNKNOWN, and the cards the
+    hook remembers below it move with it; one archived is deleted, and
+    one restored is UNKNOWN. A board moved out of the mount's workspace
+    is deleted where it was. Any other change to a list or a board
+    updates its ``list.json`` or ``board.json``. A label or a board
+    member added, changed or removed is UNKNOWN on ``labels`` or
     ``members``, since the file names come from what changed.
     """
 
@@ -195,6 +204,41 @@ class TrelloEventHook:
         self._cards[card_id] = place
         return place
 
+    async def _located(self, board_dir: str, card: JsonValue) -> str | None:
+        """Where a card an action names without its list is, read from
+        the card and its list.
+
+        Args:
+            board_dir (str): The card's board directory.
+            card (JsonValue): The card as the action names it.
+        """
+        card_id = text_field(card, "id")
+        if card_id is None:
+            return None
+        config = self._accessor.config
+        found = await get_card(config, card_id, session=self._accessor.pool)
+        list_id = text_field(found, "idList")
+        if list_id is None:
+            return None
+        lst = await get_list(config, list_id, session=self._accessor.pool)
+        return self._card_dir(board_dir, found, lst)
+
+    def _rebase(self, old: str, new: str | None) -> None:
+        """Carry each remembered card below a list or board that moved to
+        its new place, or forget it when the place left the mount.
+
+        Args:
+            old (str): Where the list or board was.
+            new (str | None): Where it is now, None when it left.
+        """
+        for card_id, place in list(self._cards.items()):
+            if not place.startswith(old + "/"):
+                continue
+            if new is None:
+                del self._cards[card_id]
+            else:
+                self._cards[card_id] = new + place[len(old) :]
+
     def _files(
         self, root: PathSpec, place: str, kind: FileChangeKind
     ) -> list[FileEvent]:
@@ -209,7 +253,7 @@ class TrelloEventHook:
             event_at(root, f"{place}/{name}", kind) for name in _CARD_FILES
         ]
 
-    def _update_card(
+    async def _update_card(
         self, root: PathSpec, board_dir: str, data: JsonValue
     ) -> Sequence[FileEvent]:
         """Map an ``updateCard``: a rename, a move between lists, an
@@ -233,6 +277,8 @@ class TrelloEventHook:
         )
         now = self._card_dir(board_dir, card, lst if after is None else after)
         if now is None:
+            now = await self._located(board_dir, card)
+        if now is None:
             return ()
         if field(old, "closed") is not None:
             if field(card, "closed") is True:
@@ -251,7 +297,7 @@ class TrelloEventHook:
             )
         return (event_at(root, f"{now}/card.json", FileChangeKind.UPDATE),)
 
-    def _card(
+    async def _card(
         self, root: PathSpec, kind: str, board_dir: str, data: JsonValue
     ) -> Sequence[FileEvent]:
         """Map an action on one card.
@@ -263,7 +309,7 @@ class TrelloEventHook:
             data (JsonValue): The action's ``data``.
         """
         if kind == "updateCard":
-            return self._update_card(root, board_dir, data)
+            return await self._update_card(root, board_dir, data)
         card = field(data, "card")
         lst = field(data, "list")
         place = self._card_dir(board_dir, card, lst)
@@ -275,6 +321,8 @@ class TrelloEventHook:
                 return ()
             cards = f"{board_dir}/lists/{list_dirname(_named(lst))}/cards"
             return (event_at(root, cards, FileChangeKind.UNKNOWN),)
+        if place is None:
+            place = await self._located(board_dir, card)
         if place is None:
             return ()
         if kind in _CARD_MADE:
@@ -304,10 +352,12 @@ class TrelloEventHook:
         if kind == "moveListFromBoard" or (
             field(old, "closed") is not None and field(lst, "closed") is True
         ):
+            self._rebase(now, None)
             return (event_at(root, now, FileChangeKind.DELETE),)
         old_name = text_field(old, "name")
         if old_name is not None:
             was = f"{lists}/{list_dirname(_named(lst, old_name))}"
+            self._rebase(was, now)
             return (
                 event_at(root, was, FileChangeKind.UNKNOWN),
                 event_at(root, now, FileChangeKind.UNKNOWN),
@@ -334,12 +384,10 @@ class TrelloEventHook:
         board = field(data, "board")
         old = field(data, "old")
         if field(old, "closed") is not None:
-            kind = (
-                FileChangeKind.DELETE
-                if field(board, "closed") is True
-                else FileChangeKind.UNKNOWN
-            )
-            return (event_at(root, board_dir, kind),)
+            if field(board, "closed") is not True:
+                return (event_at(root, board_dir, FileChangeKind.UNKNOWN),)
+            self._rebase(board_dir, None)
+            return (event_at(root, board_dir, FileChangeKind.DELETE),)
         old_name = text_field(old, "name")
         old_org = text_field(old, "idOrganization")
         if old_name is None and old_org is None:
@@ -351,8 +399,32 @@ class TrelloEventHook:
         events = [event_at(root, board_dir, FileChangeKind.UNKNOWN)]
         was = await self._board_dir(board, model, old_name, old_org)
         if was is not None and was != board_dir:
+            self._rebase(was, board_dir)
             events.insert(0, event_at(root, was, FileChangeKind.UNKNOWN))
         return tuple(events)
+
+    async def _left(
+        self, root: PathSpec, data: JsonValue, model: JsonValue
+    ) -> Sequence[FileEvent]:
+        """Map an ``updateBoard`` that moved a board out of the workspace
+        the mount shows: it is deleted where it was.
+
+        Args:
+            root (PathSpec): Any path on this mount, read for its prefix.
+            data (JsonValue): The action's ``data``.
+            model (JsonValue): The delivery's ``model``.
+        """
+        old = field(data, "old")
+        old_org = text_field(old, "idOrganization")
+        if old_org is None:
+            return ()
+        was = await self._board_dir(
+            field(data, "board"), model, text_field(old, "name"), old_org
+        )
+        if was is None:
+            return ()
+        self._rebase(was, None)
+        return (event_at(root, was, FileChangeKind.DELETE),)
 
     async def to_events(
         self, root: PathSpec, event_type: str, payload: JsonValue
@@ -369,6 +441,8 @@ class TrelloEventHook:
         model = field(payload, "model")
         board_dir = await self._board_dir(field(data, "board"), model)
         if board_dir is None:
+            if event_type == "updateBoard":
+                return await self._left(root, data, model)
             return ()
         if (
             event_type in _CARD_MADE
@@ -377,7 +451,7 @@ class TrelloEventHook:
             or event_type in _COMMENT_EDITS
             or event_type == "updateCard"
         ):
-            return self._card(root, event_type, board_dir, data)
+            return await self._card(root, event_type, board_dir, data)
         if event_type in (
             "createList",
             "updateList",
