@@ -33,6 +33,9 @@ mode: "frame"
   <p className="my-0">
     Mount your sources, pick the runtimes, and register the CLIs. Here RAM, <Icon icon="database" /> Redis and <Icon icon="slack" /> Slack share one root, <code>python3</code> runs on Monty inside the workspace, and <code>slack</code> is a virtual CLI.
   </p>
+  <p className="mt-3 mb-0">
+    It needs the Redis and Monty extras: <code>uv add "mirage-ai[redis,monty]"</code> in Python, or <code>npm install @struktoai/mirage-node redis @pydantic/monty</code> in TypeScript.
+  </p>
 </div>
 
 <Tabs>
@@ -121,7 +124,7 @@ mode: "frame"
 <div className="max-w-none text-[15px] leading-7 mt-4 mb-2">
   <ul className="my-0">
     <li>One <code>grep</code> sweeps Redis and RAM in a single pass.</li>
-    <li><code>python3</code> runs a script that lives in Slack, sandboxed in the workspace, and files its report into Redis.</li>
+    <li><code>python3</code> runs a script someone shared in <code>#general</code>, sandboxed in the workspace, and files its report into Redis. List the day's <code>files/</code> folder for your file's real name.</li>
     <li><code>slack</code> is dispatched by name, not by path, and <code>man</code>, <code>type</code> and <code>which</code> find it like any other program.</li>
   </ul>
 </div>
@@ -151,7 +154,7 @@ mode: "frame"
     External changes arrive as events on the mount. A new Slack reply is a change to the chat file, so the agent reacts instead of rescanning the tree.
   </Card>
   <Card title="Authentication" icon="key">
-    An environment variable can resolve to a credential in the environment, dotenv, AWS Secrets Manager, 1Password or Auth0.
+    An environment variable can resolve to a credential in the environment, dotenv, AWS Secrets Manager or 1Password, or in a source you register yourself.
   </Card>
 </CardGroup>
 
@@ -326,7 +329,7 @@ EOF
     <code>tail</code>, <code>grep</code>, <code>jq</code> over remote logs, metrics, and config without per-source plugins.
   </Card>
   <Card title="Sandboxed code" icon="box">
-    Run <code>python3</code> in-process on Monty, or route native programs to Docker, E2B, Daytona or an SSH host while the files stay in Mirage.
+    Run <code>python3</code> on Monty inside Mirage, or route native programs to Docker, E2B, Daytona or an SSH host while the files stay in Mirage.
   </Card>
   <Card title="Reproducible agent runs" icon="wand-magic-sparkles">
     Snapshot, restore, and clone workspaces for branchable, replayable agent runs.
@@ -343,7 +346,7 @@ EOF
     The shell runs in your Mirage process: a tree-sitter bash parser plus an executor that routes each command to the mount that owns its paths. There is no <code>/bin/bash</code> underneath. Common Unix commands work (<code>ls</code>, <code>cat</code>, <code>grep</code>, <code>find</code>, <code>head</code>, <code>wc</code>, <code>jq</code>, ...) with pipes, redirects, globs, and <code>&&</code>/<code>||</code>. <code>python3</code>, <code>node</code> and other programs go to the <a href="/home/setup/runtime/overview">runtime</a> that captures them.
   </Accordion>
   <Accordion title="Is it sandboxed?">
-    The shell only sees your mounts. The default runtimes, Monty for <code>python3</code> and QuickJS for <code>node</code>, run in-process with no host files or network. Host and sandbox runtimes (<code>local</code>, Docker, E2B, Daytona, SSH) have their own files and network; see <a href="/home/setup/runtime/overview#files">what each runtime reaches</a>.
+    The shell only sees your mounts. The default runtimes run inside Mirage with no host files or network: Monty takes <code>python3</code> in a pool of local worker processes, and QuickJS takes <code>node</code> in-process. Host and sandbox runtimes (<code>local</code>, Docker, E2B, Daytona, SSH) have their own files and network; see <a href="/home/setup/runtime/overview#files">what each runtime reaches</a>.
   </Accordion>
   <Accordion title="What about latency and cost?">
     Backend-bound. <code>cat /s3/...</code> is one GetObject; <code>find /postgres/...</code> is a SQL query. Reads go through the workspace <a href="/home/cache">cache</a>: under the default <code>read: bounded</code> a repeat read within the mount's <code>ttl</code> makes no backend call, and under <code>read: fresh</code> it costs one metadata check (and a download if the file changed).
@@ -355,7 +358,7 @@ EOF
     Anything that exposes a shell tool: Claude Code, Codex / OpenAI Agents SDK, Cursor, OpenHands, Pydantic deepagents. Direct SDK integrations live under <a href="/python/agents">Python agents</a> and <a href="/typescript/agents">TypeScript agents</a>.
   </Accordion>
   <Accordion title="Python or TypeScript?">
-    Both. The two SDKs share one layout and the same semantics: the same <code>Workspace</code>, mounts, commands, CLIs and runtimes. TypeScript ships <code>@struktoai/mirage-node</code> for Node and <code>@struktoai/mirage-browser</code> for browsers.
+    Both. The two SDKs share the same <code>Workspace</code> API, commands and CLIs, and most mounts. Runtimes differ: <code>wasi</code> is Python-only and <code>pyodide</code> TypeScript-only; see the <a href="/home/setup/runtime/overview">runtime table</a>. TypeScript ships <code>@struktoai/mirage-node</code> for Node and <code>@struktoai/mirage-browser</code> for browsers.
   </Accordion>
   <Accordion title="What if a VFS I want isn't supported yet?">
     VFS types are pluggable. The <a href="/python/vfs/new">"Add a VFS"</a> guide walks through the read/write/stat surface a new backend implements. PRs welcome.
