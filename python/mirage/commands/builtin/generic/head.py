@@ -228,25 +228,17 @@ async def _head_multi(
     for p in paths:
         body: AsyncIterator[bytes] | None = None
         first: bytes | None = None
-        failure: Exception | None = None
         if p.virtual not in unread:
             source = read(p)
             if inspect.isawaitable(source):
                 source = await source
             body = head(source, n=n, c=c, zero_terminated=zero_terminated)
-            # The first pull opens the file; a read that fails past the
-            # open still prints its header before the error.
-            try:
-                first = await anext(body, None)
-            except Exception as exc:
-                failure = exc
+            first = await anext(body, None)
         try:
             if show_headers and p.virtual not in refused:
                 header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
                 yield encode_text("\n" + header if printed else header)
                 printed = True
-            if failure is not None:
-                raise failure
             if body is None:
                 continue
             if first is not None:
@@ -337,14 +329,13 @@ async def head_generic(
                     async for chunk in source:
                         yield chunk
                 except FS_ERRORS as exc:
-                    # One whose open was refused prints no header; a read
-                    # that fails once the stat passed (a table past its
-                    # read cap) keeps it.
+                    # Reported as it happens, so a reader that stops at the
+                    # header still leaves the status; the next operand
+                    # still prints. One whose open was refused prints no
+                    # header; a read that fails once the stat passed (a
+                    # table past its read cap) keeps it.
                     if not isinstance(exc, READ_FAILURES):
                         refused.add(p.virtual)
-                    if len(opened) == 1:
-                        raise
-                    # It is reported, and the next operand still prints.
                     held = io.stderr if isinstance(io.stderr, bytes) else b""
                     io.stderr = held + encode_text(
                         fs_error_line("head", p, exc)

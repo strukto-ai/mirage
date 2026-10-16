@@ -191,20 +191,12 @@ async function* headMulti(
     try {
       // The first pull opens the file, and `stream` names in `refused` one
       // whose open it refused, which prints no header, as GNU opens a file
-      // before it heads it; a read that fails past the open still prints its
-      // header before the error.
-      let first: IteratorResult<Uint8Array> | undefined
-      let failure: { error: unknown } | null = null
-      try {
-        first = await body?.next()
-      } catch (error) {
-        failure = { error }
-      }
+      // before it heads it.
+      const first = await body?.next()
       if (showHeaders && !refused.has(p.virtual)) {
         yield encodeText(`${printed ? '\n' : ''}==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`)
         printed = true
       }
-      if (failure !== null) throw failure.error
       if (body === null || first === undefined || first.done === true) continue
       yield first.value
       for (let next = await body.next(); next.done !== true; next = await body.next()) {
@@ -264,12 +256,12 @@ export async function headGeneric(
         yield* source
       } catch (err) {
         if (!isFsError(err)) throw err
-        // One whose open was refused prints no header; a read that fails once
-        // the stat passed (a table past its read cap) keeps it.
+        // Reported as it happens, so a reader that stops at the header still
+        // leaves the status; the next operand still prints. One whose open was
+        // refused prints no header; a read that fails once the stat passed (a
+        // table past its read cap) keeps it.
         const code = (err as { code?: string }).code
         if (code === undefined || !READ_FAILURES.has(code)) refused.add(p.virtual)
-        if (opened.length === 1) throw err
-        // It is reported, and the next operand still prints.
         io.stderr = concat([await materialize(io.stderr), encodeText(fsErrorLine('head', p, err))])
         io.exitCode = 1
       }

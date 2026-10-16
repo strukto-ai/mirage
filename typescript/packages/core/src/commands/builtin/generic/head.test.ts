@@ -240,28 +240,29 @@ describe('head asks the mount for the first lines', () => {
   })
 
   it.each([
-    ['/big', '==> /big <==\n', 'EFBIG'],
-    ['/locked', '', 'EACCES'],
-  ])('-v heads one failed read but no refused open: %s', async (name, header, code) => {
-    const result = await headGeneric(
-      [PathSpec.fromStrPath(name)],
-      [],
-      opts({ lines: '1', verbose: true }),
-      fileStat,
-      // eslint-disable-next-line require-yield
-      async function* () {
-        await Promise.resolve()
-        throw new Error('read a file')
-      },
-      (p) => Promise.reject(p.virtual === '/big' ? efbig(p) : eacces(p)),
-    )
-    const printed: string[] = []
-    const drain = async (): Promise<void> => {
-      for await (const chunk of ensureStream(result?.[0] ?? new Uint8Array())) {
-        printed.push(DEC.decode(chunk))
-      }
-    }
-    await expect(drain()).rejects.toMatchObject({ code })
-    expect(printed.join('')).toBe(header)
-  })
+    ['/big', '==> /big <==\n', "head: error reading '/big': File too large\n"],
+    ['/locked', '', "head: cannot open '/locked' for reading: Permission denied\n"],
+  ])(
+    '-v keeps one failure when the reader stops at the header: %s',
+    async (name, header, stderr) => {
+      const result = await headGeneric(
+        [PathSpec.fromStrPath(name)],
+        [],
+        opts({ lines: '1', verbose: true }),
+        fileStat,
+        // eslint-disable-next-line require-yield
+        async function* () {
+          await Promise.resolve()
+          throw new Error('read a file')
+        },
+        (p) => Promise.reject(p.virtual === '/big' ? efbig(p) : eacces(p)),
+      )
+      const out = ensureStream(result?.[0] ?? new Uint8Array())[Symbol.asyncIterator]()
+      const first = await out.next()
+      await out.return?.()
+      expect(first.done === true ? '' : DEC.decode(first.value)).toBe(header)
+      expect(result?.[1].exitCode).toBe(1)
+      expect(DEC.decode(await materialize(result?.[1].stderr ?? null))).toBe(stderr)
+    },
+  )
 })
