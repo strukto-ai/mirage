@@ -93,17 +93,8 @@
                   "home/setup/tencent",
                   "home/setup/aliyun",
                   "home/setup/scaleway",
-                  "home/setup/qingstor"
-                ]
-              },
-              {
-                "group": "Hugging Face",
-                "icon": "/images/huggingface-logo.svg",
-                "pages": [
-                  "home/setup/hf_buckets",
-                  "home/setup/hf_datasets",
-                  "home/setup/hf_models",
-                  "home/setup/hf_spaces"
+                  "home/setup/qingstor",
+                  "home/setup/hf_buckets"
                 ]
               },
               {
@@ -124,6 +115,7 @@
                 "icon": "code",
                 "pages": [
                   "home/setup/github",
+                  "home/setup/hf_spaces",
                   "home/setup/linear",
                   "home/setup/wandb",
                   "home/setup/langfuse",
@@ -145,7 +137,9 @@
                   "home/setup/lancedb",
                   "home/setup/qdrant",
                   "home/setup/dify",
-                  "home/setup/mem0"
+                  "home/setup/mem0",
+                  "home/setup/hf_datasets",
+                  "home/setup/hf_models"
                 ]
               },
               {
@@ -157,7 +151,7 @@
                 ]
               },
               {
-                "group": "Integration",
+                "group": "Search & Performance",
                 "icon": "plug",
                 "pages": [
                   "home/integration/search",
