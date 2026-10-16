@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { neon, type NeonQueryFunction } from '@neondatabase/serverless'
+import { neon, types, type NeonQueryFunction } from '@neondatabase/serverless'
+import { readAsText } from '@struktoai/mirage-core/accessor/postgres'
 import type { PgDriver, PgQueryResult } from '@struktoai/mirage-core/core/postgres/_driver'
 
 interface FullResultsRow<R> {
@@ -24,7 +25,7 @@ export class NeonPgDriver implements PgDriver {
   private readonly sql: NeonQueryFunction<false, true>
 
   constructor(dsn: string) {
-    this.sql = neon(dsn, { fullResults: true })
+    this.sql = neon(dsn, { fullResults: true, types: readAsText(types) })
   }
 
   async query<R = Record<string, unknown>>(

@@ -2333,6 +2333,26 @@ POSTGRES_PROBES = [
     (5, None, True),
 ]
 
+# Every date and time type, with values a datetime cannot hold (BC, a
+# five-digit year, infinity, 24:00, an interval's months), and `seen`
+# holding each value twice so ANALYZE keeps both as samples.
+POSTGRES_MOMENTS = (
+    "INSERT INTO contract.moments VALUES "
+    "(1, '2026-01-01', '2026-01-01 12:00:00', '2026-01-01 12:00:00+00', "
+    "'12:00:00', '12:00:00+05:30', '1 day 02:00:00', "
+    "'2026-01-01 00:00:00.000001+00', "
+    "ARRAY['2026-01-01 12:00:00+00', '2026-01-02 00:00:00.000001+00']"
+    "::timestamptz[]), "
+    "(2, '2026-01-02', '2026-01-01 00:00:00.000001', "
+    "'2026-06-30 23:59:59.5+02', '00:00:00.000001', '23:59:59.5-08', "
+    "'1 year 2 mons 3 days 04:05:06.789', "
+    "'2026-01-01 00:00:00.000001+00', NULL), "
+    "(3, '0044-03-15 BC', 'infinity', '-infinity', '24:00:00', NULL, "
+    "'-1 mons', '2026-06-30 23:59:59.5+02', '{}'), "
+    "(4, 'infinity', '12026-01-01 00:00:00', '12026-01-01 00:00:00+00', "
+    "NULL, '00:00:00+00', '0', '2026-06-30 23:59:59.5+02', NULL)"
+)
+
 
 class PostgresService:
     def __init__(self, dsn: str) -> None:
@@ -2395,6 +2415,14 @@ class PostgresService:
                 "INSERT INTO contract.shuffled VALUES (3, 'c'), (1, 'a'), (2, 'b')"
             )
             await conn.execute("ANALYZE contract.shuffled")
+            await conn.execute(
+                "CREATE TABLE contract.moments (id int PRIMARY KEY, "
+                "day date, at timestamp, at_tz timestamptz, clock time, "
+                "clock_tz timetz, span interval, seen timestamptz, "
+                "stamps timestamptz[])"
+            )
+            await conn.execute(POSTGRES_MOMENTS)
+            await conn.execute("ANALYZE contract.moments")
             await conn.execute("DROP SCHEMA IF EXISTS byte_budget CASCADE")
             await conn.execute("CREATE SCHEMA byte_budget")
             await conn.execute(

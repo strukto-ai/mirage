@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PostgresAccessor } from '../../accessor/postgres.ts'
+import { TEXT_TYPES, type PostgresAccessor } from '../../accessor/postgres.ts'
 import type { PathSpec } from '../../types.ts'
 import { concat } from '../../utils/bytes.ts'
 import { fetchBoundedQuery, fetchRowKey, keyOrder, qualified, quoteIdent } from './client.ts'
@@ -21,8 +21,16 @@ import { detectScope } from './scope.ts'
 
 // Types whose `::text` is the value exactly as a rows.jsonl line spells it,
 // so a LIKE over the cast finds every row whose line holds the text inside
-// that value. Mirrors `_SAME_TEXT_TYPES` in `mirage/core/postgres/search.py`.
-const SAME_TEXT_TYPES: ReadonlySet<string> = new Set(['uuid', 'int2', 'int4', 'int8', 'bool'])
+// that value. A date or time type's row keeps that text. Mirrors
+// `_SAME_TEXT_TYPES` in `mirage/core/postgres/search.py`.
+const SAME_TEXT_TYPES: ReadonlySet<string> = new Set([
+  'uuid',
+  'int2',
+  'int4',
+  'int8',
+  'bool',
+  ...Object.keys(TEXT_TYPES),
+])
 // The strings among them, which can hold a control character the line spells
 // as an escape (`\n`, `\u0001`), so the text can match the escape's letters in
 // a row whose value never holds them: such rows are candidates too. An enum's
@@ -35,21 +43,17 @@ const SAME_TEXT_ELEMENTS: ReadonlySet<string> = new Set([
   'int2',
   'int4',
   'int8',
+  ...Object.keys(TEXT_TYPES),
 ])
 // Every character a value of these types spells in a line on either host (a
-// float's exponent, a numeric's NaN or Infinity, a timestamp's T and Z),
-// folded to lowercase. A text holding any other character is never inside
-// such a value, so the column is left out of the search.
+// float's exponent, a numeric's NaN or Infinity), folded to lowercase. A text
+// holding any other character is never inside such a value, so the column is
+// left out of the search.
 const NUMBER = '0123456789.+-e'
 const SPELLED_WITH: Readonly<Record<string, string>> = {
   float4: NUMBER,
   float8: NUMBER,
   numeric: `${NUMBER}nainfty`,
-  date: '0123456789-:.tz',
-  timestamp: '0123456789-:.+tz',
-  timestamptz: '0123456789-:.+tz',
-  time: '0123456789:.+-',
-  timetz: '0123456789:.+-',
 }
 // What a line spells around and between values: a text holding one can match
 // where no single value holds it (`:4` after a key).

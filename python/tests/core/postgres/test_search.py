@@ -155,11 +155,6 @@ async def test_ignore_case_uses_ilike():
             "a double spells digits its cast may spell otherwise",
         ),
         (
-            _columns(("id", "int4"), ("at", "timestamptz")),
-            "2026",
-            "a timestamp spells digits its cast spells otherwise",
-        ),
-        (
             _columns(("id", "int4"), ("price", "numeric")),
             "nan",
             "a numeric spells NaN",
@@ -194,11 +189,6 @@ async def test_ignore_case_uses_ilike():
             "ab",
             "a json value's cast keeps escapes the line decodes",
         ),
-        (
-            _columns(("id", "int4"), ("span", "interval")),
-            "ab",
-            "an interval spells words on one host and keys on the other",
-        ),
         (USERS, "am", "every row holds the key `name`"),
         (USERS, "ul", "a NULL spells `null` in the line"),
         (USERS, 'd":1', "a quote matches between key and value"),
@@ -223,13 +213,17 @@ async def test_declines_when_a_like_cannot_see_every_match(columns, text, why):
         (("tags", "_text", "A", "text"), ["LIKE", "~"]),
         (("ids", "_int4", "A", "int4"), ["LIKE"]),
         (("label", "text"), ["LIKE", "~"]),
+        (("at", "timestamptz"), ["LIKE"]),
+        (("span", "interval"), ["LIKE"]),
+        (("days", "_date", "A", "date"), ["LIKE"]),
     ],
 )
 @pytest.mark.asyncio
 async def test_searches_a_column_whose_cast_holds_the_text(column, clauses):
     # A char(n) without a space in the text, a jsonb value, an enum's
-    # label and an array of strings or integers hold the text where their
-    # cast does; a string can also hold it as an escape's letters.
+    # label, a date or time value (its row keeps the cast's text) and an
+    # array of strings, integers or dates hold the text where their cast
+    # does; a string can also hold it as an escape's letters.
     conn = _conn(_columns(column), [])
     assert await _lines(conn, "ada") == b""
     sql = conn.fetch.await_args_list[3].args[0]
@@ -239,30 +233,28 @@ async def test_searches_a_column_whose_cast_holds_the_text(column, clauses):
 
 @pytest.mark.asyncio
 async def test_leaves_out_a_column_that_cannot_spell_the_text():
-    # A float, a numeric, a date or a time spells digits and a few marks,
-    # never the letters of `ada`, so only the other columns are asked.
+    # A float or a numeric spells digits and a few marks, never the
+    # letters of `ada`, so only the other columns are asked.
     conn = _conn(
         _columns(
             ("id", "int4"),
             ("name", "text"),
             ("rating", "float8"),
             ("price", "numeric"),
-            ("at", "timestamptz"),
         ),
-        [{"id": 1, "name": "ada", "rating": 4.5, "price": 1, "at": None}],
+        [{"id": 1, "name": "ada", "rating": 4.5, "price": 1}],
     )
     assert await _lines(conn, "ada") == (
-        b'{"id":1,"name":"ada","rating":4.5,"price":1,"at":null}\n'
+        b'{"id":1,"name":"ada","rating":4.5,"price":1}\n'
     )
     sql = conn.fetch.await_args_list[3].args[0]
     assert '"name"::text LIKE' in sql
     assert '"rating"' not in sql and '"price"' not in sql
-    assert '"at"' not in sql
 
 
 @pytest.mark.asyncio
 async def test_answers_nothing_when_no_column_can_spell_the_text():
-    conn = _conn(_columns(("rating", "float8"), ("at", "date")), [])
+    conn = _conn(_columns(("rating", "float8"), ("price", "numeric")), [])
     assert await _lines(conn, "ada") == b""
     assert len(conn.fetch.await_args_list) == 2
 

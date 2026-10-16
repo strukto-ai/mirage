@@ -188,10 +188,11 @@ export async function fetchRows(
 
 /**
  * Each key column's text, selected under a name no column of the relation
- * has, for a page to start after. node-pg reads a timestamp as a millisecond
- * `Date`, so the driver's value of a key finer than that sorts before the row
- * it came from, and the page after it would answer that row again; the text
- * is the exact key. asyncpg keeps exact values, so Python pages from the row.
+ * has, for a page to start after. A driver's value need not be exact (pg-types
+ * parses a jsonb number as a double, and a browser mount takes any driver), so
+ * a key finer than its value sorts before the row it came from, and the page
+ * after it would answer that row again; the text is the exact key. asyncpg
+ * keeps exact values, so Python pages from the row.
  */
 function keyTexts(
   pk: readonly string[],

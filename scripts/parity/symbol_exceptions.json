@@ -753,7 +753,7 @@
   },
   "core/postgres/client": {
    "typescript_only": {
-    "keyTexts": "node-pg reads a timestamp key as a millisecond Date, so a TypeScript keyset page starts after the key's text form; asyncpg's values are exact, so Python pages from the row itself."
+    "keyTexts": "A TypeScript driver's key value need not be exact (pg-types parses a jsonb number as a double, and a browser mount takes any driver), so a TypeScript keyset page starts after the key's text form; asyncpg's values are exact, so Python pages from the row itself."
    }
   }
  }

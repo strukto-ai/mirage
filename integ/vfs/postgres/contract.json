@@ -629,6 +629,110 @@
         "stdout": "{\"id\":1,\"name\":\"a\"}\n{\"id\":2,\"name\":\"b\"}\n{\"id\":3,\"name\":\"c\"}\n{\"id\":1,\"name\":\"a\"}\n{\"id\":3,\"name\":\"c\"}\n1:{\"id\":1,\"name\":\"a\"}\n2:{\"id\":2,\"name\":\"b\"}\n3:{\"id\":3,\"name\":\"c\"}\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "postgres_dates_cat",
+      "seq": 611400,
+      "targets": [
+        "postgres"
+      ],
+      "command": "cat /pg-contract/contract/tables/moments/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":1,\"day\":\"2026-01-01\",\"at\":\"2026-01-01 12:00:00\",\"at_tz\":\"2026-01-01 12:00:00+00\",\"clock\":\"12:00:00\",\"clock_tz\":\"12:00:00+05:30\",\"span\":\"1 day 02:00:00\",\"seen\":\"2026-01-01 00:00:00.000001+00\",\"stamps\":[\"2026-01-01 12:00:00+00\",\"2026-01-02 00:00:00.000001+00\"]}\n{\"id\":2,\"day\":\"2026-01-02\",\"at\":\"2026-01-01 00:00:00.000001\",\"at_tz\":\"2026-06-30 21:59:59.5+00\",\"clock\":\"00:00:00.000001\",\"clock_tz\":\"23:59:59.5-08\",\"span\":\"1 year 2 mons 3 days 04:05:06.789\",\"seen\":\"2026-01-01 00:00:00.000001+00\",\"stamps\":null}\n{\"id\":3,\"day\":\"0044-03-15 BC\",\"at\":\"infinity\",\"at_tz\":\"-infinity\",\"clock\":\"24:00:00\",\"clock_tz\":null,\"span\":\"-1 mons\",\"seen\":\"2026-06-30 21:59:59.5+00\",\"stamps\":[]}\n{\"id\":4,\"day\":\"infinity\",\"at\":\"12026-01-01 00:00:00\",\"at_tz\":\"12026-01-01 00:00:00+00\",\"clock\":null,\"clock_tz\":\"00:00:00+00\",\"span\":\"00:00:00\",\"seen\":\"2026-06-30 21:59:59.5+00\",\"stamps\":null}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "postgres_dates_head",
+      "seq": 611401,
+      "targets": [
+        "postgres"
+      ],
+      "command": "head -n 2 /pg-contract/contract/tables/moments/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":1,\"day\":\"2026-01-01\",\"at\":\"2026-01-01 12:00:00\",\"at_tz\":\"2026-01-01 12:00:00+00\",\"clock\":\"12:00:00\",\"clock_tz\":\"12:00:00+05:30\",\"span\":\"1 day 02:00:00\",\"seen\":\"2026-01-01 00:00:00.000001+00\",\"stamps\":[\"2026-01-01 12:00:00+00\",\"2026-01-02 00:00:00.000001+00\"]}\n{\"id\":2,\"day\":\"2026-01-02\",\"at\":\"2026-01-01 00:00:00.000001\",\"at_tz\":\"2026-06-30 21:59:59.5+00\",\"clock\":\"00:00:00.000001\",\"clock_tz\":\"23:59:59.5-08\",\"span\":\"1 year 2 mons 3 days 04:05:06.789\",\"seen\":\"2026-01-01 00:00:00.000001+00\",\"stamps\":null}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "postgres_dates_tail",
+      "seq": 611402,
+      "targets": [
+        "postgres"
+      ],
+      "command": "tail -n 2 /pg-contract/contract/tables/moments/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":3,\"day\":\"0044-03-15 BC\",\"at\":\"infinity\",\"at_tz\":\"-infinity\",\"clock\":\"24:00:00\",\"clock_tz\":null,\"span\":\"-1 mons\",\"seen\":\"2026-06-30 21:59:59.5+00\",\"stamps\":[]}\n{\"id\":4,\"day\":\"infinity\",\"at\":\"12026-01-01 00:00:00\",\"at_tz\":\"12026-01-01 00:00:00+00\",\"clock\":null,\"clock_tz\":\"00:00:00+00\",\"span\":\"00:00:00\",\"seen\":\"2026-06-30 21:59:59.5+00\",\"stamps\":null}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "postgres_dates_tail_follow",
+      "seq": 611403,
+      "targets": [
+        "postgres"
+      ],
+      "command": "tail -n 1 -f /pg-contract/contract/tables/moments/rows.jsonl | head -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":4,\"day\":\"infinity\",\"at\":\"12026-01-01 00:00:00\",\"at_tz\":\"12026-01-01 00:00:00+00\",\"clock\":null,\"clock_tz\":\"00:00:00+00\",\"span\":\"00:00:00\",\"seen\":\"2026-06-30 21:59:59.5+00\",\"stamps\":null}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "postgres_dates_grep_microseconds",
+      "seq": 611404,
+      "targets": [
+        "postgres"
+      ],
+      "command": "grep -F .000001 /pg-contract/contract/tables/moments/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":1,\"day\":\"2026-01-01\",\"at\":\"2026-01-01 12:00:00\",\"at_tz\":\"2026-01-01 12:00:00+00\",\"clock\":\"12:00:00\",\"clock_tz\":\"12:00:00+05:30\",\"span\":\"1 day 02:00:00\",\"seen\":\"2026-01-01 00:00:00.000001+00\",\"stamps\":[\"2026-01-01 12:00:00+00\",\"2026-01-02 00:00:00.000001+00\"]}\n{\"id\":2,\"day\":\"2026-01-02\",\"at\":\"2026-01-01 00:00:00.000001\",\"at_tz\":\"2026-06-30 21:59:59.5+00\",\"clock\":\"00:00:00.000001\",\"clock_tz\":\"23:59:59.5-08\",\"span\":\"1 year 2 mons 3 days 04:05:06.789\",\"seen\":\"2026-01-01 00:00:00.000001+00\",\"stamps\":null}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "postgres_dates_grep_words",
+      "seq": 611405,
+      "targets": [
+        "postgres"
+      ],
+      "command": "grep -c BC /pg-contract/contract/tables/moments/rows.jsonl; grep -i MONS /pg-contract/contract/tables/moments/rows.jsonl; grep -F infinity /pg-contract/contract/tables/moments/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n{\"id\":2,\"day\":\"2026-01-02\",\"at\":\"2026-01-01 00:00:00.000001\",\"at_tz\":\"2026-06-30 21:59:59.5+00\",\"clock\":\"00:00:00.000001\",\"clock_tz\":\"23:59:59.5-08\",\"span\":\"1 year 2 mons 3 days 04:05:06.789\",\"seen\":\"2026-01-01 00:00:00.000001+00\",\"stamps\":null}\n{\"id\":3,\"day\":\"0044-03-15 BC\",\"at\":\"infinity\",\"at_tz\":\"-infinity\",\"clock\":\"24:00:00\",\"clock_tz\":null,\"span\":\"-1 mons\",\"seen\":\"2026-06-30 21:59:59.5+00\",\"stamps\":[]}\n{\"id\":3,\"day\":\"0044-03-15 BC\",\"at\":\"infinity\",\"at_tz\":\"-infinity\",\"clock\":\"24:00:00\",\"clock_tz\":null,\"span\":\"-1 mons\",\"seen\":\"2026-06-30 21:59:59.5+00\",\"stamps\":[]}\n{\"id\":4,\"day\":\"infinity\",\"at\":\"12026-01-01 00:00:00\",\"at_tz\":\"12026-01-01 00:00:00+00\",\"clock\":null,\"clock_tz\":\"00:00:00+00\",\"span\":\"00:00:00\",\"seen\":\"2026-06-30 21:59:59.5+00\",\"stamps\":null}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "postgres_dates_grep_with_a_space",
+      "seq": 611406,
+      "targets": [
+        "postgres"
+      ],
+      "command": "grep -F '2026-01-01 12' /pg-contract/contract/tables/moments/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":1,\"day\":\"2026-01-01\",\"at\":\"2026-01-01 12:00:00\",\"at_tz\":\"2026-01-01 12:00:00+00\",\"clock\":\"12:00:00\",\"clock_tz\":\"12:00:00+05:30\",\"span\":\"1 day 02:00:00\",\"seen\":\"2026-01-01 00:00:00.000001+00\",\"stamps\":[\"2026-01-01 12:00:00+00\",\"2026-01-02 00:00:00.000001+00\"]}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "postgres_dates_semantic_samples",
+      "seq": 611407,
+      "targets": [
+        "postgres"
+      ],
+      "command": "jq -c '.time_dimensions[] | select(.name == \"seen\") | .sample_values' /pg-contract/contract/tables/moments/semantic.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"2026-01-01 00:00:00.000001+00\",\"2026-06-30 21:59:59.5+00\"]\n",
+        "stderr": ""
+      }
     }
   ]
 }

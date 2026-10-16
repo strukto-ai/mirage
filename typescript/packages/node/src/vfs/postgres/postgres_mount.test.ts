@@ -37,9 +37,12 @@ const PoolCtor = vi.fn(function () {
   return pool
 })
 
+const types = { getTypeParser: () => (value: string) => value }
+
 vi.mock('pg', () => ({
-  default: { Pool: PoolCtor },
+  default: { Pool: PoolCtor, types },
   Pool: PoolCtor,
+  types,
 }))
 
 let tableRows = 5

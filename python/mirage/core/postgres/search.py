@@ -15,7 +15,7 @@
 
 from typing import Literal, TypedDict
 
-from mirage.accessor.postgres import PostgresAccessor
+from mirage.accessor.postgres import TEXT_TYPES, PostgresAccessor
 from mirage.core.postgres import client
 from mirage.core.postgres.client import qualified, quote_ident
 from mirage.core.postgres.read import row_line
@@ -25,8 +25,10 @@ from mirage.utils.json_canonical import canonicalize_row
 
 # Types whose `::text` is the value exactly as a rows.jsonl line spells it,
 # so a LIKE over the cast finds every row whose line holds the text inside
-# that value.
-_SAME_TEXT_TYPES = frozenset({"uuid", "int2", "int4", "int8", "bool"})
+# that value. A date or time type's row keeps that text.
+_SAME_TEXT_TYPES = frozenset(
+    {"uuid", "int2", "int4", "int8", "bool", *TEXT_TYPES}
+)
 # The strings among them, which can hold a control character the line
 # spells as an escape (`\n`, `\u0001`), so the text can match the escape's
 # letters in a row whose value never holds them: such rows are candidates
@@ -34,22 +36,17 @@ _SAME_TEXT_TYPES = frozenset({"uuid", "int2", "int4", "int8", "bool"})
 _STRING_TYPES = frozenset({"text", "varchar", "name"})
 # Array elements whose `::text` is each element as the line spells it.
 _SAME_TEXT_ELEMENTS = _STRING_TYPES | frozenset(
-    {"uuid", "int2", "int4", "int8"}
+    {"uuid", "int2", "int4", "int8", *TEXT_TYPES}
 )
 # Every character a value of these types spells in a line on either host
-# (a float's exponent, a numeric's NaN or Infinity, a timestamp's T and Z),
-# folded to lowercase. A text holding any other character is never inside
-# such a value, so the column is left out of the search.
+# (a float's exponent, a numeric's NaN or Infinity), folded to lowercase.
+# A text holding any other character is never inside such a value, so the
+# column is left out of the search.
 _NUMBER = frozenset("0123456789.+-e")
 _SPELLED_WITH = {
     "float4": _NUMBER,
     "float8": _NUMBER,
     "numeric": _NUMBER | frozenset("nainfty"),
-    "date": frozenset("0123456789-:.tz"),
-    "timestamp": frozenset("0123456789-:.+tz"),
-    "timestamptz": frozenset("0123456789-:.+tz"),
-    "time": frozenset("0123456789:.+-"),
-    "timetz": frozenset("0123456789:.+-"),
 }
 # What a line spells around and between values: a text holding one can
 # match where no single value holds it (`:4` after a key).

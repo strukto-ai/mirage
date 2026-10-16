@@ -139,11 +139,6 @@ describe('linesContaining', () => {
       '4.5',
       'a double spells digits its cast may spell otherwise',
     ],
-    [
-      columns(['id', 'int4'], ['at', 'timestamptz']),
-      '2026',
-      'a timestamp spells digits its cast spells otherwise',
-    ],
     [columns(['id', 'int4'], ['price', 'numeric']), 'nan', 'a numeric spells NaN'],
     [
       columns(['id', 'int4'], ['code', 'bpchar']),
@@ -171,11 +166,6 @@ describe('linesContaining', () => {
       'ab',
       "a json value's cast keeps escapes the line decodes",
     ],
-    [
-      columns(['id', 'int4'], ['span', 'interval']),
-      'ab',
-      'an interval spells words on one host and keys on the other',
-    ],
     [USERS, 'am', 'every row holds the key `name`'],
     [USERS, 'ul', 'a NULL spells `null` in the line'],
     [USERS, 'd":1', 'a quote matches between key and value'],
@@ -188,9 +178,10 @@ describe('linesContaining', () => {
     expect(calls).toHaveLength(2)
   })
 
-  // A char(n) without a space in the text, a jsonb value, an enum's label and
-  // an array of strings or integers hold the text where their cast does; a
-  // string can also hold it as an escape's letters.
+  // A char(n) without a space in the text, a jsonb value, an enum's label, a
+  // date or time value (its row keeps the cast's text) and an array of strings,
+  // integers or dates hold the text where their cast does; a string can also
+  // hold it as an escape's letters.
   it.each<[string[], string[]]>([
     [
       ['code', 'bpchar'],
@@ -210,6 +201,9 @@ describe('linesContaining', () => {
       ['label', 'text'],
       ['LIKE', '~'],
     ],
+    [['at', 'timestamptz'], ['LIKE']],
+    [['span', 'interval'], ['LIKE']],
+    [['days', '_date', 'A', 'date'], ['LIKE']],
   ])('searches a column whose cast holds the text: %j', async (column, clauses) => {
     const { accessor, calls } = makeAccessor(columns(column), [])
     expect(await lines(accessor, 'ada')).toBe('')
@@ -218,29 +212,24 @@ describe('linesContaining', () => {
     expect(['LIKE', '~'].filter((op) => sql.includes(`${name} ${op}`))).toEqual(clauses)
   })
 
-  // A float, a numeric, a date or a time spells digits and a few marks, never
-  // the letters of `ada`, so only the other columns are asked.
+  // A float or a numeric spells digits and a few marks, never the letters of
+  // `ada`, so only the other columns are asked.
   it('leaves out a column that cannot spell the text', async () => {
     const { accessor, calls } = makeAccessor(
-      columns(
-        ['id', 'int4'],
-        ['name', 'text'],
-        ['rating', 'float8'],
-        ['price', 'numeric'],
-        ['at', 'timestamptz'],
-      ),
-      [{ id: 1, name: 'ada', rating: 4.5, price: 1, at: null }],
+      columns(['id', 'int4'], ['name', 'text'], ['rating', 'float8'], ['price', 'numeric']),
+      [{ id: 1, name: 'ada', rating: 4.5, price: 1 }],
     )
-    expect(await lines(accessor, 'ada')).toBe(
-      '{"id":1,"name":"ada","rating":4.5,"price":1,"at":null}\n',
-    )
+    expect(await lines(accessor, 'ada')).toBe('{"id":1,"name":"ada","rating":4.5,"price":1}\n')
     const sql = calls[3]?.[0] ?? ''
     expect(sql).toContain('"name"::text LIKE')
-    for (const name of ['"rating"', '"price"', '"at"']) expect(sql).not.toContain(name)
+    for (const name of ['"rating"', '"price"']) expect(sql).not.toContain(name)
   })
 
   it('answers nothing when no column can spell the text', async () => {
-    const { accessor, calls } = makeAccessor(columns(['rating', 'float8'], ['at', 'date']), [])
+    const { accessor, calls } = makeAccessor(
+      columns(['rating', 'float8'], ['price', 'numeric']),
+      [],
+    )
     expect(await lines(accessor, 'ada')).toBe('')
     expect(calls).toHaveLength(2)
   })

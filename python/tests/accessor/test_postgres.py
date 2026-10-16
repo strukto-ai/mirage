@@ -17,7 +17,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.accessor.postgres import PostgresAccessor
+from mirage.accessor.postgres import (
+    SESSION,
+    TEXT_TYPES,
+    PostgresAccessor,
+    read_as_text,
+)
 from mirage.vfs.postgres.config import PostgresConfig
 
 
@@ -44,3 +49,44 @@ async def test_concurrent_initialization_and_close(monkeypatch):
     await asyncio.gather(accessor.close(), accessor.close())
     factory.assert_awaited_once()
     pool.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pool_pins_the_session_and_reads_times_as_text(monkeypatch):
+    factory = AsyncMock(return_value=AsyncMock())
+    monkeypatch.setattr(
+        "mirage.accessor.postgres.asyncpg.create_pool", factory
+    )
+    await PostgresAccessor(PostgresConfig(dsn="postgresql://unused")).pool()
+    kwargs = factory.await_args.kwargs
+    assert kwargs["server_settings"] == {
+        "default_transaction_read_only": "on",
+        "DateStyle": "ISO",
+        "IntervalStyle": "postgres",
+        "TimeZone": "UTC",
+    }
+    assert kwargs["server_settings"] is SESSION
+    assert kwargs["init"] is read_as_text
+
+
+@pytest.mark.asyncio
+async def test_read_as_text_keeps_each_date_and_time_type_as_text():
+    conn = AsyncMock()
+    await read_as_text(conn)
+    calls = conn.set_type_codec.await_args_list
+    assert [c.args for c in calls] == [(name,) for name in TEXT_TYPES]
+    assert TEXT_TYPES == (
+        "date",
+        "time",
+        "timetz",
+        "timestamp",
+        "timestamptz",
+        "interval",
+    )
+    for c in calls:
+        assert c.kwargs == {
+            "schema": "pg_catalog",
+            "encoder": str,
+            "decoder": str,
+            "format": "text",
+        }

@@ -40,9 +40,17 @@ const PoolCtor = vi.fn(function (options: Record<string, unknown>) {
   return pool
 })
 
+const types = {
+  getTypeParser:
+    (oid: number) =>
+    (value: string): unknown =>
+      `parsed ${String(oid)} ${value}`,
+}
+
 vi.mock('pg', () => ({
-  default: { Pool: PoolCtor },
+  default: { Pool: PoolCtor, types },
   Pool: PoolCtor,
+  types,
 }))
 
 describe('PostgresStore', () => {
@@ -68,7 +76,20 @@ describe('PostgresStore', () => {
     expect(PoolCtor).toHaveBeenCalledTimes(1)
     const opts = PoolCtor.mock.calls[0]?.[0]
     expect(opts?.connectionString).toBe('postgres://localhost/db')
-    expect(opts?.options).toBe('-c default_transaction_read_only=on')
+    expect(opts?.options).toBe(
+      '-c default_transaction_read_only=on -c DateStyle=ISO -c IntervalStyle=postgres -c TimeZone=UTC',
+    )
+  })
+
+  it('reads a date or time type as its text and leaves others to pg', async () => {
+    const store = new PostgresStore(resolvePostgresConfig({ dsn: 'postgres://localhost/db' }))
+    await store.query('SELECT 1')
+    const parsers = PoolCtor.mock.calls[0]?.[0].types as typeof types
+    expect(parsers.getTypeParser(1184)('2026-01-01 00:00:00.000001+00')).toBe(
+      '2026-01-01 00:00:00.000001+00',
+    )
+    expect(parsers.getTypeParser(1185)('{x}')).toBe('parsed 1009 {x}')
+    expect(parsers.getTypeParser(23)('1')).toBe('parsed 23 1')
   })
 
   it('listens for an idle connection error, which would otherwise end the process', async () => {

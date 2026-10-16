@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { readAsText, SESSION } from '@struktoai/mirage-core/accessor/postgres'
 import type { PgDriver, PgQueryResult } from '@struktoai/mirage-core/core/postgres/_driver'
 import type { PostgresConfigResolved } from '@struktoai/mirage-core/vfs/postgres/config'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
@@ -27,6 +28,7 @@ interface PgPoolLike {
 
 interface PgModule {
   Pool: new (options: Record<string, unknown>) => PgPoolLike
+  types: Parameters<typeof readAsText>[0]
 }
 
 export class PostgresStore implements PgDriver {
@@ -69,12 +71,16 @@ export class PostgresStore implements PgDriver {
       { feature: 'PostgresVFS', packageName: 'pg' },
     )
     const Pool = mod.default?.Pool ?? mod.Pool
-    if (Pool === undefined) {
-      throw new Error('postgres: pg package missing Pool export')
+    const types = mod.default?.types ?? mod.types
+    if (Pool === undefined || types === undefined) {
+      throw new Error('postgres: pg package missing Pool or types export')
     }
     const pool = new Pool({
       connectionString: this.config.dsn,
-      options: '-c default_transaction_read_only=on',
+      options: Object.entries(SESSION)
+        .map(([name, value]) => `-c ${name}=${value}`)
+        .join(' '),
+      types: readAsText(types),
     })
     // pg emits `error` for an idle connection the server or the network
     // dropped, and Node throws an `error` event nobody listens for, which would
