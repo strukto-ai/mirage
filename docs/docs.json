@@ -816,6 +816,10 @@
     {
       "source": "/home/policy/route-policy",
       "destination": "/home/policy/route-runtime"
+    },
+    {
+      "source": "/home/access/fuse",
+      "destination": "/home/setup/fuse"
     }
   ],
   "navbar": {

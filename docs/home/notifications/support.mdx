@@ -35,7 +35,7 @@ See the [Python and TypeScript examples](#push-examples).
 | --- | --- | --- | --- |
 | Disk | [disk.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notification/push/disk.py) | [disk.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notification/push/disk.ts) | Nothing; changes temporary files locally |
 | S3 | [s3.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notification/push/s3.py) | [s3.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notification/push/s3.ts) | `S3_BUCKET` and a saved S3 notification JSON file |
-| GitHub | [github.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notification/push/github.py) | [github.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notification/push/github.ts) | `GITHUB_TOKEN`, `GITHUB_REPOSITORY` (`owner/repo`), and a saved push webhook JSON file; `GITHUB_REF` defaults to `main` |
+| GitHub | [github.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notification/push/github.py) | [github.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notification/push/github.ts) | `GITHUB_TOKEN`, `GITHUB_REPOSITORY` (`owner/repo`), and a saved push webhook JSON file; `GITHUB_REF` accepts a short name or full ref and defaults to `main` |
 
 The S3 and GitHub examples process a saved payload; they do not start a webhook server.
 Run from the repository root after installing the language's dependencies:

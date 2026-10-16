@@ -16,7 +16,7 @@ async function main(): Promise<void> {
     token,
     owner,
     repo,
-    ref: process.env.GITHUB_REF ?? 'main',
+    ref: (process.env.GITHUB_REF ?? 'main').replace(/^refs\/(heads|tags)\//, ''),
   })
   const ws = new Workspace({ '/github': vfs })
   const hook = new GitHubEventHook(vfs.accessor)

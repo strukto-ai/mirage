@@ -21,7 +21,9 @@ async def main() -> None:
             token=os.environ["GITHUB_TOKEN"],
             owner=owner,
             repo=repo,
-            ref=os.environ.get("GITHUB_REF", "main"),
+            ref=os.environ.get("GITHUB_REF", "main")
+            .removeprefix("refs/heads/")
+            .removeprefix("refs/tags/"),
         )
     )
     ws = Workspace({"/github": vfs})
