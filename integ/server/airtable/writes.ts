@@ -19,6 +19,8 @@ import { COMPUTED, coerce, renderRecord } from './cells.ts'
 import type { WriteCtx } from './cells.ts'
 import { MAX_BATCH } from './config.ts'
 import type { C } from './config.ts'
+import { notePayloads } from './payloads.ts'
+import type { TableChanges } from './payloads.ts'
 import { fieldById, fieldByRef, optString, recordIn, saveWorld, tableById } from './store.ts'
 import type { FieldRow, RecordRow, TableRow, World } from './store.ts'
 import {
@@ -70,6 +72,33 @@ interface Batch {
   world: World
   table: TableRow
   w: WriteCtx
+}
+
+// Save a batch, then hand each webhook on the base the records it made,
+// changed and destroyed, table by table, as one payload stamped with the
+// write's own time, so a write reads the clock once whether or not a webhook
+// is listening.
+async function persist(b: Batch, stamp: string): Promise<void> {
+  await saveWorld(b.ctx.db, b.world)
+  const changes: TableChanges = {}
+  for (const table of b.world.tables) {
+    const created: JsonObject = {}
+    const changed: JsonObject = {}
+    for (const rec of table.records) {
+      if (rec.state === 'new') {
+        created[rec.id] = { createdTime: rec.createdTime, cellValuesByFieldId: rec.cells }
+      } else if (rec.state === 'dirty') {
+        changed[rec.id] = { current: { cellValuesByFieldId: rec.cells } }
+      }
+    }
+    const destroyed = b.world.removed.filter((r) => r.tableId === table.id).map((r) => r.id)
+    const entry: JsonObject = {}
+    if (Object.keys(created).length > 0) entry.createdRecordsById = created
+    if (Object.keys(changed).length > 0) entry.changedRecordsById = changed
+    if (destroyed.length > 0) entry.destroyedRecordIds = destroyed
+    if (Object.keys(entry).length > 0) changes[table.id] = entry
+  }
+  await notePayloads(b.ctx.db, b.world.tenant, b.world.base.id, stamp, changes)
 }
 
 async function openBatch(ctx: Ctx<C>, who: Principal, typecast: boolean): Promise<Batch> {
@@ -242,7 +271,7 @@ export const createRecords = guard(async (ctx: Ctx<C>): Promise<Reply> => {
     commit(b, rec, next, now)
     return rec
   })
-  await saveWorld(ctx.db, b.world)
+  await persist(b, now)
   const out = render(b, created, byId)
   return ok(single ? (out[0] ?? null) : { records: out })
 })
@@ -348,7 +377,7 @@ async function updateMany(ctx: Ctx<C>, destructive: boolean): Promise<Reply> {
     else updated.push(rec.id)
     return rec
   })
-  await saveWorld(ctx.db, b.world)
+  await persist(b, now)
   const out: JsonObject = { records: render(b, touched, byId) }
   if (mergeOn !== null) {
     out.createdRecords = created
@@ -375,8 +404,9 @@ async function updateOne(ctx: Ctx<C>, destructive: boolean): Promise<Reply> {
   const b = await openBatch(ctx, who, typecast)
   const rec = recordIn(b.table, ctx.params.record ?? '') ?? refuse(modelNotFound())
   const next = prepare(b, rec.cells, fields, destructive)
-  commit(b, rec, next, ctx.clock.nowIso())
-  await saveWorld(ctx.db, b.world)
+  const now = ctx.clock.nowIso()
+  commit(b, rec, next, now)
+  await persist(b, now)
   return ok(renderRecord(b.world, b.table, rec, byId))
 }
 
@@ -415,8 +445,9 @@ export const deleteRecords = guard(async (ctx: Ctx<C>): Promise<Reply> => {
   }
   const b = await openBatch(ctx, who, false)
   const recs = ids.map((id) => recordIn(b.table, id) ?? refuse(deleteNotFound(id)))
-  remove(b, recs, ctx.clock.nowIso())
-  await saveWorld(ctx.db, b.world)
+  const now = ctx.clock.nowIso()
+  remove(b, recs, now)
+  await persist(b, now)
   return ok({ records: ids.map((id) => ({ id, deleted: true })) })
 })
 
@@ -429,7 +460,8 @@ export const deleteRecord = guard(async (ctx: Ctx<C>): Promise<Reply> => {
   onlyQuery(ctx, () => false)
   const b = await openBatch(ctx, who, false)
   const rec = recordIn(b.table, ctx.params.record ?? '') ?? refuse(modelNotFound())
-  remove(b, [rec], ctx.clock.nowIso())
-  await saveWorld(ctx.db, b.world)
+  const now = ctx.clock.nowIso()
+  remove(b, [rec], now)
+  await persist(b, now)
   return ok({ id: rec.id, deleted: true })
 })

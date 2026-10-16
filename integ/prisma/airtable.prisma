@@ -164,3 +164,32 @@ model AirtableComment {
   @@id([tenant, id])
   @@index([tenant, recordId])
 }
+
+// A base's webhooks. The fake never sends a notification: a caller reads what
+// each webhook saw from its payloads, as it would after Airtable's ping.
+// `spec` is the specification as created, kept and echoed, never applied.
+model AirtableWebhook {
+  tenant         String
+  id             String
+  baseId         String
+  spec           String
+  url            String?
+  expirationTime String
+  seq            Int
+
+  @@id([tenant, id])
+  @@index([tenant, baseId])
+}
+
+// What one webhook saw, one row per payload. `cursor` counts from 1 per
+// webhook, and `transaction` is the base's own count of writes, which every
+// webhook on the base shares.
+model AirtableWebhookPayload {
+  tenant      String
+  webhookId   String
+  cursor      Int
+  transaction Int
+  body        String
+
+  @@id([tenant, webhookId, cursor])
+}

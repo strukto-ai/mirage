@@ -1,0 +1,86 @@
+{
+  "mount": "/at",
+  "base": "appRoadmapBase001",
+  "token": "patIntegFullAccess.fake",
+  "cases": [
+    {
+      "id": "record_change",
+      "root": "",
+      "writes": [
+        {
+          "method": "PATCH",
+          "path": "appRoadmapBase001/tblFeatures000001/recFeat0000000001",
+          "body": {"fields": {"Priority": 4}}
+        }
+      ],
+      "expect": [
+        ["update", "/at/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/records.jsonl"],
+        ["unknown", "/at/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/views"]
+      ]
+    },
+    {
+      "id": "create_then_delete_names_the_table_once",
+      "root": "",
+      "writes": [
+        {
+          "method": "POST",
+          "path": "appRoadmapBase001/tblReleases000002",
+          "body": {"fields": {"Name": "v9.0"}}
+        },
+        {
+          "method": "DELETE",
+          "path": "appRoadmapBase001/tblReleases000002/recNew00000000001"
+        }
+      ],
+      "expect": [
+        ["update", "/at/bases/Product_Roadmap__appRoadmapBase001/Releases__tblReleases000002/records.jsonl"],
+        ["unknown", "/at/bases/Product_Roadmap__appRoadmapBase001/Releases__tblReleases000002/views"]
+      ]
+    },
+    {
+      "id": "a_write_that_changes_nothing",
+      "root": "",
+      "writes": [
+        {
+          "method": "PATCH",
+          "path": "appRoadmapBase001/tblFeatures000001/recFeat0000000001",
+          "body": {"fields": {"Priority": 5}}
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "a_table_root_hears_only_its_table",
+      "root": "bases/Product_Roadmap__appRoadmapBase001/Releases__tblReleases000002",
+      "writes": [
+        {
+          "method": "PATCH",
+          "path": "appRoadmapBase001/tblFeatures000001/recFeat0000000001",
+          "body": {"fields": {"Priority": 4}}
+        },
+        {
+          "method": "PATCH",
+          "path": "appRoadmapBase001/tblReleases000002/recRel00000000001",
+          "body": {"fields": {"Name": "v1.0.1"}}
+        }
+      ],
+      "expect": [
+        ["update", "/at/bases/Product_Roadmap__appRoadmapBase001/Releases__tblReleases000002/records.jsonl"],
+        ["unknown", "/at/bases/Product_Roadmap__appRoadmapBase001/Releases__tblReleases000002/views"]
+      ]
+    },
+    {
+      "id": "a_webhook_gone_is_unknown_on_the_root",
+      "root": "",
+      "writes": [
+        {
+          "method": "DELETE",
+          "path": "bases/appRoadmapBase001/webhooks/achNew00000000001"
+        }
+      ],
+      "expect": [
+        ["unknown", "/at"]
+      ]
+    }
+  ]
+}

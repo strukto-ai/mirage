@@ -1164,8 +1164,8 @@ jobs:
         run: pnpm install --frozen-lockfile=false
 
       # integ/generated/ is gitignored, so every kit fake this job starts
-      # (notion, dropbox, box, onedrive) fails to import its client until this
-      # runs.
+      # (notion, dropbox, box, onedrive, airtable) fails to import its client
+      # until this runs.
       # The battery jobs get it from the integ-battery-setup action; this job
       # does not use that action and has to ask for it itself.
       - name: Generate integ Prisma clients
@@ -1274,6 +1274,20 @@ jobs:
           # if the only thing it does is cat the log.
           grep -q "ONEDRIVE_URL=" /tmp/onedrive-watch.log
 
+      # The Airtable ping cases create a webhook on the fake and read its
+      # payloads, on both hosts.
+      - name: Start the fake Airtable server
+        working-directory: integ
+        run: |
+          nohup pnpm exec tsx server/airtable/main.ts --port 5084 \
+            > /tmp/airtable-watch.log 2>&1 &
+          for i in $(seq 1 30); do
+            grep -q "AIRTABLE_URL=" /tmp/airtable-watch.log && break
+            sleep 1
+          done
+          cat /tmp/airtable-watch.log
+          grep -q "AIRTABLE_URL=" /tmp/airtable-watch.log
+
       - name: Build packages for cross-host watch cache tests
         working-directory: typescript
         run: pnpm --filter @struktoai/mirage-node... build
@@ -1288,6 +1302,13 @@ jobs:
         run: |
           ./python/.venv/bin/python integ/watch/cache/run.py
           pnpm -C integ exec tsx watch/cache/run.ts
+
+      - name: Airtable pings (both hosts)
+        env:
+          AIRTABLE_URL: http://127.0.0.1:5084
+        run: |
+          ./python/.venv/bin/python integ/watch/airtable/run.py
+          pnpm -C integ exec tsx watch/airtable/run.ts
 
       - name: Run watch battery
         env:

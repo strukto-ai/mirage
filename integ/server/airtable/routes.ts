@@ -20,6 +20,7 @@ import { createComment, deleteComment, listComments, updateComment } from './com
 import { BASES_PAGE, config } from './config.ts'
 import type { C } from './config.ts'
 import { getRecord, listRecordsGet, listRecordsPost } from './records.ts'
+import { createWebhook, deleteWebhook, listPayloads, listWebhooks } from './webhooks.ts'
 import type { FieldRow, TableRow, ViewRow } from './store.ts'
 import {
   badOffset,
@@ -49,8 +50,12 @@ const KIND = config.tenantKind
 
 // What this fake does NOT model, so a 404 or a 422 from it reads as "not
 // built" rather than "mirage sent the wrong request":
-//   - schema writes (create/update table, field, view), bases, webhooks,
-//     interfaces, enterprise and SCIM endpoints, uploadAttachment, sync
+//   - schema writes (create/update table, field, view), bases, interfaces,
+//     enterprise and SCIM endpoints, uploadAttachment, sync
+//   - webhook notifications (none is ever sent), refresh, a specification's
+//     filters (every webhook sees every record write), schema and comment
+//     changes in payloads, a payload's previous cell values and acting
+//     user, and payloads expiring
 //   - cellFormat=string, includeDateDependencyMetadata (accepted, ignored)
 //   - rate limiting: no 429 is ever answered
 //   - formulas beyond the subset in formula.ts; a rollup's value is the
@@ -149,14 +154,18 @@ function catchAll(): KitRoute<C>[] {
   )
 }
 
-// Order matters twice: /v0/meta/... must precede /v0/:base/:table, which
-// would otherwise read `meta` as a base id (and 404 it), and the catch-all
-// must come last.
+// Order matters twice: /v0/meta/... and /v0/bases/... must precede
+// /v0/:base/:table, which would otherwise read `meta` or `bases` as a base id
+// (and 404 it), and the catch-all must come last.
 export function airtableRoutes(): KitRoute<C>[] {
   return [
     route('GET', '/v0/meta/whoami', whoami),
     route('GET', '/v0/meta/bases', listBases),
     route('GET', '/v0/meta/bases/:base/tables', baseSchema),
+    route('GET', '/v0/bases/:base/webhooks', listWebhooks),
+    route('POST', '/v0/bases/:base/webhooks', createWebhook, { write: true }),
+    route('DELETE', '/v0/bases/:base/webhooks/:hook', deleteWebhook, { write: true }),
+    route('GET', '/v0/bases/:base/webhooks/:hook/payloads', listPayloads),
     route('GET', '/v0/:base/:table', listRecordsGet),
     route('POST', '/v0/:base/:table/listRecords', listRecordsPost),
     route('POST', '/v0/:base/:table', createRecords, { write: true }),

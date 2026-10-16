@@ -1782,6 +1782,124 @@ async function comments(origin: string): Promise<void> {
   )
 }
 
+// A webhook sees every record write on its base from its creation on, one
+// payload per write, numbered from cursor 1; the fake never notifies.
+async function webhooks(origin: string): Promise<void> {
+  const EPOCH = '2026-10-01T00:00:00.000Z'
+  const at = (n: number): string => new Date(Date.parse(EPOCH) + n * 1000).toISOString()
+  const v0 = `${origin}/_run/webhooks/v0`
+  const hooks = `${v0}/bases/${ROADMAP}/webhooks`
+  const features = `${v0}/${ROADMAP}/${FEATURES}`
+  const spec = { options: { filters: { dataTypes: ['tableData'] } } }
+  await reset(origin, 'webhooks', { epoch: EPOCH })
+  await expect('a base has no webhooks at first', hooks, {}, 200, { webhooks: [] })
+  await expect(
+    'a webhook needs a specification',
+    hooks,
+    { method: 'POST', json: { notificationUrl: 'https://example.com/ping' } },
+    422,
+    INVALID,
+  )
+  const hook = NEW('ach', 1)
+  const expires = new Date(Date.parse(at(1)) + 7 * 24 * 3600 * 1000).toISOString()
+  await expect(
+    'create a webhook: minted id, seven days to live',
+    hooks,
+    { method: 'POST', json: { notificationUrl: 'https://example.com/ping', specification: spec } },
+    200,
+    { id: hook, macSecretBase64: Buffer.from(hook).toString('base64'), expirationTime: expires },
+  )
+  await expect('it lists with its next cursor', hooks, {}, 200, {
+    webhooks: [
+      {
+        id: hook,
+        areNotificationsEnabled: true,
+        cursorForNextPayload: 1,
+        lastNotificationResult: null,
+        notificationUrl: 'https://example.com/ping',
+        isHookEnabled: true,
+        lastSuccessfulNotificationTime: null,
+        expirationTime: expires,
+        specification: spec,
+      },
+    ],
+  })
+  const payloads = `${hooks}/${hook}/payloads`
+  await expect('no write, no payload', payloads, {}, 200, {
+    payloads: [],
+    cursor: 1,
+    mightHaveMore: false,
+  })
+  await http(`${features}/${F(1)}`, { method: 'PATCH', json: { fields: { Priority: 5 } } })
+  await expect('a write that changes nothing is no payload', payloads, {}, 200, {
+    payloads: [],
+    cursor: 1,
+    mightHaveMore: false,
+  })
+  await http(`${features}/${F(1)}`, { method: 'PATCH', json: { fields: { Priority: 4 } } })
+  const first = obj((await http(payloads)).body)
+  const one = obj(list(first.payloads)[0])
+  eq(
+    'a write is one payload naming the records it changed',
+    [
+      first.cursor ?? null,
+      first.mightHaveMore ?? null,
+      list(first.payloads).length,
+      one.timestamp ?? null,
+    ],
+    [2, false, 1, at(3)],
+  )
+  eq(
+    'the payload is v0, numbered by the base, keyed by table and record',
+    [
+      one.payloadFormat ?? null,
+      one.baseTransactionNumber ?? null,
+      Object.keys(obj(obj(obj(one.changedTablesById)[FEATURES]).changedRecordsById)),
+    ],
+    ['v0', 1, [F(1)]],
+  )
+  const made = obj(
+    (await http(features, { method: 'POST', json: { fields: { Name: 'Hook' } } })).body,
+  )
+  await http(`${features}/${String(made.id)}`, { method: 'DELETE' })
+  const next = obj((await http(`${payloads}?cursor=2`)).body)
+  eq(
+    'a create and a delete follow from the cursor',
+    [
+      next.cursor ?? null,
+      list(next.payloads).map((p) => Object.keys(obj(obj(obj(p).changedTablesById)[FEATURES]))),
+    ],
+    [4, [['createdRecordsById'], ['destroyedRecordIds']]],
+  )
+  const paged = obj((await http(`${payloads}?limit=1`)).body)
+  eq(
+    'limit pages them',
+    [list(paged.payloads).length, paged.cursor ?? null, paged.mightHaveMore ?? null],
+    [1, 2, true],
+  )
+  await expect('limit is at most 50', `${payloads}?limit=51`, {}, 422, INVALID)
+  await expect('a cursor counts from 1', `${payloads}?cursor=0`, {}, 422, INVALID)
+  await expect('an unknown query key is refused', `${payloads}?since=1`, {}, 422, INVALID)
+  await expect('an unknown webhook', `${hooks}/achZZZZZZZZZZZZZZ/payloads`, {}, 404, NOT_FOUND)
+  await expect(
+    "a webhook is its own base's",
+    `${v0}/bases/${OPS}/webhooks/${hook}/payloads`,
+    {},
+    404,
+    NOT_FOUND,
+  )
+  await expect(
+    'a base the token cannot see',
+    `${v0}/bases/${OPS}/webhooks`,
+    { token: ROADMAP_ONLY },
+    403,
+    MODEL,
+  )
+  await expect('delete a webhook', `${hooks}/${hook}`, { method: 'DELETE' }, 200, {})
+  await expect('it is gone with its payloads', hooks, {}, 200, { webhooks: [] })
+  await expect('its payloads go with it', payloads, {}, 404, NOT_FOUND)
+}
+
 async function isolation(origin: string): Promise<void> {
   const features = (run: string): string => `${origin}/_run/${run}/v0/${ROADMAP}/${FEATURES}`
   await reset(origin, 'iso-a')
@@ -1894,6 +2012,7 @@ try {
   await single(fake.endpoint)
   await writes(fake.endpoint)
   await comments(fake.endpoint)
+  await webhooks(fake.endpoint)
   await isolation(fake.endpoint)
   await routes(fake.endpoint)
 } finally {
