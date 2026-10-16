@@ -69,7 +69,7 @@ async def main() -> None:
     result = await ws.shell(f"cat {MOUNT}/reports/q1.txt")
     print(f"read before: {(await result.stdout_str()).strip()!r}")
 
-    print("\nwatcher events:")
+    print("\nfile changes:")
     for event_type, payload in write_behind_mirage(tmp):
         for change in await hook.to_events(root, event_type, payload):
             print(f"  {change.kind.value:6} {change.path.virtual}")

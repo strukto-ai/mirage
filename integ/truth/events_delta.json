@@ -21,7 +21,7 @@
   "lines": [
     "read before: 'first quarter'",
     "",
-    "watcher events:",
+    "file changes:",
     "  create /data/reports/q3.txt",
     "  update /data/reports/q1.txt",
     "  delete /data/reports/q2.txt",

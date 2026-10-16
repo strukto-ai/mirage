@@ -9,13 +9,13 @@ See the [overview](/home/notifications) for listening to changes and event types
 
 ## Push
 
-Receive file changes through webhooks, streams or file watchers. Convert them
+Receive file changes through webhooks, streams or external file watchers. Convert them
 with the functions below, then call `ws.notify()` for each change.
 See the [Python and TypeScript examples](#push-examples).
 
 | VFS | Notification service | Python method | TypeScript method |
 | --- | --- | --- | --- |
-| Disk | File watcher: [watchdog](https://github.com/gorakhargosh/watchdog) / [chokidar](https://github.com/paulmillr/chokidar) | `DiskEventHook.to_events` | `DiskEventHook.toEvents` |
+| Disk | External tools: [watchdog](https://github.com/gorakhargosh/watchdog) / [chokidar](https://github.com/paulmillr/chokidar) | `DiskEventHook.to_events` | `DiskEventHook.toEvents` |
 | S3 | [S3 Event Notifications](https://docs.aws.amazon.com/AmazonS3/latest/userguide/EventNotifications.html) | `S3EventHook.to_events` | `S3EventHook.toEvents` |
 | GitHub | [Push webhooks](https://docs.github.com/en/webhooks/webhook-events-and-payloads#push) | `GitHubEventHook.to_events` | `GitHubEventHook.toEvents` |
 | Nextcloud | [Webhook Listeners](https://docs.nextcloud.com/server/latest/admin_manual/webhook_listeners/index.html) | `NextcloudEventHook.to_events` | `NextcloudEventHook.toEvents` |
@@ -52,12 +52,13 @@ pnpm -C examples/typescript exec tsx notification/push/s3.ts /absolute/path/to/n
 ```
 </CodeGroup>
 
-The Disk example creates, updates and deletes local files, then prints:
+The Disk example creates, updates and deletes temporary local files, then
+reports those changes directly to Mirage. It prints:
 
 ```text Disk output
 read before: 'first quarter'
 
-watcher events:
+file changes:
   create /data/reports/q3.txt
   update /data/reports/q1.txt
   delete /data/reports/q2.txt

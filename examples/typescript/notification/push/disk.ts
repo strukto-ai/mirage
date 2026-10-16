@@ -55,7 +55,7 @@ async function main(): Promise<void> {
   let result = await ws.shell(`cat ${MOUNT}/reports/q1.txt`)
   console.log(`read before: '${result.stdoutText.trim()}'`)
 
-  console.log('\nwatcher events:')
+  console.log('\nfile changes:')
   for (const [eventType, payload] of writeBehindMirage(tmp)) {
     for (const change of await hook.toEvents(root, eventType, payload)) {
       console.log(`  ${change.kind.padEnd(6)} ${change.path.virtual}`)
