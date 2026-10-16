@@ -24,7 +24,7 @@ A Mirage virtual terminal is a workspace: one virtual terminal over your mounted
 
 HTTP, MCP, RPC, CLI and SSH connections go through the Mirage server, a FastAPI app in [Python](/python/access/server) and a Fastify app in [TypeScript](/typescript/access/server) that speak the same protocol. It serves HTTP, and SSH on its own port when `ssh_port` is set or over HTTP through `mirage ssh-proxy`. The CLI starts the server on your machine when it needs one. In-app and FUSE access reach the workspace directly.
 
-To expose a VFS directly from your own app, see [Local FUSE mount](/home/setup/local-fuse).
+To expose a VFS directly from your own app, see [FUSE](/home/setup/fuse).
 
 ## What each one exposes
 

@@ -7,7 +7,7 @@ description: Run the host's python3, and any other host program you capture, as 
 `local` runs programs on the host as subprocesses: the host's `python3`, and
 any other program you add to its `captures`, such as `ffmpeg`, `gcc` or a
 vendor CLI. A program sees the host's files and network, not the workspace
-mounts; to reach the mounts, give it a [FUSE folder](/home/setup/local-fuse).
+mounts; to reach the mounts, give it a [FUSE folder](/home/setup/fuse).
 Nothing confines it; on Linux, [Sandlock](/home/setup/runtime/sandbox/sandlock)
 does. Python SDK and Node only, and never in the default runtimes.
 
@@ -67,7 +67,7 @@ in Mirage: `ffmpeg -i in.mp4 out.webm | wc -c` sends only `ffmpeg`.
 ## Connecting the workspace
 
 A local program opens host paths, not the workspace's. To give it workspace
-files, expose a mount as a [FUSE folder](/home/setup/local-fuse):
+files, expose a mount as a [FUSE folder](/home/setup/fuse):
 
 ```yaml
 mounts:

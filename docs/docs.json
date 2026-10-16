@@ -151,10 +151,9 @@
                 ]
               },
               {
-                "group": "Local FUSE mount",
+                "group": "FUSE",
                 "icon": "folder-open",
                 "pages": [
-                  "home/setup/local-fuse",
                   "home/setup/fuse",
                   "home/setup/macos",
                   "home/setup/linux",
@@ -810,6 +809,10 @@
     {
       "source": "/typescript/runtime/sandbox/ssh",
       "destination": "/home/setup/runtime/sandbox/ssh"
+    },
+    {
+      "source": "/home/setup/local-fuse",
+      "destination": "/home/setup/fuse"
     }
   ],
   "navbar": {

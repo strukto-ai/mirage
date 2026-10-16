@@ -1,54 +1,84 @@
 ---
-title: Support Matrix
-icon: table
-description: Which OS and SDK combinations support MIRAGE FUSE mounts, and how well.
+title: Overview
+description: Expose a VFS as a local folder through FUSE.
+icon: folder-open
 ---
 
-FUSE mode exposes a mount as a real OS directory so any tool (editors,
-sandbox runtimes, plain `cat`) can read it, not just MIRAGE commands. OS
-support depends on the SDK's FUSE binding: Python uses
-[mfusepy](https://github.com/mxmlnkn/mfusepy) (ctypes over libfuse), Node
-uses [@zkochan/fuse-native](https://www.npmjs.com/package/@zkochan/fuse-native)
-(a native addon), and browsers cannot mount filesystems at all.
+A local FUSE mount exposes a VFS as a folder on the machine running your
+Mirage workspace. Editors, scripts and other programs can use it like any
+other folder, even when the data lives in S3 or another remote service.
 
-## Matrix
+Use it directly in your [Python](/python/setup/fuse) or
+[TypeScript](/typescript/setup/fuse) app, or configure it through the Mirage CLI.
+A server is not required when you use the SDK in your own app.
+
+To expose the whole workspace as one folder, see
+[FUSE connection](/home/access/fuse).
+
+## Support matrix
 
 | OS | Python | TypeScript (Node) | Notes |
 | --- | --- | --- | --- |
-| Linux | ✅ supported | ✅ supported | `fuse3`; multiple mounts per process |
-| macOS | ✅ supported | ✅ supported | macFUSE kernel extension; **one mount per process** |
-| Windows | 🧪 experimental | ❌ not supported | Python via [WinFsp](/home/setup/windows) |
-| Browser | ❌ | ❌ | no kernel; use the virtual executor instead |
+| Linux | Supported | Supported | `fuse3`; multiple mounts per process |
+| macOS | Supported | Supported | macFUSE; one mount per process |
+| Windows | Experimental | Not supported | Python via [WinFsp](/home/setup/windows); write-heavy use and symlinks are not yet proven |
+| Browser | Not supported | Not supported | Use Mirage's shell and file APIs instead |
 
-Per-OS install guides: [macOS](/home/setup/macos), [Linux](/home/setup/linux),
-[Windows](/home/setup/windows). SDK wiring:
-[Python FUSE setup](/python/setup/fuse),
-[TypeScript FUSE setup](/typescript/setup/fuse).
+### Platform differences
 
-## What the labels mean
-
-- **Supported (Linux and macOS).** Both SDKs mount through the kernel,
-  including API files whose size is unknown. macOS allows one mount per
-  process.
-- **Experimental (Windows, Python only).** Mounts work over WinFsp, with the
-  Windows conventions (unmount at process exit, mount-level ownership,
-  stat-opens-a-handle) on the [Windows page](/home/setup/windows).
-  Write-heavy use and symlinks are not yet proven there.
-- **Not supported (Windows, TypeScript).** `@zkochan/fuse-native` only
-  targets macOS and Linux; its legacy Windows path builds against the
-  unmaintained Dokany-based `fuse-shared-library-win32` rather than WinFsp.
-
-## Platform quirks at a glance
-
-| Quirk | Linux | macOS | Windows |
+| | Linux | macOS | Windows |
 | --- | --- | --- | --- |
-| Mounts per process | many | **one** (Python and Node) | many |
-| Unmount | `fusermount -u` / `ws.close()` | `diskutil unmount` / `ws.close()` | at process exit only |
-| Size-unknown files pre-open | stat 0 | stat 0 | stat fetches, shows real size |
-| Mountpoint directory | must exist | must exist | must **not** exist (auto-created) |
+| Unmount | `fusermount -u` or `ws.close()` | `diskutil unmount` or `ws.close()` | At process exit |
+| Files with unknown size | Full content on read | Full content on read | Size fetched when opened |
+| Mountpoint folder | Must exist | Must exist | Must not exist; created automatically |
 
-The size-unknown semantics themselves (stat 0 until open, full content on
-read, real size after open) are identical across SDKs; see
-[Python](/python/setup/fuse#size-semantics-for-api-backed-files) or
-[TypeScript](/typescript/limitations#3-size-unknown-api-files-stat-as-0-bytes-until-first-open)
-for the per-tool table.
+## Install FUSE
+
+Follow the
+[Linux](/home/setup/linux), [macOS](/home/setup/macos) or
+[Windows](/home/setup/windows) setup guide.
+
+Install your SDK's FUSE binding using the
+[Python](/python/setup/fuse#install-mirage-with-the-fuse-extra) or
+[TypeScript](/typescript/setup/fuse) instructions.
+
+## Try it with the CLI
+
+On Linux or macOS, create a folder for the mount:
+
+```bash
+mkdir -p /tmp/mirage-data
+```
+
+Set `backend: fuse` and the local folder in your workspace config:
+
+```yaml workspace.yaml
+mounts:
+  /data:
+    vfs: ram
+    mode: WRITE
+    backend: fuse
+    mountpoint: /tmp/mirage-data
+```
+
+Create the workspace, write a file through Mirage, and read it from the local folder:
+
+```bash
+mirage workspace create workspace.yaml --id demo
+mirage shell -w demo -c 'echo "hello mirage" > /data/hello.txt'
+cat /tmp/mirage-data/hello.txt
+```
+
+```text Output
+hello mirage
+```
+
+Replace RAM with a [supported VFS](/home/setup/vfs) to expose your own data.
+The mount follows its configured access mode; a `READ` mount cannot be written to.
+Mounts configured this way are not tied to an agent session or profile.
+
+The folder is unmounted when the workspace closes. With the CLI:
+
+```bash
+mirage workspace delete demo
+```
