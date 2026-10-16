@@ -1,57 +1,37 @@
 ---
 title: Checksums
-description: The VFS method md5sum and its siblings ask, and which stores answer it.
+description: Use stored hashes to get file checksums without downloading them.
 icon: fingerprint
 ---
 
-A VFS that defines `checksum` lets `md5sum`, `sha1sum`, `sha256sum`,
-`sha384sum`, `sha512sum` and `md5` print a file's digest without reading it,
-when the store already keeps that digest (an object's MD5 ETag, or the MD5,
-SHA-1 and SHA-256 a drive records for each file) or can hash the file where it
-lives.
+Mirage can answer checksum commands using a hash your storage service already
+keeps, or by hashing the file on a remote server.
 
-## Interface
+## Example: get a file's hash
 
-<CodeGroup>
+With Google Drive mounted at `/drive/`:
 
-```python Python
-from mirage import NULL_INDEX, BaseVFS, PathSpec
-
-
-class MyVFS(BaseVFS):
-    async def checksum(
-        self, path: PathSpec, algorithm: str, index=NULL_INDEX
-    ) -> str | None: ...
+```bash
+md5sum /drive/report.csv
 ```
 
-```ts TypeScript
-import { BaseVFS, type PathSpec } from '@struktoai/mirage-core'
+Mirage uses the file's stored MD5 when available. Otherwise, it reads the file
+and computes the hash. Verification commands such as `md5sum -c checksums.md5`
+read the files to check their actual contents.
 
-class MyVFS extends BaseVFS {
-  override checksum(path: PathSpec, algorithm: string): Promise<string | null> { /* ... */ }
-}
-```
+## Connect your own backend
 
-</CodeGroup>
+Override `checksum(path, algorithm)` on your VFS. Return the file's hash as
+lowercase hexadecimal text, matching exactly the bytes a normal read returns.
 
-`algorithm` is `md5`, `sha1`, `sha256`, `sha384` or `sha512`. Answer the
-digest in lowercase hex only when it is the digest of exactly the bytes a read
-gives; answer `None` (`null`) when the store keeps none, or keeps a value that
-can be something else, and the file is read and hashed. Raise the error a read
-of the file would raise.
-
-A file the read cache holds is hashed from the cache instead. `-c` always
-reads, since it checks the bytes themselves, and standard input is always
-read. `checksum` is a dispatcher call like `read`: hides, path rules, the
-mount's mode and policies apply to it.
-
-## Backends
-
-| Backend | Digests | Read instead |
+| Method | Commands | Used when |
 | --- | --- | --- |
-| S3, R2, GCS, MinIO, Ceph, DigitalOcean Spaces, Wasabi | `md5`, from the object's ETag | a multipart upload, an object under SSE-KMS or SSE-C, and on stores other than AWS any encrypted object |
-| Google Drive | `md5`, `sha1`, `sha256` | Google Docs, Sheets and Slides files, which have no stored bytes |
-| Box | `sha1`, asked live | a file Box has not hashed yet |
-| Hugging Face models, datasets and spaces | `sha256` of an LFS file, its LFS oid, asked live | a file kept in git, whose oid also hashes a git header |
-| Nextcloud | `md5`, `sha1`, `sha256`, from `oc:checksums` | a file written without an `OC-Checksum` header, which keeps none |
-| SSH | every algorithm, by `md5sum` to `sha512sum` on the server | a server limited to SFTP, or one without the tool |
+| `checksum` with `md5` | `md5sum`, `md5` | Getting a file's MD5 hash. |
+| `checksum` with `sha1` | `sha1sum` | Getting a file's SHA-1 hash. |
+| `checksum` with `sha256` | `sha256sum` | Getting a file's SHA-256 hash. |
+| `checksum` with `sha384` | `sha384sum` | Getting a file's SHA-384 hash. |
+| `checksum` with `sha512` | `sha512sum` | Getting a file's SHA-512 hash. |
+
+The method name is the same in Python and TypeScript. Verification with `-c`
+reads the files instead. Return `None` in Python or `null` in TypeScript when
+the hash is unavailable, and Mirage computes it from the file.

@@ -1,105 +1,43 @@
 ---
 title: Walks
-description: The VFS method find, du, ls -R, tree, grep -r and rg ask before they walk a directory.
+description: Use recursive cloud listings to browse directories with fewer requests.
 icon: folder-tree
 ---
 
-A command that walks a directory lists it, then each directory below it, one
-`readdir` at a time. On a service that is one request per directory. A VFS
-that defines `read_tree` answers the whole walk at once: an object store lists
-every key under a prefix in one paged listing, Dropbox lists a folder
-recursively. The answer stands in for the walk, so the output is the same.
+Mirage connects recursive listings and batch APIs to `find`, `du`, `ls -R`
+and `tree`. Your backend can list a whole folder tree together, saving a
+separate request for every directory.
 
-## Interface
+## Example: browse an object store
 
-<CodeGroup>
+With an S3 bucket mounted at `/data/`:
 
-```python Python
-from mirage import NULL_INDEX, BaseVFS, FileStat, PathSpec
-
-
-class MyVFS(BaseVFS):
-    async def read_tree(
-        self, path: PathSpec, index=NULL_INDEX
-    ) -> dict[str, FileStat] | None: ...
+```bash
+find /data/knowledge/ -type f
+du /data/knowledge/
 ```
 
-```ts TypeScript
-import { BaseVFS, type FileStat, type PathSpec } from '@struktoai/mirage-core'
+Mirage lists the keys under the object prefix, then uses their paths and
+metadata to find files or total their sizes. Large listings may take several
+API pages.
 
-class MyVFS extends BaseVFS {
-  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> { /* ... */ }
-}
-```
+## Connect your own backend
 
-</CodeGroup>
+Override `read_tree(path)` in Python or `readTree(path)` in TypeScript.
+Return a mapping of relative paths, such as `guides/start.md`, to their
+`FileStat` metadata. Include the full tree below the requested directory,
+with the same metadata a normal listing would show.
 
-| Answer | Otherwise |
-| --- | --- |
-| every file and directory below `path`, keyed by its path below it (`a`, `a/b.txt`), each with the stat `stat` gives for it | `None`: the command walks `readdir` |
+| Method | Commands using your method | Uses normal listings instead |
+| --- | --- | --- |
+| `read_tree` | `find`, `du`, `ls -R`, `tree` | A depth limit (`find -maxdepth`, `tree -L`), or plain `ls` for one directory. |
+| `read_tree` | `grep -r`, `grep -R`, `grep -d recurse`, `rg` | `rg --max-depth` limits the levels to visit. |
+| `read_tree` | `cp -r` | The backend cannot return a complete source tree. |
 
-A directory a deeper key implies may be left out, and stats as a bare
-directory. Each directory is listed from the answer in name order, as `readdir`
-lists it. Raise the error `readdir` of `path` would raise, such as
-`NotADirectoryError` for a file.
+Return `None` in Python or `null` in TypeScript when a complete tree is
+unavailable, and Mirage lists directories individually. Commands with depth
+limits, such as `find -maxdepth 1`, also list only the levels they need.
 
-An entry's stat must be the one `stat` returns for it, since the walk uses it
-in its place: `ls -lR` prints its size, mode and time, `find -mtime` and
-`-size` test them, `du` sums the sizes. When the listing cannot give that
-stat, such as a row without a size, or a name `readdir` lists another way,
-such as one that is both a file and a folder, answer `None`. A path the answer
-does not hold is asked of `stat` and `readdir` as usual.
-
-`read_tree` is a dispatcher call, like `read`. When a hide or a path rule
-reaches below `path`, the dispatcher declines it and the command walks entry
-by entry, so each entry meets the checks its own `readdir` and `stat` meet.
-
-## Commands
-
-| Command | Asks `read_tree` for |
-| --- | --- |
-| `find` | each start point that is a directory, unless `-maxdepth` bounds the walk |
-| `du` | each operand that is a directory |
-| `ls -R` | each directory operand; `ls` without `-R` reads one directory |
-| `tree` | each operand, unless `-L` bounds the walk |
-| `grep -r`, `-R` or `-d recurse` | each directory the search walks |
-| `rg` | each directory the search walks, unless `--max-depth` bounds it |
-| `cp -r` | each source directory |
-
-Each command asks once per directory it starts a walk at. A walk bounded to
-a few levels reads those levels with `readdir`, since the whole tree can cost
-far more. A mount without `read_tree`, or a call that answers `None`, walks as
-before. `du` caps a walk
-at the mount's `max_du_entries`, since each directory costs a request; the
-entries of a `read_tree` answer cost none and do not count toward the cap.
-
-## Backends
-
-| Backend | `read_tree` |
-| --- | --- |
-| S3 and every S3-compatible store (R2, GCS, MinIO, Backblaze, Wasabi, and the rest) | one listing of every key under the prefix |
-| GridFS | one `fs.files` query under the prefix |
-| Hugging Face buckets | one recursive listing |
-| Dropbox | one recursive `list_folder` |
-| Nextcloud | one file search under the path, a page of a thousand entries per request |
-| GitHub | the repository tree the mount fetches once |
-| Redis | one key scan, with every stat in one pipeline |
-| OneDrive (personal) | one read of Graph's `/delta` feed from the folder |
-| OneDrive for Business, SharePoint | the folders' listings, twenty to a request through Graph's JSON batching |
-| Google Drive | one `files.list` per level, each asking for the children of up to forty folders of one drive |
-| SSH | one `find -L` on the server, when it runs commands and every entry is a file or a directory |
-| RAM | the store in memory |
-
-A walk on any other mount reads one directory at a time. The Hugging Face Hub
-already answers every `readdir` from the repository tree it fetches once.
-OneDrive for Business and SharePoint start the `/delta` feed only at a drive's
-root and leave out each file's `cTag`, which a listing carries, so they batch
-the listings instead; a listing the batch leaves unanswered is asked on its
-own. SharePoint's sites and a site's libraries are read one directory at a
-time, and each library's tree in one read.
-Nextcloud's file search needs a Nextcloud server; on another WebDAV server the
-walk lists each folder. GitHub answers `None` when GitHub truncated the tree of
-a large repository. SSH answers `None` on a server limited to SFTP, with a
-`find` that has no `-printf` (BusyBox, BSD), and for a tree holding a link
-loop, a broken link or a special file, which the walk reports as it finds
-them.
+Mirage applies options such as `find -name`, `find -type` and `ls -lR` to
+the returned metadata. For search, `read_tree` discovers files and
+[`files_containing`](/home/integration/search) selects which ones to read.

@@ -1,179 +1,98 @@
 ---
 title: Search
-description: The VFS methods grep and rg ask, the scan guard every whole-directory read asks, and which commands and flags use each.
+description: Use cloud search and RAG indexes through grep and rg.
 icon: magnifying-glass
 ---
 
-A VFS that defines these methods lets `grep` and `rg` skip files and lines. The
-commands still walk, filter, order and label every file, so output is the same
-as a full scan. `before_full_scan` lets the VFS refuse any command that is about
-to read every file under a directory.
+Mirage connects your service's search API to `grep` and `rg`. Agents use
+familiar commands while the backend finds relevant files or rows, avoiding
+unnecessary downloads.
 
-## Interface
+## Example: search a RAG knowledge base
 
-<CodeGroup>
+With a Chroma knowledge base mounted at `/knowledge/`:
 
-```python Python
-from mirage import NULL_INDEX, BaseVFS, PathSpec
-from mirage.io.types import ByteSource
-
-
-class MyVFS(BaseVFS):
-    searchable: tuple[str, ...] | None = None
-
-    async def files_containing(
-        self,
-        path: PathSpec,
-        text: str,
-        *,
-        whole_word: bool,
-        ignore_case: bool,
-        index=NULL_INDEX,
-    ) -> list[PathSpec] | None: ...
-
-    async def lines_containing(
-        self,
-        path: PathSpec,
-        text: str,
-        *,
-        ignore_case: bool,
-        index=NULL_INDEX,
-    ) -> ByteSource | None: ...
-
-    async def before_full_scan(
-        self,
-        path: PathSpec,
-        *,
-        files: int | None = None,
-        index=NULL_INDEX,
-    ) -> None: ...
+```bash
+grep -r 'refund' /knowledge/
 ```
 
-```ts TypeScript
-import { BaseVFS, type PathSpec } from '@struktoai/mirage-core'
-import type { ByteSource } from '@struktoai/mirage-core/io/types'
+Mirage asks Chroma which document chunks contain `refund`, then reads the
+matching documents and applies grep. Adding `-n` prints the original line
+numbers:
 
-class MyVFS extends BaseVFS {
-  override readonly searchable: readonly string[] | null = null
-
-  override filesContaining(
-    path: PathSpec,
-    text: string,
-    opts: { wholeWord: boolean; ignoreCase: boolean },
-  ): Promise<PathSpec[] | null> { /* ... */ }
-
-  override linesContaining(
-    path: PathSpec,
-    text: string,
-    opts: { ignoreCase: boolean },
-  ): Promise<ByteSource | null> { /* ... */ }
-
-  override beforeFullScan(path: PathSpec, files: number | null): Promise<void> { /* ... */ }
-}
+```bash
+grep -rn 'refund' /knowledge/
 ```
 
-</CodeGroup>
+This searches for exact text. For semantic search, use
+[`chroma-query`](/python/vfs/chroma#vector-search).
 
-| Method | Answer | Otherwise |
-| --- | --- | --- |
-| `files_containing` | the files under `path` that may hold `text`, matched on `vfs_path` ignoring case | `None`: every file is read |
-| `lines_containing` | the lines of `path` that may hold `text`, in file order, as bytes or a stream | `None`: the file is read; required for a file that may hold a NUL byte |
-| `before_full_scan` | return: the scan runs | raise: the command is refused |
+## Connect your own search
 
-An extra file or line costs a read; a missing one is a wrong answer. A search
-that holds only keys names each file with `mounted_path(path, "/" + key)`
-from `mirage.utils.key_prefix` (`mountedPath` in TypeScript).
+Override these methods on your VFS. Mirage handles the command options and
+output formatting; you do not need a separate implementation for `grep -n`,
+`grep -c` or each other option.
 
-A session's hidden files are dropped from a `files_containing` answer before
-grep sees it, so a search may answer for the whole tree. Where a path rule
-reaches below a directory, the search is not asked and every file is read, so
-each read meets the rule.
+Mirage checks the candidates with the command's matcher. Include every
+possible match; return `None` in Python or `null` in TypeScript when your
+search cannot answer, and Mirage reads the files normally.
 
-`searchable` names the files `files_containing` answers for, as mount-relative
-globs where a directory covers what is under it. A walked file outside it is
-always read; `None` (`null`), the default, covers every file.
+### `files_containing`
 
-## Commands and flags
+Return paths of files that may contain the text. Used by `grep -r`, `grep -R`,
+`grep -d recurse` and `rg` when searching directories. The TypeScript name is
+`filesContaining`.
 
-| Method | Commands | Used when |
-| --- | --- | --- |
-| `files_containing` | `grep -r`, `-R` or `-d recurse`, `rg` | once per directory operand and pattern, when the walk reads any file, unless a flag below scans |
-| `lines_containing` | `grep`, `rg` | in place of the file with no `-n`, `-b`, `-A`, `-B`, `-C` (grep also no `-NUM` or `-z`; rg also no `--column`, `--vimgrep`, `--stop-on-nonmatch`, `--null-data`, `-U`) and one pattern; otherwise to decide whether the file is read |
-| `before_full_scan` | `grep -r`, `-R` or `-d recurse`, `rg`, `tar -c`, `zip -r`, `cp -r`, `mv` across mounts, `diff -r` | once per directory a command walks, before it reads a file there; for `grep` and `rg`, only where no search answered |
-
-| Argument | Set by |
+| Command or option | How Mirage uses your retrieval |
 | --- | --- |
-| `text` | the pattern or each `-e`; for a regex, a plain-text piece of three or more characters every match holds |
-| `path` | a directory operand; for `rg` with none, the cwd |
-| `files` | how many files the session sees under `path`, when the mount answers `read_tree`; otherwise `None` |
-| `whole_word` | `-w` or `-x` with a plain-text pattern |
-| `ignore_case` | `-i`; for `rg`, also `-S` with a lowercase pattern |
+| Plain recursive search | Read candidate files and match their contents. |
+| Line numbers (`-n`) or byte offsets (`-b`) | Read candidate files and calculate the original positions. |
+| Context (`-A`, `-B`, `-C`; grep's `-NUM`) | Read candidate files and include surrounding lines. |
+| Counts, filenames, match-only output or limits (`-c`, `-l`, `-q`, `-o`, `-m`) | Apply the options while reading candidate files. |
+| Case or word matching (`-i`, `-w`, `-x`; rg's `-S`) | Retrieve candidates for the requested matching mode. |
+| Multiple patterns (`-e`) | Combine candidate files from the search terms. |
+| Nonmatching lines (`-v`) or patterns from a file (`-f`) | Use normal file reads instead of retrieval. |
 
-`grep` and `rg` read every file, and ask `before_full_scan` instead of the
-search, when:
+For example, `grep -rn 'refund' /knowledge/` uses your retrieval to choose
+documents, then Mirage reads them and adds line numbers.
 
-- the mount has no search method, a search answered `None`, or a path rule
-  reaches below the directory;
-- the line has `-v` or `rg --passthru`;
-- the output lists files that do not match: `rg --files-without-match`, `rg -c`
-  or `--count-matches` with `--include-zero` and no `-q`, `rg --stats`,
-  `--json`;
-- the pattern has no plain text of three characters (`-f`; under `-i`, a word
-  with a non-ASCII letter, or with i, k or s under Unicode folding; under
-  `rg -U`, a text with a line break);
-- `rg -L`, `rg -z`, `--pre`, or `-E` naming an encoding;
-- `grep -a`, `--binary-files=text`, `rg -a`, `--binary` or `-uuu`, after a
-  search answered, since every binary-extension file is then read.
+### `lines_containing`
 
-Every other flag is applied by the walk as usual. `rg --files` and
-`rg --type-list` read no content and ask nothing. `files_containing` never
-rules out a file named on the command line, or a binary-extension file under
-`grep -a`, `--binary-files=text`, `rg -a`, `--binary` or `-uuu`. `rg`
-decodes a file that starts with a UTF-16 byte-order mark before searching it,
-so a `files_containing` that searches the stored bytes can rule out a file
-`rg` would match.
+Return candidate lines from one file, in their original order. Used by
+`grep` and `rg`, including during directory searches. The TypeScript name is
+`linesContaining`.
 
-Raise from `before_full_scan` to refuse: the command prints
-`<command>: <message>` and exits 1, whether it runs on one mount or across
-several. From `grep` or `rg`, a filesystem error raised at a file is that file's
-read error instead, and the command exits 2.
+| Command or option | How Mirage uses your retrieval |
+| --- | --- |
+| Plain search with one term | Match the returned lines directly. |
+| Line numbers (`-n`) or byte offsets (`-b`) | Check for candidates, then read the original file to calculate positions. |
+| Context (`-A`, `-B`, `-C`; grep's `-NUM`) | Check for candidates, then read the original file for surrounding lines. |
+| Counts, filenames, match-only output or limits (`-c`, `-l`, `-q`, `-o`, `-m`) | Apply the options to returned lines for one term, without positions or context. |
+| Case or word matching (`-i`, `-w`, `-x`; rg's `-S`) | Retrieve candidate lines, then apply the exact matching rules. |
+| Multiple patterns (`-e`) | Check the terms; read the original file when candidates need combining. |
+| rg's `--column`, `--vimgrep` or multiline searches | Check for candidates, then read the original file. |
+| Nonmatching lines (`-v`) or patterns from a file (`-f`) | Use normal file reads instead of retrieval. |
 
-## Backends
+For example, `grep 'refund' tickets.jsonl` can search the returned rows
+directly. Adding `-n` requires reading the original file because snippets
+alone do not provide original line numbers.
 
-| Backend | Search | Answers for | Opt-in |
-| --- | --- | --- | --- |
-| GitHub | code search | `-w`, on the default branch, over 100 files | always |
-| Box | `/search` | `-w` | `content_search` |
-| Dropbox | `/2/files/search_v2` | `-w` | `content_search` |
-| Google Drive | `fullText contains` | `-w` | `content_search` |
-| Google Docs, Sheets, Slides | `fullText contains`, one app's files | `-w`, a word with no digit that is none of the API's names | `content_search` |
-| OneDrive | `search(q=)` | `-w` | `content_search` |
-| SharePoint | `search(q=)` | `-w`, within one document library | `content_search` |
-| Email | IMAP `SEARCH TEXT` | messages (`*/*/*.email.json`) | `content_search` |
-| Slack | `search.messages`, `search.files` | `-w`, channel and DM days (`channels/*/*/chat.jsonl`, `dms/*/*/chat.jsonl`) | `content_search` |
-| Gmail | the listing's message text | messages (`*/*/*.gmail.json`), an ASCII text | `content_search` |
-| Google Calendar | events `q`, per word | `-w`, events (`*/*/*.gcal.json`), a word with no digit | `content_search` |
-| Linear | `searchIssues`, per word; a new listing's text | `-w`, issues (`teams/*/issues/*/issue.json`) with `content_search`; members, projects, cycles and documents up to 8 KiB, an ASCII text | `content_search` for issues |
-| Trello | `/1/search`, per word | `-w`, cards (`workspaces/*/boards/*/lists/*/cards/*/card.json`) | `content_search` |
-| PostgreSQL | `LIKE` per column (`lines_containing`) | `rows.jsonl` of a table or view whose columns each hold the text as their cast spells it, or never spell it (a number, date or time) | always |
-| MongoDB | `$expr` over keys and strings (`lines_containing`) | `documents.jsonl` of a collection or view | always |
-| Airtable | `filterByFormula` per cell (`lines_containing`) | `records.jsonl` and view files of a table whose cells a formula reads as text, or that hold no word; with a link, AI text or attachment, a text with a space | always |
-| Qdrant | a new listing's payload text | `.json` and `.txt` files up to 8 KiB, an ASCII text | always |
-| SSH | GNU `grep` on the server | every text, where the server runs commands | always |
-| Chroma | `$contains` over chunks | every text without `-i` | always |
-| LanceDB | `LIKE` over string columns | `.md` cards; a text of letters and spaces that is no column's name, in a table with no list, struct or bytes column | always |
+Both tables assume your search can answer the requested text. Some modes,
+such as rg's `--json`, `--stats`, preprocessing and compressed-file search,
+use normal file reads instead.
 
-A word a backend's search is known not to see reads every file: a key of the
-rendered JSON, a fixed word such as a file type, a user's name on Slack. Each
-backend's page lists what its search covers. Box, Dropbox, Google Drive,
-OneDrive and SharePoint search the text they extract from a file, not its
-bytes, so their answer can leave out an office file, PDF or archive whose raw
-bytes hold the word, the end of a large file, or a Docs, Sheets or Slides
-file's JSON; their pages list the cases. Discord reads every file, since a
-reply carries the message it answers, which its search does not tie to the
-reply.
+## Enable cloud content search
 
-SSH runs `grep --dereference-recursive -lF --null` in the C locale over the
-mount's connection, so its answer is exact. A server that runs no commands
-(an SFTP-only account), a grep that is not GNU's, or a file the server's grep
-cannot read leaves every file to be read.
+Some backends, such as Dropbox and Google Drive, have a `content_search`
+mount option. Set it to `true` to let Mirage use the provider's content index.
+It defaults to `false`, which uses ordinary file reads. In TypeScript config
+objects, the option is named `contentSearch`.
+
+For example, with content search enabled on Dropbox:
+
+```bash
+grep -rw 'refund' /dropbox/policies/
+```
+
+The `-w` requests whole-word matches, which Dropbox's index supports. See the
+[backend's docs](/python/vfs/dropbox) for its search coverage and setup.

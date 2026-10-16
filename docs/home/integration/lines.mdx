@@ -1,125 +1,40 @@
 ---
 title: Lines
-description: The VFS methods head, tail and wc ask, and which flags use each.
+description: Use database queries and live updates through head, tail and wc.
 icon: list-ol
 ---
 
-A VFS that defines these methods lets `head`, `tail` and `wc` answer without
-reading the whole file: a database fetches the first rows with a `LIMIT`,
-counts them with `COUNT(*)`, or hands over new rows as they land, and a chat
-asks only for the messages posted since its last poll. The answer stands in
-for the file, so the output is the same as a full read.
+Mirage connects `head`, `tail` and `wc -l` to your backend's queries and live
+updates. A database can fetch a few rows or count them without exporting the
+whole table. A chat service can send new messages to `tail -f`.
 
-## Interface
+## Example: inspect a table
 
-<CodeGroup>
+With PostgreSQL mounted at `/db/`:
 
-```python Python
-from collections.abc import AsyncIterator
-
-from mirage import NULL_INDEX, BaseVFS, PathSpec
-
-
-class MyVFS(BaseVFS):
-    async def first_lines(
-        self, path: PathSpec, n: int, index=NULL_INDEX
-    ) -> bytes | None: ...
-
-    async def last_lines(
-        self, path: PathSpec, n: int, index=NULL_INDEX
-    ) -> bytes | None: ...
-
-    async def line_count(
-        self, path: PathSpec, index=NULL_INDEX
-    ) -> int | None: ...
-
-    async def follow(
-        self, path: PathSpec, n: int, interval: float, index=NULL_INDEX
-    ) -> AsyncIterator[bytes] | None: ...
+```bash
+head -n 20 /db/public/tickets/rows.jsonl
+wc -l /db/public/tickets/rows.jsonl
 ```
 
-```ts TypeScript
-import { BaseVFS, type PathSpec } from '@struktoai/mirage-core'
+Mirage uses `LIMIT` to fetch the first 20 rows and `COUNT(*)` to count them.
+Adding a byte count with `wc -lc` requires reading the file instead.
 
-class MyVFS extends BaseVFS {
-  override firstLines(path: PathSpec, n: number): Promise<Uint8Array | null> { /* ... */ }
+## Connect your own backend
 
-  override lastLines(path: PathSpec, n: number): Promise<Uint8Array | null> { /* ... */ }
+Override the methods your service supports:
 
-  override lineCount(path: PathSpec): Promise<number | null> { /* ... */ }
-
-  override follow(
-    path: PathSpec,
-    n: number,
-    interval: number,
-  ): Promise<AsyncIterable<Uint8Array> | null> { /* ... */ }
-}
-```
-
-</CodeGroup>
-
-| Method | Answer | Otherwise |
+| Method | Commands using your method | Uses normal reads instead |
 | --- | --- | --- |
-| `first_lines` | the first `n` lines a read gives, each with its newline; the whole file when it has fewer | `None`: the file is read |
-| `last_lines` | the last `n` lines a read gives, each with its newline; the whole file when it has fewer | `None`: the file is read |
-| `line_count` | how many newlines a read gives | `None`: the file is read |
-| `follow` | a stream of the last `n` lines, then each line added to the file, ending only when the caller closes it; `interval` is `tail -s`, for a backend that asks for what is new rather than being told | `None`: `tail` reads the file and polls it every `-s` seconds |
+| `first_lines` | `head` or `head -n N` for the first N lines; default 10. | Byte counts (`-c`), NUL separators (`-z`), or all but the last N lines (`-n -N`). |
+| `last_lines` | `tail` or `tail -n N` for the last N lines; default 10. | Byte counts (`-c`) or starting at line N (`-n +N`). |
+| `line_count` | `wc -l` for the newline count. | Plain `wc`, or adding word, byte, character or line-length counts (`-w`, `-c`, `-m`, `-L`). |
+| `follow` | `tail -f` on one file, optionally with `-n N`. | Following by name (`-F`, `--follow=name`), byte counts (`-c`), or starting at line N (`-n +N`). |
 
-An answer must match the file byte for byte: a missing or extra line is a
-wrong answer. Raise the error a read of the file would raise, such as
-`FileNotFoundError` for a missing file, or `EFBIG` (`File too large`) when the
-answer passes a ceiling on one read. A file the read cache holds is read from
-the cache instead, so these methods are not asked for it, except `follow`.
+The TypeScript names are `firstLines`, `lastLines`, `lineCount` and `follow`.
+For `first_lines` and `last_lines`, N must be positive. Standard input is
+always read normally.
 
-These are dispatcher calls, like `read`: hides, path rules, the mount's mode
-and policies apply to them as they do to a read of the same file, and so do
-output limits.
-
-## Commands and flags
-
-| Method | Command | Used when |
-| --- | --- | --- |
-| `first_lines` | `head` | `-n N` with `N` above 0, or no count (10); not with `-c`, `-z` or `-n -N` |
-| `last_lines` | `tail` | `-n N` with `N` above 0, or no count (10); not with `-c` or `-n +N` |
-| `line_count` | `wc` | `-l` alone; not with `-w`, `-c`, `-m` or `-L` |
-| `follow` | `tail -f` | one file that opened, followed by descriptor, with `-n N` or no count (10); not with `-F`, `--follow=name`, `-c` or `-n +N` |
-
-Standard input is always read. `tail -f` prints all `follow` streams, so the
-last lines and the ones that follow meet at one point: a line added while the
-last ones are read prints once. When `follow` answers `None`, the first print
-reads the whole file, since the polls go on from where it ends. When the
-stream `follow` returned ends, `tail` prints `tail: no files remaining` and
-exits 1. Closing the stream must end a wait for the next line, so a stopped
-`tail -f` releases the mount.
-
-`wc` rows counted by `line_count` have no byte size, so the columns are as
-wide as the widest printed number, where a read pads to the digits of the
-files' total size.
-
-## Backends
-
-| Backend | `first_lines` | `last_lines` | `line_count` | `follow` | Ceiling |
-| --- | --- | --- | --- | --- | --- |
-| PostgreSQL | `LIMIT` on `rows.jsonl` | `COUNT(*)`, then `LIMIT` and `OFFSET` | `COUNT(*)` | | `max_read_rows` |
-| MongoDB | | sort by `_id` descending with a limit, on `documents.jsonl` | `count_documents` | the last documents at one snapshot, then a change stream of the inserts after it, on a collection's `documents.jsonl` | `max_doc_limit` |
-| Airtable | `maxRecords` on `records.jsonl` and view files | | | | `max_read_records` |
-| SSH | | | `wc -l` on the server | `tail -f` on the server | |
-| Slack | | | | the day's last messages, then `conversations.history` for the messages after the last one, every `-s` seconds while the day lasts, on a `chat.jsonl` | |
-| Discord | | | | the day's last messages, then the channel's messages `after` the last one, every `-s` seconds while the day lasts, on a `chat.jsonl` | |
-
-A count past the ceiling that the table fills is `File too large`, the same
-as a whole read of that table: `head -n 20000` on a 50,000-row PostgreSQL
-table with the default `max_read_rows` of 10,000 prints
-`head: error reading '<path>': File too large` and exits 1. `wc -l` counts
-past the ceiling. Every other file on these mounts (`schema.json`,
-`database.json`, a view's schema) is read as usual. MongoDB's `head` reads the
-collection as a stream and stops after the count, so it needs no
-`first_lines`.
-
-SSH asks the server's `wc -l` only when it can run commands: a server limited
-to SFTP, or a `wc` that fails, leaves the file to be read. Its `tail -f` runs
-the server's own `tail -f` once the server finds a readable regular file and a
-`tail` there, and prints what that prints; anything else is polled. Slack and
-Discord read a followed day once, then fetch only new messages; once the UTC
-day is over, nothing more lands in its file, so they ask one last time and stop
-polling while `tail -f` keeps waiting.
+Return the same content and order as a normal file read. Return `None` in
+Python or `null` in TypeScript when a method cannot answer; Mirage reads the
+file normally.
