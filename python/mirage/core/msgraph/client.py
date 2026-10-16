@@ -320,14 +320,16 @@ async def graph_batch(
     config: MsGraphConfig,
     urls: list[str],
     session: SessionArg = None,
-) -> list[tuple[int, dict[str, Any]]]:
+) -> list[tuple[int, dict[str, Any], float]]:
     """The answers to several GETs from one JSON batch (``$batch``), each
-    as its status and body, in the order of ``urls``.
+    as its status, its body and the seconds its ``Retry-After`` asks to be
+    waited, in the order of ``urls``.
 
     Graph runs at most ``BATCH_LIMIT`` requests in a batch. Each URL is a
     full one under the mount's service root, and goes in relative to it,
     as a batch names its requests. A request the reply leaves out answers
-    status 0, and a body that is not an object answers empty.
+    status 0, a body that is not an object answers empty, and a wait is
+    at most ``MAX_BACKOFF``, 0 when the answer names none.
 
     Args:
         config (MsGraphConfig): Graph config.
@@ -346,15 +348,33 @@ async def graph_batch(
         json_body={"requests": requests},
         session=session,
     )
-    answers: dict[str, tuple[int, dict[str, Any]]] = {}
+    answers: dict[str, tuple[int, dict[str, Any], float]] = {}
     for reply in data.get("responses") or []:
         if isinstance(reply, dict):
             status, body = reply.get("status"), reply.get("body")
+            headers = reply.get("headers")
             answers[str(reply.get("id"))] = (
                 status if isinstance(status, int) else 0,
                 body if isinstance(body, dict) else {},
+                _retry_after(headers if isinstance(headers, dict) else {}),
             )
-    return [answers.get(str(i), (0, {})) for i in range(len(urls))]
+    return [answers.get(str(i), (0, {}, 0.0)) for i in range(len(urls))]
+
+
+def _retry_after(headers: dict[str, Any]) -> float:
+    """The seconds a batched answer's ``Retry-After`` asks to be waited, at
+    most ``MAX_BACKOFF``; 0 for none, or for one that is not a count of
+    seconds.
+
+    Args:
+        headers (dict[str, Any]): the answer's headers.
+    """
+    for name, value in headers.items():
+        if str(name).lower() == "retry-after":
+            text = str(value).strip()
+            seconds = text.isascii() and text.isdigit()
+            return min(float(text), MAX_BACKOFF) if seconds else 0.0
+    return 0.0
 
 
 async def graph_post_monitor(

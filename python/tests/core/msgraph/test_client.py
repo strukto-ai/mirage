@@ -4,6 +4,7 @@ from yarl import URL
 
 from mirage.core.msgraph.client import (
     GraphError,
+    _retry_after,
     encoded_path,
     graph_batch,
     graph_get,
@@ -196,7 +197,12 @@ async def test_graph_batch_sends_relative_urls_and_answers_in_order():
             payload={
                 "responses": [
                     {"id": "1", "status": 200, "body": {"value": [1]}},
-                    {"id": "0", "status": 429, "body": "throttled"},
+                    {
+                        "id": "0",
+                        "status": 429,
+                        "headers": {"retry-after": "7"},
+                        "body": "throttled",
+                    },
                 ]
             },
         )
@@ -209,4 +215,21 @@ async def test_graph_batch_sends_relative_urls_and_answers_in_order():
             {"id": "2", "method": "GET", "url": "/me/drive/root:/a:/children"},
         ]
     }
-    assert answers == [(429, {}), (200, {"value": [1]}), (0, {})]
+    assert answers == [
+        (429, {}, 7.0),
+        (200, {"value": [1]}, 0.0),
+        (0, {}, 0.0),
+    ]
+
+
+@pytest.mark.parametrize(
+    "headers,wait",
+    [
+        ({"Retry-After": "3"}, 3.0),
+        ({"Retry-After": "900"}, 30.0),
+        ({"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, 0.0),
+        ({}, 0.0),
+    ],
+)
+def test_a_batched_retry_after_is_a_capped_count_of_seconds(headers, wait):
+    assert _retry_after(headers) == wait

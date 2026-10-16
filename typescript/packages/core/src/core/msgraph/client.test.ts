@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { graphBatch, graphGet, graphList } from './client.ts'
+import { graphBatch, graphGet, graphList, retryAfter } from './client.ts'
 import { resolveMsGraphConfig } from './config.ts'
 
 afterEach(() => {
@@ -70,7 +70,7 @@ describe('Microsoft Graph client', () => {
         JSON.stringify({
           responses: [
             { id: '1', status: 200, body: { value: [1] } },
-            { id: '0', status: 429, body: 'throttled' },
+            { id: '0', status: 429, headers: { 'retry-after': '7' }, body: 'throttled' },
           ],
         }),
         { status: 200 },
@@ -93,9 +93,18 @@ describe('Microsoft Graph client', () => {
       ],
     })
     expect(answers).toEqual([
-      [429, {}],
-      [200, { value: [1] }],
-      [0, {}],
+      [429, {}, 7],
+      [200, { value: [1] }, 0],
+      [0, {}, 0],
     ])
+  })
+
+  it.each([
+    [{ 'Retry-After': '3' }, 3],
+    [{ 'Retry-After': '900' }, 30],
+    [{ 'Retry-After': 'Wed, 21 Oct 2026 07:28:00 GMT' }, 0],
+    [{}, 0],
+  ])('reads a batched Retry-After %o as a capped count of seconds', (headers, wait) => {
+    expect(retryAfter(headers)).toBe(wait)
   })
 })

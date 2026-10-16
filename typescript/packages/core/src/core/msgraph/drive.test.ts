@@ -520,8 +520,38 @@ describe('batchTree', () => {
     expect(rec.bodies.map((b) => (b.requests as unknown[]).length)).toEqual([20, 5])
   })
 
-  it('asks a listing the batch left unanswered on its own', async () => {
-    const rec = stubFetch([
+  it('asks a listing the batch left unanswered on its own, after its wait', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] })
+    try {
+      const rec = stubFetch([
+        { method: 'GET', url: children('top'), body: { value: TOP } },
+        {
+          method: 'POST',
+          url: BATCH,
+          body: {
+            responses: [
+              { id: '0', status: 200, body: { value: [] } },
+              { id: '1', status: 429, headers: { 'Retry-After': '3' }, body: {} },
+            ],
+          },
+        },
+        { method: 'GET', url: children('top/b'), body: { value: UNDER_B } },
+      ])
+      const pending = batchTree(config, loc('top'), SPEC)
+      await vi.advanceTimersByTimeAsync(2900)
+      expect(rec.calls.some(([, url]) => url === children('top/b'))).toBe(false)
+      await vi.advanceTimersByTimeAsync(200)
+      const found = await pending
+      expect(found?.has('b/y.txt')).toBe(true)
+      expect(rec.pending()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('leaves the walk a folder the account may not open', async () => {
+    const denied = { error: { code: 'accessDenied', message: 'no' } }
+    stubFetch([
       { method: 'GET', url: children('top'), body: { value: TOP } },
       {
         method: 'POST',
@@ -529,15 +559,13 @@ describe('batchTree', () => {
         body: {
           responses: [
             { id: '0', status: 200, body: { value: [] } },
-            { id: '1', status: 429, body: {} },
+            { id: '1', status: 403, body: denied },
           ],
         },
       },
-      { method: 'GET', url: children('top/b'), body: { value: UNDER_B } },
+      { method: 'GET', url: children('top/b'), status: 403, body: denied },
     ])
-    const found = await batchTree(config, loc('top'), SPEC)
-    expect(found?.has('b/y.txt')).toBe(true)
-    expect(rec.pending()).toBe(0)
+    expect(await batchTree(config, loc('top'), SPEC)).toBeNull()
   })
 
   it("reads a listing's later pages", async () => {

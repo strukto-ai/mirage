@@ -12,13 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
+
+import aiohttp
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.readdir import readdir, stat_from_item
 from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT, list_children
 from mirage.types import DirListing, FileStat, FileType, PathSpec
+
+logger = logging.getLogger(__name__)
 
 PARENTS_PER_QUERY = 40
 
@@ -126,7 +131,9 @@ async def tree(
     its Shared Drives and a folder that is not there raises what a
     listing raises. Of two items with one name in a folder, the one its
     listing keeps, the last, stands. None when that listing is short
-    (Shared Drives it could not list), so the walk lists what is there.
+    (Shared Drives it could not list), or when a level below it fails, so
+    the walk lists what is there and reports, or skips, each folder on
+    its own.
 
     Args:
         accessor (GDriveAccessor): backend accessor.
@@ -139,7 +146,13 @@ async def tree(
     found: dict[str, FileStat] = {}
     level = _placed(found, "", listed, None)
     while level:
-        children = await list_level(accessor, list(level.values()))
+        try:
+            children = await list_level(accessor, list(level.values()))
+        except (OSError, aiohttp.ClientError) as exc:
+            logger.debug(
+                "drive tree of %s left to the walk: %s", path.virtual, exc
+            )
+            return None
         below: dict[str, tuple[str, str | None]] = {}
         for rel, (folder_id, drive_id) in level.items():
             rows = sorted(

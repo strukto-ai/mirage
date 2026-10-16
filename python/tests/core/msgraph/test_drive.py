@@ -489,13 +489,16 @@ async def test_delta_tree_leaves_a_feed_of_another_folder_to_the_walk(
 
 def _listings(
     tree: dict[str, list[dict]],
-    throttled: frozenset[str] = frozenset(),
+    throttled: dict[str, float] | None = None,
     pages: dict[str, str] | None = None,
+    refused: frozenset[str] = frozenset(),
 ):
     asked: dict[str, list] = {"list": [], "batch": []}
 
     async def listing(config, url, params=None, session=None):
         asked["list"].append(url)
+        if url in refused:
+            raise GraphError(403, "accessDenied", url)
         if url not in tree:
             raise GraphError(404, "itemNotFound", url)
         return tree[url]
@@ -504,18 +507,28 @@ def _listings(
         asked["batch"].append(list(urls))
         answers = []
         for url in urls:
-            if url in throttled:
-                answers.append((429, {}))
+            if throttled and url in throttled:
+                answers.append((429, {}, throttled[url]))
+            elif url in refused:
+                answers.append((403, {}, 0.0))
             elif url in tree:
                 body = {"value": tree[url]}
                 if pages and url in pages:
                     body = {"value": [], "@odata.nextLink": pages[url]}
-                answers.append((200, body))
+                answers.append((200, body, 0.0))
             else:
-                answers.append((404, {}))
+                answers.append((404, {}, 0.0))
         return answers
 
     return listing, batch, asked
+
+
+async def _refuse_batch(config, urls, session=None):
+    raise GraphError(400, "invalidRequest", "no batching here")
+
+
+async def _absent(*args, **kwargs):
+    return False
 
 
 def _children(path: str) -> str:
@@ -587,16 +600,41 @@ async def test_batch_tree_splits_a_wide_level(monkeypatch):
 async def test_a_listing_the_batch_left_unanswered_is_asked_alone(
     monkeypatch,
 ):
+    slept: list[float] = []
+
+    async def nap(seconds):
+        slept.append(seconds)
+        asked["list"].append(f"slept {seconds}")
+
     listing, batch, asked = _listings(
-        _graph_tree(), throttled=frozenset({_children("top/b")})
+        _graph_tree(), throttled={_children("top/b"): 3.0}
+    )
+    monkeypatch.setattr(drive_ops, "graph_list", listing)
+    monkeypatch.setattr(drive_ops, "graph_batch", batch)
+    monkeypatch.setattr(drive_ops.asyncio, "sleep", nap)
+    found = await drive_ops.batch_tree(
+        MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
+    )
+    assert "b/y.txt" in found
+    assert slept == [3.0]
+    assert asked["list"] == [
+        _children("top"),
+        "slept 3.0",
+        _children("top/b"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_folder_the_account_may_not_open_leaves_the_walk(monkeypatch):
+    listing, batch, _ = _listings(
+        _graph_tree(), refused=frozenset({_children("top/b")})
     )
     monkeypatch.setattr(drive_ops, "graph_list", listing)
     monkeypatch.setattr(drive_ops, "graph_batch", batch)
     found = await drive_ops.batch_tree(
         MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
     )
-    assert "b/y.txt" in found
-    assert asked["list"] == [_children("top"), _children("top/b")]
+    assert found is None
 
 
 @pytest.mark.asyncio
@@ -630,12 +668,8 @@ async def test_a_folder_gone_below_leaves_the_walk(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_refused_batch_leaves_the_walk(monkeypatch):
     listing, _, _ = _listings(_graph_tree())
-
-    async def refuse(config, urls, session=None):
-        raise GraphError(400, "invalidRequest", "no batching here")
-
     monkeypatch.setattr(drive_ops, "graph_list", listing)
-    monkeypatch.setattr(drive_ops, "graph_batch", refuse)
+    monkeypatch.setattr(drive_ops, "graph_batch", _refuse_batch)
     found = await drive_ops.batch_tree(
         MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
     )
@@ -645,14 +679,10 @@ async def test_a_refused_batch_leaves_the_walk(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_missing_top_raises_what_its_listing_raises(monkeypatch):
     listing, batch, _ = _listings({})
-
-    async def absent(*args, **kwargs):
-        return False
-
     monkeypatch.setattr(drive_ops, "graph_list", listing)
     monkeypatch.setattr(drive_ops, "graph_batch", batch)
-    monkeypatch.setattr(drive_ops, "_is_file", absent)
-    monkeypatch.setattr(drive_ops, "_is_dir", absent)
+    monkeypatch.setattr(drive_ops, "_is_file", _absent)
+    monkeypatch.setattr(drive_ops, "_is_dir", _absent)
     with pytest.raises(FileNotFoundError):
         await drive_ops.batch_tree(
             MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"

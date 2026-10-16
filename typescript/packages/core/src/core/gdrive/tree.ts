@@ -14,6 +14,7 @@
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { DirListing, type FileStat, FileType, type PathSpec } from '../../types.ts'
+import { GoogleApiError } from '../google/client.ts'
 import type { DriveFile } from '../google/drive.ts'
 import { FOLDER_MIME, MIME_TO_EXT, listChildren } from '../google/drive.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -104,7 +105,8 @@ export async function listLevel(
  * Shared Drives and a folder that is not there raises what a listing raises.
  * Of two items with one name in a folder, the one its listing keeps, the last,
  * stands. Null when that listing is short (Shared Drives it could not list),
- * so the walk lists what is there. Mirrors Python's `tree`.
+ * or when a level below it fails, so the walk lists what is there and reports,
+ * or skips, each folder on its own. Mirrors Python's `tree`.
  */
 export async function tree(
   accessor: GDriveAccessor,
@@ -116,7 +118,16 @@ export async function tree(
   const found = new Map<string, FileStat>()
   let level = placed(found, '', listed, null)
   while (level.size > 0) {
-    const children = await listLevel(accessor, [...level.values()])
+    let children: Map<string, DriveFile[]>
+    try {
+      children = await listLevel(accessor, [...level.values()])
+    } catch (err) {
+      const failed =
+        err instanceof GoogleApiError || err instanceof TypeError || err instanceof DOMException
+      if (!failed) throw err
+      console.debug(`drive tree of ${path.virtual} left to the walk: ${String(err)}`)
+      return null
+    }
     const below = new Map<string, [string, string | null]>()
     for (const [rel, [folderId, driveId]] of level) {
       const rows = (children.get(folderId) ?? [])

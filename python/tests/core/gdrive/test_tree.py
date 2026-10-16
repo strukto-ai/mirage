@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import aiohttp
 import pytest
 
 import mirage.core.gdrive.readdir as readdir_mod
+import mirage.core.gdrive.tree as tree_mod
 from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.tree import (
     PARENTS_PER_QUERY,
@@ -32,6 +34,14 @@ DOC_MIME = "application/vnd.google-apps.document"
 
 def spec(virtual: str) -> PathSpec:
     return PathSpec.from_str_path(virtual)
+
+
+async def _no_shared_drives(*args, **kwargs):
+    raise PermissionError("no shared drives scope")
+
+
+async def _drive_down(*args, **kwargs):
+    raise aiohttp.ClientConnectionError("drive down")
 
 
 def scope(vfs_path: str = "") -> PathSpec:
@@ -137,11 +147,8 @@ async def test_a_missing_folder_raises_what_its_listing_raises(
 async def test_a_short_root_listing_is_left_to_the_walk(
     fake_drive, gdrive_accessor, monkeypatch
 ):
-    async def refuse(*args, **kwargs):
-        raise PermissionError("no shared drives scope")
-
     fake_drive.folder("sub")
-    monkeypatch.setattr(readdir_mod, "list_shared_drives", refuse)
+    monkeypatch.setattr(readdir_mod, "list_shared_drives", _no_shared_drives)
     assert await tree(gdrive_accessor, scope()) is None
     assert fake_drive.child_queries == []
 
@@ -190,3 +197,12 @@ def test_vfs_name_renders_native_suffix():
         == "Report.gdoc.json"
     )
     assert vfs_name({"name": "a.txt", "mimeType": "text/plain"}) == "a.txt"
+
+
+@pytest.mark.asyncio
+async def test_a_level_that_fails_is_left_to_the_walk(
+    fake_drive, gdrive_accessor, monkeypatch
+):
+    fake_drive.folder("sub")
+    monkeypatch.setattr(tree_mod, "list_children", _drive_down)
+    assert await tree(gdrive_accessor, scope()) is None

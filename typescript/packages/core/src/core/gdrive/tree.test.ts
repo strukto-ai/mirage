@@ -154,3 +154,11 @@ describe('gdrive listLevel', () => {
     expect(children.get(right)?.map((item) => item.name)).toEqual(['y.txt'])
   })
 })
+
+describe('gdrive tree failures', () => {
+  it('leaves a level that fails to the walk', async () => {
+    fake.folder('sub')
+    vi.spyOn(fake, 'listChildren').mockRejectedValue(new TypeError('fetch failed'))
+    expect(await tree(accessor, scope())).toBeNull()
+  })
+})

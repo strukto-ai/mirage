@@ -46,6 +46,7 @@ import {
   uploadChunk,
 } from './client.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
+import { sleep } from '../../utils/abort.ts'
 import { DIR_SIZE } from '../../utils/stat_view.ts'
 
 const SIMPLE_UPLOAD_MAX = 4 * 1024 * 1024
@@ -599,10 +600,11 @@ export async function deltaTree(
  * The folder's own children are its listing (`readdirItems`), so a folder that
  * is not there raises what a listing raises. A listing the batch does not
  * answer with its first page (Graph throttled or failed that one) is asked on
- * its own, and a listing's later pages are read as a listing reads them. Null
- * when Graph refuses a batch, or when a folder below is gone by the time its
- * listing is asked, so the walk lists what is there. Mirrors Python's
- * `batch_tree`.
+ * its own once the wait it was given has passed, and a listing's later pages
+ * are read as a listing reads them. Null when Graph refuses a batch, or when a
+ * listing below the folder fails (a folder gone, or one the account may not
+ * open), so the walk lists what is there and reports, or skips, each folder on
+ * its own. Mirrors Python's `batch_tree`.
  */
 export async function batchTree(
   config: MsGraphConfigResolved,
@@ -616,27 +618,24 @@ export async function batchTree(
     for (let start = 0; start < level.length; start += BATCH_LIMIT) {
       const chunk = level.slice(start, start + BATCH_LIMIT)
       const urls = chunk.map(([, folder]) => folder.item('/children'))
-      let answers: [number, Record<string, unknown>][]
+      const listed: Record<string, unknown>[][] = []
       try {
-        answers = await graphBatch(config, urls)
+        const answers = await graphBatch(config, urls)
+        for (const [i, url] of urls.entries()) {
+          listed.push(await batchPage(config, url, answers[i] ?? [0, {}, 0]))
+        }
       } catch (err) {
-        if (!(err instanceof GraphError)) throw err
-        console.debug(`graph batch of ${loc.path} refused: ${err.message}`)
+        const failed =
+          err instanceof GraphError || err instanceof TypeError || err instanceof DOMException
+        if (!failed) throw err
+        console.debug(`graph tree of ${loc.path} left to the walk: ${String(err)}`)
         return null
       }
       for (const [i, [rel, folder]] of chunk.entries()) {
-        let items: Record<string, unknown>[]
-        try {
-          items = await batchPage(config, urls[i] ?? '', answers[i] ?? [0, {}])
-        } catch (err) {
-          if (!(err instanceof GraphError) || err.status !== 404) throw err
-          console.debug(`graph folder ${folder.path} gone: ${err.message}`)
-          return null
-        }
-        const rows = items
+        const rows = (listed[i] ?? [])
           .map((item) => entryStat(item))
           .sort((a, b) => compareCodePoints(a.name, b.name))
-        below.push(...filed(found, rel, folder, rows))
+        for (const pair of filed(found, rel, folder, rows)) below.push(pair)
       }
     }
     level = below
@@ -646,16 +645,20 @@ export async function batchTree(
 
 /**
  * A folder's whole listing from its answer in a batch: the page the batch held
- * and the pages after it, or the listing asked again on its own when the batch
- * did not answer it. Mirrors Python's `_batch_page`.
+ * and the pages after it, or the listing asked again on its own, after the
+ * wait the answer asked for, when the batch did not answer it. Mirrors
+ * Python's `_batch_page`.
  */
 async function batchPage(
   config: MsGraphConfigResolved,
   url: string,
-  answer: [number, Record<string, unknown>],
+  answer: [number, Record<string, unknown>, number],
 ): Promise<Record<string, unknown>[]> {
-  const [status, body] = answer
-  if (status !== 200) return graphList(config, url)
+  const [status, body, wait] = answer
+  if (status !== 200) {
+    if (wait > 0) await sleep(wait * 1000)
+    return graphList(config, url)
+  }
   const items: Record<string, unknown>[] = []
   if (Array.isArray(body.value)) {
     for (const item of body.value) {
@@ -665,7 +668,9 @@ async function batchPage(
     }
   }
   const rest = body['@odata.nextLink']
-  if (typeof rest === 'string') items.push(...(await graphList(config, rest)))
+  if (typeof rest === 'string') {
+    for (const item of await graphList(config, rest)) items.push(item)
+  }
   return items
 }
 

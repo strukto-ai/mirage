@@ -246,17 +246,19 @@ export async function graphPost(
 
 /**
  * The answers to several GETs from one JSON batch (`$batch`), each as its
- * status and body, in the order of `urls`.
+ * status, its body and the seconds its `Retry-After` asks to be waited, in the
+ * order of `urls`.
  *
  * Graph runs at most `BATCH_LIMIT` requests in a batch. Each URL is a full one
  * under the mount's service root, and goes in relative to it, as a batch names
- * its requests. A request the reply leaves out answers status 0, and a body
- * that is not an object answers empty. Mirrors Python's `graph_batch`.
+ * its requests. A request the reply leaves out answers status 0, a body that
+ * is not an object answers empty, and a wait is at most `MAX_BACKOFF`, 0 when
+ * the answer names none. Mirrors Python's `graph_batch`.
  */
 export async function graphBatch(
   config: MsGraphConfigResolved,
   urls: readonly string[],
-): Promise<[number, Record<string, unknown>][]> {
+): Promise<[number, Record<string, unknown>, number][]> {
   const root = graphApi(config)
   const requests = urls.map((url, i) => ({
     id: String(i),
@@ -264,18 +266,34 @@ export async function graphBatch(
     url: url.startsWith(root) ? url.slice(root.length) : url,
   }))
   const data = await graphPost(config, `${root}/$batch`, { requests })
-  const answers = new Map<string, [number, Record<string, unknown>]>()
+  const answers = new Map<string, [number, Record<string, unknown>, number]>()
   for (const reply of Array.isArray(data.responses) ? data.responses : []) {
     if (reply === null || typeof reply !== 'object' || Array.isArray(reply)) continue
-    const { id, status, body } = reply as { id?: unknown; status?: unknown; body?: unknown }
+    const { id, status, body, headers } = reply as Record<string, unknown>
+    const page = body !== null && typeof body === 'object' && !Array.isArray(body)
+    const named = headers !== null && typeof headers === 'object' && !Array.isArray(headers)
     answers.set(String(id), [
       typeof status === 'number' ? status : 0,
-      body !== null && typeof body === 'object' && !Array.isArray(body)
-        ? (body as Record<string, unknown>)
-        : {},
+      page ? (body as Record<string, unknown>) : {},
+      retryAfter(named ? (headers as Record<string, unknown>) : {}),
     ])
   }
-  return urls.map((_, i) => answers.get(String(i)) ?? [0, {}])
+  return urls.map((_, i) => answers.get(String(i)) ?? [0, {}, 0])
+}
+
+/**
+ * The seconds a batched answer's `Retry-After` asks to be waited, at most
+ * `MAX_BACKOFF`; 0 for none, or for one that is not a count of seconds.
+ * Mirrors Python's `_retry_after`.
+ */
+export function retryAfter(headers: Record<string, unknown>): number {
+  for (const [name, value] of Object.entries(headers)) {
+    if (name.toLowerCase() === 'retry-after') {
+      const text = String(value).trim()
+      return /^[0-9]+$/.test(text) ? Math.min(Number(text), MAX_BACKOFF) : 0
+    }
+  }
+  return 0
 }
 
 export async function graphPostMonitor(
