@@ -28,7 +28,6 @@ from mirage.core.hf_hub.exists import exists as _exists
 from mirage.core.hf_hub.read import read as _read
 from mirage.core.hf_hub.readdir import readdir as _readdir
 from mirage.core.hf_hub.stat import stat as _stat
-from mirage.core.hf_hub.stat import tree as _tree
 from mirage.core.hf_hub.stream import read_stream as _read_stream
 from mirage.types import DirListing, FileStat, ListingVersion, PathSpec
 from mirage.vfs.base import BaseVFS
@@ -107,9 +106,6 @@ class HfHubVFS(BaseVFS, Generic[A]):
         self, path: PathSpec, entry: FileStat | None = None
     ) -> bool:
         return await _exists(self.accessor, path, entry)
-
-    async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
-        return await _tree(self.accessor, path)
 
     async def checksum(
         self, path: PathSpec, algorithm: str, entry: FileStat | None = None

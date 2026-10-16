@@ -20,9 +20,8 @@ import type { ReadStream } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { isNoSuchFile, joinRoot, stripPrefix } from './utils.ts'
 
-export const FOLLOW =
-  'test -f {path} && test -r {path} && command -v tail >/dev/null' +
-  ' && echo && exec tail -n {n} -f -- {path}'
+export const FOLLOWABLE = 'test -f {path} && test -r {path} && command -v tail >/dev/null'
+export const FOLLOW = 'exec tail -n {n} -f -- {path}'
 
 async function waitForClose(rs: ReadStream): Promise<Error | null> {
   try {
@@ -66,15 +65,16 @@ export async function* readStream(accessor: SSHAccessor, p: PathSpec): AsyncIter
  * server over the mount's connection, so the file is not read again on each
  * poll.
  *
- * The shell runs tail only once it finds a regular file it can read at the
- * path and a tail to run, and says so with an empty line first; anything else
- * (a server that runs no commands or has no tail, a missing file, a directory)
- * leaves the file to tail's poll, which reports it. The bytes are the server
- * tail's own: whole lines, and the last line as it stands while the file has
- * not ended it, as a tail there prints them. The server's tail waits for
- * growth its own way (inotify where it has it), so `interval` goes unused, and
- * what it says on stderr (a truncation) is not shown. Mirrors Python's
- * `follow`.
+ * One short command asks the server for a regular file it can read at the
+ * path and a tail to run; anything else (a server that runs no commands or has
+ * no tail, a missing file, a directory) leaves the file to tail's poll, which
+ * reports it. The server's `tail -f` starts at the first pull and ends when
+ * the stream closes, so a stream closed before it is pulled leaves nothing
+ * running. The bytes are the server tail's own: whole lines, and the last line
+ * as it stands while the file has not ended it, as a tail there prints them.
+ * The server's tail waits for growth its own way (inotify where it has it), so
+ * `interval` goes unused, and what it says on stderr (a truncation) is not
+ * shown. Mirrors Python's `follow`.
  */
 export async function follow(
   accessor: SSHAccessor,
@@ -83,46 +83,41 @@ export async function follow(
   _interval: number,
 ): Promise<AsyncIterable<Uint8Array> | null> {
   const remote = singleQuote(joinRoot(accessor.config.root ?? '/', stripPrefix(p)))
-  const command = FOLLOW.replaceAll(/\{path\}|\{n\}/g, (slot) =>
-    slot === '{path}' ? remote : String(n),
-  )
-  const stream = accessor.runStream(command)
-  let first: IteratorResult<Uint8Array>
+  const fill = (template: string): string =>
+    template.replaceAll(/\{path\}|\{n\}/g, (slot) => (slot === '{path}' ? remote : String(n)))
+  let status: number | null
+  let out: Uint8Array
+  let err: Uint8Array
   try {
-    first = await stream.next()
+    ;[status, out, err] = await accessor.run(fill(FOLLOWABLE))
   } catch (error) {
     console.debug(`ssh follow left to the poll: ${String(error)}`)
-    await stream.return?.()
     return null
   }
-  if (first.done === true || first.value[0] !== 0x0a) {
-    await stream.return?.()
-    return null
-  }
-  return followed(first.value.subarray(1), stream)
+  if (status !== 0 || out.length > 0 || err.length > 0) return null
+  return followed(accessor, fill(FOLLOW))
 }
 
 /**
- * `head`, then the rest of `stream`. An iterator rather than a generator: a
- * generator queues `return` behind a pull waiting for the next line, so an
- * idle `tail -f` could never close its channel. Mirrors Python's `_followed`.
+ * The server tail's output, its command started at the first pull. An
+ * iterator rather than a generator: a generator queues `return` behind a pull
+ * waiting for the next line, so an idle `tail -f` could never close its
+ * channel; `return` here closes it at once, and before the first pull leaves
+ * nothing to close. Mirrors Python's `_followed`.
  */
-function followed(
-  head: Uint8Array,
-  stream: AsyncIterableIterator<Uint8Array>,
-): AsyncIterableIterator<Uint8Array> {
-  let pending: Uint8Array | null = head.byteLength > 0 ? head : null
+function followed(accessor: SSHAccessor, command: string): AsyncIterableIterator<Uint8Array> {
+  let stream: AsyncIterableIterator<Uint8Array> | null = null
+  let closed = false
   const done: IteratorResult<Uint8Array> = { value: undefined, done: true }
   return {
     next(): Promise<IteratorResult<Uint8Array>> {
-      if (pending === null) return stream.next()
-      const value = pending
-      pending = null
-      return Promise.resolve({ value, done: false })
+      if (closed) return Promise.resolve(done)
+      stream ??= accessor.runStream(command)
+      return stream.next()
     },
     async return(): Promise<IteratorResult<Uint8Array>> {
-      pending = null
-      await stream.return?.()
+      closed = true
+      await stream?.return?.()
       return done
     },
     [Symbol.asyncIterator]() {

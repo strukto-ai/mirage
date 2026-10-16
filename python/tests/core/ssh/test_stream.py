@@ -26,34 +26,50 @@ def _file(vfs_path: str) -> PathSpec:
     )
 
 
+PROBE = (
+    "test -f 'data/a b.txt' && test -r 'data/a b.txt'"
+    " && command -v tail >/dev/null"
+)
+
+
 @pytest.mark.asyncio
 async def test_follow_streams_what_the_servers_tail_prints():
-    accessor = StreamAccessor("data", [b"\nb\nc\n", b"d\n", b"e"])
+    accessor = StreamAccessor("data", [b"b\nc\n", b"d\n", b"e"])
     stream = await follow(accessor, _file("a b.txt"), 2, 1.0)
     assert stream is not None
+    assert accessor.sent == [PROBE]
     assert [chunk async for chunk in stream] == [b"b\nc\n", b"d\n", b"e"]
-    assert accessor.sent == [
-        "test -f 'data/a b.txt' && test -r 'data/a b.txt'"
-        " && command -v tail >/dev/null"
-        " && echo && exec tail -n 2 -f -- 'data/a b.txt'"
-    ]
+    assert accessor.streamed == ["exec tail -n 2 -f -- 'data/a b.txt'"]
     assert accessor.closed == 1
 
 
 @pytest.mark.asyncio
 async def test_follow_quotes_a_path_holding_placeholders_as_it_is():
-    accessor = StreamAccessor("data", [])
-    await follow(accessor, _file("log{n}$&$$.txt"), 3, 1.0)
+    accessor = StreamAccessor("data", [b"x\n"])
+    stream = await follow(accessor, _file("log{n}$&$$.txt"), 3, 1.0)
+    assert stream is not None
+    await anext(stream)
+    await stream.aclose()
     assert accessor.sent == [
         "test -f 'data/log{n}$&$$.txt' && test -r 'data/log{n}$&$$.txt'"
         " && command -v tail >/dev/null"
-        " && echo && exec tail -n 3 -f -- 'data/log{n}$&$$.txt'"
     ]
+    assert accessor.streamed == ["exec tail -n 3 -f -- 'data/log{n}$&$$.txt'"]
+
+
+@pytest.mark.asyncio
+async def test_a_follow_closed_before_its_first_pull_runs_nothing():
+    accessor = StreamAccessor("data", [b"x\n"])
+    stream = await follow(accessor, _file("a"), 1, 1.0)
+    assert stream is not None
+    await stream.aclose()
+    assert accessor.streamed == []
+    assert accessor.closed == 0
 
 
 @pytest.mark.asyncio
 async def test_a_follow_the_caller_stops_closes_the_command():
-    accessor = StreamAccessor("data", [b"\n", b"x\n", b"y\n"])
+    accessor = StreamAccessor("data", [b"x\n", b"y\n"])
     stream = await follow(accessor, _file("a"), 0, 1.0)
     assert stream is not None
     assert await anext(stream) == b"x\n"
@@ -63,15 +79,16 @@ async def test_a_follow_the_caller_stops_closes_the_command():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "chunks",
+    "answer",
     [
-        [],
-        [b"This service allows sftp connections only.\n"],
+        (1, b"", b""),
+        (1, b"This service allows sftp connections only.\n", b""),
+        (0, b"/usr/bin/tail\n", b""),
+        (0, b"", b"warning\n"),
         OSError("closed"),
     ],
 )
-async def test_anything_but_the_shells_empty_line_leaves_the_poll(chunks):
-    accessor = StreamAccessor("data", chunks)
+async def test_anything_but_a_clean_probe_leaves_the_poll(answer):
+    accessor = StreamAccessor("data", [b"x\n"], answer)
     assert await follow(accessor, _file("a"), 1, 1.0) is None
-    if not isinstance(chunks, Exception):
-        assert accessor.closed == 1
+    assert accessor.streamed == []

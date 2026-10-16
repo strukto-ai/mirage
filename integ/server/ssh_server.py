@@ -63,13 +63,12 @@ SUMS = {
 FOLLOW_POLL = 0.05
 
 
-def follow_shape(target: str, count: str) -> list[str]:
-    """The follow command an ssh mount sends for ``tail -f``, split as the
-    shell splits it.
+def followable_shape(target: str) -> list[str]:
+    """The probe an ssh mount sends before ``tail -f``, split as the shell
+    splits it.
 
     Args:
         target (str): The file, as the client named it.
-        count (str): The ``-n`` count, as the client wrote it.
     """
     return [
         "test",
@@ -84,17 +83,18 @@ def follow_shape(target: str, count: str) -> list[str]:
         "-v",
         "tail",
         ">/dev/null",
-        "&&",
-        "echo",
-        "&&",
-        "exec",
-        "tail",
-        "-n",
-        count,
-        "-f",
-        "--",
-        target,
     ]
+
+
+def follow_shape(target: str, count: str) -> list[str]:
+    """The follow command an ssh mount sends for ``tail -f``, split as the
+    shell splits it.
+
+    Args:
+        target (str): The file, as the client named it.
+        count (str): The ``-n`` count, as the client wrote it.
+    """
+    return ["exec", "tail", "-n", count, "-f", "--", target]
 
 
 FIND_KINDS = (
@@ -355,11 +355,10 @@ def last_lines(data: bytes, count: int) -> bytes:
 async def follow_file(
     root: str, target: str, count: int, process: asyncssh.SSHServerProcess
 ) -> None:
-    """What the follow command does under the chroot: an empty line once a
-    regular readable file is at ``target``, its last ``count`` lines, then
-    what it gains until the client closes the channel, from the top again
-    once it shrinks, as ``tail -f`` does. Anything else exits 1 silently,
-    as the shell's tests do.
+    """What ``tail -f`` does under the chroot: a regular readable file's
+    last ``count`` lines, then what it gains until the client closes the
+    channel, from the top again once it shrinks. Anything else is tail's
+    refusal and exit 1.
 
     Args:
         root (str): Local directory served as the SFTP root.
@@ -369,17 +368,16 @@ async def follow_file(
     """
     root = os.path.realpath(root)
     path = os.path.join(root, target.lstrip("/"))
-    if (
-        not _inside(root, path)
-        or not os.path.isfile(path)
-        or not os.access(path, os.R_OK)
-    ):
+    if not _followable(root, target):
+        process.stderr.write(
+            f"tail: cannot open '{target}' for reading\n".encode()
+        )
         process.exit(1)
         return
     data = await asyncio.to_thread(_read_bytes, path)
     position = len(data)
     try:
-        process.stdout.write(b"\n" + last_lines(data, count))
+        process.stdout.write(last_lines(data, count))
         while not process.channel.is_closing():
             await asyncio.sleep(FOLLOW_POLL)
             try:
@@ -394,6 +392,23 @@ async def follow_file(
                 position = len(data)
     except BrokenPipeError as exc:
         logger.debug("follow of %s closed by the client: %s", path, exc)
+
+
+def _followable(root: str, target: str) -> bool:
+    """Whether a regular file the server can read is at ``target`` under
+    the chroot, which is what the follow's probe asks.
+
+    Args:
+        root (str): Local directory served as the SFTP root.
+        target (str): The file, as the client named it.
+    """
+    root = os.path.realpath(root)
+    path = os.path.join(root, target.lstrip("/"))
+    return (
+        _inside(root, path)
+        and os.path.isfile(path)
+        and os.access(path, os.R_OK)
+    )
 
 
 def _read_bytes(path: str) -> bytes:
@@ -525,11 +540,14 @@ async def run_command(root: str, process: asyncssh.SSHServerProcess) -> None:
     """
     argv = shlex.split(process.command or "")
     if (
-        len(argv) == 22
-        and argv[18].isdigit()
-        and argv == follow_shape(argv[2], argv[18])
+        len(argv) == 7
+        and argv[3].isdigit()
+        and argv == follow_shape(argv[6], argv[3])
     ):
-        await follow_file(root, argv[2], int(argv[18]), process)
+        await follow_file(root, argv[6], int(argv[3]), process)
+        return
+    if len(argv) == 12 and argv == followable_shape(argv[2]):
+        process.exit(0 if _followable(root, argv[2]) else 1)
         return
     answer = await asyncio.to_thread(_answer, root, argv)
     if answer is None:

@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { ReadStream, SFTPWrapper } from 'ssh2'
 import { SSHAccessor } from '../../accessor/ssh.ts'
-import { StreamAccessor, makeFakeAccessor } from './_test_utils.ts'
+import { StreamAccessor, makeFakeAccessor, type RunAnswer } from './_test_utils.ts'
 import { follow, readStream } from './stream.ts'
 
 class DelayedCloseStream extends Readable {
@@ -136,47 +136,63 @@ function file(vfsPath: string): PathSpec {
 describe('follow', () => {
   const ENC = new TextEncoder()
   const DEC = new TextDecoder()
+  const PROBE = "test -f 'data/a b.txt' && test -r 'data/a b.txt' && command -v tail >/dev/null"
 
   it("streams what the server's tail prints", async () => {
     const accessor = new StreamAccessor('data', [
-      ENC.encode('\nb\nc\n'),
+      ENC.encode('b\nc\n'),
       ENC.encode('d\n'),
       ENC.encode('e'),
     ])
     const stream = await follow(accessor, file('a b.txt'), 2, 1)
-    expect(stream).not.toBeNull()
+    expect(accessor.sent).toEqual([PROBE])
     const chunks: string[] = []
     for await (const chunk of stream ?? []) chunks.push(DEC.decode(chunk))
     expect(chunks).toEqual(['b\nc\n', 'd\n', 'e'])
-    expect(accessor.sent).toEqual([
-      "test -f 'data/a b.txt' && test -r 'data/a b.txt'" +
-        ' && command -v tail >/dev/null' +
-        " && echo && exec tail -n 2 -f -- 'data/a b.txt'",
-    ])
+    expect(accessor.streamed).toEqual(["exec tail -n 2 -f -- 'data/a b.txt'"])
     expect(accessor.closed).toBe(1)
   })
 
   it('quotes a path holding placeholders and replacement patterns as it is', async () => {
-    const accessor = new StreamAccessor('data', [])
-    await follow(accessor, file('log{n}$&$$.txt'), 3, 1)
+    const accessor = new StreamAccessor('data', [ENC.encode('x\n')])
+    const stream = (await follow(
+      accessor,
+      file('log{n}$&$$.txt'),
+      3,
+      1,
+    )) as AsyncIterableIterator<Uint8Array>
+    await stream.next()
+    await stream.return?.()
     expect(accessor.sent).toEqual([
       "test -f 'data/log{n}$&$$.txt' && test -r 'data/log{n}$&$$.txt'" +
-        ' && command -v tail >/dev/null' +
-        " && echo && exec tail -n 3 -f -- 'data/log{n}$&$$.txt'",
+        ' && command -v tail >/dev/null',
     ])
+    expect(accessor.streamed).toEqual(["exec tail -n 3 -f -- 'data/log{n}$&$$.txt'"])
+  })
+
+  it('runs nothing for a follow closed before its first pull', async () => {
+    const accessor = new StreamAccessor('data', [ENC.encode('x\n')])
+    const stream = (await follow(accessor, file('a'), 1, 1)) as AsyncIterableIterator<Uint8Array>
+    await stream.return?.()
+    expect(accessor.streamed).toEqual([])
+    expect(accessor.closed).toBe(0)
+  })
+
+  it('closes the command when the caller stops', async () => {
+    const accessor = new StreamAccessor('data', [ENC.encode('x\n'), ENC.encode('y\n')])
+    const stream = await follow(accessor, file('a'), 0, 1)
+    for await (const chunk of stream ?? []) {
+      expect(DEC.decode(chunk)).toBe('x\n')
+      break
+    }
+    expect(accessor.closed).toBe(1)
   })
 
   it('closes a quiet follow at once', async () => {
     let closed = 0
-    let pulls = 0
     const quiet = new StreamAccessor('data', [])
     quiet.runStream = () => ({
-      next: () => {
-        pulls += 1
-        return pulls === 1
-          ? Promise.resolve({ value: ENC.encode('\n'), done: false })
-          : new Promise<IteratorResult<Uint8Array>>(() => undefined)
-      },
+      next: () => new Promise<IteratorResult<Uint8Array>>(() => undefined),
       return: () => {
         closed += 1
         return Promise.resolve({ value: undefined, done: true })
@@ -191,27 +207,18 @@ describe('follow', () => {
     expect(closed).toBe(1)
   })
 
-  it('closes the command when the caller stops', async () => {
-    const accessor = new StreamAccessor('data', [
-      ENC.encode('\n'),
-      ENC.encode('x\n'),
-      ENC.encode('y\n'),
-    ])
-    const stream = await follow(accessor, file('a'), 0, 1)
-    for await (const chunk of stream ?? []) {
-      expect(DEC.decode(chunk)).toBe('x\n')
-      break
-    }
-    expect(accessor.closed).toBe(1)
-  })
-
-  it.each<[string, Uint8Array[] | Error]>([
-    ['no output', []],
-    ['a forced sftp', [ENC.encode('This service allows sftp connections only.\n')]],
+  it.each<[string, RunAnswer]>([
+    ['a missing file', [1, new Uint8Array(), new Uint8Array()]],
+    [
+      'a forced sftp',
+      [1, ENC.encode('This service allows sftp connections only.\n'), new Uint8Array()],
+    ],
+    ['output', [0, ENC.encode('/usr/bin/tail\n'), new Uint8Array()]],
+    ['stderr', [0, new Uint8Array(), ENC.encode('warning\n')]],
     ['a closed connection', new Error('closed')],
-  ])('leaves the poll on %s', async (_name, chunks) => {
-    const accessor = new StreamAccessor('data', chunks)
+  ])('leaves the poll on %s', async (_name, answer) => {
+    const accessor = new StreamAccessor('data', [ENC.encode('x\n')], answer)
     expect(await follow(accessor, file('a'), 1, 1)).toBeNull()
-    if (!(chunks instanceof Error)) expect(accessor.closed).toBe(1)
+    expect(accessor.streamed).toEqual([])
   })
 })

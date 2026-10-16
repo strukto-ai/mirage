@@ -48,25 +48,32 @@ class RunAccessor(SSHAccessor):
         return self.answer
 
 
-class StreamAccessor(SSHAccessor):
-    """An accessor whose server streams ``chunks`` for every command.
+class StreamAccessor(RunAccessor):
+    """An accessor whose server answers a run with ``answer`` and streams
+    ``chunks`` for a streamed command.
 
     Args:
         root (str): the mount's remote root.
-        chunks (list[bytes] | Exception): what the command prints, chunk
-            by chunk, or what starting it raises.
+        chunks (list[bytes] | Exception): what a streamed command prints,
+            chunk by chunk, or what starting it raises.
+        answer (Answer): what a run answers.
     """
 
-    def __init__(self, root: str, chunks: list[bytes] | Exception) -> None:
-        super().__init__(SSHConfig(host="example.test", root=root))
+    def __init__(
+        self,
+        root: str,
+        chunks: list[bytes] | Exception,
+        answer: Answer = (0, b"", b""),
+    ) -> None:
+        super().__init__(root, answer)
         self.chunks = chunks
-        self.sent: list[str] = []
+        self.streamed: list[str] = []
         self.closed = 0
 
     async def run_stream(
         self, command: str, size: int = 65536
     ) -> AsyncGenerator[bytes, None]:
-        self.sent.append(command)
+        self.streamed.append(command)
         if isinstance(self.chunks, Exception):
             raise self.chunks
         try:

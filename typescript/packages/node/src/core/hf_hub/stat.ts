@@ -21,7 +21,7 @@ import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { HfHubError } from './client.ts'
 import { refusalsDenied } from './lookup.ts'
 import { headCommit, mountVersion } from './repo.ts'
-import { fetchPath, fetchTree, rowOf, treeRows } from './tree.ts'
+import { fetchPath, rowOf } from './tree.ts'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 
 /**
@@ -51,34 +51,6 @@ export async function stat(
   const found = (await refusalsDenied(pathSpec, () => fetchPath(accessor, rel))).get(rel)
   if (found === undefined) throw enoent(pathSpec.virtual)
   return rowOf(found, rel.slice(rel.lastIndexOf('/') + 1))
-}
-
-/**
- * Every entry under a directory of the repository, each as its row, from the
- * one paged walk of the Hub's tree API with `recursive=true` that a listing
- * takes, at the commit the revision's head names, as a listing walks it. Null
- * when `path` is no directory in it, so the walk's readdir reports what is
- * there. Mirrors Python's `tree`.
- */
-export async function tree(
-  accessor: HfHubAccessor,
-  path: PathSpec,
-): Promise<Map<string, FileStat> | null> {
-  const rel = stripSlash(path.mountPath)
-  const folders = treeRows(
-    await refusalsDenied(path, async () =>
-      fetchTree(accessor, (await headCommit(accessor)) || undefined),
-    ),
-  )
-  if (!folders.has(rel)) return null
-  const lead = rel === '' ? '' : `${rel}/`
-  const found = new Map<string, FileStat>()
-  for (const [folder, rows] of folders) {
-    if (folder !== rel && !folder.startsWith(lead)) continue
-    const base = folder.slice(lead.length)
-    for (const row of rows) found.set(base === '' ? row.name : `${base}/${row.name}`, row)
-  }
-  return found
 }
 
 /**

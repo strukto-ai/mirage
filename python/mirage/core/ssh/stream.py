@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncIterator
 
 import asyncssh
 
@@ -25,10 +25,8 @@ from mirage.utils.quote import single_quote
 
 logger = logging.getLogger(__name__)
 
-FOLLOW = (
-    "test -f {path} && test -r {path} && command -v tail >/dev/null"
-    " && echo && exec tail -n {n} -f -- {path}"
-)
+FOLLOWABLE = "test -f {path} && test -r {path} && command -v tail >/dev/null"
+FOLLOW = "exec tail -n {n} -f -- {path}"
 
 
 async def read_stream(
@@ -62,15 +60,16 @@ async def follow(
     ``tail -f`` on the server over the mount's connection, so the file is
     not read again on each poll.
 
-    The shell runs tail only once it finds a regular file it can read at
-    the path and a tail to run, and says so with an empty line first;
-    anything else (a server that runs no commands or has no tail, a
-    missing file, a directory) leaves the file to tail's poll, which
-    reports it. The bytes are the server tail's own: whole lines, and the
-    last line as it stands while the file has not ended it, as a tail
-    there prints them. The server's tail waits for growth its own way
-    (inotify where it has it), so ``interval`` goes unused, and what it
-    says on stderr (a truncation) is not shown.
+    One short command asks the server for a regular file it can read at
+    the path and a tail to run; anything else (a server that runs no
+    commands or has no tail, a missing file, a directory) leaves the file
+    to tail's poll, which reports it. The server's ``tail -f`` starts at
+    the first pull and ends when the stream closes, so a stream closed
+    before it is pulled leaves nothing running. The bytes are the server
+    tail's own: whole lines, and the last line as it stands while the file
+    has not ended it, as a tail there prints them. The server's tail waits
+    for growth its own way (inotify where it has it), so ``interval`` goes
+    unused, and what it says on stderr (a truncation) is not shown.
 
     Args:
         accessor (SSHAccessor): the mount's connection.
@@ -81,32 +80,28 @@ async def follow(
     remote = single_quote(
         join_root(accessor.config.root, path_spec.mount_path)
     )
-    stream = accessor.run_stream(FOLLOW.format(path=remote, n=n))
     try:
-        first = await anext(stream, b"")
+        status, out, err = await accessor.run(FOLLOWABLE.format(path=remote))
     except (asyncssh.Error, OSError) as exc:
         logger.debug("ssh follow left to the poll: %s", exc)
-        await stream.aclose()
         return None
-    if not first.startswith(b"\n"):
-        await stream.aclose()
+    if status != 0 or out or err:
         return None
-    return _followed(first[1:], stream)
+    return _followed(accessor, FOLLOW.format(path=remote, n=n))
 
 
 async def _followed(
-    head: bytes, stream: AsyncGenerator[bytes, None]
+    accessor: SSHAccessor, command: str
 ) -> AsyncIterator[bytes]:
-    """``head``, then the rest of ``stream``, which closes however the
-    caller stops.
+    """The server tail's output, its command started at the first pull and
+    closed however the caller stops.
 
     Args:
-        head (bytes): what came after the shell's empty line.
-        stream (AsyncGenerator[bytes, None]): the remote tail's output.
+        accessor (SSHAccessor): the mount's connection.
+        command (str): the server's ``tail -f``.
     """
+    stream = accessor.run_stream(command)
     try:
-        if head:
-            yield head
         async for chunk in stream:
             yield chunk
     finally:

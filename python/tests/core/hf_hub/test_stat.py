@@ -19,8 +19,7 @@ import pytest
 from mirage.cache.index.ram import ListingCheckStore
 from mirage.core.hf_hub.client import HfHubError
 from mirage.core.hf_hub.readdir import readdir
-from mirage.core.hf_hub.stat import stat, tree
-from mirage.core.hf_hub.tree import parse_entry
+from mirage.core.hf_hub.stat import stat
 from mirage.types import FileStat, FileType, PathSpec
 from tests.core.hf_hub.conftest import dir_row, file_row, page, ps, seed
 from tests.fixtures.handed import entry_at
@@ -183,64 +182,3 @@ async def test_a_failing_check_stays_a_hub_error(accessor):
     with patch("mirage.core.hf_hub.tree.hub_post", failed), _walk():
         with pytest.raises(HfHubError, match="boom"):
             await _checked(accessor, ps("a.txt"))
-
-
-def _walked(*rows):
-    return patch(
-        "mirage.core.hf_hub.stat.fetch_tree",
-        AsyncMock(return_value={r["path"]: parse_entry(r) for r in rows}),
-    )
-
-
-ROWS = (file_row("a.txt", 7), file_row("d/b.txt", 3), dir_row("d"))
-
-
-@pytest.mark.asyncio
-async def test_tree_lists_every_entry_below_the_mount_root_in_one_walk(
-    accessor, tree
-):
-    seed(tree, *ROWS)
-    with _walked(*ROWS) as walk:
-        rows = await tree_of(accessor, "")
-    assert walk.await_count == 1
-    assert sorted(rows) == ["a.txt", "d", "d/b.txt"]
-    assert rows["a.txt"] == await _stat_at(accessor, ps("a.txt"))
-    assert rows["d"].type is FileType.DIRECTORY
-    assert rows["d/b.txt"].size == 3
-
-
-async def tree_of(accessor, path: str):
-    return await tree(accessor, ps(path))
-
-
-@pytest.mark.asyncio
-async def test_tree_keys_a_subtree_below_its_own_root(accessor):
-    with _walked(*ROWS):
-        rows = await tree_of(accessor, "d")
-    assert list(rows) == ["b.txt"]
-    assert rows["b.txt"].fingerprint == "oid-d/b.txt"
-
-
-@pytest.mark.asyncio
-async def test_tree_names_the_directories_the_listing_only_implies(
-    accessor,
-):
-    with _walked(file_row("d/e/b.txt")):
-        rows = await tree_of(accessor, "")
-    assert sorted(rows) == ["d", "d/e", "d/e/b.txt"]
-    assert rows["d/e"].type is FileType.DIRECTORY
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("path", ["a.txt", "nope"])
-async def test_tree_of_a_file_or_nothing_leaves_the_walk(accessor, path):
-    with _walked(*ROWS):
-        assert await tree_of(accessor, path) is None
-
-
-@pytest.mark.asyncio
-async def test_tree_reports_a_refused_repository_as_denied(accessor):
-    refused = AsyncMock(side_effect=HfHubError("gated", 403))
-    with patch("mirage.core.hf_hub.stat.fetch_tree", refused):
-        with pytest.raises(PermissionError):
-            await tree_of(accessor, "")

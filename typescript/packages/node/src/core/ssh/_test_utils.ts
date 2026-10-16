@@ -599,21 +599,23 @@ export class RunAccessor extends SSHAccessor {
   }
 }
 
-// An accessor whose server streams `chunks` for every command, or fails to
-// start it with the error given. Twin of Python's StreamAccessor.
-export class StreamAccessor extends SSHAccessor {
-  readonly sent: string[] = []
+// An accessor whose server answers a run with `answer` and streams `chunks`
+// for a streamed command, or fails to start it with the error given. Twin of
+// Python's StreamAccessor.
+export class StreamAccessor extends RunAccessor {
+  readonly streamed: string[] = []
   closed = 0
 
   constructor(
     root: string,
     private readonly chunks: Uint8Array[] | Error,
+    answer: RunAnswer = [0, new Uint8Array(), new Uint8Array()],
   ) {
-    super({ host: 'example.test', root })
+    super(root, answer)
   }
 
   override async *runStream(command: string): AsyncIterableIterator<Uint8Array> {
-    this.sent.push(command)
+    this.streamed.push(command)
     if (this.chunks instanceof Error) throw this.chunks
     try {
       for (const chunk of this.chunks) {
