@@ -73,6 +73,12 @@ describe('createFile', () => {
   })
 })
 
+async function* aBlockThenAByte(): AsyncGenerator<Uint8Array> {
+  await Promise.resolve()
+  yield new Uint8Array(MEMORY_LIMIT)
+  yield new Uint8Array(1)
+}
+
 describe('writeDescription', () => {
   it('leaves the offset after what landed when a later write fails', async () => {
     const landed: [number, number][] = []
@@ -85,16 +91,11 @@ describe('writeDescription', () => {
       }
       return [null, new IOResult()]
     }
-    async function* data(): AsyncGenerator<Uint8Array> {
-      await Promise.resolve()
-      yield new Uint8Array(MEMORY_LIMIT)
-      yield new Uint8Array(1)
-    }
     const file = new FileDescription(SCOPE)
     file.opened = true
     file.offset = 3
     await expect(
-      writeDescription(dispatch, new SessionState({ sessionId: 's' }), file, data()),
+      writeDescription(dispatch, new SessionState({ sessionId: 's' }), file, aBlockThenAByte()),
     ).rejects.toThrow('ENOSPC')
     expect(landed).toEqual([[3, MEMORY_LIMIT]])
     expect(file.offset).toBe(3 + MEMORY_LIMIT)

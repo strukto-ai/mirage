@@ -61,6 +61,10 @@ class Progress(TypedDict):
     drain_budget: NotRequired[int | None]
 
 
+async def unexpected(*params: Any) -> NoReturn:
+    raise AssertionError("unexpected write or unlink")
+
+
 async def main() -> None:
     state: Progress = {
         "input_bytes": 0,
@@ -108,9 +112,6 @@ async def main() -> None:
             ):
                 state["first_64k_ms"] = (time.perf_counter() - started) * 1000
             digest.update(chunk)
-
-    async def unexpected(*params: Any) -> NoReturn:
-        raise AssertionError("unexpected write or unlink")
 
     member = (
         Member(name="payload.bin", kind="file", path=INPUT, size=SIZE)

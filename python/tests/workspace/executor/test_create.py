@@ -87,6 +87,11 @@ async def test_both_redirect_forms_agree_end_to_end():
     await ws.close()
 
 
+async def _a_block_then_a_byte():
+    yield b"a" * MEMORY_LIMIT
+    yield b"b"
+
+
 @pytest.mark.asyncio
 async def test_a_failed_write_leaves_the_offset_after_what_landed():
     landed: list[tuple[int, int]] = []
@@ -98,12 +103,10 @@ async def test_a_failed_write_leaves_the_offset_after_what_landed():
             landed.append((kwargs["offset"], len(kwargs["data"])))
         return None, None
 
-    async def data():
-        yield b"a" * MEMORY_LIMIT
-        yield b"b"
-
     file = FileDescription(_to_scope("/data/f"), opened=True, offset=3)
     with pytest.raises(OSError):
-        await write_description(dispatch, SessionState("s"), file, data())
+        await write_description(
+            dispatch, SessionState("s"), file, _a_block_then_a_byte()
+        )
     assert landed == [(3, MEMORY_LIMIT)]
     assert file.offset == 3 + MEMORY_LIMIT
