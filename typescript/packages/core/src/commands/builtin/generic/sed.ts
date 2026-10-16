@@ -217,12 +217,18 @@ class ScriptWrites {
   ): void {
     kept.parts.push(data)
     let covered = (this.sent.get(this.first.get(path) ?? '') ?? 0) - kept.dropped
-    for (let head = kept.parts[0]; covered > 0 && head !== undefined; head = kept.parts[0]) {
-      const cut = Math.min(covered, head.byteLength)
-      if (cut === head.byteLength) kept.parts.shift()
-      else kept.parts[0] = head.subarray(cut)
-      kept.dropped += cut
-      covered -= cut
+    let whole = 0
+    for (const part of kept.parts) {
+      if (covered < part.byteLength) break
+      covered -= part.byteLength
+      kept.dropped += part.byteLength
+      whole++
+    }
+    kept.parts.splice(0, whole)
+    const head = kept.parts[0]
+    if (covered > 0 && head !== undefined) {
+      kept.parts[0] = head.subarray(covered)
+      kept.dropped += covered
     }
   }
 
