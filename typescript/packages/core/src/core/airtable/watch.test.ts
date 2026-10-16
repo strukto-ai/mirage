@@ -187,6 +187,23 @@ describe('AirtableDeltaHook', () => {
     ])
   })
 
+  it('loses the first payloads a new webhook let expire', async () => {
+    const fake = new FakeAirtable()
+    fake.push(records())
+    fake.push(records())
+    const hook = hookFor(fake)
+    const base = await hook.pull(root(), null)
+    if (fake.hooks.appA !== undefined) fake.hooks.appA.achNew = []
+    fake.push(records(), 'achNew')
+    fake.push(records(), 'achNew')
+    fake.oldest = 2
+    expect(pairs(await hook.pull(root(), base.checkpoint))).toEqual([
+      [X, '/at'],
+      [U, `${FEATURES}/records.jsonl`],
+      [X, `${FEATURES}/views`],
+    ])
+  })
+
   it('follows bases that come and go and lists no bases for a base root', async () => {
     const fake = new FakeAirtable()
     const hook = hookFor(fake)

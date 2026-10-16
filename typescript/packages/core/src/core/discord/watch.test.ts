@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
 import { FileChangeKind, PathSpec, type JsonValue } from '../../types.ts'
-import type { DiscordTransport } from './client.ts'
+import { DiscordApiError, type DiscordTransport } from './client.ts'
 import { snowflakeAt } from './history.ts'
 import { DiscordEventHook } from './watch.ts'
 
@@ -48,7 +48,11 @@ function fake(): {
   const transport: DiscordTransport = {
     call(_method, endpoint) {
       calls.push(endpoint)
-      return Promise.resolve({ ...objects[endpoint] })
+      const found = objects[endpoint]
+      if (found === undefined) {
+        return Promise.reject(new DiscordApiError(endpoint, 404, 'Unknown Channel'))
+      }
+      return Promise.resolve({ ...found })
     },
   }
   return { hook: new DiscordEventHook(new DiscordAccessor(transport)), calls, objects }
@@ -174,5 +178,15 @@ describe('DiscordEventHook', () => {
       [U, "/d/Ada's Server__900/channels/lobby__100/2026-10-01/chat.jsonl"],
     ])
     expect(calls.filter((c) => c === '/channels/100')).toHaveLength(2)
+  })
+
+  it('is UNKNOWN above a message from a deleted channel or guild', async () => {
+    const { hook, objects } = fake()
+    const gone = { id: OLD, channel_id: '404', guild_id: '900' }
+    expect(await map(hook, 'MESSAGE_DELETE', gone)).toEqual([[X, "/d/Ada's Server__900/channels"]])
+    expect(await map(hook, 'MESSAGE_DELETE', { ...gone, guild_id: '901' })).toEqual([[X, '/d']])
+    objects['/channels/300'] = { ...GENERAL, id: '300', guild_id: '901' }
+    expect(await map(hook, 'MESSAGE_CREATE', { id: LATE, channel_id: '300' })).toEqual([[X, '/d']])
+    expect(await map(hook, 'MESSAGE_CREATE', { id: LATE, channel_id: '404' })).toEqual([])
   })
 })

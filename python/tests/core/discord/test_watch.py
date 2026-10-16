@@ -15,6 +15,8 @@
 import asyncio
 from datetime import datetime, timezone
 
+import aiohttp
+
 from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.history import snowflake_at
@@ -58,6 +60,12 @@ def _hook(monkeypatch) -> tuple[DiscordEventHook, list[str]]:
 
     async def fake_get(config, endpoint, params=None, session=None):
         calls.append(endpoint)
+        if endpoint not in objects:
+            raise aiohttp.ClientResponseError(
+                request_info=None,  # type: ignore[arg-type]
+                history=(),
+                status=404,
+            )
         return dict(objects[endpoint])
 
     monkeypatch.setattr("mirage.core.discord.watch.discord_get", fake_get)
@@ -199,3 +207,20 @@ def test_a_reconnect_forgets_the_guilds_channels(monkeypatch):
         (U, "/d/Ada's Server__900/channels/lobby__100/2026-10-01/chat.jsonl")
     ]
     assert calls.count("/channels/100") == 2
+
+
+def test_a_message_from_a_deleted_channel_or_guild_is_unknown_above_it(
+    monkeypatch,
+):
+    hook, _ = _hook(monkeypatch)
+    gone = {"id": OLD, "channel_id": "404", "guild_id": "900"}
+    assert _map(hook, "MESSAGE_DELETE", gone) == [
+        (X, "/d/Ada's Server__900/channels")
+    ]
+    gone = {"id": OLD, "channel_id": "404", "guild_id": "901"}
+    assert _map(hook, "MESSAGE_DELETE", gone) == [(X, "/d")]
+    hook.objects["/channels/300"] = {**GENERAL, "id": "300", "guild_id": "901"}
+    found = _map(hook, "MESSAGE_CREATE", {"id": LATE, "channel_id": "300"})
+    assert found == [(X, "/d")]
+    found = _map(hook, "MESSAGE_CREATE", {"id": LATE, "channel_id": "404"})
+    assert found == []

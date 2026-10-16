@@ -210,6 +210,24 @@ async def test_a_webhook_gone_is_lost_and_a_new_one_reads_from_its_start(
 
 
 @pytest.mark.asyncio
+async def test_a_new_webhook_whose_first_payloads_expired_is_lost(fake):
+    fake.push(_records())
+    fake.push(_records())
+    hook = _hook()
+    base = await hook.pull(_root(), None)
+    fake.hooks["appA"]["achNew"] = []
+    fake.push(_records(), hook_id="achNew")
+    fake.push(_records(), hook_id="achNew")
+    fake.oldest = 2
+    delta = await hook.pull(_root(), base.checkpoint)
+    assert _pairs(delta) == [
+        (X, "/at"),
+        (U, f"{FEATURES}/records.jsonl"),
+        (X, f"{FEATURES}/views"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_bases_come_and_go_and_a_base_root_lists_no_bases(fake):
     hook = _hook()
     base = await hook.pull(_root(), None)

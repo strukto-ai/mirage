@@ -12,8 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import Sequence
 from typing import Any
+
+import aiohttp
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.channels import TEXT_CHANNEL_TYPES
@@ -36,6 +39,8 @@ from mirage.core.discord.entry import (
 from mirage.core.discord.files import file_blob_name, is_listed
 from mirage.types import FileChangeKind, FileEvent, JsonValue, PathSpec
 from mirage.watch.events import event_at, field, text_field
+
+logger = logging.getLogger(__name__)
 
 
 def _day_of(message_id: str) -> str | None:
@@ -99,64 +104,46 @@ class DiscordEventHook:
         )
         return data if isinstance(data, dict) else {}
 
-    async def _guild_dir(self, guild_id: str) -> str:
-        """The directory a guild id maps to, memoized.
+    async def _guild_dir(self, guild_id: str) -> str | None:
+        """The directory a guild id maps to, memoized, or None when the
+        guild is gone.
 
         Args:
             guild_id (str): A guild snowflake.
         """
         cached = self._guilds.get(guild_id)
         if cached is None:
-            guild = await self._get(f"/guilds/{guild_id}")
+            try:
+                guild = await self._get(f"/guilds/{guild_id}")
+            except aiohttp.ClientResponseError as exc:
+                if exc.status != 404:
+                    raise
+                logger.debug("discord guild %s is gone: %s", guild_id, exc)
+                return None
             guild.setdefault("id", guild_id)
             cached = guild_dirname(guild)
             self._guilds[guild_id] = cached
         return cached
 
-    async def _channel(self, channel_id: str) -> dict[str, Any]:
-        """The channel object an id names, memoized.
+    async def _channel(self, channel_id: str) -> dict[str, Any] | None:
+        """The channel object an id names, memoized, or None when the
+        channel is gone.
 
         Args:
             channel_id (str): A channel snowflake.
         """
         cached = self._channels.get(channel_id)
         if cached is None:
-            cached = await self._get(f"/channels/{channel_id}")
+            try:
+                cached = await self._get(f"/channels/{channel_id}")
+            except aiohttp.ClientResponseError as exc:
+                if exc.status != 404:
+                    raise
+                logger.debug("discord channel %s is gone: %s", channel_id, exc)
+                return None
             cached.setdefault("id", channel_id)
             self._channels[channel_id] = cached
         return cached
-
-    async def _day_dir(
-        self, channel_id: str | None, message_id: str | None
-    ) -> tuple[str, bool] | None:
-        """The day directory whose ``chat.jsonl`` holds a message's row,
-        and whether the message is in a thread, or None when no listed
-        channel holds it.
-
-        Args:
-            channel_id (str | None): The dispatch's ``channel_id``.
-            message_id (str | None): The message's id.
-        """
-        if channel_id is None or message_id is None:
-            return None
-        channel = await self._channel(channel_id)
-        thread = channel.get("type") in THREAD_TYPES
-        if thread:
-            parent_id = channel.get("parent_id")
-            if not isinstance(parent_id, str):
-                return None
-            message_id = channel_id
-            channel = await self._channel(parent_id)
-        guild_id = channel.get("guild_id")
-        if channel.get("type") not in TEXT_CHANNEL_TYPES or not isinstance(
-            guild_id, str
-        ):
-            return None
-        day = _day_of(message_id)
-        if day is None:
-            return None
-        guild = await self._guild_dir(guild_id)
-        return f"{guild}/channels/{channel_dirname(channel)}/{day}", thread
 
     async def _messages(
         self,
@@ -167,20 +154,45 @@ class DiscordEventHook:
     ) -> Sequence[FileEvent]:
         """The day files a run of messages in one channel touched.
 
+        A dispatch handled after its channel or guild was deleted cannot
+        name the channel, so it is UNKNOWN on the guild's ``channels``,
+        or on the mount when the guild is gone too.
+
         Args:
             root (PathSpec): Any path on this mount, read for its prefix.
             event_type (str): The dispatch's ``t``.
             payload (JsonValue): The dispatch's ``d``.
             message_ids (Sequence[str]): The messages it names.
         """
+        channel_id = text_field(payload, "channel_id")
+        if channel_id is None:
+            return ()
+        channel = await self._channel(channel_id)
+        thread = False
+        if channel is not None and channel.get("type") in THREAD_TYPES:
+            parent_id = channel.get("parent_id")
+            if not isinstance(parent_id, str):
+                return ()
+            thread = True
+            message_ids = [channel_id]
+            channel = await self._channel(parent_id)
+        if channel is None:
+            return await self._listing(root, payload, "channels")
+        guild_id = channel.get("guild_id")
+        if channel.get("type") not in TEXT_CHANNEL_TYPES or not isinstance(
+            guild_id, str
+        ):
+            return ()
+        guild = await self._guild_dir(guild_id)
+        if guild is None:
+            return (event_at(root, "", FileChangeKind.UNKNOWN),)
+        channel_dir = f"{guild}/channels/{channel_dirname(channel)}"
         changes: dict[str, FileChangeKind] = {}
         for message_id in message_ids:
-            place = await self._day_dir(
-                text_field(payload, "channel_id"), message_id
-            )
-            if place is None:
+            day = _day_of(message_id)
+            if day is None:
                 continue
-            day_dir, thread = place
+            day_dir = f"{channel_dir}/{day}"
             changes[f"{day_dir}/{CHAT_FILE}"] = FileChangeKind.UPDATE
             if thread or event_type in REACTION_EVENTS:
                 continue
@@ -201,7 +213,8 @@ class DiscordEventHook:
     async def _listing(
         self, root: PathSpec, payload: JsonValue, name: str
     ) -> Sequence[FileEvent]:
-        """UNKNOWN on one of a guild's listings.
+        """UNKNOWN on one of a guild's listings, or on the mount when the
+        guild is gone.
 
         Args:
             root (PathSpec): Any path on this mount, read for its prefix.
@@ -212,6 +225,8 @@ class DiscordEventHook:
         if guild_id is None:
             return ()
         guild = await self._guild_dir(guild_id)
+        if guild is None:
+            return (event_at(root, "", FileChangeKind.UNKNOWN),)
         return (event_at(root, f"{guild}/{name}", FileChangeKind.UNKNOWN),)
 
     async def to_events(

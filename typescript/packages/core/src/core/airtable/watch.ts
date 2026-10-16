@@ -177,7 +177,7 @@ export class AirtableDeltaHook implements DeltaHook {
   private async payloads(
     baseId: string,
     hookId: string,
-    from: number | null,
+    from: number,
   ): Promise<{ found: Row[]; cursor: number | null; lost: boolean }> {
     const found: Row[] = []
     let cursor = from
@@ -195,7 +195,7 @@ export class AirtableDeltaHook implements DeltaHook {
       found.push(...rows)
       const after = page.cursor
       if (typeof after !== 'number' || !Number.isInteger(after)) return { found, cursor, lost }
-      if (cursor !== null && after - cursor > rows.length) lost = true
+      if (after - cursor > rows.length) lost = true
       const more = page.mightHaveMore === true && after !== cursor
       cursor = after
       if (!more) return { found, cursor, lost }
@@ -266,9 +266,10 @@ export class AirtableDeltaHook implements DeltaHook {
     return false
   }
 
-  // Read each of a base's webhooks from its kept cursor. A lost payload may have
-  // made, renamed or destroyed a table, so a base that lost any names its
-  // tables from the schema again.
+  // Read each of a base's webhooks from its kept cursor, and one first seen since
+  // from its first payload, so a new webhook whose first payloads expired lost
+  // them too. A lost payload may have made, renamed or destroyed a table, so a
+  // base that lost any names its tables from the schema again.
   private async read(
     baseId: string,
     feed: BaseFeed,
@@ -278,7 +279,7 @@ export class AirtableDeltaHook implements DeltaHook {
     const listed = (await listWebhooks(this.accessor, baseId)).map((hook) => String(hook.id))
     let lost = Object.keys(was).some((hookId) => !listed.includes(hookId))
     for (const hookId of listed) {
-      const read = await this.payloads(baseId, hookId, was[hookId] ?? null)
+      const read = await this.payloads(baseId, hookId, was[hookId] ?? 1)
       lost = lost || read.lost
       for (const payload of read.found) {
         lost = (await this.map(baseId, feed, payload, changes)) || lost

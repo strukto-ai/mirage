@@ -185,7 +185,7 @@ class AirtableDeltaHook:
         return _BaseFeed(base_dir, hooks, await self._tables(base_id))
 
     async def _payloads(
-        self, base_id: str, hook_id: str, cursor: int | None
+        self, base_id: str, hook_id: str, cursor: int
     ) -> tuple[list[dict[str, Any]], int | None, bool]:
         """Every payload of a webhook from ``cursor``, the cursor after
         them (None when the webhook is gone), and whether any were lost.
@@ -193,7 +193,8 @@ class AirtableDeltaHook:
         Args:
             base_id (str): The base.
             hook_id (str): The webhook.
-            cursor (int | None): The first to read, None for the oldest.
+            cursor (int): The first to read; a webhook numbers its
+                payloads from 1.
         """
         found: list[dict[str, Any]] = []
         lost = False
@@ -212,7 +213,7 @@ class AirtableDeltaHook:
             after = page.get("cursor")
             if not isinstance(after, int):
                 return found, cursor, lost
-            if cursor is not None and after - cursor > len(rows):
+            if after - cursor > len(rows):
                 lost = True
             more = page.get("mightHaveMore") is True and after != cursor
             cursor = after
@@ -295,7 +296,9 @@ class AirtableDeltaHook:
         was: dict[str, int],
         changes: _Changes,
     ) -> None:
-        """Read each of a base's webhooks from its kept cursor.
+        """Read each of a base's webhooks from its kept cursor, and one
+        first seen since from its first payload, so a new webhook whose
+        first payloads expired lost them too.
 
         A lost payload may have made, renamed or destroyed a table, so a
         base that lost any names its tables from the schema again.
@@ -313,7 +316,7 @@ class AirtableDeltaHook:
         lost = bool(set(was) - set(listed))
         for hook_id in listed:
             payloads, cursor, gap = await self._payloads(
-                base_id, hook_id, was.get(hook_id)
+                base_id, hook_id, was.get(hook_id, 1)
             )
             lost = lost or gap
             for payload in payloads:

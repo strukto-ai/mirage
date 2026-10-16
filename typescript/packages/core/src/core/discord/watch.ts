@@ -16,6 +16,7 @@ import type { DiscordAccessor } from '../../accessor/discord.ts'
 import { FileChangeKind, type FileEvent, type JsonValue, type PathSpec } from '../../types.ts'
 import { eventAt, field, textField } from '../../watch/events.ts'
 import { TEXT_CHANNEL_TYPES, type DiscordChannel } from './channels.ts'
+import { DiscordApiError } from './client.ts'
 import {
   CHANNEL_EVENTS,
   CHAT_FILE,
@@ -84,52 +85,38 @@ export class DiscordEventHook {
       : {}
   }
 
-  private async guildDir(guildId: string): Promise<string> {
+  private async guildDir(guildId: string): Promise<string | null> {
     let cached = this.guilds.get(guildId)
     if (cached === undefined) {
-      const guild = await this.get(`/guilds/${guildId}`)
+      let guild: Record<string, unknown>
+      try {
+        guild = await this.get(`/guilds/${guildId}`)
+      } catch (err) {
+        if (!(err instanceof DiscordApiError) || err.status !== 404) throw err
+        console.debug(`discord watch: guild ${guildId} is gone: ${err.message}`)
+        return null
+      }
       cached = guildDirname({ ...guild, id: typeof guild.id === 'string' ? guild.id : guildId })
       this.guilds.set(guildId, cached)
     }
     return cached
   }
 
-  private async channel(channelId: string): Promise<DiscordChannel> {
+  private async channel(channelId: string): Promise<DiscordChannel | null> {
     let cached = this.channels.get(channelId)
     if (cached === undefined) {
-      const channel = await this.get(`/channels/${channelId}`)
+      let channel: Record<string, unknown>
+      try {
+        channel = await this.get(`/channels/${channelId}`)
+      } catch (err) {
+        if (!(err instanceof DiscordApiError) || err.status !== 404) throw err
+        console.debug(`discord watch: channel ${channelId} is gone: ${err.message}`)
+        return null
+      }
       cached = { ...channel, id: typeof channel.id === 'string' ? channel.id : channelId }
       this.channels.set(channelId, cached)
     }
     return cached
-  }
-
-  private async dayDir(
-    channelId: string | undefined,
-    messageId: string | undefined,
-  ): Promise<[string, boolean] | null> {
-    if (channelId === undefined || messageId === undefined) return null
-    let channel = await this.channel(channelId)
-    let id = messageId
-    const thread = channel.type !== undefined && THREAD_TYPES.has(channel.type)
-    if (thread) {
-      const parentId = channel.parent_id
-      if (typeof parentId !== 'string') return null
-      id = channelId
-      channel = await this.channel(parentId)
-    }
-    const guildId = channel.guild_id
-    if (
-      channel.type === undefined ||
-      !TEXT_CHANNEL_TYPES.has(channel.type) ||
-      typeof guildId !== 'string'
-    ) {
-      return null
-    }
-    const day = dayOf(id)
-    if (day === null) return null
-    const guild = await this.guildDir(guildId)
-    return [`${guild}/channels/${channelDirname(channel)}/${day}`, thread]
   }
 
   private async messages(
@@ -138,11 +125,35 @@ export class DiscordEventHook {
     payload: JsonValue,
     messageIds: readonly string[],
   ): Promise<readonly FileEvent[]> {
+    const channelId = textField(payload, 'channel_id')
+    if (channelId === undefined) return []
+    let channel = await this.channel(channelId)
+    let ids = messageIds
+    let thread = false
+    if (channel?.type !== undefined && THREAD_TYPES.has(channel.type)) {
+      const parentId = channel.parent_id
+      if (typeof parentId !== 'string') return []
+      thread = true
+      ids = [channelId]
+      channel = await this.channel(parentId)
+    }
+    if (channel === null) return this.listing(root, payload, 'channels')
+    const guildId = channel.guild_id
+    if (
+      channel.type === undefined ||
+      !TEXT_CHANNEL_TYPES.has(channel.type) ||
+      typeof guildId !== 'string'
+    ) {
+      return []
+    }
+    const guild = await this.guildDir(guildId)
+    if (guild === null) return [eventAt(root, '', FileChangeKind.UNKNOWN)]
+    const channelDir = `${guild}/channels/${channelDirname(channel)}`
     const changes = new Map<string, FileChangeKind>()
-    for (const messageId of messageIds) {
-      const place = await this.dayDir(textField(payload, 'channel_id'), messageId)
-      if (place === null) continue
-      const [dayDir, thread] = place
+    for (const messageId of ids) {
+      const day = dayOf(messageId)
+      if (day === null) continue
+      const dayDir = `${channelDir}/${day}`
       changes.set(`${dayDir}/${CHAT_FILE}`, FileChangeKind.UPDATE)
       if (thread || REACTION_EVENTS.has(eventType)) continue
       if (eventType !== 'MESSAGE_CREATE') {
@@ -173,6 +184,7 @@ export class DiscordEventHook {
     const guildId = textField(payload, 'guild_id')
     if (guildId === undefined) return []
     const guild = await this.guildDir(guildId)
+    if (guild === null) return [eventAt(root, '', FileChangeKind.UNKNOWN)]
     return [eventAt(root, `${guild}/${name}`, FileChangeKind.UNKNOWN)]
   }
 
