@@ -12,7 +12,7 @@ ssh -p 2222 demo@127.0.0.1 'ls /data | wc -l'  # one line
 ssh -T -p 2222 demo@127.0.0.1 < setup.sh       # a script
 sftp -P 2222 demo@127.0.0.1                    # file transfer
 scp -P 2222 notes.txt demo@127.0.0.1:/data/    # copy in
-sshfs -p 2222 -o direct_io demo@127.0.0.1:/ ~/mnt/demo  # a folder, see FUSE
+sshfs -p 2222 -o direct_io demo@127.0.0.1:/ ~/mnt/demo  # a folder over SSHFS
 ```
 
 On the SSH port only public keys log in: no passwords. Nothing is forwarded: no ports, no agent, no X11. To reach a server through its HTTPS port instead, with the CLI's token and no key, see [Over HTTPS](#over-https).
@@ -103,6 +103,44 @@ Host mirage
 ```
 
 Then `ssh demo@mirage`, `sftp demo@mirage`, `scp notes.txt demo@mirage:/data/` and `sshfs -o direct_io demo@mirage:/ ~/mnt/demo` all work, with no key and no `ssh_port`. The CLI reaches the server its `url` names, or the one it starts on your machine, and sends its token: on a hosted server, the one [`mirage login`](/home/access/cli#log-in) keeps. The route checks that token like any HTTP request, so in `jwt` mode the login is the token's account and reaches only its workspaces. The login may only name the workspace in the route, and runs under the workspace's default profile. The server still needs the SSH library from [Turn it on](#turn-it-on).
+
+## Mount a folder with SSHFS
+
+[SSHFS](https://github.com/libfuse/sshfs) makes a remote workspace available as
+a local folder over SSH/SFTP. Install `sshfs` on Linux, or macFUSE and SSHFS
+from [macfuse.github.io](https://macfuse.github.io) on macOS.
+
+With SSH enabled and your key authorized, replace `demo` with the workspace
+ID and `your-server` with the server's hostname:
+
+```bash
+mkdir -p ~/mnt/demo
+sshfs -p 2222 -o direct_io demo@your-server:/ ~/mnt/demo
+ls ~/mnt/demo
+```
+
+A VFS at `/data` appears as `~/mnt/demo/data`. Keep `-o direct_io` so files
+whose size is unknown can be read correctly. The connection uses your
+SSH key's profile.
+
+For a server reached through [HTTPS](#over-https), use the CLI's configured
+server and token:
+
+```bash
+sshfs -o ProxyCommand="mirage ssh-proxy %r" -o direct_io demo@mirage:/ ~/mnt/demo
+```
+
+Unmount when finished:
+
+<CodeGroup>
+```bash Linux
+fusermount3 -u ~/mnt/demo
+```
+
+```bash macOS
+umount ~/mnt/demo
+```
+</CodeGroup>
 
 ## Sessions
 
