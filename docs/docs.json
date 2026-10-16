@@ -66,56 +66,9 @@
             ]
           },
           {
-            "group": "Core",
+            "group": "Agents",
             "pages": [
-              "home/core/shell",
-              "home/core/tools",
-              "home/core/data-network"
-            ]
-          },
-          {
-            "group": "Access",
-            "pages": [
-              "home/access/overview",
-              {
-                "group": "Server",
-                "icon": "server",
-                "pages": [
-                  "home/access/http",
-                  "home/access/mcp",
-                  "home/access/rpc",
-                  "home/access/ssh",
-                  "home/access/fuse",
-                  "home/access/cli"
-                ]
-              }
-            ]
-          },
-          {
-            "group": "Policy",
-            "pages": [
-              "home/policy/overview",
-              "home/policy/policies",
-              "home/policy/scripts",
-              "home/policy/explain",
-              "home/policy/route-policy"
-            ]
-          },
-          {
-            "group": "Events",
-            "icon": "bell",
-            "pages": [
-              "home/events",
-              "home/events-matrix"
-            ]
-          },
-          {
-            "group": "Integration",
-            "pages": [
-              "home/integration/search",
-              "home/integration/lines",
-              "home/integration/checksums",
-              "home/integration/walks"
+              "home/agents"
             ]
           },
           {
@@ -202,6 +155,25 @@
                   "home/setup/notion",
                   "home/setup/trello"
                 ]
+              },
+              {
+                "group": "Integration",
+                "pages": [
+                  "home/integration/search",
+                  "home/integration/lines",
+                  "home/integration/checksums",
+                  "home/integration/walks"
+                ]
+              },
+              {
+                "group": "FUSE",
+                "icon": "folder-open",
+                "pages": [
+                  "home/setup/fuse",
+                  "home/setup/macos",
+                  "home/setup/linux",
+                  "home/setup/windows"
+                ]
               }
             ]
           },
@@ -225,6 +197,30 @@
                   "home/setup/cli/git"
                 ]
               }
+            ]
+          },
+          {
+            "group": "Mirage Shell",
+            "pages": [
+              "home/core/shell",
+              "home/core/tools",
+              "home/core/data-network"
+            ]
+          },
+          {
+            "group": "Agent Profiles",
+            "pages": [
+              "home/profiles"
+            ]
+          },
+          {
+            "group": "Policy",
+            "pages": [
+              "home/policy/overview",
+              "home/policy/policies",
+              "home/policy/scripts",
+              "home/policy/explain",
+              "home/policy/route-policy"
             ]
           },
           {
@@ -261,15 +257,37 @@
                   "home/setup/runtime/sandbox/e2b",
                   "home/setup/runtime/sandbox/ssh"
                 ]
-              },
+              }
+            ]
+          },
+          {
+            "group": "Authentications",
+            "pages": [
+              "home/authentication"
+            ]
+          },
+          {
+            "group": "Notifications",
+            "icon": "bell",
+            "pages": [
+              "home/events",
+              "home/events-matrix"
+            ]
+          },
+          {
+            "group": "Access",
+            "pages": [
+              "home/access/overview",
               {
-                "group": "FUSE",
-                "icon": "folder-open",
+                "group": "Server",
+                "icon": "server",
                 "pages": [
-                  "home/setup/fuse",
-                  "home/setup/macos",
-                  "home/setup/linux",
-                  "home/setup/windows"
+                  "home/access/http",
+                  "home/access/mcp",
+                  "home/access/rpc",
+                  "home/access/ssh",
+                  "home/access/fuse",
+                  "home/access/cli"
                 ]
               }
             ]

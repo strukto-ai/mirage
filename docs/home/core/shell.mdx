@@ -1,5 +1,5 @@
 ---
-title: Shell
+title: Mirage shell
 description: Run Bash-style commands, pipelines, and scripts across your mounted data.
 icon: square-terminal
 ---
@@ -61,7 +61,7 @@ These are common options, not an exhaustive flag reference.
 
 ### Per-session mount modes
 
-Session mount modes can narrow access to `read`, `write`, or `exec` (`r`, `rw`, `rwx`). Unlisted mounts keep their configured modes. Interpreters such as `python3` and `js` require `exec`; shell scripts run with the permissions of each command they contain. Use a [policy profile](/home/policy/overview) to hide paths or restrict commands.
+Session mount modes can narrow access to `read`, `write`, or `exec` (`r`, `rw`, `rwx`). Unlisted mounts keep their configured modes. Interpreters such as `python3` and `js` require `exec`; shell scripts run with the permissions of each command they contain. Use a [agent profile](/home/profiles) to hide paths or restrict commands.
 
 ## Limits
 

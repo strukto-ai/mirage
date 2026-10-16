@@ -1,0 +1,54 @@
+---
+title: Agent profiles
+sidebarTitle: Overview
+description: Choose what each agent can run and which files it can see.
+icon: robot
+---
+
+A profile gives an agent session its permissions. Agents can share a
+workspace while seeing different files and using different commands.
+
+## What a profile controls
+
+| Setting | Purpose |
+| --- | --- |
+| `commands.allow` | Limit the session to the listed commands. |
+| `commands.ask` | Require approval for matching commands. |
+| `commands.deny` | Refuse matching commands. |
+| `paths.hide` | Make matching files and folders invisible to the session. |
+| `paths.show` | Make a specific path visible within a hidden folder. |
+| `mounts` | Restrict a data source to `read`, `write` or `exec` access. |
+| `cwd` and `env` | Set the session's starting directory and environment. |
+
+## Example: a research agent
+
+This profile lets an agent browse and search `/data`, keeps it read-only,
+and hides `/data/private`.
+
+```yaml workspace.yaml
+mounts:
+  /data:
+    vfs: ram
+
+profiles:
+  researcher:
+    cwd: /data
+    mounts:
+      /data:
+        mode: read
+    paths:
+      hide: [/data/private]
+    commands:
+      allow: [ls, cat, grep, find, stat, pwd]
+
+profile: researcher
+```
+
+Replace RAM with your [VFS](/home/setup/vfs). `profile: researcher` selects
+the default for new sessions; another session can use a different named
+profile. Settings you omit add no restriction, and a profile cannot grant
+access beyond the workspace's permissions.
+
+Use [Explain](/home/policy/explain) to inspect why an action is allowed or
+refused. For rules that depend on the command's content or other conditions,
+attach a [policy script](/home/policy/scripts).

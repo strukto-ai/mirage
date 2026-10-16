@@ -1,0 +1,68 @@
+---
+title: Authentication
+sidebarTitle: Overview
+description: Connect service credentials and control who can access your workspace.
+icon: key
+---
+
+Give each VFS or CLI the credentials it needs to reach its service. Mirage
+can read those credentials from your environment or a secret store.
+
+## Credential sources
+
+| Source | Configuration name | Reads from |
+| --- | --- | --- |
+| Environment | `env` | The process running Mirage. |
+| Dotenv | `dotenv` | A file such as `.env` on the host. |
+| AWS Secrets Manager | `aws-sm` | A secret identified by its name or ARN. |
+| 1Password | `1password` | An item or field identified by an `op://` reference. |
+| Custom source | Your registered name | Your application's credential store. |
+
+## Example: connect Slack
+
+Set `SLACK_BOT_TOKEN` in the environment of the process running Mirage,
+then reference it in your workspace configuration:
+
+```yaml workspace.yaml
+mounts:
+  /slack:
+    vfs: slack
+    config:
+      token:
+        from: env
+        key: SLACK_BOT_TOKEN
+```
+
+See [Slack setup](/home/setup/slack) for the token and required scopes.
+The same reference format works in credential fields for virtual CLIs.
+
+## Use a secret store
+
+Declare a source under `secrets`, then use its name in `from`:
+
+```yaml
+secrets:
+  team:
+    source: dotenv
+    config:
+      path: .env
+
+mounts:
+  /slack:
+    vfs: slack
+    config:
+      token:
+        from: team
+        key: SLACK_BOT_TOKEN
+```
+
+`ref` identifies a secret within a source; `key` selects its field.
+For example, AWS uses a secret name or ARN as `ref`, while 1Password uses
+an `op://vault/item` reference.
+
+## Access to Mirage itself
+
+When you expose a Mirage server, configure who can connect separately from
+the service credentials above. See [HTTP authentication](/home/access/http#auth)
+for bearer tokens and JWTs, or [SSH access](/home/access/ssh) for public keys.
+[Agent profiles](/home/profiles) then control what each session can do.

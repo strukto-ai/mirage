@@ -1,15 +1,17 @@
 ---
-title: Overview
-description: Subscribe to external file changes on any mount. Mirage invalidates the changed path and ancestor listings before delivering events, with the folder-removal limits described below.
+title: Notifications
+sidebarTitle: Overview
+description: Notify agents when files or directories change in the virtual filesystem.
 icon: bell
 ---
 
-## What It Does
+## How it works
 
 Files on a mounted backend change outside your workspace all the time: a
 teammate uploads to Nextcloud, a pipeline rewrites an S3 object, a cron job
-deletes a report. `events` turns those external changes into an async event
-stream, so an agent reacts instead of rescanning and diffing directories.
+deletes a report. Mirage turns those external changes into notifications about
+files and directories in the virtual filesystem. Agents subscribe with
+`ws.events()` and react to changes as they arrive.
 
 <CodeGroup>
 
@@ -338,7 +340,7 @@ rename or delete leaves that path. An item seen for the first time is a
 otherwise. [`dropbox/events.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/dropbox/events.py)
 and [`dropbox/events.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/events.ts)
 answer each `list_folder/longpoll` with one pull; the
-[Events Matrix](/home/events-matrix#the-dropbox-longpoll-example) has the setup.
+[Notification support](/home/events-matrix#the-dropbox-longpoll-example) has the setup.
 
 ## Queues
 
@@ -399,7 +401,7 @@ end cleanly, and the workspace returns to its idle state. The next `events()` or
   stays per backend, so each mount needs its own signal feeding
   `ws.notify`.
 - Mappers and ping handlers ship for the backends in the
-  [Events Matrix](/home/events-matrix); `ws.notify` accepts events from any
+  [Notification support](/home/events-matrix); `ws.notify` accepts events from any
   detection you run, so every backend can deliver events.
 - Events are in-memory and at-most-once per subscriber unless you provide a
   durable queue.
