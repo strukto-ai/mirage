@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
 from mirage.events.payload import field, text_field
 from mirage.types import JsonValue
+
+logger = logging.getLogger(__name__)
 
 
 def day_of(ts: Any) -> str | None:
@@ -33,7 +36,8 @@ def day_of(ts: Any) -> str | None:
     """
     try:
         moment = datetime.fromtimestamp(float(ts), tz=timezone.utc)
-    except (TypeError, ValueError, OverflowError, OSError):
+    except (TypeError, ValueError, OverflowError, OSError) as exc:
+        logger.debug("slack ts %r names no day: %s", ts, exc)
         return None
     return moment.date().isoformat()
 
