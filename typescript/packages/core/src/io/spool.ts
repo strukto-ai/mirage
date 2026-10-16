@@ -46,7 +46,23 @@ export class ByteSpool {
       this.memory = []
       this.pendingSize = 0
     }
-    this.memory.push(data.slice())
+    let offset = 0
+    while (offset < data.length) {
+      const tail = this.memory.at(-1)
+      if (tail !== undefined && tail.length < CHUNK_SIZE) {
+        const count = Math.min(CHUNK_SIZE - tail.length, data.length - offset)
+        const extended = new Uint8Array(tail.buffer, tail.byteOffset, tail.length + count)
+        extended.set(data.subarray(offset, offset + count), tail.length)
+        this.memory[this.memory.length - 1] = extended
+        offset += count
+      } else {
+        const count = Math.min(CHUNK_SIZE, data.length - offset)
+        const block = new Uint8Array(CHUNK_SIZE)
+        block.set(data.subarray(offset, offset + count))
+        this.memory.push(block.subarray(0, count))
+        offset += count
+      }
+    }
     this.pendingSize += data.length
     if (this.store !== null && this.pendingSize >= IO_BUFFER_SIZE) await this.flush()
     this.size += data.length
