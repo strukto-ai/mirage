@@ -214,14 +214,21 @@ export function rechunk(source: ByteSource, size: number): OutputStream {
   async function* parts(): AsyncGenerator<Uint8Array> {
     let pending: Uint8Array[] = []
     let held = 0
-    for await (const part of ensureStream(source)) {
-      pending.push(part)
-      held += part.byteLength
-      while (held >= size) {
-        const joined = concat(pending)
-        yield joined.subarray(0, size)
-        pending = held > size ? [joined.subarray(size)] : []
-        held -= size
+    for await (let part of ensureStream(source)) {
+      if (held > 0) {
+        const fill = part.subarray(0, size - held)
+        pending.push(fill)
+        held += fill.byteLength
+        part = part.subarray(fill.byteLength)
+        if (held < size) continue
+        yield concat(pending)
+        pending = []
+        held = 0
+      }
+      for (; part.byteLength >= size; part = part.subarray(size)) yield part.subarray(0, size)
+      if (part.byteLength > 0) {
+        pending = [part]
+        held = part.byteLength
       }
     }
     if (held > 0) yield concat(pending)

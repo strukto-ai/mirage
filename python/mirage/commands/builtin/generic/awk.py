@@ -37,7 +37,7 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.cooperative import chunks
-from mirage.io.spool import ByteSpool, spooled
+from mirage.io.spool import ByteSpool, spooled_pair
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.writer import ByteWriter
 from mirage.runtime.types import DispatchFn, ShellFn
@@ -281,11 +281,8 @@ class AwkStreams:
         io = await self.shell(
             f"( {shell_join(['eval', text_view(command)])} )", source
         )
-        return CommandRun(
-            await spooled(io.stdout) or b"",
-            await spooled(io.stderr) or b"",
-            io.exit_code,
-        )
+        stdout, stderr = await spooled_pair(io.stdout, io.stderr)
+        return CommandRun(stdout or b"", stderr or b"", io.exit_code)
 
 
 async def _stage(step: Coroutine[Any, Any, None], io: IOResult) -> bool:

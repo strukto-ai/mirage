@@ -22,6 +22,7 @@ import {
   discardStreams,
   drain,
   ensureStream,
+  rechunk,
   yieldBytes,
 } from './stream.ts'
 
@@ -176,3 +177,18 @@ it.each([false, true])(
     expect(closed).toEqual(['first', 'second'])
   },
 )
+
+describe('rechunk', () => {
+  it('cuts a large block into views of it and joins short ones', async () => {
+    const big = Uint8Array.from({ length: 10 }, (_, i) => i)
+    const parts: Uint8Array[] = []
+    for await (const part of rechunk(fromChunks([Uint8Array.of(9), big, Uint8Array.of(7)]), 4))
+      parts.push(part)
+    expect(parts.map((part) => [...part])).toEqual([
+      [9, 0, 1, 2],
+      [3, 4, 5, 6],
+      [7, 8, 9, 7],
+    ])
+    expect(parts[1]?.buffer).toBe(big.buffer)
+  })
+})

@@ -14,11 +14,13 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { MEMORY_LIMIT } from '../../io/spool.ts'
 import { IOResult } from '../../io/types.ts'
+import { FileDescription } from '../../shell/descriptors.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { PathSpec } from '../../types.ts'
 import { SessionState } from '../session/session.ts'
-import { createFile } from './create.ts'
+import { createFile, writeDescription } from './create.ts'
 
 const SCOPE = new PathSpec({ virtual: '/data/f', directory: '/data/', vfsPath: '' })
 
@@ -68,5 +70,33 @@ describe('createFile', () => {
     const d = new FakeDispatch(true)
     await createFile(d.fn, sessionWithUmask(0o077), SCOPE, new Uint8Array(0))
     expect(d.ops()).toEqual(['stat', 'write'])
+  })
+})
+
+describe('writeDescription', () => {
+  it('leaves the offset after what landed when a later write fails', async () => {
+    const landed: [number, number][] = []
+    const dispatch: DispatchFn = async (op, _path, args) => {
+      await Promise.resolve()
+      if (op === 'pwrite') {
+        if (landed.length > 0) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' })
+        const [part, offset] = args as [Uint8Array, number]
+        landed.push([offset, part.byteLength])
+      }
+      return [null, new IOResult()]
+    }
+    async function* data(): AsyncGenerator<Uint8Array> {
+      await Promise.resolve()
+      yield new Uint8Array(MEMORY_LIMIT)
+      yield new Uint8Array(1)
+    }
+    const file = new FileDescription(SCOPE)
+    file.opened = true
+    file.offset = 3
+    await expect(
+      writeDescription(dispatch, new SessionState({ sessionId: 's' }), file, data()),
+    ).rejects.toThrow('ENOSPC')
+    expect(landed).toEqual([[3, MEMORY_LIMIT]])
+    expect(file.offset).toBe(3 + MEMORY_LIMIT)
   })
 })

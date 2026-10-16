@@ -22,7 +22,7 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.cooperative import chunks
 from mirage.io.errors import PipeClosed
-from mirage.io.spool import spooled
+from mirage.io.spool import spooled_pair
 from mirage.io.stream import async_chain, discard_streams
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
@@ -518,11 +518,14 @@ async def statement_output(
             written.append((key, data, False))
         elif key.owner is own or not await deliver(sink, key, data):
             written.append((key.channel, data, True))
-    out = await spooled(stdout)
+    try:
+        out, err = await spooled_pair(stdout, io.stderr)
+    except BaseException:
+        await discard_streams(*(data for _, data, _ in written))
+        raise
+    io.stderr = None
     if out:
         written.append((Channel.STDOUT, out, False))
-    err = await spooled(io.stderr)
-    io.stderr = None
     if err:
         written.append((Channel.STDERR, err, False))
     return written

@@ -534,3 +534,23 @@ describe('shuf refuses in command-line order', () => {
     expect(typeof parseLine('-i', '1-2', '-o', '/a', '-o', '/a')).not.toBe('string')
   })
 })
+
+describe('shuf over several files', () => {
+  it("ends a file's last record at that file", async () => {
+    const files = new Map([
+      ['/a', 'a'],
+      ['/b', 'b\n'],
+    ])
+    async function* stream(p: PathSpec): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      yield ENC.encode(files.get(p.virtual) ?? '')
+    }
+    const opts = { stdin: null, flags: {}, cwd: '/', vfs: { kind: 'ram' } as never } as CommandOpts
+    const paths = ['/a', '/b'].map((p) => PathSpec.fromStrPath(p))
+    const result = await shufGeneric(paths, [], opts, stream, stubWrite)
+    if (result === null) throw new Error('shuf declined to handle its own operands')
+    const [out] = result
+    const text = out === null ? '' : DEC.decode(await materialize(out))
+    expect(text.split('\n').sort()).toEqual(['', 'a', 'b'])
+  })
+})

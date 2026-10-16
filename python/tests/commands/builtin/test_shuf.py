@@ -81,6 +81,14 @@ def test_shuf_r():
     assert len(lines) == 5
 
 
+def test_shuf_ends_a_files_last_record_at_that_file():
+    ws, _ = _ws()
+    _run_raw(ws, "printf a > a; printf 'b\\n' > b", cwd="/data")
+    stdout, io = _run_raw(ws, "shuf a b | sort", cwd="/data")
+    assert io.exit_code == 0
+    assert _bytes(stdout) == b"a\nb\n"
+
+
 async def _unused_read_bytes(_path):
     raise AssertionError("read_bytes should not be called for -i")
 

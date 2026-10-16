@@ -456,7 +456,11 @@ async function sampleRecords(
   let available: number
   let need: number
   try {
-    for (const source of sources) await data.fill(source)
+    for (const source of sources) {
+      await data.fill(source)
+      if (data.size > 0 && (await data.read(data.size - 1, 1))[0] !== terminator)
+        await data.append(Uint8Array.of(terminator))
+    }
     available = await countRecords(data, terminator)
     const required = emitCount(BigInt(available), count, repeat)
     if (required > MAX_OUTPUT_LINES) throw new Error(MEMORY_EXHAUSTED)

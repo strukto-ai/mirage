@@ -20,11 +20,13 @@ under the default mask because a fresh file already renders as 644.
 
 import pytest
 
+from mirage.io.spool import MEMORY_LIMIT
+from mirage.shell.descriptors import FileDescription
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.scope import _to_scope
-from mirage.workspace.executor.create import create_file
+from mirage.workspace.executor.create import create_file, write_description
 from mirage.workspace.session.session import SessionState
 
 
@@ -83,3 +85,25 @@ async def test_both_redirect_forms_agree_end_to_end():
     )
     assert (await io.stdout_str()) == "600 /data/p\n600 /data/e\n"
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_write_leaves_the_offset_after_what_landed():
+    landed: list[tuple[int, int]] = []
+
+    async def dispatch(op: str, scope: PathSpec, **kwargs):
+        if op == "pwrite":
+            if landed:
+                raise OSError(28, "No space left on device")
+            landed.append((kwargs["offset"], len(kwargs["data"])))
+        return None, None
+
+    async def data():
+        yield b"a" * MEMORY_LIMIT
+        yield b"b"
+
+    file = FileDescription(_to_scope("/data/f"), opened=True, offset=3)
+    with pytest.raises(OSError):
+        await write_description(dispatch, SessionState("s"), file, data())
+    assert landed == [(3, MEMORY_LIMIT)]
+    assert file.offset == 3 + MEMORY_LIMIT

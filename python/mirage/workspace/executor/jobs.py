@@ -365,8 +365,8 @@ async def handle_background(
         finally:
             release_job()
             reset_caller(token)
-            for lines in held_inputs:
-                await lines.unhold()
+            for source in held_inputs:
+                await source.lines.unhold()
             if job_handed is not None and decisions is not None:
                 # A job that ended held on a question leaves its grants
                 # standing for the retry, as a held line does; a killed
@@ -391,8 +391,8 @@ async def handle_background(
         )
     except Exception as exc:
         release_job()
-        for lines in held_inputs:
-            await lines.unhold()
+        for source in held_inputs:
+            await source.lines.unhold()
         # A submission that fails (a console the table cannot build, a
         # session at its process cap) starts no runner, so nothing would
         # ever revoke the job's hand-off: its grants would stay reserved

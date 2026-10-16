@@ -27,7 +27,7 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, share
 from mirage.io.cooperative import chunks as byte_chunks
 from mirage.io.errors import PipeClosed
-from mirage.io.spool import spooled
+from mirage.io.spool import spooled_pair
 from mirage.io.stream import async_chain, discard_streams, materialize
 from mirage.io.types import ByteSource, DeviceInput, PipeStream
 from mirage.io.writer import ByteWriter
@@ -989,11 +989,9 @@ async def _handle_redirect(
                     async for part in source:
                         await sink.emit(channel, part)
         else:
-            stdout = await spooled(
-                async_chain(d for c, d in kept if c == Channel.STDOUT)
-            )
-            io.stderr = await spooled(
-                async_chain(d for c, d in kept if c != Channel.STDOUT)
+            stdout, io.stderr = await spooled_pair(
+                async_chain(d for c, d in kept if c == Channel.STDOUT),
+                async_chain(d for c, d in kept if c != Channel.STDOUT),
             )
     finally:
         await route.release()

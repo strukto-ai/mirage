@@ -525,6 +525,8 @@ async def _sample_records(
             [stream(path) for path in paths] if paths else [stdin or b""]
         ):
             await data.fill(source)
+            if data.size and await data.read(data.size - 1, 1) != terminator:
+                await data.append(terminator)
         available = await _count_records(data, terminator)
         need = _need(available, count, repeat)
     except BaseException:

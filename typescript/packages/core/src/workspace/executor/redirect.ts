@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { chunks as byteChunks } from '../../io/cooperative.ts'
-import { spooled } from '../../io/spool.ts'
+import { spooledPair } from '../../io/spool.ts'
 import { asyncChain, discardStreams } from '../../io/stream.ts'
 import { ByteWriter } from '../../io/writer.ts'
 
@@ -804,10 +804,8 @@ async function runRedirects(
       for (const [channel, data] of kept)
         for await (const part of byteChunks(data)) await sink.emit(channel, part)
     } else {
-      stdout = await spooled(
+      ;[stdout, io.stderr] = await spooledPair(
         asyncChain(kept.filter(([c]) => c === Channel.STDOUT).map(([, d]) => d)),
-      )
-      io.stderr = await spooled(
         asyncChain(kept.filter(([c]) => c !== Channel.STDOUT).map(([, d]) => d)),
       )
     }

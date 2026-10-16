@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { chunks } from '../../io/cooperative.ts'
-import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { OpReport, type ByteSource } from '../../io/types.ts'
 import type { FileDescription } from '../../shell/descriptors.ts'
 import { DEFAULT_UMASK, getCurrentEvaluation } from '../../context/session_context.ts'
@@ -131,15 +130,21 @@ export async function writeDescription(
     }
     const start = file.offset + (file.source?.lines.position ?? 0)
     let offset = start
-    for await (const part of rechunk(data, MEMORY_LIMIT)) {
-      await dispatch('pwrite', file.scope, [part, offset])
-      offset += part.byteLength
-    }
-    file.offset = offset
-    if (file.source !== null && offset !== start) {
-      await file.source.lines.discard()
-      const content = (await dispatch('read', file.scope, [], { stream: true }))[0] as ByteSource
-      file.source.lines = new AsyncLineIterator(sliceStream(content, offset))
+    try {
+      for await (const part of rechunk(data, MEMORY_LIMIT)) {
+        await dispatch('pwrite', file.scope, [part, offset])
+        offset += part.byteLength
+      }
+    } finally {
+      if (offset !== start) {
+        file.offset = offset
+        if (file.source !== null) {
+          const content = (
+            await dispatch('read', file.scope, [], { stream: true })
+          )[0] as ByteSource
+          file.source.lines = await file.source.lines.reopen(sliceStream(content, offset))
+        }
+      }
     }
   } finally {
     done()

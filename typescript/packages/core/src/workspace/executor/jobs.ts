@@ -313,7 +313,7 @@ export async function handleBackground(
       return await (asyncContextIsolatesTasks ? runWithCaller(own, body) : body())
     } finally {
       releaseProgram()
-      for (const lines of heldInputs) await lines.unhold()
+      for (const source of heldInputs) await source.lines.unhold()
 
       if (jobHanded !== null && decisions !== null) {
         // A job that ended held on a question leaves its grants standing
@@ -341,7 +341,7 @@ export async function handleBackground(
     })
   } catch (err) {
     releaseProgram()
-    for (const lines of heldInputs) await lines.unhold()
+    for (const source of heldInputs) await source.lines.unhold()
 
     // A submission that fails (a console the table cannot build, a
     // session at its process cap) starts no runner, so nothing would ever

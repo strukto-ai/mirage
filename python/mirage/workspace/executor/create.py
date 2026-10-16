@@ -17,7 +17,6 @@ from contextlib import aclosing
 
 from mirage.context import DEFAULT_UMASK
 from mirage.errors.constants import FS_ERRORS
-from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.cooperative import chunks
 from mirage.io.spool import MEMORY_LIMIT
 from mirage.io.stream import rechunk, slice_stream
@@ -169,17 +168,23 @@ async def write_description(
         start = offset = file.offset + (
             file.source.lines.position if file.source is not None else 0
         )
-        async with aclosing(rechunk(data, MEMORY_LIMIT)) as source:
-            async for part in source:
-                await dispatch("pwrite", file.scope, data=part, offset=offset)
-                offset += len(part)
-        file.offset = offset
-        if file.source is not None and offset != start:
-            await file.source.lines.discard()
-            content, _ = await dispatch("read", file.scope, stream=True)
-            file.source.lines = AsyncLineIterator(
-                slice_stream(content, offset)
-            )
+        try:
+            async with aclosing(rechunk(data, MEMORY_LIMIT)) as source:
+                async for part in source:
+                    await dispatch(
+                        "pwrite", file.scope, data=part, offset=offset
+                    )
+                    offset += len(part)
+        finally:
+            if offset != start:
+                file.offset = offset
+                if file.source is not None:
+                    content, _ = await dispatch(
+                        "read", file.scope, stream=True
+                    )
+                    file.source.lines = await file.source.lines.reopen(
+                        slice_stream(content, offset)
+                    )
 
 
 async def create_counted(

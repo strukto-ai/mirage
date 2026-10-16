@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { spooled } from '../../io/spool.ts'
+import { spooledPair } from '../../io/spool.ts'
 import { chunks } from '../../io/cooperative.ts'
 import { asyncChain, discardStreams } from '../../io/stream.ts'
 import type { ExecutionFrame } from '../frame.ts'
@@ -413,10 +413,16 @@ export async function statementOutput(
     else if (key.owner === own || !(await deliver(sink, key, data)))
       written.push([key.channel, data, true])
   }
-  const out = await spooled(stdout)
-  if (out !== null) written.push([Channel.STDOUT, out, false])
-  const err = await spooled(io.stderr)
+  let out: ByteSource | null
+  let err: ByteSource | null
+  try {
+    ;[out, err] = await spooledPair(stdout, io.stderr)
+  } catch (error) {
+    await discardStreams(...written.map(([, data]) => data))
+    throw error
+  }
   io.stderr = null
+  if (out !== null) written.push([Channel.STDOUT, out, false])
   if (err !== null) written.push([Channel.STDERR, err, false])
   return written
 }

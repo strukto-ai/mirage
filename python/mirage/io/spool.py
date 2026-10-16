@@ -6,7 +6,7 @@ from typing import Any, BinaryIO
 
 from mirage.concurrency.limiter import run_blocking
 from mirage.io.cooperative import CHUNK_SIZE, chunks
-from mirage.io.stream import OutputStream
+from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource
 
 MEMORY_LIMIT = 1024 * 1024
@@ -164,6 +164,28 @@ async def spooled(source: ByteSource | None) -> ByteSource | None:
         return await store.output()
     except BaseException:
         await store.close()
+        raise
+
+
+async def spooled_pair(
+    stdout: ByteSource | None, stderr: ByteSource | None
+) -> tuple[ByteSource | None, ByteSource | None]:
+    """``spooled`` over both outputs of a run; when one fails, what the
+    other holds is closed.
+
+    Args:
+        stdout (ByteSource | None): the first output, consumed.
+        stderr (ByteSource | None): the second, consumed.
+    """
+    try:
+        out = await spooled(stdout)
+    except BaseException:
+        await close_quietly(stderr)
+        raise
+    try:
+        return out, await spooled(stderr)
+    except BaseException:
+        await close_quietly(out)
         raise
 
 

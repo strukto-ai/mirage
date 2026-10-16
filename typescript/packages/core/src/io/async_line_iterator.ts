@@ -245,6 +245,18 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   }
 
   /**
+   * Discard this reader for one over `source` that keeps its holds and its
+   * release, for a descriptor a write moved. Mirrors Python's reopen.
+   */
+  async reopen(source: ByteSource): Promise<AsyncLineIterator> {
+    await this.discard()
+    const lines = new AsyncLineIterator(source)
+    lines.holders = this.holders
+    lines.released = this.released
+    return lines
+  }
+
+  /**
    * Read what the source has left into the buffer, for a descriptor that
    * outlives its pipe: reads go on from memory. Mirrors Python's load_rest.
    */
@@ -589,9 +601,12 @@ export async function releaseInputs(
   }
 }
 
-/** Keep each reader a job inherits open until the job ends. */
-export function holdInputs(inputs: SharedInput[]): AsyncLineIterator[] {
-  const held = [...new Set(inputs.map((source) => source.lines))]
-  for (const lines of held) lines.holders += 1
+/**
+ * Keep each reader a job inherits open until the job ends, as the
+ * descriptor's: a write that replaces it hands the hold on.
+ */
+export function holdInputs(inputs: SharedInput[]): SharedInput[] {
+  const held = [...new Map(inputs.map((source) => [source.lines, source])).values()]
+  for (const source of held) source.lines.holders += 1
   return held
 }

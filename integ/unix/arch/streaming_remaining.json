@@ -86,10 +86,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/t1320102stream && printf 'first\\nsecond\\n' > /data/t1320102stream/a && cd /data/t1320102stream && { exec 3< a; head -n 1 <&3; cat <&3; exec 3<&-; exec 3< a; head -n 1 - <&3; (exec 3<&-); cat <&3; exec 3<&-; exec 3< a; { sleep 0.1; cat <&3; } & exec 3<&-; wait; { { sleep 0.1; cat <&3; } & } 3< a; wait; printf 'abcdef' > b; exec 3<>b; head -c 2 <&3; printf XY >&3; cat <&3; exec 3>&-; printf '\\n'; cat b; }; rc=$?; cd /data; rm -r /data/t1320102stream; exit $rc)",
+      "command": "(mkdir -p /data/t1320102stream && printf 'first\\nsecond\\n' > /data/t1320102stream/a && cd /data/t1320102stream && { exec 3< a; head -n 1 <&3; cat <&3; exec 3<&-; exec 3< a; head -n 1 - <&3; (exec 3<&-); cat <&3; exec 3<&-; exec 3< a; { sleep 0.1; cat <&3; } & exec 3<&-; wait; { { sleep 0.1; cat <&3; } & } 3< a; wait; printf 'abcdef' > b; exec 3<>b; head -c 2 <&3; printf XY >&3; cat <&3; exec 3>&-; printf '\\n'; cat b; printf '\\n'; printf 'abcdef\\n' > c; exec 3<>c; { sleep 0.2; cat <&3; } & printf XY >&3; exec 3<&-; wait; cat c; }; rc=$?; cd /data; rm -r /data/t1320102stream; exit $rc)",
       "expect": {
         "exit": 0,
-        "stdout": "first\nsecond\nfirst\nsecond\nfirst\nsecond\nfirst\nsecond\nabef\nabXYef",
+        "stdout": "first\nsecond\nfirst\nsecond\nfirst\nsecond\nfirst\nsecond\nabef\nabXYef\ncdef\nXYcdef\n",
         "stderr": ""
       }
     },

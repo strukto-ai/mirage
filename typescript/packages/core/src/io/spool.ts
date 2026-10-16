@@ -1,4 +1,4 @@
-import { OutputStream } from './stream.ts'
+import { OutputStream, closeQuietly } from './stream.ts'
 import { CHUNK_SIZE, chunks } from './cooperative.ts'
 import { concat } from '../utils/bytes.ts'
 import type { ByteSource } from './types.ts'
@@ -165,6 +165,29 @@ export async function spooled(source: ByteSource | null): Promise<ByteSource | n
     return await store.output()
   } catch (error) {
     await store.close()
+    throw error
+  }
+}
+
+/**
+ * `spooled` over both outputs of a run; when one fails, what the other holds
+ * is closed. Mirrors Python's spooled_pair.
+ */
+export async function spooledPair(
+  stdout: ByteSource | null,
+  stderr: ByteSource | null,
+): Promise<[ByteSource | null, ByteSource | null]> {
+  let out: ByteSource | null
+  try {
+    out = await spooled(stdout)
+  } catch (error) {
+    await closeQuietly(stderr)
+    throw error
+  }
+  try {
+    return [out, await spooled(stderr)]
+  } catch (error) {
+    await closeQuietly(out)
     throw error
   }
 }

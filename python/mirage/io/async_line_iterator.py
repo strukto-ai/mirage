@@ -341,6 +341,18 @@ class AsyncLineIterator:
         if not self.holders and self._released:
             await self.discard()
 
+    async def reopen(self, source: ByteSource) -> "AsyncLineIterator":
+        """Discard this reader for one over ``source`` that keeps its holds
+        and its release, for a descriptor a write moved.
+
+        Args:
+            source (ByteSource): what the descriptor reads from now on.
+        """
+        await self.discard()
+        lines = AsyncLineIterator(source)
+        lines.holders, lines._released = self.holders, self._released
+        return lines
+
     async def load_rest(self) -> None:
         """Read what the source has left into the buffer, for a descriptor
         that outlives its pipe: reads go on from memory."""
@@ -520,13 +532,14 @@ async def release_inputs(
             await source.lines.release()
 
 
-def hold_inputs(inputs: list[SharedInput]) -> list[AsyncLineIterator]:
-    """Keep each reader a job inherits open until the job ends.
+def hold_inputs(inputs: list[SharedInput]) -> list[SharedInput]:
+    """Keep each reader a job inherits open until the job ends, as the
+    descriptor's: a write that replaces it hands the hold on.
 
     Args:
         inputs (list[SharedInput]): the job's inherited descriptors.
     """
-    held = list({id(source.lines): source.lines for source in inputs}.values())
-    for lines in held:
-        lines.holders += 1
+    held = list({id(source.lines): source for source in inputs}.values())
+    for source in held:
+        source.lines.holders += 1
     return held
