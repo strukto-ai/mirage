@@ -1,62 +1,11 @@
 ---
 title: FUSE
-description: Access a Mirage workspace through a local filesystem folder.
+description: Connect a local filesystem folder to a remote Mirage workspace.
 icon: folder-open
 ---
 
-FUSE exposes a Mirage workspace as a folder on the machine running it.
-Editors, scripts and other programs can read and write its virtual files
-through normal filesystem operations.
+Mirage does not yet provide a FUSE client for mounting a remote server's
+workspace on your machine.
 
-## Expose the workspace
-
-Install FUSE and the [Python](/python/setup/fuse) or
-[TypeScript](/typescript/setup/fuse) binding first. See the
-[OS support matrix](/home/setup/fuse).
-
-On Linux or macOS, create an empty folder:
-
-```bash
-mkdir -p /tmp/mirage-workspace
-```
-
-In your application, `ws` is your existing Mirage workspace. Expose its root:
-
-<CodeGroup>
-```python Python
-ws.add_fuse_mount("/", "/tmp/mirage-workspace")
-```
-
-```typescript TypeScript
-await ws.addFuseMount('/', '/tmp/mirage-workspace')
-```
-</CodeGroup>
-
-A virtual file at `/data/report.csv` is now available at
-`/tmp/mirage-workspace/data/report.csv`. Keep the workspace process running
-while other programs use the folder.
-
-For example, from another process:
-
-```bash
-cat /tmp/mirage-workspace/data/report.csv
-```
-
-This reads the same file as `cat /data/report.csv` in Mirage.
-
-## Disconnect
-
-<CodeGroup>
-```python Python
-ws.remove_fuse_mount("/")
-```
-
-```typescript TypeScript
-await ws.removeFuseMount('/')
-```
-</CodeGroup>
-
-Closing the workspace also unmounts the folder.
-
-To expose just one VFS through your workspace config, see
-[FUSE](/home/setup/fuse).
+The existing [FUSE support](/home/setup/fuse) creates a local mount on the
+machine running the workspace.
