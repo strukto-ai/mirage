@@ -12,18 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { readFileSync } from 'node:fs'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import type { NotionTransport } from './client.ts'
-import type { NotionAccessor } from '../../accessor/notion.ts'
-import { read as rawOperation } from './read.ts'
+import { NotionAPIError, type NotionTransport } from './client.ts'
+import { NotionAccessor } from '../../accessor/notion.ts'
+import { firstLines, readStream, read as rawOperation } from './read.ts'
+import { normalizeRow } from './normalize.ts'
+import { jsonlBytes } from '../render/json.ts'
+import { materialize } from '../../io/types.ts'
+import { NotionVFSBase } from '../../vfs/notion/notion.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { concat } from '../../utils/bytes.ts'
 
 class FakeTransport implements NotionTransport {
   public readonly invocations: { name: string; args: Record<string, unknown> }[] = []
-  private readonly responses = new Map<string, Record<string, unknown>[]>()
+  private readonly responses = new Map<string, (Record<string, unknown> | Error)[]>()
 
-  enqueue(toolName: string, response: Record<string, unknown>): void {
+  enqueue(toolName: string, response: Record<string, unknown> | Error): void {
     const list = this.responses.get(toolName)
     if (list === undefined) {
       this.responses.set(toolName, [response])
@@ -38,6 +47,7 @@ class FakeTransport implements NotionTransport {
     if (list.length === 0) return Promise.reject(new Error(`no canned response for ${name}`))
     const response = list.shift()
     if (response === undefined) return Promise.reject(new Error(`no canned response for ${name}`))
+    if (response instanceof Error) return Promise.reject(response)
     return Promise.resolve(response)
   }
 }
@@ -339,12 +349,212 @@ it.each([
   expect(new TextDecoder().decode(data)).toContain(`"number":${spelling}}`)
 })
 
-// What the mount hands a read: the row of the folder holding the file, as
-// the listing above it names it, for a folder an id names.
-async function read(accessor: NotionAccessor, path: PathSpec) {
-  const folder = path.virtual.replace(/\/$/, '').split('/').at(-2) ?? ''
-  const parent = folder.includes('__')
-    ? new FileStat({ name: folder, type: FileType.DIRECTORY })
-    : null
-  return rawOperation(accessor, path, null, parent)
+function parentFor(path: PathSpec): FileStat | null {
+  const folder = path.virtual.split('/').at(-2) ?? ''
+  return folder.includes('__') ? new FileStat({ name: folder, type: FileType.DIRECTORY }) : null
 }
+
+async function read(accessor: NotionAccessor, path: PathSpec) {
+  return rawOperation(accessor, path, null, parentFor(path))
+}
+
+async function indexFor(path: PathSpec, cache: IndexCacheStore) {
+  const pieces = path.virtual.split('/')
+  const count = pieces.length - 1
+  for (let i = 1; i < count; i++) {
+    const key = pieces.slice(0, i + 1).join('/')
+    const name = pieces[i] ?? ''
+    if (name.includes('__') && (await cache.get(key)).entry == null)
+      await cache.setPartialDir(key.slice(0, key.lastIndexOf('/')) || '/', [
+        [name, new FileStat({ name, type: FileType.DIRECTORY })],
+      ])
+  }
+  await cache.setDir(path.virtual.slice(0, path.virtual.lastIndexOf('/')), [
+    ['rows.jsonl', new FileStat({ name: 'rows.jsonl', type: FileType.FILE })],
+  ])
+  return cache
+}
+
+type Json = Record<string, unknown>
+interface StreamFixture {
+  responses: Json[]
+  prefixes: { n: number; requests: number; rows: number }[]
+}
+interface PaginationCase {
+  name: string
+  responses: Json[]
+  cursors: (string | null)[]
+  error?: { message: string }
+}
+
+const FIXTURE = new URL('../../../../../../integ/fixtures/notion/', import.meta.url)
+const STREAM = JSON.parse(readFileSync(new URL('streaming.json', FIXTURE), 'utf8')) as StreamFixture
+const PAGINATION = JSON.parse(
+  readFileSync(new URL('pagination.json', FIXTURE), 'utf8'),
+) as PaginationCase[]
+const VIRTUAL = '/notion/databases/DB__db/DS__ds/rows.jsonl'
+const ROWS = STREAM.responses.flatMap((reply) =>
+  (reply.results as Json[]).filter((row) => row.object === 'page'),
+)
+const EXPECTED = jsonlBytes(ROWS.map(normalizeRow))
+const QUERY = 'API-post-data-source-query'
+
+function streamTransport(responses: Json[] = STREAM.responses): FakeTransport {
+  const transport = new FakeTransport()
+  for (const response of responses) {
+    const error = response.raise as { message: string; status: number; code: string } | undefined
+    transport.enqueue(
+      QUERY,
+      error === undefined
+        ? {
+            ...response,
+            ...(Array.isArray(response.results)
+              ? { results: (response.results as Json[]).map((row) => ({ object: 'page', ...row })) }
+              : {}),
+          }
+        : new NotionAPIError(error.message, error.status, error.code),
+    )
+  }
+  return transport
+}
+
+class StreamingVFS extends NotionVFSBase {
+  override readonly name = 'notion'
+  override readonly cachesReads = true
+  override readonly accessor: NotionAccessor
+  constructor(transport: NotionTransport) {
+    super()
+    this.accessor = new NotionAccessor(transport)
+  }
+}
+
+describe('Notion streaming rows', () => {
+  it('preserves the full rendered bytes and skips empty query pages', async () => {
+    const transport = streamTransport()
+    const path = spec(VIRTUAL, '/notion')
+    const parent = parentFor(path)
+    const parts: Uint8Array[] = []
+    for await (const chunk of readStream(makeAccessor(transport), path, parent)) parts.push(chunk)
+    expect(concat(parts)).toEqual(EXPECTED)
+    expect(parts).toHaveLength(2)
+    expect(transport.invocations).toHaveLength(3)
+    expect(await read(makeAccessor(streamTransport()), path)).toEqual(EXPECTED)
+  })
+
+  it.each(STREAM.prefixes)('first $n lines fetch $requests pages', async (prefix) => {
+    const transport = streamTransport()
+    const path = spec(VIRTUAL, '/notion')
+    const result = await firstLines(makeAccessor(transport), path, prefix.n, parentFor(path))
+    expect(result).toEqual(jsonlBytes(ROWS.slice(0, prefix.n).map(normalizeRow)))
+    expect(transport.invocations).toHaveLength(prefix.requests)
+  })
+
+  it('closes before requesting another page', async () => {
+    const transport = streamTransport()
+    const path = spec(VIRTUAL, '/notion')
+    const stream = readStream(makeAccessor(transport), path, parentFor(path))
+    try {
+      expect((await stream.next()).value).toEqual(jsonlBytes(ROWS.slice(0, 2).map(normalizeRow)))
+    } finally {
+      await stream.return()
+    }
+    expect(transport.invocations).toHaveLength(1)
+  })
+
+  it.each(PAGINATION.filter((testCase) => testCase.error !== undefined))(
+    'propagates $name',
+    async (testCase) => {
+      const transport = streamTransport(testCase.responses)
+      const path = spec(VIRTUAL, '/notion')
+      await expect(
+        materialize(readStream(makeAccessor(transport), path, parentFor(path))),
+      ).rejects.toThrow(testCase.error?.message)
+      expect(transport.invocations).toHaveLength(testCase.cursors.length)
+      const prefixTransport = streamTransport(testCase.responses)
+      await expect(
+        firstLines(makeAccessor(prefixTransport), path, 100, parentFor(path)),
+      ).rejects.toThrow(testCase.error?.message)
+      expect(prefixTransport.invocations).toHaveLength(testCase.cursors.length)
+    },
+  )
+
+  it('streams an empty data source without bytes', async () => {
+    const transport = streamTransport([{ results: [], has_more: false }])
+    const path = spec(VIRTUAL, '/notion')
+    expect(await materialize(readStream(makeAccessor(transport), path, parentFor(path)))).toEqual(
+      new Uint8Array(),
+    )
+    expect(transport.invocations).toHaveLength(1)
+  })
+
+  it('reads metadata whole and declines the first-lines optimization', async () => {
+    const transport = new FakeTransport()
+    const response = { id: 'ds', title: [], properties: {} }
+    transport.enqueue('API-retrieve-a-data-source', response)
+    transport.enqueue('API-retrieve-a-data-source', response)
+    const path = spec(VIRTUAL.replace('rows.jsonl', 'data_source.json'), '/notion')
+    const parent = parentFor(path)
+    const accessor = makeAccessor(transport)
+    expect(await firstLines(accessor, path, 1, parent)).toBeNull()
+    expect(await materialize(readStream(accessor, path, parent))).toEqual(
+      await rawOperation(accessor, path, null, parent),
+    )
+    expect(transport.invocations).toHaveLength(2)
+  })
+
+  it.each([`head -n 1 ${VIRTUAL}`, `grep -l EARLY_MATCH ${VIRTUAL}`])(
+    'does not cache an early shell read: %s',
+    async (command) => {
+      const transport = streamTransport([STREAM.responses[0] ?? {}, ...STREAM.responses])
+      const vfs = new StreamingVFS(transport)
+      const ws = new Workspace({ '/notion': vfs }, { shellParser: await getTestParser() })
+      const mount = ws.mounts().find((mount) => mount.vfs === vfs)
+      if (mount === undefined) throw new Error('missing Notion mount')
+      await indexFor(spec(VIRTUAL, '/notion'), mount.index)
+      try {
+        const result = await ws.shell(command, { cwd: '/' })
+        expect(result.exitCode).toBe(0)
+        expect(transport.invocations).toHaveLength(1)
+        expect(await ws.cache.get(VIRTUAL)).toBeNull()
+        const full = await ws.shell(`cat ${VIRTUAL}`, { cwd: '/' })
+        expect(full.stdout).toEqual(EXPECTED)
+        expect(full.exitCode).toBe(0)
+        expect(transport.invocations).toHaveLength(4)
+        expect(await ws.cache.get(VIRTUAL)).toEqual(EXPECTED)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it('does not cache a failed stream', async () => {
+    const transport = streamTransport([
+      STREAM.responses[0] ?? {},
+      { raise: { message: 'access revoked', status: 403, code: 'restricted_resource' } },
+    ])
+    const vfs = new StreamingVFS(transport)
+    const ws = new Workspace({ '/notion': vfs }, { shellParser: await getTestParser() })
+    const mount = ws.mounts().find((mount) => mount.vfs === vfs)
+    if (mount === undefined) throw new Error('missing Notion mount')
+    await indexFor(spec(VIRTUAL, '/notion'), mount.index)
+    try {
+      const result = await ws.shell(`cat ${VIRTUAL}`, { cwd: '/' })
+      expect(result.exitCode).not.toBe(0)
+      expect(await ws.cache.get(VIRTUAL)).toBeNull()
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('refuses an unlisted parent before fetching rows', async () => {
+    const transport = streamTransport()
+    const path = spec(VIRTUAL, '/notion')
+    await expect(materialize(readStream(makeAccessor(transport), path))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await expect(firstLines(makeAccessor(transport), path, 1)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    expect(transport.invocations).toHaveLength(0)
+  })
+})

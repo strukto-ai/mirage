@@ -12,9 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from typing import Any
 
 from mirage.core.api.client import SessionArg
+from mirage.core.api.paginate import cursor_pages
 from mirage.core.notion.client import (
     complete_page,
     notion_get,
@@ -24,6 +27,7 @@ from mirage.core.notion.client import (
     paginate_post,
 )
 from mirage.core.notion.config import NotionConfig
+from mirage.core.notion.constants import MAX_PAGE_SIZE
 
 
 async def search_pages(
@@ -87,13 +91,51 @@ async def query_data_source(
     body: dict[str, Any] | None = None,
     session: SessionArg = None,
 ) -> list[dict[str, Any]]:
-    return await paginate_post(
-        config,
-        f"/data_sources/{data_source_id}/query",
-        body or {},
-        page_size=page_size,
-        session=session,
-    )
+    rows: list[dict[str, Any]] = []
+    async with aclosing(
+        query_data_source_pages(
+            config, data_source_id, page_size, body, session
+        )
+    ) as pages:
+        async for page in pages:
+            rows.extend(page)
+    return rows
+
+
+async def query_data_source_pages(
+    config: NotionConfig,
+    data_source_id: str,
+    page_size: int = 100,
+    body: dict[str, Any] | None = None,
+    session: SessionArg = None,
+) -> AsyncGenerator[list[dict[str, Any]], None]:
+    """Yield query pages only as the caller requests them.
+
+    Each page is checked for an incomplete response before yielding its
+    rows. Closing the iterator prevents further requests; the shared
+    cursor walker retains its repeated-cursor and terminal-page rules.
+
+    Args:
+        config (NotionConfig): notion API config.
+        data_source_id (str): the data source to query.
+        page_size (int): rows per request, capped at the API maximum.
+        body (dict[str, Any] | None): query options, never mutated.
+        session (SessionArg): pool or live session every request rides.
+    """
+    merged = dict(body or {})
+    merged["page_size"] = min(page_size, MAX_PAGE_SIZE)
+
+    async def fetch_page(cursor: str | None) -> dict[str, Any]:
+        request = dict(merged)
+        if cursor is not None:
+            request["start_cursor"] = cursor
+        return await query_data_source_page(
+            config, data_source_id, request, session=session
+        )
+
+    async with aclosing(cursor_pages(fetch_page)) as pages:
+        async for page in pages:
+            yield page
 
 
 async def query_data_source_page(

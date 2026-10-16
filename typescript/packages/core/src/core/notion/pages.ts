@@ -14,7 +14,7 @@
 
 import { NotionAPIError, type NotionTransport } from './client.ts'
 import { MAX_PAGE_SIZE } from './constants.ts'
-import { cursorItems } from '../api/paginate.ts'
+import { cursorItems, cursorPages } from '../api/paginate.ts'
 
 type Json = Record<string, unknown>
 
@@ -73,11 +73,34 @@ export async function queryDataSource(
   dataSourceId: string,
   body: Json = {},
 ): Promise<Json[]> {
-  return paginateTool(transport, 'API-post-data-source-query', {
-    ...body,
-    data_source_id: dataSourceId,
-    page_size: 100,
-  })
+  const rows: Json[] = []
+  for await (const page of queryDataSourcePages(transport, dataSourceId, body)) {
+    rows.push(...page)
+  }
+  return rows
+}
+
+/**
+ * Yield query pages only as the caller requests them. Each page is checked
+ * for an incomplete response before yielding its rows. Closing the iterator
+ * prevents further requests; the shared cursor walker retains its
+ * repeated-cursor and terminal-page rules. Query options are never mutated.
+ */
+export async function* queryDataSourcePages(
+  transport: NotionTransport,
+  dataSourceId: string,
+  body: Json = {},
+): AsyncGenerator<Json[], void> {
+  const baseArgs = { ...body, page_size: MAX_PAGE_SIZE }
+  for await (const page of cursorPages((cursor) =>
+    queryDataSourcePage(
+      transport,
+      dataSourceId,
+      cursor === null ? { ...baseArgs } : { ...baseArgs, start_cursor: cursor },
+    ),
+  )) {
+    yield page.map(asObject)
+  }
 }
 
 export async function getPage(transport: NotionTransport, pageId: string): Promise<Json> {

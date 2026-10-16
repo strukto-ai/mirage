@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.notion import NotionAccessor
 from mirage.core.notion.config import NotionConfig
+from mirage.core.notion.read import first_lines as _first_lines
 from mirage.core.notion.read import read as _read
+from mirage.core.notion.read import read_stream as _read_stream
 from mirage.core.notion.readdir import readdir as _readdir
 from mirage.core.notion.stat import stat as _stat
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
@@ -54,6 +57,16 @@ class NotionVFS(BaseVFS):
     ) -> bytes:
         data = await _read(self.accessor, path, None, parent)
         return slice_window(data, offset, size)
+
+    def read_stream(
+        self, path: PathSpec, parent: FileStat | None = None
+    ) -> AsyncIterator[bytes]:
+        return _read_stream(self.accessor, path, parent)
+
+    async def first_lines(
+        self, path: PathSpec, n: int, parent: FileStat | None = None
+    ) -> bytes | None:
+        return await _first_lines(self.accessor, path, n, parent)
 
     async def stat(
         self,

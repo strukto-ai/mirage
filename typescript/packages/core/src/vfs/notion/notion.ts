@@ -13,7 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NotionAccessor } from '../../accessor/notion.ts'
-import { read as notionRead } from '../../core/notion/read.ts'
+import {
+  firstLines as notionFirstLines,
+  read as notionRead,
+  readStream as notionStream,
+} from '../../core/notion/read.ts'
 import { readdir as notionReaddir } from '../../core/notion/readdir.ts'
 import { stat as notionStat } from '../../core/notion/stat.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
@@ -29,6 +33,8 @@ export class NotionVFSBase extends BaseVFS<NotionAccessor> {
   override readonly handed = {
     readdir: ['entry', 'parent'],
     read: ['parent'],
+    readStream: ['parent'],
+    firstLines: ['parent'],
     stat: ['entry', 'parent'],
   } as const
 
@@ -44,6 +50,14 @@ export class NotionVFSBase extends BaseVFS<NotionAccessor> {
   ): Promise<Uint8Array> {
     const data = await notionRead(this.accessor, path, null, handed?.parent)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
+    return notionStream(this.accessor, path, handed?.parent)
+  }
+
+  override firstLines(path: PathSpec, n: number, handed?: Handed): Promise<Uint8Array | null> {
+    return notionFirstLines(this.accessor, path, n, handed?.parent)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

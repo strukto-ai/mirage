@@ -1,0 +1,22 @@
+{
+  "responses": [
+    {
+      "results": [
+        {"id": "ignored", "object": "data_source"},
+        {"id": "row1", "object": "page", "properties": {"Name": {"type": "title", "title": [{"plain_text": "EARLY_MATCH café 🌍"}]}, "Notes": {"type": "rich_text", "rich_text": [{"plain_text": "line one\nline two"}]}, "Amount": {"type": "number", "number": 0.00001}}},
+        {"id": "row2", "object": "page", "properties": {"Amount": {"type": "number", "number": 1e-7}}}
+      ],
+      "has_more": true,
+      "next_cursor": "c1"
+    },
+    {"results": [], "has_more": true, "next_cursor": "c2"},
+    {"results": [{"id": "row3", "object": "page", "properties": {"Amount": {"type": "number", "number": 100000000000000000000}}}], "has_more": false}
+  ],
+  "prefixes": [
+    {"n": 0, "requests": 0, "rows": 0},
+    {"n": 1, "requests": 1, "rows": 1},
+    {"n": 2, "requests": 1, "rows": 2},
+    {"n": 3, "requests": 3, "rows": 3},
+    {"n": 5, "requests": 3, "rows": 3}
+  ]
+}

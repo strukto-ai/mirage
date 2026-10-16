@@ -12,7 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { readFileSync } from 'node:fs'
+
 import { describe, expect, it } from 'vitest'
+import { PaginationStalledError } from '../api/errors.ts'
+import { NotionAPIError } from './client.ts'
 import type { NotionTransport } from './client.ts'
 import {
   createPage,
@@ -22,6 +26,7 @@ import {
   getPage,
   queryDataSource,
   queryDataSourcePage,
+  queryDataSourcePages,
   searchDataSources,
   searchPages,
 } from './pages.ts'
@@ -32,9 +37,127 @@ class FakeTransport implements NotionTransport {
   callTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     this.invocations.push({ name, args })
     if (this.responses.length === 0) return Promise.reject(new Error('no canned response'))
-    return Promise.resolve(this.responses.shift() as Record<string, unknown>)
+    const response = this.responses.shift()
+    if (response instanceof Error) return Promise.reject(response)
+    return Promise.resolve(response as Record<string, unknown>)
   }
 }
+
+interface QueryCase {
+  name: string
+  responses: Record<string, unknown>[]
+  pages: Record<string, unknown>[][]
+  cursors: (string | null)[]
+  error?: { kind: string; message: string; status?: number | null; code?: string }
+}
+
+const CASES = JSON.parse(
+  readFileSync(
+    new URL('../../../../../../integ/fixtures/notion/pagination.json', import.meta.url),
+    'utf8',
+  ),
+) as QueryCase[]
+
+function queryTransport(testCase: QueryCase): FakeTransport {
+  const transport = new FakeTransport()
+  transport.responses = testCase.responses.map((response) => {
+    const error = response.raise as { message: string; status: number; code: string } | undefined
+    return error === undefined
+      ? response
+      : new NotionAPIError(error.message, error.status, error.code)
+  })
+  return transport
+}
+
+describe('queryDataSourcePages shared contract', () => {
+  it.each(CASES)('$name', async (testCase) => {
+    const transport = queryTransport(testCase)
+    const body = { filter: { property: 'Done', checkbox: { equals: false } } }
+    const pages = queryDataSourcePages(transport, 'ds', body)
+    expect(transport.invocations).toEqual([])
+    try {
+      for (const [at, expected] of testCase.pages.entries()) {
+        expect(await pages.next()).toEqual({ value: expected, done: false })
+        expect(transport.invocations).toHaveLength(at + 1)
+      }
+      if (testCase.error === undefined) {
+        expect((await pages.next()).done).toBe(true)
+      } else {
+        const errorClass =
+          testCase.error.kind === 'NotionAPIError' ? NotionAPIError : PaginationStalledError
+        const next = pages.next()
+        await expect(next).rejects.toBeInstanceOf(errorClass)
+        const expected = Object.fromEntries(
+          Object.entries(testCase.error).filter(([key]) => key !== 'kind'),
+        )
+        await expect(next).rejects.toMatchObject(expected)
+      }
+    } finally {
+      await pages.return()
+    }
+    expect(transport.invocations.map(({ args }) => args.start_cursor ?? null)).toEqual(
+      testCase.cursors,
+    )
+    for (const invocation of transport.invocations) {
+      expect(invocation.name).toBe('API-post-data-source-query')
+      expect(invocation.args).toMatchObject({ data_source_id: 'ds', page_size: 100, ...body })
+    }
+    expect(Object.keys(body)).toEqual(['filter'])
+  })
+
+  it('closes on an early break without fetching another page', async () => {
+    const testCase = CASES[0]
+    if (testCase === undefined) throw new Error('missing pagination fixture')
+    const transport = queryTransport(testCase)
+    const pages = queryDataSourcePages(transport, 'ds')
+    for await (const page of pages) {
+      expect(page).toEqual(testCase.pages[0])
+      break
+    }
+    expect((await pages.next()).done).toBe(true)
+    expect(transport.invocations).toHaveLength(1)
+  })
+
+  it('keeps an initial cursor and the existing fixed page size without mutating options', async () => {
+    const testCase = CASES[0]
+    if (testCase === undefined) throw new Error('missing pagination fixture')
+    const transport = queryTransport(testCase)
+    const body = { start_cursor: 'initial', page_size: 7 }
+    const pages = queryDataSourcePages(transport, 'ds', body)
+    try {
+      await pages.next()
+      await pages.next()
+    } finally {
+      await pages.return()
+    }
+    expect(transport.invocations.map(({ args }) => args)).toEqual([
+      { data_source_id: 'ds', start_cursor: 'initial', page_size: 100 },
+      { data_source_id: 'ds', start_cursor: 'c1', page_size: 100 },
+    ])
+    expect(body).toEqual({ start_cursor: 'initial', page_size: 7 })
+  })
+})
+
+describe('queryDataSource collector shared contract', () => {
+  it.each(CASES)('$name', async (testCase) => {
+    const transport = queryTransport(testCase)
+    const result = queryDataSource(transport, 'ds')
+    if (testCase.error === undefined) {
+      expect(await result).toEqual(testCase.pages.flat())
+    } else {
+      const errorClass =
+        testCase.error.kind === 'NotionAPIError' ? NotionAPIError : PaginationStalledError
+      await expect(result).rejects.toBeInstanceOf(errorClass)
+      const expected = Object.fromEntries(
+        Object.entries(testCase.error).filter(([key]) => key !== 'kind'),
+      )
+      await expect(result).rejects.toMatchObject(expected)
+    }
+    expect(transport.invocations.map(({ args }) => args.start_cursor ?? null)).toEqual(
+      testCase.cursors,
+    )
+  })
+})
 
 describe('searchDataSources', () => {
   // 2025-09-03 dropped "database" as a search filter value: the searchable

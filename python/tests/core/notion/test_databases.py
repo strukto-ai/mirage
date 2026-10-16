@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -299,10 +299,16 @@ def _row(**overrides):
     }
 
 
+async def row_page(rows):
+    yield rows
+
+
 @pytest.mark.asyncio
 async def test_read_rows_jsonl_is_one_line_per_row(accessor, monkeypatch):
-    query = AsyncMock(return_value=[_row(), {"object": "database", "id": "x"}])
-    monkeypatch.setattr(notion_read, "query_data_source", query)
+    query = Mock(
+        return_value=row_page([_row(), {"object": "database", "id": "x"}])
+    )
+    monkeypatch.setattr(notion_read, "query_data_source_pages", query)
     data = await read(
         accessor, PathSpec.from_str_path(f"{SOURCE_DIR}/rows.jsonl")
     )
@@ -327,13 +333,13 @@ async def test_read_rows_jsonl_is_one_line_per_row(accessor, monkeypatch):
     assert decoded["path"] == f"Row-A__{ROW_ID}/page.json"
     assert decoded["parent_id"] == SOURCE_ID
     assert decoded["properties"] == _row()["properties"]
-    assert query.await_args.args[1] == SOURCE_ID
+    assert query.call_args.args[1] == SOURCE_ID
 
 
 @pytest.mark.asyncio
 async def test_read_rows_jsonl_of_no_rows_is_empty(accessor, monkeypatch):
     monkeypatch.setattr(
-        notion_read, "query_data_source", AsyncMock(return_value=[])
+        notion_read, "query_data_source_pages", Mock(return_value=row_page([]))
     )
     data = await read(
         accessor, PathSpec.from_str_path(f"{SOURCE_DIR}/rows.jsonl")
@@ -453,7 +459,9 @@ async def test_rows_jsonl_spells_numeric_cells(
     row = _row()
     row["properties"]["Priority"]["number"] = number
     monkeypatch.setattr(
-        notion_read, "query_data_source", AsyncMock(return_value=[row])
+        notion_read,
+        "query_data_source_pages",
+        Mock(return_value=row_page([row])),
     )
     data = await read(
         accessor, PathSpec.from_str_path(f"{SOURCE_DIR}/rows.jsonl")

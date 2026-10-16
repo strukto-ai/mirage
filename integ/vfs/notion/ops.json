@@ -654,7 +654,7 @@
       }
     },
     {
-      "id": "notion_head_populates_render_cache",
+      "id": "notion_head_does_not_populate_render_cache",
       "seq": 660053,
       "targets": [
         "notion"
@@ -663,9 +663,10 @@
       "clear_cache": true,
       "expect": {
         "exit": 0,
-        "stdout": "2123\n/notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/Tasks__d5000000-2222-3333-4444-555566667777/rows.jsonl\n/notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/Tasks__d5000000-2222-3333-4444-555566667777/rows.jsonl\n",
+        "stdout": "-\n",
         "stderr": ""
-      }
+      },
+      "note": "An early streamed prefix never becomes a complete cached file, so its rendered size remains unknown."
     },
     {
       "id": "notion_tail_populates_render_cache",
@@ -832,6 +833,34 @@
       "expect": {
         "exit": 0,
         "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "notion_head_lines_then_full_read",
+      "seq": 660066,
+      "targets": [
+        "notion"
+      ],
+      "command": "head -n 1 /notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/Tasks__d5000000-2222-3333-4444-555566667777/rows.jsonl >/dev/null; stat -c %s /notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/Tasks__d5000000-2222-3333-4444-555566667777/rows.jsonl; cat /notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/Tasks__d5000000-2222-3333-4444-555566667777/rows.jsonl | wc -l; stat -c %s /notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/Tasks__d5000000-2222-3333-4444-555566667777/rows.jsonl",
+      "clear_cache": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "-\n2\n2123\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "notion_grep_early_then_full_read",
+      "seq": 660067,
+      "targets": [
+        "notion"
+      ],
+      "command": "grep -l title /notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/Tasks__d5000000-2222-3333-4444-555566667777/rows.jsonl >/dev/null; stat -c %s /notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/Tasks__d5000000-2222-3333-4444-555566667777/rows.jsonl; cat /notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/Tasks__d5000000-2222-3333-4444-555566667777/rows.jsonl | wc -l; stat -c %s /notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/Tasks__d5000000-2222-3333-4444-555566667777/rows.jsonl",
+      "clear_cache": true,
+      "expect": {
+        "exit": 0,
+        "stdout": "-\n2\n2123\n",
         "stderr": ""
       }
     }

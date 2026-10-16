@@ -12,12 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { jsonlBytes } from '../render/json.ts'
+import { materialize } from '../../io/types.ts'
 import { guardRow, resolveRow } from './resolve.ts'
 import type { NotionAccessor } from '../../accessor/notion.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { makeRead } from '../hierarchy/read.ts'
+import { enoent } from '../../errors/fs.ts'
 import {
   normalizeDataSource,
   normalizeDatabase,
@@ -25,7 +27,13 @@ import {
   normalizeRow,
   toJsonBytes,
 } from './normalize.ts'
-import { listBlockTree, getDataSource, getDatabase, getPage, queryDataSource } from './pages.ts'
+import {
+  listBlockTree,
+  getDataSource,
+  getDatabase,
+  getPage,
+  queryDataSourcePages,
+} from './pages.ts'
 import { detectScope } from './scope.ts'
 
 async function readPageJson(
@@ -61,8 +69,25 @@ async function readDataSourceJson(
 }
 
 async function readRowsJsonl(accessor: NotionAccessor, match: ScopeMatch): Promise<Uint8Array> {
-  const rows = await queryDataSource(accessor.transport, match.slots.data_source_id ?? '')
-  return jsonlBytes(rows.filter((row) => row.object === 'page').map(normalizeRow))
+  return materialize(rowsJsonl(accessor, match))
+}
+
+async function* rowsJsonl(
+  accessor: NotionAccessor,
+  match: ScopeMatch,
+  limit?: number,
+): AsyncGenerator<Uint8Array, void> {
+  let remaining = limit ?? Infinity
+  if (remaining <= 0) return
+  for await (const page of queryDataSourcePages(
+    accessor.transport,
+    match.slots.data_source_id ?? '',
+  )) {
+    const rows = page.filter((row) => row.object === 'page').slice(0, remaining)
+    remaining -= rows.length
+    if (rows.length > 0) yield jsonlBytes(rows.map(normalizeRow))
+    if (remaining === 0) return
+  }
 }
 
 export const read = makeRead<NotionAccessor>(
@@ -76,3 +101,31 @@ export const read = makeRead<NotionAccessor>(
   },
   { parented: true },
 )
+
+/** Render rows one query page at a time; read other files whole. */
+export async function* readStream(
+  accessor: NotionAccessor,
+  path: PathSpec,
+  parent: FileStat | null = null,
+): AsyncGenerator<Uint8Array, void> {
+  const match = detectScope(path)
+  if (match.kind !== 'rows_jsonl') {
+    yield await read(accessor, path, null, parent)
+    return
+  }
+  if (parent === null) throw enoent(path.virtual)
+  yield* rowsJsonl(accessor, match)
+}
+
+/** Render only the first n rows, closing before the next query page. */
+export async function firstLines(
+  accessor: NotionAccessor,
+  path: PathSpec,
+  n: number,
+  parent: FileStat | null = null,
+): Promise<Uint8Array | null> {
+  const match = detectScope(path)
+  if (match.kind !== 'rows_jsonl') return null
+  if (parent === null) throw enoent(path.virtual)
+  return materialize(rowsJsonl(accessor, match, n))
+}

@@ -1,0 +1,84 @@
+[
+  {
+    "name": "pages including an empty intermediate page",
+    "responses": [
+      {"results": [{"id": "row1"}, {"id": "row2"}], "has_more": true, "next_cursor": "c1"},
+      {"results": [], "has_more": true, "next_cursor": "c2"},
+      {"results": [{"id": "row3"}], "has_more": false}
+    ],
+    "pages": [[{"id": "row1"}, {"id": "row2"}], [], [{"id": "row3"}]],
+    "cursors": [null, "c1", "c2"]
+  },
+  {
+    "name": "empty data source",
+    "responses": [{"results": [], "has_more": false}],
+    "pages": [[]],
+    "cursors": [null]
+  },
+  {
+    "name": "non-list results contribute no rows",
+    "responses": [
+      {"results": {"unexpected": true}, "has_more": true, "next_cursor": "c1"},
+      {"results": [{"id": "row1"}], "has_more": false}
+    ],
+    "pages": [[], [{"id": "row1"}]],
+    "cursors": [null, "c1"]
+  },
+  {
+    "name": "has_more false ignores a cursor",
+    "responses": [{"results": [{"id": "row1"}], "has_more": false, "next_cursor": "unused"}],
+    "pages": [[{"id": "row1"}]],
+    "cursors": [null]
+  },
+  {
+    "name": "missing cursor ends pagination",
+    "responses": [{"results": [{"id": "row1"}], "has_more": true}],
+    "pages": [[{"id": "row1"}]],
+    "cursors": [null]
+  },
+  {
+    "name": "empty cursor ends pagination",
+    "responses": [{"results": [{"id": "row1"}], "has_more": true, "next_cursor": ""}],
+    "pages": [[{"id": "row1"}]],
+    "cursors": [null]
+  },
+  {
+    "name": "repeated cursor fails before another request",
+    "responses": [
+      {"results": [{"id": "row1"}], "has_more": true, "next_cursor": "c1"},
+      {"results": [{"id": "row2"}], "has_more": true, "next_cursor": "c1"}
+    ],
+    "pages": [[{"id": "row1"}], [{"id": "row2"}]],
+    "cursors": [null, "c1"],
+    "error": {"kind": "PaginationStalledError", "message": "pagination did not advance: cursor 'c1' came back twice"}
+  },
+  {
+    "name": "incomplete first page yields no rows",
+    "responses": [
+      {"results": [{"id": "partial"}], "has_more": false, "request_status": {"type": "incomplete", "incomplete_reason": "query_result_limit_reached"}}
+    ],
+    "pages": [],
+    "cursors": [null],
+    "error": {"kind": "NotionAPIError", "message": "Notion query incomplete: query_result_limit_reached", "code": "query_result_limit_reached", "status": null}
+  },
+  {
+    "name": "incomplete later page never yields partial rows",
+    "responses": [
+      {"results": [{"id": "row1"}], "has_more": true, "next_cursor": "c1"},
+      {"results": [{"id": "partial"}], "has_more": false, "request_status": {"type": "incomplete"}}
+    ],
+    "pages": [[{"id": "row1"}]],
+    "cursors": [null, "c1"],
+    "error": {"kind": "NotionAPIError", "message": "Notion query incomplete: unknown", "code": "unknown", "status": null}
+  },
+  {
+    "name": "later API error propagates",
+    "responses": [
+      {"results": [{"id": "row1"}], "has_more": true, "next_cursor": "c1"},
+      {"raise": {"message": "access revoked", "status": 403, "code": "restricted_resource"}}
+    ],
+    "pages": [[{"id": "row1"}]],
+    "cursors": [null, "c1"],
+    "error": {"kind": "NotionAPIError", "message": "access revoked", "status": 403, "code": "restricted_resource"}
+  }
+]

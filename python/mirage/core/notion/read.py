@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
+
 from mirage.accessor.notion import NotionAccessor
 from mirage.core.api.client import SessionArg
 from mirage.core.hierarchy.read import make_read
@@ -29,11 +32,13 @@ from mirage.core.notion.pages import (
     get_database,
     get_page,
     list_block_tree,
-    query_data_source,
+    query_data_source_pages,
 )
 from mirage.core.notion.resolve import guard_row, resolve_row
 from mirage.core.notion.scope import detect_scope
 from mirage.core.render.json import jsonl_bytes
+from mirage.errors.fs import enoent
+from mirage.io.types import materialize
 from mirage.types import FileStat, PathSpec
 
 
@@ -98,12 +103,27 @@ async def _read_rows_jsonl(
     entry: FileStat | None,
     parent: FileStat | None,
 ) -> bytes:
-    rows = await query_data_source(
+    return await materialize(_rows_jsonl(accessor, match))
+
+
+async def _rows_jsonl(
+    accessor: NotionAccessor, match: ScopeMatch, limit: int | None = None
+) -> AsyncGenerator[bytes, None]:
+    if limit is not None and limit <= 0:
+        return
+    pages = query_data_source_pages(
         accessor.config, match.slots["data_source_id"], session=accessor.pool
     )
-    return jsonl_bytes(
-        [normalize_row(row) for row in rows if row.get("object") == "page"]
-    )
+    async with aclosing(pages):
+        async for page in pages:
+            rows = [row for row in page if row.get("object") == "page"]
+            if limit is not None:
+                rows = rows[:limit]
+                limit -= len(rows)
+            if rows:
+                yield jsonl_bytes([normalize_row(row) for row in rows])
+            if limit == 0:
+                return
 
 
 read = make_read(
@@ -117,3 +137,48 @@ read = make_read(
         "rows_jsonl": _read_rows_jsonl,
     },
 )
+
+
+async def read_stream(
+    accessor: NotionAccessor,
+    path: PathSpec,
+    parent: FileStat | None = None,
+) -> AsyncGenerator[bytes, None]:
+    """Render rows one query page at a time; read other files whole.
+
+    Args:
+        accessor (NotionAccessor): the account.
+        path (PathSpec): the file.
+        parent (FileStat | None): the parent directory from its listing.
+    """
+    match = detect_scope(path)
+    if match.kind != "rows_jsonl":
+        yield await read(accessor, path, None, parent)
+        return
+    if parent is None:
+        raise enoent(path.virtual)
+    async with aclosing(_rows_jsonl(accessor, match)) as stream:
+        async for chunk in stream:
+            yield chunk
+
+
+async def first_lines(
+    accessor: NotionAccessor,
+    path: PathSpec,
+    n: int,
+    parent: FileStat | None = None,
+) -> bytes | None:
+    """Render only the first n rows, closing before the next query page.
+
+    Args:
+        accessor (NotionAccessor): the account.
+        path (PathSpec): the file.
+        n (int): maximum number of lines.
+        parent (FileStat | None): the parent directory from its listing.
+    """
+    match = detect_scope(path)
+    if match.kind != "rows_jsonl":
+        return None
+    if parent is None:
+        raise enoent(path.virtual)
+    return await materialize(_rows_jsonl(accessor, match, n))
