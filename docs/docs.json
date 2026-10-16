@@ -273,17 +273,11 @@
             "group": "Access",
             "pages": [
               "home/access/overview",
-              {
-                "group": "Server",
-                "icon": "server",
-                "pages": [
-                  "home/access/http",
-                  "home/access/mcp",
-                  "home/access/rpc",
-                  "home/access/ssh",
-                  "home/access/cli"
-                ]
-              },
+              "home/access/http",
+              "home/access/mcp",
+              "home/access/rpc",
+              "home/access/ssh",
+              "home/access/cli",
               "home/access/fuse"
             ]
           },
