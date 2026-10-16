@@ -5,20 +5,58 @@ description: Give your agent a Mirage terminal and access to your data.
 icon: robot
 ---
 
-Connect your agent to a Mirage workspace. It can use familiar shell and file
-tools across your data sources, with an [agent profile](/home/profiles)
-controlling what it can see and do.
+Connect your agent to a Mirage workspace to use familiar shell and file
+tools across your data sources.
 
-## Choose your language
+## Connect from any language
 
-<CardGroup cols={2}>
-  <Card title="Python agents" icon="/images/python-logo.svg" href="/python/agents/index">
-    Connect coding agents, Python frameworks and hosted agent APIs.
-  </Card>
-  <Card title="TypeScript agents" icon="/images/typescript-logo.svg" href="/typescript/agents/index">
-    Connect coding agents, TypeScript frameworks and agent plugins.
-  </Card>
-</CardGroup>
+These connections work independently of your agent's programming language.
 
-Each guide lists supported integrations and shows how to connect your agent
-through its SDK, MCP, SSH or FUSE.
+| Connection | What the agent gets |
+| --- | --- |
+| [MCP](/home/access/mcp) | Shell and file tools through an MCP client. |
+| [FUSE](/home/access/fuse) | A folder its existing file tools can read and write. See [OS and SDK support](/home/setup/fuse). |
+| [SSH](/home/access/ssh) | A remote shell, plus file access through SFTP or SCP. |
+| [HTTP](/home/access/http) or [RPC](/home/access/rpc) | An API for running commands and working with files. |
+| [CLI](/home/access/cli) | Workspace access through `mirage` commands. |
+
+## Supported agents
+
+Choose the language running Mirage. Each link opens the setup guide;
+— means there is no dedicated integration for that language.
+
+### Coding agents
+
+| Agent | Python | TypeScript |
+| --- | --- | --- |
+| Claude Code | [Guide](/python/agents/claude-code) | [Guide](/typescript/agents/claude-code) |
+| Codex | [Guide](/python/agents/codex) | [Guide](/typescript/agents/codex) |
+| Grok Build | [Guide](/python/agents/grok-build) | [Guide](/typescript/agents/grok-build) |
+| Pi Coding Agent | — | [Plugin](/typescript/agents/pi) |
+| OpenCode | — | [Plugin](/typescript/agents/opencode) |
+| DeepSeek Harness | — | [Plugin](/typescript/agents/dsh) |
+
+### Agent frameworks
+
+| Framework | Python | TypeScript |
+| --- | --- | --- |
+| Claude Agent SDK | [Guide](/python/agents/claude-agent-sdk) | [Guide](/typescript/agents/claude-agent-sdk) |
+| OpenAI Agents SDK | [Guide](/python/agents/openai-agents) | [Guide](/typescript/agents/openai) |
+| LangChain Deep Agents | [Guide](/python/agents/langchain) | [Guide](/typescript/agents/langchain) |
+| Agno | [Guide](/python/agents/agno) | — |
+| Pydantic AI | [Guide](/python/agents/pydantic-ai) | — |
+| OpenHands | [Guide](/python/agents/openhands) | — |
+| Haystack | [Guide](/python/agents/haystack) | — |
+| Vercel AI SDK | — | [Guide](/typescript/agents/vercel) |
+| Mastra | — | [Guide](/typescript/agents/mastra) |
+
+### Hosted agents
+
+| Service | Python | TypeScript |
+| --- | --- | --- |
+| OpenAI Agents API | [Guide](/python/agents/openai-agents-api) | [Guide](/typescript/agents/openai-agents-api) |
+| Claude Managed Agents | [Guide](/python/agents/claude-managed-agents) | [Guide](/typescript/agents/claude-managed-agents) |
+
+For an agent you build yourself, use the [Python](/python/access/in-app) or
+[TypeScript](/typescript/access/in-app) workspace API. [Agent profiles](/home/profiles)
+control what each session can see and do.
