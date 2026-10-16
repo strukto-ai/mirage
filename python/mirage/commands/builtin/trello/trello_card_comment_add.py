@@ -53,9 +53,9 @@ async def trello_card_comment_add(
         raise ValueError("--card_id is required")
     text = await resolve_text_input(
         accessor,
+        opts,
         inline_text=fl.as_str("text"),
         file_path=file_operand(fl, "text_file"),
-        stdin=opts.stdin,
         error_message="comment text is required",
     )
     # A card write is addressed by id, not path, so only the mount-wide

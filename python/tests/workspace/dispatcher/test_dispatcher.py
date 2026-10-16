@@ -2171,6 +2171,15 @@ async def test_a_listing_that_does_not_follow_stops_at_a_link():
         await ws.dispatch("readdir", link, nofollow=True)
     listed, _ = await ws.dispatch("readdir", link)
     assert listed == ["/data/dlink/f.txt"]
+    # A caller that already followed the link hands the directory it
+    # reached, its typed spelling riding along, and lists that one.
+    reached = dataclasses.replace(
+        PathSpec.from_str_path("/data/d"),
+        raw_path="/data/dlink/",
+        dotted="/data/dlink/",
+    )
+    listed, _ = await ws.dispatch("readdir", reached)
+    assert listed == ["/data/d/f.txt"]
 
 
 @pytest.mark.asyncio

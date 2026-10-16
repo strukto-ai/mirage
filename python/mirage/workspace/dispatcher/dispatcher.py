@@ -668,16 +668,17 @@ def _spelled_under(call: "_Call", entries: list[str]) -> list[str]:
 
     Listing a link to a directory lists the directory it reaches, and
     readdir names its children under the path it was handed, as a walk
-    through the link spells them.
+    through the link spells them. A caller that handed the directory the
+    link reaches, its typed spelling riding along, asked for that one.
 
     Args:
         call (_Call): the readdir that ran.
         entries (list[str]): its names, under the followed directory.
     """
-    if call.walked is None:
+    reached = call.path.virtual.rstrip("/")
+    if call.walked is None or call.typed.virtual.rstrip("/") == reached:
         return entries
     asked = call.walked.virtual.rstrip("/")
-    reached = call.path.virtual.rstrip("/")
     return [
         asked + entry[len(reached) :]
         if entry.startswith(reached + "/")
@@ -1922,7 +1923,11 @@ class Dispatcher:
                     probed
                     if probed is not None
                     else await mount.call(
-                        call.name, call.path.virtual, **kwargs
+                        call.name,
+                        call.path
+                        if call.name == "readdir"
+                        else call.path.virtual,
+                        **kwargs,
                     )
                 )
                 if call.name == "stat":

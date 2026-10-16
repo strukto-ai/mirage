@@ -1,5 +1,5 @@
 {
-  "baseline": 3681,
+  "baseline": 3667,
  "modules": {
   "core/api/client": {
    "typescript_only": {
@@ -330,7 +330,8 @@
   },
   "workspace/dispatcher/dispatcher": {
    "typescript_only": {
-    "AdmitWrite": "TypeScript names the function type of the workspace's write admission hook; Python annotates the Dispatcher parameter inline as a Callable."
+    "AdmitWrite": "TypeScript names the function type of the workspace's write admission hook; Python annotates the Dispatcher parameter inline as a Callable.",
+    "globScope": "The TypeScript dispatcher builds the scope a backend is called with; in Python MountEntry._scope does, the glob's pattern included."
    }
   },
   "cli/ssh": {

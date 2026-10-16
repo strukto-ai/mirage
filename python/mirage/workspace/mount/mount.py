@@ -1892,7 +1892,7 @@ class MountEntry:
     async def call(
         self,
         name: str,
-        path: str,
+        path: str | PathSpec,
         /,
         *args,
         **kwargs,
@@ -1915,21 +1915,23 @@ class MountEntry:
 
         Args:
             name (str): operation name (e.g. "read", "stat").
-            path (str): virtual path.
+            path (str | PathSpec): virtual path; a listing of a glob word
+                lists its directory for the pattern.
         """
+        virtual = path if isinstance(path, str) else path.virtual
         async with self.use():
             filetype = (
                 kwargs.pop("filetype")
                 if "filetype" in kwargs
-                else get_extension(path)
+                else get_extension(virtual)
             )
             if filetype is None and not self.vfs.supports("read"):
-                filetype = get_extension(path)
+                filetype = get_extension(virtual)
             levels = self._callers(name, filetype)
             if not levels:
-                raise enotsup(str(self.vfs.name), name, path)
+                raise enotsup(str(self.vfs.name), name, virtual)
             self.require_writable(
-                name, PathSpec.from_str_path(path), kwargs.values()
+                name, PathSpec.from_str_path(virtual), kwargs.values()
             )
 
             scope = self._scope(path)
@@ -2008,16 +2010,34 @@ class MountEntry:
             write_context=self.write_context(),
         )
 
-    def _scope(self, path: str) -> PathSpec:
-        """``path`` as this mount's VFS addresses it.
+    def _scope(self, path: str | PathSpec) -> PathSpec:
+        """``path`` as this mount's VFS addresses it. A directory a glob
+        walk lists for a pattern (``PathSpec.dir`` shaped) keeps the
+        pattern, which a backend whose listing is a window moves the
+        window by; a glob word left as typed names no directory.
 
         Args:
-            path (str): virtual path.
+            path (str | PathSpec): virtual path.
         """
+        prefix = self.prefix.rstrip("/")
+        if (
+            isinstance(path, PathSpec)
+            and path.pattern is not None
+            and path.virtual.rstrip("/") == path.directory.rstrip("/")
+        ):
+            folder = path.virtual.rstrip("/") or "/"
+            return PathSpec(
+                virtual=folder,
+                directory=folder,
+                vfs_path=mount_key(folder, prefix),
+                pattern=path.pattern,
+                resolved=False,
+            )
+        virtual = path if isinstance(path, str) else path.virtual
         return PathSpec(
-            virtual=path,
-            directory=path.rsplit("/", 1)[0] or "/",
-            vfs_path=mount_key(path, self.prefix.rstrip("/")),
+            virtual=virtual,
+            directory=virtual.rsplit("/", 1)[0] or "/",
+            vfs_path=mount_key(virtual, prefix),
         )
 
     def _op_timeout(self, name: str) -> float | None:

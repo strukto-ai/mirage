@@ -49,10 +49,9 @@ async function trelloCardCommentUpdate(
   }
   const inlineText = fl.asStr('text') ?? null
   const textFile = fl.asPath('text_file') ?? null
-  const text = await resolveTextInput(accessor, {
+  const text = await resolveTextInput(accessor, opts, {
     inlineText,
     filePath: textFile,
-    stdin: opts.stdin,
     errorMessage: 'comment text is required',
   })
   // A card write is addressed by id, not path, so only the mount-wide

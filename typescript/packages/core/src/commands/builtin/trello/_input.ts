@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { TrelloAccessor } from '../../../accessor/trello.ts'
-import { read } from '../../../core/trello/read.ts'
+import { mountIo } from '../generic_bind/adapter.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 import type { CommandOpts } from '../../config.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -23,20 +23,26 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 export interface ResolveTextInputOptions {
   inlineText: string | null
   filePath: PathSpec | null
-  stdin: CommandOpts['stdin']
   errorMessage: string
 }
 
+/**
+ * A card's text from its flag, its `--*_file` operand, or stdin. The operand
+ * is read through the mount's table, which hands the backend the rows a read
+ * of it takes, as any read on the mount is. Mirrors Python's
+ * `resolve_text_input`.
+ */
 export async function resolveTextInput(
   accessor: TrelloAccessor,
+  command: CommandOpts,
   opts: ResolveTextInputOptions,
 ): Promise<string> {
   if (opts.inlineText !== null && opts.inlineText !== '') return opts.inlineText
   if (opts.filePath !== null) {
-    const data = await read(accessor, opts.filePath)
+    const data = await mountIo(command).readBytes(accessor, opts.filePath)
     return DEC.decode(data)
   }
-  const raw = await readStdinAsync(opts.stdin)
+  const raw = await readStdinAsync(command.stdin)
   if (raw !== null) return DEC.decode(raw)
   throw new Error(opts.errorMessage)
 }

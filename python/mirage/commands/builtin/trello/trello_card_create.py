@@ -63,9 +63,9 @@ async def trello_card_create(
     ):
         desc = await resolve_text_input(
             accessor,
+            opts,
             inline_text=fl.as_str("desc"),
             file_path=file_operand(fl, "desc_file"),
-            stdin=opts.stdin,
             error_message="desc is required",
         )
     # A card write is addressed by id, not path, so only the mount-wide

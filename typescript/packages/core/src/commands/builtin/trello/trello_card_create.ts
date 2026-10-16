@@ -53,10 +53,9 @@ async function trelloCardCreate(
   const descFile = fl.asPath('desc_file') ?? null
   let desc: string | undefined
   if (inlineDesc !== null || descFile !== null || opts.stdin !== null) {
-    desc = await resolveTextInput(accessor, {
+    desc = await resolveTextInput(accessor, opts, {
       inlineText: inlineDesc,
       filePath: descFile,
-      stdin: opts.stdin,
       errorMessage: 'desc is required',
     })
   }

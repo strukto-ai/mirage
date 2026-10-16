@@ -457,6 +457,23 @@ async def test_a_glob_past_a_window_asks_the_backend():
 
 
 @pytest.mark.asyncio
+async def test_a_commands_glob_past_a_window_asks_the_backend():
+    # A command's own glob lists through the dispatcher, the pattern riding
+    # along.
+    store = Days()
+    ws = Workspace({"/w/": (store, MountMode.READ)})
+    try:
+        await ws.dispatch("readdir", _at("/w/chan"))
+        r = await ws.shell("ls -d /w/chan/d1*")
+        assert await r.stdout_str() == "/w/chan/d1\n"
+        # A word that matched nothing stays as typed and names no directory.
+        r = await ws.shell("test -e /w/chan/x*; echo $?")
+        assert await r.stdout_str() == "1\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_root_stat_lists_nothing_outside_the_mount():
     store = Days()
     ws = Workspace({"/m/w/": (store, MountMode.READ)})

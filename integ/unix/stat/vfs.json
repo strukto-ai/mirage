@@ -113,7 +113,7 @@
       "command": "stat -c \"%i %h %d %o\" /vfs/settings.json",
       "expect": {
         "exit": 0,
-        "stdout": "? ? ? ?\n",
+        "stdout": "? ? 76220159501914 ?\n",
         "stderr": ""
       }
     },

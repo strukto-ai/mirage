@@ -2162,6 +2162,19 @@ describe('a link at the final name', () => {
         ws.dispatch('readdir', '/data/dlink', [], { nofollow: true }),
       ).rejects.toMatchObject({ code: 'ENOTDIR' })
       expect(await ws.dispatch('readdir', '/data/dlink')).toEqual(['/data/dlink/f.txt'])
+      // A caller that already followed the link hands the directory it
+      // reached, its typed spelling riding along, and lists that one.
+      const reached = new PathSpec({
+        virtual: '/data/d',
+        directory: '/data/',
+        vfsPath: 'd',
+        rawPath: '/data/dlink/',
+        dotted: '/data/dlink/',
+      })
+      const dispatcher = (ws as unknown as { dispatcher: { dispatch: CallerDispatchFn } })
+        .dispatcher
+      const [listed] = await dispatcher.dispatch('readdir', reached)
+      expect(listed).toEqual(['/data/d/f.txt'])
     } finally {
       await ws.close()
     }

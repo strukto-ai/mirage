@@ -507,6 +507,26 @@ describe('a window', () => {
     }
   })
 
+  it("lets a command's glob past it ask the backend", async () => {
+    // A command's own glob lists through the dispatcher, the pattern riding
+    // along.
+    const store = new Days()
+    const ws = new Workspace(
+      { '/w/': store },
+      { mode: MountMode.READ, shellParser: await getTestParser() },
+    )
+    try {
+      await ws.dispatch('readdir', '/w/chan')
+      const listed = await ws.shell('ls -d /w/chan/d1*')
+      expect(new TextDecoder().decode(listed.stdout)).toBe('/w/chan/d1\n')
+      // A word that matched nothing stays as typed and names no directory.
+      const tested = await ws.shell('test -e /w/chan/x*; echo $?')
+      expect(new TextDecoder().decode(tested.stdout)).toBe('1\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('lets a root stat list nothing outside the mount', async () => {
     const store = new Days()
     const ws = new Workspace(

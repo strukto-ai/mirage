@@ -566,15 +566,35 @@ interface Call {
 }
 
 /**
+ * A directory a glob walk lists for a pattern (`PathSpec.dir` shaped), as the
+ * mount at `prefix` lists it: with the pattern, which a backend whose listing
+ * is a window moves the window by. Null for any other path; a glob word left
+ * as typed names no directory. Mirrors Python's MountEntry._scope.
+ */
+function globScope(path: PathSpec, prefix: string): PathSpec | null {
+  const folder = rstripSlash(path.virtual) || '/'
+  if (path.pattern === null || folder !== (rstripSlash(path.directory) || '/')) return null
+  return new PathSpec({
+    virtual: folder,
+    directory: folder,
+    vfsPath: mountKey(folder, rstripSlash(prefix)),
+    pattern: path.pattern,
+    resolved: false,
+  })
+}
+
+/**
  * A listing's names spelled under the directory the caller asked for.
  * Listing a link to a directory lists the directory it reaches, and readdir
  * names its children under the path it was handed, as a walk through the
- * link spells them. Mirrors Python's `_spelled_under`.
+ * link spells them. A caller that handed the directory the link reaches, its
+ * typed spelling riding along, asked for that one. Mirrors Python's
+ * `_spelled_under`.
  */
 function spelledUnder(call: Call, entries: string[]): string[] {
-  if (call.walked === null) return entries
-  const asked = rstripSlash(call.walked.virtual)
   const reached = rstripSlash(call.path.virtual)
+  if (call.walked === null || rstripSlash(call.typed.virtual) === reached) return entries
+  const asked = rstripSlash(call.walked.virtual)
   return entries.map((entry) =>
     entry.startsWith(`${reached}/`) ? asked + entry.slice(reached.length) : entry,
   )
@@ -891,10 +911,11 @@ export class Dispatcher {
         new IOResult(),
       ]
     }
-    const [vfs, scope, mode] = resolved
+    const [vfs, resolvedScope, mode] = resolved
     // resolve() above already threw for a path outside every mount, so
     // this lookup cannot miss.
     const mount = this.namespace.mountFor(call.path.virtual)
+    const scope = (name === 'readdir' ? globScope(call.path, mount.prefix) : null) ?? resolvedScope
     if (mount !== owner) throw ebusy(call.path.virtual)
     if (
       name === 'rmdir' &&
