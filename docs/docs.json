@@ -114,6 +114,14 @@
             ]
           },
           {
+            "group": "Watch",
+            "icon": "bell",
+            "pages": [
+              "home/watch",
+              "home/watch-matrix"
+            ]
+          },
+          {
             "group": "Integration",
             "pages": [
               "home/integration/search",
@@ -476,14 +484,6 @@
             ]
           },
           {
-            "group": "Watch",
-            "icon": "bell",
-            "pages": [
-              "python/watch",
-              "python/watch-matrix"
-            ]
-          },
-          {
             "group": "Runtimes",
             "pages": [
               "python/runtime/python"
@@ -679,14 +679,6 @@
             ]
           },
           {
-            "group": "Watch",
-            "icon": "bell",
-            "pages": [
-              "typescript/watch",
-              "typescript/watch-matrix"
-            ]
-          },
-          {
             "group": "Runtimes",
             "pages": [
               "typescript/runtime/python"
@@ -697,6 +689,22 @@
     ]
   },
   "redirects": [
+    {
+      "source": "/python/watch",
+      "destination": "/home/watch"
+    },
+    {
+      "source": "/python/watch-matrix",
+      "destination": "/home/watch-matrix"
+    },
+    {
+      "source": "/typescript/watch",
+      "destination": "/home/watch"
+    },
+    {
+      "source": "/typescript/watch-matrix",
+      "destination": "/home/watch-matrix"
+    },
     {
       "source": "/home/setup/runtime/python",
       "destination": "/home/setup/runtime/overview"
