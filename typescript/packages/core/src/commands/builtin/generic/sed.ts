@@ -181,7 +181,7 @@ class ScriptWrites {
   errors = ''
 
   private readonly first = new Map<string, string>()
-  private readonly later = new Map<string, { dropped: number; bytes: Uint8Array }>()
+  private readonly later = new Map<string, { dropped: number; parts: Uint8Array[] }>()
   private readonly sent = new Map<string, number>()
 
   constructor(
@@ -193,7 +193,7 @@ class ScriptWrites {
     for (const name of machine.wfiles.keys()) {
       const path = access.virtual(name)
       if (!this.first.has(path)) this.first.set(path, name)
-      else this.later.set(name, { dropped: 0, bytes: new Uint8Array() })
+      else this.later.set(name, { dropped: 0, parts: [] })
     }
   }
 
@@ -210,12 +210,20 @@ class ScriptWrites {
     }
   }
 
-  private keep(kept: { dropped: number; bytes: Uint8Array }, path: string, data: Uint8Array): void {
-    const bytes = concat([kept.bytes, data])
-    const sent = this.sent.get(this.first.get(path) ?? '') ?? 0
-    const covered = Math.min(sent - kept.dropped, bytes.byteLength)
-    kept.bytes = covered > 0 ? bytes.slice(covered) : bytes
-    kept.dropped += Math.max(covered, 0)
+  private keep(
+    kept: { dropped: number; parts: Uint8Array[] },
+    path: string,
+    data: Uint8Array,
+  ): void {
+    kept.parts.push(data)
+    let covered = (this.sent.get(this.first.get(path) ?? '') ?? 0) - kept.dropped
+    for (let head = kept.parts[0]; covered > 0 && head !== undefined; head = kept.parts[0]) {
+      const cut = Math.min(covered, head.byteLength)
+      if (cut === head.byteLength) kept.parts.shift()
+      else kept.parts[0] = head.subarray(cut)
+      kept.dropped += cut
+      covered -= cut
+    }
   }
 
   private async send(name: string, data: Uint8Array): Promise<void> {
@@ -240,7 +248,7 @@ class ScriptWrites {
     for (const [name, kept] of [...this.later].reverse()) {
       const path = this.access.virtual(name)
       const sent = this.sent.get(this.first.get(path) ?? '') ?? 0
-      const piece = kept.bytes.subarray(sent - kept.dropped)
+      const piece = concat(kept.parts).subarray(sent - kept.dropped)
       const tail = tails.get(path) ?? new Uint8Array()
       tails.set(
         path,
