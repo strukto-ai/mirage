@@ -369,8 +369,8 @@ database-backed queue needs no interface changes. See
 [`nextcloud/watch_custom_queue.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/nextcloud/watch_custom_queue.py)
 for a runnable custom-queue setup.
 
-To tear down without closing the workspace, call `detach_watch_runtime()`
-(`detachWatchRuntime()`): every subscriber queue closes, active `watch` loops
+To tear down without closing the workspace, call `await ws.detach_watch_runtime()`
+(`await ws.detachWatchRuntime()`): every subscriber queue closes, active `watch` loops
 end cleanly, and the workspace returns to its idle state. The next `watch()` or
 `notify()` lazily attaches a fresh default runtime.
 
