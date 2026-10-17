@@ -1819,3 +1819,14 @@ describe('bc', () => {
     expect((await runBc(program, { args_l: true })).out).toBe('a=50.204700469970700\n\n')
   })
 })
+
+describe('bc decimal precision', () => {
+  it('preserves integer literals above float precision', async () => {
+    expect((await runBc('9007199254740993\n')).out).toBe('9007199254740993\n')
+    expect((await runBc('9007199254740993-9007199254740992\n')).out).toBe('1\n')
+  })
+
+  it('preserves twenty decimal places in the math library', async () => {
+    expect((await runBc('s(1)\n', { args_l: true })).out).toBe('.84147098480789650665\n')
+  })
+})
