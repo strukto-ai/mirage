@@ -17,6 +17,13 @@ export interface BcNumber {
   readonly scale: number
 }
 
+export interface MathInterval {
+  readonly lower: BcNumber
+  readonly upper: BcNumber
+  readonly lowerOpen: boolean
+  readonly upperOpen: boolean
+}
+
 export interface BcState {
   scale: number
   mathMode: boolean

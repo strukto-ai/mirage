@@ -12,14 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from . import constants
+from .errors import BcRuntimeError
 from .numbers import (
+    ensure_bits,
     integer_sqrt,
     integer_text,
+    power_ten,
     rescale,
     trunc_div,
     truncate_int,
 )
-from .types import BcNumber
+from .types import BcNumber, MathInterval
 
 
 def atan_series(x: int, unit: int) -> int:
@@ -132,20 +136,88 @@ def bc_exp(x: int, unit: int) -> int:
         total += term
         index += 1
     for _ in range(halvings):
+        ensure_bits(2 * total.bit_length())
         total = total * total // unit
     return unit * unit // total if negative else total
 
 
 def log_domain_value(scale: int) -> BcNumber:
-    return BcNumber((1 - 10**scale) * 10**scale, scale)
+    unit = power_ten(scale)
+    ensure_bits(2 * unit.bit_length())
+    return BcNumber((1 - unit) * unit, scale)
+
+
+def settle_interval(interval: MathInterval, scale: int) -> BcNumber | None:
+    def candidate(endpoint: BcNumber, opened: bool, lower: bool) -> int:
+        result = rescale(endpoint, scale).coefficient
+        on_grid = (
+            endpoint.scale <= scale
+            or endpoint.coefficient % power_ten(endpoint.scale - scale) == 0
+        )
+        if opened and on_grid:
+            if lower and endpoint.coefficient < 0:
+                result += 1
+            elif not lower and endpoint.coefficient > 0:
+                result -= 1
+        return result
+
+    lower = candidate(interval.lower, interval.lower_open, True)
+    upper = candidate(interval.upper, interval.upper_open, False)
+    return BcNumber(lower, scale) if lower == upper else None
+
+
+def small_result(name: str, arg: BcNumber, scale: int) -> BcNumber | None:
+    if name not in ("s", "a", "c"):
+        return None
+    magnitude = abs(arg.coefficient)
+    digits = integer_text(magnitude)
+    shift = arg.scale - scale
+    tiny = shift >= 0 and (
+        len(digits) <= shift
+        or len(digits) == shift + 1
+        and digits == "1" + "0" * shift
+    )
+    if tiny:
+        return BcNumber(power_ten(scale) - 1 if name == "c" else 0, scale)
+    if (
+        len(digits) > arg.scale and not (magnitude == 1 and arg.scale == 0)
+    ) or arg.scale > constants.MAX_WORKING_SCALE // 3:
+        return None
+    order = 2 if name == "c" else 3
+    endpoint_scale = order * arg.scale
+    ensure_bits(order * magnitude.bit_length() + 4)
+    power = magnitude**order
+    divisor = 2 if name == "c" else 6 if name == "s" else 3
+    correction, remainder = divmod(power, divisor)
+    upper = (
+        power_ten(endpoint_scale)
+        if name == "c"
+        else magnitude * power_ten(endpoint_scale - arg.scale)
+    )
+    lower = upper - correction - bool(remainder)
+    interval = MathInterval(
+        BcNumber(lower, endpoint_scale),
+        BcNumber(upper, endpoint_scale),
+        remainder == 0,
+        True,
+    )
+    if name != "c" and arg.coefficient < 0:
+        interval = MathInterval(
+            BcNumber(-upper, endpoint_scale),
+            BcNumber(-lower, endpoint_scale),
+            True,
+            remainder == 0,
+        )
+    return settle_interval(interval, scale)
 
 
 def working_scale(name: str, arg: BcNumber, scale: int) -> int:
-    """Reserve digits lost to reduction and repeated squaring.
+    """Plan bounded precision for the approximate general math kernels.
 
     GNU bc 1.07.1's intermediate truncation can alter its last result
     digits, especially for large trigonometric arguments. Extra working
-    precision deliberately keeps the mathematical digits here.
+    precision deliberately reduces that error here. The general kernels
+    do not certify the final digit outside the small-argument enclosures.
 
     Args:
         name (str): the math-library function.
@@ -153,21 +225,52 @@ def working_scale(name: str, arg: BcNumber, scale: int) -> int:
         scale (int): the requested result scale.
     """
     working = max(scale, arg.scale) + 16
+    if name in ("s", "a", "c"):
+        working = max(working, (2 if name == "c" else 3) * arg.scale + 16)
+    if name in ("e", "l"):
+        working = max(working, 2 * arg.scale + 16)
+    if name == "l":
+        working = max(working, scale + arg.scale + 16)
     if name in ("s", "c"):
         working += max(0, len(integer_text(abs(arg.coefficient))) - arg.scale)
     elif name == "e":
-        working += max(0, truncate_int(arg)) // 2
+        integer = truncate_int(arg)
+        if abs(integer) > 2 * constants.MAX_WORKING_SCALE:
+            raise BcRuntimeError(constants.ARITHMETIC_LIMIT)
+        working += abs(integer) // 2
+    if working > constants.MAX_WORKING_SCALE:
+        raise BcRuntimeError(constants.ARITHMETIC_LIMIT)
+    ensure_bits(
+        constants.DECIMAL_DIGIT_BITS
+        * working
+        * constants.SERIES_PRODUCT_FACTORS
+        + constants.SERIES_LOOP_BITS
+    )
     return working
 
 
 def call_function(name: str, arg: BcNumber, scale: int) -> BcNumber:
-    if name == "l" and arg.coefficient <= 0:
+    if arg.coefficient == 0:
+        if name == "l":
+            return log_domain_value(scale)
+        return BcNumber(power_ten(scale) if name in ("c", "e") else 0, scale)
+    digits = integer_text(abs(arg.coefficient))
+    trailing = min(arg.scale, len(digits) - len(digits.rstrip("0")))
+    if trailing:
+        arg = rescale(arg, arg.scale - trailing)
+    if name == "l" and arg.coefficient == 1 and arg.scale == 0:
+        return BcNumber(0, scale)
+    if name == "l" and arg.coefficient < 0:
         return log_domain_value(scale)
     if name == "e" and truncate_int(arg) < -3 * (scale + 16):
         return BcNumber(0, scale)
+    settled = small_result(name, arg, scale)
+    if settled is not None:
+        return settled
     working = working_scale(name, arg, scale)
-    unit = 10**working
+    unit = power_ten(working)
     value = rescale(arg, working).coefficient
+    ensure_bits(abs(value).bit_length() + unit.bit_length() + 2)
     functions = {
         "s": bc_sin,
         "c": bc_cos,

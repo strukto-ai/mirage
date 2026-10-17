@@ -31,6 +31,23 @@ class BcNumber:
     scale: int
 
 
+@dataclass(frozen=True, slots=True)
+class MathInterval:
+    """Decimal bounds and whether either endpoint is excluded.
+
+    Args:
+        lower (BcNumber): the lower bound.
+        upper (BcNumber): the upper bound.
+        lower_open (bool): whether the lower endpoint is excluded.
+        upper_open (bool): whether the upper endpoint is excluded.
+    """
+
+    lower: BcNumber
+    upper: BcNumber
+    lower_open: bool = False
+    upper_open: bool = False
+
+
 @dataclass(slots=True)
 class BcState:
     """What survives between statements on one bc run.

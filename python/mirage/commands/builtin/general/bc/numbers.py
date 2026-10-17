@@ -19,6 +19,49 @@ from .types import BcNumber, BcState
 ZERO = BcNumber(0, 0)
 
 
+def ensure_bits(bits: int) -> None:
+    if bits < 0 or bits > constants.MAX_COEFFICIENT_BITS:
+        raise BcRuntimeError(constants.ARITHMETIC_LIMIT)
+
+
+def power_ten(exponent: int) -> int:
+    ensure_bits(4 * exponent + 1 if exponent >= 0 else -1)
+    value: int = 10**exponent
+    return value
+
+
+def coefficient_bits(value: int) -> int:
+    return abs(value).bit_length()
+
+
+def shift_decimal(value: int, shift: int) -> int:
+    if value == 0:
+        return 0
+    if shift >= 0:
+        ensure_bits(coefficient_bits(value) + 4 * shift)
+        return value * power_ten(shift)
+    if -shift >= coefficient_bits(value):
+        return 0
+    return trunc_div(value, power_ten(-shift))
+
+
+def normalize(num: BcNumber) -> BcNumber:
+    coefficient, scale = num.coefficient, num.scale
+    if coefficient == 0:
+        return ZERO
+    while scale and coefficient % 10 == 0:
+        coefficient //= 10
+        scale -= 1
+    return BcNumber(coefficient, scale)
+
+
+def multiply(a: int, b: int) -> int:
+    if a == 0 or b == 0:
+        return 0
+    ensure_bits(coefficient_bits(a) + coefficient_bits(b))
+    return a * b
+
+
 def clamp_scale(scale: int) -> int:
     return max(0, min(scale, constants.MAX_SCALE))
 
@@ -44,17 +87,11 @@ def trunc_div(a: int, b: int) -> int:
 
 
 def rescale(num: BcNumber, scale: int) -> BcNumber:
-    shift = scale - num.scale
-    coefficient = (
-        num.coefficient * 10**shift
-        if shift >= 0
-        else trunc_div(num.coefficient, 10**-shift)
-    )
-    return BcNumber(coefficient, scale)
+    return BcNumber(shift_decimal(num.coefficient, scale - num.scale), scale)
 
 
 def truncate_int(num: BcNumber) -> int:
-    return trunc_div(num.coefficient, 10**num.scale)
+    return shift_decimal(num.coefficient, -num.scale)
 
 
 def digit_value(char: str, ibase: int, clamp: bool) -> int:
@@ -66,7 +103,10 @@ def read_base_number(raw: str, ibase: int) -> BcNumber:
     whole, _, fraction = raw.partition(".")
     if "." in fraction:
         raise BcParseError(constants.SYNTAX_ERROR)
+    if len(whole) + len(fraction) > constants.MAX_LITERAL_DIGITS:
+        raise BcRuntimeError(constants.ARITHMETIC_LIMIT)
     scale = len(fraction)
+    ensure_bits(4 * (len(whole) + scale) + 1)
     numerator = 0
     for char in whole:
         numerator = numerator * ibase + digit_value(
@@ -74,7 +114,11 @@ def read_base_number(raw: str, ibase: int) -> BcNumber:
         )
     for char in fraction:
         numerator = numerator * ibase + digit_value(char, ibase, True)
-    return BcNumber(numerator * 10**scale // ibase ** len(fraction), scale)
+    if ibase == constants.DEFAULT_BASE:
+        return BcNumber(numerator, scale)
+    ensure_bits(ibase.bit_length() * scale + 1)
+    denominator = ibase**scale
+    return BcNumber(shift_decimal(numerator, scale) // denominator, scale)
 
 
 def add_scale(a: BcNumber, b: BcNumber) -> int:
@@ -94,9 +138,10 @@ def pow_scale(a: BcNumber, exponent: int, scale: int) -> int:
 def divide(a: BcNumber, b: BcNumber, scale: int) -> BcNumber:
     if b.coefficient == 0:
         raise BcRuntimeError(constants.DIVIDE_BY_ZERO)
-    shift = b.scale + scale - a.scale
-    numerator = a.coefficient * 10 ** max(shift, 0)
-    denominator = b.coefficient * 10 ** max(-shift, 0)
+    left, right = normalize(a), normalize(b)
+    shift = right.scale + scale - left.scale
+    numerator = shift_decimal(left.coefficient, max(shift, 0))
+    denominator = shift_decimal(right.coefficient, max(-shift, 0))
     return BcNumber(trunc_div(numerator, denominator), scale)
 
 
@@ -107,8 +152,17 @@ def modulo(a: BcNumber, b: BcNumber, scale: int) -> BcNumber:
     result_scale = max(a.scale, scale + b.scale)
     left = rescale(a, result_scale)
     product = rescale(
-        BcNumber(quotient.coefficient * b.coefficient, scale + b.scale),
+        BcNumber(
+            multiply(quotient.coefficient, b.coefficient), scale + b.scale
+        ),
         result_scale,
+    )
+    ensure_bits(
+        max(
+            coefficient_bits(left.coefficient),
+            coefficient_bits(product.coefficient),
+        )
+        + 1
     )
     return BcNumber(left.coefficient - product.coefficient, result_scale)
 
@@ -121,10 +175,13 @@ def apply_binary(
         target = add_scale(a, b)
         left = rescale(a, target).coefficient
         right = rescale(b, target).coefficient
+        ensure_bits(max(coefficient_bits(left), coefficient_bits(right)) + 1)
         return BcNumber(left + right if op == "+" else left - right, target)
     if op == "*":
         return rescale(
-            BcNumber(a.coefficient * b.coefficient, a.scale + b.scale),
+            BcNumber(
+                multiply(a.coefficient, b.coefficient), a.scale + b.scale
+            ),
             mul_scale(a, b, scale),
         )
     if op == "/":
@@ -138,12 +195,24 @@ def apply_binary(
         )
     if exponent == 0:
         return BcNumber(1, 0)
-    if exponent < 0 and a.coefficient == 0:
-        raise BcRuntimeError(constants.POW_DIVIDE_BY_ZERO)
-    power = BcNumber(a.coefficient ** abs(exponent), a.scale * abs(exponent))
+    result_scale = pow_scale(a, exponent, scale)
+    base = normalize(a)
+    if base.coefficient == 0:
+        if exponent < 0:
+            raise BcRuntimeError(constants.POW_DIVIDE_BY_ZERO)
+        return BcNumber(0, result_scale)
+    magnitude = abs(exponent)
+    if abs(base.coefficient) == 1:
+        sign = -1 if base.coefficient < 0 and magnitude % 2 else 1
+        shift = result_scale + base.scale * -exponent
+        return BcNumber(shift_decimal(sign, shift), result_scale)
+    ensure_bits(coefficient_bits(base.coefficient) * magnitude)
+    raw_scale = base.scale * magnitude
+    ensure_bits(4 * raw_scale + 1)
+    power = BcNumber(base.coefficient**magnitude, raw_scale)
     if exponent < 0:
-        return divide(BcNumber(1, 0), power, scale)
-    return rescale(power, pow_scale(a, exponent, scale))
+        return divide(BcNumber(1, 0), power, result_scale)
+    return rescale(power, result_scale)
 
 
 def integer_sqrt(value: int) -> int:
@@ -162,11 +231,13 @@ def bc_sqrt(arg: BcNumber, scale: int) -> BcNumber:
         raise BcRuntimeError(constants.NEGATIVE_SQRT)
     if arg.coefficient == 0:
         return ZERO
-    if arg.coefficient == 10**arg.scale:
+    base = normalize(arg)
+    if base == BcNumber(1, 0):
         return BcNumber(1, 0)
     target = max(scale, arg.scale)
     return BcNumber(
-        integer_sqrt(arg.coefficient * 10 ** (2 * target - arg.scale)), target
+        integer_sqrt(shift_decimal(base.coefficient, 2 * target - base.scale)),
+        target,
     )
 
 

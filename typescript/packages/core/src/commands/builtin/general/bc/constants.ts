@@ -14,6 +14,12 @@
 
 export const MATH_LIBRARY_SCALE = 20
 export const MAX_SCALE = 100
+export const MAX_COEFFICIENT_BITS = 65536
+export const MAX_LITERAL_DIGITS = 16000
+export const MAX_WORKING_SCALE = 4096
+export const DECIMAL_DIGIT_BITS = 4
+export const SERIES_PRODUCT_FACTORS = 3
+export const SERIES_LOOP_BITS = 128
 export const DEFAULT_BASE = 10
 export const MIN_BASE = 2
 export const MAX_IBASE = 16
@@ -28,6 +34,7 @@ export const C_INT_BITS = 32n
 
 export const RUNTIME_ERROR_ADDR = 3
 
+export const ARITHMETIC_LIMIT = 'Arithmetic limit exceeded'
 export const DIVIDE_BY_ZERO = 'Divide by zero'
 export const MODULO_BY_ZERO = 'Modulo by zero'
 export const POW_DIVIDE_BY_ZERO = 'divide by zero'
