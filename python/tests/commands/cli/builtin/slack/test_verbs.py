@@ -26,6 +26,7 @@ from mirage.commands.cli.builtin.slack import (
     react,
     reactions,
     read_messages,
+    search,
     send_message,
     unpin_message,
 )
@@ -43,6 +44,10 @@ def _ctx(leaf: str, **flags: str) -> Context:
 
 async def _json(out):
     return json.loads(await materialize(out))
+
+
+async def _echo_fetch(config, channel, limit):
+    return [{"ts": "1.0", "text": f"{channel}:{limit}"}]
 
 
 @pytest.mark.asyncio
@@ -68,16 +73,40 @@ async def test_send_message_threads_when_thread_ts_given(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_read_messages_defaults_limit(monkeypatch):
-    async def fake_fetch(config, channel, limit):
-        return [{"ts": "1.0", "text": f"{channel}:{limit}"}]
-
     monkeypatch.setitem(
-        read_messages.__globals__, "fetch_recent_messages", fake_fetch
+        read_messages.__globals__, "fetch_recent_messages", _echo_fetch
     )
     out, _io = await read_messages(
         CONFIG, [], [], _ctx("read-messages", channel="C1")
     )
     assert await _json(out) == [{"ts": "1.0", "text": "C1:20"}]
+
+
+@pytest.mark.asyncio
+async def test_read_messages_keeps_an_explicit_zero_limit(monkeypatch):
+    monkeypatch.setitem(
+        read_messages.__globals__, "fetch_recent_messages", _echo_fetch
+    )
+    out, _io = await read_messages(
+        CONFIG, [], [], Context(flags={"channel": "C1", "limit": 0})
+    )
+    assert await _json(out) == [{"ts": "1.0", "text": "C1:0"}]
+
+
+@pytest.mark.asyncio
+async def test_search_keeps_an_explicit_zero_count_and_page(monkeypatch):
+    calls = []
+
+    async def fake_search(config, query, count, page):
+        calls.append((query, count, page))
+        return b"{}"
+
+    monkeypatch.setitem(search.__globals__, "search_messages", fake_search)
+    await search(
+        CONFIG, [], [], Context(flags={"query": "q", "count": 0, "page": 0})
+    )
+    await search(CONFIG, [], [], Context(flags={"query": "q"}))
+    assert calls == [("q", 0, 0), ("q", 20, 1)]
 
 
 @pytest.mark.asyncio

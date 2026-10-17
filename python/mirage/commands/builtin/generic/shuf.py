@@ -11,12 +11,13 @@ from contextlib import aclosing
 from dataclasses import dataclass
 from enum import Enum
 
-from mirage.commands.builtin.constants import C_SPACE
+from mirage.commands.builtin.constants import C_SPACE, EOVERFLOW_TEXT, UINTMAX
 from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.usage import usage_hint
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.cooperative import CHUNK_SIZE
@@ -44,18 +45,17 @@ MEMORY_EXHAUSTED = "shuf: memory exhausted"
 # read differently (`: Numerical result out of range` is the value
 # outside an option's OWN range), while `shuf -i` has no range below the
 # C type's and so only ever emits this one. Measured, ground truth SH1.
-OVERFLOW_CLAUSE = ": Value too large for defined data type"
+OVERFLOW_CLAUSE = f": {EOVERFLOW_TEXT}"
 
 MULTIPLE_RANGES = "shuf: multiple -i options specified"
 
 MULTIPLE_OUTPUTS = "shuf: multiple output files specified"
 
-_TRY_HELP = "\nTry 'shuf --help' for more information."
+_TRY_HELP = "\n" + usage_hint("shuf")
 
 ECHO_WITH_RANGE = "shuf: cannot combine -e and -i options" + _TRY_HELP
 
-UINTMAX_MAX = 18446744073709551615
-SIZE_MAX = 18446744073709551615
+SIZE_MAX = UINTMAX
 
 # How many lines shuf will render into one byte object before answering
 # `memory exhausted`. GNU has no such number: it streams, so a huge
@@ -197,12 +197,12 @@ def parse_input_range(raw: str) -> tuple[int, int] | RangeRefusal:
     if _UNSIGNED.fullmatch(low_raw) is None:
         return RangeRefusal.INVALID
     low = int(low_raw)
-    if low > UINTMAX_MAX:
+    if low > UINTMAX:
         return RangeRefusal.OVERFLOW
     if _UNSIGNED.fullmatch(high_raw) is None:
         return RangeRefusal.INVALID
     high = int(high_raw)
-    if high > UINTMAX_MAX:
+    if high > UINTMAX:
         return RangeRefusal.OVERFLOW
     if low > high or high - low >= SIZE_MAX:
         return RangeRefusal.INVALID
@@ -611,7 +611,6 @@ __all__ = [
     "NO_WRITE_OP",
     "OVERFLOW_CLAUSE",
     "SIZE_MAX",
-    "UINTMAX_MAX",
     "RangeRefusal",
     "ShufFlags",
     "emit_count",

@@ -30,6 +30,7 @@ import { ZipUpdateError } from './archive/errors.ts'
 import type { MemberKind, ZipArchive, ZipRecord } from './archive/types.ts'
 import { OTHER_FILESYSTEM, scanOperand, type StatFn, type WalkFn } from './archive/walk.ts'
 import { linksOf, mountsOf } from '../utils/links.ts'
+import { formatOptionalRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
 
@@ -367,8 +368,7 @@ export async function zipGeneric(
       if (!isFsError(err)) throw err
       return createError(archivePath, String(fsStrerror(err)), warningText(plan.warnings, quiet))
     }
-    const stdout: ByteSource | null =
-      !quiet && outputLines.length > 0 ? ENC.encode(outputLines.join('\n') + '\n') : null
+    const stdout: ByteSource | null = !quiet ? formatOptionalRecords(outputLines) : null
     return [stdout, new IOResult({ stderr: ENC.encode(warningText(plan.warnings, quiet)) })]
   } finally {
     try {

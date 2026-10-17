@@ -63,6 +63,10 @@ DATA_SOURCE = "--data"
 INLINE_SOURCE = "inline body inputs"
 BAD_BODY_EXIT = 1
 REFUSAL_EXIT = 5
+EMPTY_METHOD = (
+    "error: Invalid HTTP method ``.\n  hint: Use a standard method such as "
+    "GET, POST, PATCH, PUT, or DELETE.\n"
+)
 
 # The write verbs share one shape and `notion_get` does not (a query
 # where they take a body), so the table is typed by what every entry
@@ -283,7 +287,9 @@ async def api(
     elif inline:
         body = inline
 
-    method = (fl.as_str("method") or ("POST" if named else "GET")).upper()
+    method = fl.as_str("method", "POST" if named else "GET").upper()
+    if not method:
+        return refusal(EMPTY_METHOD, REFUSAL_EXIT)
     call = METHODS.get(method)
     if call is None:
         raise UsageError(f"unsupported method: {method}")

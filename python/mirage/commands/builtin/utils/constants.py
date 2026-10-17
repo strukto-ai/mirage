@@ -42,6 +42,14 @@ CHAR_DEVICE_MAX_BYTES = 8 << 20
 # checksum list a ``*sum -c`` diagnostic names.
 STDIN_HEADER_NAME = "standard input"
 
+# grep's name for stdin in a match prefix or diagnostic, unless --label
+# names another.
+GREP_STDIN_LABEL = "(standard input)"
+
+# How long curl and wget wait on a request when the line sets no limit
+# of its own.
+HTTP_TIMEOUT_SECONDS = 30
+
 # The operand a command reads stdin through when the line names none.
 STDIN_OPERAND = PathSpec(virtual="-", directory="-", vfs_path="-")
 

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec.constants import PATHS_OPERAND, TEXTS_OPERAND
 from mirage.commands.spec.types import Argument, CommandSpec
 
 SPECS: dict[str, CommandSpec] = {
@@ -63,7 +64,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("--block-size"),
             Argument("--hyperlink", nargs="?", attached_only=True),
             Argument("-Z", "--context", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "stat": CommandSpec(
@@ -71,14 +72,14 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-c", "--format"),
             Argument("-f", "--file-system", action="store_true"),
             Argument("-L", "--dereference", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "pwd": CommandSpec(
         arguments=(
             Argument("-P", action="store_true"),
             Argument("-L", action="store_true"),
-            Argument("texts", nargs="*", metavar=""),
+            TEXTS_OPERAND,
         )
     ),
     "find": CommandSpec(
@@ -123,7 +124,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-a", action="store_true"),
             Argument("-and", action="store_true"),
             Argument("-not", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         ),
     ),
     "tree": CommandSpec(
@@ -134,7 +135,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-d", action="store_true"),
             Argument("-P"),
             Argument("-x", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "du": CommandSpec(
@@ -148,7 +149,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-P", action="store_true"),
             Argument("-S", "--separate-dirs", action="store_true"),
             Argument("-x", "--one-file-system", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "df": CommandSpec(
@@ -161,7 +162,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-T", action="store_true"),
             Argument("-P", action="store_true"),
             Argument("-B"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "mount": CommandSpec(
@@ -237,7 +238,7 @@ SPECS: dict[str, CommandSpec] = {
                 action="store_true",
                 help="Mount a subtree and all submounts somewhere else.",
             ),
-            Argument("texts", nargs="*", metavar=""),
+            TEXTS_OPERAND,
         ),
     ),
     "file": CommandSpec(
@@ -246,7 +247,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-i", action="store_true"),
             Argument("-L", action="store_true"),
             Argument("-h", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
 }

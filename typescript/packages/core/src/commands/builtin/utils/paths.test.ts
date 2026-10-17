@@ -17,40 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { hasUnresolvedGlob, resolvePathStat } from './paths.ts'
-
-function concretePath(): PathSpec {
-  return new PathSpec({
-    virtual: '/public/tables/books/rows.jsonl',
-    directory: '/public/tables/books/',
-    vfsPath: 'public/tables/books/rows.jsonl',
-    resolved: true,
-  })
-}
-
-function globPath(): PathSpec {
-  return new PathSpec({
-    virtual: '/public/tables/*/rows.jsonl',
-    directory: '/public/tables/',
-    vfsPath: 'public/tables/*/rows.jsonl',
-    pattern: 'rows.jsonl',
-    resolved: false,
-  })
-}
-
-describe('hasUnresolvedGlob', () => {
-  it('is false for concrete operands', () => {
-    expect(hasUnresolvedGlob([concretePath()])).toBe(false)
-  })
-
-  it('is false for no operands', () => {
-    expect(hasUnresolvedGlob([])).toBe(false)
-  })
-
-  it('is true when any operand still carries a pattern', () => {
-    expect(hasUnresolvedGlob([concretePath(), globPath()])).toBe(true)
-  })
-})
+import { resolvePathStat } from './paths.ts'
 
 /** Fake op dispatcher answering stat and readdir independently. */
 function dispatcher(

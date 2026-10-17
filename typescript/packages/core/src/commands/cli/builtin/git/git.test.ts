@@ -487,3 +487,30 @@ it('matches native remote URLs and tracking branches', async () => {
     realGit(['update-ref', '-d', 'refs/remotes/origin/main'])
   }
 })
+
+// A verb that writes only under some of its options (branch, symbolic-ref,
+// hash-object -w) still counts, since policy and the cache read one answer
+// for the whole verb.
+it('declares every verb that can change the repository a write', () => {
+  const writes = Object.entries(GIT.handlers)
+    .filter(([, handler]) => handler.write)
+    .map(([path]) => path)
+    .sort()
+  expect(writes).toEqual([
+    'add',
+    'branch',
+    'checkout',
+    'clone',
+    'commit',
+    'fetch',
+    'hash-object',
+    'init',
+    'mv',
+    'reset',
+    'restore',
+    'rm',
+    'switch',
+    'symbolic-ref',
+    'tag',
+  ])
+})

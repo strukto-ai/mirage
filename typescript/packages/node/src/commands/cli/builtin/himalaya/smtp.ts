@@ -17,6 +17,8 @@ import type * as Nodemailer from 'nodemailer'
 import { parseRfc822, type ParsedRfc822 } from '../../../../core/email/_parse.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
 
+const IMPLICIT_TLS_PORT = 465
+
 const transporterCache = new WeakMap<EmailConfig, Nodemailer.Transporter>()
 
 async function getTransporter(config: EmailConfig): Promise<Nodemailer.Transporter> {
@@ -26,10 +28,13 @@ async function getTransporter(config: EmailConfig): Promise<Nodemailer.Transport
     () => import('nodemailer') as unknown as Promise<typeof Nodemailer>,
     { feature: 'himalaya message send', packageName: 'nodemailer' },
   )
+  // Port 465 speaks TLS from its first byte (RFC 8314's implicit TLS);
+  // with secure false nodemailer connects in plaintext and upgrades when
+  // the server advertises STARTTLS. Mirrors Python's send_raw.
   const transporter = mod.createTransport({
     host: config.smtpHost,
     port: config.smtpPort,
-    secure: config.smtpPort === 465,
+    secure: config.smtpPort === IMPLICIT_TLS_PORT,
     auth: { user: config.username, pass: config.password },
   })
   transporterCache.set(config, transporter)

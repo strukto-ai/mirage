@@ -1,5 +1,6 @@
 import struct
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
+from dataclasses import dataclass
 
 from mirage.commands.builtin.constants import (
     OD_OVERFLOW_UNITS,
@@ -9,7 +10,11 @@ from mirage.commands.builtin.constants import (
 )
 from mirage.commands.builtin.utils.size_suffix import parse_base0
 from mirage.commands.builtin.utils.stream import resolve_source, stdin_stream
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
 from mirage.io.cooperative import chunks
@@ -18,6 +23,25 @@ from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 
 SKIP_PAST_END = b"od: cannot skip past end of combined input\n"
+RADIX_REFUSAL = (
+    "od: invalid output address radix '{}'; it must be one character "
+    "from [doxn]"
+)
+
+
+def parse_radix(value: str) -> str:
+    """``-A`` as GNU od reads it: its first character, one of ``doxn``.
+
+    An empty value is its terminating NUL, refused like any other
+    character (GNU 9.7 prints the NUL between the quotes).
+
+    Args:
+        value (str): the raw flag value.
+    """
+    radix = value[:1] or "\0"
+    if radix not in "doxn":
+        raise UsageError(RADIX_REFUSAL.format(radix), 1)
+    return radix
 
 
 def parse_count(value: str, flag: str) -> int:
@@ -171,15 +195,44 @@ async def _combined(
     return b"".join(kept), err, opened, skip
 
 
+@dataclass(frozen=True, slots=True)
+class OdFlags:
+    address_radix: str = "o"
+    skip: int = 0
+    limit: int | None = None
+    formats: tuple[str, ...] = ()
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> OdFlags:
+    """od's options, read once and refused in GNU's order: -A, -j, -N.
+
+    An explicitly empty value is read as typed, not as absent: GNU
+    refuses ``od -N ''`` as an invalid argument.
+
+    Args:
+        flags (Mapping[str, FlagValue]): the line's parsed options.
+    """
+    fl = FlagView(flags, spec=SPECS["od"])
+    formats = tuple(
+        "c" if name == "c" else str(value)
+        for name, value in fl.occurrences("format", "c")
+    )
+    radix = parse_radix(fl.as_str("address_radix", "o"))
+    skip = fl.as_str("skip_bytes")
+    limit = fl.as_str("read_bytes")
+    return OdFlags(
+        address_radix=radix,
+        skip=0 if skip is None else parse_count(skip, "-j"),
+        limit=None if limit is None else parse_count(limit, "-N"),
+        formats=formats,
+    )
+
+
 async def od_generic(
     paths: list[PathSpec],
+    ctx: Context,
     *,
     read_stream: Callable[[PathSpec], AsyncIterator[bytes]],
-    stdin: ByteSource | None = None,
-    address_radix: str = "o",
-    skip: int = 0,
-    limit: int | None = None,
-    formats: list[str] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Dump the operands, GNU od semantics; mirrors odGeneric.
 
@@ -188,13 +241,13 @@ async def od_generic(
 
     Args:
         paths (list[PathSpec]): the operands, empty for stdin.
+        ctx (Context): the line's options and input.
         read_stream (Callable): bound reader, ``read_stream(path)``.
-        stdin (ByteSource | None): the line's input.
-        address_radix (str): -A.
-        skip (int): -j.
-        limit (int | None): -N.
-        formats (list[str] | None): the -t types in order.
     """
+    parsed = parse_flags(ctx.flags)
+    stdin = ctx.stdin
+    address_radix = parsed.address_radix
+    skip, limit = parsed.skip, parsed.limit
     if paths:
         data, err, opened, unspent = await _combined(
             paths,
@@ -210,7 +263,7 @@ async def od_generic(
     io = IOResult(exit_code=1 if err else 0, stderr=err or None)
     if not opened:
         return None, io
-    type_specs = formats or ["o2"]
+    type_specs = list(parsed.formats) or ["o2"]
     lines: list[str] = []
     for offset in range(0, len(data), 16):
         block = data[offset : offset + 16]
@@ -235,4 +288,10 @@ async def od_generic(
     return ("\n".join(lines) + "\n").encode(), io
 
 
-__all__ = ["od_generic", "parse_count"]
+__all__ = [
+    "OdFlags",
+    "od_generic",
+    "parse_count",
+    "parse_flags",
+    "parse_radix",
+]

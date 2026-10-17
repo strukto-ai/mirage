@@ -20,6 +20,7 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { perOperand } from '../utils/operands.ts'
+import { UINT_MAX, strtoul } from '../utils/strtol.ts'
 import { chunks } from '../../../io/cooperative.ts'
 
 async function* stringsStream(source: ByteSource, minLen: number): AsyncIterable<Uint8Array> {
@@ -49,13 +50,30 @@ async function* stringsStream(source: ByteSource, minLen: number): AsyncIterable
   if (printing) yield new Uint8Array([10])
 }
 
+// `-n` as binutils 2.44 scans it: strtoul at base 0, every byte. Mirrors
+// Python's `_min_length`.
+function minLength(text: string): bigint | null {
+  const [value, rest] = strtoul(text)
+  return rest === '' ? value : null
+}
+
+// binutils' set_string_min refusals, in the order it tests them. Mirrors
+// Python's `_min_length_refusal`.
+function minLengthRefusal(text: string, value: bigint | null): string {
+  if (value === null) return `strings: invalid integer argument ${text}`
+  if (value > UINT_MAX) return `strings: minimum string length is too big: ${text}`
+  if (value === 0n) return `strings: minimum string length is too small: ${text}`
+  return `strings: minimum string length ${text} is too big`
+}
+
 interface StringsFlags {
   readonly minLen: number
 }
 
 function parseFlags(bag: Record<string, FlagValue>): StringsFlags {
   const fl = new FlagView(bag, specOf('strings'))
-  return { minLen: fl.asInt('n') ?? 4 }
+  const minLen = fl.asNumber('n', minLength, minLengthRefusal, { low: 1n, high: UINT_MAX - 1n })
+  return { minLen: minLen === undefined ? 4 : Number(minLen) }
 }
 
 export function stringsGeneric(

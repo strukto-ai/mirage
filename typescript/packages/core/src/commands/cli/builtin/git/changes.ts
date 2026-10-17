@@ -18,9 +18,9 @@ import git from 'isomorphic-git'
 import { visibleEntries } from './pathspec.ts'
 
 import { fsStrerror, isEacces, isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
-import { UnhashableFileError } from './errors.ts'
+import { AmbiguousArgumentError, UnhashableFileError } from './errors.ts'
 import { entryMode } from './add.ts'
-import { GITLINK_MODE, SYMLINK } from './constants.ts'
+import { EXECUTABLE_MODE, GITLINK_MODE, REGULAR_MODE, SYMLINK, SYMLINK_MODE } from './constants.ts'
 import { readIndex } from './index_file.ts'
 import { entryBytes } from './io.ts'
 
@@ -50,8 +50,6 @@ const MAX_RENAME_FILES = 200
 // similarity: a symlink is paired only with another symlink holding the same
 // bytes, since scoring one against a file would pair two unrelated things by
 // the bytes of a path.
-const REGULAR_MODE = '100644'
-const REGULAR_EXEC_MODE = '100755'
 // What a mode says a path is, for pairing within one kind. Only the executable
 // bit separates the two regular modes, and git renames across it.
 const SYMLINK_KIND = 'symlink'
@@ -70,17 +68,20 @@ const CONFLICT_CODES: Record<string, string> = {
   'false,false,true': 'UA',
 }
 
-/** One staged verdict: its letter, and the path it was renamed from. */
-type StagedRow = readonly [string, string | null]
+/**
+ * One staged verdict: its letter, the path it was renamed from, and how similar
+ * the two are (0 when it is no rename).
+ */
+type StagedRow = readonly [string, string | null, number]
 
 function isRegular(mode: string): boolean {
-  return mode === REGULAR_MODE || mode === REGULAR_EXEC_MODE
+  return mode === REGULAR_MODE || mode === EXECUTABLE_MODE
 }
 
 /** What a mode makes a path, for a rename pair that must not cross kinds. */
 export function kindOf(mode: string): string {
   if (isRegular(mode)) return REGULAR_KIND
-  return mode === '120000' ? SYMLINK_KIND : mode
+  return mode === SYMLINK_MODE ? SYMLINK_KIND : mode
 }
 
 /**
@@ -94,11 +95,14 @@ export function kindOf(mode: string): string {
  * the commit it names, rather than being read as a tree it does not have.
  */
 export async function headEntries(repo: Repo): Promise<Map<string, TreeEntry> | null> {
+  let head: string
   try {
-    return await commitEntries(repo, await resolveCommit(repo, 'HEAD'))
-  } catch {
-    return null
+    head = await resolveCommit(repo, 'HEAD')
+  } catch (err) {
+    if (err instanceof AmbiguousArgumentError) return null
+    throw err
   }
+  return commitEntries(repo, head)
 }
 
 /**
@@ -152,7 +156,7 @@ async function contentRenames(
   deletes: readonly string[],
   oids: ReadonlyMap<string, string>,
   threshold: number = RENAME_THRESHOLD,
-): Promise<[string, string][]> {
+): Promise<[string, string, number][]> {
   if (
     adds.length === 0 ||
     deletes.length === 0 ||
@@ -192,12 +196,12 @@ async function contentRenames(
   )
   const takenNew = new Set<string>()
   const takenOld = new Set<string>()
-  const pairs: [string, string][] = []
-  for (const [, fresh, old] of candidates) {
+  const pairs: [string, string, number][] = []
+  for (const [score, fresh, old] of candidates) {
     if (takenNew.has(fresh) || takenOld.has(old)) continue
     takenNew.add(fresh)
     takenOld.add(old)
-    pairs.push([fresh, old])
+    pairs.push([fresh, old, -score])
   }
   return pairs
 }
@@ -207,7 +211,8 @@ async function contentRenames(
  *
  * Two passes, git's own order: identical content first, then what is merely
  * similar enough. Both pair within one kind, and only the second is limited to
- * regular files: a moved symlink is a rename git reports as one.
+ * regular files: a moved symlink is a rename git reports as one. Each rename
+ * carries its similarity, 100 for identical content.
  */
 export async function pairRenames(
   repo: Repo,
@@ -223,7 +228,9 @@ export async function pairRenames(
       .sort(compareCodePoints)
   const adds = pick(ADDED)
   const deletes = pick(DELETED)
-  const pairs = exactRenames(adds, deletes, oids, kinds)
+  const pairs: [string, string, number][] = exactRenames(adds, deletes, oids, kinds).map(
+    ([fresh, old]) => [fresh, old, 100],
+  )
   const matchedNew = new Set(pairs.map(([fresh]) => fresh))
   const matchedOld = new Set(pairs.map(([, old]) => old))
   const scored = (side: string[]): string[] => side.filter((p) => kinds.get(p) === REGULAR_KIND)
@@ -236,12 +243,14 @@ export async function pairRenames(
       threshold,
     )),
   )
-  const paired = new Map(pairs.map(([fresh, old]) => [fresh, [RENAMED, old] as StagedRow]))
+  const paired = new Map(
+    pairs.map(([fresh, old, score]) => [fresh, [RENAMED, old, score] as StagedRow]),
+  )
   const consumed = new Set(pairs.map(([, old]) => old))
   const out = new Map<string, StagedRow>()
   for (const [path, letter] of staged) {
     if (consumed.has(path)) continue
-    out.set(path, paired.get(path) ?? [letter, null])
+    out.set(path, paired.get(path) ?? [letter, null, 0])
   }
   return out
 }

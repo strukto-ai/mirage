@@ -214,8 +214,12 @@ export async function api(
   const values = await fields(config, ctx, fl)
   const input = await inputBody(ctx, fl)
   const hasInput = fl.raw('input') !== undefined
-  const method = fl.asStr('method') ?? (Object.keys(values).length > 0 || hasInput ? 'POST' : 'GET')
+  // An explicit empty -X keeps gh's own branch, where fields ride the body as
+  // for any method it does not read as GET, and the request goes out as GET,
+  // which is what Go's net/http sends for an empty method.
+  const method = fl.asStr('method', Object.keys(values).length > 0 || hasInput ? 'POST' : 'GET')
   const upper = method.toUpperCase()
+  const wire = upper === '' ? 'GET' : upper
   const expanded = expand(endpoint, config as GhConfig)
   const path =
     expanded === GRAPHQL_PATH ? expanded : expanded.startsWith('/') ? expanded : `/${expanded}`
@@ -249,7 +253,7 @@ export async function api(
         transport.requestWithResponse === undefined
           ? {
               data: await transport.request(
-                upper,
+                wire,
                 current,
                 body,
                 first ? params : undefined,
@@ -259,7 +263,7 @@ export async function api(
               headers: {},
             }
           : await transport.requestWithResponse(
-              upper,
+              wire,
               current,
               body,
               first ? params : undefined,

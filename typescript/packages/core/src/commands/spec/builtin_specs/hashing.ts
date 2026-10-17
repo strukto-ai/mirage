@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { CommandSpec, Argument } from '../types.ts'
+import { PATH2_OPERAND, PATHS_OPERAND, PATH_OPERAND } from '../constants.ts'
 
 const CHECKSUM = new CommandSpec({
   arguments: [
@@ -25,7 +26,7 @@ const CHECKSUM = new CommandSpec({
     new Argument('--ignore-missing', { action: 'store_true' }),
     new Argument('--strict', { action: 'store_true' }),
     new Argument('--quiet', { action: 'store_true' }),
-    new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+    PATHS_OPERAND,
   ],
 })
 
@@ -36,7 +37,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-D', { action: 'store_true' }),
       new Argument(['-w', '--wrap']),
       new Argument(['-i', '--ignore-garbage'], { action: 'store_true' }),
-      new Argument('path', { metavar: '', type: 'path', nargs: '?' }),
+      PATH_OPERAND,
     ],
   }),
   cmp: new CommandSpec({
@@ -47,8 +48,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-n', '--bytes']),
       new Argument(['-b', '--print-bytes'], { action: 'store_true' }),
       new Argument(['-i', '--ignore-initial']),
-      new Argument('path', { metavar: '', type: 'path', nargs: '?' }),
-      new Argument('path2', { metavar: '', type: 'path', nargs: '?' }),
+      PATH_OPERAND,
+      PATH2_OPERAND,
       new Argument('text3', { metavar: '', nargs: '?' }),
       new Argument('text4', { metavar: '', nargs: '?' }),
     ],
@@ -69,8 +70,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-x', '--exclude'], { action: 'append' }),
       new Argument(['-X', '--exclude-from'], { action: 'append', type: 'path' }),
       new Argument(['-s', '--report-identical-files'], { action: 'store_true' }),
-      new Argument('path', { metavar: '', type: 'path', nargs: '?' }),
-      new Argument('path2', { metavar: '', type: 'path', nargs: '?' }),
+      PATH_OPERAND,
+      PATH2_OPERAND,
     ],
   }),
   iconv: new CommandSpec({
@@ -80,11 +81,11 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-c', { action: 'store_true' }),
       new Argument('-o', { type: 'path' }),
       new Argument(['-l', '--list'], { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   md5: new CommandSpec({
-    arguments: [new Argument('paths', { metavar: '', type: 'path', nargs: '*' })],
+    arguments: [PATHS_OPERAND],
   }),
   md5sum: CHECKSUM,
   patch: new CommandSpec({
@@ -93,8 +94,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-R', { action: 'store_true' }),
       new Argument('-i', { type: 'path' }),
       new Argument('-N', { action: 'store_true' }),
-      new Argument('path', { metavar: '', type: 'path', nargs: '?' }),
-      new Argument('path2', { metavar: '', type: 'path', nargs: '?' }),
+      PATH_OPERAND,
+      PATH2_OPERAND,
     ],
   }),
   sha1sum: CHECKSUM,
@@ -110,8 +111,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-s'),
       new Argument('-g'),
       new Argument('-u', { action: 'store_true' }),
-      new Argument('path', { metavar: '', type: 'path', nargs: '?' }),
-      new Argument('path2', { metavar: '', type: 'path', nargs: '?' }),
+      PATH_OPERAND,
+      PATH2_OPERAND,
     ],
   }),
 }

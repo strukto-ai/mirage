@@ -24,6 +24,7 @@ from mirage.commands.cli.builtin.git.checkout import (
     DETACHED_ADVICE,
     switch_to,
 )
+from mirage.commands.cli.builtin.git.constants import DEFAULT_BRANCH
 from mirage.commands.cli.builtin.git.errors import (
     CloneReadOnlyError,
     GitError,
@@ -31,8 +32,6 @@ from mirage.commands.cli.builtin.git.errors import (
     UsageError,
 )
 from mirage.commands.cli.builtin.git.fetch import (
-    HEADS,
-    TAGS,
     Wanted,
     configured_headers,
     fetch_objects,
@@ -52,6 +51,8 @@ from mirage.commands.cli.builtin.git.reflog import (
     entry,
 )
 from mirage.commands.cli.builtin.git.refs import (
+    BRANCH_PREFIX,
+    TAG_PREFIX,
     detach_head,
     set_head,
     valid_ref_name,
@@ -64,7 +65,7 @@ from mirage.commands.cli.builtin.git.transport import (
     is_local,
     open_transport,
 )
-from mirage.commands.cli.builtin.git.tree import tree_of
+from mirage.commands.cli.builtin.git.tree import commit_entries
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
@@ -77,8 +78,6 @@ from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
-
-DEFAULT_BRANCH = "master"
 
 
 def default_directory(url: str) -> str:
@@ -119,7 +118,7 @@ def _config(url: str, remote: str, branch: str | None) -> str:
         text += config_section(
             "branch",
             branch,
-            [("remote", remote), ("merge", f"{HEADS}{branch}")],
+            [("remote", remote), ("merge", f"{BRANCH_PREFIX}{branch}")],
         )
     return text
 
@@ -134,13 +133,13 @@ def remote_head(
         chosen (str | None): ``--branch``, a branch or a tag name.
     """
     if chosen is not None:
-        for ref in (f"{HEADS}{chosen}", f"{TAGS}{chosen}"):
+        for ref in (f"{BRANCH_PREFIX}{chosen}", f"{TAG_PREFIX}{chosen}"):
             if ref in adv.refs:
                 oid = adv.peeled.get(ref, adv.refs[ref])
-                return (chosen if ref.startswith(HEADS) else None), oid
+                return (chosen if ref.startswith(BRANCH_PREFIX) else None), oid
         return chosen, None
     if adv.head is not None and adv.head in adv.refs:
-        return adv.head[len(HEADS) :], adv.refs[adv.head]
+        return adv.head[len(BRANCH_PREFIX) :], adv.refs[adv.head]
     if "HEAD" in adv.refs:
         return None, adv.refs["HEAD"]
     return None, None
@@ -257,7 +256,7 @@ async def _populate(
     vfs = ctx.vfs
     assert vfs is not None
     gitdir = target.join(".git")
-    remote = fl.as_str("origin") or "origin"
+    remote = fl.as_str("origin", "origin")
     if not valid_ref_name(f"refs/remotes/{remote}/test"):
         raise GitError(f"'{remote}' is not a valid remote name")
     await lay_out(vfs, gitdir, DEFAULT_BRANCH, "")
@@ -273,12 +272,12 @@ async def _populate(
             Wanted(
                 ref,
                 oid,
-                f"refs/remotes/{remote}/{ref[len(HEADS) :]}"
-                if ref.startswith(HEADS)
+                f"refs/remotes/{remote}/{ref[len(BRANCH_PREFIX) :]}"
+                if ref.startswith(BRANCH_PREFIX)
                 else ref,
             )
             for ref, oid in advertised.refs.items()
-            if ref.startswith(HEADS) or ref.startswith(TAGS)
+            if ref.startswith(BRANCH_PREFIX) or ref.startswith(TAG_PREFIX)
         ]
     )
     # Only what survived is a candidate for the branch to check out: a
@@ -300,14 +299,18 @@ async def _populate(
         )
     if not advertised.refs:
         notes += "warning: You appear to have cloned an empty repository.\n"
+    # No HEAD to start from, in an empty remote or one whose HEAD names a
+    # branch it lacks: the clone is born on the branch that HEAD names,
+    # as git's unborn advertisement leaves it, or on the default one.
+    if branch is None and commit is None:
         head = advertised.head
         branch = (
             head
             if head is not None
-            and head.startswith(HEADS)
+            and head.startswith(BRANCH_PREFIX)
             and valid_ref_name(head)
-            else f"{HEADS}{DEFAULT_BRANCH}"
-        )[len(HEADS) :]
+            else f"{BRANCH_PREFIX}{DEFAULT_BRANCH}"
+        )[len(BRANCH_PREFIX) :]
     repo, _ = await fetch_objects(vfs, location, transport, adv, wanted, False)
     for want in wanted:
         assert want.local is not None
@@ -319,7 +322,7 @@ async def _populate(
         await write_file(
             vfs,
             gitdir.join(tracking),
-            f"ref: refs/remotes/{remote}/{adv.head[len(HEADS) :]}\n".encode(),
+            f"ref: refs/remotes/{remote}/{adv.head[len(BRANCH_PREFIX) :]}\n".encode(),
         )
         await append(
             vfs,
@@ -335,20 +338,27 @@ async def _populate(
     if local:
         notes += "done.\n"
     if commit is None:
-        await set_head(vfs, gitdir, f"{HEADS}{branch}")
+        if advertised.refs and not fl.as_bool("no_checkout"):
+            notes += (
+                "warning: remote HEAD refers to nonexistent ref, "
+                "unable to checkout\n"
+            )
+        await set_head(vfs, gitdir, f"{BRANCH_PREFIX}{branch}")
         return notes
     line = entry(ZERO, commit.encode(), IDENTITY, now, reason)
     if branch is not None:
-        await write_ref(vfs, gitdir, f"{HEADS}{branch}", commit.encode())
-        await set_head(vfs, gitdir, f"{HEADS}{branch}")
-        await append(vfs, gitdir, f"logs/{HEADS}{branch}", line)
+        await write_ref(
+            vfs, gitdir, f"{BRANCH_PREFIX}{branch}", commit.encode()
+        )
+        await set_head(vfs, gitdir, f"{BRANCH_PREFIX}{branch}")
+        await append(vfs, gitdir, f"logs/{BRANCH_PREFIX}{branch}", line)
     else:
         await detach_head(vfs, gitdir, commit.encode())
         notes += f"Note: switching to '{commit}'.\n\n{DETACHED_ADVICE}\n"
     await append(vfs, gitdir, "logs/HEAD", line)
     if not fl.as_bool("no_checkout"):
         tree = await asyncio.to_thread(
-            tree_of, repo, ObjectID(commit.encode())
+            commit_entries, repo, ObjectID(commit.encode())
         )
         await switch_to(
             vfs,

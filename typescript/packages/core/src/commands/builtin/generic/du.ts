@@ -17,6 +17,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { PathSpec, type Visibility } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
+import { usageHint } from '../../spec/usage.ts'
 import { IOResult, type SizedRun } from '../../../io/types.ts'
 import { pathsScoped } from '../../../view/namespace_view.ts'
 import { pathVisible } from '../../../utils/hidden.ts'
@@ -39,7 +40,6 @@ import { mountsOf } from '../utils/links.ts'
 export type ComputeSize = (p: PathSpec) => Promise<number>
 export type ComputeEntries = (p: PathSpec) => Promise<DuEntries>
 
-const USAGE_HINT = "Try 'du --help' for more information."
 const DEPTH_HEX = /^[+-]?0[xX][0-9a-fA-F]+$/
 const DEPTH_OCT = /^[+-]?0[0-7]*$/
 const DEPTH_DEC = /^[+-]?[1-9][0-9]*$/
@@ -120,11 +120,11 @@ export function parseFlags(ctx: Context): DuFlags {
   if (typeof raw === 'string') {
     maxDepth = parseDepth(raw)
     if (maxDepth === null) {
-      throw new UsageError(`du: invalid maximum depth '${quoteText(raw)}'\n${USAGE_HINT}`, 1)
+      throw new UsageError(`du: invalid maximum depth '${quoteText(raw)}'\n${usageHint('du')}`, 1)
     }
   }
   if (s && a) {
-    throw new UsageError(`du: cannot both summarize and show all entries\n${USAGE_HINT}`, 1)
+    throw new UsageError(`du: cannot both summarize and show all entries\n${usageHint('du')}`, 1)
   }
   let warning: string | undefined
   if (s && maxDepth !== null) {
@@ -132,7 +132,7 @@ export function parseFlags(ctx: Context): DuFlags {
     // carries on; any other depth is a real conflict and exits 1.
     if (maxDepth !== 0) {
       throw new UsageError(
-        `du: warning: summarizing conflicts with --max-depth=${String(maxDepth)}\n${USAGE_HINT}`,
+        `du: warning: summarizing conflicts with --max-depth=${String(maxDepth)}\n${usageHint('du')}`,
         1,
       )
     }
@@ -611,7 +611,9 @@ export async function du(
   )
   let exitCode = missing.length > 0 ? 1 : 0
   for (const virtual of unreadable?.() ?? []) {
-    notes.push(`du: cannot read directory '${respellUnder(virtual, paths)}': Permission denied`)
+    notes.push(
+      `du: cannot read directory '${respellUnder(virtual, paths)}': ${posixPhrase('EACCES')}`,
+    )
     exitCode = 1
   }
   for (const [virtual, detail] of inaccessible?.() ?? []) {

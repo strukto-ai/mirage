@@ -16,6 +16,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
 
 from mirage.accessor.base import Accessor
+from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.config import Context, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -220,6 +221,6 @@ async def bc(
                     yield chunk
         finally:
             await lines.aclose()
-            io.stderr = ("\n".join(errors) + "\n").encode() if errors else None
+            io.stderr = format_optional_records(errors)
 
     return output(), io

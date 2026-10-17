@@ -29,6 +29,7 @@ from mirage.commands.cli.builtin.git.errors import (
 )
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
 from mirage.commands.cli.builtin.git.pathspec import (
+    decoded,
     matched,
     repo_relative,
     visible_entries,
@@ -131,14 +132,8 @@ async def reset(
         state = await read_index(vfs, location.gitdir)
         tree = await asyncio.to_thread(head_entries, repo) or {}
         start = start_point(fl).virtual
-        names = {
-            path.decode("utf-8", errors="replace")
-            for path in visible_entries(location, tree)
-        }
-        names |= {
-            path.decode("utf-8", errors="replace")
-            for path in visible_entries(location, state.entries)
-        }
+        names = decoded(visible_entries(location, tree))
+        names |= decoded(visible_entries(location, state.entries))
         if texts:
             selected: set[str] = set()
             for operand in texts:
@@ -164,7 +159,7 @@ async def reset(
         found = await scan(
             vfs,
             location,
-            {path.decode("utf-8", errors="replace") for path in state.entries},
+            decoded(state.entries),
             UNTRACKED_NO,
         )
         unstaged = await work_changes(

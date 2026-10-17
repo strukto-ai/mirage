@@ -17,7 +17,7 @@ from stat import S_IFMT, S_IFREG, S_IXUSR
 
 from dulwich.diff_tree import _similarity_score
 from dulwich.index import ConflictedIndexEntry, IndexEntry
-from dulwich.object_store import BaseObjectStore, iter_tree_contents
+from dulwich.object_store import BaseObjectStore
 from dulwich.objects import Blob, ObjectID
 from dulwich.objectspec import parse_commit
 from dulwich.repo import BaseRepo
@@ -33,6 +33,7 @@ from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import entry_bytes
 from mirage.commands.cli.builtin.git.objects import VfsObjectStore
 from mirage.commands.cli.builtin.git.pathspec import visible_entries
+from mirage.commands.cli.builtin.git.tree import tree_entries
 from mirage.commands.cli.builtin.git.types import (
     IndexState,
     RepoLocation,
@@ -72,6 +73,10 @@ CONFLICT_CODES = {
     (False, False, True): "UA",
 }
 
+# One staged verdict: its letter, the path it was renamed from, and how
+# similar the two are (0 when it is no rename).
+StagedRow = tuple[str, str | None, int]
+
 
 def head_entries(repo: BaseRepo) -> dict[bytes, tuple[int, bytes]] | None:
     """Every path HEAD's tree holds, with its mode and blob id.
@@ -94,10 +99,7 @@ def head_entries(repo: BaseRepo) -> dict[bytes, tuple[int, bytes]] | None:
         commit = parse_commit(repo, HEAD_REF)
     except KeyError:
         return None
-    return {
-        entry.path: (entry.mode, entry.sha)
-        for entry in iter_tree_contents(repo.object_store, commit.tree)
-    }
+    return tree_entries(repo, commit.tree)
 
 
 def _exact_renames(
@@ -140,7 +142,7 @@ def _content_renames(
     deletes: list[str],
     shas: dict[str, bytes],
     threshold: int = RENAME_THRESHOLD,
-) -> list[tuple[str, str]]:
+) -> list[tuple[str, str, int]]:
     """Pair the rest by how much content they still have in common.
 
     This is what makes a move that also edited the file read as one
@@ -181,12 +183,12 @@ def _content_renames(
     taken_new: set[str] = set()
     taken_old: set[str] = set()
     pairs = []
-    for _score, new, old in candidates:
+    for score, new, old in candidates:
         if new in taken_new or old in taken_old:
             continue
         taken_new.add(new)
         taken_old.add(old)
-        pairs.append((new, old))
+        pairs.append((new, old, -score))
     return pairs
 
 
@@ -196,14 +198,15 @@ def pair_renames(
     shas: dict[str, bytes],
     kinds: dict[str, int],
     threshold: int = RENAME_THRESHOLD,
-) -> dict[str, tuple[str, str | None]]:
+) -> dict[str, StagedRow]:
     """Fold an add and a delete of the same file into one rename.
 
     Two passes, git's own order: identical content first, then what is
     merely similar enough. Both pair within one kind, and only the
     second is limited to regular files: a moved symlink is a rename git
     reports as one, but scoring a link against a file would pair two
-    unrelated things by the bytes of a path.
+    unrelated things by the bytes of a path. Each rename carries its
+    similarity, 100 for identical content.
 
     Args:
         store (BaseObjectStore): the object database, read for blobs.
@@ -222,9 +225,12 @@ def pair_renames(
         for path, letter in staged.items()
         if letter == DELETED and path in kinds
     )
-    pairs = _exact_renames(adds, deletes, shas, kinds)
-    matched_new = {new for new, _old in pairs}
-    matched_old = {old for _new, old in pairs}
+    pairs = [
+        (new, old, 100)
+        for new, old in _exact_renames(adds, deletes, shas, kinds)
+    ]
+    matched_new = {new for new, _old, _score in pairs}
+    matched_old = {old for _new, old, _score in pairs}
     scored = [
         [p for p in side if kinds[p] == S_IFREG]
         for side in (
@@ -235,10 +241,10 @@ def pair_renames(
     pairs.extend(
         _content_renames(store, scored[0], scored[1], shas, threshold)
     )
-    paired = {new: (RENAMED, old) for new, old in pairs}
-    consumed = {old for _new, old in pairs}
+    paired = {new: (RENAMED, old, score) for new, old, score in pairs}
+    consumed = {old for _new, old, _score in pairs}
     return {
-        path: paired.get(path, (letter, None))
+        path: paired.get(path, (letter, None, 0))
         for path, letter in staged.items()
         if path not in consumed
     }
@@ -249,7 +255,7 @@ def stage_changes(
     head: dict[bytes, tuple[int, bytes]] | None,
     entries: dict[bytes, IndexEntry],
     conflicts: set[bytes],
-) -> dict[str, tuple[str, str | None]]:
+) -> dict[str, StagedRow]:
     """Compare HEAD's tree with the index: what a commit would record.
 
     Conflicted paths are excluded rather than compared. An unmerged path
@@ -291,7 +297,7 @@ def staged_state(
     entries: dict[bytes, IndexEntry],
     conflicts: set[bytes],
     location: RepoLocation,
-) -> tuple[dict[str, tuple[str, str | None]], bool]:
+) -> tuple[dict[str, StagedRow], bool]:
     """Everything HEAD-against-index, computed off the event loop.
 
     One function rather than two calls because both halves read objects
@@ -504,7 +510,7 @@ async def work_entries(
 
 
 def merge(
-    staged: dict[str, tuple[str, str | None]],
+    staged: dict[str, StagedRow],
     unstaged: dict[str, str],
     conflicts: dict[str, str],
     untracked: list[str],
@@ -521,7 +527,7 @@ def merge(
     sorted block however they collate against the tracked ones.
 
     Args:
-        staged (dict): HEAD against the index.
+        staged (dict[str, StagedRow]): HEAD against the index.
         unstaged (dict[str, str]): the index against the working tree.
         conflicts (dict[str, str]): unmerged paths and their codes.
         untracked (list[str]): paths the working tree holds and the
@@ -533,7 +539,7 @@ def merge(
         if code is not None:
             rows.append(StatusEntry(path, code[0], code[1]))
             continue
-        letter, origin = staged.get(path, (UNCHANGED, None))
+        letter, origin, _score = staged.get(path, (UNCHANGED, None, 0))
         rows.append(
             StatusEntry(path, letter, unstaged.get(path, UNCHANGED), origin)
         )

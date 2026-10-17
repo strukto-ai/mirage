@@ -19,7 +19,7 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { interpretEscapes } from '../utils/escapes.ts'
 import { resolveSource } from '../utils/stream.ts'
-import { extraOperandError, usageHint } from '../../spec/usage.ts'
+import { extraOperandError, missingOperandError, usageHint } from '../../spec/usage.ts'
 import { UsageError } from '../../errors.ts'
 import { quoteText, quoteWord } from '../../quote.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
@@ -144,7 +144,7 @@ function parseFlags(bag: Record<string, FlagValue>): TrFlags {
 }
 
 function buildOptions(texts: readonly string[], bag: Record<string, FlagValue>): TrOptions {
-  if (texts.length === 0) throw new Error(`tr: missing operand${TRY_HELP}`)
+  if (texts.length === 0) throw missingOperandError(CommandName.TR, null)
   const { delete: del, squeeze, complement, truncateSet1 } = parseFlags(bag)
   // -d without -s takes one string, so the extra operand is the second one:
   // `tr -d a b c` names b (tr.c reports argv[optind + max_operands]).

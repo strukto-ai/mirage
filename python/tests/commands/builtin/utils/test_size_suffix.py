@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.commands.builtin.utils.size_suffix import (
+    decimal_value,
     parse_base0,
     size_suffixes,
 )
@@ -56,3 +57,10 @@ def test_parse_base0_reads_hex_octal_and_decimal():
     assert parse_base0("007") == 7
     assert parse_base0("1010") == 1010
     assert parse_base0("0") == 0
+
+
+def test_decimal_value_reads_past_the_int_digit_limit():
+    digits = "9" * 5000
+    assert decimal_value(digits) == 10**5000 - 1
+    assert decimal_value("000123") == 123
+    assert parse_base0(digits) == 10**5000 - 1

@@ -33,7 +33,7 @@ async def append(
         result = await append_values(
             tm,
             fl.as_str("spreadsheet") or "",
-            fl.as_str("range") or "A1",
+            fl.as_str("range", "A1"),
             values_json_from_flags(fl),
         )
     out = json.dumps(

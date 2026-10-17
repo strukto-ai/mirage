@@ -22,6 +22,7 @@ import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import type { LinkView } from '../../../../view/types.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
 import { ROOT_CWD } from '../../../constants.ts'
+import { OPERAND_CONCURRENCY } from '../../constants.ts'
 import { eisdir, isFsError } from '../../../../errors/fs.ts'
 import { fsErrorLine } from '../../../../errors/render.ts'
 import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
@@ -259,7 +260,7 @@ export function streamOperands(
       )
       pending.push(item)
     }
-    const concurrency = scopes.some((p) => isStdin(p)) ? 1 : 4
+    const concurrency = scopes.some((p) => isStdin(p)) ? 1 : OPERAND_CONCURRENCY
     for (let i = 0; i < concurrency; i++) start()
     try {
       while (pending.length > 0) {

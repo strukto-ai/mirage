@@ -591,4 +591,8 @@ export const HELP_TOPICS: Record<string, string> = {
 }
 
 export const GITHUB_HOST = 'github.com'
+// How gh 2.46 refuses a list verb's --limit under 1, before any request:
+// `invalid limit: 0`, and `invalid value for --limit: 0` from pr list.
+export const INVALID_LIMIT = 'invalid limit'
+export const PR_INVALID_LIMIT = 'invalid value for --limit'
 export const CONNECT_HINT = 'check your internet connection or https://githubstatus.com'

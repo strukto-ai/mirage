@@ -116,7 +116,7 @@ async def route(
             names files to load.
     """
     compose = Compose(
-        sender=fl.as_str("from") or config.username,
+        sender=fl.as_str("from", config.username),
         to=split_addresses(fl.as_list("to")),
         cc=split_addresses(fl.as_list("cc")),
         bcc=split_addresses(fl.as_list("bcc")),

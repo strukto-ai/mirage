@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.commands.builtin.generic.od import od_generic, parse_count
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
@@ -138,12 +139,13 @@ async def test_od_skips_and_limits_across_operands(
     names, skip, limit, out, err, reads
 ):
     read: list[str] = []
+    flags = {"skip_bytes": str(skip), "c": True}
+    if limit is not None:
+        flags["read_bytes"] = str(limit)
     stdout, io = await od_generic(
         [_p(n) for n in names],
+        Context(flags=flags),
         read_stream=_stream({"/a": b"abc", "/b": b"defgh"}, read),
-        skip=skip,
-        limit=limit,
-        formats=["c"],
     )
     got = b"" if stdout is None else await materialize(stdout)
     errs = b"" if io.stderr is None else await materialize(io.stderr)

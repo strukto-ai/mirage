@@ -43,7 +43,12 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> CutFlags:
     fl = FlagView(flags, spec=SPECS["cut"])
     bytes_range = fl.as_str("bytes")
     chars_range = fl.as_str("characters")
-    fields_range = fl.as_str("F") or fl.as_str("fields")
+    whitespace_fields = fl.as_str("F")
+    fields_range = (
+        whitespace_fields
+        if whitespace_fields is not None
+        else fl.as_str("fields")
+    )
     modes = [
         ("bytes", bytes_range),
         ("characters", chars_range),
@@ -80,10 +85,18 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> CutFlags:
         whitespace = "trimmed"
     if whitespace is not None and mode != "fields":
         raise ValueError("cut: '-w' is only meaningful with fields")
-    output_delimiter = fl.as_str("args_O") or fl.as_str("output_delimiter")
+    output_delimiter = fl.as_str("args_O")
+    if output_delimiter is None:
+        output_delimiter = fl.as_str("output_delimiter")
     if fl.as_str("F") is not None and output_delimiter is None:
         output_delimiter = " "
+    # GNU reads an empty -d or --output-delimiter as its terminating NUL:
+    # `cut -d ''` splits on NUL bytes and writes one between fields.
+    if output_delimiter == "":
+        output_delimiter = "\0"
     explicit_delimiter = fl.as_str("delimiter")
+    if explicit_delimiter == "":
+        explicit_delimiter = "\0"
     if explicit_delimiter is not None and len(explicit_delimiter) != 1:
         raise ValueError("cut: the delimiter must be a single character")
     return CutFlags(

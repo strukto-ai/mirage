@@ -42,6 +42,9 @@ const DATA_SOURCE = '--data'
 const INLINE_SOURCE = 'inline body inputs'
 const BAD_BODY_EXIT = 1
 const REFUSAL_EXIT = 5
+const EMPTY_METHOD =
+  'error: Invalid HTTP method ``.\n  hint: Use a standard method such as ' +
+  'GET, POST, PATCH, PUT, or DELETE.\n'
 
 // DELETE is here because `DELETE /v1/blocks/{id}` is the only delete verb the
 // public API has, so without it the one way to remove anything is unreachable
@@ -205,7 +208,8 @@ export async function api(
     else if (hasData) body = dataBody
     else if (hasInline) body = inline
 
-    method = (fl.asStr('method') ?? (named.length > 0 ? 'POST' : 'GET')).toUpperCase()
+    method = fl.asStr('method', named.length > 0 ? 'POST' : 'GET').toUpperCase()
+    if (method === '') return refusal(EMPTY_METHOD, REFUSAL_EXIT)
     if (!METHODS.has(method)) throw new Error(`unsupported method: ${method}`)
   } catch (err) {
     return usageError(err)

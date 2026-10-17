@@ -12,26 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { materialize, type IOResult } from '../../../io/types.ts'
-
 import { encodeText } from '../../../shell/bytes.ts'
-
-const ENC = new TextEncoder()
-
-// Prepend warning lines to a result's stderr in place. Used by wrappers
-// whose native push-down failed before falling back to the generic.
-export async function prependStderr(io: IOResult, warnings: readonly string[]): Promise<void> {
-  const extra = ENC.encode(warnings.join('\n') + '\n')
-  const prev = await materialize(io.stderr)
-  if (prev.length === 0) {
-    io.stderr = extra
-    return
-  }
-  const merged = new Uint8Array(extra.length + prev.length)
-  merged.set(extra)
-  merged.set(prev, extra.length)
-  io.stderr = merged
-}
 
 // Records to output bytes, one per line, smuggled bytes put back. A line
 // that came through `decodeText` holds a byte that is not valid UTF-8 as a

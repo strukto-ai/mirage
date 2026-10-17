@@ -112,10 +112,12 @@ function gitRows(path: string, spec: CommandSpec): string[] {
  * parse-options' answer to a word the verb does not take.
  *
  * `-h` asks for the usage block, which goes to stdout. A boolean long handed a
- * value is refused on one line. Anything else is an option the verb does not
- * have: a long one is an "option" and a short one a "switch", both named
- * without their dashes and quoted with a backquote-apostrophe pair, and the
- * usage block follows on stderr. Pinned against git 2.50.1.
+ * value is refused on one line, and so is an option that needs a value and ends
+ * the line without one (it reaches the operands when the verb takes free text).
+ * Anything else is an option the verb does not have: a long one is an "option"
+ * and a short one a "switch", both named without their dashes and quoted with a
+ * backquote-apostrophe pair, and the usage block follows on stderr. Pinned
+ * against git 2.50.1 and 2.47.3.
  *
  * @param word the offending word with its dashes ('--nosuch', '-Z',
  *   '--quiet=1')
@@ -138,6 +140,19 @@ export function gitOptionRefusal(word: string, path: string, spec: CommandSpec):
     return ['', `error: option \`${name.slice(2)}' takes no value\n`]
   }
   const noun = word.startsWith(LONG_PREFIX) ? 'option' : 'switch'
+  const last = word.startsWith(LONG_PREFIX) ? word : `-${word.slice(-1)}`
+  if (
+    eq === -1 &&
+    compileSpec(spec).options.some(
+      (opt) =>
+        opt.names.includes(last) &&
+        opt.action !== 'store_true' &&
+        opt.action !== 'count' &&
+        opt.nargs !== '?',
+    )
+  ) {
+    return ['', `error: ${noun} \`${last.replace(/^-+/, '')}' requires a value\n`]
+  }
   return ['', `error: unknown ${noun} \`${word.replace(/^-+/, '')}'\n${usage}`]
 }
 

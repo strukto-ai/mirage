@@ -21,7 +21,7 @@ const ALWAYS_SPECIAL = new Set(' !"$&\'()*:;<=>?[\\^`|')
 
 // '#' starts a comment and '~' starts a home-directory expansion, but
 // only as the first character of a word, so GNU quotes them there alone.
-const LEADING_SPECIAL = new Set('#~')
+export const LEADING_SPECIAL = new Set('#~')
 
 // Brace expansion needs a pair to mean anything, so GNU quotes a lone
 // brace and leaves one inside a longer name bare.
@@ -31,11 +31,11 @@ const SOLO_SPECIAL = new Set(['{', '}'])
 // Narrower than the trigger set: a space and a ':' are harmless inside
 // double quotes, while the four conditional characters above lose their
 // position rule and always rule it out.
-const DQ_BLOCKERS = new Set('!"#$&()*;<=>?[\\^`{|}~')
+export const DQ_BLOCKERS = new Set('!"#$&()*;<=>?[\\^`{|}~')
 
 const ENC = new TextEncoder()
 
-const NAMED_ESCAPES = new Map([
+export const NAMED_ESCAPES = new Map([
   ['\x07', 'a'],
   ['\b', 'b'],
   ['\t', 't'],
@@ -122,10 +122,28 @@ export function quotesOperands(cmdName: string): boolean {
 
 /** GNU ls -b, using shellQuoteAlways's documented UTF-8 locale policy. */
 export function escapeName(name: string): string {
+  return escaped(name, ' \\')
+}
+
+/**
+ * GNU's `escape` quoting style: C escapes, backslashes doubled.
+ *
+ * tar prints every member name it lists this way, under -t and under -v of
+ * -c and -x alike, and leaves a space bare where ls -b protects it. tar 1.35
+ * on debian:stable-slim lists a member stored as the bytes `a\xffb` as
+ * `a\377b` and one named `back\slash` as `back\\slash`. A byte that is not
+ * UTF-8 arrives here as its `decodeText` sentinel. Mirrors Python's
+ * `escape_quote`.
+ */
+export function escapeQuote(name: string): string {
+  return escaped(name, '\\')
+}
+
+function escaped(name: string, protectedChars: string): string {
   let out = ''
   for (const char of name) {
     const code = char.codePointAt(0) ?? 0
-    if (char === ' ' || char === '\\') out += '\\' + char
+    if (protectedChars.includes(char)) out += '\\' + char
     else if (code >= 0xdc80 && code <= 0xdcff)
       out += `\\${(code - 0xdc00).toString(8).padStart(3, '0')}`
     else out += needsEscape(char) ? escapeChar(char) : char

@@ -150,6 +150,15 @@ function memberName(spelled: string, kind: MemberKind): string {
   return name
 }
 
+/**
+ * GNU tar's `tar: NAME: Cannot VERB: REASON` diagnostic; `who` is the
+ * program signing it, tar or the compressor child it runs. Mirrors Python's
+ * cannot.
+ */
+export function cannot(name: string, verb: string, reason: string, who = 'tar'): string {
+  return `${who}: ${name}: Cannot ${verb}: ${reason}`
+}
+
 export async function checkDirectories(
   directories: readonly PathSpec[],
   isDir: DirProbe,
@@ -166,7 +175,7 @@ export async function checkDirectories(
       if (!isFsError(err)) throw err
       reason = fsStrerror(err) ?? String(err)
     }
-    return [`tar: ${directory.rawPath}: Cannot open: ${reason}`, FATAL_TRAILER]
+    return [cannot(directory.rawPath, 'open', reason), FATAL_TRAILER]
   }
   return []
 }
@@ -199,7 +208,7 @@ export async function planCreate(
       if (path.rawPath === '') notices.push(EMPTY_MEMBER)
       const trimmed = rstripSlash(path.rawPath)
       announcePrefix(stripPrefix(trimmed === '' ? path.rawPath : trimmed)[1], dropped, notices)
-      notices.push(`tar: ${path.rawPath}: Cannot stat: ${String(fsStrerror(walkRefusal(path)))}`)
+      notices.push(cannot(path.rawPath, 'stat', String(fsStrerror(walkRefusal(path)))))
       exitCode = CREATE_ERROR_EXIT
       continue
     }
@@ -241,7 +250,7 @@ export async function planCreate(
       if (problem.unreadable === true) {
         // A directory the walk could not open: GNU names it, keeps its
         // entry, and fails the run.
-        notices.push(`tar: ${shown}: Cannot open: ${problem.reason ?? ''}`)
+        notices.push(cannot(shown, 'open', problem.reason ?? ''))
         exitCode = CREATE_ERROR_EXIT
         continue
       }
@@ -249,7 +258,7 @@ export async function planCreate(
         notices.push(`tar: ${shown}: ${problem.reason ?? ''}`)
         continue
       }
-      notices.push(`tar: ${shown}: Cannot stat: ${problem.reason ?? ''}`)
+      notices.push(cannot(shown, 'stat', problem.reason ?? ''))
       exitCode = CREATE_ERROR_EXIT
     }
     if (scan.missing) continue

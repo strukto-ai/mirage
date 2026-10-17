@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
+import { recordSeparator } from './utils/lines.ts'
 import { quoteText } from '../quote.ts'
+import { usageHint } from '../spec/usage.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -22,7 +24,7 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 // range clamps identically in both languages.
 const OPEN_END = 2 ** 31 - 1
 
-const CUT_TRY = "Try 'cut --help' for more information.\n"
+const CUT_TRY = usageHint('cut')
 
 export interface CutOptions {
   ranges: [number, number][]
@@ -43,7 +45,7 @@ interface WhitespaceFields {
 }
 
 function cutError(message: string): string {
-  return `cut: ${message}\n${CUT_TRY}`
+  return `cut: ${message}\n${CUT_TRY}\n`
 }
 
 interface CutListWords {
@@ -284,7 +286,7 @@ export async function* cutStream(
   source: AsyncIterable<Uint8Array>,
   options: CutOptions,
 ): AsyncIterable<Uint8Array> {
-  const separator = options.zeroTerminated ? 0 : 0x0a
+  const separator = recordSeparator(options.zeroTerminated)
   const reader = new AsyncLineIterator(source)
   try {
     for (;;) {

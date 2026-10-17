@@ -18,6 +18,7 @@ import { IOResult } from '../../../../io/types.ts'
 import { command, type CommandFnResult, type Context } from '../../../config.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
+import { formatOptionalRecords } from '../../utils/output.ts'
 
 import type { BcNumber, BcState, BcStatement } from './types.ts'
 import { ZERO } from './numbers.ts'
@@ -138,7 +139,7 @@ export function bc(
       yield* runLines(lines, state, folder, errors)
     } finally {
       await lines.return(undefined)
-      io.stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : null
+      io.stderr = formatOptionalRecords(errors)
     }
   }
   return Promise.resolve([output(), io])

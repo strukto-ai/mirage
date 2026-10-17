@@ -16,19 +16,15 @@ import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import type { Context } from '../config.ts'
-import { specOf } from '../spec/builtins.ts'
-import { FlagView } from '../spec/flag_view.ts'
 import type { FlagValue } from '../spec/types.ts'
-import { parseFlags, rgGeneric, walkFilter } from './generic/rg.ts'
+import { rgGeneric } from './generic/rg.ts'
 import { eacces, enoent } from '../../errors/fs.ts'
 import { decodeText } from '../../shell/bytes.ts'
 import {
-  type WalkFilter,
   loopErrorLine,
   onOtherMount,
   openErrorLine,
   osErrorText,
-  walkCandidates,
   walkErrorLine,
 } from './rg_scan.ts'
 
@@ -121,10 +117,6 @@ async function rgFull(
     if (stderr !== '') warnings.push(...stderr.split('\n').slice(0, -1))
   }
   return text === '' ? [] : text.split('\n').slice(0, -1)
-}
-
-function walk(flags: Record<string, FlagValue> = {}): WalkFilter {
-  return walkFilter(parseFlags(new FlagView(flags, specOf('rg'))))
 }
 
 const ENC = new TextEncoder()
@@ -888,59 +880,6 @@ describe('rgFull walk context', () => {
       null,
     )
     expect(out).toEqual(['/w/a.txt:1', '/w/c.txt:1'])
-  })
-})
-
-describe('walkCandidates', () => {
-  // Narrowed candidates pass the filters the walk they replace applies.
-  const scope = (virtual = '/data'): PathSpec =>
-    new PathSpec({ virtual, directory: virtual, vfsPath: '' })
-  const candidate = (virtual: string): PathSpec =>
-    new PathSpec({
-      virtual,
-      directory: '',
-      vfsPath: virtual.replace(/^\/data\//, ''),
-      resolved: true,
-    })
-
-  it('prunes below the longest matching scope', () => {
-    const kept = walkCandidates(
-      [candidate('/data/.cfg/a.txt'), candidate('/data/.cfg/.secret')],
-      [scope(), scope('/data/.cfg')],
-      walk(),
-      '/',
-    )
-    expect(kept.map((p) => p.virtual)).toEqual(['/data/.cfg/a.txt'])
-  })
-
-  it('drops dotfiles below the scope', () => {
-    const kept = walkCandidates(
-      [candidate('/data/.env'), candidate('/data/.git/config'), candidate('/data/a.txt')],
-      [scope()],
-      walk(),
-      '/',
-    )
-    expect(kept.map((p) => p.virtual)).toEqual(['/data/a.txt'])
-  })
-
-  it('keeps dotfiles under --hidden', () => {
-    const paths = [candidate('/data/.env'), candidate('/data/a.txt')]
-    expect(walkCandidates(paths, [scope()], walk({ hidden: true }), '/')).toEqual(paths)
-  })
-
-  it('ignores dots in the scope itself', () => {
-    const kept = walkCandidates([candidate('/data/.cfg/a.txt')], [scope('/data/.cfg')], walk(), '/')
-    expect(kept.map((p) => p.virtual)).toEqual(['/data/.cfg/a.txt'])
-  })
-
-  it('applies --type and --glob to the file', () => {
-    const paths = [candidate('/data/a.py'), candidate('/data/b.md')]
-    expect(
-      walkCandidates(paths, [scope()], walk({ type: ['py'] }), '/').map((p) => p.virtual),
-    ).toEqual(['/data/a.py'])
-    expect(
-      walkCandidates(paths, [scope()], walk({ glob: ['*.md'] }), '/').map((p) => p.virtual),
-    ).toEqual(['/data/b.md'])
   })
 })
 

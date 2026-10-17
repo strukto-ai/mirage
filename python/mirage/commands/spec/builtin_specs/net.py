@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec.constants import PATHS_OPERAND, TEXT_OPERAND
 from mirage.commands.spec.types import Argument, CommandSpec
 
 SPECS: dict[str, CommandSpec] = {
@@ -159,7 +160,7 @@ SPECS: dict[str, CommandSpec] = {
             # A URL slot, not a free-text rest: a textual rest makes the parser
             # keep unknown dash words as operands (the echo/git-log shape), and
             # `curl -sv URL` then fetched "-sv" (#1065).
-            Argument("text", nargs="?", metavar=""),
+            TEXT_OPERAND,
         ),
     ),
     "wget": CommandSpec(
@@ -184,8 +185,8 @@ SPECS: dict[str, CommandSpec] = {
                 action="store_true",
                 help="Check that the URL exists without downloading it.",
             ),
-            Argument("text", nargs="?", metavar=""),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            TEXT_OPERAND,
+            PATHS_OPERAND,
         ),
     ),
 }

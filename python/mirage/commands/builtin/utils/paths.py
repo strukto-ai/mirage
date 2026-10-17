@@ -38,20 +38,6 @@ from mirage.view.types import LinkView, StatPath
 _ABSENT: tuple[type[Exception], ...] = (*MISS_ERRORS, DotWalkLoop)
 
 
-def has_unresolved_glob(paths: list[PathSpec]) -> bool:
-    """True when any operand still carries a glob to expand.
-
-    Backend push-down branches read ``paths[0]`` directly to build SQL, so
-    they must not run before glob expansion: a pattern segment would be
-    taken for a literal entity name, and ``tables/*/rows.jsonl`` would
-    query a relation actually called ``*``.
-
-    Args:
-        paths (list[PathSpec]): operands as parsed.
-    """
-    return any(p.pattern for p in paths)
-
-
 def resolve_script(name: str, cwd: PathSpec | str | None) -> PathSpec:
     """Resolve a script operand to a fully-resolved PathSpec.
 
@@ -65,6 +51,18 @@ def resolve_script(name: str, cwd: PathSpec | str | None) -> PathSpec:
             root.
     """
     return PathSpec.from_str_path(name, cwd=cwd or "/")
+
+
+def resolve_target(o: str | PathSpec, cwd: PathSpec | str | None) -> PathSpec:
+    """Resolve a file a transfer reads or writes (curl -o, wget -O).
+
+    Args:
+        o (str | PathSpec): the file as the line named it.
+        cwd (PathSpec | str | None): the session working directory as
+            ``Context.cwd`` carries it; None resolves against the
+            root.
+    """
+    return PathSpec.from_str_path(o, cwd=cwd or "/")
 
 
 def default_paths(

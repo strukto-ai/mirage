@@ -20,7 +20,6 @@ import { fnmatch } from '../../../../utils/fnmatch.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { DWIM_RULES } from './constants.ts'
 import type { GitError } from './errors.ts'
 import { short } from './format.ts'
 import { configValues } from './fs.ts'
@@ -32,9 +31,20 @@ import { loadMailmap } from './mailmap.ts'
 import { abbreviationRequests, needsObject } from './ref_fields.ts'
 import { keptRefs, type RefFilter } from './ref_filter.ts'
 import { parseSortKeys } from './ref_format.ts'
-import { loadRefs, mapped, parseRefspec } from './refs.ts'
+import {
+  BRANCH_PREFIX,
+  HEAD_FILE,
+  loadRefs,
+  mapped,
+  MAX_SYMREF_DEPTH,
+  parseRefspec,
+  REMOTE_PREFIX,
+  SYMREF_PREFIX,
+  TAG_PREFIX,
+} from './refs.ts'
 import { DETACHED_AT, DETACHED_FROM, NO_BRANCH } from './render.ts'
-import { commitFacts, idsUnder, objectType, repoArgs, type Repo } from './repo.ts'
+import { refsNamed } from './revparse.ts'
+import { commitFacts, idsUnder, objectType, rawObject, repoArgs, type Repo } from './repo.ts'
 import {
   RefKind,
   type DateMode,
@@ -48,9 +58,6 @@ import {
 } from './types.ts'
 import { gitBool } from './util.ts'
 
-const SYMREF_PREFIX = 'ref: '
-// git follows a chain of symbolic refs this deep before it gives up.
-const SYMREF_DEPTH = 5
 const ROOT_REF_SYNTAX = /^[A-Z_]+$/
 const PSEUDO_REFS = ['FETCH_HEAD', 'MERGE_HEAD']
 const IRREGULAR_ROOT_REFS = [
@@ -62,16 +69,15 @@ const IRREGULAR_ROOT_REFS = [
   'MERGE_AUTOSTASH',
 ]
 const KIND_PREFIXES: readonly (readonly [string, RefKind])[] = [
-  ['refs/heads/', RefKind.BRANCH],
-  ['refs/remotes/', RefKind.REMOTE],
-  ['refs/tags/', RefKind.TAG],
+  [BRANCH_PREFIX, RefKind.BRANCH],
+  [REMOTE_PREFIX, RefKind.REMOTE],
+  [TAG_PREFIX, RefKind.TAG],
 ]
 // match_pattern strips the first of these before a tag or branch pattern is
 // matched, so `v1.*` and `origin/*` name refs by their short names.
-const SHORT_PREFIXES = ['refs/tags/', 'refs/heads/', 'refs/remotes/', 'refs/']
+const SHORT_PREFIXES = [TAG_PREFIX, BRANCH_PREFIX, REMOTE_PREFIX, 'refs/']
 const WORKTREES = 'worktrees'
 const GITDIR_FILE = 'gitdir'
-const HEAD_FILE = 'HEAD'
 const CHECKOUT_MOVE = 'checkout: moving from '
 const DEC = new TextDecoder()
 
@@ -102,7 +108,7 @@ export function resolveRef(
   const raw = table.get(name)
   const target = raw?.startsWith(SYMREF_PREFIX) ? raw.slice(SYMREF_PREFIX.length).trim() : null
   let current = name
-  for (let i = 0; i <= SYMREF_DEPTH; i++) {
+  for (let i = 0; i <= MAX_SYMREF_DEPTH; i++) {
     const value = table.get(current)
     if (value === undefined) return [null, target]
     if (!value.startsWith(SYMREF_PREFIX)) return [value.trim(), target]
@@ -171,15 +177,6 @@ export function matchShort(name: string, patterns: readonly string[], icase = fa
   const prefix = SHORT_PREFIXES.find((p) => name.startsWith(p))
   const rest = prefix === undefined ? name : name.slice(prefix.length)
   return patterns.some((pattern) => fnmatch(folded(rest, icase), folded(pattern, icase)))
-}
-
-/** An object's type and content, as ref fields read it. */
-async function rawObject(repo: Repo, oid: string): Promise<RefObject> {
-  // Deprecated upstream for being general, but the raw content is what the
-  // fields parse, whichever kind of object it is.
-  // eslint-disable-next-line @typescript-eslint/no-deprecated
-  const read = await git.readObject({ ...repoArgs(repo), oid, format: 'content' })
-  return { oid, type: read.type, raw: read.object as Uint8Array }
 }
 
 /** What a tag object peels to, through any tags it names in turn. */
@@ -265,12 +262,11 @@ export async function trackingRef(
     if (dst) return { ...up, ref: dst }
   }
   if (remote !== '.') return null
-  const found = DWIM_RULES.map((rule) => rule.replace('{}', merge)).find((name) => known.has(name))
-  return { ...up, ref: found ?? merge }
+  return { ...up, ref: refsNamed(known, merge)[0] ?? merge }
 }
 
 /** The commits a walk from one tip reaches. */
-async function reached(repo: Repo, oid: string): Promise<Set<string>> {
+export async function reached(repo: Repo, oid: string): Promise<Set<string>> {
   const walked = await select(repo, [await commitFacts(repo, oid)], parseFlags(new FlagView()))
   return new Set(walked.map((commit) => commit.oid))
 }
@@ -288,11 +284,11 @@ async function withUpstreams(
 ): Promise<RefItem[]> {
   const out: RefItem[] = []
   for (const item of items) {
-    if (!item.name.startsWith('refs/heads/')) {
+    if (!item.name.startsWith(BRANCH_PREFIX)) {
       out.push(item)
       continue
     }
-    let up = await trackingRef(repo, item.name.slice('refs/heads/'.length), known)
+    let up = await trackingRef(repo, item.name.slice(BRANCH_PREFIX.length), known)
     if (up !== null) {
       const [theirs] = resolveRef(table, up.ref)
       if (theirs === null) up = { ...up, gone: true }
@@ -356,9 +352,7 @@ async function worktreeHeads(repo: Repo): Promise<Map<string, string>> {
  */
 async function detachedLabel(repo: Repo, target: string, moved: string): Promise<string> {
   const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
-  const found = [...new Set(DWIM_RULES.map((rule) => rule.replace('{}', target)))].filter((name) =>
-    refs.has(name),
-  )
+  const found = refsNamed(refs, target)
   const [only] = found
   if (target !== 'HEAD' && found.length === 1 && only !== undefined) {
     let oid = await git.resolveRef({ ...repoArgs(repo), ref: only })
@@ -411,7 +405,7 @@ export async function headDescription(repo: Repo, head: HeadRef): Promise<string
  */
 export function headRef(table: ReadonlyMap<string, string>): string | null {
   let current = HEAD_FILE
-  for (let i = 0; i <= SYMREF_DEPTH; i++) {
+  for (let i = 0; i <= MAX_SYMREF_DEPTH; i++) {
     const value = table.get(current)
     if (value === undefined) return null
     if (!value.startsWith(SYMREF_PREFIX)) return current

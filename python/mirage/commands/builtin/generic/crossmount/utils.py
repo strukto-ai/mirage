@@ -20,6 +20,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
 from typing import Any
 
+from mirage.commands.builtin.constants import OPERAND_CONCURRENCY
 from mirage.commands.builtin.generic.cp import TransferLinks
 from mirage.commands.builtin.generic.crossmount.types import (
     Cmd,
@@ -320,7 +321,9 @@ async def stream_operands(
                     )
                 )
 
-        concurrency = 1 if any(is_stdin(p) for p in scopes) else 4
+        concurrency = (
+            1 if any(is_stdin(p) for p in scopes) else OPERAND_CONCURRENCY
+        )
         for _ in range(concurrency):
             start()
         try:

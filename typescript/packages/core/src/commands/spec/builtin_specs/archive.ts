@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { CommandSpec, Argument } from '../types.ts'
+import { PATHS_OPERAND, PATH_OPERAND, TEXTS_OPERAND } from '../constants.ts'
 
 export const SPECS: Record<string, CommandSpec> = {
   gunzip: new CommandSpec({
@@ -22,7 +23,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-t', { action: 'store_true' }),
       new Argument('-q', { action: 'store_true' }),
       new Argument('-S'),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   gzip: new CommandSpec({
@@ -33,16 +34,11 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-c', { action: 'store_true' }),
       new Argument('-q', { action: 'store_true' }),
       new Argument('-S'),
-      new Argument('-1', { action: 'store_true' }),
-      new Argument('-2', { action: 'store_true' }),
-      new Argument('-3', { action: 'store_true' }),
-      new Argument('-4', { action: 'store_true' }),
-      new Argument('-5', { action: 'store_true' }),
-      new Argument('-6', { action: 'store_true' }),
-      new Argument('-7', { action: 'store_true' }),
-      new Argument('-8', { action: 'store_true' }),
-      new Argument('-9', { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      ...Array.from(
+        { length: 9 },
+        (_, i) => new Argument(`-${String(i + 1)}`, { action: 'store_true' }),
+      ),
+      PATHS_OPERAND,
     ],
   }),
   tar: new CommandSpec({
@@ -83,8 +79,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-s', { action: 'store_true' }),
       new Argument('-m', { action: 'store_true' }),
       new Argument('-h', { action: 'store_true' }),
-      new Argument('path', { metavar: '', type: 'path', nargs: '?' }),
-      new Argument('texts', { metavar: '', nargs: '*' }),
+      PATH_OPERAND,
+      TEXTS_OPERAND,
     ],
   }),
   // zcat is `gzip -cd`: -f copies input that is not gzip, -q drops the
@@ -94,7 +90,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-f', { action: 'store_true' }),
       new Argument('-q', { action: 'store_true' }),
       new Argument('-S'),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   zip: new CommandSpec({
@@ -105,7 +101,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-X', '--no-extra'], { action: 'store_true' }),
       new Argument('-y', { action: 'store_true' }),
       new Argument('-x', { action: 'append' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
 }

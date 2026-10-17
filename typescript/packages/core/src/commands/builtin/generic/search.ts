@@ -30,7 +30,7 @@ const ENC = new TextEncoder()
  * `semantic` is a usage error. Mirrors Python's `semantic_options`.
  */
 export function semanticOptions(fl: FlagView): Record<string, JsonValue> {
-  const method = fl.asStr('method') ?? 'semantic'
+  const method = fl.asStr('method', 'semantic')
   if (method !== 'semantic') {
     throw new UsageError("search: only the 'semantic' method is supported")
   }

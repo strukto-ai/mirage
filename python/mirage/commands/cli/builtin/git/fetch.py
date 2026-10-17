@@ -15,14 +15,12 @@
 import asyncio
 import time
 from dataclasses import dataclass, replace
-from io import BytesIO
 
 from dulwich.config import ConfigFile
 from dulwich.objects import Commit, ObjectID
 from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 
-from mirage.commands.cli.builtin.git.constants import DWIM_RULES
 from mirage.commands.cli.builtin.git.discover import is_bare
 from mirage.commands.cli.builtin.git.errors import (
     FetchHeadReadOnlyError,
@@ -31,7 +29,7 @@ from mirage.commands.cli.builtin.git.errors import (
     NoWorkspaceError,
 )
 from mirage.commands.cli.builtin.git.inspect import global_sources
-from mirage.commands.cli.builtin.git.io import read_optional, write_file
+from mirage.commands.cli.builtin.git.io import write_file
 from mirage.commands.cli.builtin.git.objects import abbrev_for, store_pack
 from mirage.commands.cli.builtin.git.reflog import (
     IDENTITY,
@@ -40,6 +38,9 @@ from mirage.commands.cli.builtin.git.reflog import (
     entry,
 )
 from mirage.commands.cli.builtin.git.refs import (
+    BRANCH_PREFIX,
+    REMOTE_PREFIX,
+    TAG_PREFIX,
     delete_ref,
     mapped,
     parse_refspec,
@@ -47,7 +48,8 @@ from mirage.commands.cli.builtin.git.refs import (
     valid_ref_name,
     write_ref,
 )
-from mirage.commands.cli.builtin.git.repo import open_repo
+from mirage.commands.cli.builtin.git.repo import open_repo, read_config
+from mirage.commands.cli.builtin.git.revparse import refs_named
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.transport import (
     Advertisement,
@@ -69,9 +71,6 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
-HEADS = "refs/heads/"
-TAGS = "refs/tags/"
-REMOTES = "refs/remotes/"
 FETCH_HEAD = "FETCH_HEAD"
 ALL_TAGS = "refs/tags/*:refs/tags/*"
 TERM_COLUMNS = 80
@@ -138,7 +137,7 @@ def prettify(ref: str) -> str:
     Args:
         ref (str): the full ref name.
     """
-    for prefix in (HEADS, TAGS, REMOTES):
+    for prefix in (BRANCH_PREFIX, TAG_PREFIX, REMOTE_PREFIX):
         if ref.startswith(prefix):
             return ref[len(prefix) :]
     return ref
@@ -276,7 +275,7 @@ def followed_tags(
     follow = []
     for name, oid in adv.refs.items():
         if (
-            not name.startswith(TAGS)
+            not name.startswith(TAG_PREFIX)
             or name in taken
             or not valid_ref_name(name)
         ):
@@ -345,13 +344,17 @@ def _classify(
     if old == new:
         return Row("=", "[up to date]", remote, shown), None
     if old is None:
-        if local.startswith(TAGS):
+        if local.startswith(TAG_PREFIX):
             return Row(
                 "*", "[new tag]", remote, shown, counted=True
             ), "storing tag"
-        kind = "[new branch]" if want.remote.startswith(HEADS) else "[new ref]"
+        kind = (
+            "[new branch]"
+            if want.remote.startswith(BRANCH_PREFIX)
+            else "[new ref]"
+        )
         return Row("*", kind, remote, shown, counted=True), "storing head"
-    if local.startswith(TAGS) and not want.force:
+    if local.startswith(TAG_PREFIX) and not want.force:
         return Row(
             "!",
             "[rejected]",
@@ -401,9 +404,9 @@ async def update_refs(
         if want.local is None:
             kind = (
                 "tag"
-                if want.remote.startswith(TAGS)
+                if want.remote.startswith(TAG_PREFIX)
                 else "remote-tracking branch"
-                if want.remote.startswith(REMOTES)
+                if want.remote.startswith(REMOTE_PREFIX)
                 else "branch"
             )
             rows.append(Row("*", kind, prettify(want.remote), FETCH_HEAD))
@@ -415,7 +418,7 @@ async def update_refs(
         if why is None:
             continue
         await write_ref(vfs, location.commondir, want.local, want.oid.encode())
-        if logged and not want.local.startswith(TAGS):
+        if logged and not want.local.startswith(TAG_PREFIX):
             await append(
                 vfs,
                 location.commondir,
@@ -446,11 +449,11 @@ def fetch_head(url: str, wanted: list[Wanted]) -> bytes:
             short = prettify(want.remote)
             what = (
                 f"branch '{short}' of "
-                if want.remote.startswith(HEADS)
+                if want.remote.startswith(BRANCH_PREFIX)
                 else f"tag '{short}' of "
-                if want.remote.startswith(TAGS)
+                if want.remote.startswith(TAG_PREFIX)
                 else f"remote-tracking branch '{short}' of "
-                if want.remote.startswith(REMOTES)
+                if want.remote.startswith(REMOTE_PREFIX)
                 else ""
                 if want.remote == "HEAD"
                 else f"'{want.remote}' of "
@@ -472,7 +475,7 @@ def _local_name(dst: str | None, remote: str) -> str | None:
     """
     if dst is None or dst.startswith("refs/") or dst == "HEAD":
         return dst
-    return f"{TAGS if remote.startswith(TAGS) else HEADS}{dst}"
+    return f"{TAG_PREFIX if remote.startswith(TAG_PREFIX) else BRANCH_PREFIX}{dst}"
 
 
 def _plan(
@@ -514,14 +517,7 @@ def _plan(
                         )
                     )
             continue
-        found = next(
-            (
-                rule.format(spec.src)
-                for rule in DWIM_RULES
-                if rule.format(spec.src) in adv.refs
-            ),
-            None,
-        )
+        found = next(iter(refs_named(adv.refs, spec.src)), None)
         if found is None:
             raise GitError(f"couldn't find remote ref {spec.src}")
         wanted.append(
@@ -558,10 +554,6 @@ def _plan(
             if mapped(spec, name) and name not in {w.remote for w in wanted}:
                 wanted.append(Wanted(name, adv.refs[name], name))
     return wanted
-
-
-def _config(data: bytes | None) -> ConfigFile:
-    return ConfigFile.from_file(BytesIO(data or b""))
 
 
 async def configured_headers(
@@ -649,9 +641,7 @@ async def fetch(
         vfs = ctx.vfs
         if vfs is None:
             raise NoWorkspaceError()
-        cfg = _config(
-            await read_optional(vfs, location.commondir.join("config"))
-        )
+        cfg = await read_config(vfs, location)
         head = await read_head(vfs, location.gitdir)
         name = texts[0] if texts else None
         if name is None:

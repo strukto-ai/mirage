@@ -1,9 +1,18 @@
 import re
-from collections.abc import Awaitable, Callable
-from dataclasses import replace
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, replace
 
 from mirage.commands.builtin.utils.operands import normalized_read
-from mirage.commands.spec.types import CommandName
+from mirage.commands.builtin.utils.strtol import (
+    EOVERFLOW_REASON,
+    INT_MAX,
+    xstrtoimax,
+)
+from mirage.commands.config import Context
+from mirage.commands.quote import quote_text
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
@@ -11,6 +20,51 @@ from mirage.io.record_spool import RecordSpool, delimited
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn
 from mirage.utils.key_prefix import mount_key
+
+
+def digits_refusal(text: str, value: int | None) -> str:
+    """csplit's refusal of a -n value, which GNU 9.7 reads with
+    xdectoimax(optarg, 0, INT_MAX): out of that range is too large.
+
+    Args:
+        text (str): the value as typed.
+        value (int | None): what it scanned to, None for no number.
+    """
+    reason = "" if value is None else f": {EOVERFLOW_REASON}"
+    return f"csplit: invalid number: '{quote_text(text)}'{reason}"
+
+
+@dataclass(frozen=True, slots=True)
+class CsplitFlags:
+    prefix: str | PathSpec = "xx"
+    digits: int = 2
+    suffix_format: str | None = None
+    keep_on_error: bool = False
+    silent: bool = False
+    suppress_matched: bool = False
+    elide_empty: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> CsplitFlags:
+    """csplit's options, read once, ``-n`` refused in GNU's words.
+
+    Args:
+        flags (Mapping[str, FlagValue]): the line's parsed options.
+    """
+    fl = FlagView(flags, spec=SPECS["csplit"])
+    digits = fl.as_number(
+        "digits", xstrtoimax, digits_refusal, low=0, high=INT_MAX
+    )
+    prefix = fl.raw("prefix")
+    return CsplitFlags(
+        prefix=prefix if isinstance(prefix, (str, PathSpec)) else "xx",
+        digits=2 if digits is None else digits,
+        suffix_format=fl.as_str("suffix_format"),
+        keep_on_error=fl.as_bool("keep_files"),
+        silent=fl.as_bool("quiet") or fl.as_bool("silent"),
+        suppress_matched=fl.as_bool("suppress_matched"),
+        elide_empty=fl.as_bool("elide_empty_files"),
+    )
 
 
 def _is_regex(pattern: str) -> bool:
@@ -121,38 +175,32 @@ async def _split_by_patterns(
 async def csplit_generic(
     paths: list[PathSpec],
     patterns: list[str],
+    ctx: Context,
     *,
     read_bytes: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
     unlink: Callable[..., Awaitable[None]],
-    stdin: ByteSource | None = None,
-    prefix: str | PathSpec = "xx",
-    mount_prefix: str = "",
-    cwd: str = "/",
-    digits: int = 2,
-    suffix_format: str | None = None,
-    keep_on_error: bool = False,
-    silent: bool = False,
-    suppress_matched: bool = False,
-    elide_empty: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     # An output is the -f prefix, or `xx` in the working directory, plus
     # its suffix, wherever the input lives: GNU writes `xx00` to the cwd,
     # names it as it formed it (`csplit: xx00`), and stops at the first
-    # one it cannot create, -k or not.
+    # one it cannot create, -k or not. getopt reads -n before any
+    # operand is looked at.
+    parsed = parse_flags(ctx.flags)
     if not patterns:
         # GNU wants FILE and a PATTERN before it opens anything.
         raise missing_operand_error(
             CommandName.CSPLIT, paths[-1].raw_path if paths else None
         )
+    prefix = parsed.prefix
     typed_prefix = prefix.raw_path if isinstance(prefix, PathSpec) else prefix
-    suffix_fmt = suffix_format if suffix_format else f"%0{digits}d"
+    suffix_fmt = parsed.suffix_format or f"%0{parsed.digits}d"
     # `-` is stdin. /dev/stdin would run csplit on the /dev mount, which
     # is where its pieces would land, so it stays a path.
     source = (
         normalized_read(read_bytes)(paths[0])
         if paths and paths[0].raw_path != "-"
-        else (stdin or b"")
+        else (ctx.stdin or b"")
     )
     records = await delimited([source], b"\n")
     try:
@@ -160,12 +208,12 @@ async def csplit_generic(
         if refused:
             return b"", IOResult(stderr=diagnostics.encode(), exit_code=1)
         parts, error = await _split_by_patterns(
-            records, list(patterns), suppress_matched
+            records, list(patterns), parsed.suppress_matched
         )
         sizes: list[str] = []
         created: list[tuple[str, PathSpec]] = []
         for first, last in parts:
-            if elide_empty and first == last:
+            if parsed.elide_empty and first == last:
                 continue
             suffix = suffix_fmt % len(sizes)
             name = typed_prefix + suffix
@@ -180,9 +228,9 @@ async def csplit_generic(
                 else records.data.size
             )
             data = records.data.stream(start, end - start)
-            spec = PathSpec.from_str_path(name, cwd=cwd)
+            spec = PathSpec.from_str_path(name, cwd=ctx.cwd.virtual)
             spec = replace(
-                spec, vfs_path=mount_key(spec.virtual, mount_prefix)
+                spec, vfs_path=mount_key(spec.virtual, ctx.mount_prefix)
             )
             try:
                 await write_bytes(spec, data)
@@ -193,7 +241,7 @@ async def csplit_generic(
             sizes.append(str(end - start))
         if error is not None:
             diagnostics += error
-        if error is not None and not keep_on_error:
+        if error is not None and not parsed.keep_on_error:
             # GNU removes every piece the failed run wrote unless -k keeps
             # them, so an earlier run's piece of that name is gone too.
             for name, spec in created:
@@ -201,7 +249,7 @@ async def csplit_generic(
                     await unlink(spec)
                 except FS_ERRORS as exc:
                     diagnostics += f"csplit: {name}: {fs_strerror(exc)}\n"
-        output = "" if silent or not sizes else "\n".join(sizes) + "\n"
+        output = "" if parsed.silent or not sizes else "\n".join(sizes) + "\n"
         return output.encode(), IOResult(
             stderr=diagnostics.encode() or None,
             exit_code=0 if error is None else 1,
@@ -210,4 +258,4 @@ async def csplit_generic(
         await records.close()
 
 
-__all__ = ["csplit_generic"]
+__all__ = ["CsplitFlags", "csplit_generic", "digits_refusal", "parse_flags"]

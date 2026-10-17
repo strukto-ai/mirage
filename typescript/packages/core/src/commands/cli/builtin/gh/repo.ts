@@ -43,6 +43,7 @@ import {
   ghRepo,
   ghTransport,
   jsonFields,
+  listLimit,
   textOut,
   textValue,
   typedOut,
@@ -391,7 +392,7 @@ export async function listCmd(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   const transport = ghTransport(config)
-  const limit = fl.asInt('limit') ?? 30
+  const limit = listLimit(fl, 30)
   const fields = jsonFields(fl, REPO_FIELDS)
   if (fields !== null) {
     const nodes = await listRepositoryFields(transport, texts[0], limit, repoSelection(fields))
@@ -526,7 +527,7 @@ export async function fork(
     if (texts[0] === undefined || !(err instanceof Error)) throw err
     throw new Error(`did not understand argument: ${err.message}`)
   }
-  const name = fl.asStr('fork_name') ?? undefined
+  const name = fl.asNonEmpty('fork_name')
   const body: Record<string, unknown> = {}
   if (name !== undefined) body.name = name
   if (org !== undefined) body.organization = org

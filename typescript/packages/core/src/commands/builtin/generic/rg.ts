@@ -27,6 +27,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
 import type { FlagValue, ParsedFlagValue } from '../../spec/types.ts'
 import { decodeText, encodeText } from '../../../shell/bytes.ts'
+import { UINTMAX } from '../constants.ts'
 import { NEVER_MATCH, resolvePattern, rustEscape } from '../grep_pattern.ts'
 import { exitCodeFor } from '../grep_scan.ts'
 import { FileTypes, typeListing, type TypeChange, type TypeSelection } from '../rg_filetypes.ts'
@@ -93,7 +94,6 @@ const COLOR_CHOICES = ['never', 'auto', 'always', 'ansi']
 const ENGINES = ['default', 'pcre2', 'auto']
 const SIZE = /^([0-9]+)([KMG]?)$/
 const SIZE_UNIT: Readonly<Record<string, number>> = { '': 1, K: 1 << 10, M: 1 << 20, G: 1 << 30 }
-const U64_MAX = (1n << 64n) - 1n
 // The sizes ripgrep reads as digits and a unit, each named as it is refused.
 const SIZE_SPELLINGS: Readonly<Record<string, string>> = {
   max_filesize: '--max-filesize',
@@ -155,6 +155,12 @@ function operandName(p: PathSpec): string {
   return p.rawPath === '-' ? STDIN_NAME : p.rawPath
 }
 
+// ripgrep's refusal of an option value it cannot parse, exit 2. Mirrors
+// Python's _flag_error.
+function flagError(spelling: string, reason: string): UsageError {
+  return new UsageError(`rg: error parsing flag ${spelling}: ${reason}`)
+}
+
 /**
  * One numeric option's value, refused in ripgrep's words: ripgrep reads
  * every count as an unsigned 64-bit integer, so a sign, a fraction or
@@ -169,11 +175,9 @@ export function numberFlag(fl: FlagView, dest: string): number | null {
   let reason: string | null = null
   if (value === '') reason = 'cannot parse integer from empty string'
   else if (!/^[0-9]+$/.test(digits)) reason = 'invalid digit found in string'
-  else if (BigInt(digits) > U64_MAX) reason = 'number too large to fit in target type'
+  else if (BigInt(digits) > UINTMAX) reason = 'number too large to fit in target type'
   if (reason !== null) {
-    throw new UsageError(
-      `rg: error parsing flag ${NUMBER_SPELLINGS[dest] ?? dest}: value is not a valid number: ${reason}`,
-    )
+    throw flagError(NUMBER_SPELLINGS[dest] ?? dest, `value is not a valid number: ${reason}`)
   }
   return Number(digits)
 }
@@ -194,9 +198,7 @@ export function encodingFlag(fl: FlagView): string {
     const label = String(value)
     const named = label === 'auto' || label === 'none' ? label : encodingFor(label)
     if (named === null) {
-      throw new UsageError(
-        `rg: error parsing flag -E: grep config error: unknown encoding: ${label}`,
-      )
+      throw flagError('-E', `grep config error: unknown encoding: ${label}`)
     }
     found = named
   }
@@ -224,14 +226,12 @@ function sizeBytes(value: string, dest: string): number {
     reason =
       `invalid format for size '${value}', which should be a non-empty sequence of digits ` +
       "followed by an optional 'K', 'M' or 'G' suffix"
-  else if (BigInt(size[1] ?? '') > U64_MAX)
+  else if (BigInt(size[1] ?? '') > UINTMAX)
     reason = `invalid integer found in size '${value}': number too large to fit in target type`
-  else if (BigInt(size[1] ?? '') * BigInt(SIZE_UNIT[size[2] ?? ''] ?? 1) > U64_MAX)
+  else if (BigInt(size[1] ?? '') * BigInt(SIZE_UNIT[size[2] ?? ''] ?? 1) > UINTMAX)
     reason = `size too big in '${value}'`
   if (size === null || reason !== null)
-    throw new UsageError(
-      `rg: error parsing flag ${SIZE_SPELLINGS[dest] ?? dest}: invalid size: ${reason ?? ''}`,
-    )
+    throw flagError(SIZE_SPELLINGS[dest] ?? dest, `invalid size: ${reason ?? ''}`)
   return Number(size[1]) * (SIZE_UNIT[size[2] ?? ''] ?? 1)
 }
 
@@ -333,14 +333,12 @@ function hyperlinkRefusal(fmt: string): string | null {
 function checkDisplayFlags(fl: FlagView): void {
   for (const spec of fl.asList('colors')) {
     const refusal = colorRefusal(spec)
-    if (refusal !== null) throw new UsageError(`rg: error parsing flag --colors: ${refusal}`)
+    if (refusal !== null) throw flagError('--colors', refusal)
   }
   for (const [, fmt] of fl.occurrences('hyperlink_format')) {
     const refusal = hyperlinkRefusal(String(fmt))
     if (refusal !== null)
-      throw new UsageError(
-        `rg: error parsing flag --hyperlink-format: invalid hyperlink format: ${refusal}`,
-      )
+      throw flagError('--hyperlink-format', `invalid hyperlink format: ${refusal}`)
   }
   sizeFlag(fl, 'dfa_size_limit')
   sizeFlag(fl, 'regex_size_limit')
@@ -355,7 +353,7 @@ function choice(
 ): string | null {
   const value = fl.asStr(dest)
   if (value !== undefined && !choices.includes(value)) {
-    throw new UsageError(`rg: error parsing flag ${spelling}: choice '${value}' is unrecognized`)
+    throw flagError(spelling, `choice '${value}' is unrecognized`)
   }
   return value ?? null
 }
@@ -458,8 +456,9 @@ function pathSeparator(fl: FlagView): string | null {
   const raw = encodeText(unescape(value))
   if (raw.length === 0) return null
   if (raw.length !== 1) {
-    throw new UsageError(
-      'rg: error parsing flag --path-separator: A path separator must be exactly one byte, ' +
+    throw flagError(
+      '--path-separator',
+      'A path separator must be exactly one byte, ' +
         `but the given separator is ${String(raw.length)} bytes: ${value}\nIn some shells on ` +
         "Windows '/' is automatically expanded. Use '//' instead.",
     )
@@ -631,7 +630,7 @@ export function engineFlag(fl: FlagView): string {
   if (chosen !== 'engine') return 'default'
   const value = fl.asStr('engine') ?? ''
   if (!ENGINES.includes(value)) {
-    throw new UsageError(`rg: error parsing flag --engine: unrecognized regex engine '${value}'`)
+    throw flagError('--engine', `unrecognized regex engine '${value}'`)
   }
   return value
 }
@@ -1429,16 +1428,4 @@ export function labelFlags(bag: Record<string, FlagValue>): Record<string, FlagV
   flagOccurrences(flags).push(...flagOccurrences(bag))
   if (filenameFlag(new FlagView(bag, specOf('rg'))) !== 'no_filename') flags.with_filename = true
   return flags
-}
-
-/**
- * Ask for the filename a walk would have printed on its own. A content
- * search hands the generic explicit files where the user named a directory,
- * and the generic labels explicit operands only when there are several, so
- * -H is requested here; an -I the line set after any -H still wins, since
- * forcing -H under it would defeat the suppression in the delegated scan.
- */
-export function labelled(ctx: Context): Context {
-  if (filenameFlag(new FlagView(ctx.flags, specOf('rg'))) === 'no_filename') return ctx
-  return { ...ctx, flags: labelFlags(ctx.flags) }
 }

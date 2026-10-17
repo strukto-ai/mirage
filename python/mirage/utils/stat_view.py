@@ -40,6 +40,10 @@ DIR_SIZE = 4096
 BLKSIZE = 4096
 BLOCK_UNIT = 512
 
+# The bits chmod sets (gnulib CHMOD_MODE_BITS): permissions plus
+# setuid, setgid and sticky, everything but the file type.
+CHMOD_MODE_BITS = 0o7777
+
 # FNV-1a, 64-bit: the same arithmetic on both hosts and in every
 # runtime, so one path reports one inode whoever asks.
 _FNV_OFFSET = 0xCBF29CE484222325
@@ -130,7 +134,7 @@ def posix_mode(st: FileStat) -> int:
         base = DIR_MODE if is_dir(st) else FILE_MODE
     if st.mode is None:
         return base
-    return (base & ~0o7777) | (st.mode & 0o7777)
+    return (base & ~CHMOD_MODE_BITS) | (st.mode & CHMOD_MODE_BITS)
 
 
 def is_dir(st: FileStat) -> bool:

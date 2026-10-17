@@ -20,6 +20,7 @@
 
 import { makeAbortError, mergeSignals } from '../../../utils/abort.ts'
 import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
+import { HTTP_TIMEOUT_SECONDS } from './constants.ts'
 
 export const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; mirage/1.0)'
 const DEFAULT_PORTS: Record<string, number> = { 'http:': 80, 'https:': 443 }
@@ -118,7 +119,8 @@ export interface HttpRequestOptions {
 }
 
 async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpResponse> {
-  const timeoutMs = options.timeoutMs === undefined ? 30_000 : options.timeoutMs
+  const timeoutMs =
+    options.timeoutMs === undefined ? HTTP_TIMEOUT_SECONDS * 1000 : options.timeoutMs
   const send = options.verify === false && insecureFetch !== null ? insecureFetch : fetch
   const started = Date.now()
   const controller = new AbortController()

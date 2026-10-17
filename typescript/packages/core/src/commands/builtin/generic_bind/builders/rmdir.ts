@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { UsageError } from '../../../errors.ts'
+import { missingOperandError } from '../../../spec/usage.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { LinkView } from '../../../../view/types.ts'
 import { FileType, type PathSpec } from '../../../../types.ts'
@@ -73,9 +73,7 @@ export function ancestors(
 }
 
 const rmdir: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  if (paths.length === 0) {
-    throw new UsageError("rmdir: missing operand\nTry 'rmdir --help' for more information.", 1)
-  }
+  if (paths.length === 0) throw missingOperandError('rmdir', null)
   const idx = ctx.index ?? undefined
   const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
   const fl = new FlagView(ctx.flags, specOf('rmdir'))

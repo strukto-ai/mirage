@@ -122,33 +122,6 @@ async function rowMtime(
   }
 }
 
-function extractNotName(texts: readonly string[]): string | null {
-  for (let i = 0; i < texts.length; i++) {
-    const pat = texts[i + 2]
-    if (texts[i] === '-not' && texts[i + 1] === '-name' && pat !== undefined) {
-      return pat
-    }
-  }
-  return null
-}
-
-function extractOrNames(name: string | null, texts: readonly string[]): string[] {
-  const names: string[] = []
-  if (name !== null) names.push(name)
-  let i = 0
-  while (i < texts.length) {
-    const pat = texts[i + 2]
-    const isOr = texts[i] === '-or' || texts[i] === '-o'
-    if (isOr && texts[i + 1] === '-name' && pat !== undefined) {
-      names.push(pat)
-      i += 3
-    } else {
-      i += 1
-    }
-  }
-  return names
-}
-
 // Results for a start point that is not a directory.
 //
 // GNU reports a non-directory start point when it matches the expression
@@ -342,8 +315,6 @@ export function findGeneric(
     if (err instanceof FindParseError) return Promise.resolve(invalidFindArg(err.message))
     throw err
   }
-  const nameExclude = extractNotName(texts)
-  const orNames = extractOrNames(nameFlag, texts)
   const emptyFlag = parsed.empty
   const expr = texts.length > 0 ? parseFindExpression(texts) : null
   // With a stat wired, the mtime window is applied by the overlay-
@@ -375,9 +346,7 @@ export function findGeneric(
           ...(maxSize !== null ? { maxSize } : {}),
           ...(pushMtime && mtimeMin !== null ? { mtimeMin } : {}),
           ...(pushMtime && mtimeMax !== null ? { mtimeMax } : {}),
-          ...(nameExclude !== null ? { nameExclude } : {}),
           ...(pathFlag !== null ? { pathPattern: pathFlag } : {}),
-          ...(orNames.length > 1 ? { orNames } : {}),
           ...(emptyFlag ? { empty: true } : {}),
         }
   const cacheManager = activeCacheManager()

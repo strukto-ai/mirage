@@ -75,7 +75,7 @@ async def tag_create_cmd(
         repo_id,
         tag,
         repo_type_of(fl),
-        revision=fl.as_str("revision") or DEFAULT_REVISION,
+        revision=fl.as_str("revision", DEFAULT_REVISION),
         message=fl.as_str("message"),
     )
     return text_out(f"Tag {tag} created on {repo_id}\n")

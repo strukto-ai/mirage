@@ -19,7 +19,8 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { reportedStream } from '../utils/operands.ts'
-import { extraOperandError } from '../../spec/usage.ts'
+import { extraOperandError, usageHint } from '../../spec/usage.ts'
+import { UsageError } from '../../errors.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
@@ -41,9 +42,8 @@ export function lookGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): CommandFnResult {
   if (paths.length > 1) throw extraOperandError(CommandName.LOOK, paths[1]?.rawPath ?? '')
-  if (texts.length === 0) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('look: missing prefix\n') })]
-  }
+  // util-linux 2.41 answers a missing prefix with its usage refusal.
+  if (texts.length === 0) throw new UsageError(`look: bad usage\n${usageHint('look')}`, 1)
   const prefix = texts[0] ?? ''
   const caseInsensitive = parseFlags(ctx.flags).foldCase
   const io = new IOResult({ exitCode: 1 })

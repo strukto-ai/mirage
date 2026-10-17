@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
-import { parseLimit, parseSeek, strtol, xxdGeneric } from './xxd.ts'
+import { parseLimit, parseSeek, xxdGeneric } from './xxd.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -28,20 +28,17 @@ function ctx(flags: Record<string, unknown>, stdin: Uint8Array | null = null): C
   return { flags, stdin } as unknown as Context
 }
 
-describe('xxd numbers', () => {
-  // Mirrors python's test_strtol_reads_base_zero_and_drops_the_rest.
-  it.each([
-    ['2', 2],
-    ['0x2', 2],
-    ['017', 15],
-    ['2k', 2],
-    ['x', 0],
-    ['08', 0],
-    ['-3', -3],
-  ])('strtol %j', (raw, value) => {
-    expect(strtol(raw)).toBe(value)
-  })
+async function* stream(): AsyncIterable<Uint8Array> {
+  await Promise.resolve()
+  yield DATA
+}
 
+async function* empty(): AsyncIterable<Uint8Array> {
+  await Promise.resolve()
+  yield new Uint8Array()
+}
+
+describe('xxd numbers', () => {
   // Mirrors python's test_parse_seek_reads_the_signs.
   it.each([
     ['2', { offset: 2, relative: false, back: false }],
@@ -54,11 +51,6 @@ describe('xxd numbers', () => {
 })
 
 describe('xxd -s', () => {
-  const stream = async function* (): AsyncIterable<Uint8Array> {
-    await Promise.resolve()
-    yield DATA
-  }
-
   // Mirrors python's test_a_dump_starts_its_addresses_at_the_seek.
   it.each([
     ['2', undefined, '00000002: 6667 68                                  fgh\n'],
@@ -89,10 +81,6 @@ describe('xxd -s', () => {
     ['-2', 4, ''],
     ['10', 4, ''],
   ])('stdin -s %s', async (seek, code, out) => {
-    const empty = async function* (): AsyncIterable<Uint8Array> {
-      await Promise.resolve()
-      yield new Uint8Array()
-    }
     const [stdout, result] = await xxdGeneric([], ctx({ s: seek }, DATA), empty)
     expect([DEC.decode(await materialize(stdout)), result.exitCode]).toEqual([out, code])
   })
@@ -108,5 +96,16 @@ describe('xxd -l', () => {
     ['-1', null],
   ])('parseLimit %j', (raw, limit) => {
     expect(parseLimit(raw)).toBe(limit)
+  })
+})
+
+describe('xxd -c and -g', () => {
+  // Mirrors python's test_a_direct_call_takes_integer_counts.
+  it('takes integer counts from a direct call', async () => {
+    const [stdout, result] = await xxdGeneric([F], ctx({ c: 4, g: 1 }), stream)
+    expect(DEC.decode(await materialize(stdout))).toBe(
+      '00000000: 64 65 66 67  defg\n00000004: 68           h\n',
+    )
+    expect(result.exitCode).toBe(0)
   })
 })

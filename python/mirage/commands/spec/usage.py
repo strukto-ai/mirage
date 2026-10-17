@@ -19,6 +19,7 @@ from mirage.commands.quote import quote_text
 from mirage.commands.spec.argmatch import ArgmatchChoices, ArgmatchKind
 from mirage.commands.spec.constants import (
     IN_ORDER_OPERANDS,
+    NOT_GETOPT_LONG,
     OLD_OPTION_EXIT,
     OPERAND_EXIT,
     PYTHON_NAMES,
@@ -269,17 +270,6 @@ def trigrams(name: str) -> frozenset[str]:
     return frozenset(name[i : i + 3] for i in range(len(name) - 2))
 
 
-# The programs that do NOT parse with getopt_long, and so answer an
-# option they will not take by naming the whole typed token as unknown
-# rather than by naming the option. Each one is measured: `curl
-# --silent=2` is `curl: option --silent=2: is unknown`, `python3
-# --version=2` is `Unknown option: --version=2`, `jq --tab=2` is `jq:
-# Unknown option --tab=2`, and find reads the word as a predicate. Every
-# other command here is a GNU tool whose getopt_long words the refusal
-# the other way, so the set is the exception list and not the rule.
-_NOT_GETOPT_LONG = frozenset({"curl", "jq", CommandName.FIND, *PYTHON_NAMES})
-
-
 def unexpected_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
     """getopt_long refusal for a BOOLEAN long option handed a value.
 
@@ -301,10 +291,10 @@ def unexpected_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
         cmd_name (str): command name for the message and exit code.
         token (str): the option's canonical long spelling and the value
             that was typed on it ('--byte-offset=2'). Carried whole
-            because the programs in _NOT_GETOPT_LONG quote the value
+            because the programs in NOT_GETOPT_LONG quote the value
             along with the option and getopt_long drops it.
     """
-    if cmd_name in _NOT_GETOPT_LONG:
+    if cmd_name in NOT_GETOPT_LONG:
         return unknown_option_error(cmd_name, token)
     option = token.split("=", 1)[0]
     line = f"{cmd_name}: option '{option}' doesn't allow an argument\n"

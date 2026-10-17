@@ -57,8 +57,8 @@ async def trello_card_create(
         raise ValueError("--name is required")
     desc = None
     if (
-        fl.as_str("desc")
-        or file_operand(fl, "desc_file")
+        fl.as_str("desc") is not None
+        or file_operand(fl, "desc_file") is not None
         or ctx.stdin is not None
     ):
         desc = await resolve_text_input(

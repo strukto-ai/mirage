@@ -16,6 +16,8 @@ import type { ByteSource } from '../../../io/types.ts'
 import type { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { isEisdir } from '../../../errors/fs.ts'
 import { FileStat, FileType, type PathSpec } from '../../../types.ts'
+import { encodeText } from '../../../shell/bytes.ts'
+import { STDIN_HEADER_NAME } from './constants.ts'
 import { concat } from '../../../utils/bytes.ts'
 
 export async function readStdinAsync(stdin: ByteSource | null): Promise<Uint8Array | null> {
@@ -66,6 +68,26 @@ export function neverOpened(reader: AsyncLineIterator, path: PathSpec, error: un
  */
 export function operandLabel(path: PathSpec, stdinName: string): string {
   return path.rawPath === '-' ? stdinName : path.rawPath
+}
+
+/**
+ * The `==> name <==` banner head and tail print above an operand: null names
+ * the stdin no operand named, which -v heads with the name `-` gets, and
+ * `after` says a block printed before this one, which a blank line then
+ * separates it from. Mirrors Python's operand_header.
+ */
+export function operandHeader(path: PathSpec | null, after = false): Uint8Array {
+  const label = path === null ? STDIN_HEADER_NAME : operandLabel(path, STDIN_HEADER_NAME)
+  return encodeText(`${after ? '\n' : ''}==> ${label} <==\n`)
+}
+
+/**
+ * Whether head or tail banners its operands: under -v or for more than one
+ * operand (a failed one included), never under -q. Mirrors Python's
+ * shows_headers.
+ */
+export function showsHeaders(verbose: boolean, quiet: boolean, count: number): boolean {
+  return (verbose || count > 1) && !quiet
 }
 
 /**

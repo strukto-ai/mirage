@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import git from 'isomorphic-git'
+import git, { Errors } from 'isomorphic-git'
 import { DWIM_RULES, GITLINK_MODE, HEAD } from './constants.ts'
 
 import {
@@ -118,8 +118,10 @@ async function parentsOf(repo: Repo, oid: string, revision: string): Promise<str
   try {
     const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
     return [...commit.parent]
-  } catch {
-    throw new AmbiguousArgumentError(revision)
+  } catch (err) {
+    if (err instanceof Errors.NotFoundError || err instanceof Errors.ObjectTypeError)
+      throw new AmbiguousArgumentError(revision)
+    throw err
   }
 }
 
@@ -169,23 +171,15 @@ async function applyStep(
  */
 export async function resolveCommit(repo: Repo, revision: string): Promise<string> {
   const [base, ops] = splitOperators(revision)
-  let oid = await namedObject(repo, base, revision)
+  const named = await namedObject(repo, base, revision)
   // A tag names a tag object, not the commit under it; peel until it is one.
-  for (;;) {
-    let type: string
-    try {
-      // Deprecated upstream for being general, but the general answer is
-      // what peeling needs: which of commit/tag/tree/blob this id names,
-      // without reading it as each in turn until one does not throw.
-      // eslint-disable-next-line @typescript-eslint/no-deprecated
-      type = (await git.readObject({ ...repoArgs(repo), oid })).type
-    } catch {
-      throw new AmbiguousArgumentError(revision)
-    }
-    if (type === 'commit') break
-    if (type !== 'tag') throw new AmbiguousArgumentError(revision)
-    oid = (await git.readTag({ ...repoArgs(repo), oid })).tag.object
-  }
+  const start = await unwrapped(
+    repo,
+    { oid: named, type: await typeOf(repo, named, revision) },
+    revision,
+  )
+  if (start.type !== COMMIT) throw new AmbiguousArgumentError(revision)
+  let oid = start.oid
   for (const op of ops) {
     if ('want' in op) {
       // A peel this caller can use is one that lands back on a commit: `^{}`
@@ -208,7 +202,7 @@ export async function resolveCommit(repo: Repo, revision: string): Promise<strin
  * @param table every ref, as loadRefs reads them
  * @param name the name as typed
  */
-export function refsNamed(table: ReadonlyMap<string, string>, name: string): string[] {
+export function refsNamed(table: { has(name: string): boolean }, name: string): string[] {
   return [...new Set(DWIM_RULES.map((rule) => rule.replace('{}', name)))].filter((ref) =>
     table.has(ref),
   )
@@ -230,11 +224,14 @@ async function namedObject(repo: Repo, base: string, revision: string): Promise<
   let oid: string
   try {
     oid = await git.resolveRef({ ...repoArgs(repo), ref: base })
-  } catch {
+  } catch (err) {
+    if (!(err instanceof Errors.NotFoundError)) throw err
     try {
       return await git.expandOid({ ...repoArgs(repo), oid: base })
-    } catch {
-      throw new AmbiguousArgumentError(revision)
+    } catch (missed) {
+      if (missed instanceof Errors.NotFoundError || missed instanceof Errors.AmbiguousError)
+        throw new AmbiguousArgumentError(revision)
+      throw missed
     }
   }
   await noteAmbiguity(repo, base)
@@ -264,8 +261,9 @@ async function typeOf(repo: Repo, oid: string, revision: string): Promise<string
     // reading it as each in turn until one does not throw.
     // eslint-disable-next-line @typescript-eslint/no-deprecated
     return (await git.readObject({ ...repoArgs(repo), oid })).type
-  } catch {
-    throw new AmbiguousArgumentError(revision)
+  } catch (err) {
+    if (err instanceof Errors.NotFoundError) throw new AmbiguousArgumentError(revision)
+    throw err
   }
 }
 
@@ -358,8 +356,10 @@ async function atPath(repo: Repo, rev: string, path: string, revision: string): 
     // eslint-disable-next-line @typescript-eslint/no-deprecated
     const found = await git.readObject({ ...repoArgs(repo), oid: holder.oid, filepath: path })
     return { oid: found.oid, type: found.type }
-  } catch {
-    throw new PathNotInRevisionError(path, rev, await onDisk(repo, path))
+  } catch (err) {
+    if (err instanceof Errors.NotFoundError || err instanceof Errors.ObjectTypeError)
+      throw new PathNotInRevisionError(path, rev, await onDisk(repo, path))
+    throw err
   }
 }
 
@@ -424,18 +424,22 @@ export async function tagObject(repo: Repo, stem: string): Promise<GitObject | n
   let oid: string
   try {
     oid = await git.resolveRef({ ...repoArgs(repo), ref: `${TAG_PREFIX}${stem}` })
-  } catch {
+  } catch (err) {
+    if (!(err instanceof Errors.NotFoundError)) throw err
     try {
       oid = await git.expandOid({ ...repoArgs(repo), oid: stem })
-    } catch {
-      return null
+    } catch (missed) {
+      if (missed instanceof Errors.NotFoundError || missed instanceof Errors.AmbiguousError)
+        return null
+      throw missed
     }
   }
   let type: string
   try {
     type = await typeOf(repo, oid, stem)
-  } catch {
-    return null
+  } catch (err) {
+    if (err instanceof AmbiguousArgumentError) return null
+    throw err
   }
   return type === TAG ? { oid, type } : null
 }

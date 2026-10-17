@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { CommandSpec, Argument } from '../types.ts'
+import { PATHS_OPERAND, TEXT_OPERAND } from '../constants.ts'
 
 export const SPECS: Record<string, CommandSpec> = {
   curl: new CommandSpec({
@@ -86,7 +87,7 @@ export const SPECS: Record<string, CommandSpec> = {
         action: 'store_true',
         help: 'Skip verification of the server certificate.',
       }),
-      new Argument('text', { metavar: '', nargs: '?' }),
+      TEXT_OPERAND,
     ],
   }),
   wget: new CommandSpec({
@@ -102,8 +103,8 @@ export const SPECS: Record<string, CommandSpec> = {
         action: 'store_true',
         help: 'Check that the URL exists without downloading it.',
       }),
-      new Argument('text', { metavar: '', nargs: '?' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      TEXT_OPERAND,
+      PATHS_OPERAND,
     ],
   }),
 }

@@ -29,14 +29,15 @@ import {
 import { UsageError } from '../../errors.ts'
 import type { RegexSyntax } from '../types.ts'
 import { matchStart, matchText } from '../utils/pcre.ts'
-import { STDIN_OPERAND } from '../utils/constants.ts'
+import { GREP_STDIN_LABEL, STDIN_OPERAND } from '../utils/constants.ts'
 import { linkResolver } from '../utils/links.ts'
 import { operandLabel } from '../utils/stream.ts'
 import type { StatFn } from './archive/walk.ts'
 import { decompressInputs } from './decompress.ts'
-import { maxCount } from './grep.ts'
+import { listingMode, maxCount } from './grep.ts'
 import { validUtf8 } from '../grep_binary.ts'
 import { prefixOf } from '../grep_offsets.ts'
+import { exitCodeFor } from '../grep_scan.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { OutputStream, closeQuietly } from '../../../io/stream.ts'
 
@@ -67,17 +68,13 @@ interface ZgrepFlags {
 
 // The zero-pattern sentinel is a regex, so it suppresses -F.
 function parseFlags(fl: FlagView, neverMatch: boolean): ZgrepFlags {
-  // -l and -L set one mode in grep, so the later one on the line wins.
-  let listing: string | null = null
-  for (const name of fl.typedOrder('files_with_matches', 'files_without_match')) {
-    if (fl.asBool(name)) listing = name
-  }
+  const [filesOnly, filesWithoutMatch] = listingMode(fl)
   return {
     ignoreCase: fl.asBool('ignore_case'),
     invert: fl.asBool('invert_match'),
     count: fl.asBool('count'),
-    filesOnly: listing === 'files_with_matches',
-    filesWithoutMatch: listing === 'files_without_match',
+    filesOnly,
+    filesWithoutMatch,
     lineNumbers: fl.asBool('line_number'),
     byteOffsets: fl.asBool('byte_offset'),
     fixed: fl.asBool('fixed_strings') && !neverMatch,
@@ -175,7 +172,7 @@ export async function zgrepGeneric(
       let count = 0
       let number = 0
       let binary = false
-      const fname = showFilename ? operandLabel(p, '(standard input)') : null
+      const fname = showFilename ? operandLabel(p, GREP_STDIN_LABEL) : null
       try {
         for (;;) {
           const offset = reader.position
@@ -221,12 +218,11 @@ export async function zgrepGeneric(
         await reader.discard()
       }
       let diagnostic = decodeText(await io.materializeStderr())
-      if (binary)
-        diagnostic += `grep: ${operandLabel(p, '(standard input)')}: binary file matches\n`
+      if (binary) diagnostic += `grep: ${operandLabel(p, GREP_STDIN_LABEL)}: binary file matches\n`
       if (diagnostic !== '')
         result.stderr = encodeText(decodeText(await materialize(result.stderr)) + diagnostic)
       failed ||= io.exitCode === 1
-      result.exitCode = failed ? 2 : anyMatch ? 0 : 1
+      result.exitCode = exitCodeFor(anyMatch, failed, false)
       if (pattern === null) {
         if (filesWithoutMatch) yield encodeText(p.rawPath + '\n')
       } else if (!quiet) {

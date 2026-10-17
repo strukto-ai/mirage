@@ -30,7 +30,8 @@ import { visiblePath, pathspecPatterns, pathspecSelects, repoRelative } from './
 import { quotePath, relativePath } from './render.ts'
 import { configBool } from './repo.ts'
 import { opened } from './session.ts'
-import { listedTree, resolveTree } from './tree.ts'
+import { GITLINK_MODE } from './constants.ts'
+import { listedTree, resolveTree, TREE_MODE } from './tree.ts'
 import { checkSwitches, fatal, startPoint, verbUsage } from './util.ts'
 
 /**
@@ -133,7 +134,7 @@ export async function lsTree(
       if (!visiblePath(repo.location, path)) continue
       const relative = fullName ? path : relativePath(path, prefix)
       const label = nul ? relative : quotePath(relative, false, fully)
-      const kind = mode === '040000' ? 'tree' : mode === '160000' ? 'commit' : 'blob'
+      const kind = mode === TREE_MODE ? 'tree' : mode === GITLINK_MODE ? 'commit' : 'blob'
       out.push((names ? '' : `${mode} ${kind} ${oid}\t`) + label + terminator)
     }
     return [encodeText(out.join('')), new IOResult()]

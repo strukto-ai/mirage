@@ -35,7 +35,8 @@ import {
   type AwkHost,
   type CommandRun,
 } from '../../../core/awk/index.ts'
-import { USAGE, type AwkFlags } from './awk_types.ts'
+import { AWK_USAGE } from '../constants.ts'
+import { type AwkFlags } from './awk_types.ts'
 import { callerStream } from '../generic_bind/dispatch.ts'
 import { currentCaller } from '../../../context/session_context.ts'
 
@@ -321,7 +322,7 @@ export async function awkGeneric(
   } else if (texts.length > 0 && texts[0] !== undefined) {
     program = texts[0]
   } else {
-    return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${USAGE}\n`) })]
+    return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${AWK_USAGE}\n`) })]
   }
 
   let parsed

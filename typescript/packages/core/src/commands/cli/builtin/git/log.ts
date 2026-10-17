@@ -12,14 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { loadMailmap, useMailmap } from './mailmap.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { GitError } from './errors.ts'
 import {
-  joinOutput,
+  commitEntry,
   commitOutput,
   parseDiffFlags,
   renamesEnabled,
@@ -28,7 +27,7 @@ import {
 } from './diff_output.ts'
 import {
   FULL_SHA,
-  oneline,
+  commitHeader,
   presetBlock,
   renderTemplate,
   type CommitFacts,
@@ -36,7 +35,7 @@ import {
 } from './format.ts'
 import { CommitGraph } from './graph.ts'
 import {
-  decorationFor,
+  displayed,
   decorations,
   parseFlags,
   refCommits,
@@ -49,7 +48,7 @@ import { configBool, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { splitRevisions } from './revparse.ts'
 import { checkOperands, fatal } from './util.ts'
-import { HEAD } from './constants.ts'
+import { HEAD, TEMPLATE_KINDS, TERMINATED_KINDS } from './constants.ts'
 import { Decoration } from './types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
@@ -58,11 +57,9 @@ import { encodeText } from '../../../../shell/bytes.ts'
  *
  * `format:` separates entries with a newline and ends without one, and an
  * entry that renders empty still claims its separator, so `--pretty=format:`
- * prints one newline per commit past the first. `tformat:` (and any bare `%`
- * string) terminates every entry, empty ones included - except that an empty
- * template prints nothing at all, which is how `--format=` stays silent.
- * The caller encodes through `encodeText` because `%xHH` names a raw byte.
- * Pinned against git 2.37 and 2.54.
+ * prints one newline per commit past the first; a block preset separates its
+ * entries the same way. `tformat:` (and any bare `%` string) and oneline
+ * terminate every entry instead. Pinned against git 2.37 and 2.54.
  */
 function rendered(
   commits: readonly CommitFacts[],
@@ -70,36 +67,10 @@ function rendered(
   width: number,
   decor: Decorations | null,
 ): string {
-  const fmt = flags.pretty
-  if (fmt.kind === 'oneline') {
-    const length = flags.abbrevCommit ? width : FULL_SHA
-    const lines = commits.map((commit) =>
-      flags.decorate !== Decoration.NONE
-        ? renderTemplate('%h%d %s', commit, length, decor)
-        : oneline(commit, length),
-    )
-    return lines.length > 0 ? `${lines.join('\n')}\n` : ''
-  }
-  if (fmt.kind === 'format' || fmt.kind === 'tformat') {
-    const entries = commits.map((commit) =>
-      renderTemplate(fmt.template ?? '', commit, width, decor, flags.date, flags.mailmap),
-    )
-    if (fmt.kind === 'tformat') {
-      if (fmt.template === null || fmt.template === '') return ''
-      return entries.map((text) => `${text}\n`).join('')
-    }
-    return entries.join('\n')
-  }
-  const lines: string[] = []
-  const mailmap = flags.useMailmap ? flags.mailmap : []
-  commits.forEach((commit, index) => {
-    if (index > 0) lines.push('')
-    const block = presetBlock(commit, fmt.kind, width, flags.date, mailmap)
-    if (flags.decorate !== Decoration.NONE && block[0]?.startsWith('commit '))
-      block[0] += renderTemplate('%d', commit, width, decor)
-    lines.push(...block)
-  })
-  return lines.length > 0 ? `${lines.join('\n')}\n` : ''
+  const terminated = TERMINATED_KINDS.includes(flags.pretty.kind)
+  return commits
+    .map((commit) => commitHeader(commit, flags, width, decor))
+    .join(terminated ? '' : '\n')
 }
 
 /**
@@ -138,8 +109,8 @@ async function graphed(
   const graph = new CommitGraph((oid) => walk.interesting.has(oid), flags.firstParent)
   const mailmap = flags.useMailmap ? flags.mailmap : []
   const fmt = flags.pretty
-  const user = fmt.kind === 'format' || fmt.kind === 'tformat'
-  const terminated = fmt.kind === 'oneline' || fmt.kind === 'tformat'
+  const user = TEMPLATE_KINDS.includes(fmt.kind)
+  const terminated = TERMINATED_KINDS.includes(fmt.kind)
   const empty = user && (fmt.template ?? '') === ''
   const length = fmt.kind === 'oneline' && !flags.abbrevCommit ? FULL_SHA : width
   let out = ''
@@ -220,15 +191,10 @@ export async function log(
     checkOperands(ctx, texts)
     const flags = parseFlags(fl, ctx.env)
     const repo = await opened(ctx, fl)
-    const parsed = {
-      ...flags,
-      mailmap: await loadMailmap(repo.vfs, repo.location),
-      useMailmap: useMailmap(fl, await configBool(repo, 'log.mailmap', true)),
-      decorate: await decorationFor(repo, fl, flags.pretty),
-    }
+    const [mailmap, mapped, decorate] = await displayed(repo, fl, flags.pretty)
+    const parsed = { ...flags, mailmap, useMailmap: mapped, decorate }
     const [starts, hidden] = await startingPoints(repo, texts, parsed)
-    const decor =
-      parsed.decorate === Decoration.NONE ? null : await decorations(repo, parsed.decorate)
+    const decor = await decorations(repo, parsed.decorate)
     let diffFlags = parseDiffFlags(fl, false)
     const diffing =
       diffFlags.patch ||
@@ -259,11 +225,9 @@ export async function log(
     if (diffing) {
       const blocks: string[] = []
       for (const commit of commits) {
-        const head = rendered([commit], parsed, repo.abbrev, decor)
-        const bodies = await commitOutput(repo, commit, diffFlags)
-        blocks.push(joinOutput(commit, head, bodies, parsed.pretty.kind, repo.abbrev, diffFlags))
+        blocks.push(await commitEntry(repo, commit, parsed, diffFlags, decor))
       }
-      out = blocks.join(['tformat', 'oneline'].includes(parsed.pretty.kind) ? '' : '\n')
+      out = blocks.join(TERMINATED_KINDS.includes(parsed.pretty.kind) ? '' : '\n')
     } else out = rendered(commits, parsed, repo.abbrev, decor)
     if (out === '') return [null, new IOResult()]
     return [encodeText(out), new IOResult()]

@@ -2,14 +2,14 @@ import git from 'isomorphic-git'
 import type { FlagView } from '../../../spec/flag_view.ts'
 import { pairRenames, kindOf } from './changes.ts'
 import { combinedLines } from './combined.ts'
+import { TEMPLATE_KINDS, TERMINATED_KINDS } from './constants.ts'
 import { GitError } from './errors.ts'
 import { pathspecSelects } from './pathspec.ts'
-import type { CommitFacts } from './format.ts'
-import { blobData, filePatch, shortOid } from './patch.ts'
+import { commitHeader, type CommitDisplay, type CommitFacts, type Decorations } from './format.ts'
+import { blobData, DEV_NULL, filePatch, HUNK_CONTEXT, OID_HEX, shortOid } from './patch.ts'
 import { quotePath } from './render.ts'
 import { commitFacts, repoArgs, type Repo } from './repo.ts'
-import { similarityScore } from './similarity.ts'
-import { diffstat, statTable, type FileStat } from './summary.ts'
+import { BINARY_SNIFF, diffstat, statTable, type FileStat } from './summary.ts'
 import { TREE_MODE, treeEntries, treeItems, type TreeEntry } from './tree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -64,7 +64,7 @@ export function parseDiffFlags(
     }
   }
   if (fl.asBool('no_renames')) threshold = null
-  let merge = fl.asStr('diff_merges') ?? defaultMerge
+  let merge = fl.asStr('diff_merges', defaultMerge)
   if (fl.asBool('m')) merge = 'separate'
   if (fl.asBool('c')) merge = 'combined'
   if (fl.asBool('cc')) merge = 'dense-combined'
@@ -79,8 +79,8 @@ export function parseDiffFlags(
   }
   merge = aliases[merge] ?? merge
   if (!['off', 'separate', 'combined', 'dense-combined', 'first-parent'].includes(merge))
-    throw new GitError(`invalid value for --diff-merges: ${merge}`)
-  const context = fl.asInt('unified') ?? 3
+    throw new GitError(`invalid value for '--diff-merges': '${merge}'`)
+  const context = fl.asInt('unified') ?? HUNK_CONTEXT
   if (context < 0) throw new GitError('negative context length')
   const patch =
     fl.asBool('patch') ||
@@ -143,19 +143,15 @@ export async function compare(
   }
   const pairs =
     threshold === null
-      ? new Map([...codes].map(([p, c]) => [p, [c, null] as const]))
+      ? new Map([...codes].map(([p, c]) => [p, [c, null, 0] as const]))
       : await pairRenames(repo, codes, oids, kinds, threshold)
   const rows: Change[] = []
-  for (const [path, [status, origin]] of [...pairs].sort((a, b) => compareCodePoints(a[0], b[0]))) {
+  for (const [path, [status, origin, score]] of [...pairs].sort((a, b) =>
+    compareCodePoints(a[0], b[0]),
+  )) {
     const oldPath = origin ?? path,
       old = before.get(oldPath) ?? null,
       now = after.get(path) ?? null
-    const score =
-      origin !== null && old && now
-        ? old.oid === now.oid
-          ? 100
-          : similarityScore(await blobData(repo, old), await blobData(repo, now))
-        : 0
     rows.push({ path, oldPath, old, new: now, status, score })
   }
   return rows
@@ -198,7 +194,7 @@ function textLines(data: Uint8Array): string[] {
  */
 export async function renderChanges(repo: Repo, rows: Change[], flags: DiffFlags): Promise<string> {
   if (flags.noPatch) return ''
-  const width = flags.abbrev ? repo.abbrev : 40
+  const width = flags.abbrev ? repo.abbrev : OID_HEX
   const fully = flags.quotePathFully
   let output: string[] = []
   const numbers: string[] = [],
@@ -432,7 +428,7 @@ export async function commitOutput(
     .filter((path) => maps.every((m) => m.has(path)))
     .sort(compareCodePoints)
   if (flags.noPatch) return []
-  const width = flags.abbrev ? repo.abbrev : 40
+  const width = flags.abbrev ? repo.abbrev : OID_HEX
   const names = flags.nameOnly || flags.nameStatus
   const stat =
     !names && (flags.stat || flags.numstat || flags.shortstat || flags.summary)
@@ -487,7 +483,7 @@ async function combinedPatch(
     const data = await blobData(repo, fresh),
       parents: Uint8Array[] = []
     for (const entry of old) parents.push(await blobData(repo, entry))
-    const binary = [...parents, data].some((d) => d.subarray(0, 8000).includes(0))
+    const binary = [...parents, data].some((d) => d.subarray(0, BINARY_SNIFF).includes(0))
     const body = binary
       ? []
       : combinedLines(parents.map(textLines), textLines(data), dense, context)
@@ -517,8 +513,8 @@ async function combinedPatch(
       continue
     }
     output.push(
-      `--- ${created ? '/dev/null' : quotePath(`a/${path}`, false, fully)}\n`,
-      `+++ ${deleted ? '/dev/null' : quotePath(`b/${path}`, false, fully)}\n`,
+      `--- ${created ? DEV_NULL : quotePath(`a/${path}`, false, fully)}\n`,
+      `+++ ${deleted ? DEV_NULL : quotePath(`b/${path}`, false, fully)}\n`,
       ...body,
     )
   }
@@ -542,6 +538,19 @@ export async function renamesEnabled(repo: Repo): Promise<boolean> {
 }
 
 /**
+ * Whether a commit's diff is a combined one (`-c`, `--cc`), which only a merge
+ * gets.
+ *
+ * @param commit the commit whose diff follows
+ * @param flags the diff flags
+ */
+export function isCombined(commit: CommitFacts, flags: DiffFlags): boolean {
+  return (
+    commit.parents.length > 1 && (flags.merge === 'combined' || flags.merge === 'dense-combined')
+  )
+}
+
+/**
  * The line git prints between a commit's text and its diff, null for none.
  *
  * `---` when both a diffstat and a patch follow, otherwise an empty line,
@@ -554,9 +563,7 @@ export async function renamesEnabled(repo: Repo): Promise<boolean> {
  * @param flags the diff flags
  */
 export function separatorLine(commit: CommitFacts, kind: string, flags: DiffFlags): string | null {
-  const combined =
-    commit.parents.length > 1 && (flags.merge === 'combined' || flags.merge === 'dense-combined')
-  if (combined) return ''
+  if (isCombined(commit, flags)) return ''
   if (kind === 'oneline') return null
   return flags.stat && flags.patch ? '---' : ''
 }
@@ -576,8 +583,8 @@ export function joinOutput(
   bodies.forEach((body, index) => {
     if (body === null) return
     let text = head
-    if (bodies.length > 1 && !['format', 'tformat'].includes(kind)) {
-      const length = kind === 'oneline' ? width : 40
+    if (bodies.length > 1 && !TEMPLATE_KINDS.includes(kind)) {
+      const length = kind === 'oneline' ? width : OID_HEX
       const id = commit.oid.slice(0, length),
         parent = (commit.parents[index] ?? '').slice(0, length)
       text = text.replace(id, `${id} (from ${parent})`)
@@ -586,6 +593,32 @@ export function joinOutput(
     if (!body && text && emptySummary) gap = '\n'
     blocks.push(text + gap + body)
   })
-  const separator = ['format', 'tformat', 'oneline'].includes(kind) ? '' : '\n'
+  const separator = TEMPLATE_KINDS.includes(kind) || TERMINATED_KINDS.includes(kind) ? '' : '\n'
   return blocks.join(separator) || head
+}
+
+/**
+ * A commit's log entry and its diff against its parents, as `log` and `show`
+ * print it. A commit that changes nothing the pathspec names prints nothing at
+ * all.
+ *
+ * @param repo repository to read
+ * @param commit the commit to show
+ * @param display the invocation's presentation flags
+ * @param diff the diff options
+ * @param decor ref labels when the format asked
+ * @param emptySummary put a blank line under a header whose diff is empty, as
+ *   `show` does for a summary or a combined diff
+ */
+export async function commitEntry(
+  repo: Repo,
+  commit: CommitFacts,
+  display: CommitDisplay,
+  diff: DiffFlags,
+  decor: Decorations | null,
+  emptySummary = false,
+): Promise<string> {
+  const head = commitHeader(commit, display, repo.abbrev, decor)
+  const bodies = await commitOutput(repo, commit, diff)
+  return joinOutput(commit, head, bodies, display.pretty.kind, repo.abbrev, diff, emptySummary)
 }

@@ -15,8 +15,8 @@ from mirage.commands.builtin.generic.ls import (
     filevercmp,
     ls,
     parse_flags,
+    probe_operand,
     type_indicator,
-    walk,
 )
 from mirage.commands.builtin.utils.formatting import LsColumns
 from mirage.errors.types import CommandTimeoutError
@@ -106,7 +106,7 @@ def _dir(name: str) -> FileStat:
 
 
 @pytest.mark.asyncio
-async def test_walk_stats_one_entry_at_a_time():
+async def test_probe_operand_stats_one_entry_at_a_time():
     # On a mount that keeps no listing index each entry's stat is a
     # backend request; a whole directory's worth at once is a burst.
     tree = {"/dir": _dir("dir")}
@@ -121,8 +121,10 @@ async def test_walk_stats_one_entry_at_a_time():
         flight["now"] -= 1
         return await stat(p, index)
 
-    res = await walk(_spec("/dir"), readdir=readdir, stat=slow_stat)
-    assert len(res.entries) == 40
+    operand, _ = await probe_operand(
+        _spec("/dir"), readdir=readdir, stat=slow_stat
+    )
+    assert sum(len(group) for _, group in operand.groups) == 40
     assert flight["peak"] == 1
 
 

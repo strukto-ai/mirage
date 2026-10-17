@@ -213,6 +213,17 @@ def test_write_failure_is_exit_23_with_strerror(monkeypatch):
     assert expected in io.stderr
 
 
+async def _boom(op, scope, **kwargs):
+    raise RuntimeError("backend bug")
+
+
+@pytest.mark.parametrize("option", ["output", "dump_header"])
+def test_write_error_outside_the_fs_family_propagates(monkeypatch, option):
+    _stub(monkeypatch)
+    with pytest.raises(RuntimeError, match="backend bug"):
+        _run("http://x.test/f", dispatch=_boom, **{option: "/tmp/out"})
+
+
 def test_write_failure_keeps_read_only_wording(monkeypatch):
     _stub(monkeypatch)
 

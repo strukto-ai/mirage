@@ -124,6 +124,13 @@ SIGNATURE_MARKERS = (
     "-----BEGIN SSH SIGNATURE-----",
 )
 MINIMUM_ABBREV = 4
+# The refname strip options and what each is: ``strip=`` is git's old
+# spelling of ``lstrip=``, and a bad count is refused under that name.
+STRIP_OPTIONS = (
+    ("lstrip=", "lstrip"),
+    ("strip=", "lstrip"),
+    ("rstrip=", "rstrip"),
+)
 C_INTEGER = re.compile(r"[ \t\n\v\f\r]*([+-]?)([0-9]+)")
 INT_MAX = 2**31 - 1
 UINT_MAX = 2**32 - 1
@@ -198,23 +205,15 @@ def refname_option(arg: str | None, name: str) -> tuple[str, int]:
         return "", 0
     if arg == "short":
         return "short", 0
-    for prefix in ("lstrip=", "strip="):
+    for prefix, option in STRIP_OPTIONS:
         if arg.startswith(prefix):
             count = c_int(arg[len(prefix) :])
             if count is None:
                 raise GitError(
-                    "Integer value expected refname:lstrip="
+                    f"Integer value expected refname:{option}="
                     f"{arg[len(prefix) :]}"
                 )
-            return "lstrip", count
-    if arg.startswith("rstrip="):
-        count = c_int(arg[len("rstrip=") :])
-        if count is None:
-            raise GitError(
-                "Integer value expected refname:rstrip="
-                f"{arg[len('rstrip=') :]}"
-            )
-        return "rstrip", count
+            return option, count
     raise _bad_arg(name, arg)
 
 

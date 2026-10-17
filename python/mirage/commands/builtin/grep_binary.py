@@ -9,6 +9,7 @@ from mirage.commands.builtin.grep_offsets import (
 from mirage.commands.builtin.grep_prefilter import required_needles
 from mirage.commands.builtin.grep_select import WalkFilters
 from mirage.commands.builtin.types import RegexSyntax
+from mirage.commands.builtin.utils.constants import GREP_STDIN_LABEL
 from mirage.commands.builtin.utils.pcre import match_start, match_text
 from mirage.concurrency.worker import Worker
 from mirage.io.async_line_iterator import AsyncLineIterator
@@ -51,7 +52,7 @@ class GrepFlags:
     null: bool = False
     initial_tab: bool = False
     group_separator: bytes | None = b"--"
-    label: str = "(standard input)"
+    label: str = GREP_STDIN_LABEL
     dereference: bool = False
 
 

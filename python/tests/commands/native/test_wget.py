@@ -153,30 +153,30 @@ def test_spider_quiet_is_silent(monkeypatch):
     assert io.stderr == b""
 
 
-def test_write_failure_is_exit_1_naming_the_path(monkeypatch):
+@pytest.mark.parametrize("quiet", [False, True])
+def test_write_failure_is_exit_1_naming_the_path(monkeypatch, quiet):
+    # GNU Wget 1.25.0: `wget -q -O /nonexistent/out URL` still prints
+    # "/nonexistent/out: No such file or directory" and exits 1.
     _stub(monkeypatch)
 
     async def boom(op, scope, **kwargs):
         raise FileNotFoundError("/tmp/nope/w.txt")
 
     _body, io = _run(
-        "http://x.test/f", args_O="/tmp/nope/w.txt", dispatch=boom
+        "http://x.test/f", args_O="/tmp/nope/w.txt", dispatch=boom, q=quiet
     )
     assert io.exit_code == 1
-    assert b"/tmp/nope/w.txt" in io.stderr
+    assert io.stderr == b"/tmp/nope/w.txt: No such file or directory\n"
 
 
-def test_write_failure_silenced_by_q(monkeypatch):
+def test_write_error_outside_the_fs_family_propagates(monkeypatch):
     _stub(monkeypatch)
 
     async def boom(op, scope, **kwargs):
-        raise FileNotFoundError("/tmp/nope/w.txt")
+        raise RuntimeError("backend bug")
 
-    _body, io = _run(
-        "http://x.test/f", args_O="/tmp/nope/w.txt", dispatch=boom, q=True
-    )
-    assert io.exit_code == 1
-    assert io.stderr == b""
+    with pytest.raises(RuntimeError, match="backend bug"):
+        _run("http://x.test/f", args_O="/tmp/w.txt", dispatch=boom)
 
 
 def test_exit_code_constants_match_wget():

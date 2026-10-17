@@ -20,12 +20,14 @@ from urllib.parse import quote, urlsplit
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.errors import HttpConnectError, HttpTimeoutError
 from mirage.commands.builtin.general.curl_write_out import render_write_out
+from mirage.commands.builtin.utils.constants import HTTP_TIMEOUT_SECONDS
 from mirage.commands.builtin.utils.http import (
     DEFAULT_USER_AGENT,
     HttpResponse,
     http_form_request,
     http_request,
 )
+from mirage.commands.builtin.utils.paths import resolve_target
 from mirage.commands.config import Context, command
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
@@ -47,7 +49,6 @@ EXIT_WRITE = 23
 EXIT_READ = 26
 EXIT_TIMEOUT = 28
 
-DEFAULT_TIMEOUT = 30.0
 CRLF = "\r\n"
 HELP_HINT = "curl: try 'curl --help' or 'curl --manual' for more information"
 # curl 8.7.1's wording, wrapped where it wraps it (the trailing space is
@@ -78,10 +79,6 @@ DATA_SPELLING = {
 }
 # -d @FILE drops these bytes from what it reads; --data-binary keeps them.
 DATA_STRIPPED = b"\r\n\0"
-
-
-def resolve_target(o: str | PathSpec, cwd: PathSpec | str | None) -> PathSpec:
-    return PathSpec.from_str_path(o, cwd=cwd or "/")
 
 
 def header_lines(
@@ -361,6 +358,45 @@ def _path_str(value: PathSpec | str) -> str:
     return value.virtual if isinstance(value, PathSpec) else value
 
 
+def said(quiet: bool, text: str) -> bytes:
+    """A message curl or wget prints, nothing when the line silenced it.
+
+    Args:
+        quiet (bool): whether the message is silenced (curl ``-s``
+            without ``-S``, wget ``-q``).
+        text (str): the message, newline included.
+    """
+    return b"" if quiet else text.encode()
+
+
+async def _write_named(
+    ctx: Context, target: PathSpec | str, data: bytes, quiet: bool
+) -> bytes | None:
+    """Write a ``-D`` or ``-o`` file through the dispatcher.
+
+    Args:
+        ctx (Context): the command's context; without a dispatcher there
+            is nothing to write through.
+        target (PathSpec | str): the file as the line named it.
+        data (bytes): what the file holds.
+        quiet (bool): ``-s`` without ``-S``, which silences the failure.
+
+    Returns:
+        bytes | None: None once written, else the failure's stderr.
+    """
+    if ctx.dispatch is None:
+        return None
+    try:
+        await ctx.dispatch("write", resolve_target(target, ctx.cwd), data=data)
+    # WALK_ERRORS is the shared recoverable set (every filesystem error
+    # plus the ValueError store backends raise for "not a directory"), so
+    # a missing parent cannot escape the way it did when this caught only
+    # three types.
+    except WALK_ERRORS as exc:
+        return said(quiet, _write_failure(_path_str(target), exc))
+    return None
+
+
 @command("curl", vfs=None, spec=SPECS["curl"])
 async def curl(
     accessor: Accessor,
@@ -419,7 +455,7 @@ async def curl(
     # -s silences the message, -S puts it back. Neither changes the exit code.
     quiet = fl.as_bool("silent") and not fl.as_bool("show_error")
     # A zero --max-time is curl's "no limit", not a deadline of zero.
-    timeout: float | None = DEFAULT_TIMEOUT
+    timeout: float | None = HTTP_TIMEOUT_SECONDS
     if max_time is not None:
         timeout = None if max_time == 0 else max_time
     template = fl.as_str("write_out") or ""
@@ -541,23 +577,17 @@ async def curl(
     except HttpTimeoutError as exc:
         # Nothing was received: the body is read whole, so a deadline
         # that hits mid-transfer still counts as zero bytes here.
-        err = (
-            b""
-            if quiet
-            else (
-                f"curl: ({EXIT_TIMEOUT}) Operation timed out after "
-                f"{exc.elapsed_ms} milliseconds with 0 bytes received\n"
-            ).encode()
+        err = said(
+            quiet,
+            f"curl: ({EXIT_TIMEOUT}) Operation timed out after "
+            f"{exc.elapsed_ms} milliseconds with 0 bytes received\n",
         )
         return await finish(None, IOResult(exit_code=EXIT_TIMEOUT, stderr=err))
     except HttpConnectError as exc:
-        err = (
-            b""
-            if quiet
-            else (
-                f"curl: ({EXIT_CONNECT}) Failed to connect to {exc.host} port "
-                f"{exc.port}: Could not connect to server\n"
-            ).encode()
+        err = said(
+            quiet,
+            f"curl: ({EXIT_CONNECT}) Failed to connect to {exc.host} port "
+            f"{exc.port}: Could not connect to server\n",
         )
         return await finish(None, IOResult(exit_code=EXIT_CONNECT, stderr=err))
     hops = [*resp.history, resp]
@@ -593,33 +623,21 @@ async def curl(
     # status and before -o writes the body: a file both name ends up
     # holding the body.
     if dump_file is not None:
-        if ctx.dispatch is not None:
-            try:
-                await ctx.dispatch(
-                    "write", resolve_target(dump_file, ctx.cwd), data=blocks
-                )
-            except WALK_ERRORS as exc:
-                err = (
-                    b""
-                    if quiet
-                    else _write_failure(_path_str(dump_file), exc).encode()
-                )
-                return await finish(
-                    None,
-                    IOResult(exit_code=EXIT_WRITE, stderr=trace + err),
-                    resp,
-                )
+        refused = await _write_named(ctx, dump_file, blocks, quiet)
+        if refused is not None:
+            return await finish(
+                None,
+                IOResult(exit_code=EXIT_WRITE, stderr=trace + refused),
+                resp,
+            )
     header_out = blocks if dump_to_stdout else None
     # Only -f makes an error status an error, and then no body is
     # written; the headers -D already dumped stay dumped.
     if fl.as_bool("fail") and resp.is_error:
-        err = (
-            b""
-            if quiet
-            else (
-                f"curl: ({EXIT_HTTP_ERROR}) The requested URL returned error: "
-                f"{resp.status}\n"
-            ).encode()
+        err = said(
+            quiet,
+            f"curl: ({EXIT_HTTP_ERROR}) The requested URL returned error: "
+            f"{resp.status}\n",
         )
         return await finish(
             header_out,
@@ -637,22 +655,13 @@ async def curl(
         and (output.raw_path if isinstance(output, PathSpec) else output)
         != "-"
     ):
-        o_str = _path_str(output)
-        if ctx.dispatch is not None:
-            scope = resolve_target(output, ctx.cwd)
-            try:
-                await ctx.dispatch("write", scope, data=result)
-            # WALK_ERRORS is the shared recoverable set (every filesystem error
-            # plus the ValueError store backends raise for "not a directory"),
-            # so a missing parent cannot escape the way it did when this caught
-            # only three types.
-            except WALK_ERRORS as exc:
-                err = b"" if quiet else _write_failure(o_str, exc).encode()
-                return await finish(
-                    header_out,
-                    IOResult(exit_code=EXIT_WRITE, stderr=trace + err),
-                    resp,
-                )
+        refused = await _write_named(ctx, output, result, quiet)
+        if refused is not None:
+            return await finish(
+                header_out,
+                IOResult(exit_code=EXIT_WRITE, stderr=trace + refused),
+                resp,
+            )
         # Real curl writes the body to the file and prints nothing else
         # on stdout, the headers -D sends there aside.
         return await finish(header_out, IOResult(stderr=trace), resp)

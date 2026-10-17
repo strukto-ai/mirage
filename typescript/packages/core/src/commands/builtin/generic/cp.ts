@@ -36,7 +36,7 @@ import {
 } from '../../../types.ts'
 import { UsageError } from '../../errors.ts'
 import { beforeFullScan } from '../utils/tree.ts'
-import { argmatchError, extraOperandError } from '../../spec/usage.ts'
+import { argmatchError, extraOperandError, usageHint } from '../../spec/usage.ts'
 import { argmatch } from '../../spec/argmatch.ts'
 import type { FlagView } from '../../spec/flag_view.ts'
 import { modifiedTs } from '../../../core/generic/find.ts'
@@ -262,8 +262,7 @@ export function parseFlags(fl: FlagView): CpFlags {
   const noClobber = asking === 'no_clobber'
   if (control !== null && control !== 'none' && (noClobber || update === 'none-fail')) {
     throw new UsageError(
-      'cp: --backup is mutually exclusive with -n or --update=none-fail\n' +
-        "Try 'cp --help' for more information.",
+      `cp: --backup is mutually exclusive with -n or --update=none-fail\n${usageHint('cp')}`,
       1,
     )
   }
@@ -454,7 +453,7 @@ export async function copyTreeLinks(
     }
     const leads = await copies.links.targetStat(virtual)
     if (leads === null) {
-      errors.push(`cp: cannot stat '${shown}': No such file or directory`)
+      errors.push(`cp: cannot stat '${shown}': ${posixPhrase('ENOENT')}`)
       continue
     }
     const placed = respelled(PathSpec.fromStrPath(landing), `${shownDst}/${rel}`)
@@ -528,7 +527,7 @@ export function splitOperands(
   targetDir: PathSpec | null,
   noTargetDir: boolean,
 ): [PathSpec[], PathSpec] {
-  const hint = `Try '${cmdName} --help' for more information.`
+  const hint = usageHint(cmdName)
   const first = paths[0]
   if (first === undefined) {
     throw new UsageError(`${cmdName}: missing file operand\n${hint}`, 1)
@@ -665,14 +664,31 @@ export function overwriteTypeError(
   targetExists: boolean,
   targetIsDir: boolean,
 ): string | null {
-  if (!targetExists) return null
-  if (srcIsDir && !targetIsDir) {
+  if (!targetExists || srcIsDir === targetIsDir) return null
+  return typeMismatchError(cmdName, src, target, srcIsDir)
+}
+
+// GNU's line for a directory and a non-directory meeting at one name.
+export function typeMismatchError(
+  cmdName: string,
+  src: PathSpec,
+  target: PathSpec,
+  srcIsDir: boolean,
+): string {
+  if (srcIsDir) {
     return `${cmdName}: cannot overwrite non-directory '${target.rawPath}' with directory '${src.rawPath}'`
   }
-  if (!srcIsDir && targetIsDir) {
-    return `${cmdName}: cannot overwrite directory '${target.rawPath}' with non-directory '${src.rawPath}'`
-  }
-  return null
+  return `${cmdName}: cannot overwrite directory '${target.rawPath}' with non-directory '${src.rawPath}'`
+}
+
+// GNU's line for a source that is its own destination.
+export function sameFileError(cmdName: string, src: PathSpec, target: PathSpec): string {
+  return `${cmdName}: '${src.rawPath}' and '${target.rawPath}' are the same file`
+}
+
+// GNU's line for a destination this line already wrote.
+export function justCreatedError(cmdName: string, src: PathSpec, target: PathSpec): string {
+  return `${cmdName}: will not overwrite just-created '${target.rawPath}' with '${src.rawPath}'`
 }
 
 // Whether a directory stands where a file is about to be copied. A probe the
@@ -707,7 +723,7 @@ function ontoDirectory(
   if (backupDisplaces(backup)) {
     return `${cmdName}: cannot create regular file '${target.rawPath}': ${posixPhrase('EISDIR')}`
   }
-  return `${cmdName}: cannot overwrite directory '${target.rawPath}' with non-directory '${src.rawPath}'`
+  return typeMismatchError(cmdName, src, target, false)
 }
 
 // Free a non-directory's name for a directory copied onto it. GNU refuses the
@@ -730,9 +746,7 @@ async function clearForDirectory(
   index?: IndexCacheStore,
 ): Promise<PathSpec | null> {
   if (copies === undefined || !backupDisplaces(policy.backup)) {
-    errors.push(
-      `${policy.cmdName}: cannot overwrite non-directory '${dest.rawPath}' with directory '${src.rawPath}'`,
-    )
+    errors.push(typeMismatchError(policy.cmdName, src, dest, true))
     return null
   }
   const target = linkName(copies, dest) ?? dest
@@ -879,7 +893,7 @@ async function duplicateForBackup(
     return true
   }
   if (strategy.dirCopy === undefined) {
-    errors.push(`${cmdName}: cannot backup '${target.rawPath}': Operation not supported`)
+    errors.push(`${cmdName}: cannot backup '${target.rawPath}': ${posixPhrase('ENOTSUP')}`)
     return false
   }
   await strategy.dirCopy(target, backup)
@@ -959,7 +973,6 @@ export async function makeBackup(
   return { backup, ok: true }
 }
 
-// The cp verbose line, with GNU's backup annotation when one exists.
 // The verbose line for one copied entry, with GNU's backup note. GNU prints
 // it before the create, so a create that fails still shows it; mv words a
 // copy across mounts `copied`. Mirrors Python's transfer_line.
@@ -1006,12 +1019,6 @@ function repeatedSource(
   return null
 }
 
-// Recreate a source tree's directories under the destination root. Only
-// needed on the per-entry policy path, where a whole-tree dirCopy cannot be
-// used: without this, a directory holding no files would never appear at the
-// destination, and an entirely empty tree would copy to nothing. A backend
-// exposing no mkdir (directories are implied by keys) is a no-op. Parents
-// sort before children so a nested tree lands in order.
 // GNU -v lines for a tree about to be copied natively, parents first. GNU
 // `cp -rv` reports every file and every directory it creates, including the
 // source root itself; a directory already at the destination is merged into
@@ -1512,7 +1519,7 @@ export async function cpGeneric(
       const landing =
         target !== dst ? target.virtual : resolvePath(dst.rawPath || dst.virtual, copies.cwd)
       if (named === landing) {
-        errors.push(`cp: '${src.rawPath}' and '${target.rawPath}' are the same file`)
+        errors.push(sameFileError('cp', src, target))
         continue
       }
       const repeat = repeatedSource(firstLink.get(named), src, target, false, flags, keyOf)
@@ -1524,7 +1531,7 @@ export async function cpGeneric(
       if (!firstLink.has(named)) firstLink.set(named, target)
       if (guardsCreated && created.has(keyOf(target))) {
         if (policy.ask && !(await policy.ask(target))) continue
-        errors.push(`cp: will not overwrite just-created '${target.rawPath}' with '${src.rawPath}'`)
+        errors.push(justCreatedError('cp', src, target))
         continue
       }
       const raw = link.extra[LINK_TARGET_KEY]
@@ -1553,11 +1560,11 @@ export async function cpGeneric(
       // directory source it merges into the working directory; mirage
       // refuses that at the create, since reading the empty name as the
       // working directory is what `walkError` is for.
-      errors.push(`cp: cannot overwrite directory '' with non-directory '${src.rawPath}'`)
+      errors.push(typeMismatchError('cp', src, target, false))
       continue
     }
     if (keyOf(src) === keyOf(target)) {
-      errors.push(`cp: '${src.rawPath}' and '${target.rawPath}' are the same file`)
+      errors.push(sameFileError('cp', src, target))
       continue
     }
     // GNU copies a directory into its own subtree too: everything but the
@@ -1604,9 +1611,7 @@ export async function cpGeneric(
       // taken. GNU will not create the file it points at (POSIX would), and
       // the link is a non-directory to a tree.
       if (srcIsDir) {
-        errors.push(
-          `cp: cannot overwrite non-directory '${target.rawPath}' with directory '${src.rawPath}'`,
-        )
+        errors.push(typeMismatchError('cp', src, target, true))
         continue
       }
       if (flags.verbose) lines.push(transferLine(src, target, null))
@@ -1626,7 +1631,7 @@ export async function cpGeneric(
     if (flags.recursive && srcIsDir) {
       if (guardsCreated && created.has(keyOf(target))) {
         // As a file would be, but a directory is asked nothing.
-        errors.push(`cp: will not overwrite just-created '${target.rawPath}' with '${src.rawPath}'`)
+        errors.push(justCreatedError('cp', src, target))
         continue
       }
       // A whole-tree copy reads nothing here; any other copy goes file by
@@ -1747,7 +1752,7 @@ export async function cpGeneric(
       const files = await strategy.find(src, { type: 'f', unreadable })
       for (const root of new Set(unreadable)) {
         errors.push(
-          `cp: cannot access '${spelledFrom(mountedPath(src, root), src).rawPath}': Permission denied`,
+          `cp: cannot access '${spelledFrom(mountedPath(src, root), src).rawPath}': ${posixPhrase('EACCES')}`,
         )
       }
       for (const entryMount of files) {
@@ -1806,7 +1811,7 @@ export async function cpGeneric(
       // -i asks first: GNU only meets the just-created rule once the answer
       // says to replace.
       if (policy.ask && !(await policy.ask(target))) continue
-      errors.push(`cp: will not overwrite just-created '${target.rawPath}' with '${src.rawPath}'`)
+      errors.push(justCreatedError('cp', src, target))
       continue
     }
     if (!(await overwriteGate(policy, stat, src, target, errors, copies))) continue

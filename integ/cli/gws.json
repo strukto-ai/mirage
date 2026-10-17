@@ -1521,6 +1521,32 @@
         "stdout": "",
         "stderr": "gws gmail send: option '--to' is required\nTry 'gws gmail send --help' for more information.\n"
       }
+    },
+    {
+      "id": "gw_gmail_triage_zero_max",
+      "seq": 9940005,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws gmail triage --max 0 | jq length",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_gmail_triage_empty_query",
+      "seq": 9940006,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws gmail triage --query '' | jq -r '.[].id'",
+      "expect": {
+        "exit": 0,
+        "stdout": "msg0009\nmsg0008\nmsg0007\nmsg0006\nmsg0005\nmsg0003\nmsg0004\nmsg0001\n",
+        "stderr": ""
+      }
     }
   ]
 }

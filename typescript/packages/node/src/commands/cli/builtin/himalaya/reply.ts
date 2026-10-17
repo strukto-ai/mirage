@@ -28,7 +28,7 @@ export async function reply(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   const uid = firstText(texts, 'message id')
-  const mailbox = fl.asStr('mailbox') ?? 'INBOX'
+  const mailbox = fl.asStr('mailbox', 'INBOX')
   const accessor = new EmailAccessor(config as EmailConfig)
   let original
   try {

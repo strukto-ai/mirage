@@ -21,7 +21,10 @@ from typing import NamedTuple
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.general.expr import digits_of_int, int_of_digits
-from mirage.commands.builtin.utils.strtod import strtod_whole
+from mirage.commands.builtin.utils.strtod import (
+    LONG_DOUBLE_OVERFLOW,
+    strtod_whole,
+)
 from mirage.commands.config import Context, command
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
@@ -53,11 +56,6 @@ FLOAT_CONVERSIONS = "efgaEFGA"
 # form seq's %a goldens were pinned in.
 QUAD_FRACTION_BITS = 112
 QUAD_MIN_EXPONENT = -16382
-
-# The magnitude from which strtold reads an infinity: halfway from
-# LDBL_MAX to 2**16384, a tie that rounds up to the even 2**16384. GNU
-# refuses an operand that large.
-LONG_DOUBLE_OVERFLOW = (2**114 - 1) << 16270
 
 # strtold reads zero for a magnitude at or under 2**-UNDERFLOW_BITS, half
 # of the least subnormal, and GNU takes the zero.

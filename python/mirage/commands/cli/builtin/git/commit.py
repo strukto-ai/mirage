@@ -20,10 +20,14 @@ from dulwich.objects import Commit, ObjectID
 from dulwich.repo import BaseRepo
 
 from mirage.commands.cli.builtin.git.add import stage_tracked
-from mirage.commands.cli.builtin.git.changes import head_entries
+from mirage.commands.cli.builtin.git.changes import (
+    head_entries,
+    staged_entries,
+)
 from mirage.commands.cli.builtin.git.diff_output import commit_summary
 from mirage.commands.cli.builtin.git.errors import (
     AllWithPathsError,
+    BrokenHeadError,
     GitError,
     LockExistsError,
     MissingMessageError,
@@ -41,6 +45,7 @@ from mirage.commands.cli.builtin.git.refs import (
     HEAD_REF,
     detach_head,
     read_head,
+    safe_ref_name,
     write_ref,
 )
 from mirage.commands.cli.builtin.git.repo import config_bool
@@ -119,7 +124,7 @@ def build_commit(
     author: bytes,
     parents: list[ObjectID],
     when: int,
-) -> tuple[Commit, dict[bytes, tuple[int, bytes]]]:
+) -> Commit:
     """Write the trees the index describes and the commit above them.
 
     Synchronous, and called on a worker thread: every tree written goes
@@ -152,9 +157,7 @@ def build_commit(
     commit.encoding = b"UTF-8"
     commit.message = message.encode() + b"\n"
     store.add_object(commit)
-    return commit, {
-        path: (entry.mode, entry.sha) for path, entry in state.entries.items()
-    }
+    return commit
 
 
 async def commit(
@@ -208,10 +211,7 @@ async def commit(
             await stage_tracked(vfs, location, state)
         head = await read_head(vfs, location.gitdir)
         before = await asyncio.to_thread(head_entries, repo)
-        after = {
-            path: (entry.mode, entry.sha)
-            for path, entry in state.entries.items()
-        }
+        after = staged_entries(state)
         if (
             before is not None
             and before == after
@@ -229,9 +229,14 @@ async def commit(
         parents = [] if before is None else [repo.refs[HEAD_REF]]
         who = identity(fl, ctx.session)
         when = int(time.time())
-        written, tree = await asyncio.to_thread(
+        written = await asyncio.to_thread(
             build_commit, repo, state, message, who, parents, when
         )
+        # The object is written and the ref is not, as git leaves it: the
+        # files backend refuses to lock a HEAD whose branch path leaves
+        # the ref tree, rather than let the commit land on .git/config.
+        if head.ref is not None and not safe_ref_name(head.ref):
+            raise BrokenHeadError(head.ref)
         if head.ref is not None:
             await write_ref(vfs, location.commondir, head.ref, written.id)
         else:
@@ -255,7 +260,7 @@ async def commit(
             commit_summary,
             repo,
             visible_entries(location, before or {}),
-            visible_entries(location, tree),
+            visible_entries(location, after),
             fully,
         )
     except GitError as exc:

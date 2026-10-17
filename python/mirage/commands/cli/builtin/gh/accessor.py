@@ -24,6 +24,7 @@ from mirage.commands.cli.builtin.gh.constants import (
     CONNECT_HINT,
     GITHUB_HOST,
     GOJQ_RAISED,
+    INVALID_LIMIT,
 )
 from mirage.commands.config import Context
 from mirage.commands.errors import PartialOutputError, UsageError
@@ -155,10 +156,25 @@ def repo_for(config: GhConfig, fl: FlagView) -> RepoRef:
     return gh_repo(config, fl.as_str("repo"))
 
 
-def list_limit(fl: FlagView, default: int) -> int:
-    """Preserve an explicit zero while applying a list command's default."""
-    value = fl.as_int("limit")
-    return default if value is None else value
+def list_limit(
+    fl: FlagView, default: int, refusal: str | None = INVALID_LIMIT
+) -> int:
+    """A list verb's ``--limit``, refused below 1 the way gh refuses it.
+
+    gh answers a limit under 1 with a flag error before any request, and
+    ``release list`` takes any value. An explicit zero is never the
+    default.
+
+    Args:
+        fl (FlagView): the verb's parsed flags.
+        default (int): the limit when ``--limit`` is absent.
+        refusal (str | None): the verb's wording for a limit under 1,
+            None for a verb that takes any value.
+    """
+    value = fl.as_int("limit", default)
+    if refusal is not None and value < 1:
+        raise UsageError(f"{refusal}: {value}", 1)
+    return value
 
 
 def repo_number(

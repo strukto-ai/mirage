@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
+from mirage.commands.builtin.constants import HOSTNAME
 from mirage.commands.config import Context, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -20,9 +21,6 @@ from mirage.commands.spec.synopsis import SYNOPSES
 from mirage.commands.spec.usage import usage_exit_code, usage_hint
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-# The one name every host answers with; uname -n prints it too.
-HOSTNAME = "mirage"
 
 # What each display option prints, as a Debian host with no DNS domain
 # whose /etc/hosts maps its name to 127.0.1.1; None is the unset NIS

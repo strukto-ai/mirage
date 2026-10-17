@@ -37,6 +37,10 @@ import { compareCodePoints } from '../../../../../utils/sort.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 const DEFAULT_LIMIT = 25
+// clap's refusal of a --limit under 1 (ntn 0.21.9), the value as typed.
+const LIMIT_REFUSAL =
+  "error: invalid value '{}' for '--limit <LIMIT>': limit must be at " +
+  "least 1\n\nFor more information, try '--help'."
 const DIRECTIONS: Record<string, string> = {
   asc: 'ascending',
   ascending: 'ascending',
@@ -128,8 +132,11 @@ export async function query(
   const body: Record<string, unknown> = {}
   let ref: string
   try {
+    // clap checks a value as it parses it, ahead of the missing operand.
+    const limit = fl.asInt('limit', DEFAULT_LIMIT)
+    if (limit < 1) throw new Error(LIMIT_REFUSAL.replace('{}', fl.asStr('limit', String(limit))))
     ref = dataSourceRef(firstText(texts, 'data source id'))
-    body.page_size = fl.asInt('limit') ?? DEFAULT_LIMIT
+    body.page_size = limit
     const cursor = fl.asStr('start_cursor')
     if (cursor !== undefined && cursor !== '') body.start_cursor = cursor
     const sorts = fl.asList('sort').map(parseSort)

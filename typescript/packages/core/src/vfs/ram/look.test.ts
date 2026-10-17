@@ -65,10 +65,12 @@ describe('look', () => {
     expect(r.exitCode).toBe(1)
   })
 
-  it('missing prefix returns exit code 1', async () => {
+  it('missing prefix is the usage refusal, exit 1', async () => {
     const vfs = new RAMVFS()
-    const r = await runLook(vfs, [], [])
-    expect(r.exitCode).toBe(1)
+    await expect(runLook(vfs, [], [])).rejects.toMatchObject({
+      message: "look: bad usage\nTry 'look --help' for more information.",
+      exitCode: 1,
+    })
   })
 
   it('-f is case insensitive', async () => {

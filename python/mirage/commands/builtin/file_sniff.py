@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.constants import FILE_MIME_MAP
+from mirage.commands.builtin.constants import FILE_MIME_MAP, MAGIC_SIGNATURES
 from mirage.types import ContentType, FileStat, FileType
 
 
@@ -47,17 +47,7 @@ def detect_file_type(
 ) -> ContentType | str:
     if s.content is not None and s.content != ContentType.BINARY:
         return s.content
-    magic: list[tuple[bytes, ContentType]] = [
-        (b"\x89PNG", ContentType.IMAGE_PNG),
-        (b"\xff\xd8\xff", ContentType.IMAGE_JPEG),
-        (b"GIF8", ContentType.IMAGE_GIF),
-        (b"PK\x03\x04", ContentType.ZIP),
-        (b"\x1f\x8b", ContentType.GZIP),
-        (b"%PDF", ContentType.PDF),
-        (b"{\n", ContentType.JSON),
-        (b"[{", ContentType.JSON),
-    ]
-    for sig, ftype in magic:
+    for sig, ftype in MAGIC_SIGNATURES:
         if header.startswith(sig):
             return ftype
     if all(b < 128 for b in header[:256] if b != 0):

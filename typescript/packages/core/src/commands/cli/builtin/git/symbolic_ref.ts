@@ -35,7 +35,7 @@ import {
 import { removeFile, writeFile } from './io.ts'
 
 import { shortenRef } from './ref_fields.ts'
-import { append, entry, logged, ZERO } from './reflog.ts'
+import { append, entry, logged, LOGS_DIR, ZERO } from './reflog.ts'
 import {
   blockingRef,
   deleteRef,
@@ -53,7 +53,6 @@ import { checkSwitches, fatal, verbUsage } from './util.ts'
 
 const ENC = new TextEncoder()
 const REFS_PREFIX = 'refs/'
-const LOGS_DIR = 'logs'
 
 /**
  * The last of an option and its `--no-` twin on the line, the fallback when

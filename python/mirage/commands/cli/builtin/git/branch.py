@@ -24,7 +24,7 @@ from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 from dulwich.walk import Walker
 
-from mirage.commands.cli.builtin.git.constants import DWIM_RULES, HEAD
+from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.dates import date_clock
 from mirage.commands.cli.builtin.git.errors import (
     AmbiguousArgumentError,
@@ -64,7 +64,7 @@ from mirage.commands.cli.builtin.git.ref_list import (
     head_description,
     listing_result,
     match_short,
-    read_config,
+    reached,
     ref_listing,
     sort_keys,
 )
@@ -76,13 +76,20 @@ from mirage.commands.cli.builtin.git.reflog import (
     logged,
 )
 from mirage.commands.cli.builtin.git.refs import (
+    BRANCH_PREFIX,
+    REMOTE_PREFIX,
     blocking_ref,
     delete_ref,
     read_head,
-    valid_ref_name,
+    valid_branch_name,
     write_ref,
 )
-from mirage.commands.cli.builtin.git.repo import config_bool, config_values
+from mirage.commands.cli.builtin.git.repo import (
+    Repo,
+    config_bool,
+    config_values,
+    read_config,
+)
 from mirage.commands.cli.builtin.git.revparse import (
     note_ambiguity,
     refs_named,
@@ -111,23 +118,15 @@ from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import decode_text
 from mirage.types import PathSpec
-from mirage.workspace.files import Files
 
-HEADS_PREFIX = b"refs/heads/"
-REMOTES_PREFIX = b"refs/remotes/"
 REMOTE = "remotes/"
 AUTO_SETUP_MERGE = "branch.autosetupmerge"
 TRACK_WORDS = (Track.ALWAYS, Track.SIMPLE, Track.INHERIT)
 
 
-async def refuse_ambiguous(
-    vfs: Files,
-    location: RepoLocation,
-    repo: BaseRepo,
-    name: str,
-    warned: bool,
-) -> None:
+async def refuse_ambiguous(repo: Repo, name: str, warned: bool) -> None:
     """Refuse a start point two refs answer to.
 
     As git's branch creation does while ``core.warnAmbiguousRefs`` is
@@ -136,9 +135,7 @@ async def refuse_ambiguous(
     the one checked.
 
     Args:
-        vfs (Files): the session's files.
-        location (RepoLocation): the discovered repository.
-        repo (BaseRepo): the opened repository.
+        repo (Repo): the opened repository.
         name (str): the start point as typed, or the current branch's
             short name.
         warned (bool): whether reading it already put the warning on
@@ -148,7 +145,7 @@ async def refuse_ambiguous(
         AmbiguousObjectNameError: two refs answer to the name.
     """
     if not await config_bool(
-        vfs, location, b"core", b"warnambiguousrefs", True
+        repo.dispatch, repo.location, b"core", b"warnambiguousrefs", True
     ):
         return
     known = (ref.decode(errors="replace") for ref in repo.refs.allkeys())
@@ -160,9 +157,7 @@ async def refuse_ambiguous(
 
 
 async def _create(
-    vfs: Files,
-    repo: BaseRepo,
-    location: RepoLocation,
+    repo: Repo,
     name: str,
     start: str | None,
     mode: Track,
@@ -174,9 +169,7 @@ async def _create(
     on stderr.
 
     Args:
-        vfs (Files): the session's files.
-        repo (BaseRepo): the opened repository.
-        location (RepoLocation): the discovered repository.
+        repo (Repo): the opened repository.
         name (str): the branch name.
         start (str | None): the revision to start it at, HEAD when None.
         mode (Track): ``branch.autoSetupMerge``.
@@ -185,9 +178,9 @@ async def _create(
     # Before the start point resolves, which is git's order here and
     # the opposite of switch's. A ref is a path below .git, so an
     # unchecked name reaches write_ref as one.
-    if not valid_ref_name(name):
+    if not valid_branch_name(name):
         raise InvalidBranchNameError(name)
-    ref = f"{HEADS_PREFIX.decode()}{name}"
+    ref = f"{BRANCH_PREFIX}{name}"
     if Ref(ref.encode()) in repo.refs.allkeys():
         raise BranchExistsError(name)
     # With no start point git starts from the current branch by its
@@ -198,7 +191,7 @@ async def _create(
         found = await asyncio.to_thread(resolve_object, repo, origin)
     except AmbiguousArgumentError as exc:
         raise InvalidObjectNameError(origin) from exc
-    await refuse_ambiguous(vfs, location, repo, origin, True)
+    await refuse_ambiguous(repo, origin, True)
     commit = await asyncio.to_thread(unwrapped, repo, found, origin)
     if not isinstance(commit, Commit):
         raise BranchPointError(
@@ -210,6 +203,7 @@ async def _create(
     held = blocking_ref(repo.refs.allkeys(), ref)
     if held is not None:
         raise RefLockError(ref, held)
+    vfs, location = repo.dispatch, repo.location
     await write_ref(vfs, location.commondir, ref, commit.id)
     log = location.commondir.join("logs", ref)
     if await logged(vfs, location, ref, log):
@@ -221,7 +215,7 @@ async def _create(
             f"branch: Created from {origin}",
         )
         await append(vfs, location.commondir, f"logs/{ref}", line)
-    return await set_up_tracking(vfs, repo, location, name, start, mode, head)
+    return await set_up_tracking(repo, name, start, mode, head)
 
 
 def remote_branch(repo: BaseRepo, name: str) -> str | None:
@@ -237,14 +231,14 @@ def remote_branch(repo: BaseRepo, name: str) -> str | None:
     found = [
         ref.decode()
         for ref in repo.refs.allkeys()
-        if ref.startswith(REMOTES_PREFIX)
+        if ref.startswith(REMOTE_PREFIX.encode())
         and ref.endswith(f"/{name}".encode())
         and ref.count(b"/") == 3 + name.count("/")
     ]
     return found[0] if len(found) == 1 else None
 
 
-async def track_mode(vfs: Files, location: RepoLocation) -> Track:
+async def track_mode(repo: Repo) -> Track:
     """``branch.autoSetupMerge`` from the repository's config.
 
     The words are case-sensitive and anything else reads as a boolean,
@@ -253,15 +247,14 @@ async def track_mode(vfs: Files, location: RepoLocation) -> Track:
     first and fails with nothing written (pinned against git 2.50.1).
 
     Args:
-        vfs (Files): the session's files.
-        location (RepoLocation): the discovered repository.
+        repo (Repo): the opened repository.
 
     Raises:
         BadConfigValueError: a value that is neither a word nor a boolean.
     """
     mode = Track.REMOTE
     for value in await config_values(
-        vfs, location, b"branch", b"autosetupmerge"
+        repo.dispatch, repo.location, b"branch", b"autosetupmerge"
     ):
         word = value.decode(errors="replace")
         if word in TRACK_WORDS:
@@ -291,8 +284,8 @@ def _tracked(
         branch (str): the branch just created.
         mode (Track): ``branch.autoSetupMerge``.
     """
-    if ref.startswith(HEADS_PREFIX.decode()):
-        source = ref[len(HEADS_PREFIX) :]
+    if ref.startswith(BRANCH_PREFIX):
+        source = ref[len(BRANCH_PREFIX) :]
         if mode is Track.ALWAYS:
             return ".", [ref], "", ""
         if mode is not Track.INHERIT:
@@ -319,9 +312,9 @@ def _tracked(
             )
         remote = remotes[-1].decode()
         return remote, [m.decode() for m in merges], f"{remote}/", ""
-    if not ref.startswith(REMOTES_PREFIX.decode()):
+    if not ref.startswith(REMOTE_PREFIX):
         return None, [], "", ""
-    remote, _, name = ref[len(REMOTES_PREFIX) :].partition("/")
+    remote, _, name = ref[len(REMOTE_PREFIX) :].partition("/")
     if (
         not name
         or name == HEAD
@@ -340,13 +333,11 @@ def _tracked(
         )
     if mode is Track.SIMPLE and name != branch:
         return None, [], "", ""
-    return remote, [f"{HEADS_PREFIX.decode()}{name}"], f"{remote}/", ""
+    return remote, [f"{BRANCH_PREFIX}{name}"], f"{remote}/", ""
 
 
 async def set_up_tracking(
-    vfs: Files,
-    repo: BaseRepo,
-    location: RepoLocation,
+    repo: Repo,
     branch: str,
     start: str | None,
     mode: Track,
@@ -362,9 +353,7 @@ async def set_up_tracking(
     git 2.47.3 and 2.50.1).
 
     Args:
-        vfs (Files): the session's files.
-        repo (BaseRepo): the opened repository.
-        location (RepoLocation): the discovered repository.
+        repo (Repo): the opened repository.
         branch (str): the branch just created.
         start (str | None): the start point as typed.
         mode (Track): ``branch.autoSetupMerge``, from ``track_mode``.
@@ -378,19 +367,12 @@ async def set_up_tracking(
     if typed == HEAD:
         ref = head.ref
     else:
-        known = repo.refs.allkeys()
-        ref = next(
-            (
-                rule.format(typed)
-                for rule in DWIM_RULES
-                if Ref(rule.format(typed).encode()) in known
-            ),
-            None,
-        )
+        known = (decode_text(ref) for ref in repo.refs.allkeys())
+        ref = next(iter(refs_named(known, typed)), None)
     if ref is None:
         return "", ""
-    path = location.commondir.join("config")
-    data = await read_optional(vfs, path) or b""
+    path = repo.location.commondir.join("config")
+    data = await read_optional(repo.dispatch, path) or b""
     if data and not data.endswith(b"\n"):
         data += b"\n"
     remote, merges, prefix, warning = _tracked(
@@ -403,10 +385,9 @@ async def set_up_tracking(
         branch,
         [("remote", remote)] + [("merge", merge) for merge in merges],
     )
-    await write_file(vfs, path, data + section.encode())
+    await write_file(repo.dispatch, path, data + section.encode())
     labels = [
-        f"{prefix}{merge.removeprefix(HEADS_PREFIX.decode())}"
-        for merge in merges
+        f"{prefix}{merge.removeprefix(BRANCH_PREFIX)}" for merge in merges
     ]
     if len(labels) == 1:
         return f"branch '{branch}' set up to track '{labels[0]}'.\n", ""
@@ -471,9 +452,7 @@ def _merged(repo: BaseRepo, sha: bytes, head: bytes | None) -> bool:
 
 
 async def _delete(
-    vfs: Files,
-    repo: BaseRepo,
-    location: RepoLocation,
+    repo: Repo,
     head: HeadRef,
     name: str,
     force: bool,
@@ -481,24 +460,23 @@ async def _delete(
     """Remove a branch, refusing when the removal would lose commits.
 
     Args:
-        vfs (Files): the session's files.
-        repo (BaseRepo): the opened repository.
-        location (RepoLocation): the discovered repository.
+        repo (Repo): the opened repository.
         head (HeadRef): what HEAD points at.
         name (str): the branch name.
         force (bool): whether ``-D`` was given, which deletes a branch
             HEAD does not contain.
     """
-    ref = Ref(f"{HEADS_PREFIX.decode()}{name}".encode())
+    ref = Ref(f"{BRANCH_PREFIX}{name}".encode())
     if ref not in repo.refs.allkeys():
         raise NoBranchError(name)
     if name == head.branch:
-        raise CheckedOutBranchError(name, location.worktree.virtual)
+        raise CheckedOutBranchError(name, repo.location.worktree.virtual)
     sha = repo.refs[ref]
     if not force and not await asyncio.to_thread(
         _merged, repo, sha, head_commit(repo, head)
     ):
         raise UnmergedBranchError(name)
+    vfs, location = repo.dispatch, repo.location
     await delete_ref(vfs, location.commondir, ref.decode())
     path = location.commondir.join("config")
     data = await read_optional(vfs, path)
@@ -584,8 +562,8 @@ def list_width(items: list[RefItem], bonus: int, description: str) -> int:
             width = display_width(description)
         else:
             name = item.name
-            for prefix in (HEADS_PREFIX, REMOTES_PREFIX):
-                name = name.removeprefix(prefix.decode())
+            for prefix in (BRANCH_PREFIX, REMOTE_PREFIX):
+                name = name.removeprefix(prefix)
             width = display_width(name) + (
                 bonus if item.kind is RefKind.REMOTE else 0
             )
@@ -596,9 +574,7 @@ def list_width(items: list[RefItem], bonus: int, description: str) -> int:
 async def _list_branches(
     ctx: Context,
     fl: FlagView,
-    vfs: Files,
-    repo: BaseRepo,
-    location: RepoLocation,
+    repo: Repo,
     head: HeadRef,
     patterns: tuple[str, ...],
     filt: RefFilter | None,
@@ -615,16 +591,14 @@ async def _list_branches(
     Args:
         ctx (Context): the line's context, for its env.
         fl (FlagView): spec-bound options.
-        vfs (Files): the session's files.
-        repo (BaseRepo): the opened repository.
-        location (RepoLocation): the discovered repository.
+        repo (Repo): the opened repository.
         head (HeadRef): what HEAD points at.
         patterns (tuple[str, ...]): the name patterns, empty for all.
         filt (RefFilter | None): the resolved ref filter.
         remotes_only (bool): ``-r``.
         include_remotes (bool): ``-r`` or ``-a``.
     """
-    cfg = await read_config(vfs, location)
+    cfg = await read_config(repo.dispatch, repo.location)
     keys = sort_keys(fl, configured_sort(cfg, b"branch"))
     icase = fl.as_bool("ignore_case")
     verbose = fl.as_int("verbose") or 0
@@ -635,8 +609,8 @@ async def _list_branches(
     def wanted(name: str) -> bool:
         kind = (
             (name == HEAD and detached)
-            or (not remotes_only and name.startswith("refs/heads/"))
-            or (include_remotes and name.startswith("refs/remotes/"))
+            or (not remotes_only and name.startswith(BRANCH_PREFIX))
+            or (include_remotes and name.startswith(REMOTE_PREFIX))
         )
         return kind and match_short(name, patterns, icase)
 
@@ -644,9 +618,7 @@ async def _list_branches(
         template if template is not None else build_format(verbose, 0, prefix)
     )
     items, ref_ctx, errors = await ref_listing(
-        vfs,
         repo,
-        location,
         cfg,
         used_fields(fmt, keys or ()),
         wanted,
@@ -656,7 +628,7 @@ async def _list_branches(
     if any(item.kind is RefKind.DETACHED for item in items):
         ref_ctx = replace(
             ref_ctx,
-            head_description=await head_description(vfs, repo, location, head),
+            head_description=await head_description(repo, head),
         )
     if template is None and verbose:
         fmt = listing_format(
@@ -719,7 +691,7 @@ async def branch(
             raise NoWorkspaceError()
         check_switches(ctx, operands)
         repo, location = await opened(ctx, fl)
-        mode = await track_mode(vfs, location)
+        mode = await track_mode(repo)
         filt = await asyncio.to_thread(ref_filter, repo, words)
         head = await read_head(vfs, location.gitdir)
         if fl.as_bool("show_current"):
@@ -733,19 +705,14 @@ async def branch(
             if not operands:
                 raise BranchNameRequiredError()
             deleted = b"".join(
-                [
-                    await _delete(vfs, repo, location, head, name, force)
-                    for name in operands
-                ]
+                [await _delete(repo, head, name, force) for name in operands]
             )
             if fl.as_bool("quiet"):
                 return None, IOResult()
             return yield_bytes(deleted), IOResult()
         if operands and not listing:
             tracking, warning = await _create(
-                vfs,
                 repo,
-                location,
                 operands[0],
                 operands[1] if len(operands) > 1 else None,
                 mode,
@@ -760,9 +727,7 @@ async def branch(
         return await _list_branches(
             ctx,
             fl,
-            vfs,
             repo,
-            location,
             head,
             operands if listing else (),
             filt,
@@ -792,44 +757,37 @@ def upstream_of(
     tracked = merge
     if remote != b".":
         tracked = (
-            REMOTES_PREFIX + remote + b"/" + merge.removeprefix(HEADS_PREFIX)
+            REMOTE_PREFIX.encode()
+            + remote
+            + b"/"
+            + merge.removeprefix(BRANCH_PREFIX.encode())
         )
     label = (
-        tracked.removeprefix(HEADS_PREFIX)
-        .removeprefix(REMOTES_PREFIX)
+        tracked.removeprefix(BRANCH_PREFIX.encode())
+        .removeprefix(REMOTE_PREFIX.encode())
         .decode()
     )
     if Ref(tracked) not in repo.refs.allkeys():
         return Upstream(label, 0, 0, True)
-    ours = {e.commit.id for e in Walker(repo.object_store, [tip])}
-    theirs = {
-        e.commit.id
-        for e in Walker(repo.object_store, [repo.refs[Ref(tracked)]])
-    }
+    ours = reached(repo, tip)
+    theirs = reached(repo, repo.refs[Ref(tracked)])
     return Upstream(label, len(ours - theirs), len(theirs - ours), False)
 
 
 async def branch_upstream(
-    vfs: Files,
-    repo: BaseRepo,
-    location: RepoLocation,
-    head: HeadRef,
-    no_commits: bool,
+    repo: Repo, head: HeadRef, no_commits: bool
 ) -> Upstream | None:
     """The current branch's upstream, None when it has none or no commits.
 
     Args:
-        vfs (Files): the session's files.
-        repo (BaseRepo): the opened repository.
-        location (RepoLocation): the discovered repository.
+        repo (Repo): the opened repository.
         head (HeadRef): what HEAD points at.
         no_commits (bool): whether the branch is still unborn.
     """
     if head.branch is None or no_commits:
         return None
-    data = await read_optional(vfs, location.commondir.join("config"))
-    cfg = ConfigFile.from_file(BytesIO(data or b""))
-    ref = Ref(f"refs/heads/{head.branch}".encode())
+    cfg = await read_config(repo.dispatch, repo.location)
+    ref = Ref(f"{BRANCH_PREFIX}{head.branch}".encode())
     if (
         not cfg.has_section((b"branch", head.branch.encode()))
         or ref not in repo.refs.allkeys()
@@ -852,7 +810,7 @@ def branch_read_only(
         location (RepoLocation | None): the repository it opened.
     """
     fl = FlagView(ctx.flags)
-    ref = f"{HEADS_PREFIX.decode()}{texts[0] if texts else ''}"
+    ref = f"{BRANCH_PREFIX}{texts[0] if texts else ''}"
     root = location.commondir.virtual if location is not None else ".git"
     path = posixpath.join(root, ref)
     if fl.as_bool("delete") or fl.as_bool("D"):

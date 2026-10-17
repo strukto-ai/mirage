@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 
+from mirage.commands.builtin.utils.lines import record_separator
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
 from mirage.commands.config import Context
@@ -53,7 +54,7 @@ async def comm(
         check_order,
         output_delimiter,
         total,
-        b"\0" if zero_terminated else b"\n",
+        record_separator(zero_terminated),
         paths,
     ), io
 
@@ -194,6 +195,8 @@ class CommFlags:
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> CommFlags:
     fl = FlagView(flags, spec=SPECS["comm"])
+    # An empty delimiter is its own terminating NUL: GNU writes one byte.
+    delimiter = fl.as_str("output_delimiter", "\t") or "\0"
     order = [
         name
         for name, value in fl.occurrences("check_order", "nocheck_order")
@@ -204,7 +207,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> CommFlags:
         suppress2=fl.as_bool("2"),
         suppress3=fl.as_bool("3"),
         check_order=order[-1] == "check_order" if order else None,
-        output_delimiter=fl.as_str("output_delimiter") or "\t",
+        output_delimiter=delimiter,
         total=fl.as_bool("total"),
         zero_terminated=fl.as_bool("zero_terminated"),
     )

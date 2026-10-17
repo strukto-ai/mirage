@@ -21,9 +21,24 @@ import type { CommandFnResult, Context } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { perOperand } from '../utils/operands.ts'
 import { mapStream } from '../utils/lines.ts'
+import { ERANGE_REASON, ULONG_MAX, xstrtoumax } from '../utils/strtol.ts'
+import { quoteText } from '../../quote.ts'
+
+// GNU fold's line width when -w names none.
+const WIDTH = 80
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
+// GNU 9.7 reads -w with xdectoumax(optarg, 1, SIZE_MAX - TAB_WIDTH - 1), so 0
+// and anything past this are out of range.
+const WIDTH_MAX = ULONG_MAX - 9n
+
+// fold's refusal of a -w value, the range clause only for a number. Mirrors
+// Python's `_width_refusal`.
+function widthRefusal(text: string, value: bigint | null): string {
+  const reason = value === null ? '' : `: ${ERANGE_REASON}`
+  return `fold: invalid number of columns: '${quoteText(text)}'${reason}`
+}
 
 function foldLine(line: string, width: number, breakSpaces: boolean): string {
   if (line.length <= width) return line
@@ -75,9 +90,9 @@ interface FoldFlags {
 
 function parseFlags(bag: Record<string, FlagValue>): FoldFlags {
   const fl = new FlagView(bag, specOf('fold'))
-  const widthValue = fl.asStr('width')
+  const width = fl.asNumber('width', xstrtoumax, widthRefusal, { low: 1n, high: WIDTH_MAX })
   return {
-    width: typeof widthValue === 'string' ? Number.parseInt(widthValue, 10) : 80,
+    width: width === undefined ? WIDTH : Number(width),
     breakSpaces: fl.asBool('spaces'),
     countBytes: fl.asBool('bytes'),
   }

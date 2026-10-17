@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from functools import partial
 
 from mirage.commands.builtin.generic.decompress import decompress_inputs
-from mirage.commands.builtin.generic.grep import max_count
+from mirage.commands.builtin.generic.grep import listing_mode, max_count
 from mirage.commands.builtin.grep_binary import valid_utf8
 from mirage.commands.builtin.grep_offsets import prefix_of
 from mirage.commands.builtin.grep_pattern import (
@@ -14,8 +14,12 @@ from mirage.commands.builtin.grep_pattern import (
     pattern_warnings,
     resolve_pattern,
 )
+from mirage.commands.builtin.grep_scan import exit_code_for
 from mirage.commands.builtin.types import RegexSyntax
-from mirage.commands.builtin.utils.constants import STDIN_OPERAND
+from mirage.commands.builtin.utils.constants import (
+    GREP_STDIN_LABEL,
+    STDIN_OPERAND,
+)
 from mirage.commands.builtin.utils.links import LinkResolver
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.pcre import match_start, match_text
@@ -67,17 +71,13 @@ def parse_flags(fl: FlagView, never_match: bool) -> ZgrepFlags:
         never_match (bool): zero-pattern sentinel from resolve_pattern; it is
             a regex, so it suppresses -F.
     """
-    # -l and -L set one mode in grep, so the later one on the line wins.
-    listing: str | None = None
-    for name in fl.typed_order("files_with_matches", "files_without_match"):
-        if fl.as_bool(name):
-            listing = name
+    files_only, files_without_match = listing_mode(fl)
     return ZgrepFlags(
         ignore_case=fl.as_bool("ignore_case"),
         invert=fl.as_bool("invert_match"),
         count=fl.as_bool("count"),
-        files_only=listing == "files_with_matches",
-        files_without_match=listing == "files_without_match",
+        files_only=files_only,
+        files_without_match=files_without_match,
         line_numbers=fl.as_bool("line_number"),
         byte_offsets=fl.as_bool("byte_offset"),
         fixed=fl.as_bool("fixed_strings") and not never_match,
@@ -158,7 +158,7 @@ async def zgrep_generic(
             number = 0
             binary = False
             fname = (
-                operand_label(p, "(standard input)") if show_filename else None
+                operand_label(p, GREP_STDIN_LABEL) if show_filename else None
             )
             try:
                 while True:
@@ -220,13 +220,13 @@ async def zgrep_generic(
             diagnostic = await io.materialize_stderr()
             if binary:
                 diagnostic += encode_text(
-                    f"grep: {operand_label(p, '(standard input)')}: "
+                    f"grep: {operand_label(p, GREP_STDIN_LABEL)}: "
                     "binary file matches\n"
                 )
             if diagnostic:
                 result.stderr = await materialize(result.stderr) + diagnostic
             failed = failed or io.exit_code == 1
-            result.exit_code = 2 if failed else 0 if any_match else 1
+            result.exit_code = exit_code_for(any_match, failed, False)
             if compiled is None:
                 if f.files_without_match:
                     yield encode_text(p.raw_path + "\n")

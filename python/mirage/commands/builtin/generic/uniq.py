@@ -2,6 +2,7 @@ import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
+from mirage.commands.builtin.utils.lines import record_separator
 from mirage.commands.builtin.utils.operands import split_readable
 from mirage.commands.builtin.utils.stream import (
     resolve_source,
@@ -160,7 +161,7 @@ def _group_separator_before(index: int, method: str) -> bool:
 async def _uniq_stream(
     source: AsyncIterator[bytes], flags: UniqFlags
 ) -> AsyncIterator[bytes]:
-    separator = b"\x00" if flags.zero_terminated else b"\n"
+    separator = record_separator(flags.zero_terminated)
     reader = AsyncLineIterator(source)
     first: bytes | None = None
     current_key: str | None = None

@@ -12,6 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec.constants import (
+    PATH2_OPERAND,
+    PATH_OPERAND,
+    PATHS_OPERAND,
+    REMAINDER_OPERAND,
+    TEXT_OPERAND,
+    TEXTS_OPERAND,
+)
 from mirage.commands.spec.types import Argument, CommandSpec
 
 SPECS: dict[str, CommandSpec] = {
@@ -23,7 +31,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-m", "--chars", action="store_true"),
             Argument("-L", "--max-line-length", action="store_true"),
             Argument("--total"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "sort": CommandSpec(
@@ -48,7 +56,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-M", "--month-sort", action="store_true"),
             Argument("-o", "--output", type="path", action="append"),
             Argument("-z", "--zero-terminated", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "uniq": CommandSpec(
@@ -64,8 +72,8 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-i", "--ignore-case", action="store_true"),
             Argument("-w", "--check-chars"),
             Argument("-z", "--zero-terminated", action="store_true"),
-            Argument("path", type="path", nargs="?", metavar=""),
-            Argument("path2", type="path", nargs="?", metavar=""),
+            PATH_OPERAND,
+            PATH2_OPERAND,
         )
     ),
     "cut": CommandSpec(
@@ -87,14 +95,14 @@ SPECS: dict[str, CommandSpec] = {
                 attached_only=True,
             ),
             Argument("-z", "--zero-terminated", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "echo": CommandSpec(
         arguments=(
             Argument("-n", action="store_true"),
             Argument("-e", action="store_true"),
-            Argument("texts", nargs="*", metavar=""),
+            TEXTS_OPERAND,
         )
     ),
     "tee": CommandSpec(
@@ -108,7 +116,7 @@ SPECS: dict[str, CommandSpec] = {
                 attached_only=True,
                 choices=("warn", "warn-nopipe", "exit", "exit-nopipe"),
             ),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "tr": CommandSpec(
@@ -118,7 +126,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-c", "--complement", action="store_true"),
             Argument("-C", action="store_true"),
             Argument("-t", "--truncate-set1", action="store_true"),
-            Argument("text", nargs="?", metavar=""),
+            TEXT_OPERAND,
             Argument("text2", nargs="?", metavar=""),
         )
     ),
@@ -127,13 +135,13 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-d", "--delimiters"),
             Argument("-s", "--serial", action="store_true"),
             Argument("-z", "--zero-terminated", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "printf": CommandSpec(
         arguments=(
-            Argument("text", nargs="?", metavar=""),
-            Argument("texts", nargs="*", metavar=""),
+            TEXT_OPERAND,
+            TEXTS_OPERAND,
         )
     ),
     "seq": CommandSpec(
@@ -155,14 +163,14 @@ SPECS: dict[str, CommandSpec] = {
                 "--format",
                 help="Format each number with a printf-style format string.",
             ),
-            Argument("text", nargs="?", metavar=""),
+            TEXT_OPERAND,
             Argument("text2", nargs="?", metavar=""),
             Argument("text3", nargs="?", metavar=""),
             # seq's getopt string starts with `+`, so its first operand ends
             # the options: `seq 1 -w 3` reads -w as LAST and refuses it as a
             # number (coreutils 9.7). A negative number does the same, which
             # NEGATIVE_NUMBER_OPERANDS covers.
-            Argument("texts", nargs="REMAINDER", metavar=""),
+            REMAINDER_OPERAND,
         ),
     ),
     "split": CommandSpec(
@@ -194,8 +202,8 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-a", "--suffix-length"),
             Argument("--additional-suffix"),
             Argument("-t", "--separator"),
-            Argument("path", type="path", nargs="?", metavar=""),
-            Argument("path2", type="path", nargs="?", metavar=""),
+            PATH_OPERAND,
+            PATH2_OPERAND,
         )
     ),
     "shuf": CommandSpec(
@@ -206,7 +214,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-r", "--repeat", action="store_true"),
             Argument("-i", "--input-range", action="append"),
             Argument("-o", "--output", type="path", action="append"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "comm": CommandSpec(
@@ -219,8 +227,8 @@ SPECS: dict[str, CommandSpec] = {
             Argument("--output-delimiter"),
             Argument("--total", action="store_true"),
             Argument("-z", "--zero-terminated", action="store_true"),
-            Argument("path", type="path", nargs="?", metavar=""),
-            Argument("path2", type="path", nargs="?", metavar=""),
+            PATH_OPERAND,
+            PATH2_OPERAND,
         )
     ),
     "csplit": CommandSpec(
@@ -233,13 +241,11 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-b", "--suffix-format"),
             Argument("--suppress-matched", action="store_true"),
             Argument("-z", "--elide-empty-files", action="store_true"),
-            Argument("path", type="path", nargs="?", metavar=""),
-            Argument("texts", nargs="*", metavar=""),
+            PATH_OPERAND,
+            TEXTS_OPERAND,
         )
     ),
-    "tsort": CommandSpec(
-        arguments=(Argument("path", type="path", nargs="?", metavar=""),)
-    ),
+    "tsort": CommandSpec(arguments=(PATH_OPERAND,)),
     "join": CommandSpec(
         arguments=(
             Argument("-t"),
@@ -255,8 +261,8 @@ SPECS: dict[str, CommandSpec] = {
             Argument("--check-order", action="store_true"),
             Argument("--nocheck-order", action="store_true"),
             Argument("--header", action="store_true"),
-            Argument("path", type="path", nargs="?", metavar=""),
-            Argument("path2", type="path", nargs="?", metavar=""),
+            PATH_OPERAND,
+            PATH2_OPERAND,
         )
     ),
     "numfmt": CommandSpec(
@@ -271,7 +277,7 @@ SPECS: dict[str, CommandSpec] = {
             ),
             Argument("--suffix"),
             Argument("--grouping", action="store_true"),
-            Argument("texts", nargs="*", metavar=""),
+            TEXTS_OPERAND,
         )
     ),
 }

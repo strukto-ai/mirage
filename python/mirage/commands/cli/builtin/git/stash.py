@@ -31,10 +31,10 @@ async def stash_list(
         data = await read_optional(
             ctx.vfs, location.commondir.join("logs/refs/stash")
         )
-        lines = (data or b"").splitlines()
+        rows = [row for row in reversed((data or b"").splitlines()) if row]
         text = b"".join(
             f"stash@{{{index}}}: ".encode() + row.split(b"\t", 1)[-1] + b"\n"
-            for index, row in enumerate(reversed(lines))
+            for index, row in enumerate(rows)
         )
         return text, IOResult()
     except GitError as exc:
@@ -61,7 +61,7 @@ async def stash_show(
             data = await read_optional(
                 ctx.vfs, location.commondir.join("logs/refs/stash")
             )
-            rows = list(reversed((data or b"").splitlines()))
+            rows = [row for row in reversed((data or b"").splitlines()) if row]
             index = int(match.group(1) or match.group(2))
             if not rows:
                 return None, IOResult(

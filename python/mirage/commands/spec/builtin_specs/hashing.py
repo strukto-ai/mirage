@@ -12,6 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec.constants import (
+    PATH2_OPERAND,
+    PATH_OPERAND,
+    PATHS_OPERAND,
+)
 from mirage.commands.spec.types import Argument, CommandSpec
 
 CHECKSUM = CommandSpec(
@@ -26,14 +31,12 @@ CHECKSUM = CommandSpec(
         Argument("--ignore-missing", action="store_true"),
         Argument("--strict", action="store_true"),
         Argument("--quiet", action="store_true"),
-        Argument("paths", type="path", nargs="*", metavar=""),
+        PATHS_OPERAND,
     )
 )
 
 SPECS: dict[str, CommandSpec] = {
-    "md5": CommandSpec(
-        arguments=(Argument("paths", type="path", nargs="*", metavar=""),)
-    ),
+    "md5": CommandSpec(arguments=(PATHS_OPERAND,)),
     "diff": CommandSpec(
         arguments=(
             Argument("-i", action="store_true"),
@@ -50,8 +53,8 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-x", "--exclude", action="append"),
             Argument("-X", "--exclude-from", type="path", action="append"),
             Argument("-s", "--report-identical-files", action="store_true"),
-            Argument("path", type="path", nargs="?", metavar=""),
-            Argument("path2", type="path", nargs="?", metavar=""),
+            PATH_OPERAND,
+            PATH2_OPERAND,
         )
     ),
     "base64": CommandSpec(
@@ -60,7 +63,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-D", action="store_true"),
             Argument("-w", "--wrap"),
             Argument("-i", "--ignore-garbage", action="store_true"),
-            Argument("path", type="path", nargs="?", metavar=""),
+            PATH_OPERAND,
         )
     ),
     "md5sum": CHECKSUM,
@@ -77,8 +80,8 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-s"),
             Argument("-g"),
             Argument("-u", action="store_true"),
-            Argument("path", type="path", nargs="?", metavar=""),
-            Argument("path2", type="path", nargs="?", metavar=""),
+            PATH_OPERAND,
+            PATH2_OPERAND,
         )
     ),
     "patch": CommandSpec(
@@ -87,8 +90,8 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-R", action="store_true"),
             Argument("-i", type="path"),
             Argument("-N", action="store_true"),
-            Argument("path", type="path", nargs="?", metavar=""),
-            Argument("path2", type="path", nargs="?", metavar=""),
+            PATH_OPERAND,
+            PATH2_OPERAND,
         )
     ),
     "cmp": CommandSpec(
@@ -101,8 +104,8 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-i", "--ignore-initial"),
             # FILE1 [FILE2 [SKIP1 [SKIP2]]]: the skips are byte counts, read
             # as -i reads its own (diffutils 3.10).
-            Argument("path", type="path", nargs="?", metavar=""),
-            Argument("path2", type="path", nargs="?", metavar=""),
+            PATH_OPERAND,
+            PATH2_OPERAND,
             Argument("text3", nargs="?", metavar=""),
             Argument("text4", nargs="?", metavar=""),
         )
@@ -114,7 +117,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-c", action="store_true"),
             Argument("-o", type="path"),
             Argument("-l", "--list", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
 }

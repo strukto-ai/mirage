@@ -206,3 +206,36 @@ async def test_rows_print_the_name_git_found_the_log_under(
         native.stdout,
         native.stderr,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", ["reflog", "reflog -1", "reflog show -2"])
+async def test_blank_rows_are_skipped_as_git_skips_them(
+    git_ws, repo_path, line
+):
+    ids = subprocess.run(
+        ["git", "-C", str(repo_path), "rev-list", "--reverse", "HEAD"],
+        check=True,
+        capture_output=True,
+        env=ENV,
+    ).stdout.split()
+    rows = [
+        entry(before, after, WHO, 1700000000 + n, f"commit: {n}")
+        for n, (before, after) in enumerate(zip([ZERO, *ids], ids))
+    ]
+    (repo_path / ".git" / "logs").mkdir(exist_ok=True)
+    (repo_path / ".git" / "logs" / "HEAD").write_bytes(
+        b"\n" + b"\n".join(rows) + b"\n"
+    )
+    native = subprocess.run(
+        ["git", "-C", str(repo_path), *line.split()],
+        capture_output=True,
+        env=ENV,
+    )
+    actual = await git_ws.shell(f"git -C /repo {line}")
+    assert native.returncode == 0
+    assert (actual.exit_code, actual.stdout or b"", actual.stderr or b"") == (
+        native.returncode,
+        native.stdout,
+        native.stderr,
+    )

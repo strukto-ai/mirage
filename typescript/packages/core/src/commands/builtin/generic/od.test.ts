@@ -17,6 +17,8 @@ import { UsageError } from '../../errors.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { odGeneric, parseCount } from './od.ts'
+import type { Context } from '../../config.ts'
+import type { FlagValue } from '../../spec/types.ts'
 
 describe('od parseCount', () => {
   // strtoumax base 0 (0x hex, leading 0 octal), GNU size suffixes, and one
@@ -99,7 +101,10 @@ describe('od skips and limits across operands', () => {
       if (data === undefined) throw missing(q.virtual)
       yield ENC.encode(data)
     }
-    const [stdout, io] = await odGeneric(names.map(p), stream, null, 'o', skip, limit, ['c'])
+    const flags: Record<string, FlagValue> = { skip_bytes: String(skip), c: true }
+    if (limit !== null) flags.read_bytes = String(limit)
+    const ctx = { stdin: null, flags, cwd: PathSpec.fromStrPath('/') } as Context
+    const [stdout, io] = await odGeneric(names.map(p), ctx, stream)
     const errs = io.stderr === null ? '' : DEC.decode(await materialize(io.stderr))
     expect([DEC.decode(await materialize(stdout)), errs, io.exitCode]).toEqual([
       out,

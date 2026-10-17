@@ -38,6 +38,7 @@ import {
   camel,
   ghBool,
   ghTransport,
+  listLimit,
   readCliFile,
   repoFor,
   textOut,
@@ -133,7 +134,7 @@ export async function runListCmd(
       ghTransport(config),
       repoFor(config, fl),
       params,
-      fl.asInt('limit') ?? 20,
+      listLimit(fl, 20),
       fl.asStr('workflow'),
     )
   ).map(run)
@@ -386,7 +387,7 @@ export async function workflowListCmd(
     await listWorkflows(
       ghTransport(config),
       repoFor(config, fl),
-      fl.asInt('limit') ?? 50,
+      listLimit(fl, 50),
       ghBool(fl, 'all') ? undefined : (row) => row.state === 'active',
     )
   ).map(workflow)
@@ -490,7 +491,7 @@ export async function workflowRunCmd(
   if (id === '') throw new Error('a workflow ID, name, or filename is required')
   const transport = ghTransport(config)
   const ref = repoFor(config, fl)
-  let branch = fl.asStr('ref') ?? (config as { branch?: string }).branch
+  let branch = fl.asNonEmpty('ref') ?? (config as { branch?: string }).branch
   if (branch === undefined || branch === '') {
     const repository = (await viewRepo(transport, ref)) as { default_branch?: unknown }
     branch = typeof repository.default_branch === 'string' ? repository.default_branch : undefined

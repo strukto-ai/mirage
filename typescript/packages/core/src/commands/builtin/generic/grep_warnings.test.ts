@@ -18,8 +18,8 @@ import { describe, expect, it } from 'vitest'
 import { materialize, type IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
-import { grepGeneric, labelled } from './grep.ts'
-import { prependStderr } from '../utils/output.ts'
+import { grepGeneric } from './grep.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { yieldBytes } from '../../../io/stream.ts'
 
 type GrepOut = Uint8Array | AsyncIterable<Uint8Array> | null
@@ -138,28 +138,6 @@ describe('grepGeneric excluded entries', () => {
       'grep: /data/0ghost: No such file or directory\n',
     )
     expect(io.exitCode).toBe(2)
-  })
-})
-
-describe('labelled', () => {
-  it.each([
-    [{ recursive: true }, { recursive: true, with_filename: true }],
-    [
-      { recursive: true, no_filename: true },
-      { recursive: true, no_filename: true },
-    ],
-    [
-      { with_filename: true, no_filename: true },
-      { with_filename: true, no_filename: true },
-    ],
-    [
-      { no_filename: true, with_filename: true },
-      { no_filename: true, with_filename: true },
-    ],
-  ])('asks for filenames only when the line did not decide: %j', (flags, expected) => {
-    const out = labelled(ctx(flags))
-    expect(out.flags).toEqual(expected)
-    expect(Object.keys(out.flags)).toEqual(Object.keys(expected))
   })
 })
 
@@ -386,7 +364,7 @@ describe('grepGeneric streaming results', () => {
       readdir,
       stream,
     )) as [GrepOut, IOResult]
-    await prependStderr(io, ['backend: scan fallback'])
+    io.stderr = concat([ENC.encode('backend: scan fallback\n'), await materialize(io.stderr)])
     expect(await decode(out)).toBe('/data/a.txt:alice\n')
     expect(io.exitCode).toBe(2)
     expect(await io.stderrStr()).toBe(

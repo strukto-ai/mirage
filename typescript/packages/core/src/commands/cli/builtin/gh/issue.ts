@@ -34,6 +34,7 @@ import {
   ghBool,
   ghTransport,
   jsonFields,
+  listLimit,
   repoFor,
   repoNumber,
   textOut,
@@ -159,8 +160,8 @@ export async function listCmd(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   const state = fl.asStr('state') ?? 'open'
-  const assignee = fl.asStr('assignee')
-  const author = fl.asStr('author')
+  const assignee = fl.asNonEmpty('assignee')
+  const author = fl.asNonEmpty('author')
   const labelValues = csvValues(fl.asList('label'))
   const fields = jsonFields(fl, ISSUE_FIELDS)
   if (fields !== null) {
@@ -168,7 +169,7 @@ export async function listCmd(
       ghTransport(config),
       repoFor(config, fl),
       { states: STATES[state] ?? ['OPEN'], assignee, author, labels: labelValues },
-      fl.asInt('limit') ?? 30,
+      listLimit(fl, 30),
       selection(ISSUE_FIELD_TABLE, fields, false),
     )
     return typedOut(
@@ -186,7 +187,7 @@ export async function listCmd(
     ghTransport(config),
     repoFor(config, fl),
     params,
-    fl.asInt('limit') ?? 30,
+    listLimit(fl, 30),
   )
   const rows = values.map(issue)
   return typedOut(rows, fl, listText(rows), ISSUE_FIELDS)

@@ -27,7 +27,7 @@ export const STRTOD =
 // 2**16270 up (LDBL_MAX plus half its ulp, a tie rounding to the even
 // infinity) overflows, one under 2**-16382 is tiny, and a tiny one is held
 // exactly only on the subnormal grid of 2**-16494.
-const OVERFLOW = ((1n << 114n) - 1n) << 16270n
+export const LONG_DOUBLE_OVERFLOW = ((1n << 114n) - 1n) << 16270n
 
 // The leading digits that settle the range exactly, the rest only saying
 // whether anything nonzero was dropped. 32 hex digits hold the 113 bits a
@@ -151,6 +151,6 @@ export function strtoldErange(found: RegExpExecArray): boolean {
   } else return false
   const num = significand * base ** BigInt(Math.max(exponent, 0))
   const den = base ** BigInt(Math.max(-exponent, 0))
-  if (num >= OVERFLOW * den) return true
+  if (num >= LONG_DOUBLE_OVERFLOW * den) return true
   return num << 16382n < den && (dropped || (num << 16494n) % den !== 0n)
 }

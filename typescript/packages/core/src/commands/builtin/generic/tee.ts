@@ -24,6 +24,7 @@ import { eisdir, enotdir, fsError, isEnoent, isFsError } from '../../../errors/f
 import { fsErrorLine } from '../../../errors/render.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { type FsError } from '../../../errors/types.ts'
+import { SIGPIPE_EXIT } from '../constants.ts'
 import { absentDestError, entryKind } from '../utils/paths.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { readStdinAsync } from '../utils/stream.ts'
@@ -316,7 +317,7 @@ export async function writeOutput(
         // reported, unless -p or --output-error say otherwise.
         if (parsed.pipeErrors === PipeErrors.SIGNAL) {
           const stderr = errors.length > 0 ? encodeText(errors.join('')) : null
-          return [null, new IOResult({ exitCode: 141, stderr })]
+          return [null, new IOResult({ exitCode: SIGPIPE_EXIT, stderr })]
         }
         if (parsed.pipeErrors === PipeErrors.IGNORE) continue
         errors.push(errorLine(path, fsError(path, 'EPIPE')))
@@ -371,7 +372,7 @@ async function* teeStream(
   const failed = (path: PathSpec, error: unknown): boolean => {
     if (error instanceof PipeClosed) {
       if (parsed.pipeErrors === PipeErrors.SIGNAL) {
-        io.exitCode = 141
+        io.exitCode = SIGPIPE_EXIT
         return true
       }
       if (parsed.pipeErrors === PipeErrors.IGNORE) return false

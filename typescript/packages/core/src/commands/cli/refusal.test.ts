@@ -104,6 +104,9 @@ describe('gitOptionRefusal', () => {
     ['-Z', ['', `error: unknown switch \`Z'\n${USAGE}`]],
     ['-h', [USAGE, '']],
     ['--quiet=1', ['', "error: option `quiet' takes no value\n"]],
+    ['-m', ['', "error: switch `m' requires a value\n"]],
+    ['-qm', ['', "error: switch `m' requires a value\n"]],
+    ['--count', ['', "error: option `count' requires a value\n"]],
   ])('words %s as parse-options does', (word, streams) => {
     expect(gitOptionRefusal(word, 'rm', SPEC)).toEqual(streams)
   })

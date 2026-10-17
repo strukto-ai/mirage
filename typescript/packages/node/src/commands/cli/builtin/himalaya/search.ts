@@ -22,7 +22,7 @@ import { fetchHeaders, listMessageUids } from '../../../../core/email/client.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
 import { envelopesJsonBytes } from '../../../../core/email/render.ts'
 import { DEFAULT_PAGE_SIZE } from './list.ts'
-import { pageSlice, parseQuery, sortHeaders, uidBudget } from './query.ts'
+import { pageSlice, pageWindow, parseQuery, sortHeaders, uidBudget } from './query.ts'
 
 export async function searchEnvelopes(
   config: unknown,
@@ -31,13 +31,16 @@ export async function searchEnvelopes(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const mailbox = fl.asStr('mailbox') ?? 'INBOX'
-  const page = fl.asInt('page') ?? 1
-  const pageSize = fl.asInt('page_size') ?? DEFAULT_PAGE_SIZE
+  const mailbox = fl.asStr('mailbox', 'INBOX')
+  const account = config as EmailConfig
+  const [page, pageSize] = pageWindow(
+    fl.asInt('page', 1),
+    fl.asInt('page_size', DEFAULT_PAGE_SIZE),
+    account.maxMessages,
+  )
   // The shell already split the query; upstream joins argv the same way
   // before parsing, so a pattern with spaces needs literal quotes.
   const query = parseQuery(texts.join(' '))
-  const account = config as EmailConfig
   const budget = uidBudget(page, pageSize, query.sorters, account.maxMessages)
   const accessor = new EmailAccessor(account)
   let headers

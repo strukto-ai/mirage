@@ -13,9 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { specOf } from '../../spec/builtins.ts'
-import { C_SPACE } from '../constants.ts'
+import { C_SPACE, EOVERFLOW_TEXT, UINTMAX } from '../constants.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
+import { usageHint } from '../../spec/usage.ts'
 import { quoteText } from '../../quote.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -73,6 +74,11 @@ function processItems(items: string[], repeat: boolean, need: number): string[] 
 // whitespace and `+`. See parseInputRange.
 const UNSIGNED = new RegExp(`^${C_SPACE}\\+?[0-9]+$`)
 
+// A `-o` reached a backend wired without a write op, which is a wiring fault
+// rather than anything the command line did wrong, so it is thrown as a bare
+// Error rather than returned like every user-facing refusal.
+export const NO_WRITE_OP = 'shuf: backend provides no write op'
+
 // GNU's own `xalloc_die` wording, exit 1. It is what real shuf answers with
 // when a range is too large to materialize, so it is borrowed rather than
 // invented. Measured, ground truth SH5.
@@ -84,18 +90,17 @@ export const MEMORY_EXHAUSTED = 'shuf: memory exhausted'
 // (`: Numerical result out of range` is the value outside an option's OWN
 // range), while `shuf -i` has no range below the C type's and so only ever
 // emits this one. Measured, ground truth SH1.
-export const OVERFLOW_CLAUSE = ': Value too large for defined data type'
+export const OVERFLOW_CLAUSE = `: ${EOVERFLOW_TEXT}`
 
 export const MULTIPLE_RANGES = 'shuf: multiple -i options specified'
 
 export const MULTIPLE_OUTPUTS = 'shuf: multiple output files specified'
 
-const TRY_HELP = "\nTry 'shuf --help' for more information."
+const TRY_HELP = `\n${usageHint('shuf')}`
 
 export const ECHO_WITH_RANGE = `shuf: cannot combine -e and -i options${TRY_HELP}`
 
-export const UINTMAX_MAX = 18446744073709551615n
-export const SIZE_MAX = 18446744073709551615n
+export const SIZE_MAX = UINTMAX
 
 // How many lines shuf will render into one byte object before answering
 // `memory exhausted`. GNU has no such number: it streams, so a huge range with
@@ -165,10 +170,10 @@ export function parseInputRange(raw: string): [bigint, bigint] | RangeRefusal {
   // accepted, and the regex has already refused everything else, so this cannot
   // throw and cannot read a prefix.
   const low = BigInt(lowRaw)
-  if (low > UINTMAX_MAX) return 'overflow'
+  if (low > UINTMAX) return 'overflow'
   if (!UNSIGNED.test(highRaw)) return 'invalid'
   const high = BigInt(highRaw)
-  if (high > UINTMAX_MAX) return 'overflow'
+  if (high > UINTMAX) return 'overflow'
   if (low > high || high - low >= SIZE_MAX) return 'invalid'
   return [low, high]
 }

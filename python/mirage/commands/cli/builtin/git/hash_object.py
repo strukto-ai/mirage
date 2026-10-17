@@ -19,7 +19,7 @@ import re
 from dulwich.objects import Blob, Commit, ShaFile, Tag, Tree
 
 from mirage.commands.builtin.utils.stream import read_stdin_async
-from mirage.commands.cli.builtin.git.cat_file import OBJECT_TYPES
+from mirage.commands.cli.builtin.git.constants import OBJECT_TYPES
 from mirage.commands.cli.builtin.git.errors import (
     GitError,
     NoWorkspaceError,
@@ -161,7 +161,7 @@ async def hash_object(
         if vfs is None:
             raise NoWorkspaceError()
         check_switches(ctx, texts)
-        kind = fl.as_str("t") or "blob"
+        kind = fl.as_str("t", "blob")
         if kind not in OBJECT_TYPES:
             raise GitError(f'invalid object type "{kind}"')
         literally = fl.as_bool("literally")

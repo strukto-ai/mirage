@@ -45,6 +45,7 @@ import { UsageError } from '../../errors.ts'
 import { SYNOPSES } from '../../spec/synopsis.ts'
 import { argmatchLine, argmatchValidBlock, usageHint } from '../../spec/usage.ts'
 import { argmatch } from '../../spec/argmatch.ts'
+import { GREP_STDIN_LABEL } from '../utils/constants.ts'
 import { linksOf, mountsOf } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
@@ -61,7 +62,6 @@ const DEVICE_TYPES: ReadonlySet<FileType> = new Set([
   FileType.FIFO,
   FileType.SOCKET,
 ])
-const STDIN_LABEL = '(standard input)'
 const UNIX_BYTE_OFFSETS = 'grep: warning: --unix-byte-offsets (-u) is obsolete\n'
 // What xstrtoimax takes as -m's count: blanks, a sign, then digits.
 const MAX_COUNT = /^[ \t\n\v\f\r]*[+-]?[0-9]+$/
@@ -208,17 +208,6 @@ export function filenameMode(fl: FlagView): boolean | null {
   return mode
 }
 
-/**
- * Ask for the filename a walk would have printed on its own. A content
- * search hands the generic explicit files where the user named a directory,
- * so the label is requested here; an explicit -h still wins, and an explicit
- * -H is already on the line.
- */
-export function labelled(ctx: Context): Context {
-  if (filenameMode(new FlagView(ctx.flags, specOf('grep'))) !== null) return ctx
-  return { ...ctx, flags: { ...ctx.flags, with_filename: true } }
-}
-
 function reason(error: unknown): string {
   return fsStrerror(error) ?? (error instanceof Error ? error.message : String(error))
 }
@@ -275,7 +264,7 @@ export function parseFlags(fl: FlagView): FlagSet {
     null: fl.asBool('null'),
     initialTab: fl.asBool('initial_tab'),
     groupSeparator: groupSeparator(fl),
-    label: fl.asStr('label') ?? STDIN_LABEL,
+    label: fl.asStr('label') ?? GREP_STDIN_LABEL,
   }
 }
 
@@ -344,7 +333,7 @@ export async function grepGeneric(
           source,
           pat,
           f,
-          f.label ?? STDIN_LABEL,
+          f.label ?? GREP_STDIN_LABEL,
           f.withFilename && !f.noFilename,
           io,
           false,
@@ -458,7 +447,7 @@ export async function grepGeneric(
           stream(p),
           pat,
           f,
-          operandLabel(p, f.label ?? STDIN_LABEL),
+          operandLabel(p, f.label ?? GREP_STDIN_LABEL),
           show,
           fileIO,
           printed,

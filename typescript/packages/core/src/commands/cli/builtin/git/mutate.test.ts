@@ -1420,11 +1420,45 @@ describe('a name that escapes the ref tree', () => {
     expect(await h.read('/repo/.git/config')).toEqual(before)
   })
 
+  it('is refused by checkout -b, leaving the config alone', async () => {
+    const h = await harness()
+    const before = await h.read('/repo/.git/config')
+    expect(await h.run('checkout -b ../../config')).toEqual([
+      128,
+      '',
+      "fatal: '../../config' is not a valid branch name\n" +
+        'hint: See `man git check-ref-format`\n' +
+        'hint: Disable this message with "git config set advice.refSyntax false"\n',
+    ])
+    expect(await h.read('/repo/.git/config')).toEqual(before)
+  })
+
+  it('lets checkout -b name an unresolvable start point first', async () => {
+    const h = await harness()
+    expect(await h.run('checkout -b ../../config nosuchrev')).toEqual([
+      128,
+      '',
+      "fatal: 'nosuchrev' is not a commit and a branch '../../config' cannot be created from it\n",
+    ])
+  })
+
   it('is refused by branch, before its start point resolves', async () => {
     const h = await harness()
     const [code, , err] = await h.run('branch ../../config nosuchstart')
     expect(code).toBe(128)
     expect(err.startsWith("fatal: '../../config' is not a valid branch name")).toBe(true)
+  })
+
+  it('is refused by commit through HEAD, leaving the config alone', async () => {
+    const h = await harness()
+    const before = await h.read('/repo/.git/config')
+    await write(h, '.git/HEAD', 'ref: refs/heads/../../config\n')
+    expect(await h.run('commit --allow-empty -m escape')).toEqual([
+      128,
+      '',
+      "fatal: cannot lock ref 'HEAD': unable to resolve reference 'refs/heads/../../config': reference broken\n",
+    ])
+    expect(await h.read('/repo/.git/config')).toEqual(before)
   })
 
   it('lets switch name an unresolvable start point first', async () => {
@@ -3351,5 +3385,22 @@ describe('the executable bit a tree entry records', () => {
     expect((await h.run('switch main'))[0]).toBe(0)
     expect((await h.run('switch other'))[0]).toBe(0)
     expect((await h.run('status --short'))[1]).toBe('')
+  })
+})
+
+describe('an object the store cannot read', () => {
+  // Only a missing object reads as no object; a damaged one surfaces as the
+  // error the read raised, as it does on the Python host.
+  it('fails the line rather than reading as an unknown name', async () => {
+    const h = await harness()
+    const damaged = `de${'a'.repeat(38)}`
+    await write(h, `.git/objects/de/${'a'.repeat(38)}`, 'garbage')
+    const [code, out, err] = await h.run(`cat-file -t ${damaged}`)
+    expect([code, out, err.startsWith('git cat-file: ')]).toEqual([1, '', true])
+    expect(await h.run(`cat-file -t ${'1'.repeat(40)}`)).toEqual([
+      128,
+      '',
+      `fatal: Not a valid object name ${'1'.repeat(40)}\n`,
+    ])
   })
 })

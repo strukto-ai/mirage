@@ -14,6 +14,7 @@
 
 import type { RowActionKind } from '../../core/generic/find_eval.ts'
 import { sizeSuffixes } from './utils/size_suffix.ts'
+import { ContentType } from '../../types.ts'
 
 export enum PatternType {
   EXACT = 'exact',
@@ -27,6 +28,18 @@ export const MIME_SYMLINK = 'inode/symlink; charset=binary'
 
 // How much of a file `file` sniffs: only its first bytes are read.
 export const FILE_HEADER_BYTES = 512
+
+// The leading bytes `file` recognizes a format by, checked in order.
+export const MAGIC_SIGNATURES: readonly (readonly [readonly number[], ContentType])[] = [
+  [[0x89, 0x50, 0x4e, 0x47], ContentType.IMAGE_PNG],
+  [[0xff, 0xd8, 0xff], ContentType.IMAGE_JPEG],
+  [[0x47, 0x49, 0x46, 0x38], ContentType.IMAGE_GIF],
+  [[0x50, 0x4b, 0x03, 0x04], ContentType.ZIP],
+  [[0x1f, 0x8b], ContentType.GZIP],
+  [[0x25, 0x50, 0x44, 0x46], ContentType.PDF],
+  [[0x7b, 0x0a], ContentType.JSON],
+  [[0x5b, 0x7b], ContentType.JSON],
+]
 
 export const FILE_MIME_MAP: Readonly<Record<string, string>> = Object.freeze({
   text: 'text/plain; charset=us-ascii',
@@ -49,6 +62,14 @@ export const FILE_MIME_MAP: Readonly<Record<string, string>> = Object.freeze({
 // exactly-2**64 values through the too-large checks that python rejects.
 export const UINTMAX = 2n ** 64n - 1n
 export const INTMAX = 2n ** 63n - 1n
+export const INTMAX_MIN = -(2n ** 63n)
+
+// gnulib appends strerror(ERANGE) when a value parsed but fell outside the
+// option's range, and strerror(EOVERFLOW) when the value did not fit the type
+// it was scanned into. Measured under LC_ALL=C on glibc; these are the two
+// strings here most likely to read differently under another libc or locale.
+export const ERANGE_TEXT = 'Numerical result out of range'
+export const EOVERFLOW_TEXT = 'Value too large for defined data type'
 
 export const OD_SIZE_UNITS = sizeSuffixes('bkKmMGTPE')
 // Q/R/Y/Z are in GNU od's suffix set but always overflow uintmax, so they
@@ -87,7 +108,6 @@ export const SPLIT_COUNT_PATTERN = new RegExp(`^${C_SPACE}\\+?[0-9]+$`)
 // digits-only form.
 export const SPLIT_DIGITS = /^[0-9]+$/
 export const SPLIT_HEX_DIGITS = /^[0-9a-f]+$/
-export const SPLIT_TRY_HELP = "\nTry 'split --help' for more information."
 
 // gzip 1.13's file naming. The suffix gzip writes and looks for unless -S
 // names another; the suffixes it always recognizes on a name it
@@ -112,6 +132,8 @@ export const GZIP_MAX_SUFFIX = 30
 export const SED_MISSING_SCRIPT = 'sed: missing script'
 export const SED_NO_INPUT_FILES = 'sed: no input files'
 export const SED_NO_INPUT_EXIT = 4
+
+export const AWK_USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]"
 
 // The word an `-exec` argument that stands for the match is spelled as.
 export const EXEC_PLACEHOLDER = '{}'
@@ -169,3 +191,15 @@ export const FIND_ROW_ACTIONS: ReadonlyMap<string, RowActionKind> = new Map([
   ['-ls', 'ls'],
   ['-delete', 'delete'],
 ])
+
+// How many per-mount runs of one cross-mount line are in flight at once.
+export const OPERAND_CONCURRENCY = 4
+
+// Where mktemp creates a name when neither -p nor TMPDIR says.
+export const FALLBACK_TMPDIR = '/tmp'
+
+// The status of a command SIGPIPE ended, as a shell reports it (128 + 13).
+export const SIGPIPE_EXIT = 141
+
+// The one name every host answers with; hostname and uname -n print it.
+export const HOSTNAME = 'mirage'

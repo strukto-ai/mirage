@@ -616,12 +616,6 @@ __all__ = [
     "SJIS",
     "MultibyteEncoder",
     "MultibyteSpec",
-    "euc_cn_step",
-    "euc_jp_step",
-    "euc_kr_step",
-    "gb18030_step",
-    "gbk_step",
     "multibyte_reverse",
     "multibyte_table",
-    "sjis_step",
 ]

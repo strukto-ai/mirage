@@ -39,7 +39,13 @@ from mirage.commands.cli.builtin.git.io import (
     write_file,
 )
 from mirage.commands.cli.builtin.git.ref_fields import shorten_ref
-from mirage.commands.cli.builtin.git.reflog import ZERO, append, entry, logged
+from mirage.commands.cli.builtin.git.reflog import (
+    LOGS_DIR,
+    ZERO,
+    append,
+    entry,
+    logged,
+)
 from mirage.commands.cli.builtin.git.refs import (
     SYMREF_PREFIX,
     blocking_ref,
@@ -50,6 +56,7 @@ from mirage.commands.cli.builtin.git.refs import (
     safe_ref_name,
     whole_ref_name,
 )
+from mirage.commands.cli.builtin.git.repo import Repo
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
@@ -61,10 +68,8 @@ from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.workspace.files import Files
 
 REFS_PREFIX = "refs/"
-LOGS_DIR = "logs"
 
 
 def _switched(fl: FlagView, name: str, default: bool) -> bool:
@@ -113,16 +118,16 @@ def symbolic_ref_read_only(
 
 
 async def object_of(
-    vfs: Files, gitdir: PathSpec, table: DictRefsContainer, name: str
+    repo: Repo, table: DictRefsContainer, name: str
 ) -> bytes | None:
     """The object id a ref ends at, through any symbolic hops.
 
     Args:
-        vfs (Files): the session's files.
-        gitdir (PathSpec): this checkout's git directory.
+        repo (Repo): the opened repository.
         table (DictRefsContainer): every ref, as load_refs reads them.
         name (str): the full ref name.
     """
+    vfs, gitdir = repo.dispatch, repo.location.gitdir
     end = await resolve_symbolic(vfs, gitdir, table, name, True)
     if end is None:
         return None
@@ -133,8 +138,7 @@ async def object_of(
 
 
 async def set_symbolic(
-    vfs: Files,
-    location: RepoLocation,
+    repo: Repo,
     table: DictRefsContainer,
     name: str,
     target: str,
@@ -149,8 +153,7 @@ async def set_symbolic(
     message leaves the line without one.
 
     Args:
-        vfs (Files): the session's files.
-        location (RepoLocation): the discovered repository.
+        repo (Repo): the opened repository.
         table (DictRefsContainer): every ref, as load_refs reads them.
         name (str): the ref to write.
         target (str): the ref it points at.
@@ -166,15 +169,15 @@ async def set_symbolic(
     held = blocking_ref(set(table.allkeys()), name)
     if held is not None:
         raise SymbolicRefLockError(name, held)
-    gitdir = location.gitdir
-    before = await object_of(vfs, gitdir, table, name)
+    vfs, location = repo.dispatch, repo.location
+    before = await object_of(repo, table, name)
     owner = owner_of(location, name)
     await write_file(
         vfs,
         owner.join(name),
         f"{SYMREF_PREFIX}{target}\n".encode(),
     )
-    after = await object_of(vfs, gitdir, table, target)
+    after = await object_of(repo, table, target)
     log = owner.join(LOGS_DIR, name)
     if after is None or not await logged(vfs, location, name, log):
         return
@@ -211,7 +214,7 @@ async def symbolic_ref(
         if vfs is None:
             raise NoWorkspaceError()
         check_switches(ctx, texts)
-        _, location = await opened(ctx, fl)
+        repo, location = await opened(ctx, fl)
         message = fl.as_str("m")
         if message == "":
             raise EmptyUpdateMessageError()
@@ -241,9 +244,7 @@ async def symbolic_ref(
             if not whole_ref_name(target):
                 raise InvalidSymbolicTargetError(name, target)
             who = identity(fl, ctx.session)
-            await set_symbolic(
-                vfs, location, table, name, target, who, message or ""
-            )
+            await set_symbolic(repo, table, name, target, who, message or "")
             return None, IOResult()
         if len(names) != 1:
             raise UsageError("", verb_usage(ctx))

@@ -43,6 +43,7 @@ from mirage.commands.cli.builtin.git.io import (
     stat_of,
 )
 from mirage.commands.cli.builtin.git.pathspec import (
+    decoded,
     matched,
     repo_relative,
     visible_entries,
@@ -304,13 +305,10 @@ async def rm(
             raise NoPathspecRemoveError()
         repo, location = await opened(ctx, fl, work_tree=not flags.cached)
         state = await read_index(vfs, location.gitdir)
-        tracked = {
-            path.decode("utf-8", errors="replace")
-            for path in (
-                set(visible_entries(location, state.entries))
-                | set(visible_entries(location, state.conflicts))
-            )
-        }
+        tracked = decoded(
+            set(visible_entries(location, state.entries))
+            | set(visible_entries(location, state.conflicts))
+        )
         selected = select(
             location, start_point(fl).virtual, texts, tracked, flags
         )
@@ -358,5 +356,4 @@ async def rm(
         return fatal(exc)
     if flags.quiet:
         return None, IOResult()
-    lines = "".join(f"rm '{path}'\n" for path in selected)
     return yield_bytes(lines.encode()), IOResult()

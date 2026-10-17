@@ -25,3 +25,22 @@ async def test_type_and_object_peel_a_tag_to_what_it_tags(git_rw):
     )
     kind, commit, tree, *ids = result.stdout.decode().split()
     assert (kind, [commit, tree]) == ("tag", ids)
+
+
+@pytest.mark.asyncio
+async def test_a_damaged_object_fails_the_line(git_rw, repo_path):
+    # Only a missing object reads as no object; a damaged one surfaces as
+    # the error the read raised, as it does on the TypeScript host.
+    damaged = "de" + "a" * 38
+    folder = repo_path / ".git" / "objects" / "de"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / ("a" * 38)).write_bytes(b"garbage")
+    result = await git_rw.shell(f"git -C /repo cat-file -t {damaged}")
+    assert result.exit_code == 1
+    assert (result.stderr or b"").startswith(b"git cat-file: ")
+    missing = "1" * 40
+    result = await git_rw.shell(f"git -C /repo cat-file -t {missing}")
+    assert result.exit_code == 128
+    assert (
+        result.stderr == f"fatal: Not a valid object name {missing}\n".encode()
+    )

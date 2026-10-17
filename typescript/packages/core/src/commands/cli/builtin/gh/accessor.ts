@@ -28,7 +28,7 @@ import { PathSpec } from '../../../../types.ts'
 import { fsStrerror, isEnoent, isEnotdir } from '../../../../errors/fs.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
-import { CONNECT_HINT, GITHUB_HOST, GOJQ_RAISED } from './constants.ts'
+import { CONNECT_HINT, GITHUB_HOST, GOJQ_RAISED, INVALID_LIMIT } from './constants.ts'
 
 const ENC = new TextEncoder()
 
@@ -116,6 +116,22 @@ export function textOut(text: string): CommandFnResult {
 /** Whether a gh boolean flag is on: given bare, or as `=true`. */
 export function ghBool(fl: FlagView, name: string): boolean {
   return fl.asBool(name) || fl.asStr(name) === 'true'
+}
+
+/**
+ * A list verb's `--limit`, refused below 1 the way gh refuses it: gh answers a
+ * limit under 1 with a flag error before any request, and `release list`
+ * takes any value. An explicit zero is never the fallback. Mirrors Python's
+ * `list_limit`.
+ */
+export function listLimit(
+  fl: FlagView,
+  fallback: number,
+  refusal: string | null = INVALID_LIMIT,
+): number {
+  const value = fl.asInt('limit', fallback)
+  if (refusal !== null && value < 1) throw new UsageError(`${refusal}: ${String(value)}`, 1)
+  return value
 }
 
 export function repoFor(config: unknown, fl: FlagView): RepoRef {

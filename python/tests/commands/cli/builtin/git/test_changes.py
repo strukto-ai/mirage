@@ -98,14 +98,14 @@ def test_an_index_path_absent_from_head_is_added():
     staged = stage_changes(
         EMPTY_STORE, {}, {b"new.txt": entry(b"a" * 40)}, set()
     )
-    assert staged == {"new.txt": ("A", None)}
+    assert staged == {"new.txt": ("A", None, 0)}
 
 
 def test_a_head_path_absent_from_the_index_is_deleted():
     staged = stage_changes(
         EMPTY_STORE, {b"gone.txt": (REGULAR, b"a" * 40)}, {}, set()
     )
-    assert staged == {"gone.txt": ("D", None)}
+    assert staged == {"gone.txt": ("D", None, 0)}
 
 
 def test_a_different_blob_is_a_modification():
@@ -115,7 +115,7 @@ def test_a_different_blob_is_a_modification():
         {b"a.txt": entry(b"b" * 40)},
         set(),
     )
-    assert staged == {"a.txt": ("M", None)}
+    assert staged == {"a.txt": ("M", None, 0)}
 
 
 def test_the_same_blob_is_no_change_at_all():
@@ -135,14 +135,14 @@ def test_a_mode_change_alone_is_a_modification():
         {b"a.txt": entry(b"a" * 40, mode=EXECUTABLE)},
         set(),
     )
-    assert staged == {"a.txt": ("M", None)}
+    assert staged == {"a.txt": ("M", None, 0)}
 
 
 def test_before_the_first_commit_everything_staged_is_new():
     staged = stage_changes(
         EMPTY_STORE, None, {b"a.txt": entry(b"a" * 40)}, set()
     )
-    assert staged == {"a.txt": ("A", None)}
+    assert staged == {"a.txt": ("A", None, 0)}
 
 
 def test_a_conflicted_path_is_not_compared_as_a_deletion():
@@ -160,7 +160,7 @@ def test_identical_content_moved_is_one_rename():
     staged = stage_changes(
         store, {b"old.txt": (REGULAR, sha)}, {b"new.txt": entry(sha)}, set()
     )
-    assert staged == {"new.txt": ("R", "old.txt")}
+    assert staged == {"new.txt": ("R", "old.txt", 100)}
 
 
 def test_a_move_that_also_edited_is_still_a_rename():
@@ -170,7 +170,7 @@ def test_a_move_that_also_edited_is_still_a_rename():
     staged = stage_changes(
         store, {b"old.txt": (REGULAR, old)}, {b"new.txt": entry(new)}, set()
     )
-    assert staged == {"new.txt": ("R", "old.txt")}
+    assert staged == {"new.txt": ("R", "old.txt", 74)}
 
 
 def test_a_rewrite_is_not_a_rename():
@@ -181,7 +181,7 @@ def test_a_rewrite_is_not_a_rename():
     staged = stage_changes(
         store, {b"old.txt": (REGULAR, old)}, {b"new.txt": entry(new)}, set()
     )
-    assert staged == {"old.txt": ("D", None), "new.txt": ("A", None)}
+    assert staged == {"old.txt": ("D", None, 0), "new.txt": ("A", None, 0)}
 
 
 def test_a_symlink_is_never_paired_with_a_file():
@@ -189,7 +189,7 @@ def test_a_symlink_is_never_paired_with_a_file():
     staged = stage_changes(
         store, {b"link": (SYMLINK, sha)}, {b"copy.txt": entry(sha)}, set()
     )
-    assert staged == {"link": ("D", None), "copy.txt": ("A", None)}
+    assert staged == {"link": ("D", None, 0), "copy.txt": ("A", None, 0)}
 
 
 CONFLICTS = [
@@ -272,18 +272,18 @@ async def test_a_mount_with_no_modes_claims_nothing_about_them(
 
 
 def test_a_path_can_hold_a_letter_in_both_columns():
-    rows = merge({"a.txt": ("M", None)}, {"a.txt": "M"}, {}, [])
+    rows = merge({"a.txt": ("M", None, 0)}, {"a.txt": "M"}, {}, [])
     assert len(rows) == 1
     assert (rows[0].index_status, rows[0].tree_status) == ("M", "M")
 
 
 def test_untracked_paths_follow_the_tracked_ones():
-    rows = merge({"z.txt": ("M", None)}, {}, {}, ["a.txt"])
+    rows = merge({"z.txt": ("M", None, 0)}, {}, {}, ["a.txt"])
     assert [row.path for row in rows] == ["z.txt", "a.txt"]
 
 
 def test_an_unmerged_path_sorts_among_the_tracked_ones():
-    rows = merge({"a.txt": ("M", None)}, {}, {"m.txt": "UU"}, [])
+    rows = merge({"a.txt": ("M", None, 0)}, {}, {"m.txt": "UU"}, [])
     assert [row.path for row in rows] == ["a.txt", "m.txt"]
 
 

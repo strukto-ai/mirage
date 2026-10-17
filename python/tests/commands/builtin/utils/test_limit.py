@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator
 import pytest
 
 from mirage.commands.builtin.utils.limit import (
-    apply_limit,
+    guard_output,
     maybe_with_timeout,
     run_with_timeout,
 )
@@ -49,49 +49,49 @@ async def _sleep_forever():
 
 @pytest.mark.asyncio
 async def test_no_limit_passthrough():
-    out, io = await apply_limit(_TEN, None)
-    assert out == _TEN and io.exit_code == 0 and io.stderr is None
+    out, err, code = await guard_output(_TEN, None, 0, None)
+    assert out == _TEN and code == 0 and err is None
 
 
 @pytest.mark.asyncio
 async def test_under_limit_not_truncated():
     sg = Limit(max_lines=100)
-    out, io = await apply_limit(_TEN, sg)
-    assert out == _TEN and io.stderr is None
+    out, err, _ = await guard_output(_TEN, None, 0, sg)
+    assert out == _TEN and err is None
 
 
 @pytest.mark.asyncio
 async def test_truncate_by_lines():
     sg = Limit(max_lines=3)
-    out, io = await apply_limit(_TEN, sg)
+    out, err, code = await guard_output(_TEN, None, 0, sg)
     assert out == b"line0\nline1\nline2\n"
-    assert io.exit_code == 0
-    assert b"truncated" in (await materialize(io.stderr))
+    assert code == 0
+    assert b"truncated" in (await materialize(err))
 
 
 @pytest.mark.asyncio
-async def test_error_by_lines():
+async def test_error_by_lines_prints_nothing_and_exits_1():
     sg = Limit(max_lines=3, on_exceed=OnExceed.ERROR)
-    out, io = await apply_limit(_TEN, sg)
-    assert out is None
-    assert io.exit_code == 1
-    assert b"truncated" in (await materialize(io.stderr))
+    out, err, code = await guard_output(_TEN, None, 0, sg)
+    assert out == b""
+    assert code == 1
+    assert b"truncated" in (await materialize(err))
 
 
 @pytest.mark.asyncio
 async def test_truncate_by_bytes():
     sg = Limit(max_bytes=10)
-    out, io = await apply_limit(_TEN, sg)
+    out, err, _ = await guard_output(_TEN, None, 0, sg)
     assert out == _TEN[:10]
-    assert b"truncated" in (await materialize(io.stderr))
+    assert b"truncated" in (await materialize(err))
 
 
 @pytest.mark.asyncio
 async def test_streaming_input_truncates_and_stops_early():
     sg = Limit(max_lines=2)
-    out, io = await apply_limit(_stream(_TEN), sg)
+    out, err, _ = await guard_output(_stream(_TEN), None, 0, sg)
     assert out == b"line0\nline1\n"
-    assert b"truncated" in (await materialize(io.stderr))
+    assert b"truncated" in (await materialize(err))
 
 
 def test_maybe_with_timeout_passthrough_when_no_limit():
@@ -160,9 +160,9 @@ async def test_bounds_are_independent_of_chunks(
         for at in range(0, len(data), chunk_size):
             yield data[at : at + chunk_size]
 
-    result, io = await apply_limit(source(), limit)
-    assert await materialize(result) == expected
-    assert ("truncated" in await io.stderr_str()) is truncated
+    result, err, _ = await guard_output(source(), None, 0, limit)
+    assert result == expected
+    assert (b"truncated" in await materialize(err)) is truncated
 
 
 @pytest.mark.asyncio
@@ -177,8 +177,8 @@ async def test_limit_closes_its_source_when_output_is_cut():
         finally:
             closed = True
 
-    result, io = await apply_limit(source(), Limit(max_lines=1))
-    assert await materialize(result) == b"a\n"
+    result, _, _ = await guard_output(source(), None, 0, Limit(max_lines=1))
+    assert result == b"a\n"
     assert closed
 
 

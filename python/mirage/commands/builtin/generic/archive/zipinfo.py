@@ -15,6 +15,8 @@
 from dataclasses import dataclass
 from typing import Literal
 
+from mirage.commands.builtin.utils.constants import MONTHS
+
 # Info-ZIP zipinfo's short-listing vocabulary (zipinfo.c, zi_short),
 # indexed by the host byte of "version made by" and by compression
 # method. A host past the table reads as the last "???" slot, as the
@@ -73,20 +75,6 @@ METHODS = {
     98: "ppmd",
 }
 DEFLATE_LEVELS = "NXFS"
-MONTHS = (
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-)
 # Hosts whose external attributes are DOS attribute bytes rather than a
 # Unix mode: FS_FAT_, VM_CMS_, FS_HPFS_, FS_NTFS_, ACORN_, FS_VFAT_,
 # MVS_. VMS, Amiga and Theos have their own layouts in zipinfo.c and are

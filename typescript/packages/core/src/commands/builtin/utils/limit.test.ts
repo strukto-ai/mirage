@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { Limit, OnExceed } from '../../../types.ts'
-import { applyLimit, maybeWithTimeout, runWithTimeout } from './limit.ts'
+import { guardOutput, maybeWithTimeout, runWithTimeout } from './limit.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 
 const ENC = new TextEncoder()
@@ -72,49 +72,49 @@ async function bytesOf(out: Uint8Array | AsyncIterable<Uint8Array> | null): Prom
   return materialize(out)
 }
 
-describe('applyLimit', () => {
+describe('guardOutput', () => {
   it('passes through when limit is null', async () => {
-    const [out, io] = await applyLimit(TEN, null)
+    const [out, err, code] = await guardOutput(TEN, null, 0, null)
     expect(await bytesOf(out)).toEqual(TEN)
-    expect(io.exitCode).toBe(0)
-    expect(io.stderr).toBeNull()
+    expect(code).toBe(0)
+    expect(err).toBeNull()
   })
 
   it('passes through when under limit', async () => {
     const sg = new Limit({ maxLines: 100 })
-    const [out, io] = await applyLimit(TEN, sg)
+    const [out, err] = await guardOutput(TEN, null, 0, sg)
     expect(await bytesOf(out)).toEqual(TEN)
-    expect(io.stderr).toBeNull()
+    expect(err).toBeNull()
   })
 
   it('truncates by lines', async () => {
     const sg = new Limit({ maxLines: 3 })
-    const [out, io] = await applyLimit(TEN, sg)
+    const [out, err, code] = await guardOutput(TEN, null, 0, sg)
     expect(DEC.decode(await bytesOf(out))).toBe('line0\nline1\nline2\n')
-    expect(io.exitCode).toBe(0)
-    expect(DEC.decode(await materialize(io.stderr))).toContain('truncated')
+    expect(code).toBe(0)
+    expect(DEC.decode(await materialize(err))).toContain('truncated')
   })
 
-  it('error mode returns null stdout + exit 1', async () => {
+  it('error mode prints nothing and exits 1', async () => {
     const sg = new Limit({ maxLines: 3, onExceed: OnExceed.ERROR })
-    const [out, io] = await applyLimit(TEN, sg)
-    expect(out).toBeNull()
-    expect(io.exitCode).toBe(1)
-    expect(DEC.decode(await materialize(io.stderr))).toContain('truncated')
+    const [out, err, code] = await guardOutput(TEN, null, 0, sg)
+    expect(await bytesOf(out)).toEqual(new Uint8Array())
+    expect(code).toBe(1)
+    expect(DEC.decode(await materialize(err))).toContain('truncated')
   })
 
   it('truncates by bytes', async () => {
     const sg = new Limit({ maxBytes: 10 })
-    const [out, io] = await applyLimit(TEN, sg)
+    const [out, err] = await guardOutput(TEN, null, 0, sg)
     expect(await bytesOf(out)).toEqual(TEN.subarray(0, 10))
-    expect(DEC.decode(await materialize(io.stderr))).toContain('truncated')
+    expect(DEC.decode(await materialize(err))).toContain('truncated')
   })
 
   it('truncates streaming input early', async () => {
     const sg = new Limit({ maxLines: 2 })
-    const [out, io] = await applyLimit(stream(TEN), sg)
+    const [out, err] = await guardOutput(stream(TEN), null, 0, sg)
     expect(DEC.decode(await bytesOf(out))).toBe('line0\nline1\n')
-    expect(DEC.decode(await materialize(io.stderr))).toContain('truncated')
+    expect(DEC.decode(await materialize(err))).toContain('truncated')
   })
 })
 
@@ -131,9 +131,9 @@ it.each([1, 2, 20])('intersects limits and detects exact fits with chunks of %i'
       for (let at = 0; at < text.length; at += size)
         yield await Promise.resolve(new TextEncoder().encode(text.slice(at, at + size)))
     }
-    const [out, io] = await applyLimit(source(), limit)
-    expect(new TextDecoder().decode(await materialize(out))).toBe(expected)
-    expect((await io.stderrStr()).includes('truncated')).toBe(truncated)
+    const [out, err] = await guardOutput(source(), null, 0, limit)
+    expect(new TextDecoder().decode(await bytesOf(out))).toBe(expected)
+    expect(DEC.decode(await materialize(err)).includes('truncated')).toBe(truncated)
   }
 })
 

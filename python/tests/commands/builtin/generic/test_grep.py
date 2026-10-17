@@ -2,7 +2,7 @@ from json import JSONDecodeError
 
 import pytest
 
-from mirage.commands.builtin.generic.grep import grep_generic, labelled
+from mirage.commands.builtin.generic.grep import grep_generic
 from mirage.commands.config import Context
 from mirage.errors.fs import no_mount
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
@@ -311,32 +311,6 @@ async def test_grep_still_reports_a_path_with_no_mount_below_it():
     await _drain_async(out)
     assert io.exit_code == 2
     assert b"/nope" in (io.stderr or b"")
-
-
-@pytest.mark.parametrize(
-    "flags, expected",
-    [
-        ({"recursive": True}, {"recursive": True, "with_filename": True}),
-        (
-            {"recursive": True, "no_filename": True},
-            {"recursive": True, "no_filename": True},
-        ),
-        (
-            {"with_filename": True, "no_filename": True},
-            {"with_filename": True, "no_filename": True},
-        ),
-        (
-            {"no_filename": True, "with_filename": True},
-            {"no_filename": True, "with_filename": True},
-        ),
-    ],
-)
-def test_labelled_asks_for_filenames_only_when_the_line_did_not_decide(
-    flags, expected
-):
-    out = labelled(Context(flags=flags))
-    assert out.flags == expected
-    assert list(out.flags) == list(expected)
 
 
 @pytest.mark.asyncio

@@ -41,7 +41,7 @@ async def paste(
         paths,
         read_stream=bound_op(ops.read_stream, accessor, ctx.index),
         stdin=ctx.stdin,
-        delimiters=fl.as_str("delimiters") or "\t",
+        delimiters=fl.as_str("delimiters", "\t"),
         serial=fl.as_bool("serial"),
         zero_terminated=fl.as_bool("zero_terminated"),
     )

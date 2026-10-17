@@ -36,6 +36,43 @@
       "flags": [
         "d"
       ]
+    },
+    {
+      "id": "paste_empty_delimiter_list_joins_bare",
+      "seq": 9940201,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\n' > /data/pe1 && printf '1\\n2\\n' > /data/pe2 && paste -d '' /data/pe1 /data/pe2",
+      "expect": {
+        "exit": 0,
+        "stdout": "a1\nb2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d"
+      ]
     }
   ]
 }

@@ -7,11 +7,13 @@ import { posixPhrase } from '../../../errors/posix.ts'
 import { shellQuoteAlways } from '../../../utils/quote.ts'
 import { isDir } from '../../../utils/stat_view.ts'
 import { UsageError } from '../../errors.ts'
+import { usageHint } from '../../spec/usage.ts'
 import { quoteText } from '../../quote.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { sizeSuffixes } from '../utils/size_suffix.ts'
+import { EOVERFLOW_TEXT } from '../constants.ts'
 import { absentDestError } from '../utils/paths.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
@@ -20,7 +22,6 @@ import { encodeText } from '../../../shell/bytes.ts'
 const UNITS = sizeSuffixes('EGKMPQRTYZgkmt')
 const OFF_T_MAX = 2n ** 63n - 1n
 const WS = /^[ \t\n\v\f\r]+/
-const TRY_HELP = "\nTry 'truncate --help' for more information."
 
 // GNU reads the -s operand as [ws][mode][ws][sign]digits[suffix]: C-locale
 // whitespace is skipped before and after the mode character (` < 4` caps at
@@ -41,7 +42,10 @@ function parseSize(value: string, current: number): number {
   if (sign !== '' && operation !== '') {
     // A sign after <, >, / or % is a second relative modifier, refused
     // before the number is read (`<+4` is not an invalid number).
-    throw new UsageError(`truncate: multiple relative modifiers specified${TRY_HELP}`, 1)
+    throw new UsageError(
+      `truncate: multiple relative modifiers specified\n${usageHint('truncate')}`,
+      1,
+    )
   }
   const raw = sign === '' ? remainder : remainder.slice(1)
   const suffix = Object.keys(UNITS)
@@ -58,10 +62,7 @@ function parseSize(value: string, current: number): number {
   // boundary exact where doubles round 2**63 - 1 up to 2**63.
   const magnitude = BigInt(numeric) * BigInt(suffix === undefined ? 1 : (UNITS[suffix] ?? 1))
   if (magnitude > OFF_T_MAX + (sign === '-' ? 1n : 0n)) {
-    throw new UsageError(
-      `truncate: Invalid number: '${shown}': Value too large for defined data type`,
-      1,
-    )
+    throw new UsageError(`truncate: Invalid number: '${shown}': ${EOVERFLOW_TEXT}`, 1)
   }
   const number = Number(magnitude)
   if (number === 0 && (operation === '/' || operation === '%')) {
@@ -95,7 +96,7 @@ export function parseFlags(bag: Record<string, FlagValue>): TruncateFlags {
   const size = fl.asStr('size')
   if (size === undefined) {
     throw new UsageError(
-      `truncate: you must specify either '--size' or '--reference'${TRY_HELP}`,
+      `truncate: you must specify either '--size' or '--reference'\n${usageHint('truncate')}`,
       1,
     )
   }
@@ -113,7 +114,8 @@ export async function truncateGeneric(
   stat: (path: PathSpec) => Promise<FileStat>,
   truncate: (path: PathSpec, length: number, noCreate: boolean) => Promise<void>,
 ): Promise<[ByteSource | null, IOResult]> {
-  if (paths.length === 0) throw new UsageError(`truncate: missing file operand${TRY_HELP}`, 1)
+  if (paths.length === 0)
+    throw new UsageError(`truncate: missing file operand\n${usageHint('truncate')}`, 1)
   const errors: string[] = []
   for (const path of paths) {
     try {

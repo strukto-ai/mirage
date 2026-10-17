@@ -512,7 +512,7 @@ async def workflow_run_cmd(
     if not workflow:
         raise ValueError("a workflow ID, name, or filename is required")
     ref = repo_for(config, fl)
-    branch = fl.as_str("ref") or config.branch
+    branch = fl.as_nonempty("ref") or config.branch
     if not branch:
         repo = await view_repo(config, ref)
         candidate = (

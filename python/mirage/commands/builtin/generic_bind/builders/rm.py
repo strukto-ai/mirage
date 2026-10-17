@@ -39,8 +39,9 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror, inner_suffix, with_inner
+from mirage.errors.posix import posix_phrase
 from mirage.errors.render import operand_spelling
-from mirage.errors.types import WalkDeclinedError
+from mirage.errors.types import FsCondition, WalkDeclinedError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 
@@ -155,7 +156,7 @@ async def rm(
                     if await ops.readdir(accessor, p, index=ctx.index):
                         errors.append(
                             f"rm: cannot remove '{p.raw_path}': "
-                            "Directory not empty"
+                            f"{posix_phrase(FsCondition.ENOTEMPTY)}"
                         )
                         continue
                     await require_op(ops, Operation.RMDIR)(
@@ -164,7 +165,8 @@ async def rm(
                     entry_lines = [f"removed directory '{p.raw_path}'"]
                 else:
                     errors.append(
-                        f"rm: cannot remove '{p.raw_path}': Is a directory"
+                        f"rm: cannot remove '{p.raw_path}': "
+                        f"{posix_phrase(FsCondition.EISDIR)}"
                     )
                     continue
             else:

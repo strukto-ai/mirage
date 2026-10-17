@@ -19,7 +19,7 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
-import { joinFileBytes, splitLines } from '../utils/lines.ts'
+import { joinFileLines, splitLines } from '../utils/lines.ts'
 import { advanceColumn, isSpace, textWidth } from '../../../utils/width.ts'
 
 const ENC = new TextEncoder()
@@ -133,7 +133,7 @@ export async function columnGeneric(
     // ends where the next file begins. Mirrors Python's column.
     const parts: Uint8Array[] = []
     for (const path of paths) parts.push(await materialize(stream(path)))
-    raw = joinFileBytes(parts, 0x0a)
+    raw = joinFileLines(parts, 0x0a)
   } else {
     const stdinData = await readStdinAsync(ctx.stdin)
     raw = stdinData ?? new Uint8Array(0)

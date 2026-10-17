@@ -322,14 +322,7 @@ export async function wcGeneric(
       io,
     ]
   }
-  let source: AsyncIterable<Uint8Array>
-  try {
-    source = resolveSource(ctx.stdin)
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 1, stderr: encodeText(`${msg}\n`) })]
-  }
-  const counts = await countsOf(source, ctx, parsed)
+  const counts = await countsOf(resolveSource(ctx.stdin), ctx, parsed)
   const values = selectedValues(counts, parsed)
   if (parsed.total === 'only') {
     return [encodeText(`${values.join(' ')}\n`), new IOResult()]

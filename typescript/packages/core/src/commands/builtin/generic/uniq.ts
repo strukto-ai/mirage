@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { stdinStat, stdinStream } from '../utils/stream.ts'
+import { recordSeparator } from '../utils/lines.ts'
 import { splitReadable } from '../utils/operands.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
@@ -166,7 +167,7 @@ async function* uniqStream(
   source: AsyncIterable<Uint8Array>,
   flags: UniqFlags,
 ): AsyncIterable<Uint8Array> {
-  const separator = flags.zeroTerminated ? 0 : 0x0a
+  const separator = recordSeparator(flags.zeroTerminated)
   const reader = new AsyncLineIterator(source)
   let first: Uint8Array | null = null
   let currentKey: string | null = null

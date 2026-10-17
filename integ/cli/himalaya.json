@@ -1153,6 +1153,45 @@
         "stdout": "1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "hm_list_zero_page_size_lists_every_page",
+      "seq": 9940111,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "test \"$(himalaya envelope list --page-size 0 --page 2)\" = \"$(himalaya envelope list --page-size 1000)\" && test \"$(himalaya envelope search --page-size 0 --page 3)\" = \"$(himalaya envelope search --page-size 1000)\" && echo same",
+      "expect": {
+        "exit": 0,
+        "stdout": "same\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_empty_mailbox_is_a_mailbox_name",
+      "seq": 9940112,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya envelope list -m ''",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "himalaya envelope list: no such mailbox ''\n"
+      }
+    },
+    {
+      "id": "hm_compose_empty_from_reaches_the_header",
+      "seq": 9940113,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message compose --from '' --to x@y.com --subject s --body b | grep -c '^From: *.$'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
     }
   ]
 }

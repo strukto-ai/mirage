@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { isStdin, neverOpened } from '../utils/stream.ts'
+import { recordSeparator } from '../utils/lines.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -72,7 +73,7 @@ export function pasteGeneric(
     (p) => [p, isStdin(p) ? shared : new AsyncLineIterator(stream(p))] as const,
   )
   const io = new IOResult()
-  return [pasteStream(inputs, delimiters, serial, zeroTerminated ? 0 : 10, io), io]
+  return [pasteStream(inputs, delimiters, serial, recordSeparator(zeroTerminated), io), io]
 }
 
 /**

@@ -24,6 +24,7 @@ from mirage.commands.cli.builtin.git.errors import (
     UnknownSubcommandError,
     UsageError,
 )
+from mirage.commands.cli.builtin.git.format import FULL_SHA
 from mirage.commands.cli.builtin.git.history import (
     LogFlags,
     parse_flags,
@@ -32,8 +33,15 @@ from mirage.commands.cli.builtin.git.history import (
 )
 from mirage.commands.cli.builtin.git.io import read_file, read_optional
 from mirage.commands.cli.builtin.git.objects import abbrev_for
-from mirage.commands.cli.builtin.git.ref_fields import shorten_ref
-from mirage.commands.cli.builtin.git.ref_list import unique_abbreviations
+from mirage.commands.cli.builtin.git.ref_fields import (
+    MINIMUM_ABBREV,
+    shorten_ref,
+)
+from mirage.commands.cli.builtin.git.ref_list import (
+    ref_table,
+    resolve_ref,
+    unique_abbreviations,
+)
 from mirage.commands.cli.builtin.git.refs import load_refs, resolve_symbolic
 from mirage.commands.cli.builtin.git.repo import Repo, config_bool
 from mirage.commands.cli.builtin.git.revparse import (
@@ -84,8 +92,6 @@ SHOW_TOPLEVEL = "--show-toplevel"
 # git's own global spells `--git-dir` too, so rev-parse cannot declare it:
 # it arrives as an operand, and is answered from there.
 GIT_DIR_OPTION = "--git-dir"
-MIN_ABBREV = 4
-HEX_LENGTH = 40
 GET_URL = CommandSpec(
     arguments=(
         Argument(
@@ -408,18 +414,27 @@ async def config(
 
 
 def _show_refs(repo: BaseRepo, patterns: tuple[str, ...]) -> bytes:
-    return "".join(
-        f"{repo.refs[ref].decode()} {ref.decode()}\n"
-        for ref in sorted(repo.refs.allkeys())
-        if ref.startswith(b"refs/")
-        and (
-            not patterns
-            or any(
-                ref.decode() == p or ref.decode().endswith("/" + p)
-                for p in patterns
-            )
-        )
-    ).encode()
+    """Every ref under ``refs/`` a pattern names, as ``<id> <name>`` rows.
+
+    A ref that resolves to nothing (a dangling symbolic ref) is skipped
+    silently, as git's ref iteration skips it. Pinned against git 2.47.3.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        patterns (tuple[str, ...]): whole names or trailing components.
+    """
+    table = ref_table(repo)
+    rows = []
+    for name in sorted(table):
+        if not name.startswith("refs/") or (
+            patterns
+            and not any(name == p or name.endswith("/" + p) for p in patterns)
+        ):
+            continue
+        oid, _ = resolve_ref(table, name)
+        if oid is not None:
+            rows.append(f"{oid} {name}\n")
+    return "".join(rows).encode()
 
 
 async def show_ref(
@@ -611,7 +626,7 @@ def _short_width(value: FlagValue, fallback: int) -> int:
         return fallback
     digits = re.match(r"\s*\d+", value)
     width = int(digits.group()) if digits else 0
-    return min(max(width, MIN_ABBREV), HEX_LENGTH)
+    return min(max(width, MINIMUM_ABBREV), FULL_SHA)
 
 
 async def rev_parse(

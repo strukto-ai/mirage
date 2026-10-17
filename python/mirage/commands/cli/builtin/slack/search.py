@@ -27,7 +27,7 @@ async def search(
     result = await search_messages(
         config,
         fl.as_str("query") or "",
-        count=fl.as_int("count") or 20,
-        page=fl.as_int("page") or 1,
+        count=fl.as_int("count", 20),
+        page=fl.as_int("page", 1),
     )
     return result, IOResult()

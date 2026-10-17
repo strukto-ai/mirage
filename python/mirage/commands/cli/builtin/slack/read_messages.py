@@ -28,7 +28,7 @@ async def read_messages(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags, ctx.spec)
     channel = fl.as_str("channel") or ""
-    limit = fl.as_int("limit") or 20
+    limit = fl.as_int("limit", 20)
     messages = await fetch_recent_messages(config, channel, limit)
     out = json.dumps(
         messages, ensure_ascii=False, separators=(",", ":")

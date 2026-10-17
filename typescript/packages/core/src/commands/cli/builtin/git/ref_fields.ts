@@ -114,7 +114,14 @@ const SIGNATURE_MARKERS = [
   '-----BEGIN SIGNED MESSAGE-----',
   '-----BEGIN SSH SIGNATURE-----',
 ]
-const MINIMUM_ABBREV = 4
+export const MINIMUM_ABBREV = 4
+// The refname strip options and what each is: `strip=` is git's old spelling
+// of `lstrip=`, and a bad count is refused under that name.
+const STRIP_OPTIONS = [
+  ['lstrip=', 'lstrip'],
+  ['strip=', 'lstrip'],
+  ['rstrip=', 'rstrip'],
+] as const
 const C_INTEGER = /^[ \t\n\v\f\r]*([+-]?)([0-9]+)$/
 const INT_MAX = 2 ** 31 - 1
 const UINT_MAX = 2 ** 32 - 1
@@ -160,19 +167,13 @@ function noArg(word: string): GitError {
 export function refnameOption(arg: string | null, name: string): [string, number] {
   if (arg === null) return ['', 0]
   if (arg === 'short') return ['short', 0]
-  for (const prefix of ['lstrip=', 'strip=']) {
+  for (const [prefix, option] of STRIP_OPTIONS) {
     if (arg.startsWith(prefix)) {
       const count = cInt(arg.slice(prefix.length))
       if (count === null)
-        throw new GitError(`Integer value expected refname:lstrip=${arg.slice(prefix.length)}`)
-      return ['lstrip', count]
+        throw new GitError(`Integer value expected refname:${option}=${arg.slice(prefix.length)}`)
+      return [option, count]
     }
-  }
-  if (arg.startsWith('rstrip=')) {
-    const count = cInt(arg.slice('rstrip='.length))
-    if (count === null)
-      throw new GitError(`Integer value expected refname:rstrip=${arg.slice('rstrip='.length)}`)
-    return ['rstrip', count]
   }
   throw badArg(name, arg)
 }

@@ -40,6 +40,7 @@ from mirage.utils.strverscmp import strverscmp
 
 _HINT = "Try `iconv --help' or `iconv --usage' for more information."
 _INCOMPLETE = "incomplete character or shift sequence at end of buffer"
+_ILLEGAL_AT = "illegal input sequence at position "
 _NAME_TRAIL = " \t\n\v\f\r,/"
 _NAME_DROPS = re.compile(r"[^0-9A-Za-z_.,:/-]")
 
@@ -543,6 +544,10 @@ async def _convert_stream(
         else None
     )
     codec = None if boms else _bulk_decoder(charset, little)
+
+    def refused(at: int) -> _Converted:
+        return _Converted(bytes(out), dropped, f"{_ILLEGAL_AT}{at}")
+
     fast = codec is not None
     codec_at = 0
     last = False
@@ -586,11 +591,7 @@ async def _convert_stream(
                         text = codec.decode(raw[at : at + 1])
                     except UnicodeError:
                         if not omit:
-                            yield _Converted(
-                                bytes(out),
-                                dropped,
-                                f"illegal input sequence at position {codec_at}",
-                            )
+                            yield refused(codec_at)
                             return
                         dropped = True
                         codec.reset()
@@ -607,11 +608,7 @@ async def _convert_stream(
                         data = encoder.encode_char(ord(char))
                         if data is None:
                             if not omit:
-                                yield _Converted(
-                                    bytes(out),
-                                    dropped,
-                                    f"illegal input sequence at position {codec_at}",
-                                )
+                                yield refused(codec_at)
                                 return
                             dropped = True
                         else:
@@ -630,11 +627,7 @@ async def _convert_stream(
                 data = None if cp == ILLEGAL else encoder.encode_char(cp)
                 if data is None:
                     if not omit:
-                        yield _Converted(
-                            bytes(out),
-                            dropped,
-                            f"illegal input sequence at position {offset + at}",
-                        )
+                        yield refused(offset + at)
                         return
                     dropped = True
                 else:
@@ -670,8 +663,8 @@ class IconvFlags:
 def parse_flags(flags: Mapping[str, FlagValue]) -> IconvFlags:
     fl = FlagView(flags, spec=SPECS["iconv"])
     return IconvFlags(
-        from_enc=fl.as_str("f") or "utf-8",
-        to_enc=fl.as_str("t") or "utf-8",
+        from_enc=fl.as_nonempty("f", "utf-8"),
+        to_enc=fl.as_nonempty("t", "utf-8"),
         ignore_errors=fl.as_bool("c"),
         output_path=fl.as_path("o"),
         list_charsets=fl.as_bool("list"),

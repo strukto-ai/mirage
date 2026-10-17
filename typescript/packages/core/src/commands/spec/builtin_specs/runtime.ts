@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { CommandSpec, Argument } from '../types.ts'
+import { REMAINDER_OPERAND, TEXTS_OPERAND, TEXT_OPERAND } from '../constants.ts'
 
 // CPython's own option table, minus four switches that describe a
 // process mirage does not have: -i (drop to an interactive prompt), -d
@@ -105,6 +106,33 @@ const JS_SCRIPT = new Argument('path', {
   providedBy: ['-e'],
 })
 
+const PYTHON = new CommandSpec({
+  description: "Run Python on the workspace's bound runtime.",
+  arguments: [...PYTHON_OPTIONS, PYTHON_SCRIPT, REMAINDER_OPERAND],
+})
+
+// js and node take the remainder for the same reason python does: the
+// first operand is a program, so the words after it are that program's
+// argv, not the interpreter's flags. `node - -e x` runs the piped
+// program and hands it `-e x`; `node s.js -m` hands s.js its own -m.
+// Pinned against node 22.8.0.
+const JS = new CommandSpec({
+  description: 'Run JavaScript on a sandboxed quickjs engine.',
+  arguments: [
+    new Argument(['-v', '--version'], {
+      action: 'store_true',
+      help: 'Show runtime version information and exit.',
+    }),
+    new Argument('-e', { help: 'Evaluate the next argument as a script.' }),
+    new Argument(['-m', '--module'], {
+      action: 'store_true',
+      help: 'Run as an ES module (top-level import/export/await); .mjs files select this automatically.',
+    }),
+    JS_SCRIPT,
+    REMAINDER_OPERAND,
+  ],
+})
+
 export const SPECS: Record<string, CommandSpec> = {
   bash: new CommandSpec({
     description:
@@ -138,7 +166,7 @@ export const SPECS: Record<string, CommandSpec> = {
         action: 'store_true',
         help: 'Print input lines as they are read.',
       }),
-      new Argument('texts', { metavar: '', nargs: '*' }),
+      TEXTS_OPERAND,
     ],
   }),
   bc: new CommandSpec({
@@ -146,7 +174,7 @@ export const SPECS: Record<string, CommandSpec> = {
     arguments: [
       new Argument('-l', { action: 'store_true', help: 'Load the standard math library.' }),
       new Argument('-q', { action: 'store_true', help: 'Suppress the welcome banner.' }),
-      new Argument('texts', { metavar: '', nargs: '*' }),
+      TEXTS_OPERAND,
     ],
   }),
   date: new CommandSpec({
@@ -177,12 +205,12 @@ export const SPECS: Record<string, CommandSpec> = {
         action: 'store_true',
         help: 'Use Coordinated Universal Time (UTC).',
       }),
-      new Argument('text', { metavar: '', nargs: '?' }),
+      TEXT_OPERAND,
     ],
   }),
   expr: new CommandSpec({
     description: 'Evaluate expressions.',
-    arguments: [new Argument('texts', { metavar: '', nargs: '*' })],
+    arguments: [TEXTS_OPERAND],
   }),
   history: new CommandSpec({
     description: 'Show command history for the session.',
@@ -212,30 +240,10 @@ export const SPECS: Record<string, CommandSpec> = {
         action: 'store_true',
         help: 'Read-new: no-op (file and store are the same).',
       }),
-      new Argument('texts', { metavar: '', nargs: '*' }),
+      TEXTS_OPERAND,
     ],
   }),
-  // js and node take the remainder for the same reason python does: the
-  // first operand is a program, so the words after it are that program's
-  // argv, not the interpreter's flags. `node - -e x` runs the piped
-  // program and hands it `-e x`; `node s.js -m` hands s.js its own -m.
-  // Pinned against node 22.8.0.
-  js: new CommandSpec({
-    description: 'Run JavaScript on a sandboxed quickjs engine.',
-    arguments: [
-      new Argument(['-v', '--version'], {
-        action: 'store_true',
-        help: 'Show runtime version information and exit.',
-      }),
-      new Argument('-e', { help: 'Evaluate the next argument as a script.' }),
-      new Argument(['-m', '--module'], {
-        action: 'store_true',
-        help: 'Run as an ES module (top-level import/export/await); .mjs files select this automatically.',
-      }),
-      JS_SCRIPT,
-      new Argument('texts', { metavar: '', nargs: 'REMAINDER' }),
-    ],
-  }),
+  js: JS,
   mktemp: new CommandSpec({
     arguments: [
       new Argument(['-d', '--directory'], { action: 'store_true' }),
@@ -245,42 +253,12 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-u', '--dry-run'], { action: 'store_true' }),
       new Argument(['-q', '--quiet'], { action: 'store_true' }),
       new Argument('--suffix'),
-      new Argument('text', { metavar: '', nargs: '?' }),
+      TEXT_OPERAND,
     ],
   }),
-  // An alias of js, remainder included; see the note there.
-  node: new CommandSpec({
-    description: 'Run JavaScript on a sandboxed quickjs engine.',
-    arguments: [
-      new Argument(['-v', '--version'], {
-        action: 'store_true',
-        help: 'Show runtime version information and exit.',
-      }),
-      new Argument('-e', { help: 'Evaluate the next argument as a script.' }),
-      new Argument(['-m', '--module'], {
-        action: 'store_true',
-        help: 'Run as an ES module (top-level import/export/await); .mjs files select this automatically.',
-      }),
-      JS_SCRIPT,
-      new Argument('texts', { metavar: '', nargs: 'REMAINDER' }),
-    ],
-  }),
-  python: new CommandSpec({
-    description: "Run Python on the workspace's bound runtime.",
-    arguments: [
-      ...PYTHON_OPTIONS,
-      PYTHON_SCRIPT,
-      new Argument('texts', { metavar: '', nargs: 'REMAINDER' }),
-    ],
-  }),
-  python3: new CommandSpec({
-    description: "Run Python on the workspace's bound runtime.",
-    arguments: [
-      ...PYTHON_OPTIONS,
-      PYTHON_SCRIPT,
-      new Argument('texts', { metavar: '', nargs: 'REMAINDER' }),
-    ],
-  }),
+  node: JS,
+  python: PYTHON,
+  python3: PYTHON,
   uname: new CommandSpec({
     description: 'Print certain system information.',
     arguments: [
@@ -320,7 +298,7 @@ export const SPECS: Record<string, CommandSpec> = {
         action: 'store_true',
         help: 'Print the operating system.',
       }),
-      new Argument('texts', { metavar: '', nargs: '*' }),
+      TEXTS_OPERAND,
     ],
   }),
   hostname: new CommandSpec({
@@ -352,7 +330,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-s', '--short'], { action: 'store_true', help: 'Short host name.' }),
       new Argument(['-y', '--yp'], { action: 'store_true', help: 'NIS/YP domain name.' }),
       new Argument('--nis', { action: 'store_true', help: 'NIS/YP domain name.' }),
-      new Argument('texts', { metavar: '', nargs: '*' }),
+      TEXTS_OPERAND,
     ],
   }),
   id: new CommandSpec({
@@ -388,7 +366,7 @@ export const SPECS: Record<string, CommandSpec> = {
         action: 'store_true',
         help: 'Delimit entries with NUL characters, not whitespace; not permitted in default format.',
       }),
-      new Argument('texts', { metavar: '', nargs: '*' }),
+      TEXTS_OPERAND,
     ],
   }),
   getconf: new CommandSpec({
@@ -397,11 +375,11 @@ export const SPECS: Record<string, CommandSpec> = {
     arguments: [
       new Argument('-a', { action: 'store_true', help: 'Print every variable and its value.' }),
       new Argument('-v', { help: 'Give values for compilation environment SPEC.' }),
-      new Argument('texts', { metavar: '', nargs: '*' }),
+      TEXTS_OPERAND,
     ],
   }),
   sleep: new CommandSpec({
     description: 'Delay for a specified amount of time.',
-    arguments: [new Argument('texts', { metavar: '', nargs: '*' })],
+    arguments: [TEXTS_OPERAND],
   }),
 }

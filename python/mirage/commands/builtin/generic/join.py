@@ -10,6 +10,8 @@ from contextlib import aclosing
 from dataclasses import dataclass, field
 from enum import Enum
 
+from mirage.commands.builtin.constants import INTMAX_MIN
+from mirage.commands.builtin.utils.lines import record_separator
 from mirage.commands.builtin.utils.stream import never_opened, stdin_stream
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
@@ -30,7 +32,6 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn
 
 IDX_MAX = 2**63 - 1
-INTMAX_MIN = -(2**63)
 WHOLE_LINE = b"\n"
 FIELD_RUN = re.compile(rb"[^ \t\n]+")
 INTEGER = re.compile(r"[ \t\n\v\f\r]*([+-]?[0-9]+)", re.ASCII)
@@ -365,7 +366,7 @@ class _Options:
             outlist=tuple(self.outlist),
             autoformat=self.autoformat,
             ignore_case=self.ignore_case,
-            eol=b"\0" if self.zero else b"\n",
+            eol=record_separator(self.zero),
             check_order=self.check_order,
             header=self.header,
             files=(

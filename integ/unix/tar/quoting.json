@@ -1,0 +1,134 @@
+{
+  "cases": [
+    {
+      "id": "tar_t_escapes_a_member_name_that_is_not_utf8",
+      "seq": 15100041,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s 'H4sIAAAAAAACA+3TMQ7CMBBFQdecwkcwEDmXoXFoEoGEhKHg9GCoED0RKDPNX23/yn0I35aa3HWvbT632b7dz3/OaRNiCjO41ks5xxgWapxWgeUayv6wq8dSx1/qv+/XSf9zuJ30DwAAAAAAAADwzx6xMphDACgAAA==' | base64 -d | tar -tzf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\\377b\nback\\\\slash\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "z",
+        "f"
+      ]
+    },
+    {
+      "id": "tar_tv_escapes_a_member_name_and_a_link_target",
+      "seq": 15100042,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s 'H4sIAAAAAAACA+3RMQoCMRQE0H+UvYFJIOQ8giCCWKzx/DFsKVvYrI3vNTPdFHO5reMUx0pTq3XL6TN3esulxFLjB17Pfl7nZPyn+2McvrH939r3/+eUco2l9Gsf/gcAAAAAAAAAANj1BstWnRgAKAAA' | base64 -d | tar -tvzf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "drwxr-xr-x 0/0               0 1970-01-01 00:00 dir\\377/\nlrwxrwxrwx 0/0               0 1970-01-01 00:00 ln\\377 -> tgt\\377\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "v",
+        "z",
+        "f"
+      ]
+    },
+    {
+      "id": "tar_xOv_escapes_the_names_it_lists_on_stderr",
+      "seq": 15100043,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s 'H4sIAAAAAAACA+3TMQ7CMBBFQdecwkcwEDmXoXFoEoGEhKHg9GCoED0RKDPNX23/yn0I35aa3HWvbT632b7dz3/OaRNiCjO41ks5xxgWapxWgeUayv6wq8dSx1/qv+/XSf9zuJ30DwAAAAAAAADwzx6xMphDACgAAA==' | base64 -d | tar -xOvzf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\nyo\n",
+        "stderr": "a\\377b\nback\\\\slash\n"
+      },
+      "flags": [
+        "x",
+        "O",
+        "v",
+        "z",
+        "f"
+      ]
+    },
+    {
+      "id": "tar_t_escapes_a_gnu_long_name_that_is_not_utf8",
+      "seq": 15100044,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s 'H4sIAAAAAAACA+3XQQ6CMBCF4a49RU9ASwPM1gNwCRMiIRpMEDdeHgsbAlEji2pi/29B2b/M67RqusGosKwneT6d3vp88i+2cErn6gtu1/7Qaa0ilZjE7MtLW5dNewqYf5FlL/NPRZb5p9OhS/IPrhrn3/6IUYgk/0397/yX/o+m/51N1/e/FBn9///9fxxo4Djyfzf/Y9kv9z8R8fNvmf/g7jtmIGbnNnwFT/vf/Mb75P0/rova9XU/MP8AAAAAAAAAAGz2ANbu+mQAKAAA' | base64 -d | tar -tzf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "dir\\377/\ndir\\377/000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000/\ndir\\377/000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000/f\\377\nln\\377\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "z",
+        "f"
+      ]
+    },
+    {
+      "id": "tar_t_escapes_a_pax_path_that_is_not_utf8",
+      "seq": 15100045,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf %s 'H4sIAAAAAAACA+2YwU7DMBBEfeYr/AXJ7tqx20PvHPsLEQ1QCRBKXani51MnIBQSURVBXCDzLrbigw+TmZE3y9fl4boqN1W9yzfbulE/D0Wctd0aGa7ELO/77juzMaT0QSVgvwtlHa9X84Stfi7D/aqVPr8ypMuwfaxW7JciZERcRguyzkcF29Ob0alfvp0q8AfpdJ/4jtbUvig+9f9471lE6QL+T6N/rwJoIk7lvyH7UX9hjr8L8j9F/hvXKwC6EGiei/o/gcJfyn8hssj/f6X/6fx3Q/25MMj/NPm/+A35f9ugAWbrfyIZ5b+xShP8Pzkv8M6syfqPv4enKcZ/Z8z/aDj/Y8fo/yT9L6/1H6VHA8+QiSw/nv95f/77j2MmFEpLuAsN/A8AAAAAAAAAAHybIxhoodwAKAAA' | base64 -d | tar -tzf -",
+      "expect": {
+        "exit": 0,
+        "stdout": "dir\\377/\ndir\\377/000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000/\ndir\\377/000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000/f\\377\nln\\377\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "z",
+        "f"
+      ]
+    },
+    {
+      "id": "tar_cv_and_xv_double_a_backslash_in_the_listing",
+      "seq": 15100046,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(mkdir -p /data/fcA_q && cd /data/fcA_q && printf x > 'back\\slash' && tar -cvf a.tar 'back\\slash' && rm 'back\\slash' && tar -xvf a.tar && cat 'back\\slash'; rc=$?; cd / && rm -r /data/fcA_q; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "back\\\\slash\nback\\\\slash\nx",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "x",
+        "v",
+        "f"
+      ]
+    }
+  ]
+}

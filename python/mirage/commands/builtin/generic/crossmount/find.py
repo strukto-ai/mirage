@@ -17,6 +17,7 @@ from mirage.commands.builtin.constants import (
     EXEC_END,
     FIND_EXEC_PREDICATES,
     FIND_VALUE_PREDICATES,
+    OPERAND_CONCURRENCY,
 )
 from mirage.commands.builtin.find_parse import parse_find_expression
 from mirage.commands.builtin.generic.crossmount.constants import (
@@ -238,7 +239,7 @@ async def run_find(
         await materialize(out)
         return io
 
-    ios = await bounded_map(plan, search, 4)
+    ios = await bounded_map(plan, search, OPERAND_CONCURRENCY)
     # A run that failed found no rows and says why; one that succeeded
     # without structured rows is a find this line cannot compose.
     if any(io.matched_runs is None and io.exit_code == 0 for io in ios):

@@ -22,6 +22,7 @@ import { SLACK } from './index.ts'
 import { emojiList } from './emoji_list.ts'
 import { listPins } from './list_pins.ts'
 import { readMessages } from './read_messages.ts'
+import { search } from './search.ts'
 import { sendMessage } from './send_message.ts'
 import { context } from '../../../../workspace/fixtures/context.ts'
 
@@ -115,6 +116,15 @@ describe('slack verbs', () => {
     expect(CALLS[0]?.endpoint).toBe('conversations.history')
     expect(CALLS[0]?.params).toEqual({ channel: 'C1', limit: '20' })
     expect(JSON.parse(DEC.decode(out as Uint8Array))).toEqual([{ ts: '1.0', text: 'hey' }])
+  })
+
+  it('read-messages and search keep an explicit zero', async () => {
+    CALLS.length = 0
+    RESPONSE = { ok: true, messages: [] }
+    await readMessages({}, [], [], context({ flags: { channel: 'C1', limit: 0 } }))
+    await search({}, [], [], context({ flags: { query: 'q', count: 0, page: 0 } }))
+    expect(CALLS[0]?.params).toEqual({ channel: 'C1', limit: '0' })
+    expect(CALLS[1]?.params).toMatchObject({ query: 'q', count: '0', page: '0' })
   })
 
   it('list-pins renders the items array', async () => {

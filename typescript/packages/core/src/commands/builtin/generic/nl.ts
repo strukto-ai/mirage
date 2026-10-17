@@ -22,8 +22,9 @@ import { stdinStream } from '../utils/stream.ts'
 import { perOperand } from '../utils/operands.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
+import { usageHint } from '../../spec/usage.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { C_SPACE } from '../constants.ts'
+import { C_SPACE, EOVERFLOW_TEXT, ERANGE_TEXT, INTMAX, INTMAX_MIN } from '../constants.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
@@ -146,7 +147,7 @@ function renderLine(line: string, config: NlConfig, state: NlState): Uint8Array 
     if (state.overflowed) return null
     const prefix = formatNumber(state.number, config.width, config.numberFormat)
     const advanced = state.number + config.increment
-    if (advanced < INTMAX_MIN || advanced > INTMAX_MAX) {
+    if (advanced < INTMAX_MIN || advanced > INTMAX) {
       state.overflowed = true
     } else {
       state.number = advanced
@@ -217,10 +218,6 @@ function parseNumbering(raw: string): [string, RegExp | null] {
   return [raw.slice(0, 1), null]
 }
 
-// gnulib appends strerror(ERANGE) when a value parsed but fell outside the
-// option's range, and strerror(EOVERFLOW) when the value did not fit the type
-// it was scanned into. Measured under LC_ALL=C on glibc; these are the two
-// strings here most likely to read differently under another libc or locale.
 // One numeric option value as `strtol` reads it: a run of C whitespace, then
 // at most one sign, then decimal digits, then NOTHING.
 //
@@ -234,15 +231,11 @@ function parseNumbering(raw: string): [string, RegExp | null] {
 // there is only ever one sign. Measured, ground truth NL3-C.
 const NUMBER = new RegExp(`^${C_SPACE}[+-]?[0-9]+$`)
 
-const ERANGE = 'Numerical result out of range'
-const EOVERFLOW = 'Value too large for defined data type'
-
-// The two type limits nl's four numeric options are bounded by. Held as
-// bigint because INTMAX_MAX is past Number.MAX_SAFE_INTEGER, so a float64
-// comparison would accept 9223372036854775808 that GNU refuses.
+// The two type limits nl's four numeric options are bounded by: int here, and
+// intmax_t's INTMAX and INTMAX_MIN. Held as bigint because INTMAX is past
+// Number.MAX_SAFE_INTEGER, so a float64 comparison would accept
+// 9223372036854775808 that GNU refuses.
 const INT_MAX = 2n ** 31n - 1n
-const INTMAX_MAX = 2n ** 63n - 1n
-const INTMAX_MIN = -(2n ** 63n)
 
 // Where the sub-minimum side of -w switches from the ERANGE wording to
 // the EOVERFLOW one, measured by bisection on coreutils 9.4 / glibc 2.39 /
@@ -294,9 +287,9 @@ function numberError(
   if (!NUMBER.test(raw)) return `nl: ${label}: '${quoteText(raw)}'`
   const value = BigInt(raw)
   if ((high !== null && value > high) || (overflowLow !== null && value < overflowLow)) {
-    return `nl: ${label}: '${quoteText(raw)}': ${EOVERFLOW}`
+    return `nl: ${label}: '${quoteText(raw)}': ${EOVERFLOW_TEXT}`
   }
-  if (value < low) return `nl: ${label}: '${quoteText(raw)}': ${ERANGE}`
+  if (value < low) return `nl: ${label}: '${quoteText(raw)}': ${ERANGE_TEXT}`
   return null
 }
 
@@ -313,8 +306,8 @@ const NUMERIC_OPTIONS: readonly (readonly [
   bigint | null,
   bigint | null,
 ])[] = [
-  ['starting_line_number', 'invalid starting line number', INTMAX_MIN, INTMAX_MAX, INTMAX_MIN],
-  ['line_increment', 'invalid line number increment', INTMAX_MIN, INTMAX_MAX, INTMAX_MIN],
+  ['starting_line_number', 'invalid starting line number', INTMAX_MIN, INTMAX, INTMAX_MIN],
+  ['line_increment', 'invalid line number increment', INTMAX_MIN, INTMAX, INTMAX_MIN],
   ['number_width', 'invalid line number field width', 1n, INT_MAX, WIDTH_OVERFLOW_LOW],
   ['join_blank_lines', 'invalid line number of blank lines', 0n, null, null],
 ]
@@ -341,7 +334,7 @@ const NUMBER_FORMATS = new Set(['ln', 'rn', 'rz'])
 
 // The line usage() prints after a deferred refusal. GNU's numeric options
 // never reach it: they exit where they are validated.
-const HINT = "Try 'nl --help' for more information."
+const HINT = usageHint('nl')
 
 // GNU's refusal for one occurrence of a style or format option.
 function styleError(dest: string, raw: string): string | null {

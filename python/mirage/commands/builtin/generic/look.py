@@ -7,10 +7,11 @@ from mirage.commands.builtin.utils.operands import (
 )
 from mirage.commands.builtin.utils.stream import resolve_source
 from mirage.commands.config import Context
+from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
-from mirage.commands.spec.usage import extra_operand_error
+from mirage.commands.spec.usage import extra_operand_error, usage_hint
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn
@@ -76,7 +77,8 @@ async def look_generic(
     read_stream: PolymorphicReadFn,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
-        raise ValueError("look: missing prefix")
+        # util-linux 2.41 answers a missing prefix with its usage refusal.
+        raise UsageError(f"look: bad usage\n{usage_hint('look')}", 1)
     parsed = parse_flags(ctx.flags)
     return await look(
         paths,

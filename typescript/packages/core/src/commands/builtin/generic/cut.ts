@@ -66,7 +66,11 @@ function parseFlags(bag: Record<string, FlagValue>): CutOptions | string {
   }
   let outputDelimiter = fl.asStr('args_O') ?? fl.asStr('output_delimiter')
   if (fl.asStr('F') !== undefined && outputDelimiter === undefined) outputDelimiter = ' '
-  const explicitDelimiter = fl.asStr('delimiter')
+  // GNU reads an empty -d or --output-delimiter as its terminating NUL:
+  // `cut -d ''` splits on NUL bytes and writes one between fields.
+  if (outputDelimiter === '') outputDelimiter = '\0'
+  const typedDelimiter = fl.asStr('delimiter')
+  const explicitDelimiter = typedDelimiter === '' ? '\0' : typedDelimiter
   if (explicitDelimiter !== undefined && Array.from(explicitDelimiter).length !== 1) {
     return 'cut: the delimiter must be a single character\n'
   }

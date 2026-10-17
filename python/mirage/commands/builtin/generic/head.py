@@ -8,20 +8,20 @@ from mirage.commands.builtin.tail_counts import (
     number_flag_error,
     parse_byte_count,
 )
-from mirage.commands.builtin.utils.constants import (
-    CHAR_DEVICE_MAX_BYTES,
-    STDIN_HEADER_NAME,
-)
+from mirage.commands.builtin.utils.constants import CHAR_DEVICE_MAX_BYTES
 from mirage.commands.builtin.utils.limit import truncate_stream
+from mirage.commands.builtin.utils.lines import record_separator
 from mirage.commands.builtin.utils.operands import (
     normalized_read,
     operands_io,
+    report_fs_error,
     split_opened,
 )
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
-    operand_label,
+    operand_header,
     resolve_source,
+    shows_headers,
     stdin_stat,
     stdin_stream,
 )
@@ -30,7 +30,6 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
-from mirage.errors.render import fs_error_line
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult
@@ -118,7 +117,7 @@ async def head(
             return
 
         target = n if n is not None else 10
-        separator = b"\x00" if zero_terminated else b"\n"
+        separator = record_separator(zero_terminated)
 
         if target >= 0:
             if target == 0:
@@ -180,7 +179,7 @@ async def head(
         await close_quietly(stream)
 
 
-def head_multi(
+async def head_multi(
     paths: list[PathSpec],
     *,
     read: Callable[..., Any],
@@ -210,29 +209,6 @@ def head_multi(
             whose open it refused, which print no header, as GNU opens a
             file before it heads it.
     """
-    return _head_multi(
-        paths,
-        read=read,
-        n=n,
-        c=c,
-        show_headers=show_headers,
-        zero_terminated=zero_terminated,
-        unread=unread,
-        refused=refused,
-    )
-
-
-async def _head_multi(
-    paths: list[PathSpec],
-    *,
-    read: Callable[..., Any],
-    n: int | None = None,
-    c: int | None = None,
-    show_headers: bool = False,
-    zero_terminated: bool = False,
-    unread: frozenset[str] = frozenset(),
-    refused: Collection[str] = frozenset(),
-) -> AsyncIterator[bytes]:
     printed = False
     for p in paths:
         body: AsyncIterator[bytes] | None = None
@@ -245,8 +221,7 @@ async def _head_multi(
             first = await anext(body, None)
         try:
             if show_headers and p.virtual not in refused:
-                header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
-                yield encode_text("\n" + header if printed else header)
+                yield operand_header(p, printed)
                 printed = True
             if body is None:
                 continue
@@ -299,7 +274,7 @@ async def head_generic(
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=encode_text(str(exc)))
     if paths:
-        show_headers = (parsed.verbose or len(paths) > 1) and not parsed.quiet
+        show_headers = shows_headers(parsed.verbose, parsed.quiet, len(paths))
         opened, unread, err = await split_opened(paths, stat, "head")
         io = operands_io(err)
         if not opened:
@@ -347,11 +322,7 @@ async def head_generic(
                     # table past its read cap) keeps it.
                     if not isinstance(exc, READ_FAILURES):
                         refused.add(p.virtual)
-                    held = io.stderr if isinstance(io.stderr, bytes) else b""
-                    io.stderr = held + encode_text(
-                        fs_error_line("head", p, exc)
-                    )
-                    io.exit_code = 1
+                    await report_fs_error(io, "head", p, exc)
                 finally:
                     await close_quietly(source)
 
@@ -376,7 +347,5 @@ async def head_generic(
     )
     if parsed.verbose and not parsed.quiet:
         # -v heads a stdin nobody named with the name it gives `-`.
-        body = async_chain(
-            [encode_text(f"==> {STDIN_HEADER_NAME} <==\n"), body]
-        )
+        body = async_chain([operand_header(None), body])
     return body, IOResult()

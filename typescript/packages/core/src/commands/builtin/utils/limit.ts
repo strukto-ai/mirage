@@ -224,16 +224,6 @@ async function* boundedStream(
   }
 }
 
-export async function applyLimit(
-  src: ByteSource,
-  limit: Limit | null,
-): Promise<[ByteSource | null, IOResult]> {
-  const io = new IOResult()
-  if (limit === null || (limit.maxLines === null && limit.maxBytes === null)) return [src, io]
-  const data = await materialize(boundedStream(src, io, limit))
-  return [io.exitCode !== 0 ? null : data, io]
-}
-
 async function* errorStream(
   src: ByteSource,
   io: IOResult,

@@ -18,6 +18,7 @@ import { walkFind, type WalkFindDeps } from '../../../core/generic/find.ts'
 import type { ChildMounts } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { FileType, type PathSpec } from '../../../types.ts'
+import { isEnotdir, isMissingPath } from '../../../errors/fs.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { readdirOp, statOp } from '../generic/crossmount/utils.ts'
@@ -85,12 +86,15 @@ function isDirWith(stat: StatFn, readdir: (p: PathSpec) => Promise<string[]>): D
   return async (p) => {
     try {
       return (await stat(p)).type === FileType.DIRECTORY
-    } catch {
-      // Not an object of its own; ask the listing instead.
+    } catch (err) {
+      if (!isMissingPath(err) && !isEnotdir(err)) throw err
+      console.debug(`archive: ${p.virtual} does not stat; asking readdir`)
     }
     try {
       return (await readdir(p)).length > 0
-    } catch {
+    } catch (err) {
+      if (!isMissingPath(err) && !isEnotdir(err)) throw err
+      console.debug(`archive: ${p.virtual} is not a directory on either channel: ${String(err)}`)
       return false
     }
   }

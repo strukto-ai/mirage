@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { concat } from '../../../../utils/bytes.ts'
+import { MONTHS } from '../../utils/constants.ts'
 
 const ENC = new TextEncoder()
 
@@ -74,20 +75,6 @@ const METHODS: Readonly<Record<number, string>> = {
   98: 'ppmd',
 }
 const DEFLATE_LEVELS = 'NXFS'
-const MONTHS: readonly string[] = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-]
 // Hosts whose external attributes are DOS attribute bytes rather than a
 // Unix mode: FS_FAT_, VM_CMS_, FS_HPFS_, FS_NTFS_, ACORN_, FS_VFAT_,
 // MVS_. VMS, Amiga and Theos have their own layouts in zipinfo.c and are

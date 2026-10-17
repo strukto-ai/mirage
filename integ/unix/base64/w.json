@@ -36,6 +36,43 @@
       "flags": [
         "w"
       ]
+    },
+    {
+      "id": "base64_w_refuses_what_gnu_refuses",
+      "seq": 9940302,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for w in abc '' -1 2x 0x2; do printf abc | base64 -w \"$w\"; echo rc=$?; done; printf abc | base64 -w ' +2'; printf abc | base64 -w 99999999999999999999; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=1\nYW\nJj\nYWJj\n",
+        "stderr": "base64: invalid wrap size: 'abc'\nbase64: invalid wrap size: ''\nbase64: invalid wrap size: '-1'\nbase64: invalid wrap size: '2x'\nbase64: invalid wrap size: '0x2'\n"
+      },
+      "flags": [
+        "w"
+      ]
     }
   ]
 }

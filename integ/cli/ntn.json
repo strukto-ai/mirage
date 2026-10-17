@@ -1052,6 +1052,32 @@
         "stdout": "By id\nfalse\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ntn_datasources_query_refuses_a_zero_limit",
+      "seq": 9940121,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn datasources query d5000000-2222-3333-4444-555566667777 --limit 0",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: invalid value '0' for '--limit <LIMIT>': limit must be at least 1\n\nFor more information, try '--help'.\n"
+      }
+    },
+    {
+      "id": "ntn_api_refuses_an_empty_method",
+      "seq": 9940122,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/users/me -X ''",
+      "expect": {
+        "exit": 5,
+        "stdout": "",
+        "stderr": "error: Invalid HTTP method ``.\n  hint: Use a standard method such as GET, POST, PATCH, PUT, or DELETE.\n"
+      }
     }
   ]
 }

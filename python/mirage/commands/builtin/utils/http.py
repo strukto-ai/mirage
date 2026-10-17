@@ -25,6 +25,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from mirage.commands.builtin.errors import HttpConnectError, HttpTimeoutError
+from mirage.commands.builtin.utils.constants import HTTP_TIMEOUT_SECONDS
 
 # httpx is the [http] extra, so it stays optional: top-level import guarded the
 # same way the databricks accessor guards its SDK.
@@ -104,7 +105,7 @@ async def http_request(
     method: str = "GET",
     headers: dict[str, str] | None = None,
     data: bytes | None = None,
-    timeout: float | None = 30,
+    timeout: float | None = HTTP_TIMEOUT_SECONDS,
     follow_redirects: bool = False,
     verify: bool = True,
     *,
@@ -142,7 +143,7 @@ async def http_form_request(
     method: str = "POST",
     form_data: dict[str, str] | None = None,
     headers: dict[str, str] | None = None,
-    timeout: float | None = 30,
+    timeout: float | None = HTTP_TIMEOUT_SECONDS,
     follow_redirects: bool = False,
     verify: bool = True,
 ) -> HttpResponse:
@@ -160,7 +161,7 @@ async def http_form_request(
 async def http_get(
     url: str,
     headers: dict[str, str] | None = None,
-    timeout: float | None = 30,
+    timeout: float | None = HTTP_TIMEOUT_SECONDS,
     follow_redirects: bool = True,
 ) -> HttpResponse:
     return await http_request(

@@ -50,8 +50,9 @@ const UNSTAGED_HEADER = 'Unstaged changes after reset:'
 async function unmatched(repo: Repo, operand: string): Promise<GitError> {
   try {
     await resolveCommit(repo, operand)
-  } catch {
-    return new AmbiguousArgumentError(operand)
+  } catch (err) {
+    if (err instanceof GitError) return new AmbiguousArgumentError(operand)
+    throw err
   }
   return new RevisionResetError(operand)
 }

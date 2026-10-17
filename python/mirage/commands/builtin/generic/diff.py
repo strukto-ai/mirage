@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, tzinfo
 from functools import partial
 
+from mirage.commands.builtin.constants import INTMAX
 from mirage.commands.builtin.diff_format import ed_script, normal_diff
 from mirage.commands.builtin.utils.formatting import full_iso_time
 from mirage.commands.builtin.utils.lines import split_lines_keepends
@@ -24,6 +25,7 @@ from mirage.commands.spec.types import Argument, CommandName, FlagValue
 from mirage.commands.spec.usage import (
     extra_operand_error,
     missing_operand_error,
+    usage_hint,
 )
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
@@ -576,11 +578,11 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> DiffFlags:
             )
             and int(value or "0") >= 0
         ):
-            context = max(context, min(int(value or "0"), 2**63 - 1))
+            context = max(context, min(int(value or "0"), INTMAX))
         else:
             raise UsageError(
                 f"diff: invalid context length '{value}'\n"
-                "diff: Try 'diff --help' for more information."
+                + usage_hint("diff")
             )
     new_file = fl.as_bool("new_file")
     return DiffFlags(

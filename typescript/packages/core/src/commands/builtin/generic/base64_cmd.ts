@@ -20,6 +20,9 @@ import { encodeBase64 } from '../../../utils/base64.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { resolveSource, stdinStat, stdinStream } from '../utils/stream.ts'
 import { splitReadable } from '../utils/operands.ts'
+import { xstrtoimax } from '../utils/strtol.ts'
+import { INTMAX } from '../constants.ts'
+import { quoteText } from '../../quote.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { chunks } from '../../../io/cooperative.ts'
@@ -27,6 +30,8 @@ import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+// GNU base64's line length when -w names none.
+const WRAP_WIDTH = 76
 
 interface Base64Flags {
   readonly decode: boolean
@@ -34,12 +39,20 @@ interface Base64Flags {
   readonly ignoreGarbage: boolean
 }
 
+// base64's refusal of a -w value that is no number or negative. Mirrors
+// Python's `_wrap_refusal`.
+function wrapRefusal(text: string): string {
+  return `base64: invalid wrap size: '${quoteText(text)}'`
+}
+
 function parseFlags(bag: Record<string, FlagValue>): Base64Flags {
   const fl = new FlagView(bag, specOf('base64'))
-  const wrapValue = fl.asStr('wrap')
+  // GNU 9.7 reads -w with xstrtoimax and takes a width past intmax_t as no
+  // wrapping at all.
+  const wrap = fl.asNumber('wrap', xstrtoimax, wrapRefusal, { low: 0n })
   return {
     decode: fl.asBool('D') || fl.asBool('decode'),
-    wrap: typeof wrapValue === 'string' ? Number.parseInt(wrapValue, 10) : null,
+    wrap: wrap === undefined ? null : wrap > INTMAX ? 0 : Number(wrap),
     ignoreGarbage: fl.asBool('ignore_garbage'),
   }
 }
@@ -49,7 +62,7 @@ async function* base64EncodeStream(
   wrap: number | null,
   signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
-  const width = wrap ?? 76
+  const width = wrap ?? WRAP_WIDTH
   let pending: Uint8Array = new Uint8Array()
   let column = 0
   const stream = chunks(source, signal)

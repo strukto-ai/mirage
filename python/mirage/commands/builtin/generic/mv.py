@@ -24,12 +24,14 @@ from mirage.commands.builtin.generic.cp import (
     backup_raw,
     copy_entries,
     dest_kind,
+    just_created_error,
     link_stat,
     make_backup,
     overwrite_gate,
     overwrite_type_error,
     prompter,
     rename_link,
+    same_file_error,
     slash_refuses_file,
     source_kind,
     split_operands,
@@ -37,6 +39,7 @@ from mirage.commands.builtin.generic.cp import (
     suffix_flag,
     target_dir_error,
     target_flags,
+    type_mismatch_error,
     update_gates,
     update_mode,
     walk,
@@ -53,6 +56,7 @@ from mirage.commands.builtin.utils.copy import (
 from mirage.commands.builtin.utils.tree import before_full_scan
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.usage import usage_hint
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror, inner_suffix, with_inner
 from mirage.errors.posix import posix_phrase
@@ -116,7 +120,7 @@ def parse_flags(fl: FlagView) -> MvFlags:
     ):
         raise UsageError(
             "mv: cannot combine --backup with --exchange, -n, or "
-            "--update=none-fail\nTry 'mv --help' for more information.",
+            f"--update=none-fail\n{usage_hint('mv')}",
             1,
         )
     target_dir, no_target = target_flags("mv", fl)
@@ -203,6 +207,17 @@ def _replace_error(
             f"'{target.raw_path}'; unable to remove target: {reason}"
         )
     return f"mv: cannot overwrite '{target.raw_path}': {reason}"
+
+
+def _move_error(src: PathSpec, target: PathSpec, reason: str | None) -> str:
+    """GNU's line for a source mv could not move onto its target.
+
+    Args:
+        src (PathSpec): the source being moved.
+        target (PathSpec): where it was to land.
+        reason (str | None): the error's text, as ``fs_strerror`` gives it.
+    """
+    return f"mv: cannot move '{src.raw_path}' to '{target.raw_path}': {reason}"
 
 
 async def _remove_entries(
@@ -337,30 +352,19 @@ async def _exchange_pair(
         errors (list[str]): Collected stderr lines, appended in place.
         lines (list[str] | None): Verbose sink; None keeps the swap silent.
     """
+    refused = f"mv: cannot exchange '{src.raw_path}' and '{target.raw_path}'"
     if isinstance(strategy, PrimitiveMove):
-        errors.append(
-            f"mv: cannot exchange '{src.raw_path}' and "
-            f"'{target.raw_path}': Invalid cross-device link"
-        )
+        errors.append(f"{refused}: {posix_phrase(FsCondition.EXDEV)}")
         return
     if typed_name(src) in (".", ".."):
-        errors.append(
-            f"mv: cannot exchange '{src.raw_path}' and "
-            f"'{target.raw_path}': {posix_phrase(FsCondition.EBUSY)}"
-        )
+        errors.append(f"{refused}: {posix_phrase(FsCondition.EBUSY)}")
         return
     if not await path_exists(stat, src) or not await path_exists(stat, target):
-        errors.append(
-            f"mv: cannot exchange '{src.raw_path}' and "
-            f"'{target.raw_path}': No such file or directory"
-        )
+        errors.append(f"{refused}: {posix_phrase(FsCondition.ENOENT)}")
         return
     holding = await _holding_path(stat, target)
     if holding is None:
-        errors.append(
-            f"mv: cannot exchange '{src.raw_path}' and "
-            f"'{target.raw_path}': File exists"
-        )
+        errors.append(f"{refused}: {posix_phrase(FsCondition.EEXIST)}")
         return
     staged = False
     swapped = False
@@ -374,10 +378,7 @@ async def _exchange_pair(
         restored = await _undo_exchange(
             strategy, src, target, holding, staged, swapped
         )
-        errors.append(
-            f"mv: cannot exchange '{src.raw_path}' and "
-            f"'{target.raw_path}': {fs_strerror(exc)}"
-        )
+        errors.append(f"{refused}: {fs_strerror(exc)}")
         if not restored:
             errors.append(
                 f"mv: '{src.raw_path}' left at "
@@ -499,17 +500,13 @@ async def mv_generic(
             # in (gnulib reads the name as `.`): a file cannot overwrite
             # it, and a directory renamed onto it is busy (coreutils 9.7).
             errors.append(
-                f"mv: cannot move '{src.raw_path}' to '': "
-                "Device or resource busy"
+                _move_error(src, target, posix_phrase(FsCondition.EBUSY))
                 if src_is_dir
-                else "mv: cannot overwrite directory '' with non-directory "
-                f"'{src.raw_path}'"
+                else type_mismatch_error("mv", src, target, False)
             )
             continue
         if key_of(src) == key_of(target):
-            errors.append(
-                f"mv: '{src.raw_path}' and '{target.raw_path}' are the same file"
-            )
+            errors.append(same_file_error("mv", src, target))
             continue
         if flags.exchange:
             await _exchange_pair(
@@ -555,9 +552,11 @@ async def mv_generic(
             continue
         if slash_refuses_file(target, target_exists, src_is_dir):
             errors.append(
-                f"mv: cannot move '{src.raw_path}' to "
-                f"'{target.raw_path}': "
-                f"{posix_phrase(target_err or FsCondition.ENOTDIR)}"
+                _move_error(
+                    src,
+                    target,
+                    posix_phrase(target_err or FsCondition.ENOTDIR),
+                )
             )
             continue
         # GNU lets -n, --update and -i decide before it weighs a type
@@ -585,15 +584,11 @@ async def mv_generic(
             or update_gates(flags.update)
             or flags.backup == "numbered"
         ):
-            errors.append(
-                f"mv: will not overwrite just-created '{target.raw_path}' "
-                f"with '{src.raw_path}'"
-            )
+            errors.append(just_created_error("mv", src, target))
             continue
         if busy:
             errors.append(
-                f"mv: cannot move '{src.raw_path}' to "
-                f"'{target.raw_path}': {posix_phrase(FsCondition.EBUSY)}"
+                _move_error(src, target, posix_phrase(FsCondition.EBUSY))
             )
             continue
         if mount_root is not None and mount_root(target.virtual):
@@ -607,8 +602,7 @@ async def mv_generic(
                 )
             elif flags.no_copy:
                 errors.append(
-                    f"mv: cannot move '{src.raw_path}' to "
-                    f"'{target.raw_path}': Invalid cross-device link"
+                    _move_error(src, target, posix_phrase(FsCondition.EXDEV))
                 )
             else:
                 errors.append(_replace_error(src, target, busy_phrase, True))
@@ -639,7 +633,12 @@ async def mv_generic(
                 continue
             if children:
                 errors.append(
-                    _replace_error(src, target, "Directory not empty", across)
+                    _replace_error(
+                        src,
+                        target,
+                        posix_phrase(FsCondition.ENOTEMPTY),
+                        across,
+                    )
                 )
                 continue
         # The reveal guard answers before the backup so a refused move
@@ -649,10 +648,7 @@ async def mv_generic(
             try:
                 guard(src, target)
             except FS_ERRORS as exc:
-                errors.append(
-                    f"mv: cannot move '{src.raw_path}' to "
-                    f"'{target.raw_path}': {fs_strerror(exc)}"
-                )
+                errors.append(_move_error(src, target, fs_strerror(exc)))
                 continue
         backup_strategy = (
             NativeMove(rename=partial(rename_link, copies))
@@ -673,8 +669,7 @@ async def mv_generic(
             )
             if ok:
                 errors.append(
-                    f"mv: cannot move '{src.raw_path}' to "
-                    f"'{target.raw_path}': Invalid cross-device link"
+                    _move_error(src, target, posix_phrase(FsCondition.EXDEV))
                 )
             continue
         source_link = (
@@ -690,10 +685,7 @@ async def mv_generic(
             try:
                 strategy.check_unlink(src)
             except FS_ERRORS as exc:
-                errors.append(
-                    f"mv: cannot move '{src.raw_path}' to "
-                    f"'{target.raw_path}': {fs_strerror(exc)}"
-                )
+                errors.append(_move_error(src, target, fs_strerror(exc)))
                 continue
         if (
             isinstance(strategy, PrimitiveMove)
@@ -735,18 +727,14 @@ async def mv_generic(
             try:
                 await rename_link(copies, src, target)
             except FS_ERRORS as exc:
-                errors.append(
-                    f"mv: cannot move '{src.raw_path}' to "
-                    f"'{target.raw_path}': {fs_strerror(exc)}"
-                )
+                errors.append(_move_error(src, target, fs_strerror(exc)))
                 continue
         elif isinstance(strategy, PrimitiveMove):
             if target_err is FsCondition.ENOENT:
                 # GNU's rename meets the absent parent before it falls
                 # back to a copy across devices.
                 errors.append(
-                    f"mv: cannot move '{src.raw_path}' to "
-                    f"'{target.raw_path}': {posix_phrase(target_err)}"
+                    _move_error(src, target, posix_phrase(target_err))
                 )
                 continue
             if target_is_dir and backup is None:

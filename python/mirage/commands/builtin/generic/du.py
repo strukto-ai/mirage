@@ -13,6 +13,7 @@ from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.usage import usage_hint
 from mirage.context import session_visibility
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
@@ -32,7 +33,6 @@ logger = logging.getLogger(__name__)
 ComputeSize = Callable[[PathSpec], Awaitable[int]]
 ComputeEntries = Callable[[PathSpec], Awaitable[DuEntries]]
 
-USAGE_HINT = "Try 'du --help' for more information."
 TRUNCATED_NOTE = "du: walk stopped early: the reported sizes are incomplete"
 _DEPTH_HEX = re.compile(r"^[+-]?0[xX][0-9a-fA-F]+$")
 _DEPTH_OCT = re.compile(r"^[+-]?0[0-7]*$")
@@ -133,12 +133,13 @@ def parse_flags(ctx: Context) -> DuFlags:
         depth = parse_depth(raw)
         if depth is None:
             raise UsageError(
-                f"du: invalid maximum depth '{quote_text(raw)}'\n{USAGE_HINT}",
+                f"du: invalid maximum depth '{quote_text(raw)}'\n{usage_hint('du')}",
                 1,
             )
     if s and a:
         raise UsageError(
-            f"du: cannot both summarize and show all entries\n{USAGE_HINT}", 1
+            f"du: cannot both summarize and show all entries\n{usage_hint('du')}",
+            1,
         )
     warning: str | None = None
     if s and depth is not None:
@@ -147,7 +148,7 @@ def parse_flags(ctx: Context) -> DuFlags:
         if depth != 0:
             raise UsageError(
                 "du: warning: summarizing conflicts with "
-                f"--max-depth={depth}\n{USAGE_HINT}",
+                f"--max-depth={depth}\n{usage_hint('du')}",
                 1,
             )
         warning = "du: warning: summarizing is the same as using --max-depth=0"
@@ -702,7 +703,8 @@ async def du(
     for virtual in unreadable() if unreadable is not None else ():
         notes.append(
             f"du: cannot read directory "
-            f"'{_respell_under(virtual, paths)}': Permission denied"
+            f"'{_respell_under(virtual, paths)}': "
+            f"{posix_phrase(FsCondition.EACCES)}"
         )
         exit_code = 1
     for virtual, detail in inaccessible() if inaccessible is not None else ():

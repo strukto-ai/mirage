@@ -12,8 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { bccAddresses, stripBcc } from './smtp.ts'
+import { describe, expect, it, vi } from 'vitest'
+import { buildEmailConfig } from '../../../../core/email/config.ts'
+import { bccAddresses, sendRaw, stripBcc } from './smtp.ts'
+
+const transports = vi.hoisted((): Record<string, unknown>[] => [])
+
+vi.mock('nodemailer', () => ({
+  createTransport: (options: Record<string, unknown>) => {
+    transports.push(options)
+    return { sendMail: () => Promise.resolve({}) }
+  },
+}))
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -80,5 +90,29 @@ describe('stripBcc', () => {
   it('leaves a headers-only message untouched', () => {
     const raw = ENC.encode('To: a@x')
     expect(DEC.decode(stripBcc(raw))).toBe('To: a@x')
+  })
+})
+
+function config(smtpPort: number): ReturnType<typeof buildEmailConfig> {
+  return buildEmailConfig({
+    imapHost: 'h',
+    smtpHost: 'h',
+    smtpPort,
+    username: 'u',
+    password: 'p',
+  })
+}
+
+// Mirrors python's test_smtp.py: nodemailer's `secure` is implicit TLS,
+// and with it off nodemailer upgrades when the server offers STARTTLS.
+describe('sendRaw', () => {
+  it('speaks TLS from the first byte on port 465', async () => {
+    await sendRaw(config(465), message('From: a@x', 'To: b@x'))
+    expect(transports.at(-1)).toMatchObject({ port: 465, secure: true })
+  })
+
+  it.each([25, 587, 2525])('upgrades with STARTTLS on port %i', async (port) => {
+    await sendRaw(config(port), message('From: a@x', 'To: b@x'))
+    expect(transports.at(-1)).toMatchObject({ port, secure: false })
   })
 })

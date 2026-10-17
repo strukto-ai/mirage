@@ -201,8 +201,6 @@ export async function refuseLostWork(
  * @param selected the paths to delete, in index order
  * @param lines the `rm` lines already printed, for a refusal to carry on stdout
  *   the way git prints them anyway
- * @param links the name plane's link facts, null when no namespace is wired
- * @param mounts the name plane's mount boundaries, null when none is wired
  */
 export async function clearWorktree(
   vfs: Files,

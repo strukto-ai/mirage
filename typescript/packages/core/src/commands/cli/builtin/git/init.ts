@@ -14,6 +14,7 @@ import {
   NoWorkingDirectoryError,
 } from './errors.ts'
 import { ensureDir, readOptional, statOf, takeLock, writeFile } from './io.ts'
+import { DEFAULT_BRANCH } from './constants.ts'
 import { validRefName } from './refs.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import { fatal, startPoint } from './util.ts'
@@ -80,9 +81,11 @@ export async function init(
       throw new CannotMkdirError(target.rawPath, 'No such file or directory')
     const bare = fl.asBool('bare')
     let gitdir = namedGitdir(fl, texts)
-    const branch = fl.asStr('initial_branch') ?? 'master'
-    if (!validRefName(`refs/heads/${branch}`) || branch.startsWith('-'))
-      throw new GitError(`invalid branch name: '${branch}'`)
+    const branch = fl.asStr('initial_branch', DEFAULT_BRANCH)
+    // The ref rules alone: unlike a branch made later, the first one may be
+    // named HEAD or start with a dash (pinned against git 2.47.3 and 2.50.1).
+    if (!validRefName(`refs/heads/${branch}`))
+      throw new GitError(`invalid initial branch name: '${branch}'`)
     const info = await statOf(vfs, gitdir)
     if (
       info !== null &&

@@ -36,7 +36,7 @@ STRTOD = re.compile(
 # 2**16270 up (LDBL_MAX plus half its ulp, a tie rounding to the even
 # infinity) overflows, one under 2**-16382 is tiny, and a tiny one is held
 # exactly only on the subnormal grid of 2**-16494.
-_OVERFLOW = ((1 << 114) - 1) << 16270
+LONG_DOUBLE_OVERFLOW = ((1 << 114) - 1) << 16270
 
 # The leading digits that settle the range exactly, the rest only saying
 # whether anything nonzero was dropped. 32 hex digits hold the 113 bits a
@@ -165,6 +165,6 @@ def strtold_erange(found: re.Match[str]) -> bool:
         return False
     num: int = significand * base ** max(exponent, 0)
     den: int = base ** max(-exponent, 0)
-    if num >= _OVERFLOW * den:
+    if num >= LONG_DOUBLE_OVERFLOW * den:
         return True
     return (num << 16382) < den and (dropped or (num << 16494) % den != 0)

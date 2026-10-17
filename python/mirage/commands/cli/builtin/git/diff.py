@@ -112,7 +112,7 @@ def _sides(
             return None, None, warning
         old = resolve_commit(repo, texts[0])
         if len(texts) == 1:
-            return tree_entries(repo.object_store, old.tree), None, warning
+            return tree_entries(repo, old.tree), None, warning
         new = resolve_commit(repo, texts[1])
     else:
         old, new, symmetric = ends
@@ -127,8 +127,8 @@ def _sides(
                     f"using {old.id.decode()}\n"
                 ).encode()
     return (
-        tree_entries(repo.object_store, old.tree),
-        tree_entries(repo.object_store, new.tree),
+        tree_entries(repo, old.tree),
+        tree_entries(repo, new.tree),
         warning,
     )
 
@@ -146,9 +146,7 @@ def _base(repo: BaseRepo, texts: tuple[str, ...]) -> Tree:
     if len(texts) > 1:
         raise GitError("--cached accepts at most one revision")
     if texts:
-        return tree_entries(
-            repo.object_store, resolve_commit(repo, texts[0]).tree
-        )
+        return tree_entries(repo, resolve_commit(repo, texts[0]).tree)
     return head_entries(repo) or {}
 
 

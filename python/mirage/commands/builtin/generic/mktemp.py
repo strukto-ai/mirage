@@ -3,6 +3,7 @@ import string
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
+from mirage.commands.builtin.constants import FALLBACK_TMPDIR
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
@@ -87,7 +88,7 @@ def plan_template(
         )
     if use_dest_dir or t:
         if t:
-            directory = env_tmpdir or dest_dir or "/tmp"
+            directory = env_tmpdir or dest_dir or FALLBACK_TMPDIR
             if "/" in template:
                 raise UsageError(
                     f"mktemp: invalid template, '{quote_text(template)}', "
@@ -95,7 +96,7 @@ def plan_template(
                     1,
                 )
         else:
-            directory = dest_dir or env_tmpdir or "/tmp"
+            directory = dest_dir or env_tmpdir or FALLBACK_TMPDIR
             if template.startswith("/"):
                 raise UsageError(
                     f"mktemp: invalid template, '{quote_text(template)}'; "
@@ -196,7 +197,7 @@ async def mktemp(
             except FileNotFoundError:
                 if not fallback:
                     raise
-                await mkdir_fn(PathSpec.from_str_path("/tmp"))
+                await mkdir_fn(PathSpec.from_str_path(FALLBACK_TMPDIR))
                 await create(path)
     except FS_ERRORS as exc:
         # -q suppresses the diagnostic about the create only (GNU); a

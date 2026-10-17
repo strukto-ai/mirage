@@ -18,20 +18,10 @@ import git from 'isomorphic-git'
 
 import { getOpcodes } from '../../../builtin/diff_format.ts'
 import { DiffOpTag } from '../../../builtin/diff_types.ts'
-import { byteLines } from './patch.ts'
+import { blobData, byteLines } from './patch.ts'
 import { repoArgs, type Repo } from './repo.ts'
 import { BINARY_SNIFF } from './summary.ts'
-import { treeEntries } from './tree.ts'
-
-/** A blob's bytes, empty for a side that does not exist or is no blob. */
-async function blob(repo: Repo, oid: string | null): Promise<Uint8Array> {
-  if (oid === null) return new Uint8Array()
-  try {
-    return (await git.readBlob({ ...repoArgs(repo), oid })).blob
-  } catch {
-    return new Uint8Array()
-  }
-}
+import { treeEntries, type TreeEntry } from './tree.ts'
 
 /**
  * How many times a pattern matches a blob, git's `contains` under
@@ -64,16 +54,16 @@ export function contains(text: string, needle: RegExp): number {
 }
 
 /**
- * How many times a string appears in one blob, or a pattern matches it as git
+ * How many times a string appears in one side, or a pattern matches it as git
  * counts under `--pickaxe-regex`.
  */
 async function occurrences(
   repo: Repo,
-  oid: string | null,
+  entry: TreeEntry | null,
   needle: string | RegExp,
   ignoreCase: boolean,
 ): Promise<number> {
-  const data = await blob(repo, oid)
+  const data = await blobData(repo, entry)
   if (needle instanceof RegExp) return contains(decodeText(data), needle)
   const text = ignoreCase ? foldAscii(decodeText(data)) : decodeText(data)
   if (needle === '') return 0
@@ -87,27 +77,31 @@ async function occurrences(
 }
 
 /**
- * The old and new blob ids of every path a commit changed against its first
+ * The old and new entries of every path a commit changed against its first
  * parent, or against nothing for a root commit.
+ *
+ * Each side reads the way `blobData` reads it, so a gitlink is its `Subproject
+ * commit` line, as git's pickaxe sees it, rather than an id this repository
+ * does not hold.
  */
 async function changes(
   repo: Repo,
   oid: string,
   parents: readonly string[],
-): Promise<[string | null, string | null][]> {
+): Promise<[TreeEntry | null, TreeEntry | null][]> {
   const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
   const after = await treeEntries(repo, commit.tree)
   const first = parents[0]
-  let before = new Map<string, { oid: string; mode: string }>()
+  let before = new Map<string, TreeEntry>()
   if (first !== undefined) {
     const parent = await git.readCommit({ ...repoArgs(repo), oid: first })
     before = await treeEntries(repo, parent.commit.tree)
   }
-  const out: [string | null, string | null][] = []
+  const out: [TreeEntry | null, TreeEntry | null][] = []
   for (const path of new Set([...before.keys(), ...after.keys()])) {
-    const old = before.get(path)?.oid ?? null
-    const now = after.get(path)?.oid ?? null
-    if (old !== now) out.push([old, now])
+    const old = before.get(path) ?? null
+    const now = after.get(path) ?? null
+    if (old?.oid !== now?.oid) out.push([old, now])
   }
   return out
 }
@@ -125,9 +119,9 @@ export async function greps(
   pattern: RegExp,
   forceText = false,
 ): Promise<boolean> {
-  for (const [oldOid, newOid] of await changes(repo, oid, parents)) {
-    const old = await blob(repo, oldOid)
-    const now = await blob(repo, newOid)
+  for (const [oldEntry, newEntry] of await changes(repo, oid, parents)) {
+    const old = await blobData(repo, oldEntry)
+    const now = await blobData(repo, newEntry)
     if (!forceText && [old, now].some((data) => data.subarray(0, BINARY_SNIFF).includes(0)))
       continue
     const before = byteLines(old)

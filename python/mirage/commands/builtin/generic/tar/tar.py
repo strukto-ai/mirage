@@ -46,6 +46,7 @@ from mirage.commands.builtin.generic.tar.constants import (
     USAGE_HINT,
 )
 from mirage.commands.builtin.generic.tar.create import (
+    cannot,
     check_directories,
     plan_create,
 )
@@ -58,6 +59,10 @@ from mirage.commands.builtin.generic.tar.types import (
 )
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.operands import normalized_read
+from mirage.commands.builtin.utils.output import (
+    format_optional_records,
+    format_records,
+)
 from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
@@ -78,6 +83,7 @@ from mirage.utils.compress import (
     gunzip_stream,
     gzip_compress_stream,
 )
+from mirage.utils.quote import escape_quote
 from mirage.view.types import LinkView, MountView
 
 logger = logging.getLogger(__name__)
@@ -93,12 +99,8 @@ def _compression_suffix(z: bool, j: bool, J: bool) -> CompressionSuffix:
     return ""
 
 
-def _read_mode(suffix: CompressionSuffix) -> ReadMode:
-    return READ_MODES[suffix]
-
-
 def _stderr_of(lines: list[str]) -> bytes:
-    return ("\n".join(lines) + "\n").encode() if lines else b""
+    return format_records(lines)
 
 
 class ZeroTail(io.RawIOBase):
@@ -173,7 +175,7 @@ async def _open_archive(
             )
             return
         failure = None
-        mode = _read_mode(suffix)
+        mode = READ_MODES[suffix]
         source = data
         if suffix == ":gz" or (suffix == "" and first.startswith(GZIP_MAGIC)):
             try:
@@ -386,8 +388,11 @@ async def _write_archive(
                         size = 0
                 except FS_ERRORS as exc:
                     notices.append(
-                        f"tar: {member.spelled or member.name}: "
-                        f"Cannot open: {fs_strerror(exc)}"
+                        cannot(
+                            member.spelled or member.name,
+                            "open",
+                            fs_strerror(exc),
+                        )
                     )
                     result.exit_code = CREATE_ERROR_EXIT
                     continue
@@ -418,7 +423,7 @@ async def _write_archive(
                 if padding:
                     yield bytes(padding)
                 total += len(header) + size + padding
-                names.append(member.name)
+                names.append(escape_quote(member.name))
         trailer = 2 * tarfile.BLOCKSIZE
         yield bytes(trailer + (-(total + trailer)) % tarfile.RECORDSIZE)
         if result.exit_code >= CREATE_ERROR_EXIT:
@@ -462,7 +467,7 @@ async def _write_archive(
         return None, _open_failure(
             archive_path.raw_path, exc, mode_suffix, False
         )
-    stdout = ("\n".join(names) + "\n").encode() if verbose and names else None
+    stdout = format_optional_records(names) if verbose else None
     return stdout, result
 
 
@@ -500,11 +505,11 @@ def _open_failure(
     who = CHILD_NAME if suffix else "tar"
     if reading and isinstance(exc, IsADirectoryError):
         lines = [
-            f"{who}: {shown}: Cannot read: {fs_strerror(exc)}",
+            cannot(shown, "read", fs_strerror(exc), who),
             _voiced(TAPE_START, who),
         ]
     else:
-        lines = [f"{who}: {shown}: Cannot open: {fs_strerror(exc)}"]
+        lines = [cannot(shown, "open", fs_strerror(exc), who)]
     lines.append(_voiced(FATAL_TRAILER, who))
     if suffix:
         if reading and not isinstance(exc, FileNotFoundError):
@@ -565,13 +570,14 @@ def _long_member(member: tarfile.TarInfo, name: str) -> str:
     stamp = datetime.fromtimestamp(member.mtime, timezone.utc).strftime(
         "%Y-%m-%d %H:%M"
     )
+    target = escape_quote(member.linkname)
     suffix = (
-        f" -> {member.linkname}"
+        f" -> {target}"
         if member.issym()
-        else (f" link to {member.linkname}" if member.islnk() else "")
+        else (f" link to {target}" if member.islnk() else "")
     )
     size = f"{member.size:>{max(1, 19 - len(owner))}}"
-    return f"{mode} {owner}{size} {stamp} {name}{suffix}"
+    return f"{mode} {owner}{size} {stamp} {escape_quote(name)}{suffix}"
 
 
 async def _list_archive(
@@ -597,7 +603,7 @@ async def _list_archive(
                 for member in tf.getmembers()
             ]
             rows = [
-                _long_member(member, name) if verbose else name
+                _long_member(member, name) if verbose else escape_quote(name)
                 for member, name in zip(tf.getmembers(), names)
             ]
     keep, misses = _selected_members(names, selectors)
@@ -610,7 +616,7 @@ async def _list_archive(
         for idx, row in enumerate(rows)
         if idx in keep and (result.cut is None or idx <= result.cut)
     ]
-    stdout = ("\n".join(shown) + "\n").encode() if shown else None
+    stdout = format_optional_records(shown)
     if result.cut is not None:
         return stdout, IOResult(
             exit_code=2, stderr=_cut_short(failure, list(result.notices))
@@ -660,7 +666,9 @@ async def _extract_archive(
             return None, data
         async with _open_archive(data, mode_suffix) as result:
             tf, failure = result.archive, result.failure
-            if tf is not None:
+            if tf is None:
+                _, misses = _selected_members([], selectors)
+            else:
                 members = tf.getmembers()
                 listed = [
                     member.name + "/" if member.isdir() else member.name
@@ -703,13 +711,17 @@ async def _extract_archive(
                                     )
                                 except FS_ERRORS as exc:
                                     notices.append(
-                                        f"tar: {'/'.join(parts)}: "
-                                        f"Cannot mkdir: "
-                                        f"{fs_strerror(exc)}"
+                                        cannot(
+                                            "/".join(parts),
+                                            "mkdir",
+                                            fs_strerror(exc),
+                                        )
                                     )
                                     failed = True
                                     continue
-                                names.append(member.name.rstrip("/") + "/")
+                                names.append(
+                                    escape_quote(member.name.rstrip("/") + "/")
+                                )
                         continue
                     if idx == result.cut:
                         # Only the whole blocks that arrived are written.
@@ -719,7 +731,7 @@ async def _extract_archive(
                         content = _member_stream(tf, member)
                     if to_stdout:
                         await output.fill(content)
-                        names.append(member.name)
+                        names.append(escape_quote(member.name))
                         continue
                     parts = _out_parts(member.name, strip_n, notices)
                     if not parts:
@@ -731,14 +743,20 @@ async def _extract_archive(
                             await ensure_dir(parent, mkdir_fn, stat, made)
                         except FS_ERRORS as exc:
                             notices.append(
-                                f"tar: {'/'.join(parts[:-1])}: Cannot "
-                                f"mkdir: {fs_strerror(exc)}"
+                                cannot(
+                                    "/".join(parts[:-1]),
+                                    "mkdir",
+                                    fs_strerror(exc),
+                                )
                             )
                             # GNU tar 1.35 (debian:stable-slim) reports ENOENT
                             # for the member after its parent mkdir failed.
                             notices.append(
-                                f"tar: {'/'.join(parts)}: Cannot "
-                                "open: No such file or directory"
+                                cannot(
+                                    "/".join(parts),
+                                    "open",
+                                    "No such file or directory",
+                                )
                             )
                             failed = True
                             continue
@@ -748,12 +766,11 @@ async def _extract_archive(
                         )
                     except FS_ERRORS as exc:
                         notices.append(
-                            f"tar: {'/'.join(parts)}: Cannot open: "
-                            f"{fs_strerror(exc)}"
+                            cannot("/".join(parts), "open", fs_strerror(exc))
                         )
                         failed = True
                         continue
-                    names.append(member.name)
+                    names.append(escape_quote(member.name))
         notices[:0] = result.notices
         failed = failed or bool(result.notices)
         if to_stdout:
@@ -767,12 +784,7 @@ async def _extract_archive(
             handed_off = stdout is not None
             stderr_lines = notices + (names if verbose else [])
         else:
-            listing = (
-                ("\n".join(names) + "\n").encode()
-                if verbose and names
-                else None
-            )
-            stdout = listing
+            stdout = format_optional_records(names) if verbose else None
             stderr_lines = list(notices)
         if result.cut is not None:
             return stdout, IOResult(

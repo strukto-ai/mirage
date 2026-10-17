@@ -12,8 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DIR_MODE, FIFO_MODE, FILE_MODE } from '../../utils/stat_view.ts'
+import {
+  CHAR_MODE,
+  CHMOD_MODE_BITS,
+  DIR_MODE,
+  FIFO_MODE,
+  FILE_MODE,
+  LINK_MODE,
+} from '../../utils/stat_view.ts'
 import { FileStat, FileType } from '../../types.ts'
+import { MONTHS } from './utils/constants.ts'
 import { lsModeString } from './utils/formatting.ts'
 import { groupName, ownerName, type Identity } from './utils/identity.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -37,8 +45,8 @@ const STAT_DIRECTIVES = new Set(['s', 'y', 'Y', 'm', 'M', 'T', 'u', 'U', 'g', 'G
 // the permission bits; the kind always fixes the type bits.
 const KIND_MODE: Record<PrintfKind, number> = {
   d: DIR_MODE,
-  l: 0o120777,
-  c: 0o020666,
+  l: LINK_MODE,
+  c: CHAR_MODE,
   p: FIFO_MODE,
   f: FILE_MODE,
 }
@@ -50,20 +58,6 @@ const KIND_TYPE: Record<PrintfKind, FileType> = {
   f: FileType.FILE,
 }
 const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const MONTH_ABBR = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-]
 
 // Whether a -printf format reads anything off the entry's stat.
 export function printfNeedsStat(fmt: string): boolean {
@@ -122,7 +116,7 @@ function timeDirective(letter: string, ts: number): string | null {
       return DAY_ABBR[dt.getUTCDay()] ?? ''
     case 'b':
     case 'h':
-      return MONTH_ABBR[dt.getUTCMonth()] ?? ''
+      return MONTHS[dt.getUTCMonth()] ?? ''
     case 'p':
       return dt.getUTCHours() < 12 ? 'AM' : 'PM'
     default:
@@ -150,7 +144,7 @@ function modeBits(st: PrintfStatFacts | null, kind: PrintfKind): number {
   const base = KIND_MODE[kind]
   const mode = st?.mode ?? null
   if (mode === null) return base
-  return (base & ~0o7777) | (mode & 0o7777)
+  return (base & ~CHMOD_MODE_BITS) | (mode & CHMOD_MODE_BITS)
 }
 
 function warnUnrecognized(src: string, warnings: string[]): void {
@@ -238,10 +232,14 @@ export function expandPrintf(
     } else if (code === 'g' || code === 'G') {
       out.push(groupName(st?.gid ?? null, identity))
     } else if (code === 'm') {
-      out.push((modeBits(st, kind) & 0o7777).toString(8))
+      out.push((modeBits(st, kind) & CHMOD_MODE_BITS).toString(8))
     } else if (code === 'M') {
       const bits = modeBits(st, kind)
-      out.push(lsModeString(new FileStat({ name: '', type: KIND_TYPE[kind], mode: bits & 0o7777 })))
+      out.push(
+        lsModeString(
+          new FileStat({ name: '', type: KIND_TYPE[kind], mode: bits & CHMOD_MODE_BITS }),
+        ),
+      )
     } else if (code === 'T' && i < n) {
       const letter = fmt.charAt(i)
       i += 1

@@ -15,11 +15,13 @@ from mirage.commands.builtin.utils.bre import (
     PosixSyntax,
     translate_ere,
 )
+from mirage.commands.cli.builtin.git.constants import EXECUTABLE, REGULAR
 from mirage.commands.cli.builtin.git.discover import require_work_tree
 from mirage.commands.cli.builtin.git.errors import (
     AmbiguousArgumentError,
     GitError,
     InvalidRevisionNameError,
+    PatternCompileError,
     UsageError,
 )
 from mirage.commands.cli.builtin.git.index_file import read_index
@@ -40,7 +42,11 @@ from mirage.commands.cli.builtin.git.repo import config_bool
 from mirage.commands.cli.builtin.git.revparse import resolve_object, unwrapped
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.summary import BINARY_SNIFF
-from mirage.commands.cli.builtin.git.tree import Tree, flat_tree, resolve_tree
+from mirage.commands.cli.builtin.git.tree import (
+    Tree,
+    resolve_tree,
+    tree_entries,
+)
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
     fatal,
@@ -146,8 +152,8 @@ def parse_flags(
                     )
                 compiled.append(posix_line_matcher(pattern, whole_word))
             except (PatternError, BreError, re.error) as exc:
-                raise GitError(
-                    f"{origin}, '{part}': {str(exc).removeprefix('grep: ')}"
+                raise PatternCompileError(
+                    origin, part, str(exc).removeprefix("grep: ")
                 ) from exc
     listing = (
         "files_without_match"
@@ -226,8 +232,8 @@ def search_entries(repo: BaseRepo, name: str) -> Tree:
     """
     obj = unwrapped(repo, resolve_object(repo, name), name)
     if isinstance(obj, Blob):
-        return {b"": (0o100644, obj.id)}
-    return flat_tree(repo, resolve_tree(repo, name, obj))
+        return {b"": (REGULAR, obj.id)}
+    return tree_entries(repo, resolve_tree(repo, name, obj))
 
 
 async def grep(
@@ -296,7 +302,6 @@ async def grep(
         if sources and cached:
             raise GitError("both --cached and trees are given")
         if not sources and not cached:
-            assert ctx.vfs is not None
             await require_work_tree(
                 ctx.vfs,
                 location,
@@ -322,8 +327,8 @@ async def grep(
                         conflict.ancestor,
                     ):
                         if entry is not None and entry.mode in (
-                            0o100644,
-                            0o100755,
+                            REGULAR,
+                            EXECUTABLE,
                         ):
                             entries[path] = (entry.mode, entry.sha)
                             break
@@ -333,7 +338,7 @@ async def grep(
         for revision, entries in sources:
             for path, (mode, oid) in sorted(entries.items()):
                 relative = path.decode("utf-8", "surrogateescape")
-                if mode not in (0o100644, 0o100755) or (
+                if mode not in (REGULAR, EXECUTABLE) or (
                     relative
                     and (
                         not visible_path(location, relative)

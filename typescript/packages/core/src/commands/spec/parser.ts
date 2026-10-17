@@ -254,13 +254,6 @@ export class ParsedArgs {
   texts(): string[] {
     return this.args.filter(([, k]) => k !== 'path').map(([v]) => v)
   }
-
-  flag(
-    name: string,
-    fallback: string | boolean | number | string[] | null = null,
-  ): string | boolean | number | string[] | null {
-    return this.flags[name] ?? fallback
-  }
 }
 
 // The values the per-value checks refused, in the order read. `kinds` is

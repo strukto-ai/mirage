@@ -16,12 +16,14 @@ import {
   AmbiguousArgumentError,
   GitError,
   InvalidRevisionNameError,
+  PatternCompileError,
   UsageError,
 } from './errors.ts'
 import { readIndex } from './index_file.ts'
 import { exists, isLink, readOptional } from './io.ts'
 import { pathspecPatterns, pathspecSelects, repoRelative, visiblePath } from './pathspec.ts'
 import { quotePath, relativePath } from './render.ts'
+import { EXECUTABLE, EXECUTABLE_MODE, REGULAR, REGULAR_MODE } from './constants.ts'
 import { blobData } from './patch.ts'
 import { configBool, type Repo } from './repo.ts'
 import { opened } from './session.ts'
@@ -76,7 +78,7 @@ function parseFlags(
         compiled.push(posixLineMatcher(pattern, wholeWord))
       } catch (err) {
         if (err instanceof PatternError || err instanceof BreError || err instanceof SyntaxError)
-          throw new GitError(`${origin}, '${part}': ${err.message.replace(/^grep: /, '')}`)
+          throw new PatternCompileError(origin, part, err.message.replace(/^grep: /, ''))
         throw err
       }
     }
@@ -138,7 +140,7 @@ function searched(data: Uint8Array, label: string, flags: GrepFlags): [Uint8Arra
 /** The searchable leaves of a tree-ish, or a directly named blob. */
 async function searchEntries(repo: Repo, name: string): Promise<Map<string, TreeEntry>> {
   const obj = await unwrapped(repo, await resolveObject(repo, name), name)
-  if (obj.type === 'blob') return new Map([['', { mode: '100644', oid: obj.oid }]])
+  if (obj.type === 'blob') return new Map([['', { mode: REGULAR_MODE, oid: obj.oid }]])
   return treeEntries(repo, await resolveTree(repo, name, obj))
 }
 
@@ -215,7 +217,7 @@ export async function grep(
       if (!cached) {
         for (const [path, conflict] of state.conflicts) {
           for (const entry of [conflict.this, conflict.other, conflict.ancestor]) {
-            if (entry !== null && [0o100644, 0o100755].includes(entry.mode)) {
+            if (entry !== null && [REGULAR, EXECUTABLE].includes(entry.mode)) {
               entries.set(path, { mode: entry.mode.toString(8), oid: entry.oid })
               break
             }
@@ -231,7 +233,7 @@ export async function grep(
         compareCodePoints(byteView(a), byteView(b)),
       )) {
         if (
-          !['100644', '100755'].includes(entry.mode) ||
+          ![REGULAR_MODE, EXECUTABLE_MODE].includes(entry.mode) ||
           (path && (!visiblePath(repo.location, path) || !pathspecSelects(path, specs)))
         )
           continue

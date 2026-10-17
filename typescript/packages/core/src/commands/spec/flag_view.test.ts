@@ -22,6 +22,14 @@ import { parseCommand, parseToKwargs } from './parser.ts'
 
 // Mirrors python/tests/commands/spec/test_types.py.
 
+function scan(text: string): bigint | null {
+  return /^\d+$/.test(text) ? BigInt(text) : null
+}
+
+function refusal(text: string, value: bigint | null): string {
+  return `cmd: bad '${text}' (${value === null ? 'null' : String(value)})`
+}
+
 describe('FlagView', () => {
   it('reads each flag shape at its declared type', () => {
     const path = PathSpec.fromStrPath('hidden/../file', undefined, '/repo')
@@ -45,6 +53,43 @@ describe('FlagView', () => {
     expect(fl.asPaths('files')).toEqual([path])
     expect(fl.asStr('file')).toBeUndefined()
     expect(fl.asList('files')).toEqual([])
+  })
+
+  it('asNumber refuses in the words and status the caller gives', () => {
+    const fl = new FlagView({ n: '5', x: 'abc', big: '9', zero: '0' })
+    expect(fl.asNumber('n', scan, refusal, { low: 1n, high: 8n })).toBe(5n)
+    expect(fl.asNumber('absent', scan, refusal)).toBeUndefined()
+    for (const [name, message] of [
+      ['x', "cmd: bad 'abc' (null)"],
+      ['big', "cmd: bad '9' (9)"],
+      ['zero', "cmd: bad '0' (0)"],
+    ] as const) {
+      expect(() => fl.asNumber(name, scan, refusal, { low: 1n, high: 8n, exitCode: 2 })).toThrow(
+        expect.objectContaining({ message, exitCode: 2 }),
+      )
+    }
+  })
+
+  it('reads an integer value as its digits', () => {
+    const fl = new FlagView({ n: 5, big: 9, switch: true })
+    expect(fl.asText('n')).toBe('5')
+    expect(fl.asText('switch')).toBeUndefined()
+    expect(fl.asNumber('n', scan, refusal, { low: 1n, high: 8n })).toBe(5n)
+    expect(fl.asNumber('switch', scan, refusal)).toBeUndefined()
+    expect(() => fl.asNumber('big', scan, refusal, { low: 1n, high: 8n })).toThrow(
+      expect.objectContaining({ message: "cmd: bad '9' (9)" }),
+    )
+  })
+
+  it('answers its fallback only for an absent flag', () => {
+    const fl = new FlagView({ limit: 0, to: '', rate: 0, page: '0' })
+    expect(fl.asInt('limit', 20)).toBe(0)
+    expect(fl.asInt('page', 1)).toBe(0)
+    expect(fl.asInt('count', 20)).toBe(20)
+    expect(fl.asStr('to', 'none')).toBe('')
+    expect(fl.asStr('from', 'none')).toBe('none')
+    expect(fl.asFloat('rate', 0.5)).toBe(0)
+    expect(fl.asFloat('threshold', 0.5)).toBe(0.5)
   })
 
   // Python's as_int calls int(), which raises on a partial or junk value.

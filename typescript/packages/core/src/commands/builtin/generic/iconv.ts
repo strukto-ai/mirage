@@ -39,6 +39,7 @@ import {
 
 const HINT = "Try `iconv --help' or `iconv --usage' for more information."
 const INCOMPLETE = 'incomplete character or shift sequence at end of buffer'
+const ILLEGAL_AT = 'illegal input sequence at position '
 const NAME_TRAIL = ' \t\n\v\f\r,/'
 const NAME_DROPS = /[^0-9A-Za-z_.,:/-]/g
 
@@ -302,8 +303,8 @@ interface IconvFlags {
 function parseFlags(bag: Record<string, FlagValue>): IconvFlags {
   const fl = new FlagView(bag, specOf('iconv'))
   return {
-    fromEnc: fl.asStr('f') ?? 'utf-8',
-    toEnc: fl.asStr('t') ?? 'utf-8',
+    fromEnc: fl.asNonEmpty('f', 'utf-8'),
+    toEnc: fl.asNonEmpty('t', 'utf-8'),
     ignoreErrors: fl.asBool('c'),
     outputPath: fl.asPath('o') ?? null,
     listCharsets: fl.asBool('list'),
@@ -441,7 +442,7 @@ async function* convertStream(
             yield {
               data: out.subarray(0, n),
               dropped,
-              error: 'illegal input sequence at position ' + String(offset + at),
+              error: ILLEGAL_AT + String(offset + at),
             }
             return
           }

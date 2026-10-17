@@ -31,6 +31,7 @@ import {
   withInner,
 } from '../../../../errors/fs.ts'
 import { operandSpelling } from '../../../../errors/render.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
 import type { WalkDeclinedError } from '../../../../errors/types.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 import { linksOf, mountsOf } from '../../utils/links.ts'
@@ -125,13 +126,13 @@ const rm: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
           }
         } else if (dirFlag) {
           if ((await ops.readdir(accessor, p, idx)).length > 0) {
-            errors.push(`rm: cannot remove '${p.rawPath}': Directory not empty`)
+            errors.push(`rm: cannot remove '${p.rawPath}': ${posixPhrase('ENOTEMPTY')}`)
             continue
           }
           await rmdir(accessor, p, idx)
           entryLines = [`removed directory '${p.rawPath}'`]
         } else {
-          errors.push(`rm: cannot remove '${p.rawPath}': Is a directory`)
+          errors.push(`rm: cannot remove '${p.rawPath}': ${posixPhrase('EISDIR')}`)
           continue
         }
       } else {

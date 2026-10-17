@@ -15,7 +15,7 @@
 import { statOf } from './io.ts'
 import { PathSpec } from '../../../../types.ts'
 
-import git from 'isomorphic-git'
+import git, { Errors } from 'isomorphic-git'
 
 import { HttpConnectError } from '../../../builtin/errors.ts'
 import { httpRequest } from '../../../builtin/utils/http.ts'
@@ -224,9 +224,10 @@ export class LocalTransport implements Transport {
       let oid: string
       try {
         oid = await git.resolveRef({ ...repoArgs(this.repo), ref: name })
-      } catch {
+      } catch (err) {
         // A symref to an unborn branch names nothing yet.
-        continue
+        if (err instanceof Errors.NotFoundError) continue
+        throw err
       }
       refs.set(name, oid)
       let target = oid

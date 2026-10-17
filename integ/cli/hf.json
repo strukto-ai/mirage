@@ -390,6 +390,32 @@
         "stdout": "1\n",
         "stderr": "hf download: /scratch/ro: Read-only file system\n"
       }
+    },
+    {
+      "id": "hf_download_zero_workers_refuses_the_pool",
+      "seq": 9940401,
+      "targets": [
+        "cli-hf"
+      ],
+      "command": "hf download integ/repo-cli --include '*.txt' --max-workers 0 --local-dir /scratch/w0; echo rc=$?; hf download integ/repo-cli one_byte.txt --max-workers 0 --local-dir /scratch/w1 --quiet && cat /scratch/w1/one_byte.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n/scratch/w1\nxy",
+        "stderr": "Invalid value. max_workers must be greater than 0\n"
+      }
+    },
+    {
+      "id": "hf_repo_tag_create_sends_an_empty_revision",
+      "seq": 9940402,
+      "targets": [
+        "cli-hf"
+      ],
+      "command": "hf repo tag create integ/repo-cli v-empty --revision ''",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "hf repo tag create: {\"error\":\"not_found\",\"method\":\"POST\",\"path\":\"/api/models/integ/repo-cli/tag/\"}\n"
+      }
     }
   ]
 }

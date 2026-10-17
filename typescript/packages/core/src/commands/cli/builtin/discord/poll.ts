@@ -33,7 +33,7 @@ export async function poll(
     fl.asStr('channel') ?? '',
     fl.asStr('question') ?? '',
     fl.asList('answer'),
-    fl.asInt('duration') ?? 24,
+    fl.asInt('duration', 24),
     fl.asBool('multiselect'),
   )
   const out: ByteSource = ENC.encode(JSON.stringify(result))

@@ -15,12 +15,12 @@ import asyncio
 
 import pytest
 
+from mirage.commands.builtin.constants import UINTMAX
 from mirage.commands.builtin.generic.shuf import (
     MAX_OUTPUT_LINES,
     MEMORY_EXHAUSTED,
     NO_WRITE_OP,
     SIZE_MAX,
-    UINTMAX_MAX,
     RangeRefusal,
     emit_count,
     parse_flags,
@@ -349,10 +349,10 @@ def test_shuf_no_write_op_is_not_swallowed_by_that_catch():
         ("9007199254740993-9007199254740993", (2**53 + 1, 2**53 + 1)),
         ("9223372036854775807-9223372036854775807", (2**63 - 1, 2**63 - 1)),
         ("9223372036854775808-9223372036854775808", (2**63, 2**63)),
-        (f"{UINTMAX_MAX}-{UINTMAX_MAX}", (UINTMAX_MAX, UINTMAX_MAX)),
-        (f"{UINTMAX_MAX - 1}-{UINTMAX_MAX}", (UINTMAX_MAX - 1, UINTMAX_MAX)),
-        (f"0-{UINTMAX_MAX - 1}", (0, UINTMAX_MAX - 1)),
-        (f"1-{UINTMAX_MAX}", (1, UINTMAX_MAX)),
+        (f"{UINTMAX}-{UINTMAX}", (UINTMAX, UINTMAX)),
+        (f"{UINTMAX - 1}-{UINTMAX}", (UINTMAX - 1, UINTMAX)),
+        (f"0-{UINTMAX - 1}", (0, UINTMAX - 1)),
+        (f"1-{UINTMAX}", (1, UINTMAX)),
     ],
 )
 def test_shuf_input_range_accepts_a_bound_up_to_uintmax_max(raw, bounds):
@@ -373,7 +373,7 @@ def test_shuf_input_range_accepts_a_bound_up_to_uintmax_max(raw, bounds):
     ],
 )
 def test_shuf_input_range_overflow_earns_the_clause(raw):
-    """A bound past UINTMAX_MAX is OVERFLOW, and the clause is EOVERFLOW's.
+    """A bound past UINTMAX is OVERFLOW, and the clause is EOVERFLOW's.
 
     Not ERANGE's `: Numerical result out of range`, which `nl -w` uses for
     a value outside an option's OWN range; `shuf -i` has no range below
@@ -449,7 +449,7 @@ def test_shuf_range_error_renders_the_clause_only_when_earned():
         2**53 + 1,
         2**63 - 1,
         2**63,
-        UINTMAX_MAX,
+        UINTMAX,
     ],
 )
 def test_shuf_input_range_emits_a_large_bound_exactly(low):
@@ -470,7 +470,7 @@ def test_shuf_input_range_emits_a_large_bound_exactly(low):
 @pytest.mark.parametrize(
     "raw",
     [
-        f"1-{UINTMAX_MAX}",
+        f"1-{UINTMAX}",
         "1-1000000000000",
         "1-100000000",
     ],
@@ -496,7 +496,7 @@ def test_shuf_head_count_zero_on_a_huge_range_emits_nothing():
             [],
             [],
             read_bytes=_unused_read_bytes,
-            input_range=f"1-{UINTMAX_MAX}",
+            input_range=f"1-{UINTMAX}",
             count=0,
         )
     )
@@ -510,7 +510,7 @@ def test_shuf_repeat_draws_from_a_huge_range_without_enumerating_it():
             [],
             [],
             read_bytes=_unused_read_bytes,
-            input_range=f"1-{UINTMAX_MAX}",
+            input_range=f"1-{UINTMAX}",
             count=4,
             with_replacement=True,
         )
@@ -526,10 +526,10 @@ def test_shuf_repeat_draws_from_a_huge_range_without_enumerating_it():
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"input_range": f"1-{UINTMAX_MAX}"},
+        {"input_range": f"1-{UINTMAX}"},
         {"input_range": "1-1000000000000"},
         {"input_range": f"1-{MAX_OUTPUT_LINES + 1}"},
-        {"input_range": f"1-{UINTMAX_MAX}", "with_replacement": True},
+        {"input_range": f"1-{UINTMAX}", "with_replacement": True},
         {
             "input_range": "1-3",
             "count": MAX_OUTPUT_LINES + 1,
@@ -587,7 +587,7 @@ def test_shuf_repeat_with_a_huge_count_on_stdin_is_refused_too():
 @pytest.mark.parametrize(
     "raw",
     [
-        str(UINTMAX_MAX),
+        str(UINTMAX),
         "18446744073709551616",
         "+18446744073709551616",
         "99999999999999999999999999",
@@ -634,7 +634,7 @@ def test_shuf_emit_count_is_decided_before_anything_is_built(
 def test_shuf_memory_exhausted_is_a_refusal_the_builder_renders():
     """The builder turns it into one stderr line and exit 1, as GNU does."""
     ws, _ = _ws()
-    stdout, io = _run_raw(ws, f"shuf -i 1-{UINTMAX_MAX}", stdin=b"a\n")
+    stdout, io = _run_raw(ws, f"shuf -i 1-{UINTMAX}", stdin=b"a\n")
     assert io.exit_code == 1
     assert not _bytes(stdout)
     assert io.stderr == b"shuf: memory exhausted\n"

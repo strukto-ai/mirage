@@ -21,9 +21,13 @@ from dataclasses import dataclass
 from typing import Literal
 
 import regex
-from dulwich.object_store import BaseObjectStore
 from dulwich.objects import Commit, ObjectID, Tag
-from dulwich.refs import HEADREF, LOCAL_BRANCH_PREFIX, LOCAL_TAG_PREFIX
+from dulwich.refs import (
+    HEADREF,
+    LOCAL_BRANCH_PREFIX,
+    LOCAL_REMOTE_PREFIX,
+    LOCAL_TAG_PREFIX,
+)
 from dulwich.repo import BaseRepo
 
 from mirage.commands.builtin.utils.bre import (
@@ -32,12 +36,14 @@ from mirage.commands.builtin.utils.bre import (
     search_bre,
     translate_ere,
 )
+from mirage.commands.cli.builtin.git.constants import TEMPLATE_KINDS
 from mirage.commands.cli.builtin.git.dates import date_clock, parse_date_mode
 from mirage.commands.cli.builtin.git.errors import (
     BadDateError,
     GitError,
     IncompatibleLogOptionsError,
     InvalidDecorateError,
+    PatternCompileError,
     UnrecognizedArgumentError,
     UsageError,
 )
@@ -48,9 +54,13 @@ from mirage.commands.cli.builtin.git.format import (
     needs_decorations,
     parse_pretty,
 )
-from mirage.commands.cli.builtin.git.mailmap import mapped_identity
+from mirage.commands.cli.builtin.git.mailmap import (
+    load_mailmap,
+    mapped_identity,
+    use_mailmap,
+)
 from mirage.commands.cli.builtin.git.pickaxe import greps, touches
-from mirage.commands.cli.builtin.git.repo import config_values
+from mirage.commands.cli.builtin.git.repo import config_bool, config_values
 from mirage.commands.cli.builtin.git.types import (
     DateMode,
     Decoration,
@@ -65,7 +75,6 @@ from mirage.workspace.files import Files
 
 logger = logging.getLogger(__name__)
 
-REMOTE_PREFIX = b"refs/remotes/"
 BASIC_REGEXP = "basic_regexp"
 EXTENDED_REGEXP = "extended_regexp"
 FIXED_STRINGS = "fixed_strings"
@@ -178,19 +187,24 @@ class Walk:
     interesting: frozenset[bytes]
 
 
-def _timestamp(value: str | None, flag: str) -> float | None:
+def _timestamp(value: str | None, flag: str, now: int) -> float | None:
     """Read a date flag as an epoch second, refusing what it cannot read.
 
     Accepts an ISO-8601 date or a bare epoch second. git accepts far
     more (``2 weeks ago``, ``yesterday``); anything else is refused here
     rather than silently ignored, which would quietly widen the window.
+    An empty value is now, as git's approxidate reads a date that says
+    nothing (git 2.47: ``--since=`` lists no past commit).
 
     Args:
         value (str | None): the flag's value.
         flag (str): flag name, for error attribution.
+        now (int): the invocation's clock, in epoch seconds.
     """
     if value is None:
         return None
+    if value == "":
+        return float(now)
     parsed = iso_timestamp(value)
     if parsed is not None:
         return parsed
@@ -198,6 +212,24 @@ def _timestamp(value: str | None, flag: str) -> float | None:
         return float(value)
     except ValueError as exc:
         raise BadDateError(flag, value) from exc
+
+
+def _window_end(
+    fl: FlagView, names: tuple[str, str], flag: str, now: int
+) -> float | None:
+    """One end of the date window, from the last of its two spellings.
+
+    ``--after`` and ``--since`` (``--before`` and ``--until``) set one
+    limit, and each occurrence overwrites it, so the one typed last wins.
+
+    Args:
+        fl (FlagView): the log flags.
+        names (tuple[str, str]): the two dests of the one limit.
+        flag (str): flag name, for error attribution.
+        now (int): the invocation's clock, in epoch seconds.
+    """
+    typed = fl.typed_order(*names)
+    return _timestamp(fl.as_str(typed[-1]) if typed else None, flag, now)
 
 
 def pretty_format(fl: FlagView) -> LogFormat:
@@ -258,7 +290,7 @@ def _pattern(
             )
         return search_bre(value, ignore_case)
     except (BreError, re.error, regex.error) as exc:
-        raise GitError(f"{origin}, '{value}': {exc}") from exc
+        raise PatternCompileError(origin, value, str(exc)) from exc
 
 
 def _pickaxe_pattern(value: str, ignore_case: bool) -> re.Pattern[str]:
@@ -332,13 +364,14 @@ def parse_flags(
     if isinstance(search, str) and fl.as_bool("pickaxe_regex"):
         search = _pickaxe_pattern(search, ignore_case)
     max_count = fl.as_int("max_count")
+    clock = date_clock(env)
     return LogFlags(
         authors=authors,
         committers=committers,
         greps=greps,
         ignore_case=ignore_case,
         force_text=fl.as_bool("text"),
-        date=parse_date_mode(fl.as_str("date") or "default", date_clock(env)),
+        date=parse_date_mode(fl.as_str("date", "default"), clock),
         # git reads a negative count as no limit at all.
         max_count=None
         if max_count is not None and max_count < 0
@@ -352,8 +385,8 @@ def parse_flags(
         changed=None
         if changed is None
         else _pickaxe_pattern(changed, ignore_case),
-        since=_timestamp(fl.as_str("after") or fl.as_str("since"), "--since"),
-        until=_timestamp(fl.as_str("before") or fl.as_str("until"), "--until"),
+        since=_window_end(fl, ("after", "since"), "--since", clock.now),
+        until=_window_end(fl, ("before", "until"), "--until", clock.now),
         all_refs=fl.as_bool("all"),
         pretty=pretty,
         abbrev_commit=oneline,
@@ -459,17 +492,49 @@ async def decoration_for(
             style = decoration_style(configured[-1])
     if style is None:
         style = Decoration.NONE
-    if pretty.kind not in ("format", "tformat"):
+    if pretty.kind not in TEMPLATE_KINDS:
         return style
     if not needs_decorations(pretty):
         return Decoration.NONE
     return Decoration.SHORT if style is Decoration.NONE else style
 
 
+async def displayed(
+    vfs: Files,
+    location: RepoLocation,
+    fl: FlagView,
+    pretty: LogFormat,
+) -> tuple[tuple[MailmapEntry, ...], bool, Decoration]:
+    """How ``log`` and ``show`` present commits, once the repository's
+    config can be read: the worktree ``.mailmap``, whether the header
+    identities map through it (``log.mailmap`` unless the line's
+    ``--[no-]mailmap`` says otherwise), and the decoration style.
+
+    Args:
+        vfs (Files): the session's files.
+        location (RepoLocation): the discovered repository.
+        fl (FlagView): the line's flags.
+        pretty (LogFormat): the line's format.
+
+    Raises:
+        BadConfigValueError: a ``log.mailmap`` git cannot read as a
+            boolean.
+        InvalidDecorateError: a ``--decorate`` value that names no style.
+    """
+    return (
+        await load_mailmap(vfs, location),
+        use_mailmap(
+            fl, await config_bool(vfs, location, b"log", b"mailmap", True)
+        ),
+        await decoration_for(vfs, location, fl, pretty),
+    )
+
+
 def decorations(
     repo: BaseRepo, style: Decoration = Decoration.SHORT
-) -> dict[bytes, list[str]]:
-    """Ref labels per commit, in the order git prints them.
+) -> dict[bytes, list[str]] | None:
+    """Ref labels per commit, in the order git prints them; None for a
+    line that prints none.
 
     git walks refs alphabetically and prepends each label, so a
     commit's labels read in reverse ref order; HEAD is pulled to the
@@ -479,9 +544,11 @@ def decorations(
 
     Args:
         repo (BaseRepo): repository whose refs to enumerate.
-        style (Decoration): ``FULL`` keeps each ref's whole name;
-            anything else shortens it.
+        style (Decoration): ``FULL`` keeps each ref's whole name,
+            ``NONE`` loads nothing; anything else shortens it.
     """
+    if style is Decoration.NONE:
+        return None
     full = style is Decoration.FULL
     labels: dict[bytes, list[str]] = {}
     for name in sorted(repo.refs.allkeys()):
@@ -515,8 +582,8 @@ def _ref_label(name: bytes, full: bool) -> str:
         return text
     if name.startswith(LOCAL_BRANCH_PREFIX):
         return text[len(LOCAL_BRANCH_PREFIX) :]
-    if name.startswith(REMOTE_PREFIX):
-        return text[len(REMOTE_PREFIX) :]
+    if name.startswith(LOCAL_REMOTE_PREFIX):
+        return text[len(LOCAL_REMOTE_PREFIX) :]
     return text
 
 
@@ -794,22 +861,22 @@ def _filters_pass(commit: Commit, flags: LogFlags) -> bool:
     )
 
 
-def _picked(store: BaseObjectStore, commit: Commit, flags: LogFlags) -> bool:
+def _picked(repo: BaseRepo, commit: Commit, flags: LogFlags) -> bool:
     """Whether the pickaxe, if any, keeps a commit: ``-G``'s changed
     line, or ``-S``'s change in the count of a string or pattern.
 
     Args:
-        store (BaseObjectStore): object database holding the trees.
+        repo (BaseRepo): repository holding the trees.
         commit (Commit): the commit.
         flags (LogFlags): the parsed invocation.
     """
     if flags.changed is not None:
-        return greps(store, commit, flags.changed, flags.force_text)
+        return greps(repo, commit, flags.changed, flags.force_text)
     if flags.search is None:
         return True
     if isinstance(flags.search, str):
-        return touches(store, commit, flags.search.encode(), flags.ignore_case)
-    return touches(store, commit, flags.search)
+        return touches(repo, commit, flags.search.encode(), flags.ignore_case)
+    return touches(repo, commit, flags.search)
 
 
 def walked(
@@ -840,7 +907,6 @@ def walked(
         hidden (tuple[Commit, ...]): commits whose whole history is
             left out, the ``A`` of ``A..B``.
     """
-    store = repo.object_store
     if flags.max_count == 0:
         return Walk((), frozenset())
     source: Iterator[Commit] = (
@@ -860,7 +926,7 @@ def walked(
     for commit in source:
         if not _filters_pass(commit, flags):
             continue
-        shown = _picked(store, commit, flags)
+        shown = _picked(repo, commit, flags)
         steps.append(WalkStep(commit, shown))
         printed += shown
         if flags.max_count is not None and printed >= flags.max_count:

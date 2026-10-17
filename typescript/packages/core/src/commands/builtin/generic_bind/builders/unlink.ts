@@ -12,18 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { UsageError } from '../../../errors.ts'
-import { extraOperandError } from '../../../spec/usage.ts'
+import { extraOperandError, missingOperandError } from '../../../spec/usage.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { FileType } from '../../../../types.ts'
 import { fsStrerror, isFsError } from '../../../../errors/fs.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 import { linksOf } from '../../utils/links.ts'
 
 const unlink: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  if (paths.length === 0) {
-    throw new UsageError("unlink: missing operand\nTry 'unlink --help' for more information.", 1)
-  }
+  if (paths.length === 0) throw missingOperandError('unlink', null)
   const idx = ctx.index ?? undefined
   const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
   if (resolved.length > 1) {
@@ -45,7 +43,7 @@ const unlink: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
       null,
       new IOResult({
         exitCode: 1,
-        stderr: enc.encode(`unlink: cannot unlink '${p.rawPath}': Not a directory\n`),
+        stderr: enc.encode(`unlink: cannot unlink '${p.rawPath}': ${posixPhrase('ENOTDIR')}\n`),
       }),
     ]
   }
@@ -70,7 +68,7 @@ const unlink: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
       null,
       new IOResult({
         exitCode: 1,
-        stderr: enc.encode(`unlink: cannot unlink '${p.rawPath}': Is a directory\n`),
+        stderr: enc.encode(`unlink: cannot unlink '${p.rawPath}': ${posixPhrase('EISDIR')}\n`),
       }),
     ]
   }

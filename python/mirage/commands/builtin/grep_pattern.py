@@ -23,13 +23,7 @@ from mirage.commands.builtin.utils.bre import (
 )
 from mirage.commands.builtin.utils.operands import materialized_read
 from mirage.commands.builtin.utils.pcre import PcreError, translate_pcre
-from mirage.commands.builtin.utils.rust_regex import (
-    RustRegexError,
-    translate_rust,
-    whole_line,
-    whole_word,
-)
-from mirage.commands.builtin.utils.types import HostRegex
+from mirage.commands.builtin.utils.rust_regex import whole_line
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.shell.bytes import decode_text
@@ -271,32 +265,6 @@ def perl_regex(
     return translated.source, translated.ignore_case
 
 
-def rust_source(
-    pattern: str, fixed_string: bool, whole: bool, ignore_case: bool
-) -> HostRegex:
-    """ripgrep's default-engine pattern list as host source.
-
-    Args:
-        pattern (str): the newline-separated pattern list.
-        fixed_string (bool): -F.
-        whole (bool): -w, ripgrep's half word boundaries.
-        ignore_case (bool): -i or smart case.
-
-    Raises:
-        UsageError: ripgrep refuses the pattern.
-    """
-    parts = pattern.split("\n")
-    if fixed_string:
-        parts = [rust_escape(part) for part in parts]
-    try:
-        translated = translate_rust(parts, ignore_case)
-    except RustRegexError as exc:
-        raise UsageError(f"rg: {exc}") from exc
-    if not whole:
-        return translated
-    return HostRegex(whole_word(translated.source), translated.ignore_case)
-
-
 def rust_escape(text: str) -> str:
     """A literal as a Rust regex, the way ``regex::escape`` spells it.
 
@@ -365,18 +333,6 @@ def compile_pattern(
     """
     # GNU grep 3.11: -x overrides -w in either order.
     whole_word = whole_word and not line_regexp
-    if syntax is RegexSyntax.RUST:
-        translated = rust_source(
-            pattern, fixed_string, whole_word, ignore_case
-        )
-        source = (
-            whole_line(translated.source, False)
-            if line_regexp
-            else translated.source
-        )
-        return re.compile(
-            source, re.IGNORECASE if translated.ignore_case else 0
-        )
     if syntax is RegexSyntax.PERL and not fixed_string:
         source, fold = perl_regex(pattern, ignore_case, whole_word)
         if line_regexp:

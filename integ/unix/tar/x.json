@@ -1,0 +1,42 @@
+{
+  "cases": [
+    {
+      "id": "tar_x_names_a_miss_after_the_archive_notice",
+      "seq": 15100061,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tar -xf /data/a.txt nope",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar: This does not look like a tar archive\ntar: nope: Not found in archive\ntar: Exiting with failure status due to previous errors\n"
+      },
+      "flags": [
+        "x",
+        "f"
+      ]
+    }
+  ]
+}

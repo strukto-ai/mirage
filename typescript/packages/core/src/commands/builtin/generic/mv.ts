@@ -26,6 +26,7 @@ import {
 } from '../../../types.ts'
 import { isFifo } from '../../../utils/stat_view.ts'
 import { UsageError } from '../../errors.ts'
+import { usageHint } from '../../spec/usage.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { beforeFullScan } from '../utils/tree.ts'
 import { backupControl, siblingPath } from '../utils/backup.ts'
@@ -59,6 +60,8 @@ import {
   copyEntries,
   cpWalk,
   destKind,
+  justCreatedError,
+  sameFileError,
   sourceKind,
   makeBackup,
   overwriteGate,
@@ -70,6 +73,7 @@ import {
   suffixFlag,
   targetDirError,
   targetFlags,
+  typeMismatchError,
   updateGates,
   updateMode,
   type TransferPolicy,
@@ -128,8 +132,7 @@ export function parseFlags(fl: FlagView): MvFlags {
   const exchange = fl.asBool('exchange')
   if (control !== null && control !== 'none' && (exchange || noClobber || update === 'none-fail')) {
     throw new UsageError(
-      'mv: cannot combine --backup with --exchange, -n, or --update=none-fail\n' +
-        "Try 'mv --help' for more information.",
+      `mv: cannot combine --backup with --exchange, -n, or --update=none-fail\n${usageHint('mv')}`,
       1,
     )
   }
@@ -182,6 +185,12 @@ function replaceError(src: PathSpec, target: PathSpec, reason: string, across: b
     return `mv: inter-device move failed: '${src.rawPath}' to '${target.rawPath}'; unable to remove target: ${reason}`
   }
   return `mv: cannot overwrite '${target.rawPath}': ${reason}`
+}
+
+// GNU's line for a source mv could not move onto its target. Mirrors
+// Python's _move_error.
+function moveError(src: PathSpec, target: PathSpec, reason: string): string {
+  return `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${reason}`
 }
 
 // Remove copied source entries children first, GNU rm style. A failed
@@ -275,27 +284,22 @@ async function exchangePair(
   errors: string[],
   lines: string[] | undefined,
 ): Promise<void> {
+  const refused = `mv: cannot exchange '${src.rawPath}' and '${target.rawPath}'`
   if (isPrimitiveMove(strategy)) {
-    errors.push(
-      `mv: cannot exchange '${src.rawPath}' and '${target.rawPath}': Invalid cross-device link`,
-    )
+    errors.push(`${refused}: ${posixPhrase('EXDEV')}`)
     return
   }
   if (typedName(src) === '.' || typedName(src) === '..') {
-    errors.push(
-      `mv: cannot exchange '${src.rawPath}' and '${target.rawPath}': ${posixPhrase('EBUSY')}`,
-    )
+    errors.push(`${refused}: ${posixPhrase('EBUSY')}`)
     return
   }
   if (!(await pathExists(stat, src)) || !(await pathExists(stat, target))) {
-    errors.push(
-      `mv: cannot exchange '${src.rawPath}' and '${target.rawPath}': No such file or directory`,
-    )
+    errors.push(`${refused}: ${posixPhrase('ENOENT')}`)
     return
   }
   const holding = await holdingPath(stat, target)
   if (holding === null) {
-    errors.push(`mv: cannot exchange '${src.rawPath}' and '${target.rawPath}': File exists`)
+    errors.push(`${refused}: ${posixPhrase('EEXIST')}`)
     return
   }
   let staged = false
@@ -309,9 +313,7 @@ async function exchangePair(
   } catch (err) {
     if (!isFsError(err)) throw err
     const restored = await undoExchange(strategy, src, target, holding, staged, swapped)
-    errors.push(
-      `mv: cannot exchange '${src.rawPath}' and '${target.rawPath}': ${String(fsStrerror(err))}`,
-    )
+    errors.push(`${refused}: ${String(fsStrerror(err))}`)
     if (!restored) {
       errors.push(`mv: '${src.rawPath}' left at '${holding.rawPath}' after a failed exchange`)
     }
@@ -405,13 +407,13 @@ export async function mvGeneric(
       // directory renamed onto it is busy (coreutils 9.7).
       errors.push(
         srcIsDir
-          ? `mv: cannot move '${src.rawPath}' to '': Device or resource busy`
-          : `mv: cannot overwrite directory '' with non-directory '${src.rawPath}'`,
+          ? moveError(src, target, posixPhrase('EBUSY'))
+          : typeMismatchError('mv', src, target, false),
       )
       continue
     }
     if (keyOf(src) === keyOf(target)) {
-      errors.push(`mv: '${src.rawPath}' and '${target.rawPath}' are the same file`)
+      errors.push(sameFileError('mv', src, target))
       continue
     }
     if (flags.exchange) {
@@ -444,9 +446,7 @@ export async function mvGeneric(
       continue
     }
     if (slashRefusesFile(target, targetExists, srcIsDir)) {
-      errors.push(
-        `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${posixPhrase(targetErr ?? 'ENOTDIR')}`,
-      )
+      errors.push(moveError(src, target, posixPhrase(targetErr ?? 'ENOTDIR')))
       continue
     }
     // GNU lets -n, --update and -i decide before it weighs a type mismatch,
@@ -465,13 +465,11 @@ export async function mvGeneric(
       created.has(keyOf(target)) &&
       !(flags.noClobber || updateGates(flags.update) || flags.backup === 'numbered')
     ) {
-      errors.push(`mv: will not overwrite just-created '${target.rawPath}' with '${src.rawPath}'`)
+      errors.push(justCreatedError('mv', src, target))
       continue
     }
     if (busy) {
-      errors.push(
-        `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${posixPhrase('EBUSY')}`,
-      )
+      errors.push(moveError(src, target, posixPhrase('EBUSY')))
       continue
     }
     if (mountRoot?.(target.virtual) === true) {
@@ -482,9 +480,7 @@ export async function mvGeneric(
       if (backupDisplaces(flags.backup)) {
         errors.push(`mv: cannot backup '${target.rawPath}': ${busyPhrase}`)
       } else if (flags.noCopy) {
-        errors.push(
-          `mv: cannot move '${src.rawPath}' to '${target.rawPath}': Invalid cross-device link`,
-        )
+        errors.push(moveError(src, target, posixPhrase('EXDEV')))
       } else {
         errors.push(replaceError(src, target, busyPhrase, true))
       }
@@ -516,7 +512,7 @@ export async function mvGeneric(
         continue
       }
       if (children.length > 0) {
-        errors.push(replaceError(src, target, 'Directory not empty', across))
+        errors.push(replaceError(src, target, posixPhrase('ENOTEMPTY'), across))
         continue
       }
     }
@@ -528,9 +524,7 @@ export async function mvGeneric(
         guard(src, target)
       } catch (err) {
         if (!isFsError(err)) throw err
-        errors.push(
-          `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${String(fsStrerror(err))}`,
-        )
+        errors.push(moveError(src, target, String(fsStrerror(err))))
         continue
       }
     }
@@ -551,11 +545,7 @@ export async function mvGeneric(
         index,
         copies,
       )
-      if (made.ok) {
-        errors.push(
-          `mv: cannot move '${src.rawPath}' to '${target.rawPath}': Invalid cross-device link`,
-        )
-      }
+      if (made.ok) errors.push(moveError(src, target, posixPhrase('EXDEV')))
       continue
     }
     const sourceLink = copies !== undefined && copies.links.statAt(src.virtual) !== null
@@ -565,9 +555,7 @@ export async function mvGeneric(
         strategy.checkUnlink?.(src)
       } catch (err) {
         if (!isFsError(err)) throw err
-        errors.push(
-          `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${String(fsStrerror(err))}`,
-        )
+        errors.push(moveError(src, target, String(fsStrerror(err))))
         continue
       }
     }
@@ -604,18 +592,14 @@ export async function mvGeneric(
         await renameLink(copies, src, target)
       } catch (err) {
         if (!isFsError(err)) throw err
-        errors.push(
-          `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${String(fsStrerror(err))}`,
-        )
+        errors.push(moveError(src, target, String(fsStrerror(err))))
         continue
       }
     } else if (isPrimitiveMove(strategy)) {
       if (targetErr === 'ENOENT') {
         // GNU's rename meets the absent parent before it falls back to a
         // copy across devices.
-        errors.push(
-          `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${posixPhrase(targetErr)}`,
-        )
+        errors.push(moveError(src, target, posixPhrase(targetErr)))
         continue
       }
       if (targetIsDir && made.backup === null) {

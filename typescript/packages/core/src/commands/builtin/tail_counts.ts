@@ -48,8 +48,7 @@ export function parseByteCount(raw: string): number {
   return sign === '-' ? -count : count
 }
 
-export function parseN(n: string | null): [number, boolean] {
-  if (n === null) return [10, false]
+function parseN(n: string): [number, boolean] {
   if (n.startsWith('+')) return [Number.parseInt(n.slice(1), 10), true]
   return [Number.parseInt(n, 10), false]
 }

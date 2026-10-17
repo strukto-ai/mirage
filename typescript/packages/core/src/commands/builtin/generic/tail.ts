@@ -12,9 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isStdin, operandLabel } from '../utils/stream.ts'
+import { isStdin, operandHeader, showsHeaders } from '../utils/stream.ts'
 import { stdinStream, stdinStat } from '../utils/stream.ts'
-import { STDIN_HEADER_NAME } from '../utils/constants.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
@@ -32,11 +31,10 @@ import {
   parseSeconds,
   type TailCounts,
 } from '../tail_counts.ts'
-import { fsErrorLine } from '../../../errors/render.ts'
 import { enoent, fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
 import { shellQuote } from '../../../utils/quote.ts'
-import { splitOpened } from '../utils/operands.ts'
+import { reportFsError, splitOpened } from '../utils/operands.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
@@ -204,7 +202,6 @@ async function polledWindow(
   return materialize(data as ByteSource)
 }
 
-/** A follow poll's whole-file read, for a stat that carries no size. */
 // `stream`, answered by the mount's `lastLines(p, n)` where it can: the last
 // `n` lines without the rest of the file. Mirrors Python's `_read_last`.
 function readLast(
@@ -300,11 +297,7 @@ async function* tailMulti(
 ): AsyncIterable<Uint8Array> {
   let printed = 0
   for (const p of paths) {
-    let pending = showHeaders
-      ? encodeText(
-          (printed > 0 ? '\n' : '') + '==> ' + operandLabel(p, STDIN_HEADER_NAME) + ' <==\n',
-        )
-      : null
+    let pending = showHeaders ? operandHeader(p, printed > 0) : null
     if (unread.has(p.virtual)) {
       if (pending !== null) {
         yield pending
@@ -326,8 +319,7 @@ async function* tailMulti(
     } catch (err) {
       if (!isFsError(err)) throw err
       const code = (err as { code?: string }).code
-      note(io, fsErrorLine('tail', p, err))
-      io.exitCode = 1
+      await reportFsError(io, 'tail', p, err)
       if (pending !== null && code !== undefined && READ_FAILURES.has(code)) {
         yield pending
         printed++
@@ -338,6 +330,7 @@ async function* tailMulti(
   }
 }
 
+/** A follow poll's whole-file read, for a stat that carries no size. */
 async function* polledFile(dispatch: DispatchFn, p: PathSpec): AsyncIterable<Uint8Array> {
   yield await polledWindow(dispatch, p)
 }
@@ -416,11 +409,7 @@ async function* follow(
     for (const entry of [...active]) {
       const [slot, p] = entry
       if (unread.has(p.virtual)) {
-        if (showHeaders) {
-          yield encodeText(
-            `${last === null ? '' : '\n'}==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`,
-          )
-        }
+        if (showHeaders) yield operandHeader(p, last !== null)
         last = slot
         active.splice(active.indexOf(entry), 1)
         continue
@@ -448,17 +437,12 @@ async function* follow(
         // reported the way the stat's failure would have been, and under
         // --retry waited for like a file that was never there (this is the
         // initial open that a descriptor follow's --retry covers).
-        note(io, fsErrorLine('tail', p, err))
-        io.exitCode = 1
+        await reportFsError(io, 'tail', p, err)
         active.splice(active.indexOf(entry), 1)
         if (flags.retry) waiting.push([slot, p, APPEARED])
         continue
       }
-      if (showHeaders) {
-        yield encodeText(
-          `${last === null ? '' : '\n'}==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`,
-        )
-      }
+      if (showHeaders) yield operandHeader(p, last !== null)
       last = slot
       if (raw !== null) {
         yield* tail(raw, counts)
@@ -558,8 +542,7 @@ async function* follow(
       }
       const [data, pos] = grown
       if (data.byteLength > 0) {
-        if (showHeaders && last !== slot)
-          yield encodeText(`\n==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`)
+        if (showHeaders && last !== slot) yield operandHeader(p, true)
         last = slot
         yield data
       }
@@ -702,7 +685,7 @@ export async function tailGeneric(
     return [null, new IOResult({ stderr: retryWarning === '' ? null : encodeText(retryWarning) })]
   }
   if (paths.length > 0) {
-    const showHeaders = (vFlag || paths.length > 1) && !qFlag
+    const showHeaders = showsHeaders(vFlag, qFlag, paths.length)
     const [opened, unread, err] = await splitOpened(paths, stat, 'tail')
     const io = new IOResult({
       exitCode: err === '' ? 0 : 1,
@@ -763,7 +746,7 @@ export async function tailGeneric(
   }
 
   async function* output(): AsyncIterable<Uint8Array> {
-    if (vFlag && !qFlag) yield encodeText('==> ' + STDIN_HEADER_NAME + ' <==\n')
+    if (vFlag && !qFlag) yield operandHeader(null)
     yield* tail(ctx.stdin ?? new Uint8Array(), counts)
   }
   return [output(), new IOResult({ stderr: retryWarning === '' ? null : encodeText(retryWarning) })]

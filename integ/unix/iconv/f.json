@@ -275,6 +275,44 @@
         "stdout": " 61 00\n 00 61\naa\nrc=1\nrc=1\nrc=1\naaaaaaaaa\nrc=1\nrc=1\nrc=1\nrc=1\n",
         "stderr": "iconv: illegal input sequence at position 0\niconv: conversion to `LATIN-1' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\niconv: conversion from `UTF_8' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\niconv: conversion to `S_JIS' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\niconv: conversion to `/SJIS' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\niconv: conversion to `ſjis' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\niconv: conversion to `ascıı' is not supported\nTry `iconv --help' or `iconv --usage' for more information.\n"
       }
+    },
+    {
+      "id": "iconv_empty_charset_is_the_default",
+      "seq": 9940207,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'hi\\n' | iconv -f '' -t utf-8; printf 'hi\\n' | iconv -f utf-8 -t ''",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\nhi\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f",
+        "t"
+      ]
     }
   ]
 }

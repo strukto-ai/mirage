@@ -16,16 +16,28 @@ import { type RecordSpool, delimited } from '../../../io/record_spool.ts'
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { CommandName } from '../../spec/types.ts'
+import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { missingOperandError } from '../../spec/usage.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
+import { quoteText } from '../../quote.ts'
+import { EOVERFLOW_REASON, INT_MAX, xstrtoimax } from '../utils/strtol.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { ignoreBOM: true })
+
+/**
+ * csplit's refusal of a -n value, which GNU 9.7 reads with
+ * xdectoimax(optarg, 0, INT_MAX): out of that range is too large. Mirrors
+ * Python's `digits_refusal`.
+ */
+export function digitsRefusal(text: string, value: bigint | null): string {
+  const reason = value === null ? '' : `: ${EOVERFLOW_REASON}`
+  return `csplit: invalid number: '${quoteText(text)}'${reason}`
+}
 
 function isRegex(pattern: string): boolean {
   return pattern.startsWith('/') && pattern.endsWith('/')
@@ -137,6 +149,33 @@ function formatSuffix(index: number, digits: number, format: string | null): str
   })
 }
 
+interface CsplitFlags {
+  readonly prefix: string
+  readonly digits: number
+  readonly suffixFormat: string | null
+  readonly keepOnError: boolean
+  readonly silent: boolean
+  readonly suppressMatched: boolean
+  readonly elideEmpty: boolean
+}
+
+// csplit's options, read once, -n refused in GNU's words. Mirrors Python's
+// `parse_flags`.
+function parseFlags(bag: Record<string, FlagValue>): CsplitFlags {
+  const fl = new FlagView(bag, specOf('csplit'))
+  const digits = fl.asNumber('digits', xstrtoimax, digitsRefusal, { low: 0n, high: INT_MAX })
+  const suffixFormat = fl.asStr('suffix_format')
+  return {
+    prefix: fl.asPath('prefix')?.rawPath ?? 'xx',
+    digits: digits === undefined ? 2 : Number(digits),
+    suffixFormat: typeof suffixFormat === 'string' ? suffixFormat : null,
+    keepOnError: fl.asBool('keep_files'),
+    silent: fl.asBool('quiet') || fl.asBool('silent'),
+    suppressMatched: fl.asBool('suppress_matched'),
+    elideEmpty: fl.asBool('elide_empty_files'),
+  }
+}
+
 export async function csplitGeneric(
   paths: PathSpec[],
   texts: string[],
@@ -145,25 +184,18 @@ export async function csplitGeneric(
   write: (p: PathSpec, data: ByteSource) => Promise<void>,
   unlink: (p: PathSpec) => Promise<void>,
 ): Promise<CommandFnResult> {
+  // getopt reads -n before any operand is looked at.
+  const parsed = parseFlags(ctx.flags)
   // GNU wants FILE and a PATTERN before it opens anything.
   if (texts.length === 0) {
     throw missingOperandError(CommandName.CSPLIT, paths[paths.length - 1]?.rawPath ?? null)
   }
-  const fl = new FlagView(ctx.flags, specOf('csplit'))
   // An output is the -f prefix, or `xx` in the working directory, plus its
   // suffix, wherever the input lives: GNU writes `xx00` to the cwd, names it
   // as it formed it (`csplit: xx00`), and stops at the first one it cannot
   // create, -k or not. Mirrors csplit.py.
-  const typedPrefix = fl.asPath('prefix')?.rawPath ?? 'xx'
+  const typedPrefix = parsed.prefix
   const mountPrefix = ctx.mountPrefix ?? ''
-  const digitsValue = fl.asStr('digits')
-  const suffixValue = fl.asStr('suffix_format')
-  const digits = typeof digitsValue === 'string' ? Number.parseInt(digitsValue, 10) : 2
-  const suffixFormat = typeof suffixValue === 'string' ? suffixValue : null
-  const quiet = fl.asBool('quiet') || fl.asBool('silent')
-  const keep = fl.asBool('keep_files')
-  const suppressMatched = fl.asBool('suppress_matched')
-  const elideEmpty = fl.asBool('elide_empty_files')
   const first = paths[0]
   const source =
     first !== undefined && first.rawPath !== '-' ? stream(first) : (ctx.stdin ?? new Uint8Array())
@@ -173,13 +205,13 @@ export async function csplitGeneric(
     let diagnostics = checked[0]
     if (checked[1])
       return [new Uint8Array(), new IOResult({ stderr: ENC.encode(diagnostics), exitCode: 1 })]
-    const [parts, splitError] = await splitByPatterns(records, texts, suppressMatched)
+    const [parts, splitError] = await splitByPatterns(records, texts, parsed.suppressMatched)
     let error = splitError
     const sizes: string[] = []
     const created: [string, PathSpec][] = []
     for (const [first, last] of parts) {
-      if (elideEmpty && first === last) continue
-      const suffix = formatSuffix(sizes.length, digits, suffixFormat)
+      if (parsed.elideEmpty && first === last) continue
+      const suffix = formatSuffix(sizes.length, parsed.digits, parsed.suffixFormat)
       const name = typedPrefix + suffix
       const start = first < records.count ? (await records.window(first))[0] : records.data.size
       const end = last < records.count ? (await records.window(last))[0] : records.data.size
@@ -205,7 +237,7 @@ export async function csplitGeneric(
       sizes.push(String(size))
     }
     if (error !== null) diagnostics += error
-    if (error !== null && !keep) {
+    if (error !== null && !parsed.keepOnError) {
       // GNU removes every piece the failed run wrote unless -k keeps them, so
       // an earlier run's piece of that name is gone too.
       for (const [name, spec] of created) {
@@ -217,7 +249,7 @@ export async function csplitGeneric(
         }
       }
     }
-    const output = quiet || sizes.length === 0 ? '' : sizes.join('\n') + '\n'
+    const output = parsed.silent || sizes.length === 0 ? '' : sizes.join('\n') + '\n'
     const result: ByteSource = ENC.encode(output)
     return [
       result,

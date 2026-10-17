@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Errors } from 'isomorphic-git'
 import { getOpcodes } from '../../../builtin/diff_format.ts'
 import { DiffOpTag } from '../../../builtin/diff_types.ts'
 import { plural } from './dates.ts'
@@ -50,15 +51,17 @@ export interface FileStat {
  * A blob's bytes, empty when there is nothing to read.
  *
  * A gitlink names a commit in another repository, so its id is legitimately
- * absent from this store; it reads as empty rather than failing the whole
- * table.
+ * absent from this store, or names one of its commits rather than a blob; it
+ * reads as empty rather than failing the whole table.
  */
 async function blobData(repo: Repo, oid: string | null): Promise<Uint8Array> {
   if (oid === null) return new Uint8Array(0)
   try {
     return await readBlobBytes(repo, oid)
-  } catch {
-    return new Uint8Array(0)
+  } catch (err) {
+    if (err instanceof Errors.NotFoundError || err instanceof Errors.ObjectTypeError)
+      return new Uint8Array(0)
+    throw err
   }
 }
 

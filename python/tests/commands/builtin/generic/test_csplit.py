@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.commands.builtin.generic.csplit import csplit_generic
+from mirage.commands.config import Context
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -68,16 +69,19 @@ async def test_stdin_outputs_are_named_on_the_executing_mount(
     async def write_bytes(path: PathSpec, data: bytes) -> None:
         specs.append(path)
 
+    ctx = Context(
+        stdin=b"a\nb\n",
+        flags={"prefix": prefix},
+        cwd=PathSpec.from_str_path(cwd),
+        mount_prefix="/data",
+    )
     await csplit_generic(
         [],
         ["2"],
+        ctx,
         read_bytes=_no_read,
         write_bytes=write_bytes,
         unlink=_no_unlink,
-        stdin=b"a\nb\n",
-        prefix=prefix,
-        mount_prefix="/data",
-        cwd=cwd,
     )
     assert [p.virtual for p in specs] == named
 

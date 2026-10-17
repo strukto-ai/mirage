@@ -15,9 +15,11 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TypeVar
 
+from mirage.commands.builtin.utils.constants import STDIN_HEADER_NAME
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, materialize
+from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec, PolymorphicReadFn
 
 # The backend config a platform command threads through to its reader.
@@ -65,14 +67,15 @@ async def resolve_text_input(
     Args:
         read_bytes (Callable): backend read ``(config, path) -> bytes``.
         config: the backend config passed through to ``read_bytes``.
-        inline_text (str | None): text given inline on the command line.
+        inline_text (str | None): text given inline on the command line;
+            an empty one is the text (`--desc ''` clears a description).
         file_path (PathT | None): the operand to read the text from, in
             whatever shape ``read_bytes`` takes -- a backend reader wants
             the mount-relative path, not the virtual one.
         stdin (ByteSource | None): piped input.
         error_message (str): raised when no source provides text.
     """
-    if inline_text:
+    if inline_text is not None:
         return inline_text
     if file_path is not None:
         return (await read_bytes(config, file_path)).decode(errors="replace")
@@ -126,6 +129,35 @@ def operand_label(path: PathSpec, stdin_name: str) -> str:
         stdin_name (str): the command's name for ``-``.
     """
     return stdin_name if path.raw_path == "-" else path.raw_path
+
+
+def operand_header(path: PathSpec | None, after: bool = False) -> bytes:
+    """The ``==> name <==`` banner head and tail print above an operand.
+
+    Args:
+        path (PathSpec | None): the operand; None for the stdin no operand
+            named, which ``-v`` heads with the name ``-`` gets.
+        after (bool): whether a block printed before this one, which a
+            blank line then separates it from.
+    """
+    label = (
+        STDIN_HEADER_NAME
+        if path is None
+        else operand_label(path, STDIN_HEADER_NAME)
+    )
+    return encode_text(("\n" if after else "") + f"==> {label} <==\n")
+
+
+def shows_headers(verbose: bool, quiet: bool, count: int) -> bool:
+    """Whether head or tail banners its operands: under ``-v`` or for more
+    than one operand, never under ``-q``.
+
+    Args:
+        verbose (bool): ``-v``.
+        quiet (bool): ``-q``.
+        count (int): the operands as given, a failed one included.
+    """
+    return (verbose or count > 1) and not quiet
 
 
 def stdin_stream(

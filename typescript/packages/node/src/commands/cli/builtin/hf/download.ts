@@ -42,6 +42,9 @@ import { fetchTree, filterRepoPaths, repoFiles } from '../../../../core/hf_hub/t
 import type { TreeEntry } from '../../../../core/hf_hub/tree_entry.ts'
 import { hubFor, repoTypeOf, requireOperands, textOut } from './accessor.ts'
 
+// huggingface_hub 1.16.4's answer to a download pool under one worker.
+const MAX_WORKERS_REFUSAL = 'Invalid value. max_workers must be greater than 0'
+
 /**
  * Which repo paths a download line asks for.
  *
@@ -355,7 +358,15 @@ export async function downloadCmd(
   const tree = await listedOrEmpty(accessor)
   const paths = selected(tree, names, include, exclude)
   if (paths.length === 0) await refuseAbsent(accessor, names)
-  const workers = fl.asInt('max_workers') ?? MAX_DOWNLOAD_WORKERS
+  let workers = fl.asInt('max_workers', MAX_DOWNLOAD_WORKERS)
+  if (workers < 1) {
+    // Upstream fetches one named file without a pool and hands any other
+    // download to a thread pool, which refuses a size under 1.
+    if (names.length !== 1 || (names[0] ?? '').endsWith('/')) {
+      throw new UsageError(MAX_WORKERS_REFUSAL, 1)
+    }
+    workers = 1
+  }
   let base: string
   let written: string[]
   if (localDir !== undefined) {

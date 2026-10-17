@@ -21,13 +21,15 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { perOperand } from '../utils/operands.ts'
+import { TAB_WIDTH } from '../../../utils/width.ts'
+import { EOVERFLOW_REASON, ERANGE_REASON, xstrtoumax } from '../utils/strtol.ts'
+import { quoteText } from '../../quote.ts'
 
 const ENC = new TextEncoder()
 
 const WIDTH = 75
 const LEEWAY = 7
 const DEF_INDENT = 3
-const TAB_WIDTH = 8
 const MAX_WORDS = 1000
 const MAX_CHARS = 5000
 const EOF = -1
@@ -433,13 +435,35 @@ interface FmtFlags {
   readonly uniform: boolean
 }
 
+// fmt's refusal of a -w value, past its range a range error. Mirrors Python's
+// `_width_refusal`.
+function widthRefusal(text: string, value: bigint | null): string {
+  const reason = value === null ? '' : `: ${ERANGE_REASON}`
+  return `fmt: invalid width: '${quoteText(text)}'${reason}`
+}
+
+// fmt's refusal of a -g value, past the width too large. Mirrors Python's
+// `_goal_refusal`.
+function goalRefusal(text: string, value: bigint | null): string {
+  const reason = value === null ? '' : `: ${EOVERFLOW_REASON}`
+  return `fmt: invalid width: '${quoteText(text)}'${reason}`
+}
+
 function parseFlags(bag: Record<string, FlagValue>): FmtFlags {
   const fl = new FlagView(bag, specOf('fmt'))
-  const widthValue = fl.asStr('width')
-  const goalValue = fl.asStr('goal')
+  // GNU 9.7 reads -w with xdectoumax(optarg, 0, MAXCHARS / 2) and then -g with
+  // xdectoumax(optarg, 0, max_width).
+  const width = fl.asNumber('width', xstrtoumax, widthRefusal, {
+    low: 0n,
+    high: BigInt(MAX_CHARS / 2),
+  })
+  const goal = fl.asNumber('goal', xstrtoumax, goalRefusal, {
+    low: 0n,
+    high: width ?? BigInt(WIDTH),
+  })
   return {
-    width: typeof widthValue === 'string' ? Number.parseInt(widthValue, 10) : null,
-    goal: typeof goalValue === 'string' ? Number.parseInt(goalValue, 10) : null,
+    width: width === undefined ? null : Number(width),
+    goal: goal === undefined ? null : Number(goal),
     prefix: fl.asStr('prefix') ?? null,
     splitOnly: fl.asBool('split_only'),
     tagged: fl.asBool('tagged_paragraph'),

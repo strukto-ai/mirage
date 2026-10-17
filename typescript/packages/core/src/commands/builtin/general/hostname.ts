@@ -20,11 +20,9 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { SYNOPSES } from '../../spec/synopsis.ts'
 import { usageExitCode, usageHint } from '../../spec/usage.ts'
+import { HOSTNAME } from '../constants.ts'
 
 const ENC = new TextEncoder()
-
-// The one name every host answers with; uname -n prints it too.
-export const HOSTNAME = 'mirage'
 
 // What each display option prints, as a Debian host with no DNS domain whose
 // /etc/hosts maps its name to 127.0.1.1; null is the unset NIS domain.

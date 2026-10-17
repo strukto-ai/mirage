@@ -27,7 +27,6 @@ from mirage.commands.builtin.rg_scan import (
     on_other_mount,
     open_error_line,
     os_error_text,
-    walk_candidates,
     walk_error_line,
 )
 from mirage.commands.builtin.utils.wrap import to_pathspec
@@ -1024,69 +1023,6 @@ class TestWalkContext:
         ) == ["/tmp/w/a.txt:1", "/tmp/w/b.txt:1"]
 
 
-def _scope(virtual: str = "/data") -> PathSpec:
-    return PathSpec(vfs_path="", virtual=virtual, directory=virtual)
-
-
-def _candidate(virtual: str) -> PathSpec:
-    return PathSpec(
-        vfs_path=virtual.removeprefix("/data/"),
-        virtual=virtual,
-        directory="",
-        resolved=True,
-    )
-
-
-class TestWalkCandidates:
-    """Narrowed candidates pass the filters the walk they replace applies."""
-
-    def test_drops_dotfiles_below_the_scope(self):
-        kept = walk_candidates(
-            [
-                _candidate("/data/.env"),
-                _candidate("/data/.git/config"),
-                _candidate("/data/a.txt"),
-            ],
-            [_scope()],
-            _walk(),
-            "/",
-        )
-        assert [p.virtual for p in kept] == ["/data/a.txt"]
-
-    def test_hidden_flag_keeps_dotfiles(self):
-        paths = [_candidate("/data/.env"), _candidate("/data/a.txt")]
-        assert (
-            walk_candidates(paths, [_scope()], _walk(hidden=True), "/")
-            == paths
-        )
-
-    def test_ignores_dots_in_the_scope_itself(self):
-        kept = walk_candidates(
-            [_candidate("/data/.cfg/a.txt")],
-            [_scope("/data/.cfg")],
-            _walk(),
-            "/",
-        )
-        assert [p.virtual for p in kept] == ["/data/.cfg/a.txt"]
-
-    def test_applies_type_and_glob_to_the_file(self):
-        paths = [_candidate("/data/a.py"), _candidate("/data/b.md")]
-        by_type = walk_candidates(paths, [_scope()], _walk(type=["py"]), "/")
-        by_glob = walk_candidates(paths, [_scope()], _walk(glob=["*.md"]), "/")
-        assert [p.virtual for p in by_type] == ["/data/a.py"]
-        assert [p.virtual for p in by_glob] == ["/data/b.md"]
-
-    def test_a_directory_the_walk_would_skip_hides_its_files(self):
-        paths = [_candidate("/data/sub/a.py"), _candidate("/data/b.py")]
-        kept = walk_candidates(paths, [_scope()], _walk(glob=["!sub/"]), "/")
-        assert [p.virtual for p in kept] == ["/data/b.py"]
-
-    def test_max_depth_counts_below_the_scope(self):
-        paths = [_candidate("/data/a.py"), _candidate("/data/sub/b.py")]
-        kept = walk_candidates(paths, [_scope()], _walk(max_depth="1"), "/")
-        assert [p.virtual for p in kept] == ["/data/a.py"]
-
-
 class TestNamedOperandsAreNeverFiltered:
     """ripgrep 14.1.1 searches a file named on the line whatever --type,
     --glob or a leading dot say (`rg --type rust b in` prints `b`)."""
@@ -1107,17 +1043,6 @@ class TestNamedOperandsAreNeverFiltered:
         assert await rg(backend, "/tmp/w", "b", file_type="rust") == [
             "/tmp/w/.hid.rs:1:b"
         ]
-
-
-def test_walk_candidates_prunes_below_the_longest_matching_scope():
-    scopes = [_scope(), _scope("/data/.cfg")]
-    kept = walk_candidates(
-        [_candidate("/data/.cfg/a.txt"), _candidate("/data/.cfg/.secret")],
-        scopes,
-        _walk(),
-        "/",
-    )
-    assert [p.virtual for p in kept] == ["/data/.cfg/a.txt"]
 
 
 def test_os_error_text_numbers_what_the_vocabulary_names():

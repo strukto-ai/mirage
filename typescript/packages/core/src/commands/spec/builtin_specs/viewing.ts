@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { CommandSpec, Argument } from '../types.ts'
+import { PATH2_OPERAND, PATHS_OPERAND, TEXT_OPERAND } from '../constants.ts'
 
 export const SPECS: Record<string, CommandSpec> = {
   cat: new CommandSpec({
@@ -26,7 +27,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-T', '--show-tabs'], { action: 'store_true' }),
       new Argument(['-A', '--show-all'], { action: 'store_true' }),
       new Argument('-u', { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   column: new CommandSpec({
@@ -34,14 +35,14 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-t', { action: 'store_true' }),
       new Argument('-s'),
       new Argument('-o'),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   expand: new CommandSpec({
     arguments: [
       new Argument(['-t', '--tabs'], { action: 'append' }),
       new Argument(['-i', '--initial'], { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   fmt: new CommandSpec({
@@ -53,7 +54,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-s', '--split-only'], { action: 'store_true' }),
       new Argument(['-t', '--tagged-paragraph'], { action: 'store_true' }),
       new Argument(['-u', '--uniform-spacing'], { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   fold: new CommandSpec({
@@ -62,7 +63,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-s', '--spaces'], { action: 'store_true' }),
       new Argument(['-b', '--bytes'], { action: 'store_true' }),
       new Argument(['-c', '--characters'], { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   head: new CommandSpec({
@@ -73,15 +74,11 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('--silent', { action: 'store_true' }),
       new Argument(['-v', '--verbose'], { action: 'store_true' }),
       new Argument(['-z', '--zero-terminated'], { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   look: new CommandSpec({
-    arguments: [
-      new Argument('-f', { action: 'store_true' }),
-      new Argument('text', { metavar: '', nargs: '?' }),
-      new Argument('path2', { metavar: '', type: 'path', nargs: '?' }),
-    ],
+    arguments: [new Argument('-f', { action: 'store_true' }), TEXT_OPERAND, PATH2_OPERAND],
   }),
   nl: new CommandSpec({
     arguments: [
@@ -96,7 +93,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-i', '--line-increment'], { action: 'append' }),
       new Argument(['-w', '--number-width'], { action: 'append' }),
       new Argument(['-n', '--number-format'], { action: 'append' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   od: new CommandSpec({
@@ -106,18 +103,18 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-N', '--read-bytes']),
       new Argument(['-t', '--format'], { action: 'append' }),
       new Argument('-c', { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   rev: new CommandSpec({
-    arguments: [new Argument('paths', { metavar: '', type: 'path', nargs: '*' })],
+    arguments: [PATHS_OPERAND],
   }),
   tac: new CommandSpec({
     arguments: [
       new Argument(['-b', '--before'], { action: 'store_true' }),
       new Argument(['-r', '--regex'], { action: 'store_true' }),
       new Argument(['-s', '--separator']),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   tail: new CommandSpec({
@@ -130,7 +127,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-F', { action: 'store_true' }),
       new Argument('--retry', { action: 'store_true' }),
       new Argument(['-s', '--sleep-interval']),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   unexpand: new CommandSpec({
@@ -138,7 +135,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-t', '--tabs']),
       new Argument(['-a', '--all'], { action: 'store_true' }),
       new Argument('--first-only', { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
 }

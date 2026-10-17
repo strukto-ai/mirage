@@ -70,9 +70,7 @@ def number_flag_error(
     return None
 
 
-def _parse_n(n: str | None) -> tuple[int, bool]:
-    if n is None:
-        return 10, False
+def _parse_n(n: str) -> tuple[int, bool]:
     if n.startswith("+"):
         return int(n[1:]), True
     return int(n), False

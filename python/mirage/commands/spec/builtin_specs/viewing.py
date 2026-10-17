@@ -12,6 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec.constants import (
+    PATH2_OPERAND,
+    PATHS_OPERAND,
+    TEXT_OPERAND,
+)
 from mirage.commands.spec.types import Argument, CommandSpec
 
 SPECS: dict[str, CommandSpec] = {
@@ -27,7 +32,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-T", "--show-tabs", action="store_true"),
             Argument("-A", "--show-all", action="store_true"),
             Argument("-u", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "head": CommandSpec(
@@ -38,7 +43,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("--silent", action="store_true"),
             Argument("-v", "--verbose", action="store_true"),
             Argument("-z", "--zero-terminated", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "tail": CommandSpec(
@@ -59,7 +64,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-F", action="store_true"),
             Argument("--retry", action="store_true"),
             Argument("-s", "--sleep-interval"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "nl": CommandSpec(
@@ -75,7 +80,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-i", "--line-increment", action="append"),
             Argument("-w", "--number-width", action="append"),
             Argument("-n", "--number-format", action="append"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "tac": CommandSpec(
@@ -83,7 +88,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-b", "--before", action="store_true"),
             Argument("-r", "--regex", action="store_true"),
             Argument("-s", "--separator"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "column": CommandSpec(
@@ -91,7 +96,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-t", action="store_true"),
             Argument("-s"),
             Argument("-o"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "fold": CommandSpec(
@@ -100,7 +105,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-s", "--spaces", action="store_true"),
             Argument("-b", "--bytes", action="store_true"),
             Argument("-c", "--characters", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "fmt": CommandSpec(
@@ -112,17 +117,15 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-s", "--split-only", action="store_true"),
             Argument("-t", "--tagged-paragraph", action="store_true"),
             Argument("-u", "--uniform-spacing", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
-    "rev": CommandSpec(
-        arguments=(Argument("paths", type="path", nargs="*", metavar=""),)
-    ),
+    "rev": CommandSpec(arguments=(PATHS_OPERAND,)),
     "expand": CommandSpec(
         arguments=(
             Argument("-t", "--tabs", action="append"),
             Argument("-i", "--initial", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "unexpand": CommandSpec(
@@ -130,14 +133,14 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-t", "--tabs"),
             Argument("-a", "--all", action="store_true"),
             Argument("--first-only", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "look": CommandSpec(
         arguments=(
             Argument("-f", action="store_true"),
-            Argument("text", nargs="?", metavar=""),
-            Argument("path2", type="path", nargs="?", metavar=""),
+            TEXT_OPERAND,
+            PATH2_OPERAND,
         )
     ),
     "od": CommandSpec(
@@ -147,7 +150,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-N", "--read-bytes"),
             Argument("-t", "--format", action="append"),
             Argument("-c", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
 }

@@ -20,6 +20,7 @@ from mirage.commands.builtin.generic.archive.zip_update import (
 )
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.operands import normalized_read
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -467,7 +468,7 @@ async def zip_cmd(
             return _create_error(
                 archive_path, fs_strerror(exc), _stderr(plan.warnings, q)
             )
-        stdout = ("\n".join(output_lines) + "\n").encode() if not q else None
+        stdout = format_records(output_lines) if not q else None
         return stdout, IOResult(stderr=_stderr(plan.warnings, q))
 
 

@@ -61,6 +61,9 @@ from mirage.workspace.files import Files
 
 logger = logging.getLogger(__name__)
 
+# huggingface_hub 1.16.4's answer to a download pool under one worker.
+MAX_WORKERS_REFUSAL = "Invalid value. max_workers must be greater than 0"
+
 
 def selected(
     tree: dict[str, TreeEntry],
@@ -437,7 +440,13 @@ async def download_cmd(
         wanted = selected(tree, names, include, exclude)
         if not wanted:
             await refuse_absent(accessor, names)
-        workers = fl.as_int("max_workers") or MAX_DOWNLOAD_WORKERS
+        workers = fl.as_int("max_workers", MAX_DOWNLOAD_WORKERS)
+        if workers < 1:
+            # Upstream fetches one named file without a pool and hands any
+            # other download to a thread pool, which refuses a size under 1.
+            if len(names) != 1 or names[0].endswith("/"):
+                raise UsageError(MAX_WORKERS_REFUSAL, 1)
+            workers = 1
         if local_dir:
             # A named local directory downloads straight into it, with no
             # cache in between; that is what upstream does too, which is why

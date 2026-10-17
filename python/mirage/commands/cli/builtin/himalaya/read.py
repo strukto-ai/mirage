@@ -29,7 +29,7 @@ async def read(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     uid = first_text(texts, "message id")
-    mailbox = fl.as_str("mailbox") or "INBOX"
+    mailbox = fl.as_str("mailbox", "INBOX")
     accessor = EmailAccessor(config)
     try:
         if fl.as_bool("raw"):

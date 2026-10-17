@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Literal, TypeAlias
 
 from dulwich.objects import Commit
@@ -215,6 +215,13 @@ class CommitGraph:
                 return False
         return True
 
+    def _row(self) -> Iterator[tuple[int, bytes]]:
+        """The cells one row draws, by column: every column, then this
+        commit's own when it is in none of them."""
+        yield from enumerate(self._columns)
+        if self._commit not in self._columns:
+            yield len(self._columns), self._commit
+
     def _update_columns(self) -> None:
         """Lay out the next row: the columns after this commit, and where
         each edge of this row lands in them."""
@@ -225,16 +232,8 @@ class CommitGraph:
         self._width = 0
         self._prev_edges_added = self._edges_added
         self._edges_added = 0
-        seen_this = False
-        for i in range(len(self._columns) + 1):
-            if i == len(self._columns):
-                if seen_this:
-                    break
-                column = self._commit
-            else:
-                column = self._columns[i]
+        for i, column in self._row():
             if column == self._commit:
-                seen_this = True
                 self._commit_index = i
                 self._merge_layout = -1
                 for parent in self._parents:
@@ -329,13 +328,7 @@ class CommitGraph:
     def _commit_line(self) -> str:
         line = ""
         seen_this = False
-        for i in range(len(self._columns) + 1):
-            if i == len(self._columns):
-                if seen_this:
-                    break
-                column = self._commit
-            else:
-                column = self._columns[i]
+        for i, column in self._row():
             if column == self._commit:
                 seen_this = True
                 line += "*"
@@ -379,13 +372,7 @@ class CommitGraph:
         line = ""
         seen_this = False
         parent_seen = False
-        for i in range(len(self._columns) + 1):
-            if i == len(self._columns):
-                if seen_this:
-                    break
-                column = self._commit
-            else:
-                column = self._columns[i]
+        for i, column in self._row():
             if column == self._commit:
                 seen_this = True
                 at = self._merge_layout

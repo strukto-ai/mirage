@@ -22,6 +22,7 @@ import { stdinStream } from '../utils/stream.ts'
 import { reportedStream } from '../utils/operands.ts'
 import { asyncChain } from '../../../io/stream.ts'
 import { mapStream } from '../utils/lines.ts'
+import { TAB_WIDTH } from '../../../utils/width.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
@@ -66,9 +67,8 @@ interface UnexpandFlags {
 
 function parseFlags(bag: Record<string, FlagValue>): UnexpandFlags {
   const fl = new FlagView(bag, specOf('unexpand'))
-  const tabsValue = fl.asStr('tabs')
   return {
-    tabsize: tabsValue === undefined ? 8 : Number.parseInt(tabsValue, 10),
+    tabsize: Number.parseInt(fl.asNonEmpty('tabs', String(TAB_WIDTH)), 10),
     allSpaces: fl.asBool('all'),
     firstOnly: fl.asBool('first_only'),
   }

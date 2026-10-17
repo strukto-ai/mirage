@@ -1,3 +1,5 @@
+import sys
+
 _POWERS = {
     "K": 1,
     "M": 2,
@@ -50,7 +52,26 @@ def parse_base0(digits: str) -> int:
         return int(digits, 16)
     if digits.startswith("0") and len(digits) > 1:
         return int(digits, 8)
-    return int(digits, 10)
+    return decimal_value(digits)
 
 
-__all__ = ["parse_base0", "size_suffixes"]
+def decimal_value(digits: str) -> int:
+    """``digits`` read exactly as a decimal number, however long.
+
+    CPython's ``int()`` refuses a decimal string longer than
+    ``sys.get_int_max_str_digits()`` (4300 by default), and an option's
+    digit run has no such bound, so the digits are read in runs that
+    stay under it. Hex and octal are exempt from the limit.
+
+    Args:
+        digits (str): ASCII decimal digits, no sign.
+    """
+    run = sys.get_int_max_str_digits() or len(digits) or 1
+    value = 0
+    for start in range(0, len(digits), run):
+        part = digits[start : start + run]
+        value = value * 10 ** len(part) + int(part)
+    return value
+
+
+__all__ = ["decimal_value", "parse_base0", "size_suffixes"]

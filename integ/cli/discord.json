@@ -220,6 +220,32 @@
         "stdout": "11\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "dc_read_zero_limit",
+      "seq": 9940003,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord read --channel 200000000000000001 --limit 0 | jq length",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dc_poll_zero_duration",
+      "seq": 9940004,
+      "targets": [
+        "cli-discord"
+      ],
+      "command": "discord poll --channel 200000000000000001 --question Lunch? --answer Pizza --answer Sushi --duration 0 | jq -r '.poll.duration'",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
     }
   ]
 }

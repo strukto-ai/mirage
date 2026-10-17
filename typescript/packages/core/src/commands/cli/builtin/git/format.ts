@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { TEMPLATE_KINDS } from './constants.ts'
 import { showDate } from './dates.ts'
 import { mappedIdentity } from './mailmap.ts'
-import { DateKind, type DateMode, type MailmapEntry } from './types.ts'
+import { DateKind, Decoration, type DateMode, type MailmapEntry } from './types.ts'
 import { byteChar } from '../../../../shell/bytes.ts'
 import { BadPrettyError, UnsupportedPrettyError } from './errors.ts'
 
@@ -83,6 +84,25 @@ export interface LogFormat {
 }
 
 export const MEDIUM: LogFormat = { kind: 'medium', template: null }
+
+/** What `log` and `show` both read off their flags to present a commit. */
+export interface CommitDisplay {
+  /** How the commit renders. */
+  readonly pretty: LogFormat
+  /**
+   * Print an abbreviated id, which `--oneline` implies and `--pretty=oneline`
+   * alone does not.
+   */
+  readonly abbrevCommit: boolean
+  /** How dates render. */
+  readonly date: DateMode
+  /** The worktree `.mailmap`. */
+  readonly mailmap: readonly MailmapEntry[]
+  /** Map the header identities. */
+  readonly useMailmap: boolean
+  /** How the commit is labelled with its refs. */
+  readonly decorate: Decoration
+}
 
 /**
  * Read a --pretty/--format value the way git's pretty.c does.
@@ -184,34 +204,9 @@ function messageBlock(commit: CommitFacts): string[] {
 }
 
 /**
- * A full log entry: the header block and the indented message.
- *
- * A merge carries an extra `Merge:` line naming its parents in abbreviated form,
- * which git prints between the id and the author for both `log` and `show`.
- *
- * @param commit the commit to render
- * @param length how many hex digits of a parent id to print
+ * The `Merge:` line every block preset prints for a merge, which git puts
+ * between the id and the author for both `log` and `show`.
  */
-function entry(
-  commit: CommitFacts,
-  length: number = SHORT_SHA,
-  date: DateMode = DEFAULT_DATE,
-  mailmap: readonly MailmapEntry[] = [],
-): string[] {
-  const lines = [`commit ${commit.oid}`]
-  if (commit.parents.length > 1) {
-    lines.push(`Merge: ${commit.parents.map((p) => short(p, length)).join(' ')}`)
-  }
-  lines.push(
-    `Author: ${mappedIdentity(`${commit.authorName} <${commit.authorEmail}>`, mailmap)}`,
-    `Date:   ${showDate(commit.authorTime, commit.authorTimezoneMinutes, date)}`,
-    '',
-    ...messageBlock(commit),
-  )
-  return lines
-}
-
-/** The `Merge:` line every block preset prints for a merge. */
 function mergeLine(commit: CommitFacts, length: number): string[] {
   if (commit.parents.length <= 1) return []
   return [`Merge: ${commit.parents.map((p) => short(p, length)).join(' ')}`]
@@ -220,9 +215,10 @@ function mergeLine(commit: CommitFacts, length: number): string[] {
 /**
  * One commit as a block preset renders it (short/medium/full/fuller).
  *
- * Pinned against git 2.50: `short` is the id, author and indented subject;
- * `full` adds `Commit:` and drops both dates; `fuller` aligns four header
- * lines to the `AuthorDate:` column.
+ * Pinned against git 2.50: `medium` is the id, author, author date and
+ * indented message; `short` is the id, author and indented subject; `full`
+ * adds `Commit:` and drops both dates; `fuller` aligns four header lines to
+ * the `AuthorDate:` column.
  */
 export function presetBlock(
   commit: CommitFacts,
@@ -241,10 +237,18 @@ export function presetBlock(
       '',
       ...messageBlock(commit),
     ]
-  if (kind === 'medium') return entry(commit, length, date, mailmap)
   const author = mappedIdentity(`${commit.authorName} <${commit.authorEmail}>`, mailmap)
   const committer = mappedIdentity(`${commit.committerName} <${commit.committerEmail}>`, mailmap)
   const lines = [`commit ${commit.oid}`, ...mergeLine(commit, length)]
+  if (kind === 'medium') {
+    lines.push(
+      `Author: ${author}`,
+      `Date:   ${showDate(commit.authorTime, commit.authorTimezoneMinutes, date)}`,
+      '',
+      ...messageBlock(commit),
+    )
+    return lines
+  }
   if (kind === 'short') {
     lines.push(`Author: ${author}`, '', `${INDENT}${subject(commit)}`)
     return lines
@@ -414,4 +418,57 @@ function identPlaceholder(
       return showDate(time, zone, { ...date, kind, local: false, strftime: '' })
     }
   }
+}
+
+/**
+ * One commit's header, as `log` and `show` print it.
+ *
+ * `format:` is a separator, so a single commit prints with no trailing newline
+ * at all; `tformat:` terminates the entry even when it renders empty, except
+ * that an empty template prints nothing, which is how `--format=` stays
+ * silent. The caller encodes through `encodeText` because `%xHH` names a raw
+ * byte. Pinned against git 2.37 and 2.54. A decorated preset labels the commit
+ * after its id.
+ *
+ * @param commit the commit to render
+ * @param display the invocation's presentation flags
+ * @param width abbreviated id width for this repository
+ * @param decor ref labels when the format asked
+ */
+export function commitHeader(
+  commit: CommitFacts,
+  display: CommitDisplay,
+  width: number,
+  decor: Decorations | null,
+): string {
+  const fmt = display.pretty
+  const decorated = display.decorate !== Decoration.NONE
+  if (fmt.kind === 'oneline') {
+    const length = display.abbrevCommit ? width : FULL_SHA
+    return `${decorated ? renderTemplate('%h%d %s', commit, length, decor) : oneline(commit, length)}\n`
+  }
+  if (TEMPLATE_KINDS.includes(fmt.kind)) {
+    const text = renderTemplate(
+      fmt.template ?? '',
+      commit,
+      width,
+      decor,
+      display.date,
+      display.mailmap,
+    )
+    if (fmt.kind === 'tformat') {
+      return fmt.template === null || fmt.template === '' ? '' : `${text}\n`
+    }
+    return text
+  }
+  const block = presetBlock(
+    commit,
+    fmt.kind,
+    width,
+    display.date,
+    display.useMailmap ? display.mailmap : [],
+  )
+  if (decorated && block[0]?.startsWith('commit '))
+    block[0] += renderTemplate('%d', commit, width, decor)
+  return `${block.join('\n')}\n`
 }

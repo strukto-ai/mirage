@@ -25,6 +25,7 @@ from mirage.types import FileStat, PathSpec
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.stat_view import (
     CHAR_MODE,
+    CHMOD_MODE_BITS,
     DIR_MODE,
     FIFO_MODE,
     FILE_MODE,
@@ -119,7 +120,7 @@ def _mode_bits(st: FileStat | None, kind: str) -> int:
     base = _KIND_MODE[kind]
     if st is None or st.mode is None:
         return base
-    return (base & ~0o7777) | (st.mode & 0o7777)
+    return (base & ~CHMOD_MODE_BITS) | (st.mode & CHMOD_MODE_BITS)
 
 
 def expand_printf(
@@ -216,7 +217,7 @@ def expand_printf(
                 group_name(st.gid if st is not None else None, identity)
             )
         elif code == "m":
-            out.append(format(_mode_bits(st, kind) & 0o7777, "o"))
+            out.append(format(_mode_bits(st, kind) & CHMOD_MODE_BITS, "o"))
         elif code == "M":
             out.append(filemode(_mode_bits(st, kind)))
         elif code == "T" and i < n:

@@ -13,8 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
-from dulwich.object_store import MemoryObjectStore
 from dulwich.objects import Blob, Tree
+from dulwich.repo import MemoryRepo
 
 from mirage import Workspace
 from mirage.commands.cli.builtin.git import GIT
@@ -114,6 +114,31 @@ def test_status_only_reads():
     assert not GIT.handlers["status"].write
 
 
+def test_every_verb_that_can_change_the_repository_is_a_write():
+    # A verb that writes only under some of its options (branch,
+    # symbolic-ref, hash-object -w) still counts, since policy and the
+    # cache read one answer for the whole verb.
+    assert {
+        path for path, handler in GIT.handlers.items() if handler.write
+    } == {
+        "add",
+        "branch",
+        "checkout",
+        "clone",
+        "commit",
+        "fetch",
+        "hash-object",
+        "init",
+        "mv",
+        "reset",
+        "restore",
+        "rm",
+        "switch",
+        "symbolic-ref",
+        "tag",
+    }
+
+
 @pytest.mark.asyncio
 async def test_status_outside_a_repository_is_gits_fatal():
     with Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE) as ws:
@@ -200,10 +225,10 @@ def test_tree_entries_flattens_subtrees_and_keeps_a_submodule_whole():
     root.add(b"a.txt", 0o100755, blob.id)
     root.add(b"dir", 0o040000, sub.id)
     root.add(b"vendor", 0o160000, commit)
-    store = MemoryObjectStore()
+    repo = MemoryRepo()
     for obj in (blob, sub, root):
-        store.add_object(obj)
-    assert tree_entries(store, root.id) == {
+        repo.object_store.add_object(obj)
+    assert tree_entries(repo, root.id) == {
         b"a.txt": (0o100755, blob.id),
         b"dir/b.txt": (0o100644, blob.id),
         b"vendor": (0o160000, commit),

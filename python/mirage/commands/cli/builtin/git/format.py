@@ -13,9 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass, replace
+from typing import Protocol
 
 from dulwich.objects import Commit
 
+from mirage.commands.cli.builtin.git.constants import TEMPLATE_KINDS
 from mirage.commands.cli.builtin.git.dates import show_date
 from mirage.commands.cli.builtin.git.errors import (
     BadPrettyError,
@@ -25,9 +27,10 @@ from mirage.commands.cli.builtin.git.mailmap import mapped_identity
 from mirage.commands.cli.builtin.git.types import (
     DateKind,
     DateMode,
+    Decoration,
     MailmapEntry,
 )
-from mirage.shell.bytes import byte_char
+from mirage.shell.bytes import byte_char, encode_text
 
 SHORT_SHA = 7
 FULL_SHA = 40
@@ -73,6 +76,40 @@ class LogFormat:
 
 
 MEDIUM = LogFormat(kind="medium")
+
+
+class CommitDisplay(Protocol):
+    """What ``log`` and ``show`` both read off their flags to present a
+    commit.
+
+    Args:
+        pretty (LogFormat): how the commit renders.
+        abbrev_commit (bool): print an abbreviated id, which
+            ``--oneline`` implies and ``--pretty=oneline`` alone does
+            not.
+        date (DateMode): how dates render.
+        mailmap (tuple[MailmapEntry, ...]): the worktree ``.mailmap``.
+        use_mailmap (bool): map the header identities.
+        decorate (Decoration): how the commit is labelled with its refs.
+    """
+
+    @property
+    def pretty(self) -> LogFormat: ...
+
+    @property
+    def abbrev_commit(self) -> bool: ...
+
+    @property
+    def date(self) -> DateMode: ...
+
+    @property
+    def mailmap(self) -> tuple[MailmapEntry, ...]: ...
+
+    @property
+    def use_mailmap(self) -> bool: ...
+
+    @property
+    def decorate(self) -> Decoration: ...
 
 
 def parse_pretty(value: str) -> LogFormat:
@@ -191,42 +228,10 @@ def message_block(commit: Commit) -> list[str]:
     return [f"{INDENT}{line}" for line in text.split("\n")]
 
 
-def entry(
-    commit: Commit,
-    length: int = SHORT_SHA,
-    date: DateMode = DEFAULT_DATE,
-    mailmap: tuple[MailmapEntry, ...] = (),
-) -> list[str]:
-    """A full log entry: the header block and the indented message.
-
-    A merge carries an extra ``Merge:`` line naming its parents in
-    abbreviated form, which git prints between the id and the author for
-    both ``log`` and ``show``.
-
-    Args:
-        commit (Commit): the commit to render.
-        length (int): how many hex digits of a parent id to print.
-    """
-    lines = [f"commit {commit.id.decode()}"]
-    if len(commit.parents) > 1:
-        lines.append(
-            f"Merge: {' '.join(short(p, length) for p in commit.parents)}"
-        )
-    author = mapped_identity(commit.author.decode("utf-8", "replace"), mailmap)
-    lines.extend(
-        [
-            f"Author: {author}",
-            "Date:   "
-            + show_date(commit.author_time, commit.author_timezone, date),
-            "",
-            *message_block(commit),
-        ]
-    )
-    return lines
-
-
 def _merge_line(commit: Commit, length: int) -> list[str]:
-    """The ``Merge:`` line every block preset prints for a merge.
+    """The ``Merge:`` line every block preset prints for a merge, which
+    git puts between the id and the author for both ``log`` and
+    ``show``.
 
     Args:
         commit (Commit): the commit to render.
@@ -235,15 +240,6 @@ def _merge_line(commit: Commit, length: int) -> list[str]:
     if len(commit.parents) <= 1:
         return []
     return [f"Merge: {' '.join(short(p, length) for p in commit.parents)}"]
-
-
-def _subject_only_block(commit: Commit) -> list[str]:
-    """The subject indented the way ``--pretty=short`` prints it.
-
-    Args:
-        commit (Commit): the commit to render.
-    """
-    return [f"{INDENT}{subject(commit)}"]
 
 
 def preset_block(
@@ -255,7 +251,8 @@ def preset_block(
 ) -> list[str]:
     """One commit as a block preset renders it (short/medium/full/fuller).
 
-    Pinned against git 2.50: ``short`` is the id, author and indented
+    Pinned against git 2.50: ``medium`` is the id, author, author date
+    and indented message; ``short`` is the id, author and indented
     subject; ``full`` adds ``Commit:`` and drops both dates; ``fuller``
     aligns four header lines to the ``AuthorDate:`` column.
 
@@ -276,8 +273,6 @@ def preset_block(
             "",
             *message_block(commit),
         ]
-    if kind == "medium":
-        return entry(commit, length, date, mailmap)
     author = mapped_identity(
         commit.author.decode("utf-8", errors="replace"), mailmap
     )
@@ -285,8 +280,19 @@ def preset_block(
         commit.committer.decode("utf-8", errors="replace"), mailmap
     )
     lines = [f"commit {commit.id.decode()}", *_merge_line(commit, length)]
+    if kind == "medium":
+        lines.extend(
+            [
+                f"Author: {author}",
+                "Date:   "
+                + show_date(commit.author_time, commit.author_timezone, date),
+                "",
+                *message_block(commit),
+            ]
+        )
+        return lines
     if kind == "short":
-        lines.extend([f"Author: {author}", "", *_subject_only_block(commit)])
+        lines.extend([f"Author: {author}", "", f"{INDENT}{subject(commit)}"])
         return lines
     if kind == "full":
         lines.extend(
@@ -356,19 +362,6 @@ def _body(message: str) -> str:
     return rest if separator else ""
 
 
-def decoration_names(decor: Decorations | None, commit: Commit) -> list[str]:
-    """The decoration labels attached to one commit, or none.
-
-    Args:
-        decor (Decorations | None): sha-keyed labels, None when the
-            format never asked for them.
-        commit (Commit): the commit being rendered.
-    """
-    if decor is None:
-        return []
-    return decor.get(commit.id, [])
-
-
 def render_template(
     template: str,
     commit: Commit,
@@ -393,7 +386,7 @@ def render_template(
         decor (Decorations | None): ref labels for %d/%D.
     """
     message = commit.message.decode("utf-8", errors="replace")
-    labels = decoration_names(decor, commit)
+    labels = [] if decor is None else decor.get(commit.id, [])
     out: list[str] = []
     i = 0
     while i < len(template):
@@ -512,3 +505,59 @@ def _ident_placeholder(
             ),
         )
     return None
+
+
+def commit_header(
+    commit: Commit,
+    display: CommitDisplay,
+    width: int,
+    decor: Decorations | None,
+) -> bytes:
+    """One commit's header, as ``log`` and ``show`` print it.
+
+    ``format:`` is a separator, so a single commit prints with no
+    trailing newline at all; ``tformat:`` terminates the entry even
+    when it renders empty, except that an empty template prints
+    nothing, which is how ``--format=`` stays silent. Bytes go out
+    through ``encode_text`` because ``%xHH`` names a raw byte. Pinned
+    against git 2.37 and 2.54. A decorated preset labels the commit
+    after its id.
+
+    Args:
+        commit (Commit): the commit to render.
+        display (CommitDisplay): the invocation's presentation flags.
+        width (int): abbreviated id width for this repository.
+        decor (Decorations | None): ref labels when the format asked.
+    """
+    fmt = display.pretty
+    decorated = display.decorate is not Decoration.NONE
+    if fmt.kind == "oneline":
+        length = width if display.abbrev_commit else FULL_SHA
+        line = (
+            render_template("%h%d %s", commit, length, decor)
+            if decorated
+            else oneline(commit, length)
+        )
+        return f"{line}\n".encode()
+    if fmt.kind in TEMPLATE_KINDS:
+        rendered = render_template(
+            fmt.template or "",
+            commit,
+            width,
+            decor,
+            display.date,
+            display.mailmap,
+        )
+        if fmt.kind == "tformat":
+            return encode_text(f"{rendered}\n") if fmt.template else b""
+        return encode_text(rendered)
+    block = preset_block(
+        commit,
+        fmt.kind,
+        width,
+        display.date,
+        display.mailmap if display.use_mailmap else (),
+    )
+    if decorated and block and block[0].startswith("commit "):
+        block[0] += render_template("%d", commit, width, decor)
+    return ("\n".join(block) + "\n").encode()

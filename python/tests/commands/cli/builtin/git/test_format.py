@@ -22,9 +22,9 @@ from mirage.commands.cli.builtin.git.errors import (
 )
 from mirage.commands.cli.builtin.git.format import (
     abbrev_length,
-    entry,
     message_block,
     oneline,
+    preset_block,
     short,
     subject,
 )
@@ -75,9 +75,9 @@ def test_blank_message_lines_render_as_four_spaces():
     ]
 
 
-def test_entry_has_gits_header_block():
+def test_medium_has_gits_header_block():
     commit = _commit(b"first commit\n")
-    assert entry(commit) == [
+    assert preset_block(commit, "medium", 7) == [
         f"commit {commit.id.decode()}",
         "Author: Dev Person <dev@example.com>",
         "Date:   Fri Jan 16 11:10:00 2026 +0000",
@@ -91,7 +91,7 @@ def test_a_merge_lists_its_parents_between_id_and_author():
     # one parent, in both log and show.
     commit = _commit(b"merge side\n")
     commit.parents = [b"a" * 40, b"b" * 40]
-    assert entry(commit)[:3] == [
+    assert preset_block(commit, "medium", 7)[:3] == [
         f"commit {commit.id.decode()}",
         f"Merge: {'a' * 7} {'b' * 7}",
         "Author: Dev Person <dev@example.com>",
@@ -101,7 +101,9 @@ def test_a_merge_lists_its_parents_between_id_and_author():
 def test_a_single_parent_commit_has_no_merge_line():
     commit = _commit(b"ordinary\n")
     commit.parents = [b"a" * 40]
-    assert not any(line.startswith("Merge:") for line in entry(commit))
+    assert not any(
+        line.startswith("Merge:") for line in preset_block(commit, "medium", 7)
+    )
 
 
 # Measured against git 2.50.1 by building repositories of each size and
@@ -235,7 +237,6 @@ def test_preset_blocks_shape_their_headers():
     assert fuller_lines[2].startswith("AuthorDate: ")
     assert fuller_lines[3].startswith("Commit:     ")
     assert fuller_lines[4].startswith("CommitDate: ")
-    assert git_format.preset_block(commit, "medium", 7) == entry(commit, 7)
 
 
 def test_render_template_names_raw_bytes_with_x():

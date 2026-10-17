@@ -2,6 +2,7 @@ import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
+from mirage.commands.builtin.constants import EOVERFLOW_TEXT
 from mirage.commands.builtin.utils.paths import absent_dest_error
 from mirage.commands.builtin.utils.size_suffix import size_suffixes
 from mirage.commands.errors import UsageError
@@ -9,6 +10,7 @@ from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.usage import usage_hint
 from mirage.errors.classify import classify
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eisdir, enoent, enotdir
@@ -26,7 +28,6 @@ from mirage.utils.stat_view import is_dir
 _UNITS = size_suffixes("EGKMPQRTYZgkmt")
 _OFF_T_MAX = 2**63 - 1
 _WS = " \t\n\v\f\r"
-_TRY_HELP = "\nTry 'truncate --help' for more information."
 
 # GNU reads the -s operand as [ws][mode][ws][sign]digits[suffix]: C-locale
 # whitespace is skipped before and after the mode character (` < 4` caps at
@@ -51,7 +52,9 @@ def parse_size(value: str, current: int) -> int:
         # A sign after <, >, / or % is a second relative modifier, refused
         # before the number is read (`<+4` is not an invalid number).
         raise UsageError(
-            "truncate: multiple relative modifiers specified" + _TRY_HELP, 1
+            "truncate: multiple relative modifiers specified\n"
+            + usage_hint("truncate"),
+            1,
         )
     raw = remainder[1:] if sign else remainder
     suffix = next(
@@ -74,8 +77,7 @@ def parse_size(value: str, current: int) -> int:
     # (`-s -8E` reduces to zero while `-s 8E` is too large).
     if number > _OFF_T_MAX + (1 if sign == "-" else 0):
         raise UsageError(
-            f"truncate: Invalid number: '{shown}': "
-            "Value too large for defined data type",
+            f"truncate: Invalid number: '{shown}': {EOVERFLOW_TEXT}",
             1,
         )
     if number == 0 and operation in {"/", "%"}:
@@ -121,8 +123,8 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TruncateFlags:
     size = fl.as_str("size")
     if size is None:
         raise UsageError(
-            "truncate: you must specify either '--size' or '--reference'"
-            + _TRY_HELP,
+            "truncate: you must specify either '--size' or '--reference'\n"
+            + usage_hint("truncate"),
             1,
         )
     parse_size(size, 0)
@@ -149,7 +151,9 @@ async def truncate_generic(
         truncate_fn (Callable): sets the length and enforces no_create.
     """
     if not paths:
-        raise UsageError("truncate: missing file operand" + _TRY_HELP, 1)
+        raise UsageError(
+            f"truncate: missing file operand\n{usage_hint('truncate')}", 1
+        )
     errors: list[str] = []
     for path in paths:
         try:

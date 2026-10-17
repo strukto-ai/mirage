@@ -20,6 +20,11 @@ from dulwich.objects import Commit, ObjectID, ShaFile, Tag, Tree
 from dulwich.repo import BaseRepo
 
 from mirage.commands.builtin.utils.stream import read_stdin_async
+from mirage.commands.cli.builtin.git.constants import (
+    GITLINK,
+    OBJECT_TYPES,
+    TREE,
+)
 from mirage.commands.cli.builtin.git.errors import (
     AmbiguousArgumentError,
     GitError,
@@ -40,7 +45,6 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
-OBJECT_TYPES = ("blob", "tree", "commit", "tag")
 # The query modes, each named by the switch that selects it.
 QUERIES = ("t", "s", "e", "p")
 BATCH_FORMAT = "%(objectname) %(objecttype) %(objectsize)"
@@ -91,7 +95,7 @@ def pretty(obj: ShaFile) -> bytes:
     """
     if not isinstance(obj, Tree):
         return obj.as_raw_string()
-    kinds = {0o40000: b"tree", 0o160000: b"commit"}
+    kinds = {TREE: b"tree", GITLINK: b"commit"}
     return b"".join(
         b"%06o %s %s\t%s\n" % (mode, kinds.get(mode, b"blob"), sha, name)
         for name, mode, sha in obj.iteritems()

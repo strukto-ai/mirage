@@ -597,7 +597,7 @@ COMMIT_OPTIONS = (
 
 CHECKOUT_OPTIONS = (
     Argument(
-        "-b", action="store_true", help="Create the branch and switch to it"
+        "-b", metavar="branch", help="Create the branch and switch to it"
     ),
     Argument(
         "--detach", action="store_true", help="Leave HEAD on the commit itself"
@@ -1552,12 +1552,14 @@ GIT = CLI(
         "reflog": CLIHandler(fn=verb(reflog)),
         "for-each-ref": CLIHandler(fn=verb(for_each_ref)),
         "cat-file": CLIHandler(fn=verb(cat_file)),
-        "hash-object": CLIHandler(fn=verb(hash_object, hash_object_read_only)),
+        "hash-object": CLIHandler(
+            fn=verb(hash_object, hash_object_read_only), write=True
+        ),
         "grep": CLIHandler(fn=verb(grep)),
         "ls-tree": CLIHandler(fn=verb(ls_tree)),
         "ls-files": CLIHandler(fn=verb(ls_files)),
-        "fetch": CLIHandler(fn=verb(fetch, fetch_read_only)),
-        "clone": CLIHandler(fn=verb(clone, clone_read_only)),
+        "fetch": CLIHandler(fn=verb(fetch, fetch_read_only), write=True),
+        "clone": CLIHandler(fn=verb(clone, clone_read_only), write=True),
         "help": CLIHandler(fn=verb(help_cmd)),
         "init": CLIHandler(fn=verb(init), write=True),
         "fsck": CLIHandler(fn=verb(fsck)),

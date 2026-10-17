@@ -103,8 +103,9 @@ export async function sourceTree(
   let found: GitObject
   try {
     found = await resolveObject(repo, revision)
-  } catch {
-    throw new UnresolvableSourceError(revision)
+  } catch (err) {
+    if (err instanceof GitError) throw new UnresolvableSourceError(revision)
+    throw err
   }
   // A local branch of that name wins over every other reading, as it does for
   // checkout's own operand: `--source=main` reads the branch even where a tag

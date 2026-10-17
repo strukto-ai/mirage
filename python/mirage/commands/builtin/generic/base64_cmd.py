@@ -2,13 +2,16 @@ import base64 as b64lib
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 
+from mirage.commands.builtin.constants import INTMAX
 from mirage.commands.builtin.utils.operands import split_readable
 from mirage.commands.builtin.utils.stream import (
     resolve_source,
     stdin_stat,
     stdin_stream,
 )
+from mirage.commands.builtin.utils.strtol import xstrtoimax
 from mirage.commands.config import Context
+from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
@@ -18,12 +21,14 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, ReadStreamFn, StatFn
 
 ALPHABET = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+# GNU base64's line length when -w names none.
+WRAP_WIDTH = 76
 
 
 async def _base64_encode_stream(
     source: AsyncIterator[bytes], wrap: int | None
 ) -> AsyncIterator[bytes]:
-    width = 76 if wrap is None else wrap
+    width = WRAP_WIDTH if wrap is None else wrap
     pending = b""
     column = 0
     stream = chunks(source)
@@ -146,6 +151,16 @@ async def base64_cmd(
 __all__ = ["base64_cmd"]
 
 
+def _wrap_refusal(text: str, value: int | None) -> str:
+    """base64's refusal of a -w value that is no number or negative.
+
+    Args:
+        text (str): the value as typed.
+        value (int | None): what it scanned to, None for no number.
+    """
+    return f"base64: invalid wrap size: '{quote_text(text)}'"
+
+
 @dataclass(frozen=True, slots=True)
 class Base64Flags:
     decode: bool = False
@@ -155,10 +170,12 @@ class Base64Flags:
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> Base64Flags:
     fl = FlagView(flags, spec=SPECS["base64"])
-    wrap_value = fl.as_str("wrap")
+    # GNU 9.7 reads -w with xstrtoimax and takes a width past intmax_t
+    # as no wrapping at all.
+    wrap = fl.as_number("wrap", xstrtoimax, _wrap_refusal, low=0)
     return Base64Flags(
         decode=fl.as_bool("D") or fl.as_bool("decode"),
-        wrap=int(wrap_value) if wrap_value is not None else None,
+        wrap=None if wrap is None else (0 if wrap > INTMAX else wrap),
         ignore_garbage=fl.as_bool("ignore_garbage"),
     )
 

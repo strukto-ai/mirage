@@ -54,6 +54,24 @@
         "stdout": "0000000   a   b  \\n\n0000003\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "od_empty_address_radix_is_refused",
+      "seq": 9940203,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf 'ab' | od -A '' -c; printf 'ab' | od -A z -c; printf 'ab' | od -A dx -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000   a   b\n0000002\n",
+        "stderr": "od: invalid output address radix '\u0000'; it must be one character from [doxn]\nod: invalid output address radix 'z'; it must be one character from [doxn]\n"
+      },
+      "flags": [
+        "address-radix"
+      ]
     }
   ]
 }

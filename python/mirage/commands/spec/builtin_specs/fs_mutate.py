@@ -12,7 +12,56 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec.constants import (
+    PATHS_OPERAND,
+    TEXT_OPERAND,
+    TEXTS_OPERAND,
+)
 from mirage.commands.spec.types import Argument, CommandSpec
+
+OWNERSHIP = CommandSpec(
+    arguments=(
+        Argument("-c", "--changes", action="store_true"),
+        Argument("-f", "--silent", action="store_true"),
+        Argument("--quiet", action="store_true"),
+        Argument("-v", "--verbose", action="store_true"),
+        Argument("--dereference", action="store_true"),
+        Argument("-h", "--no-dereference", action="store_true"),
+        Argument("-R", "--recursive", action="store_true"),
+        TEXT_OPERAND,
+        PATHS_OPERAND,
+    )
+)
+
+_OVERWRITE_OPTIONS: tuple[Argument, ...] = (
+    # Non-interactive control plane (rm precedent): -f/-i are
+    # accepted no-ops — there is no prompt, and an overwrite
+    # proceeds unless -n/--update say otherwise.
+    Argument("-f", "--force", action="store_true"),
+    Argument("-i", "--interactive", action="store_true"),
+    Argument("-n", "--no-clobber", action="store_true"),
+    Argument("-v", "--verbose", action="store_true"),
+    # GNU: -u/-b never take an argument; only --update=/--backup=
+    # carry values, so the shorts stay clusterable (-bv).
+    Argument(
+        "-u",
+        "--update",
+        nargs="?",
+        attached_only=True,
+        short_value=False,
+    ),
+    Argument(
+        "-b",
+        "--backup",
+        nargs="?",
+        attached_only=True,
+        short_value=False,
+    ),
+    # PathSpec normalizes trailing slashes everywhere, so the GNU
+    # spelling is an accepted no-op.
+    Argument("--strip-trailing-slashes", action="store_true"),
+    Argument("-t", "--target-directory", type="path"),
+)
 
 SPECS: dict[str, CommandSpec] = {
     "mkdir": CommandSpec(
@@ -30,7 +79,7 @@ SPECS: dict[str, CommandSpec] = {
                 attached_only=True,
                 short_value=False,
             ),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "touch": CommandSpec(
@@ -44,7 +93,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-r", "--reference", type="path"),
             Argument("-t"),
             Argument("--time"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     # The leading MODE/OWNER/GROUP stays TEXT while the FILE operands
@@ -57,36 +106,12 @@ SPECS: dict[str, CommandSpec] = {
             Argument("--quiet", action="store_true"),
             Argument("-v", "--verbose", action="store_true"),
             Argument("-R", "--recursive", action="store_true"),
-            Argument("text", nargs="?", metavar=""),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            TEXT_OPERAND,
+            PATHS_OPERAND,
         )
     ),
-    "chown": CommandSpec(
-        arguments=(
-            Argument("-c", "--changes", action="store_true"),
-            Argument("-f", "--silent", action="store_true"),
-            Argument("--quiet", action="store_true"),
-            Argument("-v", "--verbose", action="store_true"),
-            Argument("--dereference", action="store_true"),
-            Argument("-h", "--no-dereference", action="store_true"),
-            Argument("-R", "--recursive", action="store_true"),
-            Argument("text", nargs="?", metavar=""),
-            Argument("paths", type="path", nargs="*", metavar=""),
-        )
-    ),
-    "chgrp": CommandSpec(
-        arguments=(
-            Argument("-c", "--changes", action="store_true"),
-            Argument("-f", "--silent", action="store_true"),
-            Argument("--quiet", action="store_true"),
-            Argument("-v", "--verbose", action="store_true"),
-            Argument("--dereference", action="store_true"),
-            Argument("-h", "--no-dereference", action="store_true"),
-            Argument("-R", "--recursive", action="store_true"),
-            Argument("text", nargs="?", metavar=""),
-            Argument("paths", type="path", nargs="*", metavar=""),
-        )
-    ),
+    "chown": OWNERSHIP,
+    "chgrp": OWNERSHIP,
     "cp": CommandSpec(
         arguments=(
             Argument("-r", action="store_true"),
@@ -97,75 +122,23 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-P", "--no-dereference", action="store_true"),
             Argument("-H", action="store_true"),
             Argument("-d", action="store_true"),
-            # Non-interactive control plane (rm precedent): -f/-i are
-            # accepted no-ops — there is no prompt, and an overwrite
-            # proceeds unless -n/--update say otherwise.
-            Argument("-f", "--force", action="store_true"),
-            Argument("-i", "--interactive", action="store_true"),
-            Argument("-n", "--no-clobber", action="store_true"),
-            Argument("-v", "--verbose", action="store_true"),
-            # GNU: -u/-b never take an argument; only --update=/--backup=
-            # carry values, so the shorts stay clusterable (-bv).
-            Argument(
-                "-u",
-                "--update",
-                nargs="?",
-                attached_only=True,
-                short_value=False,
-            ),
-            Argument(
-                "-b",
-                "--backup",
-                nargs="?",
-                attached_only=True,
-                short_value=False,
-            ),
-            # PathSpec normalizes trailing slashes everywhere, so the GNU
-            # spelling is an accepted no-op.
-            Argument("--strip-trailing-slashes", action="store_true"),
-            Argument("-t", "--target-directory", type="path"),
+            *_OVERWRITE_OPTIONS,
             Argument("-T", "--no-target-directory", action="store_true"),
             Argument("-S", "--suffix"),
             Argument("-x", "--one-file-system", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "mv": CommandSpec(
         arguments=(
-            # Non-interactive control plane (rm precedent): -f/-i are
-            # accepted no-ops — there is no prompt, and an overwrite
-            # proceeds unless -n/--update say otherwise.
-            Argument("-f", "--force", action="store_true"),
-            Argument("-i", "--interactive", action="store_true"),
-            Argument("-n", "--no-clobber", action="store_true"),
-            Argument("-v", "--verbose", action="store_true"),
-            # GNU: -u/-b never take an argument; only --update=/--backup=
-            # carry values, so the shorts stay clusterable (-bv).
-            Argument(
-                "-u",
-                "--update",
-                nargs="?",
-                attached_only=True,
-                short_value=False,
-            ),
-            Argument(
-                "-b",
-                "--backup",
-                nargs="?",
-                attached_only=True,
-                short_value=False,
-            ),
-            # PathSpec normalizes trailing slashes everywhere, so the GNU
-            # spelling is an accepted no-op.
-            Argument("--strip-trailing-slashes", action="store_true"),
-            Argument("-t", "--target-directory", type="path"),
+            *_OVERWRITE_OPTIONS,
             # Cross-mount moves are copy+remove; --no-copy turns them into
             # GNU's cross-device refusal instead.
             Argument("--no-copy", action="store_true"),
             Argument("--exchange", action="store_true"),
             Argument("-T", "--no-target-directory", action="store_true"),
             Argument("-S", "--suffix"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "rm": CommandSpec(
@@ -187,7 +160,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("--preserve-root", action="store_true"),
             Argument("--no-preserve-root", action="store_true"),
             Argument("--one-file-system", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "rmdir": CommandSpec(
@@ -195,17 +168,15 @@ SPECS: dict[str, CommandSpec] = {
             Argument("--ignore-fail-on-non-empty", action="store_true"),
             Argument("-p", "--parents", action="store_true"),
             Argument("-v", "--verbose", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
-    "unlink": CommandSpec(
-        arguments=(Argument("paths", type="path", nargs="*", metavar=""),)
-    ),
+    "unlink": CommandSpec(arguments=(PATHS_OPERAND,)),
     "truncate": CommandSpec(
         arguments=(
             Argument("-c", "--no-create", action="store_true"),
             Argument("-s", "--size"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "basename": CommandSpec(
@@ -213,13 +184,13 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-a", "--multiple", action="store_true"),
             Argument("-s", "--suffix"),
             Argument("-z", "--zero", action="store_true"),
-            Argument("texts", nargs="*", metavar=""),
+            TEXTS_OPERAND,
         )
     ),
     "dirname": CommandSpec(
         arguments=(
             Argument("-z", "--zero", action="store_true"),
-            Argument("texts", nargs="*", metavar=""),
+            TEXTS_OPERAND,
         )
     ),
     "realpath": CommandSpec(
@@ -234,7 +205,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-s", "--strip", action="store_true"),
             Argument("--no-symlinks", action="store_true"),
             Argument("-z", "--zero", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "readlink": CommandSpec(
@@ -247,7 +218,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-s", "--silent", action="store_true"),
             Argument("-v", "--verbose", action="store_true"),
             Argument("-z", "--zero", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     # getfattr and setfattr run in the executor over the dispatcher's
@@ -311,7 +282,7 @@ SPECS: dict[str, CommandSpec] = {
                 action="store_true",
                 help="physical walk, do not follow symbolic links",
             ),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "setfattr": CommandSpec(
@@ -337,7 +308,7 @@ SPECS: dict[str, CommandSpec] = {
                 action="store_true",
                 help="do not dereference symbolic links",
             ),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     # ln runs in the executor for both link kinds (a symlink is namespace
@@ -366,7 +337,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-s", "--symbolic", action="store_true"),
             Argument("-t", "--target-directory", type="path"),
             Argument("-T", "--no-target-directory", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
 }

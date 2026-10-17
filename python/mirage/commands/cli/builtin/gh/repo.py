@@ -584,7 +584,7 @@ async def fork(
         if operand is None:
             raise
         raise ValueError(f"did not understand argument: {exc}") from exc
-    name = fl.as_str("fork_name")
+    name = fl.as_nonempty("fork_name")
     body: dict[str, JsonValue] = {}
     if name is not None:
         body["name"] = name

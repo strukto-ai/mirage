@@ -84,21 +84,6 @@ export interface HeadRef {
 }
 
 /**
- * What moving HEAD carried across, and what it could not do.
- *
- * Two things rather than one because git writes both: the paths whose
- * uncommitted change survived the move go to stdout with their status letters,
- * and a submodule directory the move could not remove is a warning on stderr
- * above the line saying the branch changed.
- */
-export interface HeadMove {
-  /** Each path whose uncommitted change was carried across, by status letter. */
-  readonly carried: ReadonlyMap<string, string>
-  /** The warning lines to write before the note, empty when there are none. */
-  readonly warnings: string
-}
-
-/**
  * One object id with the type git records for it.
  *
  * The pair travels together because a revision that names a tree or a blob is

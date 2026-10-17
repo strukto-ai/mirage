@@ -18,7 +18,6 @@ import pytest
 
 from mirage.commands.builtin.utils.paths import (
     default_paths,
-    has_unresolved_glob,
     resolve_path_stat,
     resolve_script,
 )
@@ -53,42 +52,6 @@ def _spec(virtual: str) -> PathSpec:
     return PathSpec(
         virtual=virtual, directory=virtual, vfs_path=virtual.strip("/")
     )
-
-
-def _glob_spec(virtual: str, directory: str, pattern: str) -> PathSpec:
-    return PathSpec(
-        virtual=virtual,
-        directory=directory,
-        vfs_path=virtual.strip("/"),
-        pattern=pattern,
-        resolved=False,
-    )
-
-
-def test_has_unresolved_glob_false_for_concrete_paths():
-    assert (
-        has_unresolved_glob([_spec("/pg/public/tables/books/rows.jsonl")])
-        is False
-    )
-
-
-def test_has_unresolved_glob_false_for_empty():
-    assert has_unresolved_glob([]) is False
-
-
-def test_has_unresolved_glob_true_for_pattern():
-    spec = _glob_spec(
-        "/pg/public/tables/*/rows.jsonl", "/pg/public/tables", "rows.jsonl"
-    )
-    assert has_unresolved_glob([spec]) is True
-
-
-def test_has_unresolved_glob_true_when_any_operand_globs():
-    concrete = _spec("/pg/public/tables/books/rows.jsonl")
-    globbed = _glob_spec(
-        "/pg/public/tables/*/schema.json", "/pg/public/tables", "schema.json"
-    )
-    assert has_unresolved_glob([concrete, globbed]) is True
 
 
 def test_resolve_script_absolute_is_normalized():

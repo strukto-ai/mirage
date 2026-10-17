@@ -15,6 +15,7 @@
 import { ByteSpool } from '../../../io/spool.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { stdinStream } from '../utils/stream.ts'
+import { recordSeparator } from '../utils/lines.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { PathSpec } from '../../../types.ts'
@@ -241,7 +242,7 @@ async function checkStream(
   let index = 0
   try {
     for (;;) {
-      const raw = await reader.readline(undefined, parsed.zeroTerminated ? 0 : 10)
+      const raw = await reader.readline(undefined, recordSeparator(parsed.zeroTerminated))
       if (raw === null) break
       const current = DEC.decode(raw)
       index++
@@ -387,7 +388,7 @@ async function externalRecords(
   cfg: SortConfig,
   signal?: AbortSignal,
 ): Promise<ByteSpool | Uint8Array> {
-  const separator = parsed.zeroTerminated ? 0 : 10
+  const separator = recordSeparator(parsed.zeroTerminated)
   const ending = String.fromCharCode(separator)
   const levels: ByteSpool[][] = [[]]
   let refused: [InputStage, Uint8Array] | null = null

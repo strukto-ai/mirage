@@ -4,19 +4,19 @@ from enum import Enum
 from functools import partial
 
 from mirage.commands.builtin.constants import (
+    EOVERFLOW_TEXT,
     SPLIT_BYTE_SUFFIXES,
     SPLIT_BYTE_UNITS,
     SPLIT_COUNT_PATTERN,
     SPLIT_DIGITS,
     SPLIT_HEX_DIGITS,
-    SPLIT_TRY_HELP,
     UINTMAX,
 )
 from mirage.commands.builtin.utils.stream import resolve_source
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec.types import CommandName
-from mirage.commands.spec.usage import extra_operand_error
+from mirage.commands.spec.usage import extra_operand_error, usage_hint
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.async_line_iterator import AsyncLineIterator
@@ -152,7 +152,7 @@ def parse_suffix_length(value: str) -> int:
     if length > UINTMAX:
         raise UsageError(
             f"split: invalid suffix length: '{quote_text(value)}': "
-            "Value too large for defined data type",
+            f"{EOVERFLOW_TEXT}",
             1,
         )
     return length
@@ -185,14 +185,14 @@ def parse_suffix_start(value: str, hex_mode: bool, suffix_len: int) -> int:
         kind = "hexadecimal" if hex_mode else "numerical"
         raise UsageError(
             f"split: '{quote_text(value)}': invalid start value for "
-            f"{kind} suffix" + SPLIT_TRY_HELP,
+            f"{kind} suffix\n{usage_hint('split')}",
             1,
         )
     start = int(value, 16 if hex_mode else 10)
     if len(format(start, "x" if hex_mode else "d")) > suffix_len:
         raise UsageError(
             "split: numerical suffix start value is too large "
-            "for the suffix length" + SPLIT_TRY_HELP,
+            f"for the suffix length\n{usage_hint('split')}",
             1,
         )
     return start

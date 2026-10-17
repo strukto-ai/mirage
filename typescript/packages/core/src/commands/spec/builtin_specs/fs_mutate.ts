@@ -12,6 +12,32 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { CommandSpec, Argument } from '../types.ts'
+import { PATHS_OPERAND, TEXTS_OPERAND, TEXT_OPERAND } from '../constants.ts'
+
+const OWNERSHIP = new CommandSpec({
+  arguments: [
+    new Argument(['-c', '--changes'], { action: 'store_true' }),
+    new Argument(['-f', '--silent'], { action: 'store_true' }),
+    new Argument('--quiet', { action: 'store_true' }),
+    new Argument(['-v', '--verbose'], { action: 'store_true' }),
+    new Argument('--dereference', { action: 'store_true' }),
+    new Argument(['-h', '--no-dereference'], { action: 'store_true' }),
+    new Argument(['-R', '--recursive'], { action: 'store_true' }),
+    TEXT_OPERAND,
+    PATHS_OPERAND,
+  ],
+})
+
+const OVERWRITE_OPTIONS: readonly Argument[] = [
+  new Argument(['-f', '--force'], { action: 'store_true' }),
+  new Argument(['-i', '--interactive'], { action: 'store_true' }),
+  new Argument(['-n', '--no-clobber'], { action: 'store_true' }),
+  new Argument(['-v', '--verbose'], { action: 'store_true' }),
+  new Argument(['-u', '--update'], { nargs: '?', attachedOnly: true, shortValue: false }),
+  new Argument(['-b', '--backup'], { nargs: '?', attachedOnly: true, shortValue: false }),
+  new Argument('--strip-trailing-slashes', { action: 'store_true' }),
+  new Argument(['-t', '--target-directory'], { type: 'path' }),
+]
 
 export const SPECS: Record<string, CommandSpec> = {
   basename: new CommandSpec({
@@ -19,22 +45,10 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-a', '--multiple'], { action: 'store_true' }),
       new Argument(['-s', '--suffix']),
       new Argument(['-z', '--zero'], { action: 'store_true' }),
-      new Argument('texts', { metavar: '', nargs: '*' }),
+      TEXTS_OPERAND,
     ],
   }),
-  chgrp: new CommandSpec({
-    arguments: [
-      new Argument(['-c', '--changes'], { action: 'store_true' }),
-      new Argument(['-f', '--silent'], { action: 'store_true' }),
-      new Argument('--quiet', { action: 'store_true' }),
-      new Argument(['-v', '--verbose'], { action: 'store_true' }),
-      new Argument('--dereference', { action: 'store_true' }),
-      new Argument(['-h', '--no-dereference'], { action: 'store_true' }),
-      new Argument(['-R', '--recursive'], { action: 'store_true' }),
-      new Argument('text', { metavar: '', nargs: '?' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
-    ],
-  }),
+  chgrp: OWNERSHIP,
   chmod: new CommandSpec({
     arguments: [
       new Argument(['-c', '--changes'], { action: 'store_true' }),
@@ -42,23 +56,11 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('--quiet', { action: 'store_true' }),
       new Argument(['-v', '--verbose'], { action: 'store_true' }),
       new Argument(['-R', '--recursive'], { action: 'store_true' }),
-      new Argument('text', { metavar: '', nargs: '?' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      TEXT_OPERAND,
+      PATHS_OPERAND,
     ],
   }),
-  chown: new CommandSpec({
-    arguments: [
-      new Argument(['-c', '--changes'], { action: 'store_true' }),
-      new Argument(['-f', '--silent'], { action: 'store_true' }),
-      new Argument('--quiet', { action: 'store_true' }),
-      new Argument(['-v', '--verbose'], { action: 'store_true' }),
-      new Argument('--dereference', { action: 'store_true' }),
-      new Argument(['-h', '--no-dereference'], { action: 'store_true' }),
-      new Argument(['-R', '--recursive'], { action: 'store_true' }),
-      new Argument('text', { metavar: '', nargs: '?' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
-    ],
-  }),
+  chown: OWNERSHIP,
   cp: new CommandSpec({
     arguments: [
       new Argument('-r', { action: 'store_true' }),
@@ -68,25 +70,15 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-P', '--no-dereference'], { action: 'store_true' }),
       new Argument('-H', { action: 'store_true' }),
       new Argument('-d', { action: 'store_true' }),
-      new Argument(['-f', '--force'], { action: 'store_true' }),
-      new Argument(['-i', '--interactive'], { action: 'store_true' }),
-      new Argument(['-n', '--no-clobber'], { action: 'store_true' }),
-      new Argument(['-v', '--verbose'], { action: 'store_true' }),
-      new Argument(['-u', '--update'], { nargs: '?', attachedOnly: true, shortValue: false }),
-      new Argument(['-b', '--backup'], { nargs: '?', attachedOnly: true, shortValue: false }),
-      new Argument('--strip-trailing-slashes', { action: 'store_true' }),
-      new Argument(['-t', '--target-directory'], { type: 'path' }),
+      ...OVERWRITE_OPTIONS,
       new Argument(['-T', '--no-target-directory'], { action: 'store_true' }),
       new Argument(['-S', '--suffix']),
       new Argument(['-x', '--one-file-system'], { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   dirname: new CommandSpec({
-    arguments: [
-      new Argument(['-z', '--zero'], { action: 'store_true' }),
-      new Argument('texts', { metavar: '', nargs: '*' }),
-    ],
+    arguments: [new Argument(['-z', '--zero'], { action: 'store_true' }), TEXTS_OPERAND],
   }),
   // getfattr and setfattr run in the executor over the dispatcher's attribute
   // ops, like readlink and ln, so these specs are their grammar and no
@@ -122,7 +114,7 @@ export const SPECS: Record<string, CommandSpec> = {
         action: 'store_true',
         help: 'physical walk, do not follow symbolic links',
       }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   // ln runs in the executor for both link kinds (a symlink is namespace
@@ -143,7 +135,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-s', '--symbolic'], { action: 'store_true' }),
       new Argument(['-t', '--target-directory'], { type: 'path' }),
       new Argument(['-T', '--no-target-directory'], { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   mkdir: new CommandSpec({
@@ -152,24 +144,17 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-v', '--verbose'], { action: 'store_true' }),
       new Argument(['-m', '--mode']),
       new Argument(['-Z', '--context'], { nargs: '?', attachedOnly: true, shortValue: false }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   mv: new CommandSpec({
     arguments: [
-      new Argument(['-f', '--force'], { action: 'store_true' }),
-      new Argument(['-i', '--interactive'], { action: 'store_true' }),
-      new Argument(['-n', '--no-clobber'], { action: 'store_true' }),
-      new Argument(['-v', '--verbose'], { action: 'store_true' }),
-      new Argument(['-u', '--update'], { nargs: '?', attachedOnly: true, shortValue: false }),
-      new Argument(['-b', '--backup'], { nargs: '?', attachedOnly: true, shortValue: false }),
-      new Argument('--strip-trailing-slashes', { action: 'store_true' }),
-      new Argument(['-t', '--target-directory'], { type: 'path' }),
+      ...OVERWRITE_OPTIONS,
       new Argument('--no-copy', { action: 'store_true' }),
       new Argument('--exchange', { action: 'store_true' }),
       new Argument(['-T', '--no-target-directory'], { action: 'store_true' }),
       new Argument(['-S', '--suffix']),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   readlink: new CommandSpec({
@@ -182,7 +167,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-s', '--silent'], { action: 'store_true' }),
       new Argument(['-v', '--verbose'], { action: 'store_true' }),
       new Argument(['-z', '--zero'], { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   realpath: new CommandSpec({
@@ -197,7 +182,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-s', '--strip'], { action: 'store_true' }),
       new Argument('--no-symlinks', { action: 'store_true' }),
       new Argument(['-z', '--zero'], { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   rm: new CommandSpec({
@@ -212,7 +197,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('--preserve-root', { action: 'store_true' }),
       new Argument('--no-preserve-root', { action: 'store_true' }),
       new Argument('--one-file-system', { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   rmdir: new CommandSpec({
@@ -220,7 +205,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('--ignore-fail-on-non-empty', { action: 'store_true' }),
       new Argument(['-p', '--parents'], { action: 'store_true' }),
       new Argument(['-v', '--verbose'], { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   setfattr: new CommandSpec({
@@ -232,7 +217,7 @@ export const SPECS: Record<string, CommandSpec> = {
         action: 'store_true',
         help: 'do not dereference symbolic links',
       }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   touch: new CommandSpec({
@@ -246,17 +231,17 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-r', '--reference'], { type: 'path' }),
       new Argument('-t'),
       new Argument('--time'),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   truncate: new CommandSpec({
     arguments: [
       new Argument(['-c', '--no-create'], { action: 'store_true' }),
       new Argument(['-s', '--size']),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   unlink: new CommandSpec({
-    arguments: [new Argument('paths', { metavar: '', type: 'path', nargs: '*' })],
+    arguments: [PATHS_OPERAND],
   }),
 }

@@ -12,8 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+
 import pytest
 
+from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.constants import OPERAND, REFUSED
 from mirage.commands.spec.flag_view import FlagBag, FlagView, spec_flag_names
@@ -45,6 +48,64 @@ def test_flag_view_typed_reads():
     assert fl.as_paths("files") == [path]
     assert fl.as_str("file") is None
     assert fl.as_list("files") == []
+
+
+def test_flag_view_default_answers_only_an_absent_flag():
+    fl = FlagView({"limit": 0, "to": "", "rate": 0.0, "page": "0"})
+    assert fl.as_int("limit", 20) == 0
+    assert fl.as_int("page", 1) == 0
+    assert fl.as_int("count", 20) == 20
+    assert fl.as_str("to", "none") == ""
+    assert fl.as_str("from", "none") == "none"
+    assert fl.as_float("rate", 0.5) == 0.0
+    assert fl.as_float("threshold", 0.5) == 0.5
+
+
+def _scan(text):
+    return int(text) if text.isdigit() else None
+
+
+def _refusal(text, value):
+    return f"cmd: bad '{text}' ({value})"
+
+
+def test_flag_view_as_number_refuses_with_the_programs_words():
+    fl = FlagView({"n": "5", "x": "abc", "big": "9", "zero": "0"})
+    assert fl.as_number("n", _scan, _refusal, low=1, high=8) == 5
+    assert fl.as_number("absent", _scan, _refusal) is None
+    for name, message in (
+        ("x", "cmd: bad 'abc' (None)"),
+        ("big", "cmd: bad '9' (9)"),
+        ("zero", "cmd: bad '0' (0)"),
+    ):
+        with pytest.raises(UsageError, match=re.escape(message)) as info:
+            fl.as_number(name, _scan, _refusal, low=1, high=8, exit_code=2)
+        assert info.value.exit_code == 2
+
+
+def test_flag_view_reads_an_integer_value_as_its_digits():
+    fl = FlagView({"n": 5, "big": 9, "switch": True})
+    assert fl.as_text("n") == "5"
+    assert fl.as_text("switch") is None
+    assert fl.as_number("n", _scan, _refusal, low=1, high=8) == 5
+    assert fl.as_number("switch", _scan, _refusal) is None
+    with pytest.raises(UsageError, match=re.escape("cmd: bad '9' (9)")):
+        fl.as_number("big", _scan, _refusal, low=1, high=8)
+
+
+def _unscanned(text):
+    return None
+
+
+def test_flag_view_spells_an_integer_past_the_digit_limit():
+    huge = "1" + "0" * 5000
+    fl = FlagView({"w": 10**5000, "neg": -(10**5000)})
+    assert fl.as_text("w") == huge
+    assert fl.as_text("neg") == "-" + huge
+    with pytest.raises(
+        UsageError, match=re.escape(f"cmd: bad '{huge}' (None)")
+    ):
+        fl.as_number("w", _unscanned, _refusal)
 
 
 def test_flag_view_list_coerces_single_string():

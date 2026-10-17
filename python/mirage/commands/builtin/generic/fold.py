@@ -9,25 +9,51 @@ from mirage.commands.builtin.utils.operands import (
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import stdin_stat, stdin_stream
+from mirage.commands.builtin.utils.strtol import (
+    ERANGE_REASON,
+    ULONG_MAX,
+    xstrtoumax,
+)
 from mirage.commands.config import Context
+from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
+# GNU fold's line width when -w names none.
+WIDTH = 80
+# GNU 9.7 reads -w with xdectoumax(optarg, 1, SIZE_MAX - TAB_WIDTH - 1),
+# so 0 and anything past this are out of range.
+WIDTH_MAX = ULONG_MAX - 9
+
+
+def _width_refusal(text: str, value: int | None) -> str:
+    """fold's refusal of a -w value, the range clause only for a number.
+
+    Args:
+        text (str): the value as typed.
+        value (int | None): what it scanned to, None for no number.
+    """
+    reason = "" if value is None else f": {ERANGE_REASON}"
+    return f"fold: invalid number of columns: '{quote_text(text)}'{reason}"
+
 
 @dataclass(frozen=True, slots=True)
 class FoldFlags:
-    width: int = 80
+    width: int = WIDTH
     break_spaces: bool = False
     count_bytes: bool = False
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> FoldFlags:
     fl = FlagView(flags, spec=SPECS["fold"])
+    width = fl.as_number(
+        "width", xstrtoumax, _width_refusal, low=1, high=WIDTH_MAX
+    )
     return FoldFlags(
-        width=int(fl.as_str("width") or "80"),
+        width=WIDTH if width is None else width,
         break_spaces=fl.as_bool("spaces"),
         count_bytes=fl.as_bool("bytes"),
     )
@@ -71,7 +97,7 @@ async def fold(
     *,
     read_stream: PolymorphicReadFn,
     stdin: ByteSource | None = None,
-    width: int = 80,
+    width: int = WIDTH,
     break_spaces: bool = False,
     count_bytes: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:

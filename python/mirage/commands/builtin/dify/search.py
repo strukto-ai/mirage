@@ -7,7 +7,7 @@ def _options(fl: FlagView) -> dict[str, JsonValue]:
     top_k = fl.as_int("top_k")
     return {
         "top_k": top_k if top_k is not None else 10,
-        "method": fl.as_str("method") or "semantic",
+        "method": fl.as_str("method", "semantic"),
         "threshold": fl.as_float("threshold") or 0.0,
     }
 

@@ -29,8 +29,8 @@ export async function triage(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const query = fl.asStr('query') ?? 'is:unread'
-  const maxResults = fl.asInt('max') ?? 20
+  const query = fl.asStr('query', 'is:unread')
+  const maxResults = fl.asInt('max', 20)
   const tm = new TokenManager(config as GoogleConfig)
   const stubs = await listMessages(tm, { query, maxResults })
   const summaries: {

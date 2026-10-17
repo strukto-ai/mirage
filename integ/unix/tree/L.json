@@ -34,6 +34,43 @@
       "flags": [
         "L"
       ]
+    },
+    {
+      "id": "tree_L_refuses_a_level_under_one",
+      "seq": 9940307,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/tl/d/e && printf x > /data/tl/d/e/f && cd /data/tl && for l in abc '' 0 -1; do tree -L \"$l\" d; echo rc=$?; done; tree -L 1x d; tree -L 0x2 d; cd / && rm -r /data/tl",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nd\n`-- e\n\n2 directories, 0 files\nd\n`-- e\n    `-- f\n\n2 directories, 1 file\n",
+        "stderr": "tree: Invalid level, must be greater than 0.\ntree: Invalid level, must be greater than 0.\ntree: Invalid level, must be greater than 0.\ntree: Invalid level, must be greater than 0.\n"
+      },
+      "flags": [
+        "L"
+      ]
     }
   ]
 }

@@ -1,0 +1,161 @@
+{
+  "cases": [
+    {
+      "id": "tar_xO_fails_on_a_file_that_is_not_a_tar",
+      "seq": 15100051,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tar -xOf /data/a.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar: This does not look like a tar archive\ntar: Exiting with failure status due to previous errors\n"
+      },
+      "flags": [
+        "x",
+        "O",
+        "f"
+      ]
+    },
+    {
+      "id": "tar_xvO_fails_on_a_file_that_is_not_a_tar",
+      "seq": 15100052,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tar -xvOf /data/a.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar: This does not look like a tar archive\ntar: Exiting with failure status due to previous errors\n"
+      },
+      "flags": [
+        "x",
+        "v",
+        "O",
+        "f"
+      ]
+    },
+    {
+      "id": "tar_xO_fails_on_stdin_that_skips_to_a_header",
+      "seq": 15100053,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf %01024d 0 | tar -xOf -",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar: This does not look like a tar archive\ntar: Skipping to next header\ntar: Exiting with failure status due to previous errors\n"
+      },
+      "flags": [
+        "x",
+        "O",
+        "f"
+      ]
+    },
+    {
+      "id": "tar_xO_names_each_miss_after_the_archive_notice",
+      "seq": 15100054,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tar -xOf /data/a.txt nope other",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar: This does not look like a tar archive\ntar: nope: Not found in archive\ntar: other: Not found in archive\ntar: Exiting with failure status due to previous errors\n"
+      },
+      "flags": [
+        "x",
+        "O",
+        "f"
+      ]
+    }
+  ]
+}

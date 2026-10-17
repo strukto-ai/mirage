@@ -33,7 +33,7 @@ export async function append(
   const result = await appendValues(
     new TokenManager(config as GoogleConfig),
     fl.asStr('spreadsheet') ?? '',
-    fl.asStr('range') ?? 'A1',
+    fl.asStr('range', 'A1'),
     valuesJsonFromFlags(fl),
   )
   const out: ByteSource = ENC.encode(JSON.stringify(result))

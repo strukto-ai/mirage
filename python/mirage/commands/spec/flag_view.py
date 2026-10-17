@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping, Sequence
-from typing import Generic, TypeVar
+from collections.abc import Callable, Mapping, Sequence
+from decimal import Decimal
+from typing import Generic, TypeVar, overload
 
+from mirage.commands.errors import UsageError
 from mirage.commands.spec.compile import argument_dest, compile_spec
 from mirage.commands.spec.constants import (
     OPERAND,
@@ -173,14 +175,29 @@ class FlagView:
         # A count flag holds an int; any occurrence reads as set.
         return isinstance(value, int) and value > 0
 
-    def as_int(self, name: str) -> int | None:
+    @overload
+    def as_int(self, name: str) -> int | None: ...
+
+    @overload
+    def as_int(self, name: str, default: int) -> int: ...
+
+    def as_int(self, name: str, default: int | None = None) -> int | None:
+        """The option as an integer, ``default`` only when it is absent.
+
+        A value the line gave, ``0`` included, is the value: an absent
+        option and an explicit zero are different requests.
+
+        Args:
+            name (str): the option's dest.
+            default (int | None): what an absent option reads as.
+        """
         value = self._flags.get(self._key(name))
         if isinstance(value, bool):
-            return None
+            return default
         if isinstance(value, int):
             return value
         if not isinstance(value, str):
-            return None
+            return default
         try:
             return int(value)
         except ValueError as exc:
@@ -188,14 +205,28 @@ class FlagView:
                 f"flag '{name}' expects an integer, got '{value}'"
             ) from exc
 
-    def as_float(self, name: str) -> float | None:
+    @overload
+    def as_float(self, name: str) -> float | None: ...
+
+    @overload
+    def as_float(self, name: str, default: float) -> float: ...
+
+    def as_float(
+        self, name: str, default: float | None = None
+    ) -> float | None:
+        """The option as a number, ``default`` only when it is absent.
+
+        Args:
+            name (str): the option's dest.
+            default (float | None): what an absent option reads as.
+        """
         value = self._flags.get(self._key(name))
         if isinstance(value, bool):
-            return None
+            return default
         if isinstance(value, (int, float)):
             return float(value)
         if not isinstance(value, str):
-            return None
+            return default
         try:
             return float(value)
         except ValueError as exc:
@@ -203,9 +234,109 @@ class FlagView:
                 f"flag '{name}' expects a number, got '{value}'"
             ) from exc
 
-    def as_str(self, name: str) -> str | None:
+    def as_number(
+        self,
+        name: str,
+        scan: Callable[[str], int | None],
+        refusal: Callable[[str, int | None], str],
+        *,
+        low: int | None = None,
+        high: int | None = None,
+        exit_code: int = 1,
+    ) -> int | None:
+        """An integer option read and refused the way its program does.
+
+        Each program scans its own numbers (gnulib's ``xstrtoumax``,
+        C's ``strtol``, ``atoi``) and words its own refusal, so both come
+        from the caller: ``scan`` is the program's reader, None for a
+        text it does not take, and a scanned value outside
+        ``low``..``high`` is refused the same way, through ``refusal``.
+        An integer value is scanned as its digits (``as_text``).
+
+        Args:
+            name (str): the option's dest.
+            scan (Callable[[str], int | None]): the program's reader.
+            refusal (Callable[[str, int | None], str]): the diagnostic
+                for the text as typed and what it scanned to, None when
+                it did not scan.
+            low (int | None): the smallest value the program takes.
+            high (int | None): the largest value the program takes.
+            exit_code (int): the program's status for the refusal.
+
+        Returns:
+            int | None: the value, or None when the option is absent.
+        """
+        text = self.as_text(name)
+        if text is None:
+            return None
+        value = scan(text)
+        if (
+            value is None
+            or (low is not None and value < low)
+            or (high is not None and value > high)
+        ):
+            raise UsageError(refusal(text, value), exit_code)
+        return value
+
+    def as_text(self, name: str) -> str | None:
+        """The option as the text a line would have typed for it: a string
+        as given, an integer (a direct call's ``{"c": 4}``) as its decimal
+        digits, None when absent. A bool is a switch, not a number, so it
+        reads as absent.
+
+        The digits come from ``Decimal``, because ``str()`` refuses an int
+        past ``sys.get_int_max_str_digits()`` (4300 by default), and such
+        a value must still reach the program's own refusal.
+
+        Args:
+            name (str): the option's dest.
+        """
         value = self._flags.get(self._key(name))
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return str(Decimal(value))
         return value if isinstance(value, str) else None
+
+    @overload
+    def as_str(self, name: str) -> str | None: ...
+
+    @overload
+    def as_str(self, name: str, default: str) -> str: ...
+
+    def as_str(self, name: str, default: str | None = None) -> str | None:
+        """The option as text, ``default`` only when it is absent.
+
+        A given-but-empty value (``--to=``, ``-d ''``) is the value, as
+        it is to the program: what an empty one means is the command's
+        to decide, never the accessor's.
+
+        Args:
+            name (str): the option's dest.
+            default (str | None): what an absent option reads as.
+        """
+        value = self._flags.get(self._key(name))
+        return value if isinstance(value, str) else default
+
+    @overload
+    def as_nonempty(self, name: str) -> str | None: ...
+
+    @overload
+    def as_nonempty(self, name: str, default: str) -> str: ...
+
+    def as_nonempty(self, name: str, default: str | None = None) -> str | None:
+        """The option as text, ``default`` when it is absent or empty.
+
+        For a program that cannot tell an empty value from none, as a Go
+        flag's zero value cannot (gh's ``if opts.Name != ""``): there the
+        empty one reads as unset, and nowhere else.
+
+        Args:
+            name (str): the option's dest.
+            default (str | None): what an absent or empty option reads as.
+        """
+        value = self.as_str(name)
+        return value if value else default
 
     def as_list(self, name: str) -> list[str]:
         value = self._flags.get(self._key(name))

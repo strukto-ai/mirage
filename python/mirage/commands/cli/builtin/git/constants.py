@@ -29,11 +29,17 @@ SYMLINK = 0o120000
 # an object this repository holds, so nothing about it is written into
 # the working tree; git only makes sure a directory stands at the name.
 GITLINK = 0o160000
+# A subtree, which git spells 40000 in a tree object and 040000 when it
+# prints one.
+TREE = 0o040000
 OWNER_EXECUTE = 0o100
 # The part of a tree entry's mode that is a permission: what a restored
 # entry's own bits are set from, the object type above it being the
 # mount's business rather than the tree's.
 PERMISSION_BITS = 0o777
+
+# The object types git knows, in its own order.
+OBJECT_TYPES = ("blob", "tree", "commit", "tag")
 
 # The symbolic ref every verb resolves first, and the ref-space spelling
 # dulwich takes for it.
@@ -50,6 +56,11 @@ GIT_SPACE = b" \t\n\r"
 # its repository under.
 GIT_DIR = ".git"
 
+# The pretty kinds a placeholder template spells, and the kinds that end
+# every entry with a newline rather than separating entries by one.
+TEMPLATE_KINDS = ("format", "tformat")
+TERMINATED_KINDS = ("oneline", "tformat")
+
 # The rules a short ref name is tried against, rev-parse's dwim_ref order.
 DWIM_RULES = (
     "{}",
@@ -59,3 +70,7 @@ DWIM_RULES = (
     "refs/remotes/{}",
     "refs/remotes/{}/HEAD",
 )
+
+# The branch a new repository, or a clone whose remote names no usable
+# HEAD, starts on when nothing says otherwise.
+DEFAULT_BRANCH = "master"

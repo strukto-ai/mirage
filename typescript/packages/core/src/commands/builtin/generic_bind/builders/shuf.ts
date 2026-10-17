@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { shufGeneric } from '../../generic/shuf.ts'
+import { NO_WRITE_OP, shufGeneric } from '../../generic/shuf.ts'
 import { type GenericCommand, resolveGlobOf } from '../adapter.ts'
 
 export const BUILDER: GenericCommand = {
@@ -30,7 +30,7 @@ export const BUILDER: GenericCommand = {
       // Only `-o` writes, so a read-only backend still serves plain shuf.
       // Requiring the write op up front would break every read-only backend.
       (p, data) => {
-        if (write === undefined) throw new Error('shuf: backend provides no write op')
+        if (write === undefined) throw new Error(NO_WRITE_OP)
         return write(accessor, p, data)
       },
     )

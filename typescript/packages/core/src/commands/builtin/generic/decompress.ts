@@ -231,6 +231,25 @@ export async function replaceOutput(
   await write(out, data)
 }
 
+/**
+ * Remove an input once its in-place output is written: the link it was named
+ * through, when there is one. Mirrors Python's remove_input.
+ */
+export async function removeInput(
+  path: PathSpec,
+  link: string | null,
+  unlink: (path: PathSpec) => Promise<void>,
+  resolver: LinkResolver | null,
+): Promise<void> {
+  if (link === null || resolver === null) await unlink(path)
+  else await resolver.unlink(link)
+}
+
+/** gzip's refusal to replace an output already standing at its name. */
+export function existsLine(name: string): string {
+  return `gzip: ${name} already exists;\tnot overwritten\n`
+}
+
 interface DecompressOptions {
   stdin: ByteSource | null
   toStdout?: boolean
@@ -344,7 +363,7 @@ export async function decompressInputs(
         const out = link === null ? output[1] : besideLink(link, outName)
         const existed = await outputTaken(out, options.stat, resolver)
         if (existed && !force) {
-          report(`gzip: ${outName} already exists;\tnot overwritten\n`, 2)
+          report(existsLine(outName), 2)
           continue
         }
         if (failure !== null) {
@@ -362,10 +381,7 @@ export async function decompressInputs(
           if (existed) continue
           return
         }
-        if (options.keep !== true) {
-          if (link === null || resolver === null) await options.unlink(path)
-          else await resolver.unlink(link)
-        }
+        if (options.keep !== true) await removeInput(path, link, options.unlink, resolver)
       } finally {
         await spool.close()
         await closeQuietly(source)

@@ -73,7 +73,7 @@ export async function tagCreateCmd(
     repoId,
     tag,
     repoTypeOf(fl),
-    fl.asStr('revision') ?? DEFAULT_REVISION,
+    fl.asStr('revision', DEFAULT_REVISION),
     fl.asStr('message'),
   )
   return textOut(`Tag ${tag} created on ${repoId}\n`)

@@ -166,6 +166,23 @@ async def test_a_commit_is_recorded_in_the_reflog(git_rw, repo_path: Path):
     assert (repo_path / ".git" / "logs" / "refs" / "heads" / "main").exists()
 
 
+@pytest.mark.asyncio
+async def test_a_head_naming_a_path_outside_the_ref_tree_is_refused(
+    git_rw, repo_path: Path
+):
+    config = (repo_path / ".git" / "config").read_bytes()
+    (repo_path / ".git" / "HEAD").write_text(
+        "ref: refs/heads/../../config\n", encoding="utf-8"
+    )
+    code, _out, err = await run(git_rw, "commit --allow-empty -m escape")
+    assert code == 128
+    assert err == (
+        b"fatal: cannot lock ref 'HEAD': unable to resolve reference "
+        b"'refs/heads/../../config': reference broken\n"
+    )
+    assert (repo_path / ".git" / "config").read_bytes() == config
+
+
 def test_the_author_flag_still_wins_over_the_environment():
     view = env_view({"GIT_AUTHOR_NAME": "Env", "GIT_AUTHOR_EMAIL": "e@x"})
     fl = FlagView({"author": "Flag <f@x>"})

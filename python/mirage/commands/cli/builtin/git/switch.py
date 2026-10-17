@@ -20,14 +20,9 @@ from dulwich.refs import Ref
 from mirage.commands.cli.builtin.git.branch import (
     refuse_ambiguous,
     remote_branch,
-    set_up_tracking,
     track_mode,
 )
-from mirage.commands.cli.builtin.git.checkout import (
-    move_head,
-    previous_position,
-    tracking_report,
-)
+from mirage.commands.cli.builtin.git.checkout import move_head
 from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import (
     BranchExistsError,
@@ -42,21 +37,22 @@ from mirage.commands.cli.builtin.git.errors import (
     RefLockError,
     RefReadOnlyError,
 )
-from mirage.commands.cli.builtin.git.format import short, subject
 from mirage.commands.cli.builtin.git.index_file import (
     read_index,
     refuse_unresolved,
 )
-from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.refs import (
     BRANCH_PREFIX,
+    REMOTE_PREFIX,
     TAG_PREFIX,
     blocking_ref,
     read_head,
     set_head,
-    valid_ref_name,
+    valid_branch_name,
 )
 from mirage.commands.cli.builtin.git.revparse import (
+    COMMIT,
+    TAG,
     note_ambiguity,
     resolve_commit,
 )
@@ -72,9 +68,6 @@ from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
-REMOTES_PREFIX = "refs/remotes/"
-COMMIT = "commit"
-TAG = "tag"
 REMOTE_BRANCH = "remote branch"
 
 
@@ -113,7 +106,7 @@ def expected_kind(known: set[Ref], name: str) -> str:
     """
     if Ref(f"{TAG_PREFIX}{name}".encode()) in known:
         return TAG
-    if Ref(f"{REMOTES_PREFIX}{name}".encode()) in known:
+    if Ref(f"{REMOTE_PREFIX}{name}".encode()) in known:
         return REMOTE_BRANCH
     return COMMIT
 
@@ -154,14 +147,12 @@ async def switch_branch(
         if not creating and not texts and not flags.detach:
             raise MissingBranchArgumentError()
         repo, location = await opened(ctx, fl, work_tree=True)
-        mode = await track_mode(vfs, location)
+        mode = await track_mode(repo)
         head = await read_head(vfs, location.gitdir)
         known = repo.refs.allkeys()
         if flags.create is not None:
             target = flags.create
             ref = Ref(f"{BRANCH_PREFIX}{target}".encode())
-            if ref in known:
-                raise BranchExistsError(target)
             start = texts[0] if texts else None
             # Before the first commit there is nothing for HEAD to
             # resolve to, and git makes the branch anyway: the line
@@ -176,20 +167,28 @@ async def switch_branch(
                 and head.ref is not None
                 and Ref(head.ref.encode()) not in known
             )
-            if not unborn:
+            if start is not None:
                 try:
-                    commit = resolve_commit(repo, start or HEAD)
+                    commit = resolve_commit(repo, start)
                 except GitError as exc:
-                    raise InvalidReferenceError(start or HEAD) from exc
-                if start is not None:
-                    await refuse_ambiguous(vfs, location, repo, start, False)
-            # After the start point and before anything is written,
-            # which is git's own order. A ref is a path below .git, so
-            # an unchecked name reaches write_ref as one: -c
-            # ../../config would land on the repository's own
-            # configuration rather than on a branch.
-            if not valid_ref_name(target):
+                    raise InvalidReferenceError(start) from exc
+                await refuse_ambiguous(repo, start, False)
+            # After a start point that was named and before HEAD is
+            # read or anything is written, which is git's own order, and
+            # before it asks whether the branch exists, so a
+            # refs/heads/HEAD already there is still refused as a name.
+            # A ref is a path below .git, so an unchecked name reaches
+            # write_ref as one: -c ../../config would land on the
+            # repository's own configuration rather than on a branch.
+            if not valid_branch_name(target):
                 raise InvalidBranchNameError(target)
+            if ref in known:
+                raise BranchExistsError(target)
+            if start is None and not unborn:
+                try:
+                    commit = resolve_commit(repo, HEAD)
+                except GitError as exc:
+                    raise InvalidReferenceError(HEAD) from exc
             # And before the working tree moves: git takes the ref lock
             # first, so a name whose path another ref holds refuses with
             # nothing checked out.
@@ -250,7 +249,7 @@ async def switch_branch(
             attached = creating or (not flags.detach and ref in known)
             if not flags.detach and not attached:
                 raise BranchExpectedError(expected_kind(known, target), target)
-        moved = await move_head(
+        return await move_head(
             vfs,
             repo,
             location,
@@ -259,54 +258,29 @@ async def switch_branch(
             target,
             ref if attached else None,
             creating,
-            start or HEAD,
-            creating and start is None,
-        )
-        tracking, warning = (
-            await set_up_tracking(
-                vfs, repo, location, target, start, mode, head
-            )
-            if creating
-            else ("", "")
+            start,
+            mode,
+            False,
+            fl.as_bool("quiet"),
         )
     except GitError as exc:
         return fatal(exc)
-    carried = "".join(
-        f"{letter}\t{path}\n" for path, letter in sorted(moved.carried.items())
-    )
-    carried += tracking
-    # Above everything the move says about itself, which is where git
-    # puts it: what could not be removed is a fact about the working
-    # tree rather than about where HEAD went.
-    note = moved.warnings + previous_position(repo, head) + warning
-    if attached:
-        verb = "Switched to a new branch" if creating else "Switched to branch"
-        note += f"{verb} '{target}'\n"
-        if not creating:
-            carried += await tracking_report(vfs, location, target)
-    else:
-        note += (
-            f"HEAD is now at {short(commit.id, abbrev_for(repo))} "
-            f"{subject(commit)}\n"
-        )
-    if fl.as_bool("quiet"):
-        return None, IOResult(stderr=(moved.warnings + warning).encode())
-    return yield_bytes(carried.encode()), IOResult(stderr=note.encode())
 
 
 def switch_read_only(
     texts: list[str], ctx: Context, location: RepoLocation | None
 ) -> GitError:
     """switch's refusal by a read-only mount: the new branch's ref under
-    ``-c``, whose lock git takes first, and the index's otherwise.
+    a ``-c`` with no start point, whose lock git takes first, and the
+    index's otherwise.
 
     Args:
         texts (list[str]): the line's operands.
         ctx (Context): the line's context.
         location (RepoLocation | None): the repository it opened.
     """
-    name = FlagView(ctx.flags).as_str("create")
-    if name is None:
+    name = FlagView(ctx.flags, ctx.spec).as_str("create")
+    if name is None or texts:
         return index_locked(texts, ctx, location)
     ref = f"{BRANCH_PREFIX}{name}"
     root = location.commondir.virtual if location is not None else ".git"

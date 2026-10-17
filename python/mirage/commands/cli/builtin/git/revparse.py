@@ -157,10 +157,7 @@ def _commit_at(repo: BaseRepo, sha: ObjectID, revision: str) -> Commit:
         sha (ObjectID): hex object id.
         revision (str): the whole revision, for error attribution.
     """
-    try:
-        obj = repo.object_store[sha]
-    except KeyError as exc:
-        raise AmbiguousArgumentError(revision) from exc
+    obj = _object_by_id(repo, sha, revision)
     if not isinstance(obj, Commit):
         raise AmbiguousArgumentError(revision)
     return obj

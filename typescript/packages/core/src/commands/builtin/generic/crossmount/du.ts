@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { OPERAND_CONCURRENCY } from '../../constants.ts'
 import { DISPATCH_BUILDERS } from './constants.ts'
 import { mountStarts, reached } from './scopes.ts'
 import type { CrossResult, RunSingle } from './types.ts'
@@ -87,7 +88,7 @@ export async function runDu(
       await materialize(out)
       return io
     },
-    4,
+    OPERAND_CONCURRENCY,
   )
   // A run that failed measured nothing and says why; one that succeeded
   // without a measurement is a du this line cannot compose.

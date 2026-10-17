@@ -272,6 +272,34 @@ async def test_dir_aware_stat_ignores_fabricated_children():
         await bound(PathSpec.from_str_path("/nope.txt"))
 
 
+async def _missing_stat(_accessor, path, _index):
+    raise FileNotFoundError(path.virtual)
+
+
+async def _refused_readdir(_accessor, path, _index):
+    raise PermissionError(path.virtual)
+
+
+async def _unused(*_args):
+    raise AssertionError("not used")
+
+
+@pytest.mark.asyncio
+async def test_dir_aware_stat_lets_a_refused_listing_through():
+    # Only a miss is a negative probe here: the stat is the operation, so
+    # a parent listing the session may not read fails it as itself.
+    ops = CommandIO(
+        readdir=_refused_readdir,
+        read_bytes=_unused,
+        read_stream=_unused,
+        stat=_missing_stat,
+        is_mounted=lambda _a: True,
+    )
+    bound = dir_aware_stat(ops, None, NO_NS)
+    with pytest.raises(PermissionError):
+        await bound(PathSpec.from_str_path("/locked/nope.txt"))
+
+
 @pytest.mark.asyncio
 async def test_dir_aware_stat_probe_swallows_driver_errors():
     # A backend whose readdir raises a non-FS driver error for missing

@@ -186,6 +186,5 @@ describe('the other dialects', () => {
 
   it('escapes as regex::escape', () => {
     expect(rustEscape('a.b-c~d')).toBe('a\\.b\\-c\\~d')
-    expect(compilePattern('a.b', false, true, false, RegexSyntax.RUST).test('a.b')).toBe(true)
   })
 })

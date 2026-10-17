@@ -31,7 +31,7 @@ import { formatFsError } from '../../../errors/render.ts'
 import { fsStrerror, isEnoent, isFsError } from '../../../errors/fs.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { followedStat } from '../../../view/namespace_view.ts'
-import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
+import { extraOperandError, missingOperandError, usageHint } from '../../spec/usage.ts'
 import { isStdin, stdinStat, stdinStream } from '../utils/stream.ts'
 import { splitLinesKeepends } from '../utils/lines.ts'
 import { UsageError } from '../../errors.ts'
@@ -83,9 +83,7 @@ function parseFlags(bag: Record<string, FlagValue>): DiffFlags {
     )
       context = Math.max(context, Math.min(Number(value), Number.MAX_SAFE_INTEGER))
     else
-      throw new UsageError(
-        `diff: invalid context length '${String(value)}'\ndiff: Try 'diff --help' for more information.`,
-      )
+      throw new UsageError(`diff: invalid context length '${String(value)}'\n${usageHint('diff')}`)
   }
   const newFile = fl.asBool('new_file')
   return {

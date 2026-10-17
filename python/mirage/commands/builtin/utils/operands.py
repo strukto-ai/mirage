@@ -378,11 +378,27 @@ async def reported_stream(
         async for chunk in source:
             yield chunk
     except FS_ERRORS as exc:
-        existing = await materialize(io.stderr)
-        io.stderr = existing + encode_text(fs_error_line(cmd_name, path, exc))
-        io.exit_code = 1
+        await report_fs_error(io, cmd_name, path, exc)
     finally:
         await close_quietly(source)
+
+
+async def report_fs_error(
+    io: IOResult, cmd_name: str, path: PathSpec, exc: BaseException
+) -> None:
+    """Report one operand's filesystem failure on a result whose output
+    goes on: its ``fs_error_line`` lands after the stderr already there,
+    and the exit code becomes 1.
+
+    Args:
+        io (IOResult): the result the failure is reported on.
+        cmd_name (str): the command whose diagnostic is reported.
+        path (PathSpec): the operand that failed.
+        exc (BaseException): the failure.
+    """
+    existing = await materialize(io.stderr)
+    io.stderr = existing + encode_text(fs_error_line(cmd_name, path, exc))
+    io.exit_code = 1
 
 
 def per_operand(

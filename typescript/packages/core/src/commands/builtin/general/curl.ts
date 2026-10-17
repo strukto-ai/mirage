@@ -25,6 +25,8 @@ import {
   httpRequest,
   isHttpError,
 } from '../utils/http.ts'
+import { HTTP_TIMEOUT_SECONDS } from '../utils/constants.ts'
+import { resolveTarget } from '../utils/paths.ts'
 import { UsageError } from '../../errors.ts'
 import { fsStrerror, isFsError, isWalkError, enotsup } from '../../../errors/fs.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
@@ -48,7 +50,6 @@ const EXIT_WRITE = 23
 const EXIT_READ = 26
 const EXIT_TIMEOUT = 28
 
-const DEFAULT_TIMEOUT_MS = 30_000
 const CRLF = '\r\n'
 const HELP_HINT = "curl: try 'curl --help' or 'curl --manual' for more information"
 // curl 8.7.1's wording, wrapped where it wraps it (the trailing space is the
@@ -75,10 +76,6 @@ const DATA_SPELLING: Record<string, string> = {
 // -d @FILE drops these bytes from what it reads; --data-binary keeps them.
 const DATA_STRIPPED = new Set([0x0d, 0x0a, 0x00])
 const UNRESERVED = /^[A-Za-z0-9\-._~]$/
-
-export function resolveTarget(o: string | PathSpec, cwd: string): PathSpec {
-  return PathSpec.fromStrPath(o, undefined, cwd)
-}
 
 /**
  * The headers -H sends, and every name it mentions.
@@ -314,6 +311,30 @@ function writeFailure(shown: string, err: unknown): string {
   return `curl: (${String(EXIT_WRITE)}) ${shown}: ${detail}\n`
 }
 
+/** A message curl or wget prints, nothing when the line silenced it. */
+export function said(quiet: boolean, text: string): Uint8Array {
+  return quiet ? new Uint8Array() : ENC.encode(text)
+}
+
+// Write a -D or -o file through the dispatcher: null once written (or with no
+// dispatcher to write through), else the failure's stderr. Mirrors Python's
+// _write_named.
+async function writeNamed(
+  ctx: Context,
+  target: PathSpec | string,
+  data: Uint8Array,
+  quiet: boolean,
+): Promise<Uint8Array | null> {
+  if (ctx.dispatch === undefined) return null
+  try {
+    await ctx.dispatch('write', resolveTarget(target, ctx.cwd.virtual), [data])
+  } catch (err) {
+    if (!isWalkError(err)) throw err
+    return said(quiet, writeFailure(target instanceof PathSpec ? target.virtual : target, err))
+  }
+  return null
+}
+
 async function curl(
   _accessor: Accessor,
   paths: PathSpec[],
@@ -368,7 +389,7 @@ async function curl(
   }
   // A zero --max-time is curl's "no limit", not a deadline of zero.
   const timeoutMs =
-    maxTime === undefined ? DEFAULT_TIMEOUT_MS : maxTime === 0 ? null : maxTime * 1000
+    maxTime === undefined ? HTTP_TIMEOUT_SECONDS * 1000 : maxTime === 0 ? null : maxTime * 1000
   let template = fl.asStr('write_out') ?? ''
   // curl 8.14.1: -s suppresses only the opening diagnostic; -S does not
   // restore it. The option error is always printed. Parsed flags lose their
@@ -471,23 +492,11 @@ async function curl(
       // Nothing was received: the body is read whole, so a deadline that
       // hits mid-transfer still counts as zero bytes here.
       const line = `curl: (${String(EXIT_TIMEOUT)}) Operation timed out after ${String(err.elapsedMs)} milliseconds with 0 bytes received\n`
-      return await finish(
-        null,
-        new IOResult({
-          exitCode: EXIT_TIMEOUT,
-          stderr: quiet ? new Uint8Array() : ENC.encode(line),
-        }),
-      )
+      return await finish(null, new IOResult({ exitCode: EXIT_TIMEOUT, stderr: said(quiet, line) }))
     }
     if (!(err instanceof HttpConnectError)) throw err
     const line = `curl: (${String(EXIT_CONNECT)}) Failed to connect to ${err.host} port ${String(err.port)}: Could not connect to server\n`
-    return await finish(
-      null,
-      new IOResult({
-        exitCode: EXIT_CONNECT,
-        stderr: quiet ? new Uint8Array() : ENC.encode(line),
-      }),
-    )
+    return await finish(null, new IOResult({ exitCode: EXIT_CONNECT, stderr: said(quiet, line) }))
   }
   const hops = [...resp.history, resp]
   // The first request is the one this handler built; each redirect's is
@@ -527,20 +536,13 @@ async function curl(
   // -D writes the headers as they arrive, so before -f judges the status and
   // before -o writes the body: a file both name ends up holding the body.
   if (dumpFile !== null) {
-    if (ctx.dispatch !== undefined) {
-      try {
-        await ctx.dispatch('write', resolveTarget(dumpFile, ctx.cwd.virtual), [blocks])
-      } catch (err) {
-        const line = writeFailure(dumpFile instanceof PathSpec ? dumpFile.virtual : dumpFile, err)
-        return await finish(
-          null,
-          new IOResult({
-            exitCode: EXIT_WRITE,
-            stderr: concat([trace, quiet ? new Uint8Array() : ENC.encode(line)]),
-          }),
-          resp,
-        )
-      }
+    const refused = await writeNamed(ctx, dumpFile, blocks, quiet)
+    if (refused !== null) {
+      return await finish(
+        null,
+        new IOResult({ exitCode: EXIT_WRITE, stderr: concat([trace, refused]) }),
+        resp,
+      )
     }
   }
   const headerOut = dumpToStdout ? blocks : null
@@ -552,7 +554,7 @@ async function curl(
       headerOut,
       new IOResult({
         exitCode: EXIT_HTTP_ERROR,
-        stderr: concat([trace, quiet ? new Uint8Array() : ENC.encode(line)]),
+        stderr: concat([trace, said(quiet, line)]),
       }),
       resp,
     )
@@ -565,21 +567,13 @@ async function curl(
     result = concat([blocks, result])
   }
   if (output !== null && !outputIsStdout) {
-    if (ctx.dispatch !== undefined) {
-      const scope = resolveTarget(output, ctx.cwd.virtual)
-      try {
-        await ctx.dispatch('write', scope, [result])
-      } catch (err) {
-        const line = writeFailure(output instanceof PathSpec ? output.virtual : output, err)
-        return await finish(
-          headerOut,
-          new IOResult({
-            exitCode: EXIT_WRITE,
-            stderr: concat([trace, quiet ? new Uint8Array() : ENC.encode(line)]),
-          }),
-          resp,
-        )
-      }
+    const refused = await writeNamed(ctx, output, result, quiet)
+    if (refused !== null) {
+      return await finish(
+        headerOut,
+        new IOResult({ exitCode: EXIT_WRITE, stderr: concat([trace, refused]) }),
+        resp,
+      )
     }
     // Real curl writes the body to the file and prints nothing else on
     // stdout, the headers -D sends there aside.

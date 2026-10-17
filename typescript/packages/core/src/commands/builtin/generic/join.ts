@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
+import { INTMAX_MIN } from '../constants.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { OPERAND, SPELLED } from '../../spec/constants.ts'
 import { FlagView, spreadOperands } from '../../spec/flag_view.ts'
@@ -29,7 +30,6 @@ import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 
 const IDX_MAX = (1n << 63n) - 1n
-const INTMAX_MIN = -(1n << 63n)
 const WHOLE_LINE = '\n'
 const FIELD_RUN = /[^ \t\n]+/g
 const INTEGER = /^[ \t\n\v\f\r]*([+-]?[0-9]+)$/

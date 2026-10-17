@@ -455,17 +455,7 @@ export async function removeTree(vfs: Files, path: PathSpec): Promise<void> {
   // deep under the directory costs the caller nothing: the scan sees every
   // depth at once and the tree is still whole when it refuses.
   refuseMount(vfs, path)
-  let entries: string[] = []
-  try {
-    entries = await readNames(vfs, path)
-  } catch (err) {
-    // `readNames` reads only an absent path as nothing there, where python's
-    // `read_names` folds "not a directory" in as well (MISS_ERRORS carries
-    // NotADirectoryError). A file listed as a directory is exactly what this
-    // walk expects to meet, and the unlink below is its answer.
-    if ((err as { code?: string }).code !== 'ENOTDIR') throw err
-  }
-  for (const entry of entries) {
+  for (const entry of await readNames(vfs, path)) {
     // A listing answers in whole paths, so the child is rebuilt from the
     // basename the way every other walk here does.
     const name = entryName(entry)

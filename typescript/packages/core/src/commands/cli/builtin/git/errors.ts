@@ -513,6 +513,16 @@ export class PartialCommitError extends GitError {
 }
 
 /**
+ * git's `compile_regexp_failed`: a pattern that does not compile, named with
+ * where it came from and what the engine said.
+ */
+export class PatternCompileError extends GitError {
+  constructor(origin: string, pattern: string, reason: string) {
+    super(`${origin}, '${pattern}': ${reason}`)
+  }
+}
+
+/**
  * A --pretty/--format value naming no format at all.
  *
  * git's own wording and exit code for a name it has never heard of.
@@ -1267,6 +1277,17 @@ export class RefUpdateConflictError extends GitError {
 export class RefLockError extends GitError {
   constructor(ref: string, held: string) {
     super(`cannot lock ref '${ref}': '${held}' exists; cannot create '${ref}'`)
+  }
+}
+
+/**
+ * A HEAD naming a ref whose path leaves the ref tree, which the files backend
+ * will not lock: `ref: refs/heads/../../config` would otherwise point the new
+ * commit at the repository's own config. Pinned against git 2.47.3.
+ */
+export class BrokenHeadError extends GitError {
+  constructor(target: string) {
+    super(`cannot lock ref 'HEAD': unable to resolve reference '${target}': reference broken`)
   }
 }
 

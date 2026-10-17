@@ -138,9 +138,9 @@ def test_search_spec_parses_query_paths_and_options():
         cwd="/knowledge",
     )
 
-    assert parsed.flag("--method") == "hybrid"
-    assert parsed.flag("--top-k") == "5"
-    assert parsed.flag("--threshold") == "0.4"
+    assert parsed.flags["--method"] == "hybrid"
+    assert parsed.flags["--top-k"] == "5"
+    assert parsed.flags["--threshold"] == "0.4"
     assert parsed.args == [
         ("login docs", "str"),
         ("/knowledge/guides/*.md", "path"),
@@ -175,14 +175,6 @@ def test_parsed_args_paths():
 def test_parsed_args_texts():
     p = ParsedArgs(flags={}, args=[("/a", "path"), ("text", "str")])
     assert p.texts() == ["text"]
-
-
-def test_parsed_args_flag():
-    p = ParsedArgs(flags={"-n": "10", "-r": True}, args=[])
-    assert p.flag("-n") == "10"
-    assert p.flag("-r") is True
-    assert p.flag("-x") is None
-    assert p.flag("-x", "default") == "default"
 
 
 def test_parse_combined_bool_and_value():
@@ -371,14 +363,14 @@ def test_grep_spec_parses_correctly():
 def test_head_spec_parses_n_flag():
     spec = SPECS["head"]
     parsed = parse_command(spec, ["-n", "20", "file.txt"], cwd="/data")
-    assert parsed.flag("--lines") == "20"
+    assert parsed.flags["--lines"] == "20"
     assert parsed.paths() == ["/data/file.txt"]
 
 
 def test_head_spec_parses_joined_n():
     spec = SPECS["head"]
     parsed = parse_command(spec, ["-n20", "file.txt"], cwd="/")
-    assert parsed.flag("--lines") == "20"
+    assert parsed.flags["--lines"] == "20"
     assert parsed.paths() == ["/file.txt"]
 
 
@@ -408,8 +400,8 @@ def test_rg_spec_with_long_flags():
     parsed = parse_command(
         spec, ["--type", "py", "--hidden", "pattern", "src/"], cwd="/"
     )
-    assert parsed.flag("--type") == ["py"]
-    assert parsed.flag("--hidden") is True
+    assert parsed.flags["--type"] == ["py"]
+    assert parsed.flags["--hidden"] is True
     assert parsed.args[0] == ("pattern", "str")
     assert parsed.args[1] == ("/src", "path")
 
@@ -420,8 +412,8 @@ def test_find_spec():
         spec, ["/data", "-name", "*.py", "-type", "f"], cwd="/"
     )
     assert parsed.paths() == ["/data"]
-    assert parsed.flag("-name") == ["*.py"]
-    assert parsed.flag("-type") == ["f"]
+    assert parsed.flags["-name"] == ["*.py"]
+    assert parsed.flags["-type"] == ["f"]
 
 
 def test_curl_spec():
@@ -430,12 +422,12 @@ def test_curl_spec():
         spec, ["-H", "Accept: json", "http://example.com"], cwd="/"
     )
     # Both spellings land on the long dest, the way every aliased option does.
-    assert parsed.flag("--header") == ["Accept: json"]
+    assert parsed.flags["--header"] == ["Accept: json"]
     assert parsed.texts() == ["http://example.com"]
     # The URL is a positional slot, so an unknown option is refused rather
     # than fetched (#1065).
     parsed = parse_command(spec, ["-sv", "http://example.com"], cwd="/")
-    assert parsed.flag("--verbose") is True
+    assert parsed.flags["--verbose"] is True
     assert parsed.texts() == ["http://example.com"]
 
 
@@ -451,7 +443,7 @@ def test_wget_spec():
 def test_sed_spec():
     spec = SPECS["sed"]
     parsed = parse_command(spec, ["-i", "s/foo/bar/", "file.txt"], cwd="/data")
-    assert parsed.flag("-i") is True
+    assert parsed.flags["-i"] is True
     assert parsed.args[0] == ("s/foo/bar/", "str")
     assert parsed.args[1] == ("/data/file.txt", "path")
 
@@ -461,10 +453,10 @@ def test_sort_spec():
     parsed = parse_command(
         spec, ["-k", "2", "-t", ",", "-rn", "data.csv"], cwd="/"
     )
-    assert parsed.flag("--key") == ["2"]
-    assert parsed.flag("--field-separator") == ","
-    assert parsed.flag("--reverse") is True
-    assert parsed.flag("--numeric-sort") is True
+    assert parsed.flags["--key"] == ["2"]
+    assert parsed.flags["--field-separator"] == ","
+    assert parsed.flags["--reverse"] is True
+    assert parsed.flags["--numeric-sort"] is True
     assert parsed.paths() == ["/data.csv"]
 
 

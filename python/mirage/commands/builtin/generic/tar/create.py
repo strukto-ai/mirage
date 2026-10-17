@@ -163,6 +163,19 @@ def member_name(spelled: str, kind: MemberKind) -> str:
     return name
 
 
+def cannot(name: str, verb: str, reason: str | None, who: str = "tar") -> str:
+    """GNU tar's ``tar: NAME: Cannot VERB: REASON`` diagnostic.
+
+    Args:
+        name (str): the operand or member as tar names it.
+        verb (str): what failed: ``open``, ``read``, ``stat`` or ``mkdir``.
+        reason (str | None): the failure's strerror text.
+        who (str): the program signing the line, tar or the compressor
+            child it runs.
+    """
+    return f"{who}: {name}: Cannot {verb}: {reason}"
+
+
 async def check_directories(
     directories: list[PathSpec], is_dir: DirProbe, stat: StatFn
 ) -> list[str]:
@@ -184,7 +197,7 @@ async def check_directories(
         except FS_ERRORS as exc:
             reason = fs_strerror(exc) or str(exc)
         return [
-            f"tar: {directory.raw_path}: Cannot open: {reason}",
+            cannot(directory.raw_path, "open", reason),
             constants.FATAL_TRAILER,
         ]
     return []
@@ -254,8 +267,7 @@ async def plan_create(
                 notices,
             )
             notices.append(
-                f"tar: {path.raw_path}: Cannot stat: "
-                f"{fs_strerror(walk_refusal(path))}"
+                cannot(path.raw_path, "stat", fs_strerror(walk_refusal(path)))
             )
             exit_code = constants.CREATE_ERROR_EXIT
             continue
@@ -298,13 +310,13 @@ async def plan_create(
             if problem.unreadable:
                 # A directory the walk could not open: GNU names it,
                 # keeps its entry, and fails the run.
-                notices.append(f"tar: {shown}: Cannot open: {problem.reason}")
+                notices.append(cannot(shown, "open", problem.reason))
                 exit_code = constants.CREATE_ERROR_EXIT
                 continue
             if not problem.fatal:
                 notices.append(f"tar: {shown}: {problem.reason}")
                 continue
-            notices.append(f"tar: {shown}: Cannot stat: {problem.reason}")
+            notices.append(cannot(shown, "stat", problem.reason))
             exit_code = constants.CREATE_ERROR_EXIT
         if scan.missing:
             continue

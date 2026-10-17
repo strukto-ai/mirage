@@ -16,6 +16,7 @@ import { compileSpec, argumentDest } from './compile.ts'
 import { flagKwargName, OPERAND, REFUSED, SPELLED } from './constants.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { PathSpec } from '../../types.ts'
+import { UsageError } from '../errors.ts'
 import type { CommandSpec, FlagValue, ParsedFlagValue } from './types.ts'
 
 // The tape records what the parser scanned, so its values are the parser's
@@ -161,10 +162,17 @@ export class FlagView {
     return typeof value === 'number' && value > 0
   }
 
-  asInt(name: string): number | undefined {
+  /**
+   * The option as an integer, `fallback` only when it is absent. A value the
+   * line gave, `0` included, is the value: an absent option and an explicit
+   * zero are different requests. Mirrors Python's `as_int`.
+   */
+  asInt(name: string): number | undefined
+  asInt(name: string, fallback: number): number
+  asInt(name: string, fallback?: number): number | undefined {
     const value = this.flags[this.key(name)]
     if (typeof value === 'number') return value
-    if (typeof value !== 'string') return undefined
+    if (typeof value !== 'string') return fallback
     // Python's int() is all-or-nothing: it accepts surrounding whitespace
     // and underscore separators and raises on anything else. parseInt would
     // instead take the numeric prefix of '5x' and hand back NaN for 'abc',
@@ -177,10 +185,16 @@ export class FlagView {
     return Number.parseInt(text.replaceAll('_', ''), 10)
   }
 
-  asFloat(name: string): number | undefined {
+  /**
+   * The option as a number, `fallback` only when it is absent. Mirrors
+   * Python's `as_float`.
+   */
+  asFloat(name: string): number | undefined
+  asFloat(name: string, fallback: number): number
+  asFloat(name: string, fallback?: number): number | undefined {
     const value = this.flags[this.key(name)]
     if (typeof value === 'number') return value
-    if (typeof value !== 'string') return undefined
+    if (typeof value !== 'string') return fallback
     // All-or-nothing like Python's float(), mirroring asInt: parseFloat
     // would take the numeric prefix of '2.5x' and hand back NaN for
     // 'abc', and NaN still satisfies `number`.
@@ -195,9 +209,72 @@ export class FlagView {
     return Number.parseFloat(text.replaceAll('_', ''))
   }
 
-  asStr(name: string): string | undefined {
+  /**
+   * An integer option read and refused the way its program does. Each program
+   * scans its own numbers (gnulib's `xstrtoumax`, C's `strtol`, `atoi`) and
+   * words its own refusal, so both come from the caller: `scan` is the
+   * program's reader, null for a text it does not take, and a scanned value
+   * outside `low`..`high` is refused the same way, through `refusal`, with
+   * `exitCode`. Values are bigints so a range check at the 64-bit edge is
+   * exact. An integer value is scanned as its digits (`asText`). Undefined
+   * when the option is absent. Mirrors Python's `as_number`.
+   */
+  asNumber(
+    name: string,
+    scan: (text: string) => bigint | null,
+    refusal: (text: string, value: bigint | null) => string,
+    bounds: { readonly low?: bigint; readonly high?: bigint; readonly exitCode?: number } = {},
+  ): bigint | undefined {
+    const text = this.asText(name)
+    if (text === undefined) return undefined
+    const value = scan(text)
+    if (
+      value === null ||
+      (bounds.low !== undefined && value < bounds.low) ||
+      (bounds.high !== undefined && value > bounds.high)
+    ) {
+      throw new UsageError(refusal(text, value), bounds.exitCode ?? 1)
+    }
+    return value
+  }
+
+  /**
+   * The option as the text a line would have typed for it: a string as given,
+   * an integer (a direct call's `{ c: 4 }`) as its decimal digits, undefined
+   * when absent. A boolean is a switch, not a number, so it reads as absent.
+   * Mirrors Python's `as_text`.
+   */
+  asText(name: string): string | undefined {
     const value = this.flags[this.key(name)]
+    if (typeof value === 'number')
+      return Number.isInteger(value) ? BigInt(value).toString() : undefined
     return typeof value === 'string' ? value : undefined
+  }
+
+  /**
+   * The option as text, `fallback` only when it is absent. A given-but-empty
+   * value (`--to=`, `-d ''`) is the value, as it is to the program: what an
+   * empty one means is the command's to decide, never the accessor's.
+   * Mirrors Python's `as_str`.
+   */
+  asStr(name: string): string | undefined
+  asStr(name: string, fallback: string): string
+  asStr(name: string, fallback?: string): string | undefined {
+    const value = this.flags[this.key(name)]
+    return typeof value === 'string' ? value : fallback
+  }
+
+  /**
+   * The option as text, `fallback` when it is absent or empty. For a program
+   * that cannot tell an empty value from none, as a Go flag's zero value
+   * cannot (gh's `if opts.Name != ""`): there the empty one reads as unset,
+   * and nowhere else. Mirrors Python's `as_nonempty`.
+   */
+  asNonEmpty(name: string): string | undefined
+  asNonEmpty(name: string, fallback: string): string
+  asNonEmpty(name: string, fallback?: string): string | undefined {
+    const value = this.asStr(name)
+    return value === undefined || value === '' ? fallback : value
   }
 
   asList(name: string): string[] {

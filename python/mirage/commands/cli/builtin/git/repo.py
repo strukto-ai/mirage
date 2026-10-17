@@ -24,7 +24,7 @@ from mirage.commands.cli.builtin.git.io import read_optional
 from mirage.commands.cli.builtin.git.objects import load_object_store
 from mirage.commands.cli.builtin.git.refs import load_refs
 from mirage.commands.cli.builtin.git.types import RepoLocation
-from mirage.commands.cli.builtin.git.util import git_bool
+from mirage.commands.cli.builtin.git.util import git_bool, multivar
 from mirage.workspace.files import Files
 
 
@@ -99,10 +99,8 @@ async def open_repo(
     )
 
 
-async def config_values(
-    vfs: Files, location: RepoLocation, section: bytes, name: bytes
-) -> list[bytes]:
-    """Every value a variable takes in the repository's config, in order.
+async def read_config(vfs: Files, location: RepoLocation) -> ConfigFile:
+    """The repository's own config, empty when it has none.
 
     Only the repository's own config is reachable from a mount, and a
     linked worktree's config is its repository's.
@@ -110,17 +108,23 @@ async def config_values(
     Args:
         vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
+    """
+    data = await read_optional(vfs, location.commondir.join("config"))
+    return ConfigFile.from_file(BytesIO(data or b""))
+
+
+async def config_values(
+    vfs: Files, location: RepoLocation, section: bytes, name: bytes
+) -> list[bytes]:
+    """Every value a variable takes in the repository's config, in order.
+
+    Args:
+        vfs (Files): the session's files.
+        location (RepoLocation): the discovered repository.
         section (bytes): the section, e.g. ``b"core"``.
         name (bytes): the variable, e.g. ``b"worktree"``.
     """
-    data = await read_optional(vfs, location.commondir.join("config"))
-    if data is None:
-        return []
-    config = ConfigFile.from_file(BytesIO(data))
-    try:
-        return list(config.get_multivar((section,), name))
-    except KeyError:
-        return []
+    return multivar(await read_config(vfs, location), (section,), name)
 
 
 async def config_bool(

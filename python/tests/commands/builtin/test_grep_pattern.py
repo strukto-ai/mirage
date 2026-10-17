@@ -201,6 +201,3 @@ def test_perl_refusals_are_pcre2s():
 
 def test_rust_escape_is_regex_escape():
     assert rust_escape("a.b-c~d") == "a\\.b\\-c\\~d"
-    assert compile_pattern(
-        "a.b", fixed_string=True, syntax=RegexSyntax.RUST
-    ).search("a.b")

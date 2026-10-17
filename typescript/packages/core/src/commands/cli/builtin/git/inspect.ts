@@ -1,6 +1,7 @@
 import { PathSpec } from '../../../../types.ts'
 import { loadRefs, resolveSymbolic } from './refs.ts'
-import { shortenRef } from './ref_fields.ts'
+import { MINIMUM_ABBREV, shortenRef } from './ref_fields.ts'
+import { FULL_SHA } from './format.ts'
 import git from 'isomorphic-git'
 import { VERSION } from '../../../../version.ts'
 
@@ -24,7 +25,7 @@ import {
   UsageError,
 } from './errors.ts'
 import { parseFlags, refCommits, select } from './history.ts'
-import { uniqueAbbreviations } from './ref_list.ts'
+import { resolveRef, uniqueAbbreviations } from './ref_list.ts'
 import { commitFacts, configBool, repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { configLines, type ConfigLine } from './fs.ts'
@@ -53,8 +54,6 @@ const SHOW_TOPLEVEL = '--show-toplevel'
 // git's own global spells `--git-dir` too, so rev-parse cannot declare it: it
 // arrives as an operand, and is answered from there.
 const GIT_DIR_OPTION = '--git-dir'
-const MIN_ABBREV = 4
-const HEX_LENGTH = 40
 const GET_URL = new CommandSpec({
   arguments: [
     new Argument('--push', {
@@ -369,8 +368,10 @@ export async function showRef(
       .sort(compareCodePoints)) {
       if (texts.length && !texts.some((pattern) => ref === pattern || ref.endsWith(`/${pattern}`)))
         continue
-      const oid = await git.resolveRef({ ...repoArgs(repo), ref })
-      lines.push(`${oid} ${ref}`)
+      // A ref that resolves to nothing (a dangling symbolic ref) is skipped
+      // silently, as git's ref iteration skips it. Pinned against git 2.47.3.
+      const [oid] = resolveRef(refs, ref)
+      if (oid !== null) lines.push(`${oid} ${ref}`)
     }
     return [
       ENC.encode(lines.length ? `${lines.join('\n')}\n` : ''),
@@ -468,7 +469,7 @@ function shortWidth(value: unknown, fallback: number): number {
   if (typeof value !== 'string') return fallback
   const digits = /^\s*\d+/.exec(value)
   const width = digits === null ? 0 : Number(digits[0])
-  return Math.min(Math.max(width, MIN_ABBREV), HEX_LENGTH)
+  return Math.min(Math.max(width, MINIMUM_ABBREV), FULL_SHA)
 }
 
 /**

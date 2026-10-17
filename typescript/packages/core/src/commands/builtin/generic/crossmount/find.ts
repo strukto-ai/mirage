@@ -17,6 +17,7 @@ import {
   EXEC_END,
   FIND_EXEC_PREDICATES,
   FIND_VALUE_PREDICATES,
+  OPERAND_CONCURRENCY,
 } from '../../constants.ts'
 import { parseFindExpression } from '../../find_parse.ts'
 import { DISPATCH_BUILDERS } from './constants.ts'
@@ -223,7 +224,7 @@ export async function runFind(
       await materialize(out)
       return io
     },
-    4,
+    OPERAND_CONCURRENCY,
   )
   // A run that failed found no rows and says why; one that succeeded without
   // structured rows is a find this line cannot compose.

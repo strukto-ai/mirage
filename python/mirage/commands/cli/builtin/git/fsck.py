@@ -5,6 +5,7 @@ from dulwich.errors import ChecksumMismatch
 from dulwich.objects import Commit, ObjectID, ShaFile, Tag, Tree
 from dulwich.repo import BaseRepo
 
+from mirage.commands.cli.builtin.git.constants import GITLINK
 from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import (
@@ -131,7 +132,7 @@ def links(obj: ShaFile) -> list[bytes]:
         return [obj.tree, *obj.parents]
     if isinstance(obj, Tree):
         return [
-            entry.sha for entry in obj.iteritems() if entry.mode != 0o160000
+            entry.sha for entry in obj.iteritems() if entry.mode != GITLINK
         ]
     if isinstance(obj, Tag):
         return [obj.object[1]]
@@ -230,13 +231,13 @@ async def fsck(
         roots.update(
             entry.sha
             for entry in index.entries.values()
-            if entry.mode != 0o160000
+            if entry.mode != GITLINK
         )
         for conflict in index.conflicts.values():
             roots.update(
                 entry.sha
                 for entry in (conflict.ancestor, conflict.this, conflict.other)
-                if entry is not None and entry.mode != 0o160000
+                if entry is not None and entry.mode != GITLINK
             )
         for directory in {location.gitdir, location.commondir}:
             roots.update(await log_roots(ctx.vfs, directory.join("logs")))

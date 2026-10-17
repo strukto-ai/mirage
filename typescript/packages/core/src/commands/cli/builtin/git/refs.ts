@@ -14,19 +14,22 @@
 
 import type { PathSpec } from '../../../../types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import { HEAD } from './constants.ts'
+import { BadRefNameUpdateError } from './errors.ts'
 import { isDirectory, readFile, readNames, readOptional, removeFile, writeFile } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 
 import type { HeadRef, Refspec, SymbolicEnd } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 
-const HEAD_FILE = 'HEAD'
+export const HEAD_FILE = 'HEAD'
 const PACKED_REFS = 'packed-refs'
 const REFS_DIR = 'refs'
-const MAX_SYMREF_DEPTH = 5
+export const MAX_SYMREF_DEPTH = 5
 const SAFE_ONE_LEVEL = /^[A-Z_]+$/
 export const SYMREF_PREFIX = 'ref: '
 export const BRANCH_PREFIX = 'refs/heads/'
+export const REMOTE_PREFIX = 'refs/remotes/'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -86,6 +89,14 @@ async function walkLooseRefs(
  * Refs live in the common directory, so a branch made from a linked worktree is
  * visible to the repository it was cut from, which is what makes `git worktree`
  * share branches at all.
+ *
+ * A name whose path would leave the ref tree is refused here as git's ref
+ * transaction refuses it, whatever the caller checked: the name is joined onto
+ * the git directory, so `refs/heads/../../config` would land on the
+ * repository's own configuration. Every verb checks its name before it gets
+ * here, so this is the last guard, not the refusal a user sees.
+ *
+ * @throws BadRefNameUpdateError a name `refname_is_safe` refuses
  */
 export async function writeRef(
   vfs: Files,
@@ -93,6 +104,7 @@ export async function writeRef(
   ref: string,
   sha: string,
 ): Promise<void> {
+  if (!safeRefName(ref)) throw new BadRefNameUpdateError(ref)
   await writeFile(vfs, commondir.join(ref), ENC.encode(`${sha}\n`))
 }
 
@@ -272,6 +284,18 @@ export function validRefName(name: string): boolean {
     if (code < 0x20 || code === 0x7f || FORBIDDEN_IN_REF.has(ch)) return false
   }
   return name.split('/').every((part) => !part.startsWith('.') && !part.endsWith(LOCK_SUFFIX))
+}
+
+/**
+ * Whether git takes a name for a new branch (`strbuf_check_branch_ref`): git's
+ * ref rules, and two more that hold for a branch only: no leading `-`, which
+ * would read as an option, and not `HEAD`, which `refs/heads/HEAD` would make
+ * ambiguous with HEAD itself. Pinned against git 2.47.3.
+ *
+ * @param name the name below `refs/heads/`
+ */
+export function validBranchName(name: string): boolean {
+  return !name.startsWith('-') && name !== HEAD && validRefName(name)
 }
 
 /**

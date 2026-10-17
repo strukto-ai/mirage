@@ -2,6 +2,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import partial
 
+from mirage.commands.builtin.constants import UINTMAX
 from mirage.commands.builtin.utils.lines import map_stream
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
@@ -21,6 +22,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
+from mirage.utils.width import TAB_WIDTH
 
 # GNU's scanner is `c_isdigit`, which is ASCII. A unicode-aware test
 # (python `str.isdigit`, a `\d` class) accepts U+0663 and friends, which
@@ -31,11 +33,6 @@ _DIGITS = frozenset("0123456789")
 # newline, a carriage return, a vertical tab and a form feed are all
 # invalid characters rather than separators.
 _BLANKS = frozenset(" \t")
-
-# The accumulator GNU overflows: a tab stop is read into `uintmax_t`.
-_UINTMAX_MAX = 18446744073709551615
-
-_DEFAULT_TAB_SIZE = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,7 +200,9 @@ def _scan_tab_stops(raw: str, acc: _TabAccumulator) -> None:
                 have = True
                 digits_at = index
             value = value * 10 + int(char)
-            if value > _UINTMAX_MAX:
+            # The accumulator GNU overflows: a tab stop is read into
+            # `uintmax_t`.
+            if value > UINTMAX:
                 end = index
                 while end < len(raw) and raw[end] in _DIGITS:
                     end += 1
@@ -310,7 +309,7 @@ def next_tab_stop(tabs: TabStops, column: int) -> int:
         return column + size - column % size
     if tabs.stops:
         return column + 1
-    return column + _DEFAULT_TAB_SIZE - column % _DEFAULT_TAB_SIZE
+    return column + TAB_WIDTH - column % TAB_WIDTH
 
 
 def _expand_text(text: str, tabs: TabStops) -> str:

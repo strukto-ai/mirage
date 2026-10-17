@@ -36,6 +36,43 @@
       "flags": [
         "t"
       ]
+    },
+    {
+      "id": "unexpand_empty_tab_list_is_the_default",
+      "seq": 9940206,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '        a\\n' | unexpand -t '' | od -An -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "  \\t   a  \\n\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
     }
   ]
 }

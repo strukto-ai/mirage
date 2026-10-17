@@ -27,6 +27,7 @@ import {
   csvValues,
   ghBool,
   ghTransport,
+  listLimit,
   repoFor,
   textOut,
   textValue,
@@ -84,7 +85,7 @@ export async function listCmd(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   const rows = (
-    await listReleases(ghTransport(config), repoFor(config, fl), fl.asInt('limit') ?? 30)
+    await listReleases(ghTransport(config), repoFor(config, fl), listLimit(fl, 30, null))
   ).map(release)
   const latest = rows.find((row) => !row.isDraft && !row.isPrerelease)
   if (latest !== undefined) latest.isLatest = true
@@ -123,13 +124,13 @@ export async function createCmd(
   if (tag === '') throw new Error('a release tag is required in noninteractive mode')
   const body: Record<string, unknown> = {
     tag_name: tag,
-    name: fl.asStr('title') ?? tag,
+    name: fl.asNonEmpty('title', tag),
     body: (await bodyValue(ctx, fl, { value: 'notes', file: 'notes_file' })) ?? '',
     draft: ghBool(fl, 'draft'),
     prerelease: ghBool(fl, 'prerelease'),
     generate_release_notes: ghBool(fl, 'generate_notes'),
   }
-  const target = fl.asStr('target')
+  const target = fl.asNonEmpty('target')
   if (target !== undefined) body.target_commitish = target
   const created = release(await createRelease(ghTransport(config), repoFor(config, fl), body))
   return textOut(`${textValue(created.url)}\n`)

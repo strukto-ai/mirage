@@ -128,11 +128,13 @@ def git_option_refusal(
     """parse-options' answer to a word the verb does not take.
 
     ``-h`` asks for the usage block, which goes to stdout. A boolean
-    long handed a value is refused on one line. Anything else is an
-    option the verb does not have: a long one is an "option" and a
-    short one a "switch", both named without their dashes and quoted
-    with a backquote-apostrophe pair, and the usage block follows on
-    stderr. Pinned against git 2.50.1.
+    long handed a value is refused on one line, and so is an option
+    that needs a value and ends the line without one (it reaches the
+    operands when the verb takes free text). Anything else is an option
+    the verb does not have: a long one is an "option" and a short one a
+    "switch", both named without their dashes and quoted with a
+    backquote-apostrophe pair, and the usage block follows on stderr.
+    Pinned against git 2.50.1 and 2.47.3.
 
     Args:
         word (str): the offending word with its dashes ('--nosuch',
@@ -157,6 +159,14 @@ def git_option_refusal(
     ):
         return "", f"error: option `{name[2:]}' takes no value\n"
     noun = "option" if word.startswith(LONG_PREFIX) else "switch"
+    last = word if word.startswith(LONG_PREFIX) else f"-{word[-1]}"
+    if not eq and any(
+        last in opt.names
+        and opt.action not in ("store_true", "count")
+        and opt.nargs != "?"
+        for opt in compile_spec(spec).options
+    ):
+        return "", f"error: {noun} `{last.lstrip('-')}' requires a value\n"
     return "", f"error: unknown {noun} `{word.lstrip('-')}'\n{usage}"
 
 

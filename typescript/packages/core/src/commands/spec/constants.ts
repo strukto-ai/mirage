@@ -31,6 +31,16 @@ export const VERSION_OPTION = new Argument('--version', {
   help: 'Show version information and exit',
 })
 
+// The operand slots most builtin specs declare, one shared object each: an
+// Argument is frozen, and only the two options above are ever told apart by
+// identity.
+export const PATHS_OPERAND = new Argument('paths', { metavar: '', type: 'path', nargs: '*' })
+export const TEXTS_OPERAND = new Argument('texts', { metavar: '', nargs: '*' })
+export const PATH_OPERAND = new Argument('path', { metavar: '', type: 'path', nargs: '?' })
+export const PATH2_OPERAND = new Argument('path2', { metavar: '', type: 'path', nargs: '?' })
+export const TEXT_OPERAND = new Argument('text', { metavar: '', nargs: '?' })
+export const REMAINDER_OPERAND = new Argument('texts', { metavar: '', nargs: 'REMAINDER' })
+
 // Stand-in name for a required operand whose slot declares none, so a
 // refusal that has to name the slot always has a word for it. Bare like
 // every operand name: the brackets are the renderer's.
@@ -82,7 +92,6 @@ export const STDIN_DASH_COMMANDS: ReadonlySet<string> = new Set([
   'rg',
   'sed',
   'sha1sum',
-  'sha224sum',
   'sha256sum',
   'sha384sum',
   'sha512sum',
@@ -793,12 +802,19 @@ export const READ_FAIL_EXIT_ISDIR: Readonly<Record<string, number>> = Object.fre
 // source-selecting options a reader needs.
 export const PYTHON_NAMES: ReadonlySet<string> = new Set(['python', 'python3'])
 
+// The programs that do NOT parse with getopt_long, and so answer an option
+// they will not take by naming the whole typed token as unknown rather than by
+// naming the option. Each one is measured: `curl --silent=2` is
+// `curl: option --silent=2: is unknown`, `python3 --version=2` is
+// `Unknown option: --version=2`, `jq --tab=2` is `jq: Unknown option --tab=2`,
+// and find reads the word as a predicate. Every other command here is a GNU
+// tool whose getopt_long words the refusal the other way, so the set is the
+// exception list and not the rule.
+export const NOT_GETOPT_LONG: ReadonlySet<string> = new Set(['curl', 'jq', 'find', ...PYTHON_NAMES])
+
 // Pinned on CPython 3.12.13, including two quirks worth keeping: the
 // hint always spells the program `python` (never `python3`, whichever
 // way it was invoked), and it quotes with a backquote/quote pair.
-export function pythonUsage(name: string): string {
-  return (
-    `usage: ${name} [option] ... [-c cmd | -m mod | file | -] [arg] ...\n` +
-    "Try `python -h' for more information.\n"
-  )
-}
+export const PYTHON_USAGE =
+  'usage: {name} [option] ... [-c cmd | -m mod | file | -] [arg] ...\n' +
+  "Try `python -h' for more information.\n"

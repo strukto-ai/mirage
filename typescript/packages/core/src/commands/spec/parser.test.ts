@@ -2047,11 +2047,6 @@ describe('ParsedArgs helpers', () => {
   it('texts() returns TEXT args only', () => {
     expect(parsed.texts()).toEqual(['literal'])
   })
-
-  it('flag() reads with fallback', () => {
-    expect(parsed.flag('-l')).toBe(true)
-    expect(parsed.flag('--missing', 'def')).toBe('def')
-  })
 })
 
 it.each([['-O', '-'], ['-O-']])('keeps wget stdout out of path operands', (...argv) => {

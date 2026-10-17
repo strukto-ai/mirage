@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { FALLBACK_TMPDIR } from '../constants.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { UsageError } from '../../errors.ts'
@@ -84,7 +85,7 @@ export function planTemplate(
   if (useDestDir || t || templateArg === undefined) {
     let directory: string
     if (t) {
-      directory = envTmpdir || destDir || '/tmp'
+      directory = envTmpdir || destDir || FALLBACK_TMPDIR
       if (template.includes('/')) {
         throw new UsageError(
           `mktemp: invalid template, '${quoteText(template)}', contains directory separator`,
@@ -92,7 +93,7 @@ export function planTemplate(
         )
       }
     } else {
-      directory = destDir || envTmpdir || '/tmp'
+      directory = destDir || envTmpdir || FALLBACK_TMPDIR
       if (template.startsWith('/')) {
         throw new UsageError(
           `mktemp: invalid template, '${quoteText(template)}'; with --tmpdir, it may not be absolute`,
@@ -181,7 +182,7 @@ export async function mktempGeneric(
         await create(path)
       } catch (error) {
         if (!fallback || !isEnoent(error)) throw error
-        await mkdir(PathSpec.fromStrPath('/tmp'))
+        await mkdir(PathSpec.fromStrPath(FALLBACK_TMPDIR))
         await create(path)
       }
     }

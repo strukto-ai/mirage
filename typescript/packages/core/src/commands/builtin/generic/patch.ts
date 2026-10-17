@@ -558,6 +558,22 @@ async function loadPatchData(
   }
 }
 
+// GNU patch's numeric_string: one sign, then digits to the end of the word.
+const STRIP_COUNT = /^[+-]?[0-9]+$/
+
+// `-p` as GNU patch scans it, null for no number. Mirrors Python's
+// `_strip_count`.
+function stripCount(text: string): bigint | null {
+  return STRIP_COUNT.test(text) ? BigInt(text) : null
+}
+
+// GNU patch's fatal line for a -p value that is no number or negative.
+// Mirrors Python's `_strip_refusal`.
+function stripRefusal(text: string, value: bigint | null): string {
+  const problem = value === null ? 'is not a number' : 'is negative'
+  return `patch: **** strip count ${shellQuote(text)} ${problem}`
+}
+
 interface PatchFlags {
   readonly strip: number
   readonly reverse: boolean
@@ -570,7 +586,7 @@ function parseFlags(bag: Record<string, FlagValue>): PatchFlags {
   const fl = new FlagView(bag, specOf('patch'))
   const input = fl.raw('i')
   return {
-    strip: fl.asInt('p') ?? 0,
+    strip: Number(fl.asNumber('p', stripCount, stripRefusal, { low: 0n, exitCode: 2 }) ?? 0n),
     reverse: fl.asBool('R'),
     inputPath: input instanceof PathSpec ? input : (fl.asStr('i') ?? null),
     forward: fl.asBool('N'),

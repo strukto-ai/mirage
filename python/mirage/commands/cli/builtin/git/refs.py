@@ -17,7 +17,8 @@ from io import BytesIO
 
 from dulwich.refs import DictRefsContainer, Ref, read_packed_refs_with_peeled
 
-from mirage.commands.cli.builtin.git.constants import HEAD_REF
+from mirage.commands.cli.builtin.git.constants import HEAD, HEAD_REF
+from mirage.commands.cli.builtin.git.errors import BadRefNameUpdateError
 from mirage.commands.cli.builtin.git.io import (
     read_file,
     read_names,
@@ -40,6 +41,7 @@ REFS_DIR = "refs"
 SYMREF_PREFIX = "ref: "
 BRANCH_PREFIX = "refs/heads/"
 TAG_PREFIX = "refs/tags/"
+REMOTE_PREFIX = "refs/remotes/"
 MAX_SYMREF_DEPTH = 5
 SAFE_ONE_LEVEL = re.compile(r"[A-Z_]+")
 
@@ -110,13 +112,25 @@ async def write_ref(
     worktree is visible to the repository it was cut from, which is what
     makes ``git worktree`` share branches at all.
 
+    A name whose path would leave the ref tree is refused here as git's
+    ref transaction refuses it, whatever the caller checked: the name
+    is joined onto the git directory, so ``refs/heads/../../config``
+    would land on the repository's own configuration. Every verb checks
+    its name before it gets here, so this is the last guard, not the
+    refusal a user sees.
+
     Args:
         vfs (Files): the session's files.
         commondir (PathSpec): absolute virtual path of the shared git
             directory.
         ref (str): full ref name, e.g. ``refs/heads/main``.
         sha (bytes): hex object id the ref should name.
+
+    Raises:
+        BadRefNameUpdateError: a name ``refname_is_safe`` refuses.
     """
+    if not safe_ref_name(ref):
+        raise BadRefNameUpdateError(ref)
     await write_file(vfs, commondir.join(ref), sha + b"\n")
 
 
@@ -322,6 +336,21 @@ def valid_ref_name(name: str) -> bool:
         if part.startswith(".") or part.endswith(LOCK_SUFFIX):
             return False
     return True
+
+
+def valid_branch_name(name: str) -> bool:
+    """Whether git takes a name for a new branch
+    (``strbuf_check_branch_ref``).
+
+    git's ref rules, and two more that hold for a branch only: no
+    leading ``-``, which would read as an option, and not ``HEAD``,
+    which ``refs/heads/HEAD`` would make ambiguous with HEAD itself.
+    Pinned against git 2.47.3.
+
+    Args:
+        name (str): the name below ``refs/heads/``.
+    """
+    return not name.startswith("-") and name != HEAD and valid_ref_name(name)
 
 
 def whole_ref_name(name: str) -> bool:

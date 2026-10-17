@@ -19,7 +19,11 @@ from dataclasses import dataclass, replace
 from dulwich.objects import Blob, Commit, ObjectID, ShaFile, Tag, Tree
 from dulwich.repo import BaseRepo
 
-from mirage.commands.cli.builtin.git.constants import HEAD
+from mirage.commands.cli.builtin.git.constants import (
+    HEAD,
+    TERMINATED_KINDS,
+    TREE,
+)
 from mirage.commands.cli.builtin.git.dates import (
     date_clock,
     parse_date_mode,
@@ -27,8 +31,9 @@ from mirage.commands.cli.builtin.git.dates import (
 )
 from mirage.commands.cli.builtin.git.diff_output import (
     DiffFlags,
+    commit_entry,
     commit_output,
-    join_output,
+    is_combined,
     parse_diff_flags,
     renames_enabled,
 )
@@ -39,20 +44,13 @@ from mirage.commands.cli.builtin.git.errors import (
 )
 from mirage.commands.cli.builtin.git.format import (
     DEFAULT_DATE,
-    FULL_SHA,
-    Decorations,
     LogFormat,
-    oneline,
-    preset_block,
-    render_template,
 )
 from mirage.commands.cli.builtin.git.history import (
-    decoration_for,
     decorations,
+    displayed,
     pretty_format,
 )
-from mirage.commands.cli.builtin.git.mailmap import load_mailmap, use_mailmap
-from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.pathspec import pathspec_patterns
 from mirage.commands.cli.builtin.git.ref_fields import ident_date
 from mirage.commands.cli.builtin.git.repo import config_bool
@@ -133,57 +131,10 @@ def parse_show_flags(
             default_renames=default_renames,
             quote_path_fully=quote_path_fully,
         ),
-        date=parse_date_mode(fl.as_str("date") or "default", date_clock(env)),
+        date=parse_date_mode(fl.as_str("date", "default"), date_clock(env)),
         pretty=pretty,
         abbrev_commit=fl.as_bool("oneline"),
     )
-
-
-def _header(
-    commit: Commit, flags: ShowFlags, width: int, decor: Decorations | None
-) -> bytes:
-    """The commit header in the requested format.
-
-    ``format:`` is a separator, so a single commit prints with no
-    trailing newline at all; ``tformat:`` terminates the entry even
-    when it renders empty, except that an empty template prints
-    nothing, matching ``log --format=``. Pinned against git 2.37 and
-    2.54. A decorated preset labels the commit after its id, as ``log``
-    does.
-
-    Args:
-        commit (Commit): the commit being shown.
-        flags (ShowFlags): the parsed invocation.
-        width (int): abbreviated id width for this repository.
-        decor (Decorations | None): ref labels when the format asked.
-    """
-    fmt = flags.pretty
-    decorated = flags.decorate is not Decoration.NONE
-    if fmt.kind == "oneline":
-        length = width if flags.abbrev_commit else FULL_SHA
-        line = (
-            render_template("%h%d %s", commit, length, decor)
-            if decorated
-            else oneline(commit, length)
-        )
-        return f"{line}\n".encode()
-    if fmt.kind in ("format", "tformat"):
-        rendered = render_template(
-            fmt.template or "", commit, width, decor, flags.date, flags.mailmap
-        )
-        if fmt.kind == "tformat":
-            return encode_text(f"{rendered}\n") if fmt.template else b""
-        return encode_text(rendered)
-    block = preset_block(
-        commit,
-        fmt.kind,
-        width,
-        flags.date,
-        flags.mailmap if flags.use_mailmap else (),
-    )
-    if decorated and block and block[0].startswith("commit "):
-        block[0] += render_template("%d", commit, width, decor)
-    return ("\n".join(block) + "\n").encode()
 
 
 def _tagger_lines(ident: str, flags: ShowFlags) -> str:
@@ -244,40 +195,6 @@ def _tag_block(
     return block + ("" if end == -1 else text[end + 1 :]), target
 
 
-def _commit_entry(
-    repo: BaseRepo,
-    commit: Commit,
-    flags: ShowFlags,
-    decor: Decorations | None,
-) -> bytes:
-    """A commit's log entry and its diff against its parent.
-
-    A commit that changes nothing the pathspec names prints nothing at
-    all.
-
-    Args:
-        repo (BaseRepo): repository to read.
-        commit (Commit): the commit to show.
-        flags (ShowFlags): the parsed invocation.
-        decor (Decorations | None): ref labels when the format asked.
-    """
-    header = _header(commit, flags, abbrev_for(repo), decor)
-    bodies = commit_output(repo, commit, flags.diff)
-    combined = len(commit.parents) > 1 and flags.diff.merge in (
-        "combined",
-        "dense-combined",
-    )
-    return join_output(
-        commit,
-        header,
-        bodies,
-        flags.pretty.kind,
-        abbrev_for(repo),
-        flags.diff,
-        (flags.diff.summary or combined) and not flags.diff.no_patch,
-    )
-
-
 def _render(
     repo: BaseRepo,
     objects: list[tuple[str, ShaFile]],
@@ -299,12 +216,8 @@ def _render(
             object it resolved to.
         flags (ShowFlags): the parsed invocation.
     """
-    decor = (
-        None
-        if flags.decorate is Decoration.NONE
-        else decorations(repo, flags.decorate)
-    )
-    terminated = flags.pretty.kind in ("oneline", "tformat")
+    decor = decorations(repo, flags.decorate)
+    terminated = flags.pretty.kind in TERMINATED_KINDS
     parts: list[bytes] = []
     shown_commits: set[bytes] = set()
     shown_one = False
@@ -321,14 +234,22 @@ def _render(
                 (b"\n" if shown_one else b"")
                 + f"tree {name}\n\n".encode()
                 + b"".join(
-                    entry + (b"/" if mode == 0o40000 else b"") + b"\n"
+                    entry + (b"/" if mode == TREE else b"") + b"\n"
                     for entry, mode, _ in target.iteritems()
                 )
             )
             shown_one = True
         elif isinstance(target, Commit) and target.id not in shown_commits:
             shown_commits.add(target.id)
-            entry = _commit_entry(repo, target, flags, decor)
+            combined = is_combined(target, flags.diff)
+            entry = commit_entry(
+                repo,
+                target,
+                flags,
+                flags.diff,
+                decor,
+                (flags.diff.summary or combined) and not flags.diff.no_patch,
+            )
             parts.append(
                 (b"\n" if shown_one and not terminated else b"") + entry
             )
@@ -372,14 +293,11 @@ async def show(
             await config_bool(vfs, location, b"core", b"quotepath", True),
             ctx.env,
         )
+        mailmap, mapped, decorate = await displayed(
+            vfs, location, fl, parsed.pretty
+        )
         parsed = replace(
-            parsed,
-            mailmap=await load_mailmap(vfs, location),
-            use_mailmap=use_mailmap(
-                fl,
-                await config_bool(vfs, location, b"log", b"mailmap", True),
-            ),
-            decorate=await decoration_for(vfs, location, fl, parsed.pretty),
+            parsed, mailmap=mailmap, use_mailmap=mapped, decorate=decorate
         )
         objects = [
             (name, await asyncio.to_thread(resolve_object, repo, name))

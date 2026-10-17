@@ -33,7 +33,7 @@ async def write(
             tm,
             fl.as_str("document") or "",
             fl.as_str("text") or "",
-            fl.as_str("tab") or None,
+            fl.as_str("tab"),
         )
     out = json.dumps(
         result, ensure_ascii=False, separators=(",", ":")

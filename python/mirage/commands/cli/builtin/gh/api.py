@@ -244,8 +244,12 @@ async def api(
     fields = await _fields(config, ctx, fl)
     input_body = await _input_body(ctx, fl)
     has_input = fl.raw("input") is not None
-    method = fl.as_str("method") or ("POST" if fields or has_input else "GET")
+    # An explicit empty -X keeps gh's own branch, where fields ride the
+    # body as for any method it does not read as GET, and the request goes
+    # out as GET, which is what Go's net/http sends for an empty method.
+    method = fl.as_str("method", "POST" if fields or has_input else "GET")
     upper = method.upper()
+    wire = upper or "GET"
     path = expand(endpoint, config)
     if path != GRAPHQL_PATH and not path.startswith("/"):
         path = f"/{path}"
@@ -274,7 +278,7 @@ async def api(
             if has_input or body is not None:
                 response = await github_request_response(
                     config.token,
-                    upper,
+                    wire,
                     current,
                     body,
                     request_params,
@@ -284,7 +288,7 @@ async def api(
             else:
                 response = await github_request_response(
                     config.token,
-                    upper,
+                    wire,
                     current,
                     params=request_params,
                     base_url=config.base_url,

@@ -33,6 +33,40 @@
         "stdout": "",
         "stderr": "csplit: missing operand\nTry 'csplit --help' for more information.\n"
       }
+    },
+    {
+      "id": "csplit_n_refuses_what_gnu_refuses",
+      "seq": 9940303,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/cn && printf x > /data/cn/.keep && cd /data/cn && for n in x '' -1 3x 2147483648; do printf 'l1\\nl2\\nl3\\n' | csplit -n \"$n\" - 2; echo rc=$?; done; printf 'l1\\nl2\\nl3\\n' | csplit -n ' +3' - 2 && ls; cd / && rm -r /data/cn",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=1\n3\n6\nxx000\nxx001\n",
+        "stderr": "csplit: invalid number: 'x'\ncsplit: invalid number: ''\ncsplit: invalid number: '-1': Value too large for defined data type\ncsplit: invalid number: '3x'\ncsplit: invalid number: '2147483648': Value too large for defined data type\n"
+      },
+      "flags": [
+        "n"
+      ]
     }
   ]
 }

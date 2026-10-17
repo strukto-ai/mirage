@@ -60,7 +60,7 @@ async def token(
         ctx (Context): the invocation's context; ``--hostname`` rides its flags.
     """
     host = (
-        FlagView(ctx.flags).as_str("hostname")
+        FlagView(ctx.flags).as_nonempty("hostname")
         or urlsplit(web_origin(config)).hostname
     )
     text = (

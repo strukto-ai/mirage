@@ -21,7 +21,7 @@ _ALWAYS_SPECIAL = frozenset(" !\"$&'()*:;<=>?[\\^`|")
 
 # ``#`` starts a comment and ``~`` starts a home-directory expansion, but
 # only as the first character of a word, so GNU quotes them there alone.
-_LEADING_SPECIAL = frozenset("#~")
+LEADING_SPECIAL = frozenset("#~")
 
 # Brace expansion needs a pair to mean anything, so GNU quotes a lone
 # brace and leaves one inside a longer name bare.
@@ -31,9 +31,9 @@ _SOLO_SPECIAL = frozenset({"{", "}"})
 # Narrower than the trigger set: a space and a ``:`` are harmless inside
 # double quotes, while the four conditional characters above lose their
 # position rule and always rule it out.
-_DQ_BLOCKERS = frozenset('!"#$&()*;<=>?[\\^`{|}~')
+DQ_BLOCKERS = frozenset('!"#$&()*;<=>?[\\^`{|}~')
 
-_NAMED_ESCAPES = {
+NAMED_ESCAPES = {
     "\a": "a",
     "\b": "b",
     "\t": "t",
@@ -110,7 +110,7 @@ def _needs_escape(char: str) -> bool:
 
 
 def _escape(char: str) -> str:
-    named = _NAMED_ESCAPES.get(char)
+    named = NAMED_ESCAPES.get(char)
     if named is not None:
         return f"\\{named}"
     # GNU escapes bytes, not code points, so a non-ASCII character costs
@@ -136,9 +136,29 @@ def escape_name(name: str) -> str:
     Args:
         name (str): the filename or symlink target to display.
     """
+    return _escaped(name, " \\")
+
+
+def escape_quote(name: str) -> str:
+    """GNU's ``escape`` quoting style: C escapes, backslashes doubled.
+
+    tar prints every member name it lists this way, under -t and under
+    -v of -c and -x alike, and leaves a space bare where ls -b protects
+    it. tar 1.35 on debian:stable-slim lists a member stored as the
+    bytes ``a\\xffb`` as ``a\\377b`` and one named ``back\\slash`` as
+    ``back\\\\slash``. A byte that is not UTF-8 arrives here as its
+    surrogate escape, the way tarfile decodes it.
+
+    Args:
+        name (str): the member name or link target to display.
+    """
+    return _escaped(name, "\\")
+
+
+def _escaped(name: str, protected: str) -> str:
     parts: list[str] = []
     for char in name:
-        if char in " \\":
+        if char in protected:
             parts.append("\\" + char)
         elif 0xDC80 <= ord(char) <= 0xDCFF:
             parts.append(f"\\{ord(char) - 0xDC00:03o}")
@@ -162,7 +182,7 @@ def needs_shell_quote(name: str) -> bool:
     for index, char in enumerate(name):
         if char in _ALWAYS_SPECIAL or _needs_escape(char):
             return True
-        if index == 0 and char in _LEADING_SPECIAL:
+        if index == 0 and char in LEADING_SPECIAL:
             return True
     return False
 
@@ -183,7 +203,7 @@ def shell_quote_always(name: str) -> str:
         name (str): The name to wrap.
     """
     if "'" in name and not any(
-        char in _DQ_BLOCKERS or _needs_escape(char) for char in name
+        char in DQ_BLOCKERS or _needs_escape(char) for char in name
     ):
         return f'"{name}"'
     parts = ["'"]

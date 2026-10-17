@@ -14,8 +14,6 @@
 
 import type { PathSpec } from '../../../types.ts'
 
-export const USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]"
-
 export interface AwkFlags {
   readonly fieldSeparator: string | null
   readonly assignments: readonly string[]

@@ -20,6 +20,7 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 import { isStdin } from '../utils/stream.ts'
+import { recordSeparator } from '../utils/lines.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { isFsError } from '../../../errors/fs.ts'
@@ -42,6 +43,8 @@ interface CommFlags {
 
 function parseFlags(bag: Record<string, FlagValue>): CommFlags {
   const fl = new FlagView(bag, specOf('comm'))
+  // An empty delimiter is its own terminating NUL: GNU writes one byte.
+  const delimiter = fl.asStr('output_delimiter', '\t')
   const order = fl
     .occurrences('check_order', 'nocheck_order')
     .filter(([, value]) => value === true)
@@ -51,7 +54,7 @@ function parseFlags(bag: Record<string, FlagValue>): CommFlags {
     suppress2: fl.asBool('2'),
     suppress3: fl.asBool('3'),
     checkOrder: order.length > 0 ? order.at(-1) === 'check_order' : null,
-    outputDelimiter: fl.asStr('output_delimiter') ?? '\t',
+    outputDelimiter: delimiter === '' ? '\0' : delimiter,
     total: fl.asBool('total'),
     zeroTerminated: fl.asBool('zero_terminated'),
   }
@@ -92,7 +95,7 @@ async function* commStream(
   flags: CommFlags,
   paths: readonly [PathSpec, PathSpec],
 ): AsyncIterable<Uint8Array> {
-  const separator = flags.zeroTerminated ? 0 : 10
+  const separator = recordSeparator(flags.zeroTerminated)
   const lines: [string | null, string | null] = [null, null]
   const warned = [false, false]
   const counts = [0, 0, 0]

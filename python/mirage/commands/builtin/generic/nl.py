@@ -3,7 +3,13 @@ from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from functools import partial
 
-from mirage.commands.builtin.constants import C_SPACE
+from mirage.commands.builtin.constants import (
+    C_SPACE,
+    EOVERFLOW_TEXT,
+    ERANGE_TEXT,
+    INTMAX,
+    INTMAX_MIN,
+)
 from mirage.commands.builtin.utils.bre import BreError, search_bre
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
@@ -17,6 +23,7 @@ from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.usage import usage_hint
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
@@ -38,18 +45,9 @@ from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 # one sign. Measured, ground truth NL3-C.
 _NUMBER = re.compile(rf"{C_SPACE}[+-]?[0-9]+")
 
-# gnulib appends `strerror(ERANGE)` when a value parsed but fell outside
-# the option's range, and `strerror(EOVERFLOW)` when the value did not
-# fit the type it was scanned into. Measured under LC_ALL=C on glibc;
-# these are the two strings here most likely to read differently under
-# another libc or locale.
-_ERANGE = "Numerical result out of range"
-_EOVERFLOW = "Value too large for defined data type"
-
-# The two type limits nl's four numeric options are bounded by.
+# The two type limits nl's four numeric options are bounded by: int
+# here, and intmax_t's INTMAX and INTMAX_MIN.
 _INT_MAX = 2**31 - 1
-_INTMAX_MAX = 2**63 - 1
-_INTMAX_MIN = -(2**63)
 
 # Where the sub-minimum side of `-w` switches from the ERANGE
 # wording to the EOVERFLOW one, measured by bisection on coreutils 9.4 /
@@ -62,7 +60,7 @@ _INTMAX_MIN = -(2**63)
 # It belongs to `-w` ALONE (GNU 9.7 reads `-l` unsigned). `-v` and `-i`
 # switch at the type boundary instead (`-i -9223372036854775808` numbers
 # happily and only `-9223372036854775809` is refused), so they carry
-# _INTMAX_MIN here and the ERANGE clause is unreachable for them.
+# INTMAX_MIN here and the ERANGE clause is unreachable for them.
 _WIDTH_OVERFLOW_LOW = -(2**30)
 
 
@@ -141,9 +139,9 @@ def _number_error(
     if (high is not None and value > high) or (
         overflow_low is not None and value < overflow_low
     ):
-        return f"nl: {label}: '{quote_text(raw)}': {_EOVERFLOW}"
+        return f"nl: {label}: '{quote_text(raw)}': {EOVERFLOW_TEXT}"
     if value < low:
-        return f"nl: {label}: '{quote_text(raw)}': {_ERANGE}"
+        return f"nl: {label}: '{quote_text(raw)}': {ERANGE_TEXT}"
     return None
 
 
@@ -155,16 +153,16 @@ _NUMERIC_OPTIONS: tuple[tuple[str, str, int, int | None, int | None], ...] = (
     (
         "starting_line_number",
         "invalid starting line number",
-        _INTMAX_MIN,
-        _INTMAX_MAX,
-        _INTMAX_MIN,
+        INTMAX_MIN,
+        INTMAX,
+        INTMAX_MIN,
     ),
     (
         "line_increment",
         "invalid line number increment",
-        _INTMAX_MIN,
-        _INTMAX_MAX,
-        _INTMAX_MIN,
+        INTMAX_MIN,
+        INTMAX,
+        INTMAX_MIN,
     ),
     (
         "number_width",
@@ -203,7 +201,7 @@ _NUMBER_FORMATS = frozenset({"ln", "rn", "rz"})
 
 # The line usage() prints after a deferred refusal. GNU's numeric
 # options never reach it: they exit where they are validated.
-_HINT = "Try 'nl --help' for more information."
+_HINT = usage_hint("nl")
 
 
 def _style_error(dest: str, raw: str) -> str | None:
@@ -508,7 +506,7 @@ def _render_line(line: str, config: NlConfig, state: NlState) -> bytes | None:
             state.number, config.width, config.number_format
         )
         advanced = state.number + config.increment
-        if not _INTMAX_MIN <= advanced <= _INTMAX_MAX:
+        if not INTMAX_MIN <= advanced <= INTMAX:
             state.overflowed = True
         else:
             state.number = advanced

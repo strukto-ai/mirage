@@ -12,6 +12,7 @@ from mirage.commands.builtin.sort_keys import (
     parse_keydef,
     sort_lines,
 )
+from mirage.commands.builtin.utils.lines import record_separator
 from mirage.commands.builtin.utils.stream import (
     stdin_stream,
 )
@@ -403,7 +404,7 @@ async def _external_records(
     parsed: SortFlags,
     cfg: SortConfig,
 ) -> ByteSpool | bytes:
-    separator = b"\0" if parsed.zero_terminated else b"\n"
+    separator = record_separator(parsed.zero_terminated)
     levels: list[list[ByteSpool]] = [[]]
     refused: tuple[InputStage, bytes] | None = None
     stream = stdin_stream(read, stdin)
@@ -517,7 +518,7 @@ async def _check_stream(
     try:
         while (
             raw := await reader.readline(
-                b"\0" if parsed.zero_terminated else b"\n"
+                record_separator(parsed.zero_terminated)
             )
         ) is not None:
             current = raw.decode(errors="replace")

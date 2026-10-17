@@ -12,6 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec.constants import (
+    PATH_OPERAND,
+    PATHS_OPERAND,
+    TEXTS_OPERAND,
+)
 from mirage.commands.spec.types import Argument, CommandSpec
 
 SPECS: dict[str, CommandSpec] = {
@@ -66,16 +71,8 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-c", action="store_true"),
             Argument("-q", action="store_true"),
             Argument("-S"),
-            Argument("-1", action="store_true"),
-            Argument("-2", action="store_true"),
-            Argument("-3", action="store_true"),
-            Argument("-4", action="store_true"),
-            Argument("-5", action="store_true"),
-            Argument("-6", action="store_true"),
-            Argument("-7", action="store_true"),
-            Argument("-8", action="store_true"),
-            Argument("-9", action="store_true"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            *(Argument(f"-{n}", action="store_true") for n in range(1, 10)),
+            PATHS_OPERAND,
         )
     ),
     "gunzip": CommandSpec(
@@ -86,7 +83,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-t", action="store_true"),
             Argument("-q", action="store_true"),
             Argument("-S"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "zip": CommandSpec(
@@ -102,7 +99,7 @@ SPECS: dict[str, CommandSpec] = {
             # takes one per occurrence, since its spec has no variadic
             # option value and `-x a -x b` says the same thing.
             Argument("-x", action="append"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "unzip": CommandSpec(
@@ -138,8 +135,8 @@ SPECS: dict[str, CommandSpec] = {
             # The archive is the only path operand; everything after it is an
             # Info-ZIP member pattern matched against archive entry names,
             # never a filesystem path.
-            Argument("path", type="path", nargs="?", metavar=""),
-            Argument("texts", nargs="*", metavar=""),
+            PATH_OPERAND,
+            TEXTS_OPERAND,
         )
     ),
     # zcat is `gzip -cd`: -f copies input that is not gzip, -q drops
@@ -149,7 +146,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-f", action="store_true"),
             Argument("-q", action="store_true"),
             Argument("-S"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
 }

@@ -14,8 +14,6 @@
 
 from dataclasses import dataclass
 
-from dulwich.repo import BaseRepo
-
 from mirage.commands.cli.builtin.git.branch import branch_upstream
 from mirage.commands.cli.builtin.git.changes import collect
 from mirage.commands.cli.builtin.git.errors import GitError, NoWorkspaceError
@@ -28,7 +26,7 @@ from mirage.commands.cli.builtin.git.render import (
     relative_entries,
     short_format,
 )
-from mirage.commands.cli.builtin.git.repo import config_bool
+from mirage.commands.cli.builtin.git.repo import Repo, config_bool
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import (
     HeadRef,
@@ -121,7 +119,7 @@ async def displayed(
 
 async def render_report(
     vfs: Files,
-    repo: BaseRepo,
+    repo: Repo,
     location: RepoLocation,
     head: HeadRef,
     start: str,
@@ -134,7 +132,7 @@ async def render_report(
 
     Args:
         vfs (Files): the session's files.
-        repo (BaseRepo): the opened repository.
+        repo (Repo): the opened repository.
         location (RepoLocation): the discovered repository.
         head (HeadRef): what HEAD points at.
         start (str): absolute virtual path git is running in, which the
@@ -145,11 +143,9 @@ async def render_report(
     )
     fully = await config_bool(vfs, location, b"core", b"quotepath", True)
     detached = (
-        ""
-        if head.branch is not None
-        else await detached_line(vfs, repo, location, head)
+        "" if head.branch is not None else await detached_line(repo, head)
     )
-    upstream = await branch_upstream(vfs, repo, location, head, no_commits)
+    upstream = await branch_upstream(repo, head, no_commits)
     return long_format(
         await displayed(vfs, location, start, rows),
         head.branch,
@@ -200,11 +196,9 @@ async def status(
             rows = await displayed(
                 vfs, location, start_point(fl).virtual, rows
             )
-        upstream = await branch_upstream(vfs, repo, location, head, no_commits)
+        upstream = await branch_upstream(repo, head, no_commits)
         detached = (
-            ""
-            if head.branch is not None
-            else await detached_line(vfs, repo, location, head)
+            "" if head.branch is not None else await detached_line(repo, head)
         )
     except GitError as exc:
         return fatal(exc)

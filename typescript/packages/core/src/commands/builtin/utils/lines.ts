@@ -19,6 +19,11 @@ import { concat } from '../../../utils/bytes.ts'
 // Split text into lines (or `sep`-terminated records), dropping the
 // terminator's trailing empty entry. Mirrors Python's
 // mirage.commands.builtin.utils.lines.split_lines.
+// The byte that ends a record: NUL under -z, else a newline.
+export function recordSeparator(zero: boolean): number {
+  return zero ? 0 : 0x0a
+}
+
 export function splitLines(text: string, sep = '\n'): string[] {
   if (text === '') return []
   const stripped = text.endsWith(sep) ? text.slice(0, -sep.length) : text
@@ -40,9 +45,10 @@ export function splitLinesKeepends(text: string): string[] {
   return lines
 }
 
-// joinFileLines for readers that keep raw bytes (column). Mirrors Python's
-// join_file_lines over bytes.
-export function joinFileBytes(chunks: readonly Uint8Array[], sep: number): Uint8Array {
+// Several files' contents as one, each file's last line ended: a file whose
+// last record lacks its separator still ends it where the next file begins,
+// as GNU's record readers (column) see it. Mirrors Python's join_file_lines.
+export function joinFileLines(chunks: readonly Uint8Array[], sep: number): Uint8Array {
   const parts: Uint8Array[] = []
   chunks.forEach((chunk, index) => {
     parts.push(chunk)
@@ -51,13 +57,7 @@ export function joinFileBytes(chunks: readonly Uint8Array[], sep: number): Uint8
       parts.push(Uint8Array.of(sep))
     }
   })
-  const out = new Uint8Array(parts.reduce((total, part) => total + part.byteLength, 0))
-  let offset = 0
-  for (const part of parts) {
-    out.set(part, offset)
-    offset += part.byteLength
-  }
-  return out
+  return concat(parts)
 }
 
 export async function* mapStream(

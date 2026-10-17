@@ -18,7 +18,6 @@ import re
 from bisect import bisect_left
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
-from io import BytesIO
 from os.path import commonprefix
 
 from dulwich.config import ConfigFile
@@ -27,7 +26,6 @@ from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 from dulwich.walk import Walker
 
-from mirage.commands.cli.builtin.git.constants import DWIM_RULES
 from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.format import short
 from mirage.commands.cli.builtin.git.io import read_names, read_optional
@@ -39,12 +37,23 @@ from mirage.commands.cli.builtin.git.ref_fields import (
 )
 from mirage.commands.cli.builtin.git.ref_filter import RefFilter, kept_refs
 from mirage.commands.cli.builtin.git.ref_format import parse_sort_keys
-from mirage.commands.cli.builtin.git.refs import mapped, parse_refspec
+from mirage.commands.cli.builtin.git.refs import (
+    BRANCH_PREFIX,
+    HEAD_FILE,
+    MAX_SYMREF_DEPTH,
+    REMOTE_PREFIX,
+    SYMREF_PREFIX,
+    TAG_PREFIX,
+    mapped,
+    parse_refspec,
+)
 from mirage.commands.cli.builtin.git.render import (
     DETACHED_AT,
     DETACHED_FROM,
     NO_BRANCH,
 )
+from mirage.commands.cli.builtin.git.repo import Repo
+from mirage.commands.cli.builtin.git.revparse import refs_named
 from mirage.commands.cli.builtin.git.types import (
     DateMode,
     HeadRef,
@@ -55,19 +64,14 @@ from mirage.commands.cli.builtin.git.types import (
     RefObject,
     RefSortKey,
     RefUpstream,
-    RepoLocation,
 )
 from mirage.commands.cli.builtin.git.util import git_bool
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import IOResult
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
-from mirage.workspace.files import Files
 
-SYMREF_PREFIX = "ref: "
-# git follows a chain of symbolic refs this deep before it gives up.
-SYMREF_DEPTH = 5
 ROOT_REF_SYNTAX = re.compile(r"[A-Z_]+")
 PSEUDO_REFS = ("FETCH_HEAD", "MERGE_HEAD")
 IRREGULAR_ROOT_REFS = (
@@ -79,16 +83,15 @@ IRREGULAR_ROOT_REFS = (
     "MERGE_AUTOSTASH",
 )
 KIND_PREFIXES = (
-    ("refs/heads/", RefKind.BRANCH),
-    ("refs/remotes/", RefKind.REMOTE),
-    ("refs/tags/", RefKind.TAG),
+    (BRANCH_PREFIX, RefKind.BRANCH),
+    (REMOTE_PREFIX, RefKind.REMOTE),
+    (TAG_PREFIX, RefKind.TAG),
 )
 # match_pattern strips the first of these before a tag or branch pattern
 # is matched, so `v1.*` and `origin/*` name refs by their short names.
-SHORT_PREFIXES = ("refs/tags/", "refs/heads/", "refs/remotes/", "refs/")
+SHORT_PREFIXES = (TAG_PREFIX, BRANCH_PREFIX, REMOTE_PREFIX, "refs/")
 WORKTREES = "worktrees"
 GITDIR_FILE = "gitdir"
-HEAD_FILE = "HEAD"
 
 
 def is_root_ref(name: str) -> bool:
@@ -139,7 +142,7 @@ def resolve_ref(
         else None
     )
     current = name
-    for _ in range(SYMREF_DEPTH + 1):
+    for _ in range(MAX_SYMREF_DEPTH + 1):
         value = table.get(current)
         if value is None:
             return None, target
@@ -380,15 +383,20 @@ def tracking_ref(
             return RefUpstream(ref=dst, remote=remote, merge=merged)
     if remote != ".":
         return None
-    found = next(
-        (
-            rule.format(merged)
-            for rule in DWIM_RULES
-            if rule.format(merged) in known
-        ),
-        merged,
-    )
+    found = next(iter(refs_named(known, merged)), merged)
     return RefUpstream(ref=found, remote=remote, merge=merged)
+
+
+def reached(repo: BaseRepo, oid: ObjectID) -> set[bytes]:
+    """Every commit a walk from one commit reaches, the commit itself
+    included, for the distance between a branch and its upstream.
+    Synchronous, for a worker thread: the walk reads commits.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        oid (ObjectID): the commit to walk from.
+    """
+    return {entry.commit.id for entry in Walker(repo.object_store, [oid])}
 
 
 def with_upstreams(
@@ -413,27 +421,17 @@ def with_upstreams(
     """
     out: list[RefItem] = []
     for item in items:
-        if not item.name.startswith("refs/heads/"):
+        if not item.name.startswith(BRANCH_PREFIX):
             out.append(item)
             continue
-        up = tracking_ref(cfg, item.name[len("refs/heads/") :], known)
+        up = tracking_ref(cfg, item.name[len(BRANCH_PREFIX) :], known)
         if up is not None:
             theirs, _ = resolve_ref(table, up.ref)
             if theirs is None:
                 up = replace(up, gone=True)
             elif counted:
-                ours = {
-                    e.commit.id
-                    for e in Walker(
-                        repo.object_store, [ObjectID(item.oid.encode())]
-                    )
-                }
-                there = {
-                    e.commit.id
-                    for e in Walker(
-                        repo.object_store, [ObjectID(theirs.encode())]
-                    )
-                }
+                ours = reached(repo, ObjectID(item.oid.encode()))
+                there = reached(repo, ObjectID(theirs.encode()))
                 up = replace(
                     up, ahead=len(ours - there), behind=len(there - ours)
                 )
@@ -441,31 +439,19 @@ def with_upstreams(
     return out
 
 
-async def read_config(vfs: Files, location: RepoLocation) -> ConfigFile:
-    """The repository's own config, empty when it has none.
-
-    Args:
-        vfs (Files): the session's files.
-        location (RepoLocation): the discovered repository.
-    """
-    data = await read_optional(vfs, location.commondir.join("config"))
-    return ConfigFile.from_file(BytesIO(data or b""))
-
-
-async def root_names(vfs: Files, location: RepoLocation) -> list[str]:
+async def root_names(repo: Repo) -> list[str]:
     """The names at the top of this checkout's git directory.
 
     Args:
-        vfs (Files): the session's files.
-        location (RepoLocation): the discovered repository.
+        repo (Repo): the opened repository.
     """
     return [
         posixpath.basename(entry)
-        for entry in await read_names(vfs, location.gitdir)
+        for entry in await read_names(repo.dispatch, repo.location.gitdir)
     ]
 
 
-async def worktree_heads(vfs: Files, location: RepoLocation) -> dict[str, str]:
+async def worktree_heads(repo: Repo) -> dict[str, str]:
     """``get_worktrees``: the branch each worktree has checked out, and
     where that worktree is.
 
@@ -474,9 +460,9 @@ async def worktree_heads(vfs: Files, location: RepoLocation) -> dict[str, str]:
     ``gitdir`` file git keeps for it, less its ``/.git``.
 
     Args:
-        vfs (Files): the session's files.
-        location (RepoLocation): the discovered repository.
+        repo (Repo): the opened repository.
     """
+    vfs, location = repo.dispatch, repo.location
     heads: dict[str, str] = {}
 
     async def note(gitdir: PathSpec, path: str) -> None:
@@ -523,28 +509,21 @@ def _detached_label(repo: BaseRepo, target: str, moved: bytes) -> str:
         target (str): what the checkout was asked for.
         moved (bytes): the commit it moved HEAD to.
     """
-    refs = repo.refs.allkeys()
-    found = [
-        name
-        for name in dict.fromkeys(rule.format(target) for rule in DWIM_RULES)
-        if name.encode() in refs
-    ]
+    found = refs_named(
+        (decode_text(ref) for ref in repo.refs.allkeys()), target
+    )
     if target != "HEAD" and len(found) == 1:
         obj = repo.object_store[repo.refs[Ref(found[0].encode())]]
         while isinstance(obj, Tag):
             obj = repo.object_store[obj.object[1]]
         if obj.id == moved:
             return (
-                found[0]
-                .removeprefix("refs/tags/")
-                .removeprefix("refs/remotes/")
+                found[0].removeprefix(TAG_PREFIX).removeprefix(REMOTE_PREFIX)
             )
     return short(moved, abbrev_for(repo))
 
 
-async def detached_line(
-    vfs: Files, repo: BaseRepo, location: RepoLocation, head: HeadRef
-) -> str:
+async def detached_line(repo: Repo, head: HeadRef) -> str:
     """The first line of a status on a detached HEAD, read off the reflog.
 
     git names the target of the newest ``checkout: moving from`` entry,
@@ -554,12 +533,12 @@ async def detached_line(
     git 2.47.3 and 2.50.1).
 
     Args:
-        vfs (Files): the session's files.
-        repo (BaseRepo): the opened repository.
-        location (RepoLocation): the discovered repository.
+        repo (Repo): the opened repository.
         head (HeadRef): what HEAD points at.
     """
-    log = await read_optional(vfs, location.gitdir.join("logs/HEAD"))
+    log = await read_optional(
+        repo.dispatch, repo.location.gitdir.join("logs/HEAD")
+    )
     for row in reversed((log or b"").splitlines()):
         record, _, message = row.partition(b"\t")
         text = message.decode("utf-8", "replace")
@@ -573,19 +552,15 @@ async def detached_line(
     return NO_BRANCH
 
 
-async def head_description(
-    vfs: Files, repo: BaseRepo, location: RepoLocation, head: HeadRef
-) -> str:
+async def head_description(repo: Repo, head: HeadRef) -> str:
     """``get_head_description``: how a detached HEAD row names itself
     in a branch listing, the status line in parentheses.
 
     Args:
-        vfs (Files): the session's files.
-        repo (BaseRepo): the opened repository.
-        location (RepoLocation): the discovered repository.
+        repo (Repo): the opened repository.
         head (HeadRef): what HEAD points at.
     """
-    line = await detached_line(vfs, repo, location, head)
+    line = await detached_line(repo, head)
     return "(no branch)" if line == NO_BRANCH else f"({line})"
 
 
@@ -597,7 +572,7 @@ def head_ref(table: Mapping[str, str]) -> str | None:
         table (Mapping[str, str]): each ref's raw value.
     """
     current = HEAD_FILE
-    for _ in range(SYMREF_DEPTH + 1):
+    for _ in range(MAX_SYMREF_DEPTH + 1):
         value = table.get(current)
         if value is None:
             return None
@@ -668,9 +643,7 @@ def unique_abbreviations(
 
 
 async def ref_listing(
-    vfs: Files,
-    repo: BaseRepo,
-    location: RepoLocation,
+    repo: Repo,
     cfg: ConfigFile,
     fields: Sequence[RefField],
     wanted: Callable[[str], bool],
@@ -685,9 +658,7 @@ async def ref_listing(
     worktrees and the mailmap.
 
     Args:
-        vfs (Files): the session's files.
-        repo (BaseRepo): the opened repository.
-        location (RepoLocation): the discovered repository.
+        repo (Repo): the opened repository.
         cfg (ConfigFile): the repository's config.
         fields (Sequence[RefField]): every field the listing reads.
         wanted (Callable[[str], bool]): whether a ref name is listed.
@@ -701,12 +672,14 @@ async def ref_listing(
         the listing's facts, and git's errors about skipped refs.
     """
     table = ref_table(repo)
-    names = await root_names(vfs, location)
+    names = await root_names(repo)
     if roots:
         for name in names:
             if name == HEAD_FILE or not is_root_ref(name):
                 continue
-            data = await read_optional(vfs, location.gitdir.join(f"{name}"))
+            data = await read_optional(
+                repo.dispatch, repo.location.gitdir.join(f"{name}")
+            )
             if data:
                 table[name] = data.decode("utf-8", "replace").split("\n", 1)[0]
     known = known_names(table, names)
@@ -726,7 +699,7 @@ async def ref_listing(
             with_upstreams, repo, cfg, items, table, known, counted
         )
     if any(field.field == "worktreepath" for field in fields):
-        heads = await worktree_heads(vfs, location)
+        heads = await worktree_heads(repo)
         items = [
             replace(item, worktree=heads.get(item.name, "")) for item in items
         ]
@@ -742,7 +715,7 @@ async def ref_listing(
         ),
         head=head_ref(table),
         abbrev=abbrev_for(repo),
-        mailmap=await load_mailmap(vfs, location)
+        mailmap=await load_mailmap(repo.dispatch, repo.location)
         if _mailmapped(fields)
         else (),
         date=date,

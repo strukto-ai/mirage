@@ -366,6 +366,25 @@ def uid_budget(
     return min(max(page, 1) * page_size, max_messages)
 
 
+def page_window(
+    page: int, page_size: int, max_messages: int
+) -> tuple[int, int]:
+    """``--page`` and ``--page-size`` as upstream reads a page size of 0.
+
+    Upstream (v2.2.1 ``envelope list``/``search``) filters a 0 page size
+    out to none at all, which lists the whole mailbox whatever page was
+    asked for; the whole mailbox here is the account's message window.
+
+    Args:
+        page (int): 1-based page number.
+        page_size (int): maximum entries per page, 0 for no limit.
+        max_messages (int): the account's message window.
+    """
+    if page_size == 0:
+        return 1, max_messages
+    return page, page_size
+
+
 def page_slice(items: list[Any], page: int, page_size: int) -> list[Any]:
     """Take one page of results, counting from 1.
 

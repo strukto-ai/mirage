@@ -88,7 +88,7 @@ async def list_cmd(
     rows = [
         _release(value)
         for value in await list_releases(
-            config, repo_for(config, fl), list_limit(fl, 30)
+            config, repo_for(config, fl), list_limit(fl, 30, None)
         )
     ]
     latest = next(
@@ -137,14 +137,15 @@ async def create_cmd(
     notes = await body_value(ctx, fl, value="notes", file="notes_file")
     body: dict[str, JsonValue] = {
         "tag_name": tag,
-        "name": fl.as_str("title") or tag,
+        "name": fl.as_nonempty("title", tag),
         "body": notes or "",
         "draft": gh_bool(fl, "draft"),
         "prerelease": gh_bool(fl, "prerelease"),
         "generate_release_notes": gh_bool(fl, "generate_notes"),
     }
-    if fl.as_str("target") is not None:
-        body["target_commitish"] = fl.as_str("target") or ""
+    target = fl.as_nonempty("target")
+    if target is not None:
+        body["target_commitish"] = target
     created = _release(
         await create_release(config, repo_for(config, fl), body)
     )

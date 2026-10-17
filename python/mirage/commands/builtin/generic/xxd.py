@@ -11,12 +11,12 @@ from collections.abc import (
 from contextlib import aclosing
 from dataclasses import dataclass
 
-from mirage.commands.builtin.utils.size_suffix import parse_base0
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
     resolve_source,
     stdin_stream,
 )
+from mirage.commands.builtin.utils.strtol import c_int, strtol
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -42,12 +42,10 @@ OPEN_OUTPUT_EXIT = 3
 CANNOT_SEEK_EXIT = 4
 SEEK_BACK_EXIT = 5
 CANNOT_SEEK = b"xxd: Sorry, cannot seek.\n"
-# A number as C's strtol reads it at base 0: optional space and sign,
-# then hex after 0x, octal after a bare 0, decimal otherwise; anything
-# after the digits is ignored.
-STRTOL_PATTERN = re.compile(
-    r"\s*([+-]?)(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)"
-)
+# The most octets vim's xxd puts on a line outside -p (its COLS), and its
+# refusal of a -c past that or under 1.
+COLS_MAX = 256
+COLS_REFUSAL = f"xxd: invalid number of columns (max. {COLS_MAX})."
 # The most NUL bytes one chunk carries when a dump's offset skips ahead.
 GAP_CHUNK = 65536
 # What a plain dump's bytes decode to, and the ones it skips.
@@ -64,6 +62,9 @@ async def _xxd_dump_stream(
 ) -> AsyncIterator[bytes]:
     fmt = "{:02X}" if uppercase else "{:02x}"
     offset_fmt = "{:08X}: " if uppercase else "{:08x}: "
+    # The hex column holds every group a full line has, the last one short
+    # when ``group`` does not divide ``cols``, one blank between each.
+    width = cols * 2 + -(-cols // group) - 1
     offset = base
     leftover = b""
     async for chunk in source:
@@ -80,7 +81,7 @@ async def _xxd_dump_stream(
             ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in row)
             line = (
                 offset_fmt.format(offset)
-                + f"{hex_part:<{cols * 2 + (cols // group) - 1}}  {ascii_part}\n"
+                + f"{hex_part:<{width}}  {ascii_part}\n"
             )
             yield line.encode()
             offset += cols
@@ -97,8 +98,7 @@ async def _xxd_dump_stream(
             chr(b) if 32 <= b < 127 else "." for b in leftover
         )
         line = (
-            offset_fmt.format(offset)
-            + f"{hex_part:<{cols * 2 + (cols // group) - 1}}  {ascii_part}\n"
+            offset_fmt.format(offset) + f"{hex_part:<{width}}  {ascii_part}\n"
         )
         yield line.encode()
 
@@ -308,21 +308,6 @@ def _patched(existing: bytes, segments: list[tuple[int, bytes]]) -> bytes:
     return bytes(buf)
 
 
-def strtol(text: str) -> int:
-    """``text`` as C's ``strtol(text, NULL, 0)`` reads it: 0 when it
-    holds no number.
-
-    Args:
-        text (str): the word.
-    """
-    match = STRTOL_PATTERN.match(text)
-    if match is None:
-        return 0
-    sign, digits = match.groups()
-    value = parse_base0(digits)
-    return -value if sign == "-" else value
-
-
 @dataclass(frozen=True, slots=True)
 class XxdSeek:
     """``-s`` as xxd reads it: ``[+][-]offset``.
@@ -345,7 +330,7 @@ def parse_limit(raw: str | None) -> int | None:
     """
     if raw is None:
         return None
-    limit = strtol(raw)
+    limit = strtol(raw)[0]
     return None if limit < 0 else limit
 
 
@@ -359,7 +344,7 @@ def parse_seek(raw: str) -> XxdSeek:
     rest = raw[1:] if relative else raw
     back = rest.startswith("-")
     return XxdSeek(
-        offset=strtol(rest[1:] if back else rest),
+        offset=strtol(rest[1:] if back else rest)[0],
         relative=relative,
         back=back,
     )
@@ -684,22 +669,60 @@ class XxdFlags:
     limit: int | None = None
 
 
-def _count(value: FlagValue | None, default: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, (str, int)):
-        return default
-    if not value:
-        return default
-    return int(value)
+def _octets(text: str) -> int:
+    """A ``-c`` or ``-g`` count as xxd reads it: ``(int)strtol(text, NULL,
+    0)``, so a word with no number is 0 and only its leading number counts.
+
+    Args:
+        text (str): the value as typed.
+    """
+    return c_int(strtol(text)[0])
+
+
+def _cols_refusal(text: str, value: int | None) -> str:
+    """xxd's one refusal of a -c count, whatever was typed.
+
+    Args:
+        text (str): the value as typed.
+        value (int | None): what it scanned to.
+    """
+    return COLS_REFUSAL
+
+
+def _group_of(text: str | None, cols: int) -> int:
+    """``-g`` as xxd settles it against the line's ``cols``.
+
+    A negative count is the default 2, and one under 1 or past ``cols``
+    is the whole line, which is how ``-g 0`` turns grouping off.
+
+    Args:
+        text (str | None): the value as typed, None when absent.
+        cols (int): the octets per line.
+    """
+    group = 2 if text is None else _octets(text)
+    if group < 0:
+        group = 2
+    return cols if group < 1 or group > cols else group
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> XxdFlags:
     fl = FlagView(flags, spec=SPECS["xxd"])
+    plain = fl.as_bool("p")
+    # -c 0 is the default, and only a dump outside -p caps the count.
+    cols = fl.as_number(
+        "c",
+        _octets,
+        _cols_refusal,
+        low=0,
+        high=None if plain else COLS_MAX,
+    )
+    cols = 16 if cols is None or cols == 0 else cols
     return XxdFlags(
         reverse=fl.as_bool("r"),
-        plain=fl.as_bool("p"),
+        plain=plain,
         uppercase=fl.as_bool("u"),
-        cols=_count(fl.raw("c"), 16),
-        group=_count(fl.raw("g"), 2),
+        cols=cols,
+        group=_group_of(fl.as_text("g"), cols),
         seek=parse_seek(fl.as_str("s") or ""),
         limit=parse_limit(fl.as_str("args_l")),
     )

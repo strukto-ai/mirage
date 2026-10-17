@@ -29,15 +29,15 @@ export interface ResolveTextInputOptions {
 /**
  * A card's text from its flag, its `--*_file` operand, or stdin. The operand
  * is read through the mount's table, which hands the backend the rows a read
- * of it takes, as any read on the mount is. Mirrors Python's
- * `resolve_text_input`.
+ * of it takes, as any read on the mount is. An empty inline text is the text
+ * (`--desc ''` clears a description). Mirrors Python's `resolve_text_input`.
  */
 export async function resolveTextInput(
   accessor: TrelloAccessor,
   command: Context,
   opts: ResolveTextInputOptions,
 ): Promise<string> {
-  if (opts.inlineText !== null && opts.inlineText !== '') return opts.inlineText
+  if (opts.inlineText !== null) return opts.inlineText
   if (opts.filePath !== null) {
     const data = await mountIo(command).readBytes(accessor, opts.filePath)
     return DEC.decode(data)

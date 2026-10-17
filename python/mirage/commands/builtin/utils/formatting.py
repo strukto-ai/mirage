@@ -36,7 +36,12 @@ from mirage.types import (
     LsTimeKind,
 )
 from mirage.utils.dates import iso_timestamp
-from mirage.utils.stat_view import content_size, posix_mode, size_unknown
+from mirage.utils.stat_view import (
+    CHMOD_MODE_BITS,
+    content_size,
+    posix_mode,
+    size_unknown,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +273,7 @@ def _perm_triplet(bits: int, special: str | None = None) -> str:
 
 def ls_mode_string(s: FileStat) -> str:
     type_char = constants.TYPE_CHARS.get(s.type, "-")
-    mode = s.mode if s.mode is not None else posix_mode(s) & 0o7777
+    mode = s.mode if s.mode is not None else posix_mode(s) & CHMOD_MODE_BITS
     perms = (
         _perm_triplet(mode >> 6, "s" if mode & 0o4000 else None)
         + _perm_triplet(mode >> 3, "s" if mode & 0o2000 else None)

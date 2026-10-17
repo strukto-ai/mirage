@@ -1,6 +1,7 @@
 import errno
 from collections.abc import Sequence
 
+from mirage.commands.cli.builtin.git.constants import DEFAULT_BRANCH
 from mirage.commands.cli.builtin.git.discover import discover
 from mirage.commands.cli.builtin.git.errors import (
     CannotMkdirError,
@@ -112,11 +113,12 @@ async def init(
             )
         bare = fl.as_bool("bare")
         gitdir = named_gitdir(fl, texts)
-        branch = fl.as_str("initial_branch") or "master"
-        if not valid_ref_name(f"refs/heads/{branch}") or branch.startswith(
-            "-"
-        ):
-            raise GitError(f"invalid branch name: '{branch}'")
+        branch = fl.as_str("initial_branch", DEFAULT_BRANCH)
+        # The ref rules alone: unlike a branch made later, the first one
+        # may be named HEAD or start with a dash (pinned against git
+        # 2.47.3 and 2.50.1).
+        if not valid_ref_name(f"refs/heads/{branch}"):
+            raise GitError(f"invalid initial branch name: '{branch}'")
         info = await stat_of(vfs, gitdir)
         if info is not None and (
             info.type is not FileType.DIRECTORY

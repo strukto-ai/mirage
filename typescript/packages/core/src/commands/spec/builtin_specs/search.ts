@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { CommandSpec, Argument } from '../types.ts'
+import { PATHS_OPERAND, TEXT_OPERAND } from '../constants.ts'
 
 export const SPECS: Record<string, CommandSpec> = {
   awk: new CommandSpec({
@@ -20,7 +21,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-v', { action: 'append' }),
       new Argument('-f', { action: 'append', type: 'path' }),
       new Argument('text', { metavar: '', nargs: '?', providedBy: ['-f'] }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   grep: new CommandSpec({
@@ -84,7 +85,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-U', '--binary'], { action: 'store_true' }),
       new Argument(['-u', '--unix-byte-offsets'], { action: 'store_true' }),
       new Argument('text', { metavar: '', nargs: '?', providedBy: ['-e', '-f'] }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   jq: new CommandSpec({
@@ -368,7 +369,7 @@ export const SPECS: Record<string, CommandSpec> = {
         nargs: '?',
         providedBy: ['-e', '-f', '--files', '--type-list'],
       }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
     allowAbbrev: false,
   }),
@@ -377,8 +378,8 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('--method'),
       new Argument('--top-k'),
       new Argument('--threshold'),
-      new Argument('text', { metavar: '', nargs: '?' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      TEXT_OPERAND,
+      PATHS_OPERAND,
     ],
   }),
   sed: new CommandSpec({
@@ -392,14 +393,11 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-l', '--line-length']),
       new Argument(['-s', '--separate'], { action: 'store_true' }),
       new Argument('text', { metavar: '', nargs: '?', providedBy: ['-e', '-f'] }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   strings: new CommandSpec({
-    arguments: [
-      new Argument('-n'),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
-    ],
+    arguments: [new Argument('-n'), PATHS_OPERAND],
   }),
   zgrep: new CommandSpec({
     arguments: [
@@ -425,7 +423,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-w', '--word-regexp'], { action: 'store_true' }),
       new Argument(['-x', '--line-regexp'], { action: 'store_true' }),
       new Argument('text', { metavar: '', nargs: '?', providedBy: ['-e', '-f'] }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
 }

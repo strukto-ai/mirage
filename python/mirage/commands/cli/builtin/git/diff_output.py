@@ -17,13 +17,21 @@ from dataclasses import dataclass, replace
 from io import BytesIO
 
 from dulwich.config import ConfigFile
-from dulwich.diff_tree import _similarity_score
 from dulwich.objects import Commit, ObjectID, Tree
 from dulwich.repo import BaseRepo
 
 from mirage.commands.cli.builtin.git.changes import pair_renames
 from mirage.commands.cli.builtin.git.combined import combined_lines
+from mirage.commands.cli.builtin.git.constants import (
+    TEMPLATE_KINDS,
+    TERMINATED_KINDS,
+)
 from mirage.commands.cli.builtin.git.errors import GitError
+from mirage.commands.cli.builtin.git.format import (
+    CommitDisplay,
+    Decorations,
+    commit_header,
+)
 from mirage.commands.cli.builtin.git.io import read_optional
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.patch import (
@@ -37,6 +45,7 @@ from mirage.commands.cli.builtin.git.patch import (
 from mirage.commands.cli.builtin.git.pathspec import pathspec_selects
 from mirage.commands.cli.builtin.git.render import quote_path
 from mirage.commands.cli.builtin.git.summary import (
+    BINARY_SNIFF,
     FileStat,
     diffstat,
     stat_table,
@@ -112,7 +121,7 @@ def parse_diff_flags(
         threshold = RENAME_SCORE
     if fl.as_bool("no_renames"):
         threshold = None
-    merge = fl.as_str("diff_merges") or default_merge
+    merge = fl.as_str("diff_merges", default_merge)
     if fl.as_bool("m"):
         merge = "separate"
     if fl.as_bool("c"):
@@ -136,7 +145,7 @@ def parse_diff_flags(
         "dense-combined",
         "first-parent",
     ):
-        raise GitError(f"invalid value for --diff-merges: {merge}")
+        raise GitError(f"invalid value for '--diff-merges': '{merge}'")
     context = fl.as_int("unified")
     if context is not None and context < 0:
         raise GitError("negative context length")
@@ -202,39 +211,33 @@ def compare(
             else "D"
             if p not in after
             else "T"
-            if before[p][0] & 0o170000 != after[p][0] & 0o170000
+            if stat.S_IFMT(before[p][0]) != stat.S_IFMT(after[p][0])
             else "M"
         )
         for name, p in names.items()
     }
     entries = {name: after.get(p, before.get(p)) for name, p in names.items()}
     pairs = (
-        {p: (code, None) for p, code in codes.items()}
+        {p: (code, None, 0) for p, code in codes.items()}
         if threshold is None
         else pair_renames(
             repo.object_store,
             codes,
             {p: e[1] for p, e in entries.items() if e is not None},
-            {p: e[0] & 0o170000 for p, e in entries.items() if e is not None},
+            {
+                p: stat.S_IFMT(e[0])
+                for p, e in entries.items()
+                if e is not None
+            },
             threshold,
         )
     )
     rows = []
-    for path, (status, origin) in sorted(
+    for path, (status, origin, score) in sorted(
         pairs.items(), key=lambda item: names[item[0]]
     ):
         name, old_path = names[path], names[origin or path]
         old, new = before.get(old_path), after.get(name)
-        score = 0
-        if origin is not None and old is not None and new is not None:
-            score = (
-                100
-                if old[1] == new[1]
-                else _similarity_score(
-                    repo.object_store[ObjectID(old[1])],
-                    repo.object_store[ObjectID(new[1])],
-                )
-            )
         rows.append(Change(name, old_path, old, new, status, score))
     return rows
 
@@ -451,7 +454,7 @@ def entries(
             paths when empty.
     """
     if recursive or tree is None:
-        found = tree_entries(repo.object_store, tree)
+        found = tree_entries(repo, tree)
     else:
         obj = repo.object_store[ObjectID(tree)]
         assert isinstance(obj, Tree)
@@ -639,7 +642,9 @@ def combined_patch(
         old = [row.old for row in changes]
         new_data = blob_data(repo, new)
         old_data = [blob_data(repo, entry) for entry in old]
-        binary = any(b"\0" in data[:8000] for data in [*old_data, new_data])
+        binary = any(
+            b"\0" in data[:BINARY_SNIFF] for data in [*old_data, new_data]
+        )
         body = (
             []
             if binary
@@ -717,6 +722,20 @@ async def renames_enabled(vfs: Files, location: RepoLocation) -> bool:
     return value.lower() not in (b"false", b"no", b"off", b"0", b"")
 
 
+def is_combined(commit: Commit, flags: DiffFlags) -> bool:
+    """Whether a commit's diff is a combined one (``-c``, ``--cc``),
+    which only a merge gets.
+
+    Args:
+        commit (Commit): the commit whose diff follows.
+        flags (DiffFlags): the diff flags.
+    """
+    return len(commit.parents) > 1 and flags.merge in (
+        "combined",
+        "dense-combined",
+    )
+
+
 def separator_line(commit: Commit, kind: str, flags: DiffFlags) -> str | None:
     """The line git prints between a commit's text and its diff, None
     for none.
@@ -731,10 +750,7 @@ def separator_line(commit: Commit, kind: str, flags: DiffFlags) -> str | None:
         kind (str): the pretty format's kind.
         flags (DiffFlags): the diff flags.
     """
-    if len(commit.parents) > 1 and flags.merge in (
-        "combined",
-        "dense-combined",
-    ):
+    if is_combined(commit, flags):
         return ""
     if kind == "oneline":
         return None
@@ -758,7 +774,7 @@ def join_output(
         if body is None:
             continue
         head = header
-        if len(bodies) > 1 and kind not in ("format", "tformat"):
+        if len(bodies) > 1 and kind not in TEMPLATE_KINDS:
             parent = commit.parents[index].decode()
             full = commit.id.decode()
             if kind == "oneline":
@@ -772,5 +788,41 @@ def join_output(
         if not body and head and empty_summary:
             gap = b"\n"
         blocks.append(head + gap + body)
-    separator = b"\n" if kind not in ("format", "tformat", "oneline") else b""
+    separator = b"\n" if kind not in TEMPLATE_KINDS + TERMINATED_KINDS else b""
     return separator.join(blocks) or header
+
+
+def commit_entry(
+    repo: BaseRepo,
+    commit: Commit,
+    display: CommitDisplay,
+    diff: DiffFlags,
+    decor: Decorations | None,
+    empty_summary: bool = False,
+) -> bytes:
+    """A commit's log entry and its diff against its parents, as ``log``
+    and ``show`` print it.
+
+    A commit that changes nothing the pathspec names prints nothing at
+    all. Synchronous, for a worker thread: the diff reads objects.
+
+    Args:
+        repo (BaseRepo): repository to read.
+        commit (Commit): the commit to show.
+        display (CommitDisplay): the invocation's presentation flags.
+        diff (DiffFlags): the diff options.
+        decor (Decorations | None): ref labels when the format asked.
+        empty_summary (bool): put a blank line under a header whose
+            diff is empty, as ``show`` does for a summary or a combined
+            diff.
+    """
+    header = commit_header(commit, display, abbrev_for(repo), decor)
+    return join_output(
+        commit,
+        header,
+        commit_output(repo, commit, diff),
+        display.pretty.kind,
+        abbrev_for(repo),
+        diff,
+        empty_summary,
+    )

@@ -3,7 +3,7 @@ import logging
 import posixpath
 import string
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, fields
 from typing import Any
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -531,23 +531,6 @@ class Operand:
     path: PathSpec
     row: FileStat | None
     groups: list[tuple[PathSpec, list[FileStat]]]
-
-
-@dataclass(frozen=True, slots=True)
-class WalkResult:
-    """Outcome of listing one directory.
-
-    Args:
-        entries (list[FileStat]): The stats to render for this directory.
-        warnings (list[LsWarning]): Diagnostics collected at or below this
-            directory.
-        listed (bool): False when the directory itself could not be opened, so
-            callers skip emitting a `dir:` header for it.
-    """
-
-    entries: list[FileStat] = field(default_factory=list)
-    warnings: list[LsWarning] = field(default_factory=list)
-    listed: bool = True
 
 
 def exit_status_for(warnings: list[LsWarning]) -> int:
@@ -1385,108 +1368,44 @@ async def probe_operand(
     return Operand(path, None, groups), warnings
 
 
-async def walk(
+async def _operand_row(
     path: PathSpec,
-    *,
-    readdir: Readdir,
     stat: Stat,
-    all_files: bool = False,
-    sort_by: LsSortBy = LsSortBy.NAME,
-    reverse: bool = False,
-    recursive: bool = False,
-    list_dir: bool = False,
-    command_line_arg: bool = True,
-    index: IndexCacheStore = NULL_INDEX,
-    links: LinkView | None = None,
-    deref: bool = False,
-    child_mounts: ChildMounts | None = None,
-    mounts: MountView | None = None,
-    stat_path: StatPath | None = None,
-    time_kind: LsTimeKind = LsTimeKind.MTIME,
-    group_dirs_first: bool = False,
-    escape: bool = False,
-) -> WalkResult:
-    """Flat listing for one operand: a directory's entries, or the operand
-    itself when it is not one. ``recursive`` flattens the whole subtree in
-    ``ls -R`` order.
+    index: IndexCacheStore,
+    links: LinkView | None,
+    child_mounts: ChildMounts | None,
+) -> FileStat | LsWarning:
+    """The row ``ls -d`` prints for one operand, or why it cannot.
 
     Args:
-        path (PathSpec): the operand to list.
-        readdir (Readdir): backend directory lister.
+        path (PathSpec): the operand to stat.
         stat (Stat): backend stat.
-        all_files (bool): keep dotfiles.
-        sort_by (LsSortBy): active sort key.
-        reverse (bool): reverse the sort.
-        recursive (bool): descend into subdirectories.
-        list_dir (bool): stat the operand itself instead of listing it (-d).
-        command_line_arg (bool): False below an operand, where GNU downgrades
-            a failure to a minor problem (exit 1).
         index (IndexCacheStore): listing cache.
         links (LinkView | None): the namespace's symlink facts.
         child_mounts (ChildMounts | None): session-filtered child-mount
-            names to merge into a directory listing.
-        mounts (MountView | None): the boundaries this walk's readdir
-            cannot cross, so ``-R`` lists a nested mount's root without
-            descending it.
-        stat_path (StatPath | None): dispatcher-backed stat, for the
-            child-mount rows no backend can supply.
-        time_kind (LsTimeKind): which timestamp ``-t`` compares.
-        group_dirs_first (bool): ``--group-directories-first``.
+            names, which make a path no backend serves a directory.
     """
-    if list_dir:
-        link_row = _link_row(path, links)
-        if link_row is not None:
-            return WalkResult([link_row])
-        try:
-            listed = await stat(path, index)
-        except (OSError, ValueError) as exc:
-            if (
-                not isinstance(exc, DotWalkError)
-                and child_mounts is not None
-                and child_mounts(path.virtual)
-            ):
-                # No backend serves it, but the namespace owes it
-                # children, so the dispatcher stats it as a directory and -d
-                # must print the same row.
-                return WalkResult(
-                    [FileStat(name=path.raw_path, type=FileType.DIRECTORY)]
-                )
-            detail = fs_strerror(exc) or exc
-            return WalkResult(
-                warnings=[
-                    LsWarning(
-                        f"ls: cannot access '{path.raw_path}': {detail}",
-                        command_line_arg,
-                    )
-                ],
-                listed=False,
-            )
-        # GNU ls -d prints the operand as given.
-        return WalkResult([listed.model_copy(update={"name": path.raw_path})])
-
-    operand, warnings = await probe_operand(
-        path,
-        readdir=readdir,
-        stat=stat,
-        all_files=all_files,
-        sort_by=sort_by,
-        reverse=reverse,
-        recursive=recursive,
-        command_line_arg=command_line_arg,
-        index=index,
-        links=links,
-        deref=deref,
-        child_mounts=child_mounts,
-        mounts=mounts,
-        stat_path=stat_path,
-        time_kind=time_kind,
-        group_dirs_first=group_dirs_first,
-        escape=escape,
-    )
-    if operand.row is not None:
-        return WalkResult([operand.row], warnings)
-    entries = [e for _, group in operand.groups for e in group]
-    return WalkResult(entries, warnings, listed=bool(operand.groups))
+    link_row = _link_row(path, links)
+    if link_row is not None:
+        return link_row
+    try:
+        listed = await stat(path, index)
+    except (OSError, ValueError) as exc:
+        if (
+            not isinstance(exc, DotWalkError)
+            and child_mounts is not None
+            and child_mounts(path.virtual)
+        ):
+            # No backend serves it, but the namespace owes it
+            # children, so the dispatcher stats it as a directory and -d
+            # must print the same row.
+            return FileStat(name=path.raw_path, type=FileType.DIRECTORY)
+        detail = fs_strerror(exc) or exc
+        return LsWarning(
+            f"ls: cannot access '{path.raw_path}': {detail}", True
+        )
+    # GNU ls -d prints the operand as given.
+    return listed.model_copy(update={"name": path.raw_path})
 
 
 async def _operand_key(
@@ -1707,21 +1626,12 @@ async def ls(
         rows: list[FileStat] = []
         row_hrefs: list[str] = []
         for p in paths:
-            result = await walk(
-                p,
-                readdir=readdir,
-                stat=stat,
-                list_dir=True,
-                index=index,
-                links=links,
-                deref=deref,
-                child_mounts=child_mounts,
-                mounts=mounts,
-                stat_path=stat_path,
-            )
-            rows.extend(result.entries)
-            row_hrefs.extend(p.virtual for _ in result.entries)
-            warnings.extend(result.warnings)
+            row = await _operand_row(p, stat, index, links, child_mounts)
+            if isinstance(row, LsWarning):
+                warnings.append(row)
+                continue
+            rows.append(row)
+            row_hrefs.append(p.virtual)
         if len(rows) > 1:
             order = _order_rows(
                 rows,
@@ -1944,12 +1854,10 @@ __all__ = [
     "LS_OK",
     "LsWarning",
     "Operand",
-    "WalkResult",
     "exit_status_for",
     "format_simple",
     "ls",
     "ls_generic",
     "probe_operand",
     "sort_stats",
-    "walk",
 ]

@@ -38,6 +38,7 @@ import { UsageError } from '../../errors.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { errorVirtualPath, fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { isDirectory, pathExists } from '../utils/copy.ts'
+import { formatOptionalRecords, formatRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -198,17 +199,13 @@ function slackWarning(slack: number, archive: string): [string, number] {
 // proper (Info-ZIP's `unzip -h` is its help screen).
 const USAGE_EXIT = 10
 
-function unzipNoDirectory(archive: string): string {
+// Info-ZIP's line for an archive with no central directory, its second line
+// indented under the first's text. Mirrors Python's no_directory.
+function noDirectory(prog: string, archive: string): string {
+  const indent = ' '.repeat(`${prog}:  `.length)
   return (
-    `unzip:  cannot find zipfile directory in one of ${archive} or\n` +
-    `        ${archive}.zip, and cannot find ${archive}.ZIP, period.\n`
-  )
-}
-
-function zipinfoNoDirectory(archive: string): string {
-  return (
-    `zipinfo:  cannot find zipfile directory in one of ${archive} or\n` +
-    `          ${archive}.zip, and cannot find ${archive}.ZIP, period.\n`
+    `${prog}:  cannot find zipfile directory in one of ${archive} or\n` +
+    `${indent}${archive}.zip, and cannot find ${archive}.ZIP, period.\n`
   )
 }
 
@@ -240,7 +237,7 @@ function refusal(fault: ZipFault, archive: string, zipinfo: boolean, pipe: boole
     return new IOResult({ exitCode: CORRUPT_EXIT, stderr: ENC.encode(corruptCdir(archive)) })
   }
   const head = pipe || zipinfo ? `[${archive}]\n` : ''
-  const tail = pipe ? '' : zipinfo ? zipinfoNoDirectory(archive) : unzipNoDirectory(archive)
+  const tail = pipe ? '' : noDirectory(zipinfo ? 'zipinfo' : 'unzip', archive)
   return new IOResult({ exitCode: NO_ARCHIVE_EXIT, stderr: ENC.encode(head + NO_EOCD + tail) })
 }
 
@@ -795,7 +792,7 @@ export async function unzipGeneric(
           for (const e of selected) {
             lines.push(`${String(e.size).padStart(9, ' ')}  ${e.name}`)
           }
-          out = ENC.encode(lines.join('\n') + '\n')
+          out = formatRecords(lines)
         }
         // GNU -l prints no caution lines and only exits 11 when the
         // patterns left nothing at all.
@@ -864,8 +861,7 @@ export async function unzipGeneric(
       const outputLines: string[] = quiet ? [] : [`Archive:  ${archivePath.rawPath}`]
       const errors: string[] = []
       const made = new Set<string>()
-      const listing = (): ByteSource | null =>
-        outputLines.length > 0 ? ENC.encode(outputLines.join('\n') + '\n') : null
+      const listing = (): ByteSource | null => formatOptionalRecords(outputLines)
       if (fl.raw('d') !== undefined) {
         try {
           await makeDirs(dest)

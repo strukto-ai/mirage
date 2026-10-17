@@ -57,7 +57,8 @@ export function token(
   ctx: Context,
 ): CommandFnResult {
   const host =
-    new FlagView(ctx.flags).asStr('hostname') ?? new URL(webOrigin(config as GhConfig)).hostname
+    new FlagView(ctx.flags).asNonEmpty('hostname') ??
+    new URL(webOrigin(config as GhConfig)).hostname
   return [
     null,
     new IOResult({

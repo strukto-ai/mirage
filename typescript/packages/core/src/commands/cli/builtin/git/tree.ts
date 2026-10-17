@@ -15,9 +15,10 @@
 import git from 'isomorphic-git'
 
 import { decodeText } from '../../../../shell/bytes.ts'
+import { toHex } from '../../../../utils/hex.ts'
 import { GitError } from './errors.ts'
 import { resolveObject, unwrapped } from './revparse.ts'
-import { repoArgs, type Repo } from './repo.ts'
+import { rawObject, repoArgs, type Repo } from './repo.ts'
 import type { GitObject } from './types.ts'
 
 const SPACE = 0x20
@@ -52,11 +53,8 @@ export interface TreeItem {
  * `040000`, as isomorphic-git spells it.
  */
 export async function treeItems(repo: Repo, treeOid: string): Promise<TreeItem[]> {
-  // Deprecated upstream for being general, but the raw content is exactly what
-  // a byte-faithful name needs.
-  // eslint-disable-next-line @typescript-eslint/no-deprecated
-  const read = await git.readObject({ ...repoArgs(repo), oid: treeOid, format: 'content' })
-  const raw = read.object as Uint8Array
+  // The raw content is exactly what a byte-faithful name needs.
+  const { raw } = await rawObject(repo, treeOid)
   const items: TreeItem[] = []
   for (let at = 0; at < raw.length;) {
     const space = raw.indexOf(SPACE, at)
@@ -64,9 +62,7 @@ export async function treeItems(repo: Repo, treeOid: string): Promise<TreeItem[]
     if (nul < 0 || nul + 1 + OID_BYTES > raw.length)
       throw new GitError(`unable to read tree (${treeOid})`)
     const mode = DEC.decode(raw.subarray(at, space))
-    const oid = Array.from(raw.subarray(nul + 1, nul + 1 + OID_BYTES), (byte) =>
-      byte.toString(16).padStart(2, '0'),
-    ).join('')
+    const oid = toHex(raw.subarray(nul + 1, nul + 1 + OID_BYTES))
     items.push({
       path: decodeText(raw.subarray(space + 1, nul)),
       oid,

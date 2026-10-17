@@ -23,6 +23,7 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import { headEntries } from './changes.ts'
 import {
   AllWithPathsError,
+  BrokenHeadError,
   GitError,
   LockExistsError,
   MissingMessageError,
@@ -38,12 +39,12 @@ import { readIndex, updateIndex } from './index_file.ts'
 import { takeLock } from './io.ts'
 
 import { record } from './reflog.ts'
-import { detachHead, readHead, writeRef } from './refs.ts'
+import { detachHead, readHead, safeRefName, writeRef } from './refs.ts'
 import { configBool, repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { renderReport } from './status.ts'
 import { report } from './summary.ts'
-import type { TreeEntry } from './tree.ts'
+import { TREE_MODE, type TreeEntry } from './tree.ts'
 import type { IndexState } from './types.ts'
 import { checkSwitches, fatal, startPoint } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -167,7 +168,7 @@ async function buildCommit(
       const cut = child.lastIndexOf('/')
       if ((cut === -1 ? '' : child.slice(0, cut)) !== dir) continue
       entries.push({
-        mode: '040000',
+        mode: TREE_MODE,
         path: cut === -1 ? child : child.slice(cut + 1),
         oid,
         type: 'tree',
@@ -253,6 +254,10 @@ export async function commit(
     const who = identity(fl, ctx.session)
     const when = Math.floor(Date.now() / 1000)
     const oid = await buildCommit(repo, state, message, who, parents, when)
+    // The object is written and the ref is not, as git leaves it: the files
+    // backend refuses to lock a HEAD whose branch path leaves the ref tree,
+    // rather than let the commit land on .git/config.
+    if (head.ref !== null && !safeRefName(head.ref)) throw new BrokenHeadError(head.ref)
     if (head.ref !== null) await writeRef(vfs, repo.location.commondir, head.ref, oid)
     else await detachHead(vfs, repo.location.gitdir, oid)
     if (restaged !== null) await updateIndex(repo, restaged[0], restaged[1])

@@ -14,7 +14,6 @@
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
 
 from mirage.commands.spec import constants
 from mirage.commands.spec.argmatch import (
@@ -190,9 +189,6 @@ class ParsedArgs:
 
     def texts(self) -> list[str]:
         return [v for v, k in self.args if k != "path"]
-
-    def flag(self, name: str, default: Any = None) -> Any:
-        return self.flags.get(name, default)
 
 
 @dataclass(slots=True)

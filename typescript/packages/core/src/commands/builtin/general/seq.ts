@@ -29,7 +29,7 @@ import { UsageError } from '../../errors.ts'
 import { quoteText } from '../../quote.ts'
 import { CommandName } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { strtodWhole } from '../utils/strtod.ts'
+import { LONG_DOUBLE_OVERFLOW, strtodWhole } from '../utils/strtod.ts'
 
 // GNU seq's long_double_format: one floating directive, its flags and an
 // optional L, with nothing but %% around it.
@@ -45,11 +45,6 @@ const FLOAT_CONVERSIONS = 'efgaEFGA'
 // goldens were pinned in.
 const QUAD_FRACTION_BITS = 112
 const QUAD_MIN_EXPONENT = -16382
-
-// The magnitude from which strtold reads an infinity: halfway from LDBL_MAX to
-// 2**16384, a tie that rounds up to the even 2**16384. GNU refuses an operand
-// that large.
-const LONG_DOUBLE_OVERFLOW = ((1n << 114n) - 1n) << 16270n
 
 // strtold reads zero for a magnitude at or under 2**-UNDERFLOW_BITS, half of
 // the least subnormal, and GNU takes the zero.

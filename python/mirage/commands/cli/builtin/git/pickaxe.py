@@ -17,28 +17,14 @@ from collections.abc import Iterator
 from difflib import SequenceMatcher
 
 from dulwich.diff_tree import tree_changes
-from dulwich.object_store import BaseObjectStore
-from dulwich.objects import Blob, Commit, ObjectID
+from dulwich.objects import Commit
+from dulwich.repo import BaseRepo
 
-from mirage.commands.cli.builtin.git.patch import byte_lines
+from mirage.commands.cli.builtin.git.patch import blob_data, byte_lines
 from mirage.commands.cli.builtin.git.summary import BINARY_SNIFF
 from mirage.shell.bytes import decode_text
 
 EMPTY_TREE = None
-
-
-def _blob(store: BaseObjectStore, sha: ObjectID | None) -> bytes:
-    """A blob's bytes, empty for a side that does not exist.
-
-    Args:
-        store (BaseObjectStore): object database holding the blob.
-        sha (ObjectID | None): blob id, None when the side does not
-            exist.
-    """
-    if sha is None:
-        return b""
-    obj = store[sha]
-    return obj.data if isinstance(obj, Blob) else b""
 
 
 def contains(text: str, pattern: re.Pattern[str]) -> int:
@@ -73,52 +59,60 @@ def contains(text: str, pattern: re.Pattern[str]) -> int:
 
 
 def _occurrences(
-    store: BaseObjectStore,
-    sha: ObjectID | None,
+    repo: BaseRepo,
+    entry: tuple[int, bytes] | None,
     needle: bytes | re.Pattern[str],
     ignore_case: bool,
 ) -> int:
-    """How many times a string appears in one blob, or a pattern matches it
-    as git counts under ``--pickaxe-regex``.
+    """How many times a string appears in one side, or a pattern matches
+    it as git counts under ``--pickaxe-regex``.
 
     Args:
-        store (BaseObjectStore): object database holding the blob.
-        sha (ObjectID | None): blob id, None when the side does not
-            exist.
+        repo (BaseRepo): repository holding the blob.
+        entry (tuple[int, bytes] | None): the side's (mode, id), None
+            when it does not exist.
         needle (bytes | re.Pattern[str]): the string being counted,
             already folded under ``ignore_case``, or the pattern.
         ignore_case (bool): fold the blob's ASCII letters to lower case,
             the table git folds a ``-S`` string through under ``-i``.
     """
-    data = _blob(store, sha)
+    data = blob_data(repo, entry)
     if not isinstance(needle, re.Pattern):
         return (data.lower() if ignore_case else data).count(needle)
     return contains(decode_text(data), needle)
 
 
 def _changes(
-    store: BaseObjectStore, commit: Commit
-) -> Iterator[tuple[ObjectID | None, ObjectID | None]]:
-    """The old and new blob ids of every path a commit changed against
+    repo: BaseRepo, commit: Commit
+) -> Iterator[tuple[tuple[int, bytes] | None, tuple[int, bytes] | None]]:
+    """The old and new (mode, id) of every path a commit changed against
     its first parent, or against nothing for a root commit.
 
+    Each side reads the way ``blob_data`` reads it, so a gitlink is its
+    ``Subproject commit`` line, as git's pickaxe sees it, rather than an
+    id this repository does not hold.
+
     Args:
-        store (BaseObjectStore): object database holding the trees.
+        repo (BaseRepo): repository holding the trees.
         commit (Commit): the commit.
     """
+    store = repo.object_store
     parent_tree = EMPTY_TREE
     if commit.parents:
         parent = store[commit.parents[0]]
         assert isinstance(parent, Commit)
         parent_tree = parent.tree
     for change in tree_changes(store, parent_tree, commit.tree):
-        old = change.old.sha if change.old is not None else None
-        new = change.new.sha if change.new is not None else None
-        yield old, new
+        old = change.old
+        new = change.new
+        yield (
+            (old.mode, old.sha) if old is not None else None,
+            (new.mode, new.sha) if new is not None else None,
+        )
 
 
 def greps(
-    store: BaseObjectStore,
+    repo: BaseRepo,
     commit: Commit,
     pattern: re.Pattern[str],
     force_text: bool = False,
@@ -127,13 +121,14 @@ def greps(
     git's ``-G``; a binary side is skipped, as git does without ``--text``.
 
     Args:
-        store (BaseObjectStore): object database holding the trees.
+        repo (BaseRepo): repository holding the trees.
         commit (Commit): the commit to test.
         pattern (re.Pattern[str]): the compiled ``-G`` expression.
         force_text (bool): include binary changed lines under ``--text``.
     """
-    for old_sha, new_sha in _changes(store, commit):
-        old, new = _blob(store, old_sha), _blob(store, new_sha)
+    for old_entry, new_entry in _changes(repo, commit):
+        old = blob_data(repo, old_entry)
+        new = blob_data(repo, new_entry)
         if not force_text and (
             b"\0" in old[:BINARY_SNIFF] or b"\0" in new[:BINARY_SNIFF]
         ):
@@ -151,7 +146,7 @@ def greps(
 
 
 def touches(
-    store: BaseObjectStore,
+    repo: BaseRepo,
     commit: Commit,
     needle: bytes | re.Pattern[str],
     ignore_case: bool = False,
@@ -171,7 +166,7 @@ def touches(
     its own case folding.
 
     Args:
-        store (BaseObjectStore): object database holding the trees.
+        repo (BaseRepo): repository holding the trees.
         commit (Commit): the commit to test.
         needle (bytes | re.Pattern[str]): the string being counted, or
             the ``--pickaxe-regex`` pattern.
@@ -179,9 +174,9 @@ def touches(
     """
     if ignore_case and isinstance(needle, bytes):
         needle = needle.lower()
-    for old, new in _changes(store, commit):
-        if _occurrences(store, old, needle, ignore_case) != _occurrences(
-            store, new, needle, ignore_case
+    for old, new in _changes(repo, commit):
+        if _occurrences(repo, old, needle, ignore_case) != _occurrences(
+            repo, new, needle, ignore_case
         ):
             return True
     return False

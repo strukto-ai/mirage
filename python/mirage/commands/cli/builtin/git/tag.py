@@ -60,7 +60,6 @@ from mirage.commands.cli.builtin.git.ref_list import (
     configured_sort,
     listing_result,
     match_short,
-    read_config,
     ref_listing,
     sort_keys,
 )
@@ -71,6 +70,7 @@ from mirage.commands.cli.builtin.git.refs import (
     valid_ref_name,
     write_ref,
 )
+from mirage.commands.cli.builtin.git.repo import read_config
 from mirage.commands.cli.builtin.git.revparse import resolve_object
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
@@ -324,9 +324,7 @@ async def tag(
                 )
 
             items, ref_ctx, errors = await ref_listing(
-                vfs,
                 repo,
-                location,
                 cfg,
                 used_fields(fmt, keys or ()),
                 wanted,

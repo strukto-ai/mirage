@@ -13,7 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
-import { mapped, parseRefspec, safeRefName, wholeRefName } from './refs.ts'
+import { PathSpec } from '../../../../types.ts'
+import { Files } from '../../../../workspace/files.ts'
+import { BadRefNameUpdateError } from './errors.ts'
+import {
+  mapped,
+  parseRefspec,
+  safeRefName,
+  validBranchName,
+  wholeRefName,
+  writeRef,
+} from './refs.ts'
 
 it.each([
   ['main', { src: 'main', dst: null, force: false }],
@@ -54,4 +64,33 @@ it.each([
 it('takes no bare @ as a whole ref name', () => {
   expect(wholeRefName('@')).toBe(false)
   expect(wholeRefName('HEAD')).toBe(true)
+})
+
+it('refuses to write a ref whose name leaves the ref tree', async () => {
+  const files = new Files((op, path) => {
+    throw new Error(`${op} ${path.virtual} reached the mount`)
+  })
+  const written = writeRef(
+    files,
+    PathSpec.fromStrPath('/repo/.git'),
+    'refs/heads/../../config',
+    'cdd6234342b147880f5d86c55dad6c1fbe222bfe',
+  )
+  await expect(written).rejects.toThrow(BadRefNameUpdateError)
+  await expect(written).rejects.toThrow(
+    "refusing to update ref with bad name 'refs/heads/../../config'",
+  )
+})
+
+it.each([
+  ['main', true],
+  ['feature/HEAD', true],
+  ['HEADS', true],
+  ['x-', true],
+  ['@', true],
+  ['HEAD', false],
+  ['-x', false],
+  ['a..b', false],
+])('validBranchName follows strbuf_check_branch_ref: %s', (name, valid) => {
+  expect(validBranchName(name)).toBe(valid)
 })

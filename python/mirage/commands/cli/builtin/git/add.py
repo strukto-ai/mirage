@@ -41,6 +41,7 @@ from mirage.commands.cli.builtin.git.io import (
 )
 from mirage.commands.cli.builtin.git.objects import store_blob
 from mirage.commands.cli.builtin.git.pathspec import (
+    decoded,
     matched,
     repo_relative,
     visible_entries,
@@ -321,10 +322,7 @@ async def stage_tracked(
         location (RepoLocation): the discovered repository.
         state (IndexState): the index, updated in place.
     """
-    tracked = {
-        path.decode("utf-8", errors="replace")
-        for path in visible_entries(location, state.entries)
-    }
+    tracked = decoded(visible_entries(location, state.entries))
     found = await scan(vfs, location, tracked, UNTRACKED_NO)
     present = set(found.files)
     await stage_changes(
@@ -365,10 +363,7 @@ async def add(
             raise NothingSpecifiedError()
         _repo, location = await opened(ctx, fl, work_tree=True)
         state = await read_index(vfs, location.gitdir)
-        tracked = {
-            path.decode("utf-8", errors="replace")
-            for path in visible_entries(location, state.entries)
-        }
+        tracked = decoded(visible_entries(location, state.entries))
         found = await scan(
             vfs,
             location,

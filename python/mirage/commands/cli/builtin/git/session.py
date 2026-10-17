@@ -17,8 +17,6 @@ from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import replace
 
-from dulwich.repo import BaseRepo
-
 from mirage.commands.cli.builtin.git.discover import (
     discover,
     require_work_tree,
@@ -28,7 +26,11 @@ from mirage.commands.cli.builtin.git.errors import (
     IndexLockError,
     NoWorkspaceError,
 )
-from mirage.commands.cli.builtin.git.repo import config_values, open_repo
+from mirage.commands.cli.builtin.git.repo import (
+    Repo,
+    config_values,
+    open_repo,
+)
 from mirage.commands.cli.builtin.git.types import ReadOnlyRefusal, RepoLocation
 from mirage.commands.cli.builtin.git.util import (
     fatal,
@@ -150,7 +152,7 @@ def verb(
 
 async def opened(
     ctx: Context, fl: FlagView, work_tree: bool = False
-) -> tuple[BaseRepo, RepoLocation]:
+) -> tuple[Repo, RepoLocation]:
     """Discover and open the repository a verb was invoked against.
 
     Every verb starts the same way: honor ``-C``, walk up to the mount

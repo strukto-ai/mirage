@@ -39,8 +39,15 @@ from mirage.types import (
     StatFn,
 )
 from mirage.utils.dates import iso_timestamp, iso_to_epoch
-from mirage.utils.quote import shell_quote_always
+from mirage.utils.quote import (
+    DQ_BLOCKERS,
+    LEADING_SPECIAL,
+    NAMED_ESCAPES,
+    shell_quote_always,
+)
 from mirage.utils.stat_view import (
+    BLOCK_UNIT,
+    CHMOD_MODE_BITS,
     content_size,
     device_rdev,
     posix_mode,
@@ -109,20 +116,6 @@ _TYPE_LABELS = {
     FileType.FIFO: "fifo",
 }
 
-_SHELL_SPECIAL = frozenset('!"#$&()*;<=>?[\\^`{|}~')
-
-_START_SAFE = frozenset("#~")
-
-_ESCAPE_NAMES = {
-    "\a": "\\a",
-    "\b": "\\b",
-    "\t": "\\t",
-    "\n": "\\n",
-    "\v": "\\v",
-    "\f": "\\f",
-    "\r": "\\r",
-}
-
 
 @dataclass(frozen=True, slots=True)
 class _FormatDirective:
@@ -150,7 +143,7 @@ def _type_label(s: FileStat) -> str:
 
 
 def _effective_mode(s: FileStat) -> int:
-    return posix_mode(s) & 0o7777
+    return posix_mode(s) & CHMOD_MODE_BITS
 
 
 def _epoch(iso: str | None) -> str:
@@ -179,9 +172,9 @@ def _escape_char(char: str) -> str:
     Args:
         char (str): the character to escape.
     """
-    named = _ESCAPE_NAMES.get(char)
+    named = NAMED_ESCAPES.get(char)
     if named is not None:
-        return named
+        return f"\\{named}"
     raw = char.encode("utf-8", "surrogateescape")
     return "".join(f"\\{byte:03o}" for byte in raw)
 
@@ -199,7 +192,9 @@ def _double_quotable(name: str) -> bool:
     for index, char in enumerate(name):
         if _needs_escape(char):
             return False
-        if char in _SHELL_SPECIAL and not (index == 0 and char in _START_SAFE):
+        if char in DQ_BLOCKERS and not (
+            index == 0 and char in LEADING_SPECIAL
+        ):
             return False
     return True
 
@@ -304,7 +299,7 @@ def _directive_value(
     if spec == "W":
         return _epoch(s.birthtime)
     if spec == "B":
-        return "512"
+        return str(BLOCK_UNIT)
     if spec == "d":
         return "?" if s.dev is None else str(s.dev)
     if spec == "D":
@@ -594,6 +589,23 @@ def _render_stat(s: FileStat, name: str, identity: Identity | None) -> str:
     )
 
 
+def _render_one(
+    s: FileStat, name: str, fmt: str | None, identity: Identity | None
+) -> str:
+    """One operand's report: the ``-c`` format when given, else GNU's
+    default layout.
+
+    Args:
+        s (FileStat): the backend and namespace stat.
+        name (str): operand spelling.
+        fmt (str | None): the ``-c`` format, or None for the default.
+        identity (Identity | None): session owner and group defaults.
+    """
+    if fmt is not None:
+        return _format_stat(fmt, s, name, identity)
+    return _render_stat(s, name, identity)
+
+
 async def _dispatched_statfs(
     dispatch: DispatchFn, path: PathSpec
 ) -> tuple[str, CapacityResult]:
@@ -711,10 +723,7 @@ async def stat(
         # backend inode, so the namespace is the only authority for it.
         linked = None if L or links is None else links.stat_at(p.virtual)
         if linked is not None:
-            if c is not None:
-                lines.append(_format_stat(c, linked, p.raw_path, identity))
-            else:
-                lines.append(_render_stat(linked, p.raw_path, identity))
+            lines.append(_render_one(linked, p.raw_path, c, identity))
             continue
         try:
             s = await operand_stat(
@@ -728,10 +737,7 @@ async def stat(
             # GNU stat keeps reporting the remaining operands, exit 1.
             err += encode_text(fs_error_line("stat", p, exc))
             continue
-        if c is not None:
-            lines.append(_format_stat(c, s, p.raw_path, identity))
-        else:
-            lines.append(_render_stat(s, p.raw_path, identity))
+        lines.append(_render_one(s, p.raw_path, c, identity))
     io = IOResult(exit_code=1 if err else 0, stderr=err or None)
     if not lines:
         return None, io

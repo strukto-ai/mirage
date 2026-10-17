@@ -627,6 +627,31 @@ function linkRow(path: PathSpec, links: LinkView | null): FileStat | null {
   return row.with({ name: path.rawPath })
 }
 
+// The row `ls -d` prints for one operand, or why it cannot. Mirrors Python's
+// _operand_row.
+async function operandRow(
+  path: PathSpec,
+  stat: Stat,
+  links: LinkView | null,
+  childMounts: ChildMounts | null,
+): Promise<FileStat | LsWarning> {
+  const link = linkRow(path, links)
+  if (link !== null) return link
+  try {
+    // GNU ls -d prints the operand as given.
+    return asOperand(await stat(path), path)
+  } catch (err) {
+    if (!isWalkError(err)) throw err
+    if (!isDotWalkError(err) && (childMounts?.(path.virtual) ?? []).length > 0) {
+      // No backend serves it, but the namespace owes it children,
+      // so the dispatcher stats it as a directory and -d must print the
+      // same row.
+      return new FileStat({ name: path.rawPath, type: FileType.DIRECTORY })
+    }
+    return { message: `ls: cannot access '${path.rawPath}': ${errText(err)}`, serious: true }
+  }
+}
+
 // List one operand and report whether it turned out to be a directory.
 // `chain` holds, under -RL, the directories open above this one, each as the
 // path it resolves to; `spell` gives a path below the operand as the operand
@@ -1193,37 +1218,17 @@ export async function lsGeneric(
   }
   const warnings: LsWarning[] = []
   const lines: string[] = []
+  const childMounts: ChildMounts | null =
+    ctx.vfs === undefined ? null : (dir: string) => owedNames(ctx.vfs, dir)
 
   if (listDirItself) {
     // -d turns every operand into a plain row, sorted together and printed
     // with no headers.
     const collected: { row: FileStat; href: string }[] = []
     for (const p of targets) {
-      const link = linkRow(p, links)
-      if (link !== null) {
-        collected.push({ row: link, href: p.virtual })
-        continue
-      }
-      try {
-        // GNU ls -d prints the operand as given.
-        collected.push({ row: asOperand(await stat(p), p), href: p.virtual })
-      } catch (err) {
-        if (!isWalkError(err)) throw err
-        if (!isDotWalkError(err) && owedNames(ctx.vfs, p.virtual).length > 0) {
-          // No backend serves it, but the namespace owes it children,
-          // so the dispatcher stats it as a directory and -d must print the
-          // same row.
-          collected.push({
-            row: new FileStat({ name: p.rawPath, type: FileType.DIRECTORY }),
-            href: p.virtual,
-          })
-          continue
-        }
-        warnings.push({
-          message: `ls: cannot access '${p.rawPath}': ${errText(err)}`,
-          serious: true,
-        })
-      }
+      const row = await operandRow(p, stat, links, childMounts)
+      if (row instanceof FileStat) collected.push({ row, href: p.virtual })
+      else warnings.push(row)
     }
     const byRow = new Map(collected.map((c) => [c.row, c.href]))
     const rows =
@@ -1259,7 +1264,7 @@ export async function lsGeneric(
     links,
     deref,
     followArgs,
-    childMounts: ctx.vfs === undefined ? null : (dir: string) => owedNames(ctx.vfs, dir),
+    childMounts,
     mounts: mountsOf(ctx) ?? null,
     statPath: ctx.statPath ?? null,
     statNeeded: statNeeded(flags),

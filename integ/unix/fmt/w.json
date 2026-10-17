@@ -73,6 +73,25 @@
       "flags": [
         "w"
       ]
+    },
+    {
+      "id": "fmt_w_and_g_refuse_what_gnu_refuses",
+      "seq": 9940304,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "for a in '-w abc' '-w -1' '-w 2501' '-w 0x5' '-g abc' '-g 76' '-w 5 -g 10'; do printf 'one two three\\n' | fmt $a; echo rc=$?; done; printf 'one two three\\n' | fmt -w 0; printf 'one two three\\n' | fmt -w ' +9'",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\none\ntwo\nthree\none two\nthree\n",
+        "stderr": "fmt: invalid width: 'abc'\nfmt: invalid width: '-1'\nfmt: invalid width: '2501': Numerical result out of range\nfmt: invalid width: '0x5'\nfmt: invalid width: 'abc'\nfmt: invalid width: '76': Value too large for defined data type\nfmt: invalid width: '10': Value too large for defined data type\n"
+      },
+      "flags": [
+        "w",
+        "g"
+      ]
     }
   ]
 }

@@ -28,16 +28,16 @@ import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { quoteText } from '../../quote.ts'
-import { extraOperandError } from '../../spec/usage.ts'
+import { extraOperandError, usageHint } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
 import { UsageError } from '../../errors.ts'
 import {
+  EOVERFLOW_TEXT,
   SPLIT_BYTE_SUFFIXES,
   SPLIT_BYTE_UNITS,
   SPLIT_COUNT_PATTERN,
   SPLIT_DIGITS,
   SPLIT_HEX_DIGITS,
-  SPLIT_TRY_HELP,
   UINTMAX,
 } from '../constants.ts'
 
@@ -134,8 +134,7 @@ function parseSuffixLength(value: string): number {
   // built into a file name).
   if (BigInt(value.trim().replace(/^\+/, '')) > UINTMAX) {
     throw new UsageError(
-      `split: invalid suffix length: '${quoteText(value)}': ` +
-        'Value too large for defined data type',
+      `split: invalid suffix length: '${quoteText(value)}': ${EOVERFLOW_TEXT}`,
       1,
     )
   }
@@ -156,14 +155,14 @@ function parseSuffixStart(value: string, hexMode: boolean, suffixLen: number): n
   if (!(hexMode ? SPLIT_HEX_DIGITS : SPLIT_DIGITS).test(value)) {
     const kind = hexMode ? 'hexadecimal' : 'numerical'
     throw new UsageError(
-      `split: '${quoteText(value)}': invalid start value for ${kind} suffix${SPLIT_TRY_HELP}`,
+      `split: '${quoteText(value)}': invalid start value for ${kind} suffix\n${usageHint('split')}`,
       1,
     )
   }
   const start = Number.parseInt(value, hexMode ? 16 : 10)
   if (start.toString(hexMode ? 16 : 10).length > suffixLen) {
     throw new UsageError(
-      `split: numerical suffix start value is too large for the suffix length${SPLIT_TRY_HELP}`,
+      `split: numerical suffix start value is too large for the suffix length\n${usageHint('split')}`,
       1,
     )
   }

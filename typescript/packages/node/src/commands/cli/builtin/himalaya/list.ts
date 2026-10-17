@@ -21,7 +21,7 @@ import { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchHeaders, listMessageUids } from '../../../../core/email/client.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
 import { envelopesJsonBytes } from '../../../../core/email/render.ts'
-import { pageSlice, sortHeaders, uidBudget } from './query.ts'
+import { pageSlice, pageWindow, sortHeaders, uidBudget } from './query.ts'
 
 export const DEFAULT_PAGE_SIZE = 25
 
@@ -32,10 +32,13 @@ export async function listEnvelopes(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const mailbox = fl.asStr('mailbox') ?? 'INBOX'
-  const page = fl.asInt('page') ?? 1
-  const pageSize = fl.asInt('page_size') ?? DEFAULT_PAGE_SIZE
+  const mailbox = fl.asStr('mailbox', 'INBOX')
   const account = config as EmailConfig
+  const [page, pageSize] = pageWindow(
+    fl.asInt('page', 1),
+    fl.asInt('page_size', DEFAULT_PAGE_SIZE),
+    account.maxMessages,
+  )
   const budget = uidBudget(page, pageSize, [], account.maxMessages)
   const accessor = new EmailAccessor(account)
   let headers

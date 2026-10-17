@@ -35,10 +35,10 @@ from mirage.commands.cli.builtin.git.ref_list import (
     is_root_ref,
     listing_result,
     match_as_path,
-    read_config,
     ref_listing,
     sort_keys,
 )
+from mirage.commands.cli.builtin.git.repo import read_config
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import QuoteStyle, RefKind
 from mirage.commands.cli.builtin.git.util import (
@@ -129,9 +129,7 @@ async def for_each_ref(
             )
 
         items, ref_ctx, errors = await ref_listing(
-            ctx.vfs,
             repo,
-            location,
             await read_config(ctx.vfs, location),
             used_fields(fmt, keys or ()),
             wanted,

@@ -32,6 +32,7 @@ from mirage.commands.cli.builtin.git.io import (
     rename_path,
 )
 from mirage.commands.cli.builtin.git.pathspec import (
+    decoded,
     repo_relative,
     under,
     visible_path,
@@ -461,15 +462,11 @@ async def mv(
             raise UsageError("", verb_usage(ctx))
         repo, location = await opened(ctx, fl, work_tree=True)
         state = await read_index(vfs, location.gitdir)
-        conflicted = {
-            path.decode("utf-8", errors="replace") for path in state.conflicts
-        }
+        conflicted = decoded(state.conflicts)
         # An unmerged path holds no ordinary entry, so a tracked set
         # built from the entries alone would call it untracked and let
         # a directory holding one move with its stages left behind.
-        tracked = {
-            path.decode("utf-8", errors="replace") for path in state.entries
-        } | conflicted
+        tracked = decoded(state.entries) | conflicted
         moves = await plan(
             vfs,
             location,

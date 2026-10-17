@@ -33,7 +33,7 @@ async def read(
     messages = await fetch_recent_messages(
         config,
         fl.as_str("channel") or "",
-        fl.as_int("limit") or 20,
+        fl.as_int("limit", 20),
     )
     out = json.dumps(
         messages, ensure_ascii=False, separators=(",", ":")

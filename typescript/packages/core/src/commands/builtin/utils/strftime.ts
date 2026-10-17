@@ -16,22 +16,9 @@
 // `ls --time-style=+FMT` print them; `%q` and `%N` are the two GNU adds
 // no C library strftime knows.
 import type { Zone } from '../../../utils/timezone.ts'
+import { MONTHS } from './constants.ts'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const MONTH_NAMES = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-]
 
 function pad2(n: number): string {
   return String(n).padStart(2, '0')
@@ -81,7 +68,7 @@ export function gnuStrftime(dt: Date, fmt: string, zone: Zone): string {
         return full[dow] ?? ''
       }
       case 'b':
-        return MONTH_NAMES[month] ?? ''
+        return MONTHS[month] ?? ''
       case 'B': {
         const full = [
           'January',
@@ -102,7 +89,7 @@ export function gnuStrftime(dt: Date, fmt: string, zone: Zone): string {
       case 'c':
         // C-locale %c (%a %b %e %H:%M:%S %Y), what glibc renders and what
         // Python's strftime produces under LC_ALL=C.
-        return `${DAY_NAMES[dow] ?? ''} ${MONTH_NAMES[month] ?? ''} ${String(day).padStart(2, ' ')} ${pad2(hour)}:${pad2(minute)}:${pad2(second)} ${pad4(year)}`
+        return `${DAY_NAMES[dow] ?? ''} ${MONTHS[month] ?? ''} ${String(day).padStart(2, ' ')} ${pad2(hour)}:${pad2(minute)}:${pad2(second)} ${pad4(year)}`
       case 'C':
         return pad2(Math.floor(year / 100))
       case 'd':
@@ -116,7 +103,7 @@ export function gnuStrftime(dt: Date, fmt: string, zone: Zone): string {
       case 'G':
         return pad4(isoWeekParts(year, month, day)[0])
       case 'h':
-        return MONTH_NAMES[month] ?? ''
+        return MONTHS[month] ?? ''
       case 'H':
         return pad2(hour)
       case 'k':

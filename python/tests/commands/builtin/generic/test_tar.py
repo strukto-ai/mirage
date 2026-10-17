@@ -9,9 +9,8 @@ from mirage.commands.builtin.generic.tar import (
     member_name,
     pruned,
     strip_prefix,
-    tar,
 )
-from mirage.commands.builtin.generic.tar.tar import _write_archive
+from mirage.commands.builtin.generic.tar.tar import _write_archive, tar
 from mirage.commands.builtin.generic.tar.types import CreateResult, Member
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import materialize

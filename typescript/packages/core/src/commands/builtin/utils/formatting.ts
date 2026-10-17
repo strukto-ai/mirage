@@ -23,7 +23,7 @@ import { gnuStrftime } from './strftime.ts'
 import { UINTMAX } from '../constants.ts'
 import { UTC_ZONE, type Zone } from '../../../utils/timezone.ts'
 import { isoTimestamp } from '../../../utils/dates.ts'
-import { contentSize, posixMode, sizeUnknown } from '../../../utils/stat_view.ts'
+import { CHMOD_MODE_BITS, contentSize, posixMode, sizeUnknown } from '../../../utils/stat_view.ts'
 import {
   EPOCH_LS_TIME,
   FIND_FUTURE_SECONDS,
@@ -243,7 +243,7 @@ function permTriplet(bits: number, special?: string): string {
 
 export function lsModeString(s: FileStat): string {
   const typeChar = TYPE_CHARS[s.type] ?? '-'
-  const mode = s.mode ?? posixMode(s) & 0o7777
+  const mode = s.mode ?? posixMode(s) & CHMOD_MODE_BITS
   return (
     typeChar +
     permTriplet(mode >> 6, mode & 0o4000 ? 's' : undefined) +

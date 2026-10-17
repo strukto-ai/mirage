@@ -26,8 +26,16 @@ import { fnmatch } from '../../../utils/fnmatch.ts'
 import { formatRecords } from '../utils/output.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { linksOf, mountsOf } from '../utils/links.ts'
+import { cInt, strtoul } from '../utils/strtol.ts'
 
 const UNOPENABLE_MARK = '  [error opening dir]'
+
+// GNU tree's ASCII (C-locale) drawing set, matching `tree` in the battery's
+// docker oracle; the vertical/indent continuations are 4 columns wide.
+const BRANCH = '|-- '
+const LAST = '`-- '
+const VERTICAL = '|   '
+const INDENT = '    '
 
 interface TreeFlags {
   readonly maxDepth: number | null
@@ -38,11 +46,23 @@ interface TreeFlags {
   readonly oneFileSystem: boolean
 }
 
+// `-L` as tree 2.2.1 reads it: `(int)strtoul(sLevel, NULL, 0)`. Mirrors
+// Python's `_level`.
+function level(text: string): bigint {
+  return cInt(strtoul(text)[0])
+}
+
+// tree's one refusal for a level under 1, whatever was typed. Mirrors
+// Python's `_level_refusal`.
+function levelRefusal(): string {
+  return 'tree: Invalid level, must be greater than 0.'
+}
+
 function parseFlags(bag: Record<string, FlagValue>): TreeFlags {
   const fl = new FlagView(bag, specOf('tree'))
-  const depthRaw = fl.asStr('L') ?? null
+  const depth = fl.asNumber('L', level, levelRefusal, { low: 1n })
   return {
-    maxDepth: depthRaw === null ? null : Number.parseInt(depthRaw, 10),
+    maxDepth: depth === undefined ? null : Number(depth),
     showHidden: fl.asBool('a'),
     ignorePattern: fl.asStr('args_I') ?? null,
     dirsOnly: fl.asBool('d'),
@@ -197,14 +217,14 @@ async function walkTree(
     const entry = filtered[i]
     if (entry === undefined) continue
     const last = i === filtered.length - 1
-    const connector = last ? '`-- ' : '|-- '
+    const connector = last ? LAST : BRANCH
     const shown = entry.link === null ? entry.name : `${entry.name} -> ${entry.link}`
     lines.push(`${prefix}${connector}${shown}`)
     if (entry.isDir) {
       dirs += 1
       if (entry.link !== null) continue
       if (treeOpts.maxDepth !== null && depth + 1 >= treeOpts.maxDepth) continue
-      const nextPrefix = prefix + (last ? '    ' : '|   ')
+      const nextPrefix = prefix + (last ? INDENT : VERTICAL)
       // Past a mount root the subtree belongs to another VFS, so the
       // rest of this branch reads through the dispatcher. Deeper mounts
       // under it need no second switch: the dispatcher already routes

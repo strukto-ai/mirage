@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DIFF_HEADER } from './constants.ts'
+import { DIFF_HEADER, PR_INVALID_LIMIT } from './constants.ts'
 import { commentsFor, commentsText } from './issue.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
@@ -37,6 +37,7 @@ import {
   ghBool,
   ghTransport,
   jsonFields,
+  listLimit,
   repoFor,
   repoNumber,
   textOut,
@@ -354,15 +355,15 @@ export async function listCmd(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   const wanted = fl.asStr('state') ?? 'open'
-  const base = fl.asStr('base')
-  const head = fl.asStr('head')
+  const base = fl.asNonEmpty('base')
+  const head = fl.asNonEmpty('head')
   const fields = jsonFields(fl, PR_FIELDS)
   if (fields !== null) {
     const rows = await listPullRequestFields(
       ghTransport(config),
       repoFor(config, fl),
       { states: STATES[wanted] ?? ['OPEN'], base, head },
-      fl.asInt('limit') ?? 30,
+      listLimit(fl, 30, PR_INVALID_LIMIT),
       selection(PULL_FIELD_TABLE, fields, false),
     )
     return typedOut(
@@ -379,7 +380,7 @@ export async function listCmd(
     ghTransport(config),
     repoFor(config, fl),
     params,
-    fl.asInt('limit') ?? 30,
+    listLimit(fl, 30, PR_INVALID_LIMIT),
     wanted === 'merged'
       ? (row) => row.merged_at !== null && row.merged_at !== undefined
       : undefined,

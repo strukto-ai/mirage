@@ -8,9 +8,9 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
-from dataclasses import replace
 from functools import partial
 
+from mirage.commands.builtin.constants import UINTMAX
 from mirage.commands.builtin.grep_pattern import (
     NEVER_MATCH,
     resolve_pattern,
@@ -74,7 +74,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.concurrency.worker import Worker
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import walk_refusal
-from mirage.io.stream import close_quietly
+from mirage.io.stream import close_quietly, yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn, ShellFn
 from mirage.shell.bytes import decode_text, encode_text
@@ -121,7 +121,6 @@ COLOR_CHOICES = ("never", "auto", "always", "ansi")
 ENGINES = ("default", "pcre2", "auto")
 SIZE = re.compile(r"([0-9]+)([KMG]?)")
 SIZE_UNIT = {"": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30}
-U64_MAX = (1 << 64) - 1
 # The sizes ripgrep reads as digits and a unit, each named as it is refused.
 SIZE_SPELLINGS = {
     "max_filesize": "--max-filesize",
@@ -193,6 +192,17 @@ def operand_name(p: PathSpec) -> str:
     return STDIN_NAME if p.raw_path == "-" else p.raw_path
 
 
+def _flag_error(spelling: str, reason: str) -> UsageError:
+    """ripgrep's refusal of an option value it cannot parse, exit 2.
+
+    Args:
+        spelling (str): the option as ripgrep names it (``-E``,
+            ``--colors``).
+        reason (str): why the value is refused.
+    """
+    return UsageError(f"rg: error parsing flag {spelling}: {reason}")
+
+
 def number_flag(fl: FlagView, dest: str) -> int | None:
     """One numeric option's value, refused in ripgrep's words.
 
@@ -216,12 +226,11 @@ def number_flag(fl: FlagView, dest: str) -> int | None:
         reason = "cannot parse integer from empty string"
     elif not digits or not (digits.isascii() and digits.isdigit()):
         reason = "invalid digit found in string"
-    elif int(digits) > U64_MAX:
+    elif int(digits) > UINTMAX:
         reason = "number too large to fit in target type"
     if reason is not None:
-        raise UsageError(
-            f"rg: error parsing flag {NUMBER_SPELLINGS[dest]}: "
-            f"value is not a valid number: {reason}"
+        raise _flag_error(
+            NUMBER_SPELLINGS[dest], f"value is not a valid number: {reason}"
         )
     return int(digits)
 
@@ -245,9 +254,8 @@ def encoding_flag(fl: FlagView) -> str:
         label = str(value)
         named = label if label in ("auto", "none") else encoding_for(label)
         if named is None:
-            raise UsageError(
-                "rg: error parsing flag -E: grep config error: unknown "
-                f"encoding: {label}"
+            raise _flag_error(
+                "-E", f"grep config error: unknown encoding: {label}"
             )
         found = named
     return found
@@ -288,18 +296,15 @@ def size_bytes(value: str, dest: str) -> int:
             "non-empty sequence of digits followed by an optional 'K', 'M' "
             "or 'G' suffix"
         )
-    elif int(size.group(1)) > U64_MAX:
+    elif int(size.group(1)) > UINTMAX:
         reason = (
             f"invalid integer found in size '{value}': number too large to "
             "fit in target type"
         )
-    elif int(size.group(1)) * SIZE_UNIT[size.group(2)] > U64_MAX:
+    elif int(size.group(1)) * SIZE_UNIT[size.group(2)] > UINTMAX:
         reason = f"size too big in '{value}'"
     if size is None or reason is not None:
-        raise UsageError(
-            f"rg: error parsing flag {SIZE_SPELLINGS[dest]}: invalid size: "
-            f"{reason}"
-        )
+        raise _flag_error(SIZE_SPELLINGS[dest], f"invalid size: {reason}")
     return int(size.group(1)) * SIZE_UNIT[size.group(2)]
 
 
@@ -456,13 +461,12 @@ def check_display_flags(fl: FlagView) -> None:
     for spec in fl.as_list("colors"):
         refusal = color_refusal(spec)
         if refusal is not None:
-            raise UsageError(f"rg: error parsing flag --colors: {refusal}")
+            raise _flag_error("--colors", refusal)
     for _, fmt in fl.occurrences("hyperlink_format"):
         refusal = hyperlink_refusal(str(fmt))
         if refusal is not None:
-            raise UsageError(
-                "rg: error parsing flag --hyperlink-format: invalid "
-                f"hyperlink format: {refusal}"
+            raise _flag_error(
+                "--hyperlink-format", f"invalid hyperlink format: {refusal}"
             )
     size_flag(fl, "dfa_size_limit")
     size_flag(fl, "regex_size_limit")
@@ -481,10 +485,7 @@ def _choice(
     """
     value = fl.as_str(dest)
     if value is not None and value not in choices:
-        raise UsageError(
-            f"rg: error parsing flag {spelling}: choice "
-            f"'{value}' is unrecognized"
-        )
+        raise _flag_error(spelling, f"choice '{value}' is unrecognized")
     return value
 
 
@@ -619,11 +620,11 @@ def path_separator(fl: FlagView) -> str | None:
     if not raw:
         return None
     if len(raw) != 1:
-        raise UsageError(
-            "rg: error parsing flag --path-separator: A path separator must "
-            f"be exactly one byte, but the given separator is {len(raw)} "
-            f"bytes: {value}\nIn some shells on Windows '/' is automatically "
-            "expanded. Use '//' instead."
+        raise _flag_error(
+            "--path-separator",
+            "A path separator must be exactly one byte, but the given "
+            f"separator is {len(raw)} bytes: {value}\nIn some shells on "
+            "Windows '/' is automatically expanded. Use '//' instead.",
         )
     return decode_text(raw)
 
@@ -837,10 +838,7 @@ def engine_flag(fl: FlagView) -> str:
         return "default"
     value = fl.as_str("engine") or ""
     if value not in ENGINES:
-        raise UsageError(
-            f"rg: error parsing flag --engine: "
-            f"unrecognized regex engine '{value}'"
-        )
+        raise _flag_error("--engine", f"unrecognized regex engine '{value}'")
     return value
 
 
@@ -1052,10 +1050,6 @@ def fifo_stat(path: str) -> FileStat:
         path (str): the operand's name.
     """
     return FileStat(name=path, type=FileType.FIFO)
-
-
-async def _wrap_bytes(data: bytes) -> AsyncIterator[bytes]:
-    yield data
 
 
 def _sort_key(h: Haystack, key: str) -> str | None:
@@ -1744,7 +1738,7 @@ async def _search_all(
                     if refusal is not None:
                         warnings.append(refusal)
                         continue
-                    source = _wrap_bytes(text)
+                    source = yield_bytes(text)
                 elif (
                     f.search_zip
                     and h.virtual.endswith(GZIP_NAMES)
@@ -1880,21 +1874,3 @@ def label_flags(flags: Mapping[str, FlagValue]) -> dict[str, FlagValue]:
     if filename_flag(FlagView(flags, spec=SPECS["rg"])) != "no_filename":
         labelled_flags["with_filename"] = True
     return labelled_flags
-
-
-def labelled(ctx: Context) -> Context:
-    """Ask for the filename a walk would have printed on its own.
-
-    A content search hands the generic explicit files where the user
-    named a directory, and the generic labels explicit operands only when
-    there are several, so ``-H`` is requested here; an ``-I`` the line
-    set after any ``-H`` still wins, since forcing ``-H`` under it would
-    defeat the suppression in the delegated scan.
-
-    Args:
-        ctx (Context): the narrowing wrapper's options.
-    """
-    flags = ctx.flags or {}
-    if filename_flag(FlagView(flags, spec=SPECS["rg"])) == "no_filename":
-        return ctx
-    return replace(ctx, flags=label_flags(flags))

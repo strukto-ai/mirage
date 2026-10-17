@@ -29,8 +29,8 @@ export async function search(
   const out: ByteSource = await searchMessages(
     slackAccessor(config),
     fl.asStr('query') ?? '',
-    fl.asInt('count') ?? 20,
-    fl.asInt('page') ?? 1,
+    fl.asInt('count', 20),
+    fl.asInt('page', 1),
   )
   return [out, new IOResult()]
 }

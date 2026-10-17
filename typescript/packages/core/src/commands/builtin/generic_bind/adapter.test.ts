@@ -260,6 +260,20 @@ describe('dirAwareStat', () => {
     await expect(stat(PathSpec.fromStrPath('/nope.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
+  it('lets a refused listing through the implicit-directory probe', async () => {
+    // Only a miss is a negative probe here: the stat is the operation, so a
+    // parent listing the session may not read fails it as itself.
+    const refused: CommandIO = {
+      ...dirOps([]),
+      stat: (_a, p) => Promise.reject(enoent(p)),
+      readdir: (_a, p) => Promise.reject(eacces(p.virtual)),
+    }
+    const stat = dirAwareStat(refused, accessor, NO_NS)
+    await expect(stat(PathSpec.fromStrPath('/locked/nope.txt'))).rejects.toMatchObject({
+      code: 'EACCES',
+    })
+  })
+
   it('keeps ENOENT when the probe readdir raises a driver error', async () => {
     const throwing: CommandIO = {
       ...dirOps([]),

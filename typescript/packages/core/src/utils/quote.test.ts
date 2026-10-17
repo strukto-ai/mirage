@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   escapeName,
+  escapeQuote,
   needsShellQuote,
   quotesOperands,
   SHELL_QUOTED_COMMANDS,
@@ -180,4 +181,22 @@ it.each([
   ['\udcff', '\\377'],
 ])('GNU ls escape names: %s', (name, expected) => {
   expect(escapeName(name)).toBe(expected)
+})
+
+// GNU tar 1.35 on debian:stable-slim (LC_ALL=C.UTF-8), `tar -tf` of members
+// created under each name: tar's escape style leaves a space bare.
+it.each([
+  ['a b', 'a b'],
+  ['back\\slash', 'back\\\\slash'],
+  ['tab\tx', 'tab\\tx'],
+  ['nl\nx', 'nl\\nx'],
+  ['e\u001bx', 'e\\033x'],
+  ['del\u007f', 'del\\177'],
+  ['c1\u0085', 'c1\\302\\205'],
+  ['\u00e9', '\u00e9'],
+  ['q"uote', 'q"uote'],
+  ["s'q", "s'q"],
+  ['a\udcffb', 'a\\377b'],
+])('GNU tar member names: %s', (name, expected) => {
+  expect(escapeQuote(name)).toBe(expected)
 })

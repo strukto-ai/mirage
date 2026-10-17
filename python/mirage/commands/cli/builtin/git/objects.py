@@ -23,7 +23,7 @@ from dulwich.pack import Pack, PackData, load_pack_index_file, write_pack_index
 from dulwich.repo import BaseRepo
 
 from mirage.bridge.sync import run_async_from_sync
-from mirage.commands.cli.builtin.git.format import abbrev_length
+from mirage.commands.cli.builtin.git.format import FULL_SHA, abbrev_length
 from mirage.commands.cli.builtin.git.io import (
     file_size,
     read_file,
@@ -41,7 +41,6 @@ PACK_DIR = "objects/pack"
 IDX_SUFFIX = ".idx"
 PACK_SUFFIX = ".pack"
 FANOUT_LEN = 2
-SHA_LEN = 40
 HEX_DIGITS = frozenset(b"0123456789abcdef")
 
 
@@ -144,7 +143,7 @@ class LooseObjects:
         found = []
         for entry in names:
             rest = entry_name(entry)
-            if len(fanout) + len(rest) == SHA_LEN:
+            if len(fanout) + len(rest) == FULL_SHA:
                 found.append(ObjectID(f"{fanout}{rest}".encode()))
         return found
 

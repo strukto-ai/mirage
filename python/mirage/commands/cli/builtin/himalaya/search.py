@@ -16,6 +16,7 @@ from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.list import DEFAULT_PAGE_SIZE
 from mirage.commands.cli.builtin.himalaya.query import (
     page_slice,
+    page_window,
     parse_query,
     sort_headers,
     uid_budget,
@@ -34,9 +35,12 @@ async def search_envelopes(
     config: EmailConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    mailbox = fl.as_str("mailbox") or "INBOX"
-    page = fl.as_int("page") or 1
-    page_size = fl.as_int("page_size") or DEFAULT_PAGE_SIZE
+    mailbox = fl.as_str("mailbox", "INBOX")
+    page, page_size = page_window(
+        fl.as_int("page", 1),
+        fl.as_int("page_size", DEFAULT_PAGE_SIZE),
+        config.max_messages,
+    )
     # The shell already split the query; upstream joins argv the same
     # way before parsing, so a pattern with spaces needs literal quotes.
     query = parse_query(" ".join(texts))

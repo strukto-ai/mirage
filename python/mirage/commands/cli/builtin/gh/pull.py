@@ -26,7 +26,10 @@ from mirage.commands.cli.builtin.gh.accessor import (
     text_out,
     typed_out,
 )
-from mirage.commands.cli.builtin.gh.constants import DIFF_HEADER
+from mirage.commands.cli.builtin.gh.constants import (
+    DIFF_HEADER,
+    PR_INVALID_LIMIT,
+)
 from mirage.commands.cli.builtin.gh.fields import (
     LOGIN,
     SHARED_FIELDS,
@@ -454,10 +457,10 @@ async def list_cmd(
             repo_for(config, fl),
             PullListFilter(
                 _STATES.get(wanted, ("OPEN",)),
-                fl.as_str("base"),
-                fl.as_str("head"),
+                fl.as_nonempty("base"),
+                fl.as_nonempty("head"),
             ),
-            list_limit(fl, 30),
+            list_limit(fl, 30, PR_INVALID_LIMIT),
             selection(PULL_FIELD_TABLE, fields, False),
         )
         return await typed_out(
@@ -473,8 +476,8 @@ async def list_cmd(
         "state": "closed" if wanted == "merged" else wanted
     }
     for name in ("base", "head"):
-        value = fl.as_str(name)
-        if value:
+        value = fl.as_nonempty(name)
+        if value is not None:
             params[name] = value
     include = (
         (lambda row: row.get("merged_at") is not None)
@@ -485,7 +488,7 @@ async def list_cmd(
         config,
         repo_for(config, fl),
         params,
-        list_limit(fl, 30),
+        list_limit(fl, 30, PR_INVALID_LIMIT),
         include=include,
     )
     rows = [_pull(value) for value in values]

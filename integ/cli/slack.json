@@ -252,6 +252,19 @@
         "stdout": "4\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sl_read_messages_zero_limit",
+      "seq": 9940001,
+      "targets": [
+        "cli-slack"
+      ],
+      "command": "slack read-messages --channel C1 --limit 0 | jq length",
+      "expect": {
+        "exit": 0,
+        "stdout": "100\n",
+        "stderr": ""
+      }
     }
   ]
 }

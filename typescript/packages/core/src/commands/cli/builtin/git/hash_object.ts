@@ -20,7 +20,7 @@ import { PathSpec } from '../../../../types.ts'
 import { readStdinAsync } from '../../../builtin/utils/stream.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { OBJECT_TYPES } from './cat_file.ts'
+import { OBJECT_TYPES } from './constants.ts'
 import { GitError, NoWorkspaceError, ObjectWriteReadOnlyError } from './errors.ts'
 import { readFile } from './io.ts'
 import { repoArgs } from './repo.ts'
@@ -133,7 +133,7 @@ export async function hashObject(
   try {
     if (vfs === undefined) throw new NoWorkspaceError()
     checkSwitches(ctx, texts)
-    const asked = fl.asStr('t') ?? 'blob'
+    const asked = fl.asStr('t', 'blob')
     const kind = OBJECT_TYPES.find((type) => type === asked)
     if (kind === undefined) throw new GitError(`invalid object type "${asked}"`)
     const base = startPoint(fl)

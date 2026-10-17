@@ -118,7 +118,9 @@ def test_git_usage_closes_a_verb_without_options_with_a_blank_line():
 
 # Pinned against git 2.50.1: a long option is named without its dashes
 # and a short one is a switch, both before the usage block; `-h` puts the
-# usage on stdout; a boolean handed a value is refused on one line.
+# usage on stdout; a boolean handed a value is refused on one line, and so
+# is an option that needs a value and ends the line (git 2.47.3), a
+# cluster's last letter included.
 @pytest.mark.parametrize(
     ("word", "streams"),
     [
@@ -126,6 +128,9 @@ def test_git_usage_closes_a_verb_without_options_with_a_blank_line():
         ("-Z", ("", f"error: unknown switch `Z'\n{USAGE}")),
         ("-h", (USAGE, "")),
         ("--quiet=1", ("", "error: option `quiet' takes no value\n")),
+        ("-m", ("", "error: switch `m' requires a value\n")),
+        ("-qm", ("", "error: switch `m' requires a value\n")),
+        ("--count", ("", "error: option `count' requires a value\n")),
     ],
 )
 def test_git_option_refusal_words_it_as_parse_options_does(word, streams):

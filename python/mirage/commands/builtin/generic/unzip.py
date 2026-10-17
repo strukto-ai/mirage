@@ -20,6 +20,10 @@ from mirage.commands.builtin.generic.archive.zipinfo import (
 )
 from mirage.commands.builtin.utils.copy import is_directory, path_exists
 from mirage.commands.builtin.utils.operands import normalized_read
+from mirage.commands.builtin.utils.output import (
+    format_optional_records,
+    format_records,
+)
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
@@ -115,17 +119,18 @@ MISSING_EXIT = 2
 USAGE_EXIT = 10
 
 
-def unzip_no_directory(archive: str) -> str:
-    return (
-        f"unzip:  cannot find zipfile directory in one of {archive} or"
-        f"\n        {archive}.zip, and cannot find {archive}.ZIP, period.\n"
-    )
+def no_directory(prog: str, archive: str) -> str:
+    """Info-ZIP's line for an archive with no central directory, its
+    second line indented under the first's text.
 
-
-def zipinfo_no_directory(archive: str) -> str:
+    Args:
+        prog (str): the program signing it, ``unzip`` or ``zipinfo``.
+        archive (str): the archive operand as typed.
+    """
+    indent = " " * len(f"{prog}:  ")
     return (
-        f"zipinfo:  cannot find zipfile directory in one of {archive} or"
-        f"\n          {archive}.zip, and cannot find {archive}.ZIP, period.\n"
+        f"{prog}:  cannot find zipfile directory in one of {archive} or"
+        f"\n{indent}{archive}.zip, and cannot find {archive}.ZIP, period.\n"
     )
 
 
@@ -294,10 +299,8 @@ def _refusal(
         head = f"[{archive}]\n" if pipe or zipinfo else ""
         if pipe:
             tail = ""
-        elif zipinfo:
-            tail = zipinfo_no_directory(archive)
         else:
-            tail = unzip_no_directory(archive)
+            tail = no_directory("zipinfo" if zipinfo else "unzip", archive)
         return IOResult(
             exit_code=NO_ARCHIVE_EXIT, stderr=(head + NO_EOCD + tail).encode()
         )
@@ -741,7 +744,7 @@ async def _run(
             lines = ["  Length      Name", "---------  ----"]
             for info in selected:
                 lines.append(f"{info.file_size:>9}  {info.filename}")
-            listing = ("\n".join(lines) + "\n").encode()
+            listing = format_records(lines)
         # GNU -l prints no caution lines and only exits 11 when the
         # patterns left nothing at all.
         if nothing_left:
@@ -813,12 +816,7 @@ async def _run(
         try:
             await _make_dirs(dest, mkdir_fn, stat, made)
         except FS_ERRORS as exc:
-            output = (
-                ("\n".join(output_lines) + "\n").encode()
-                if output_lines
-                else None
-            )
-            return output, IOResult(
+            return format_optional_records(output_lines), IOResult(
                 exit_code=DEST_EXIT,
                 stderr=checkdir_dest(typed_dest, fs_strerror(exc)).encode(),
             )
@@ -990,9 +988,7 @@ async def _run(
         extracted.add(out_path)
         if not q:
             output_lines.append(_extracted_line(info, shown(out_path)))
-    output = (
-        ("\n".join(output_lines) + "\n").encode() if output_lines else None
-    )
+    output = format_optional_records(output_lines)
     stderr = (cautions + "".join(errors)).encode()
     if create_failed:
         exit_code = CREATE_EXIT

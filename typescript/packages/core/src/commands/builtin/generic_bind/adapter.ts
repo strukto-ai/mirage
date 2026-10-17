@@ -52,6 +52,8 @@ import {
   isDotWalkError,
   isEnoent,
   isEnotdir,
+  isMissError,
+  isMissingPath,
   walkRefusal,
 } from '../../../errors/fs.ts'
 import { owedNames } from '../utils/links.ts'
@@ -737,8 +739,9 @@ export function resolveGlobOf<A extends Accessor = Accessor>(ops: CommandIO<A>):
 // The parent listing is authoritative instead: the operand is an implicit
 // directory only if its parent's readdir lists it. When the operand is the
 // mount root there is no parent to list, so its own readdir decides (root
-// listings are real in every backend). Any probe failure is a negative
-// probe (the original ENOENT stands), never an error to surface.
+// listings are real in every backend). A listing that misses is a negative
+// probe (the original ENOENT stands); any other failure propagates, as
+// Python's MISS_ERRORS catch lets it.
 async function isImplicitDir<A extends Accessor>(
   ops: CommandIO<A>,
   accessor: A,
@@ -751,7 +754,8 @@ async function isImplicitDir<A extends Accessor>(
     try {
       const entries = await ops.readdir(accessor, path, index)
       return entries.length > 0
-    } catch {
+    } catch (err) {
+      if (!isMissError(err) && !isMissingPath(err)) throw err
       return false
     }
   }
@@ -765,7 +769,8 @@ async function isImplicitDir<A extends Accessor>(
   try {
     const entries = await ops.readdir(accessor, parentPath, index)
     return entries.some((entry) => norm(entry) === target)
-  } catch {
+  } catch (err) {
+    if (!isMissError(err) && !isMissingPath(err)) throw err
     return false
   }
 }
@@ -888,10 +893,12 @@ export function fileSize<A extends Accessor>(
  *
  * A no leaves the original error untouched, so nothing is swallowed: the
  * caller rethrows what the backend said. Both probes are broad for that
- * same reason, which is the one `isImplicitDir` states for its own
- * catches: a probe that fails is a negative probe, never an error to
+ * same reason: a probe that fails is a negative probe, never an error to
  * surface. Surfacing one would replace the read's error with one from a
- * call the user never made, and it is the read that failed.
+ * call the user never made, and it is the read that failed. `isImplicitDir`
+ * narrows to a miss because for its other caller the stat IS the
+ * operation; here it is a probe, so the wider catch belongs on this side of
+ * the call, and each failure it absorbs is logged.
  */
 async function readHitADir<A extends Accessor>(
   ops: CommandIO<A>,
@@ -907,14 +914,15 @@ async function readHitADir<A extends Accessor>(
   let st: FileStat | null = null
   try {
     st = await ops.stat(accessor, path, index)
-  } catch {
+  } catch (probe) {
+    console.debug(`read probe: stat ${path.virtual} failed: ${String(probe)}`)
     st = null
   }
   if (st !== null) return st.type === FileType.DIRECTORY
   try {
     if (await isImplicitDir(ops, accessor, path, index)) return true
-  } catch {
-    // negative probe, see above
+  } catch (probe) {
+    console.debug(`read probe: listing ${path.virtual} failed: ${String(probe)}`)
   }
   return false
 }

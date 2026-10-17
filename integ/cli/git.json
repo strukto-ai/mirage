@@ -5146,6 +5146,146 @@
         "stdout": "file:/repo/pathspec-link/../.git/config\tselected\noriginal\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_checkout_b_refuses_an_invalid_branch_name",
+      "seq": 13472001,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout -b ../../config; echo rc=$?; git -C /repo checkout -b a..b HEAD~1; echo rc=$?; git -C /repo checkout -b ../../config nosuchrev; echo rc=$?; head -1 /repo/.git/config",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=128\nrc=128\nrc=128\n[core]\n",
+        "stderr": "fatal: '../../config' is not a valid branch name\nhint: See `man git check-ref-format`\nhint: Disable this message with \"git config set advice.refSyntax false\"\nfatal: 'a..b' is not a valid branch name\nhint: See `man git check-ref-format`\nhint: Disable this message with \"git config set advice.refSyntax false\"\nfatal: 'nosuchrev' is not a commit and a branch '../../config' cannot be created from it\n"
+      }
+    },
+    {
+      "id": "git_commit_refuses_a_head_outside_the_ref_tree",
+      "seq": 13472002,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; cp .git/HEAD .git/HEAD.saved; printf 'ref: refs/heads/../../config\\n' > .git/HEAD; git commit --allow-empty -m escape; echo rc=$?; mv .git/HEAD.saved .git/HEAD; head -1 .git/config)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=128\n[core]\n",
+        "stderr": "fatal: cannot lock ref 'HEAD': unable to resolve reference 'refs/heads/../../config': reference broken\n"
+      }
+    },
+    {
+      "id": "git_reflog_and_stash_skip_blank_rows",
+      "seq": 13472003,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(mkdir -p /repo/blank && cp -r /repo/.git /repo/blank/.git && cd /repo/blank && a=$(git rev-parse 98b4ffe) && b=$(git rev-parse 265ec3a) && z=0000000000000000000000000000000000000000 && printf '%s %s A <a@example.com> 1700000000 +0000\\tcommit (initial): one\\n\\n%s %s A <a@example.com> 1700000001 +0000\\tcommit: two\\n\\n' $z $a $a $b > .git/logs/HEAD && git reflog && printf '%s\\n' $b > .git/refs/stash && printf '%s %s A <a@example.com> 1700000000 +0000\\tWIP on main: one\\n\\n%s %s A <a@example.com> 1700000001 +0000\\tWIP on main: two\\n\\n' $z $a $a $b > .git/logs/refs/stash && git stash list && git stash show 'stash@{2}'; echo rc=$?; cd /repo && rm -r blank)",
+      "expect": {
+        "exit": 0,
+        "stdout": "265ec3a HEAD@{0}: commit: two\n98b4ffe HEAD@{1}: commit (initial): one\nstash@{0}: WIP on main: two\nstash@{1}: WIP on main: one\nrc=128\n",
+        "stderr": "fatal: log for 'stash' only has 2 entries\n"
+      }
+    },
+    {
+      "id": "git_clone_of_a_dangling_head_is_born_on_its_branch",
+      "seq": 13472004,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo && export GIT_AUTHOR_NAME=A GIT_AUTHOR_EMAIL=a@example.com GIT_COMMITTER_NAME=A GIT_COMMITTER_EMAIL=a@example.com && git init -q -b main dangle && cd dangle && echo a > a && git add a && git commit -qm one && git branch dev && git symbolic-ref HEAD refs/heads/gone && git branch -D main > /dev/null && cd /repo && git clone dangle dangled; echo rc=$?; cat dangled/.git/HEAD; ls -A dangled; git -C dangled branch -a; git -C dangled config --get branch.gone.merge; git clone -q --no-checkout dangle quiet; cat quiet/.git/HEAD; rm -r dangle dangled quiet)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nref: refs/heads/gone\n.git\n  remotes/origin/dev\nrefs/heads/gone\nref: refs/heads/gone\n",
+        "stderr": "Cloning into 'dangled'...\ndone.\nwarning: remote HEAD refers to nonexistent ref, unable to checkout\n"
+      }
+    },
+    {
+      "id": "git_log_pickaxe_reads_a_gitlink_as_its_subproject_line",
+      "seq": 13472005,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo && git init -q -b main pk && cd pk && e=$(git hash-object -w -t tree --stdin < /dev/null) && t1=$(printf '160000 sub\\0\\x11\\x11\\x11\\x11\\x11\\x11\\x11\\x11\\x11\\x11\\x11\\x11\\x11\\x11\\x11\\x11\\x11\\x11\\x11\\x11' | git hash-object -w -t tree --stdin) && t2=$(printf '160000 sub\\0\\x22\\x22\\x22\\x22\\x22\\x22\\x22\\x22\\x22\\x22\\x22\\x22\\x22\\x22\\x22\\x22\\x22\\x22\\x22\\x22' | git hash-object -w -t tree --stdin) && c1=$(printf 'tree %s\\nauthor A <a@example.com> 1700000000 +0000\\ncommitter A <a@example.com> 1700000000 +0000\\n\\nadd\\n' $t1 | git hash-object -w -t commit --stdin) && c2=$(printf 'tree %s\\nparent %s\\nauthor A <a@example.com> 1700000001 +0000\\ncommitter A <a@example.com> 1700000001 +0000\\n\\nmove\\n' $t2 $c1 | git hash-object -w -t commit --stdin) && c3=$(printf 'tree %s\\nparent %s\\nauthor A <a@example.com> 1700000002 +0000\\ncommitter A <a@example.com> 1700000002 +0000\\n\\ndrop\\n' $e $c2 | git hash-object -w -t commit --stdin) && git log --format=%s -S 'Subproject commit' $c3 && echo == && git log --format=%s -S 1111111111 $c3 && echo == && git log --format=%s -G Subproject $c3 && echo == && git log --format=%s -G 2222 $c3 && echo == && git log --format=%s -S 'Sub.roject' --pickaxe-regex $c3; cd /repo && rm -r pk)",
+      "expect": {
+        "exit": 0,
+        "stdout": "drop\nadd\n==\nmove\nadd\n==\ndrop\nmove\nadd\n==\ndrop\nmove\n==\ndrop\nadd\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_ref_skips_a_dangling_symref",
+      "seq": 13472006,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo symbolic-ref refs/heads/dangling refs/heads/nosuch && git -C /repo symbolic-ref refs/heads/alias refs/heads/main && git -C /repo show-ref > /dev/null; echo rc=$?; git -C /repo show-ref | grep -c dangling; git -C /repo show-ref dangling; echo rc=$?; git -C /repo show-ref alias | cut -d' ' -f2; git -C /repo symbolic-ref -d refs/heads/dangling; git -C /repo symbolic-ref -d refs/heads/alias",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n0\nrc=1\nrefs/heads/alias\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_an_option_missing_its_value_is_named",
+      "seq": 13472007,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo switch -c; echo rc=$?; git -C /repo switch --create; echo rc=$?; git -C /repo switch -qc; echo rc=$?; git -C /repo branch --format; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=129\nrc=129\nrc=129\nrc=129\n",
+        "stderr": "error: switch `c' requires a value\nerror: option `create' requires a value\nerror: switch `c' requires a value\nerror: option `format' requires a value\n"
+      }
+    },
+    {
+      "id": "git_a_new_branch_is_never_head_or_a_dash",
+      "seq": 13472008,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout -b HEAD; echo rc=$?; git -C /repo checkout -b -x; echo rc=$?; git -C /repo switch -c HEAD; echo rc=$?; git -C /repo switch -c -x; echo rc=$?; git -C /repo branch HEAD; echo rc=$?; git -C /repo branch -- -x; echo rc=$?; git -C /repo checkout -b HEAD nosuchrev; echo rc=$?; git -C /repo switch -c HEAD nosuchrev; echo rc=$?; git -C /repo checkout -b; echo rc=$?; git -C /repo rev-parse -q --verify refs/heads/HEAD; echo rc=$?; git -C /repo rev-parse -q --verify refs/heads/-x; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=128\nrc=128\nrc=128\nrc=128\nrc=128\nrc=128\nrc=128\nrc=128\nrc=129\nrc=1\nrc=1\n",
+        "stderr": "fatal: 'HEAD' is not a valid branch name\nhint: See `man git check-ref-format`\nhint: Disable this message with \"git config set advice.refSyntax false\"\nfatal: '-x' is not a valid branch name\nhint: See `man git check-ref-format`\nhint: Disable this message with \"git config set advice.refSyntax false\"\nfatal: 'HEAD' is not a valid branch name\nhint: See `man git check-ref-format`\nhint: Disable this message with \"git config set advice.refSyntax false\"\nfatal: '-x' is not a valid branch name\nhint: See `man git check-ref-format`\nhint: Disable this message with \"git config set advice.refSyntax false\"\nfatal: 'HEAD' is not a valid branch name\nhint: See `man git check-ref-format`\nhint: Disable this message with \"git config set advice.refSyntax false\"\nfatal: '-x' is not a valid branch name\nhint: See `man git check-ref-format`\nhint: Disable this message with \"git config set advice.refSyntax false\"\nfatal: 'nosuchrev' is not a commit and a branch 'HEAD' cannot be created from it\nfatal: invalid reference: nosuchrev\nerror: switch `b' requires a value\n"
+      }
+    },
+    {
+      "id": "git_a_head_branch_already_there_is_still_refused_as_a_name",
+      "seq": 13472009,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo; oid=$(git rev-parse HEAD); echo $oid > .git/refs/heads/HEAD; git checkout -b HEAD; echo rc=$?; git switch -c HEAD; echo rc=$?; git branch HEAD; echo rc=$?; rm .git/refs/heads/HEAD)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=128\nrc=128\nrc=128\n",
+        "stderr": "fatal: 'HEAD' is not a valid branch name\nhint: See `man git check-ref-format`\nhint: Disable this message with \"git config set advice.refSyntax false\"\nfatal: 'HEAD' is not a valid branch name\nhint: See `man git check-ref-format`\nhint: Disable this message with \"git config set advice.refSyntax false\"\nfatal: 'HEAD' is not a valid branch name\nhint: See `man git check-ref-format`\nhint: Disable this message with \"git config set advice.refSyntax false\"\n"
+      }
+    },
+    {
+      "id": "git_init_takes_head_or_a_dash_as_its_first_branch",
+      "seq": 13472010,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo && git init -q -b HEAD i1 && cat i1/.git/HEAD && git init -q -b -x i2 && cat i2/.git/HEAD; rm -r i1 i2)",
+      "expect": {
+        "exit": 0,
+        "stdout": "ref: refs/heads/HEAD\nref: refs/heads/-x\n",
+        "stderr": ""
+      }
     }
   ]
 }

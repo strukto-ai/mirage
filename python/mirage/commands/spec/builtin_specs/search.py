@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec.constants import PATHS_OPERAND, TEXT_OPERAND
 from mirage.commands.spec.types import Argument, CommandSpec
 
 SPECS: dict[str, CommandSpec] = {
@@ -82,7 +83,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-U", "--binary", action="store_true"),
             Argument("-u", "--unix-byte-offsets", action="store_true"),
             Argument("text", nargs="?", metavar="", provided_by=("-e", "-f")),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "search": CommandSpec(
@@ -90,8 +91,8 @@ SPECS: dict[str, CommandSpec] = {
             Argument("--method"),
             Argument("--top-k"),
             Argument("--threshold"),
-            Argument("text", nargs="?", metavar=""),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            TEXT_OPERAND,
+            PATHS_OPERAND,
         )
     ),
     "rg": CommandSpec(
@@ -285,7 +286,7 @@ SPECS: dict[str, CommandSpec] = {
                 metavar="",
                 provided_by=("-e", "-f", "--files", "--type-list"),
             ),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         ),
     ),
     "sed": CommandSpec(
@@ -315,7 +316,7 @@ SPECS: dict[str, CommandSpec] = {
             # Without provided_by, the -e/-f forms would mislabel f.txt as the
             # script (TEXT) and never read it as a file.
             Argument("text", nargs="?", metavar="", provided_by=("-e", "-f")),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "jq": CommandSpec(
@@ -487,13 +488,13 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-v", action="append"),
             Argument("-f", type="path", action="append"),
             Argument("text", nargs="?", metavar="", provided_by=("-f",)),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "strings": CommandSpec(
         arguments=(
             Argument("-n"),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
     "zgrep": CommandSpec(
@@ -525,7 +526,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-w", "--word-regexp", action="store_true"),
             Argument("-x", "--line-regexp", action="store_true"),
             Argument("text", nargs="?", metavar="", provided_by=("-e", "-f")),
-            Argument("paths", type="path", nargs="*", metavar=""),
+            PATHS_OPERAND,
         )
     ),
 }

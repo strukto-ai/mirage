@@ -30,8 +30,20 @@ import type { DispatchFn } from '../../../runtime/types.ts'
 import { isoTimestamp, isoToEpoch } from '../../../utils/dates.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
-import { shellQuoteAlways } from '../../../utils/quote.ts'
-import { contentSize, deviceRdev, posixMode, sizeUnknown } from '../../../utils/stat_view.ts'
+import {
+  DQ_BLOCKERS,
+  LEADING_SPECIAL,
+  NAMED_ESCAPES,
+  shellQuoteAlways,
+} from '../../../utils/quote.ts'
+import {
+  BLOCK_UNIT,
+  CHMOD_MODE_BITS,
+  contentSize,
+  deviceRdev,
+  posixMode,
+  sizeUnknown,
+} from '../../../utils/stat_view.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { fullIsoTime, lsModeString } from '../utils/formatting.ts'
 import { groupName, identityOf, ownerName, type Identity } from '../utils/identity.ts'
@@ -53,7 +65,7 @@ function typeLabel(s: FileStat): string {
 }
 
 function effectiveMode(s: FileStat): number {
-  return posixMode(s) & 0o7777
+  return posixMode(s) & CHMOD_MODE_BITS
 }
 
 function epoch(iso: string | null): string {
@@ -113,20 +125,6 @@ interface FormatDirective {
   spec: string
 }
 
-const SHELL_SPECIAL = new Set('!"#$&()*;<=>?[\\^`{|}~')
-
-const START_SAFE = new Set('#~')
-
-const ESCAPE_NAMES: Record<string, string> = {
-  '\x07': '\\a',
-  '\b': '\\b',
-  '\t': '\\t',
-  '\n': '\\n',
-  '\v': '\\v',
-  '\f': '\\f',
-  '\r': '\\r',
-}
-
 // Whether GNU spells a character as a $'..' escape: a control character, or
 // any byte past ASCII, as the C locale prints it.
 function needsEscape(char: string): boolean {
@@ -136,8 +134,8 @@ function needsEscape(char: string): boolean {
 // Spell one character the way bash's $'..' does, a character past ASCII as
 // the octal escape of each of its UTF-8 bytes.
 function escapeChar(char: string): string {
-  const named = ESCAPE_NAMES[char]
-  if (named !== undefined) return named
+  const named = NAMED_ESCAPES.get(char)
+  if (named !== undefined) return `\\${named}`
   return Array.from(encodeText(char), (byte) => '\\' + byte.toString(8).padStart(3, '0')).join('')
 }
 
@@ -149,7 +147,7 @@ function doubleQuotable(name: string): boolean {
   for (let index = 0; index < name.length; index += 1) {
     const char = name.charAt(index)
     if (needsEscape(char)) return false
-    if (SHELL_SPECIAL.has(char) && !(index === 0 && START_SAFE.has(char))) return false
+    if (DQ_BLOCKERS.has(char) && !(index === 0 && LEADING_SPECIAL.has(char))) return false
   }
   return true
 }
@@ -230,7 +228,7 @@ function directiveValue(
   if (spec === 'Z') return epoch(s.ctime)
   if (spec === 'w') return statTime(s.birthtime)
   if (spec === 'W') return epoch(s.birthtime)
-  if (spec === 'B') return '512'
+  if (spec === 'B') return String(BLOCK_UNIT)
   if (spec === 'd') return s.dev === null ? '?' : String(s.dev)
   if (spec === 'D') return s.dev === null ? '?' : s.dev.toString(16)
   const device = s.extra[DEVICE_NUMBERS_KEY]
@@ -450,6 +448,17 @@ function renderStat(s: FileStat, name: string, identity: Identity | null): strin
   ].join('\n')
 }
 
+// One operand's report: the -c format when given, else GNU's default layout.
+function renderOne(
+  s: FileStat,
+  name: string,
+  fmt: string | null,
+  identity: Identity | null,
+): string {
+  if (fmt !== null) return formatStat(fmt, s, name, identity)
+  return renderStat(s, name, identity)
+}
+
 // Report the file system each operand is on, GNU `stat -f`. The operand stat
 // settles that a path exists first, so a missing one fails in the words a
 // plain stat would find for it; `statfs` is null outside a workspace.
@@ -539,11 +548,7 @@ export async function statGeneric(
     // inode, so the namespace is the only authority for it.
     const linked = links?.statAt(p.virtual) ?? null
     if (linked !== null) {
-      if (fmt !== null) {
-        lines.push(formatStat(fmt, linked, p.rawPath, identity))
-      } else {
-        lines.push(renderStat(linked, p.rawPath, identity))
-      }
+      lines.push(renderOne(linked, p.rawPath, fmt, identity))
       continue
     }
     let s: FileStat
@@ -555,11 +560,7 @@ export async function statGeneric(
       err += fsErrorLine('stat', p, e)
       continue
     }
-    if (fmt !== null) {
-      lines.push(formatStat(fmt, s, p.rawPath, identity))
-    } else {
-      lines.push(renderStat(s, p.rawPath, identity))
-    }
+    lines.push(renderOne(s, p.rawPath, fmt, identity))
   }
   const io = new IOResult({
     exitCode: err === '' ? 0 : 1,

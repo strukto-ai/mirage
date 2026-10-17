@@ -6,11 +6,27 @@ import { encodeText } from '../../../shell/bytes.ts'
 import type { PathSpec } from '../../../types.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { UsageError } from '../../errors.ts'
+import type { Context } from '../../config.ts'
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { OD_OVERFLOW_UNITS, OD_SIZE_UNITS, UINTMAX, XSTRTOUMAX_PATTERN } from '../constants.ts'
 import { parseBase0 } from '../utils/size_suffix.ts'
 import { resolveSource, stdinStream } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
+const RADIX_REFUSAL = "od: invalid output address radix '{}'; it must be one character from [doxn]"
+
+/**
+ * `-A` as GNU od reads it: its first character, one of `doxn`. An empty value
+ * is its terminating NUL, refused like any other character (GNU 9.7 prints
+ * the NUL between the quotes). Mirrors Python's `parse_radix`.
+ */
+export function parseRadix(value: string): string {
+  const radix = value.slice(0, 1) || '\0'
+  if (!'doxn'.includes(radix)) throw new UsageError(RADIX_REFUSAL.replace('{}', radix), 1)
+  return radix
+}
 
 export function parseCount(value: string, flag: string): number {
   const match = XSTRTOUMAX_PATTERN.exec(value)
@@ -145,6 +161,32 @@ async function combined(
   return [concat(kept), err, opened, toSkip]
 }
 
+interface OdFlags {
+  readonly addressRadix: string
+  readonly skip: number
+  readonly limit: number | null
+  readonly formats: readonly string[]
+}
+
+// od's options, read once and refused in GNU's order: -A, -j, -N. An
+// explicitly empty value is read as typed, not as absent: GNU refuses
+// `od -N ''` as an invalid argument. Mirrors Python's `parse_flags`.
+function parseFlags(bag: Record<string, FlagValue>): OdFlags {
+  const fl = new FlagView(bag, specOf('od'))
+  const formats = fl
+    .occurrences('format', 'c')
+    .map(([name, value]) => (name === 'c' ? 'c' : String(value)))
+  const addressRadix = parseRadix(fl.asStr('address_radix', 'o'))
+  const skip = fl.asStr('skip_bytes')
+  const limit = fl.asStr('read_bytes')
+  return {
+    addressRadix,
+    skip: skip === undefined ? 0 : parseCount(skip, '-j'),
+    limit: limit === undefined ? null : parseCount(limit, '-N'),
+    formats,
+  }
+}
+
 /**
  * Dump the operands, GNU od semantics. od defines multiple FILE operands as
  * one concatenated input, so skip and limit offsets apply across the whole
@@ -152,13 +194,11 @@ async function combined(
  */
 export async function odGeneric(
   paths: readonly PathSpec[],
+  ctx: Context,
   read: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  stdin: ByteSource | null,
-  addressRadix: string,
-  skip: number,
-  limit: number | null,
-  formats: readonly string[],
 ): Promise<[ByteSource | null, IOResult]> {
+  const { addressRadix, skip, limit, formats } = parseFlags(ctx.flags)
+  const stdin = ctx.stdin
   let data: Uint8Array
   let err = ''
   let opened = true

@@ -12,30 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isStdin, operandLabel } from '../utils/stream.ts'
+import { isStdin, operandHeader, showsHeaders } from '../utils/stream.ts'
+import { recordSeparator } from '../utils/lines.ts'
 import { stdinStream, stdinStat } from '../utils/stream.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
-import { fsErrorLine } from '../../../errors/render.ts'
+import { IOResult } from '../../../io/types.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
 import { FileType, Limit, type FileStat, type PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { numberFlagError, parseByteCount } from '../tail_counts.ts'
-import { CHAR_DEVICE_MAX_BYTES, STDIN_HEADER_NAME } from '../utils/constants.ts'
+import { CHAR_DEVICE_MAX_BYTES } from '../utils/constants.ts'
 import { asyncChain, closeQuietly } from '../../../io/stream.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { SharedInput } from '../../../io/async_line_iterator.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { deadlineCheck, truncateStream } from '../utils/limit.ts'
-import { splitOpened } from '../utils/operands.ts'
+import { reportFsError, splitOpened } from '../utils/operands.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
-
-const NL = 0x0a
 
 interface HeadFlags {
   lines: number
@@ -111,7 +109,7 @@ async function* headStream(
     return
   }
 
-  const delimiter = zeroTerminated ? 0 : NL
+  const delimiter = recordSeparator(zeroTerminated)
   const budget = new YieldBudget(signal, overdue)
   if (lines >= 0) {
     if (lines === 0) return
@@ -199,7 +197,7 @@ async function* headMulti(
       // before it heads it.
       const first = await body?.next()
       if (showHeaders && !refused.has(p.virtual)) {
-        yield encodeText(`${printed ? '\n' : ''}==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`)
+        yield operandHeader(p, printed)
         printed = true
       }
       if (body === null || first === undefined || first.done === true) continue
@@ -235,7 +233,7 @@ export async function headGeneric(
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]
   }
   if (paths.length > 0) {
-    const showHeaders = (parsed.verbose || paths.length > 1) && !parsed.quiet
+    const showHeaders = showsHeaders(parsed.verbose, parsed.quiet, paths.length)
     const [opened, unread, err] = await splitOpened(paths, stat, 'head')
     const io = new IOResult({
       exitCode: err === '' ? 0 : 1,
@@ -267,8 +265,7 @@ export async function headGeneric(
         // table past its read cap) keeps it.
         const code = (err as { code?: string }).code
         if (code === undefined || !READ_FAILURES.has(code)) refused.add(p.virtual)
-        io.stderr = concat([await materialize(io.stderr), encodeText(fsErrorLine('head', p, err))])
-        io.exitCode = 1
+        await reportFsError(io, 'head', p, err)
       }
     }
     return [
@@ -287,21 +284,18 @@ export async function headGeneric(
       io,
     ]
   }
-  try {
-    const source = resolveSource(ctx.stdin)
-    const body = headStream(
-      source,
-      parsed.lines,
-      parsed.bytesMode,
-      parsed.zeroTerminated,
-      ctx.signal,
-      deadlineCheck(ctx),
-    )
-    // -v heads a stdin nobody named with the name it gives `-`.
-    const header = encodeText(`==> ${STDIN_HEADER_NAME} <==\n`)
-    return [parsed.verbose && !parsed.quiet ? asyncChain([header, body]) : body, new IOResult()]
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 1, stderr: encodeText(`${msg}\n`) })]
-  }
+  const source = resolveSource(ctx.stdin)
+  const body = headStream(
+    source,
+    parsed.lines,
+    parsed.bytesMode,
+    parsed.zeroTerminated,
+    ctx.signal,
+    deadlineCheck(ctx),
+  )
+  // -v heads a stdin nobody named with the name it gives `-`.
+  return [
+    parsed.verbose && !parsed.quiet ? asyncChain([operandHeader(null), body]) : body,
+    new IOResult(),
+  ]
 }

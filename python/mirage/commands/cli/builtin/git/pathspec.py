@@ -12,9 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
 import posixpath
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import TypeVar
 
 from mirage.commands.cli.builtin.git.errors import (
@@ -25,8 +24,6 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.shell.bytes import byte_view
 from mirage.utils.fnmatch import fnmatch
-
-logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -182,6 +179,15 @@ def visible_path(location: RepoLocation, relative: str) -> bool:
     """
     vfs = location.vfs
     return vfs is None or vfs.is_visible(location.worktree.join(relative))
+
+
+def decoded(paths: Iterable[bytes]) -> set[str]:
+    """Repository-relative paths as text.
+
+    Args:
+        paths (Iterable[bytes]): index, conflict or tree keys.
+    """
+    return {path.decode("utf-8", errors="replace") for path in paths}
 
 
 def visible_entries(

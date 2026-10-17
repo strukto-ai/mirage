@@ -192,14 +192,9 @@ export async function catGeneric(
       : merged
     return [out, io]
   }
-  try {
-    const source = resolveSource(ctx.stdin)
-    const out: ByteSource = wantsDisplay
-      ? displayLines(source, display, ctx.signal, deadlineCheck(ctx))
-      : source
-    return [out, new IOResult()]
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 1, stderr: encodeText(`${msg}\n`) })]
-  }
+  const source = resolveSource(ctx.stdin)
+  const out: ByteSource = wantsDisplay
+    ? displayLines(source, display, ctx.signal, deadlineCheck(ctx))
+    : source
+  return [out, new IOResult()]
 }

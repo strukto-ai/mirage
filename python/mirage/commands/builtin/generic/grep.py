@@ -29,6 +29,7 @@ from mirage.commands.builtin.grep_select import (
     file_admitted,
     parse_file_globs,
 )
+from mirage.commands.builtin.utils.constants import GREP_STDIN_LABEL
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
@@ -59,6 +60,7 @@ from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
+from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import byte_view, utf8_locale
 from mirage.types import FileStat, FileType, PathSpec
@@ -82,7 +84,6 @@ DEVICE_TYPES = frozenset(
         FileType.SOCKET,
     }
 )
-STDIN_LABEL = "(standard input)"
 UNIX_BYTE_OFFSETS = b"grep: warning: --unix-byte-offsets (-u) is obsolete\n"
 # What xstrtoimax takes as -m's count: blanks, a sign, then digits.
 MAX_COUNT = re.compile(r"[ \t\n\v\f\r]*[+-]?[0-9]+")
@@ -248,22 +249,6 @@ def filename_mode(fl: FlagView) -> bool | None:
     return mode
 
 
-def labelled(ctx: Context) -> Context:
-    """Ask for the filename a walk would have printed on its own.
-
-    A content search hands the generic explicit files where the user
-    named a directory, so the label is requested here; an explicit -h
-    still wins, and an explicit -H is already on the line.
-
-    Args:
-        ctx (Context): the narrowing wrapper's options.
-    """
-    flags = ctx.flags or {}
-    if filename_mode(FlagView(flags, spec=SPECS["grep"])) is not None:
-        return ctx
-    return replace(ctx, flags={**flags, "with_filename": True})
-
-
 def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
     """Convert the raw flag bag into GrepFlags, the only string-keyed reads.
 
@@ -322,7 +307,7 @@ def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
         null=fl.as_bool("null"),
         initial_tab=fl.as_bool("initial_tab"),
         group_separator=group_separator(fl),
-        label=STDIN_LABEL if label is None else label,
+        label=GREP_STDIN_LABEL if label is None else label,
         filters=WalkFilters(
             file_globs=parse_file_globs(fl),
             exclude_dir=tuple(fl.as_list("exclude_dir")),
@@ -519,7 +504,7 @@ async def grep_generic(
                 source = (
                     operand_stream(p)
                     if is_stdin(p) or read_stream is not None
-                    else wrap_bytes(await rb(p.virtual))
+                    else yield_bytes(await rb(p.virtual))
                 )
                 show = not f.no_filename and (
                     f.with_filename or walked or len(paths) > 1
@@ -566,7 +551,3 @@ async def grep_generic(
                 )
 
     return run(), io
-
-
-async def wrap_bytes(data: bytes) -> AsyncIterator[bytes]:
-    yield data

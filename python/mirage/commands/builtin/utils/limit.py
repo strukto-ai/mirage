@@ -186,16 +186,6 @@ async def _bounded_stream(
         await close_quietly(src)
 
 
-async def apply_limit(
-    src: ByteSource, limit: Limit | None
-) -> tuple[ByteSource | None, IOResult]:
-    io = IOResult()
-    if limit is None or (limit.max_lines is None and limit.max_bytes is None):
-        return src, io
-    data = await materialize(_bounded_stream(src, io, limit))
-    return (None if io.exit_code else data), io
-
-
 async def truncate_stream(
     src: ByteSource,
     io: IOResult,
@@ -203,7 +193,7 @@ async def truncate_stream(
 ) -> AsyncIterator[bytes]:
     """Lazily truncate a byte stream and attach the outcome to ``io``.
 
-    Unlike :func:`apply_limit`, this never gathers the stream. Sources that
+    Unlike :func:`guard_output`, this never gathers the stream. Sources that
     may be endless use it before any VALUE barrier can materialize them.
     """
     max_bytes = limit.max_bytes

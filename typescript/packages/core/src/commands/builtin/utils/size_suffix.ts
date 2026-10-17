@@ -58,5 +58,13 @@ export function sizeSuffixes(letters: string): Record<string, number> {
 export function parseBase0(digits: string): bigint {
   if (digits.slice(0, 2).toLowerCase() === '0x') return BigInt(digits)
   if (digits.startsWith('0') && digits.length > 1) return BigInt(`0o${digits.slice(1)}`)
+  return decimalValue(digits)
+}
+
+/**
+ * `digits` read exactly as a decimal number, however long. BigInt has no
+ * digit limit; Python's `decimal_value` reads in runs under CPython's.
+ */
+export function decimalValue(digits: string): bigint {
   return BigInt(digits)
 }

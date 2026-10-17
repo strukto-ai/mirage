@@ -327,6 +327,20 @@ class PartialCommitError(GitError):
         )
 
 
+class PatternCompileError(GitError):
+    """git's ``compile_regexp_failed``: a pattern that does not compile,
+    named with where it came from and what the engine said.
+
+    Args:
+        origin (str): git's name for where the pattern came from.
+        pattern (str): the pattern as typed.
+        reason (str): the engine's refusal.
+    """
+
+    def __init__(self, origin: str, pattern: str, reason: str) -> None:
+        super().__init__(f"{origin}, '{pattern}': {reason}")
+
+
 class BadPrettyError(GitError):
     """A --pretty/--format value naming no format at all.
 
@@ -1316,6 +1330,23 @@ class RefLockError(GitError):
     def __init__(self, ref: str, held: str) -> None:
         super().__init__(
             f"cannot lock ref '{ref}': '{held}' exists; cannot create '{ref}'"
+        )
+
+
+class BrokenHeadError(GitError):
+    """A HEAD naming a ref whose path leaves the ref tree, which the
+    files backend will not lock: ``ref: refs/heads/../../config`` would
+    otherwise point the new commit at the repository's own config.
+    Pinned against git 2.47.3.
+
+    Args:
+        target (str): the ref HEAD names.
+    """
+
+    def __init__(self, target: str) -> None:
+        super().__init__(
+            f"cannot lock ref 'HEAD': unable to resolve reference "
+            f"'{target}': reference broken"
         )
 
 

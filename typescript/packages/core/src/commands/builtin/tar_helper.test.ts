@@ -13,10 +13,27 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { readTar, writeTar, type TarEntry } from './tar_helper.ts'
+import { ByteSpool } from '../../io/spool.ts'
+import { gunzip } from '../../utils/compress.ts'
+import { readTar, readTarSpool, writeTar, type TarEntry } from './tar_helper.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
+
+// GNU tar 1.35 (debian:stable-slim), `tar --format=<format> --mtime=@0
+// --owner=0 --group=0 --numeric-owner -cf - dir$'\377' ln$'\377'` piped
+// through `gzip -n -9 | base64 -w0`: a directory dir\377 holding a
+// 120-character directory and its file f\377, and a symlink ln\377 ->
+// tgt\377. gnu stores the long names as GNU long-name members, posix as pax
+// records, and ustar refuses the long one and keeps the rest.
+const NON_UTF8 = {
+  gnu: 'H4sIAAAAAAACA+3XQQ6CMBCF4a49RU9ASwPM1gNwCRMiIRpMEDdeHgsbAlEji2pi/29B2b/M67RqusGosKwneT6d3vp88i+2cErn6gtu1/7Qaa0ilZjE7MtLW5dNewqYf5FlL/NPRZb5p9OhS/IPrhrn3/6IUYgk/0397/yX/o+m/51N1/e/FBn9///9fxxo4Djyfzf/Y9kv9z8R8fNvmf/g7jtmIGbnNnwFT/vf/Mb75P0/rova9XU/MP8AAAAAAAAAAGz2ANbu+mQAKAAA',
+  posix:
+    'H4sIAAAAAAACA+2YwU7DMBBEfeYr/AXJ7tqx20PvHPsLEQ1QCRBKXani51MnIBQSURVBXCDzLrbigw+TmZE3y9fl4boqN1W9yzfbulE/D0Wctd0aGa7ELO/77juzMaT0QSVgvwtlHa9X84Stfi7D/aqVPr8ypMuwfaxW7JciZERcRguyzkcF29Ob0alfvp0q8AfpdJ/4jtbUvig+9f9471lE6QL+T6N/rwJoIk7lvyH7UX9hjr8L8j9F/hvXKwC6EGiei/o/gcJfyn8hssj/f6X/6fx3Q/25MMj/NPm/+A35f9ugAWbrfyIZ5b+xShP8Pzkv8M6syfqPv4enKcZ/Z8z/aDj/Y8fo/yT9L6/1H6VHA8+QiSw/nv95f/77j2MmFEpLuAsN/A8AAAAAAAAAAHybIxhoodwAKAAA',
+  ustar:
+    'H4sIAAAAAAACA+3RMQoCMRQE0H+UvYFJIOQ8giCCWKzx/DFsKVvYrI3vNTPdFHO5reMUx0pTq3XL6TN3esulxFLjB17Pfl7nZPyn+2McvrH939r3/+eUco2l9Gsf/gcAAAAAAAAAANj1BstWnRgAKAAA',
+}
+const DEEP = `dir\udcff/${'0'.repeat(120)}/`
 
 describe('tar_helper', () => {
   it('reads a raw header whose checksum ends with NUL then newline', async () => {
@@ -101,4 +118,28 @@ describe('tar_helper', () => {
     expect(back[0]?.isFile).toBe(false)
     expect(back[0]?.data.byteLength).toBe(0)
   })
+
+  it.each(Object.entries(NON_UTF8))(
+    'keeps a name byte that is not UTF-8 in a %s archive as its sentinel',
+    async (format, encoded) => {
+      const source = new ByteSpool()
+      const contents = new ByteSpool()
+      try {
+        await source.append(await gunzip(Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0))))
+        const entries = await readTarSpool(source, contents)
+        const expected =
+          format === 'ustar'
+            ? ['dir\udcff/', 'ln\udcff']
+            : ['dir\udcff/', DEEP, `${DEEP}f\udcff`, 'ln\udcff']
+        expect(entries.map((entry) => entry.name)).toEqual(expected)
+        expect(entries.at(-1)?.linkname).toBe('tgt\udcff')
+        expect(DEC.decode(await contents.read(0, contents.size))).toBe(
+          format === 'ustar' ? '' : 'z\n',
+        )
+      } finally {
+        await source.close()
+        await contents.close()
+      }
+    },
+  )
 })

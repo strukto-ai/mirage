@@ -18,7 +18,6 @@ import { IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { DWIM_RULES } from './constants.ts'
 import { isBare } from './discover.ts'
 import {
   FetchHeadReadOnlyError,
@@ -33,16 +32,20 @@ import { writeFile } from './io.ts'
 
 import { append, entry, IDENTITY, ZERO } from './reflog.ts'
 import {
+  BRANCH_PREFIX,
   deleteRef,
   loadRefs,
   mapped,
   parseRefspec,
   readHead,
+  REMOTE_PREFIX,
   SYMREF_PREFIX,
+  TAG_PREFIX,
   validRefName,
   writeRef,
 } from './refs.ts'
 import { objectType, openRepo, repoArgs, storePack, type Repo } from './repo.ts'
+import { refsNamed } from './revparse.ts'
 import { opened } from './session.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import {
@@ -56,9 +59,6 @@ import type { ReadOnlyRefusal, Refspec } from './types.ts'
 import { checkSwitches, fatal } from './util.ts'
 
 const ENC = new TextEncoder()
-export const HEADS = 'refs/heads/'
-export const TAGS = 'refs/tags/'
-const REMOTES = 'refs/remotes/'
 const FETCH_HEAD = 'FETCH_HEAD'
 const ALL_TAGS = 'refs/tags/*:refs/tags/*'
 const TERM_COLUMNS = 80
@@ -123,7 +123,7 @@ function row(
 
 /** A ref name the way git's fetch summary shortens it. */
 export function prettify(ref: string): string {
-  for (const prefix of [HEADS, TAGS, REMOTES])
+  for (const prefix of [BRANCH_PREFIX, TAG_PREFIX, REMOTE_PREFIX])
     if (ref.startsWith(prefix)) return ref.slice(prefix.length)
   return ref
 }
@@ -220,7 +220,7 @@ async function followedTags(
   const local = await resolvedRefs(repo)
   const follow: Wanted[] = []
   for (const [name, oid] of adv.refs) {
-    if (!name.startsWith(TAGS) || taken.has(name) || local.has(name) || !validRefName(name))
+    if (!name.startsWith(TAG_PREFIX) || taken.has(name) || local.has(name) || !validRefName(name))
       continue
     if (await holds(repo, adv.peeled.get(name) ?? oid)) follow.push(wanted(name, oid, name))
   }
@@ -266,12 +266,12 @@ async function classify(
   const shown = prettify(local)
   if (old === want.oid) return [row('=', '[up to date]', remote, shown), null]
   if (old === undefined) {
-    if (local.startsWith(TAGS))
+    if (local.startsWith(TAG_PREFIX))
       return [row('*', '[new tag]', remote, shown, '', true), 'storing tag']
-    const kind = want.remote.startsWith(HEADS) ? '[new branch]' : '[new ref]'
+    const kind = want.remote.startsWith(BRANCH_PREFIX) ? '[new branch]' : '[new ref]'
     return [row('*', kind, remote, shown, '', true), 'storing head']
   }
-  if (local.startsWith(TAGS) && !want.force)
+  if (local.startsWith(TAG_PREFIX) && !want.force)
     return [row('!', '[rejected]', remote, shown, 'would clobber existing tag', true), null]
   const ends = [old.slice(0, repo.abbrev), want.oid.slice(0, repo.abbrev)]
   if (await isAncestor(repo, old, want.oid))
@@ -294,9 +294,9 @@ export async function updateRefs(
   const now = Math.floor(Date.now() / 1000)
   for (const want of wants) {
     if (want.local === null) {
-      const kind = want.remote.startsWith(TAGS)
+      const kind = want.remote.startsWith(TAG_PREFIX)
         ? 'tag'
-        : want.remote.startsWith(REMOTES)
+        : want.remote.startsWith(REMOTE_PREFIX)
           ? 'remote-tracking branch'
           : 'branch'
       rows.push(row('*', kind, prettify(want.remote), FETCH_HEAD))
@@ -308,7 +308,7 @@ export async function updateRefs(
     rejected ||= line.code === '!'
     if (why === null) continue
     await writeRef(repo.vfs, repo.location.commondir, want.local, want.oid)
-    if (logged && !want.local.startsWith(TAGS))
+    if (logged && !want.local.startsWith(TAG_PREFIX))
       await append(
         repo.vfs,
         repo.location.commondir,
@@ -326,11 +326,11 @@ export function fetchHead(url: string, wants: readonly Wanted[]): string {
     for (const want of wants) {
       if (!want.listed || want.merge !== merge) continue
       const short = prettify(want.remote)
-      const what = want.remote.startsWith(HEADS)
+      const what = want.remote.startsWith(BRANCH_PREFIX)
         ? `branch '${short}' of `
-        : want.remote.startsWith(TAGS)
+        : want.remote.startsWith(TAG_PREFIX)
           ? `tag '${short}' of `
-          : want.remote.startsWith(REMOTES)
+          : want.remote.startsWith(REMOTE_PREFIX)
             ? `remote-tracking branch '${short}' of `
             : want.remote === 'HEAD'
               ? ''
@@ -347,7 +347,7 @@ export function fetchHead(url: string, wants: readonly Wanted[]): string {
  */
 function localName(dst: string | null, remote: string): string | null {
   if (dst === null || dst.startsWith('refs/') || dst === 'HEAD') return dst
-  return `${remote.startsWith(TAGS) ? TAGS : HEADS}${dst}`
+  return `${remote.startsWith(TAG_PREFIX) ? TAG_PREFIX : BRANCH_PREFIX}${dst}`
 }
 
 /**
@@ -385,9 +385,7 @@ function plan(
       }
       continue
     }
-    const name = DWIM_RULES.map((rule) => rule.replace('{}', spec.src)).find((candidate) =>
-      adv.refs.has(candidate),
-    )
+    const [name] = refsNamed(adv.refs, spec.src)
     if (name === undefined) throw new GitError(`couldn't find remote ref ${spec.src}`)
     out.push(
       wanted(

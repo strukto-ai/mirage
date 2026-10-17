@@ -21,7 +21,7 @@ import { type FlagValue } from '../../spec/types.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import type { ByteSource } from '../../../io/types.ts'
-import { parseBase0 } from '../utils/size_suffix.ts'
+import { cInt, strtol } from '../utils/strtol.ts'
 import { singleChunk } from '../utils/operands.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -43,10 +43,10 @@ const OPEN_OUTPUT_EXIT = 3
 const CANNOT_SEEK_EXIT = 4
 const SEEK_BACK_EXIT = 5
 const CANNOT_SEEK = 'xxd: Sorry, cannot seek.\n'
-// A number as C's strtol reads it at base 0: optional space and sign, then
-// hex after 0x, octal after a bare 0, decimal otherwise; anything after the
-// digits is ignored.
-const STRTOL_PATTERN = /^\s*([+-]?)(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)/
+// The most octets vim's xxd puts on a line outside -p (its COLS), and its
+// refusal of a -c past that or under 1.
+const COLS_MAX = 256
+const COLS_REFUSAL = `xxd: invalid number of columns (max. ${String(COLS_MAX)}).`
 // The most NUL bytes one chunk carries when a dump's offset skips ahead.
 const GAP_CHUNK = 65536
 // What a plain dump's bytes decode to, and the ones it skips.
@@ -82,7 +82,9 @@ async function* xxdDumpStream(
 ): AsyncIterable<Uint8Array> {
   let offset = base
   let leftover = new Uint8Array(0)
-  const hexColumnWidth = cols * 2 + Math.floor(cols / group) - 1
+  // The hex column holds every group a full line has, the last one short when
+  // `group` does not divide `cols`, one blank between each.
+  const hexColumnWidth = cols * 2 + Math.ceil(cols / group) - 1
   const emitRow = (row: Uint8Array): Uint8Array => {
     const hexParts: string[] = []
     for (let g = 0; g < row.byteLength; g += group) {
@@ -311,15 +313,6 @@ function patched(existing: Uint8Array, segments: [number, Uint8Array][]): Uint8A
 
 void padLeft
 
-/** `text` as C's `strtol(text, NULL, 0)` reads it: 0 when it holds no number.
- * Mirrors Python's strtol. */
-export function strtol(text: string): number {
-  const match = STRTOL_PATTERN.exec(text)
-  if (match === null) return 0
-  const value = Number(parseBase0(match[2] ?? '0'))
-  return match[1] === '-' ? -value : value
-}
-
 /** `-s` as xxd reads it: `[+][-]offset`. `relative` (`+`) seeks from where
  * INFILE stands, which is its start here; `back` (`-`) seeks back from its
  * end. Mirrors Python's XxdSeek. */
@@ -334,7 +327,7 @@ export interface XxdSeek {
  * parse_limit. */
 export function parseLimit(raw: string | undefined): number | null {
   if (raw === undefined) return null
-  const limit = strtol(raw)
+  const limit = Number(strtol(raw)[0])
   return limit < 0 ? null : limit
 }
 
@@ -343,7 +336,7 @@ export function parseSeek(raw: string): XxdSeek {
   const relative = raw.startsWith('+')
   const rest = relative ? raw.slice(1) : raw
   const back = rest.startsWith('-')
-  return { offset: strtol(back ? rest.slice(1) : rest), relative, back }
+  return { offset: Number(strtol(back ? rest.slice(1) : rest)[0]), relative, back }
 }
 
 /** `source` with its first `count` bytes read off, or null when it ends
@@ -527,19 +520,43 @@ interface XxdFlags {
   readonly limit: number | null
 }
 
-function count(value: FlagValue | undefined, fallback: number): number {
-  const parsed = typeof value === 'string' ? Number.parseInt(value, 10) : 0
-  return parsed > 0 ? parsed : fallback
+// A `-c` or `-g` count as xxd reads it: `(int)strtol(text, NULL, 0)`, so a
+// word with no number is 0 and only its leading number counts. Mirrors
+// Python's `_octets`.
+function octets(text: string): bigint {
+  return cInt(strtol(text)[0])
+}
+
+// xxd's one refusal of a -c count, whatever was typed. Mirrors Python's
+// `_cols_refusal`.
+function colsRefusal(): string {
+  return COLS_REFUSAL
+}
+
+// `-g` as xxd settles it against the line's `cols`: a negative count is the
+// default 2, and one under 1 or past `cols` is the whole line, which is how
+// `-g 0` turns grouping off. Mirrors Python's `_group_of`.
+function groupOf(text: string | undefined, cols: number): number {
+  const typed = text === undefined ? 2 : Number(octets(text))
+  const group = typed < 0 ? 2 : typed
+  return group < 1 || group > cols ? cols : group
 }
 
 function parseFlags(bag: Record<string, FlagValue>): XxdFlags {
   const fl = new FlagView(bag, specOf('xxd'))
+  const plain = fl.asBool('p')
+  // -c 0 is the default, and only a dump outside -p caps the count.
+  const typedCols = fl.asNumber('c', octets, colsRefusal, {
+    low: 0n,
+    ...(plain ? {} : { high: BigInt(COLS_MAX) }),
+  })
+  const cols = typedCols === undefined || typedCols === 0n ? 16 : Number(typedCols)
   return {
     reverse: fl.asBool('r'),
-    plain: fl.asBool('p'),
+    plain,
     uppercase: fl.asBool('u'),
-    cols: count(fl.raw('c'), 16),
-    group: count(fl.raw('g'), 2),
+    cols,
+    group: groupOf(fl.asText('g'), cols),
     seek: parseSeek(fl.asStr('s') ?? ''),
     limit: parseLimit(fl.asStr('args_l')),
   }

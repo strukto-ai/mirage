@@ -36,6 +36,43 @@
       "flags": [
         "c"
       ]
+    },
+    {
+      "id": "xxd_c_reads_strtol_and_caps_at_256",
+      "seq": 9940309,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for c in abc '' 0 3x 0x4 ' +4'; do printf 'hello world\\n' | xxd -c \"$c\"; done; for c in -3 257 99999999999999999999; do printf hi | xxd -c \"$c\"; echo rc=$?; done; printf hi | xxd -p -c 300",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000000: 6865 6c6c 6f20 776f 726c 640a            hello world.\n00000000: 6865 6c6c 6f20 776f 726c 640a            hello world.\n00000000: 6865 6c6c 6f20 776f 726c 640a            hello world.\n00000000: 6865 6c  hel\n00000003: 6c6f 20  lo \n00000006: 776f 72  wor\n00000009: 6c64 0a  ld.\n00000000: 6865 6c6c  hell\n00000004: 6f20 776f  o wo\n00000008: 726c 640a  rld.\n00000000: 6865 6c6c  hell\n00000004: 6f20 776f  o wo\n00000008: 726c 640a  rld.\nrc=1\nrc=1\nrc=1\n6869\n",
+        "stderr": "xxd: invalid number of columns (max. 256).\nxxd: invalid number of columns (max. 256).\nxxd: invalid number of columns (max. 256).\n"
+      },
+      "flags": [
+        "c"
+      ]
     }
   ]
 }

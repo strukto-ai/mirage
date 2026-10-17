@@ -214,6 +214,15 @@ export class CommitGraph {
   }
 
   /**
+   * The cells one row draws, by column: every column, then this commit's own
+   * when it is in none of them.
+   */
+  private *row(oid: string): Generator<[number, string]> {
+    yield* this.columns.entries()
+    if (!this.columns.includes(oid)) yield [this.columns.length, oid]
+  }
+
+  /**
    * Lay out the next row: the columns after this commit, and where each edge
    * of this row lands in them.
    */
@@ -226,15 +235,8 @@ export class CommitGraph {
     this.width = 0
     this.prevEdgesAdded = this.edgesAdded
     this.edgesAdded = 0
-    let seenThis = false
-    for (let i = 0; i <= this.columns.length; i += 1) {
-      let column: string
-      if (i === this.columns.length) {
-        if (seenThis) break
-        column = oid
-      } else column = this.columns[i] ?? ''
+    for (const [i, column] of this.row(oid)) {
       if (column === oid) {
-        seenThis = true
         this.commitIndex = i
         this.mergeLayout = -1
         for (const parent of this.parents) this.insertColumn(parent, i)
@@ -317,12 +319,7 @@ export class CommitGraph {
     const oid = this.commit?.oid ?? ''
     let line = ''
     let seenThis = false
-    for (let i = 0; i <= this.columns.length; i += 1) {
-      let column: string
-      if (i === this.columns.length) {
-        if (seenThis) break
-        column = oid
-      } else column = this.columns[i] ?? ''
+    for (const [i, column] of this.row(oid)) {
       if (column === oid) {
         seenThis = true
         line += '*'
@@ -364,12 +361,7 @@ export class CommitGraph {
     let line = ''
     let seenThis = false
     let parentSeen = false
-    for (let i = 0; i <= this.columns.length; i += 1) {
-      let column: string
-      if (i === this.columns.length) {
-        if (seenThis) break
-        column = oid
-      } else column = this.columns[i] ?? ''
+    for (const [i, column] of this.row(oid)) {
       if (column === oid) {
         seenThis = true
         let at = this.mergeLayout

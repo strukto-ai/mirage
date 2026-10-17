@@ -14,6 +14,7 @@
 
 from dataclasses import replace
 
+from mirage.commands.builtin.constants import OPERAND_CONCURRENCY
 from mirage.commands.builtin.generic.crossmount.constants import (
     DISPATCH_BUILDERS,
 )
@@ -103,7 +104,7 @@ async def run_du(
         await materialize(out)
         return io
 
-    ios = await bounded_map(plan, measure, 4)
+    ios = await bounded_map(plan, measure, OPERAND_CONCURRENCY)
     # A run that failed measured nothing and says why; one that succeeded
     # without a measurement is a du this line cannot compose.
     if any(io.sized_runs is None and io.exit_code == 0 for io in ios):

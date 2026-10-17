@@ -28,9 +28,9 @@ from mirage.commands.builtin.utils.links import (
 )
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.config import CommandIO, Context
-from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.usage import missing_operand_error
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
@@ -109,10 +109,7 @@ async def rmdir(
     v = fl.as_bool("verbose")
     ignore = fl.as_bool("ignore_fail_on_non_empty")
     if not ops.is_mounted(accessor) or not paths:
-        raise UsageError(
-            "rmdir: missing operand\nTry 'rmdir --help' for more information.",
-            1,
-        )
+        raise missing_operand_error("rmdir", None)
     rmdir_fn = require_op(ops, Operation.RMDIR)
     paths = await ops.resolve_glob(accessor, paths, ctx.index)
     links = links_of(ctx)

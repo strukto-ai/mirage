@@ -13,12 +13,16 @@ from mirage.commands.builtin.tail_counts import (
     parse_counts,
     parse_seconds,
 )
-from mirage.commands.builtin.utils.constants import STDIN_HEADER_NAME
-from mirage.commands.builtin.utils.operands import operands_io, split_opened
+from mirage.commands.builtin.utils.operands import (
+    operands_io,
+    report_fs_error,
+    split_opened,
+)
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
-    operand_label,
+    operand_header,
     resolve_source,
+    shows_headers,
     stdin_stat,
     stdin_stream,
 )
@@ -32,7 +36,6 @@ from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import argmatch_error
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import enoent, fs_strerror
-from mirage.errors.render import fs_error_line
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.cooperative import chunks
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
@@ -250,7 +253,7 @@ async def tail(
             await reader.discard()
 
 
-def tail_multi(
+async def tail_multi(
     paths: list[PathSpec],
     *,
     read: Callable[..., Any],
@@ -278,41 +281,13 @@ def tail_multi(
         io (IOResult | None): the result a failed read is reported on,
             so the next operand still prints; None lets it raise.
     """
-    return _tail_multi(
-        paths,
-        read=read,
-        n=n,
-        c=c,
-        from_line=from_line,
-        from_byte=from_byte,
-        show_headers=show_headers,
-        unread=unread,
-        io=io,
-    )
-
-
-async def _tail_multi(
-    paths: list[PathSpec],
-    *,
-    read: Callable[..., Any],
-    n: int | None = None,
-    c: int | None = None,
-    from_line: int | None = None,
-    from_byte: int | None = None,
-    show_headers: bool = False,
-    unread: frozenset[str] = frozenset(),
-    io: IOResult | None = None,
-) -> AsyncIterator[bytes]:
     printed = 0
     for p in paths:
         header = b""
         if show_headers:
             # The blank line goes before a printed block, not an operand:
             # a file after one that printed nothing starts without it.
-            label = operand_label(p, STDIN_HEADER_NAME)
-            header = encode_text(
-                ("\n" if printed else "") + f"==> {label} <==\n"
-            )
+            header = operand_header(p, printed > 0)
         pending = header
         if p.virtual in unread:
             if pending:
@@ -340,8 +315,7 @@ async def _tail_multi(
             # read cap) is reported, and the next operand still prints.
             # The open succeeded, so a read failure still heads it; the
             # report lands first, as a reader may stop at the header.
-            _note(io, fs_error_line("tail", p, exc))
-            io.exit_code = 1
+            await report_fs_error(io, "tail", p, exc)
             if pending and isinstance(exc, READ_FAILURES):
                 yield pending
                 pending = b""
@@ -641,10 +615,7 @@ async def _follow(
         for slot, p in list(active):
             if p.virtual in unread:
                 if show_headers:
-                    header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
-                    yield encode_text(
-                        ("\n" if last is not None else "") + header
-                    )
+                    yield operand_header(p, last is not None)
                 last = slot
                 active.remove((slot, p))
                 continue
@@ -684,15 +655,13 @@ async def _follow(
                 # would have been, and under --retry waited for like a
                 # file that was never there (this is the initial open that
                 # a descriptor follow's --retry covers).
-                _note(io, fs_error_line("tail", p, exc))
-                io.exit_code = 1
+                await report_fs_error(io, "tail", p, exc)
                 active.remove((slot, p))
                 if flags.retry:
                     waiting.append((slot, p, APPEARED))
                 continue
             if show_headers:
-                header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
-                yield encode_text(("\n" if last is not None else "") + header)
+                yield operand_header(p, last is not None)
             last = slot
             for chunk in chunks:
                 yield chunk
@@ -786,8 +755,7 @@ async def _follow(
             data, positions[slot] = grown
             if data:
                 if show_headers and last != slot:
-                    label = operand_label(p, STDIN_HEADER_NAME)
-                    yield encode_text(f"\n==> {label} <==\n")
+                    yield operand_header(p, True)
                 last = slot
                 yield data
     _note(io, "tail: no files remaining\n")
@@ -931,7 +899,7 @@ async def tail_generic(
     ):
         return None, IOResult(stderr=retry_warning or None)
     if paths:
-        show_headers = (parsed.verbose or len(paths) > 1) and not parsed.quiet
+        show_headers = shows_headers(parsed.verbose, parsed.quiet, len(paths))
         opened, unread, err = await split_opened(paths, stat, "tail")
         io = operands_io(err)
         if retry_warning:
@@ -993,7 +961,5 @@ async def tail_generic(
     )
     if parsed.verbose and not parsed.quiet:
         # -v heads a stdin nobody named with the name it gives `-`.
-        body = async_chain(
-            [encode_text(f"==> {STDIN_HEADER_NAME} <==\n"), body]
-        )
+        body = async_chain([operand_header(None), body])
     return body, IOResult(stderr=retry_warning or None)

@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { GENERAL_WGET } from './wget.ts'
+import { enoent } from '../../../errors/fs.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -36,6 +37,7 @@ function mockFetch(respBody: string, status = 200): void {
 async function runWget(
   texts: string[],
   flags: Record<string, string | boolean | number | string[]> = {},
+  refuse?: Error,
 ): Promise<{
   out: string
   err: string
@@ -52,6 +54,7 @@ async function runWget(
     flags,
     cwd: PathSpec.fromStrPath('/'),
     dispatch: (_op, path, args) => {
+      if (refuse !== undefined) return Promise.reject(refuse)
       writes[path.virtual] = args?.[0] as Uint8Array
       return Promise.resolve([null, new IOResult()])
     },
@@ -139,6 +142,24 @@ describe('wget', () => {
     const r = await runWget(['https://x.test/missing'], { spider: true })
     expect(r.exitCode).toBe(8)
     expect(r.err).toBe('Remote file does not exist -- broken link!!!\n')
+  })
+
+  // GNU Wget 1.25.0: `wget -q -O /nonexistent/out URL` still prints
+  // "/nonexistent/out: No such file or directory" and exits 1.
+  it.each([false, true])('names a refused -O write with its strerror (-q %s)', async (q) => {
+    const r = await runWget(
+      ['https://x.test/f'],
+      { args_O: '/tmp/nope/w.txt', q },
+      enoent('/tmp/nope/w.txt'),
+    )
+    expect(r.exitCode).toBe(1)
+    expect(r.err).toBe('/tmp/nope/w.txt: No such file or directory\n')
+  })
+
+  it('lets a write error outside the fs family propagate', async () => {
+    await expect(
+      runWget(['https://x.test/f'], { args_O: '/tmp/w.txt' }, new TypeError('backend bug')),
+    ).rejects.toThrow('backend bug')
   })
 
   it('reports a refused connection as exit 4', async () => {

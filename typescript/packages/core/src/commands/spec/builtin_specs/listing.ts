@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { CommandSpec, Argument } from '../types.ts'
+import { PATHS_OPERAND, TEXTS_OPERAND } from '../constants.ts'
 
 export const SPECS: Record<string, CommandSpec> = {
   df: new CommandSpec({
@@ -24,7 +25,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-T', { action: 'store_true' }),
       new Argument('-P', { action: 'store_true' }),
       new Argument('-B'),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   du: new CommandSpec({
@@ -38,7 +39,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-P', { action: 'store_true' }),
       new Argument(['-S', '--separate-dirs'], { action: 'store_true' }),
       new Argument(['-x', '--one-file-system'], { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   mount: new CommandSpec({
@@ -83,7 +84,7 @@ export const SPECS: Record<string, CommandSpec> = {
         action: 'store_true',
         help: 'Mount a subtree and all submounts somewhere else.',
       }),
-      new Argument('texts', { metavar: '', nargs: '*' }),
+      TEXTS_OPERAND,
     ],
   }),
   file: new CommandSpec({
@@ -92,7 +93,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-i', { action: 'store_true' }),
       new Argument('-L', { action: 'store_true' }),
       new Argument('-h', { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   find: new CommandSpec({
@@ -125,7 +126,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-a', { action: 'store_true' }),
       new Argument('-and', { action: 'store_true' }),
       new Argument('-not', { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
     ignoreTokens: ['(', ')', '!'],
   }),
@@ -166,14 +167,14 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('--block-size'),
       new Argument('--hyperlink', { nargs: '?', attachedOnly: true }),
       new Argument(['-Z', '--context'], { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   pwd: new CommandSpec({
     arguments: [
       new Argument('-P', { action: 'store_true' }),
       new Argument('-L', { action: 'store_true' }),
-      new Argument('texts', { metavar: '', nargs: '*' }),
+      TEXTS_OPERAND,
     ],
   }),
   stat: new CommandSpec({
@@ -181,7 +182,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-c', '--format']),
       new Argument(['-f', '--file-system'], { action: 'store_true' }),
       new Argument(['-L', '--dereference'], { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
   tree: new CommandSpec({
@@ -192,7 +193,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-d', { action: 'store_true' }),
       new Argument('-P'),
       new Argument('-x', { action: 'store_true' }),
-      new Argument('paths', { metavar: '', type: 'path', nargs: '*' }),
+      PATHS_OPERAND,
     ],
   }),
 }

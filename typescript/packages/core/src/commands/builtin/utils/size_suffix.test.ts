@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
 
-import { parseBase0, sizeSuffixes } from './size_suffix.ts'
+import { decimalValue, parseBase0, sizeSuffixes } from './size_suffix.ts'
 
 describe('sizeSuffixes', () => {
   it('maps a letter to its binary power', () => {
@@ -51,5 +51,14 @@ describe('parseBase0', () => {
     expect(parseBase0('007')).toBe(7n)
     expect(parseBase0('1010')).toBe(1010n)
     expect(parseBase0('0')).toBe(0n)
+  })
+})
+
+describe('decimalValue', () => {
+  it('reads a number however long', () => {
+    const digits = '9'.repeat(5000)
+    expect(decimalValue(digits)).toBe(10n ** 5000n - 1n)
+    expect(decimalValue('000123')).toBe(123n)
+    expect(parseBase0(digits)).toBe(10n ** 5000n - 1n)
   })
 })

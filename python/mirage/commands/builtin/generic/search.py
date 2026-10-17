@@ -22,7 +22,7 @@ def semantic_options(fl: FlagView) -> dict[str, JsonValue]:
     Args:
         fl (FlagView): the invocation's search flags.
     """
-    method = fl.as_str("method") or "semantic"
+    method = fl.as_str("method", "semantic")
     if method != "semantic":
         raise UsageError("search: only the 'semantic' method is supported")
     options: dict[str, JsonValue] = {

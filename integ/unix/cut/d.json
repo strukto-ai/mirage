@@ -113,6 +113,84 @@
         "d",
         "f"
       ]
+    },
+    {
+      "id": "cut_empty_delimiter_is_nul",
+      "seq": 9940204,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\0b\\0c\\n' | cut -d '' -f2; printf 'a\\0b\\0c\\n' | cut -d '' -f1,3 --output-delimiter=:",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\na:c\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d",
+        "f",
+        "output-delimiter"
+      ]
+    },
+    {
+      "id": "cut_empty_output_delimiter_is_nul",
+      "seq": 9940205,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a:b:c\\n' | cut -d: -f1,2 --output-delimiter='' | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": " 61 00 62 0a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d",
+        "f",
+        "output-delimiter"
+      ]
     }
   ]
 }

@@ -31,7 +31,7 @@ export async function read(
   const messages = await fetchRecentMessages(
     discordAccessor(config),
     fl.asStr('channel') ?? '',
-    fl.asInt('limit') ?? 20,
+    fl.asInt('limit', 20),
   )
   const out: ByteSource = ENC.encode(JSON.stringify(messages))
   return [out, new IOResult()]

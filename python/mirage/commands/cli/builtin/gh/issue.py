@@ -192,8 +192,8 @@ async def list_cmd(
             repo_for(config, fl),
             IssueListFilter(
                 _STATES.get(state, ("OPEN",)),
-                fl.as_str("assignee"),
-                fl.as_str("author"),
+                fl.as_nonempty("assignee"),
+                fl.as_nonempty("author"),
                 tuple(csv_values(fl.as_list("label"))),
             ),
             list_limit(fl, 30),
@@ -209,10 +209,12 @@ async def list_cmd(
             ISSUE_FIELDS,
         )
     params = {"state": state}
-    if fl.as_str("assignee"):
-        params["assignee"] = fl.as_str("assignee") or ""
-    if fl.as_str("author"):
-        params["creator"] = fl.as_str("author") or ""
+    assignee = fl.as_nonempty("assignee")
+    if assignee is not None:
+        params["assignee"] = assignee
+    author = fl.as_nonempty("author")
+    if author is not None:
+        params["creator"] = author
     labels = csv_values(fl.as_list("label"))
     if labels:
         params["labels"] = ",".join(labels)

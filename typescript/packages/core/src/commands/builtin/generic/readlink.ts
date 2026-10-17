@@ -15,29 +15,13 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { lstripSlash } from '../../../utils/slash.ts'
+import { posixNormpath } from '../../../utils/path.ts'
 import { missingOperandError } from '../../spec/usage.ts'
 
 const ENC = new TextEncoder()
-
-function normPath(p: string): string {
-  const parts = p.split('/')
-  const out: string[] = []
-  for (const seg of parts) {
-    if (seg === '' || seg === '.') continue
-    if (seg === '..') {
-      if (out.length > 0) out.pop()
-      continue
-    }
-    out.push(seg)
-  }
-  const leading = p.startsWith('/') ? '/' : ''
-  return leading + out.join('/') || (leading !== '' ? '/' : '.')
-}
 
 interface ReadlinkFlags {
   readonly canonicalize: boolean
@@ -67,12 +51,7 @@ export function readlinkGeneric(
   const noNewline = parsed.noNewline
   const results: string[] = []
   for (const p of paths) {
-    let vp =
-      mountPrefixOf(p.virtual, p.vfsPath) !== ''
-        ? mountPrefixOf(p.virtual, p.vfsPath) + '/' + lstripSlash(p.virtual)
-        : p.virtual
-    if (normalize) vp = normPath(vp)
-    results.push(vp)
+    results.push(normalize ? posixNormpath(p.virtual) : p.virtual)
   }
   let text = results.join('\n')
   if (!noNewline) text += '\n'

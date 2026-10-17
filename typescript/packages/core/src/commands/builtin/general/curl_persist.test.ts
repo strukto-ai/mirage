@@ -127,7 +127,7 @@ describe('wget -O persists to mount', () => {
     const ws = await makeWs()
     const io = await ws.shell('wget -O /readonly/wget.bin https://x.test/file')
     expect(io.exitCode).toBe(1)
-    expect(io.stderrText).toMatch(/read-only/)
+    expect(io.stderrText).toBe('/readonly/wget.bin: Read-only file system\n')
     await ws.close()
   })
 })

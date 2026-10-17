@@ -30,8 +30,6 @@ from mirage.commands.builtin.generic_bind.adapter import (
     resolve_or_empty,
 )
 from mirage.commands.config import CommandIO, Context
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -43,10 +41,7 @@ async def csplit(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags, spec=SPECS["csplit"])
     paths = await resolve_or_empty(ops, accessor, paths, ctx.index)
-    prefix_flag = fl.raw("prefix")
-    prefix = prefix_flag if isinstance(prefix_flag, (str, PathSpec)) else "xx"
     # The pieces go to the prefix, or `xx` in the working directory, which
     # need not be this mount, so a dispatcher routes each write, and the
     # removal of a failed run's pieces, to the mount that owns it.
@@ -59,19 +54,10 @@ async def csplit(
     return await generic_csplit(
         paths,
         texts,
+        ctx,
         read_bytes=bound_op(ops.read_stream, accessor, ctx.index),
         write_bytes=write_bytes,
         unlink=unlink,
-        stdin=ctx.stdin,
-        prefix=prefix,
-        mount_prefix=ctx.mount_prefix,
-        cwd=ctx.cwd.virtual,
-        digits=int(fl.as_str("digits") or "2"),
-        suffix_format=fl.as_str("suffix_format"),
-        keep_on_error=fl.as_bool("keep_files"),
-        silent=fl.as_bool("quiet") or fl.as_bool("silent"),
-        suppress_matched=fl.as_bool("suppress_matched"),
-        elide_empty=fl.as_bool("elide_empty_files"),
     )
 
 

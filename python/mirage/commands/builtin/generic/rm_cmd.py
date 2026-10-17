@@ -16,7 +16,7 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from mirage.commands.builtin.utils.paths import descendant_path
-from mirage.commands.errors import UsageError
+from mirage.commands.spec.usage import missing_operand_error
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
@@ -38,9 +38,7 @@ def rm_without_operands(force: bool) -> tuple[ByteSource | None, IOResult]:
     """
     if force:
         return None, IOResult()
-    raise UsageError(
-        "rm: missing operand\nTry 'rm --help' for more information.", 1
-    )
+    raise missing_operand_error("rm", None)
 
 
 async def remove_tree(

@@ -14,8 +14,8 @@
 
 import git from 'isomorphic-git'
 import { BreError, PosixSyntax, searchBre, translateEre } from '../../../builtin/utils/bre.ts'
-import { GitError } from './errors.ts'
-import { HEAD } from './constants.ts'
+import { GitError, PatternCompileError } from './errors.ts'
+import { HEAD, TEMPLATE_KINDS } from './constants.ts'
 
 import type { FlagView } from '../../../spec/flag_view.ts'
 import { isoTimestamp } from '../../../../utils/dates.ts'
@@ -34,22 +34,19 @@ import {
   type LogFormat,
 } from './format.ts'
 import { greps, touches } from './pickaxe.ts'
-import { loadRefs, SYMREF_PREFIX } from './refs.ts'
-import { commitFacts, repoArgs, type Repo } from './repo.ts'
+import { BRANCH_PREFIX, loadRefs, REMOTE_PREFIX, SYMREF_PREFIX, TAG_PREFIX } from './refs.ts'
+import { commitFacts, configBool, repoArgs, type Repo } from './repo.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { compilePosixRegex, POSIX_CLASSES } from '../../../../utils/posix.ts'
-import { mappedIdentity } from './mailmap.ts'
+import { loadMailmap, mappedIdentity, useMailmap } from './mailmap.ts'
 import { dateClock, parseDateMode } from './dates.ts'
 import { configValues } from './fs.ts'
 import { maybeBool } from './util.ts'
 import { Decoration, type DateMode, type MailmapEntry } from './types.ts'
 
-const BRANCH_PREFIX = 'refs/heads/'
 // How many hidden commits a limited walk takes past the point where only
 // hidden ones are queued, git's SLOP.
 const SLOP = 5
-const TAG_PREFIX = 'refs/tags/'
-const REMOTE_PREFIX = 'refs/remotes/'
 const BASIC_REGEXP = 'basic_regexp'
 const EXTENDED_REGEXP = 'extended_regexp'
 const FIXED_STRINGS = 'fixed_strings'
@@ -147,15 +144,33 @@ export interface Walk {
  *
  * Accepts an ISO-8601 date or a bare epoch second. git accepts far more
  * (`2 weeks ago`, `yesterday`); anything else is refused here rather than
- * silently ignored, which would quietly widen the window.
+ * silently ignored, which would quietly widen the window. An empty value is
+ * now, as git's approxidate reads a date that says nothing (git 2.47:
+ * `--since=` lists no past commit).
  */
-function timestamp(value: string | null, flag: string): number | null {
+function timestamp(value: string | null, flag: string, now: number): number | null {
   if (value === null) return null
+  if (value === '') return now
   const parsed = isoTimestamp(value)
   if (parsed !== null) return parsed
   const asNumber = Number(value)
   if (value.trim() !== '' && Number.isFinite(asNumber)) return asNumber
   throw new BadDateError(flag, value)
+}
+
+/**
+ * One end of the date window, from the last of its two spellings: `--after`
+ * and `--since` (`--before` and `--until`) set one limit, and each occurrence
+ * overwrites it, so the one typed last wins. Mirrors Python's `_window_end`.
+ */
+function windowEnd(
+  fl: FlagView,
+  names: readonly [string, string],
+  flag: string,
+  now: number,
+): number | null {
+  const last = fl.typedOrder(...names).at(-1)
+  return timestamp(last === undefined ? null : (fl.asStr(last) ?? null), flag, now)
 }
 
 /**
@@ -198,7 +213,7 @@ function pattern(value: string, syntax: string, ignoreCase: boolean, origin: str
     return searchBre(value, ignoreCase)
   } catch (err) {
     if (err instanceof BreError || err instanceof SyntaxError)
-      throw new GitError(`${origin}, '${value}': ${err.message}`)
+      throw new PatternCompileError(origin, value, err.message)
     throw err
   }
 }
@@ -333,6 +348,7 @@ export function parseFlags(
     search = pickaxePattern(search, ignoreCase)
   }
   const maxCount = fl.asInt('max_count') ?? null
+  const clock = dateClock(env)
   return {
     authors,
     committers,
@@ -340,7 +356,7 @@ export function parseFlags(
     useMailmap: true,
     greps,
     ignoreCase,
-    date: parseDateMode(fl.asStr('date') ?? 'default', dateClock(env)),
+    date: parseDateMode(fl.asStr('date', 'default'), clock),
     decorate: Decoration.NONE,
     // git reads a negative count as no limit at all.
     maxCount: maxCount !== null && maxCount < 0 ? null : maxCount,
@@ -352,8 +368,8 @@ export function parseFlags(
     search,
     changed: changed === null ? null : pickaxePattern(changed, ignoreCase),
     forceText: fl.asBool('text'),
-    since: timestamp(fl.asStr('after') ?? fl.asStr('since') ?? null, '--since'),
-    until: timestamp(fl.asStr('before') ?? fl.asStr('until') ?? null, '--until'),
+    since: windowEnd(fl, ['after', 'since'], '--since', clock.now),
+    until: windowEnd(fl, ['before', 'until'], '--until', clock.now),
     allRefs: fl.asBool('all'),
     pretty,
     abbrevCommit: oneline,
@@ -468,13 +484,38 @@ export async function decorationFor(
     if (configured !== undefined) style = decorationStyle(configured)
   }
   style ??= Decoration.NONE
-  if (pretty.kind !== 'format' && pretty.kind !== 'tformat') return style
+  if (!TEMPLATE_KINDS.includes(pretty.kind)) return style
   if (!needsDecorations(pretty)) return Decoration.NONE
   return style === Decoration.NONE ? Decoration.SHORT : style
 }
 
 /**
- * Ref labels per commit, in the order git prints them.
+ * How `log` and `show` present commits, once the repository's config can be
+ * read: the worktree `.mailmap`, whether the header identities map through it
+ * (`log.mailmap` unless the line's `--[no-]mailmap` says otherwise), and the
+ * decoration style.
+ *
+ * @param repo the opened repository
+ * @param fl the line's flags
+ * @param pretty the line's format
+ * @throws BadConfigValueError a `log.mailmap` git cannot read as a boolean
+ * @throws InvalidDecorateError a `--decorate` value that names no style
+ */
+export async function displayed(
+  repo: Repo,
+  fl: FlagView,
+  pretty: LogFormat,
+): Promise<[readonly MailmapEntry[], boolean, Decoration]> {
+  return [
+    await loadMailmap(repo.vfs, repo.location),
+    useMailmap(fl, await configBool(repo, 'log.mailmap', true)),
+    await decorationFor(repo, fl, pretty),
+  ]
+}
+
+/**
+ * Ref labels per commit, in the order git prints them; null for a line that
+ * prints none.
  *
  * git walks refs alphabetically and prepends each label, so a commit's labels
  * read in reverse ref order; HEAD is pulled to the front, spelled
@@ -482,12 +523,14 @@ export async function decorationFor(
  * `HEAD` alone when detached. Pinned against git 2.50.
  *
  * @param repo the opened repository
- * @param style `FULL` keeps each ref's whole name; anything else shortens it
+ * @param style `FULL` keeps each ref's whole name, `NONE` loads nothing;
+ *   anything else shortens it
  */
 export async function decorations(
   repo: Repo,
   style: Decoration = Decoration.SHORT,
-): Promise<Map<string, string[]>> {
+): Promise<Map<string, string[]> | null> {
+  if (style === Decoration.NONE) return null
   const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
   const resolved = await resolvedRefs(repo)
   const full = style === Decoration.FULL

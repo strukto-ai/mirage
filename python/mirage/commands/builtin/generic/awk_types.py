@@ -16,8 +16,6 @@ from dataclasses import dataclass
 
 from mirage.types import PathSpec
 
-USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]"
-
 
 @dataclass(frozen=True, slots=True)
 class AwkFlags:
@@ -28,5 +26,4 @@ class AwkFlags:
 
 __all__ = [
     "AwkFlags",
-    "USAGE",
 ]

@@ -7,6 +7,7 @@ from functools import partial
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.builtin.utils.strtol import c_int, strtoul
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -423,11 +424,29 @@ class TreeFlags:
     one_file_system: bool = False
 
 
+def _level(text: str) -> int:
+    """``-L`` as tree 2.2.1 reads it: ``(int)strtoul(sLevel, NULL, 0)``.
+
+    Args:
+        text (str): the value as typed.
+    """
+    return c_int(strtoul(text)[0])
+
+
+def _level_refusal(text: str, value: int | None) -> str:
+    """tree's one refusal for a level under 1, whatever was typed.
+
+    Args:
+        text (str): the value as typed.
+        value (int | None): what it scanned to.
+    """
+    return "tree: Invalid level, must be greater than 0."
+
+
 def parse_flags(flags: Mapping[str, FlagValue]) -> TreeFlags:
     fl = FlagView(flags, spec=SPECS["tree"])
-    depth_raw = fl.as_str("L")
     return TreeFlags(
-        max_depth=int(depth_raw) if depth_raw is not None else None,
+        max_depth=fl.as_number("L", _level, _level_refusal, low=1),
         show_hidden=fl.as_bool("a"),
         ignore_pattern=fl.as_str("args_I"),
         dirs_only=fl.as_bool("d"),

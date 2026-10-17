@@ -16,6 +16,7 @@ import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
+from mirage.commands.builtin.utils.lines import record_separator
 from mirage.commands.quote import quote_text
 from mirage.commands.spec.usage import usage_hint
 from mirage.io.async_line_iterator import AsyncLineIterator
@@ -253,7 +254,7 @@ async def cut_stream(
     output_delimiter: str | None,
     zero_terminated: bool,
 ) -> AsyncIterator[bytes]:
-    separator = b"\x00" if zero_terminated else b"\n"
+    separator = record_separator(zero_terminated)
     reader = AsyncLineIterator(source)
     try:
         while (rec := await reader.readline(separator)) is not None:

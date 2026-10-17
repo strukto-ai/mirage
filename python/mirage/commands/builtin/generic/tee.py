@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from functools import partial
 
+from mirage.commands.builtin.constants import SIGPIPE_EXIT
 from mirage.commands.builtin.utils.paths import (
     absent_dest_error,
     entry_kind,
@@ -278,7 +279,7 @@ async def write_output(
             # what it reported, unless -p or --output-error say otherwise.
             if parsed.pipe_errors is PipeErrors.SIGNAL:
                 return None, IOResult(
-                    exit_code=141, stderr=b"".join(errors) or None
+                    exit_code=SIGPIPE_EXIT, stderr=b"".join(errors) or None
                 )
             if parsed.pipe_errors is PipeErrors.REPORT:
                 errors.append(
@@ -396,7 +397,7 @@ async def _tee_stream(
     def failed(path: PathSpec, exc: Exception) -> bool:
         if isinstance(exc, PipeClosed):
             if parsed.pipe_errors is PipeErrors.SIGNAL:
-                io.exit_code = 141
+                io.exit_code = SIGPIPE_EXIT
                 return True
             if parsed.pipe_errors is PipeErrors.IGNORE:
                 return False

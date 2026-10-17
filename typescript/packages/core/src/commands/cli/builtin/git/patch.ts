@@ -15,22 +15,22 @@
 import { getOpcodes, groupOpcodes } from '../../../builtin/diff_format.ts'
 import { DiffOpTag } from '../../../builtin/diff_types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
-import { FUNCNAME_START, GIT_SPACE } from './constants.ts'
+import { FUNCNAME_START, GIT_SPACE, GITLINK_MODE } from './constants.ts'
 import { quotePath } from './render.ts'
 import { readBlobBytes, type Repo } from './repo.ts'
+import { BINARY_SNIFF } from './summary.ts'
 import type { TreeEntry } from './tree.ts'
 
-const HUNK_CONTEXT = 3
+export const HUNK_CONTEXT = 3
 const FUNCNAME_BYTES = 80
 const HUNK_HEADER_BYTES = 128
-const BINARY_SNIFF = 8000
-const OID_HEX = 40
-const DEV_NULL = '/dev/null'
+export const OID_HEX = 40
+export const DEV_NULL = '/dev/null'
 
 /** An entry's bytes: a blob's contents, a submodule's commit line, empty for a missing side. */
 export async function blobData(repo: Repo, entry: TreeEntry | null): Promise<Uint8Array> {
   if (!entry) return new Uint8Array()
-  if (entry.mode === '160000') return encodeText(`Subproject commit ${entry.oid}\n`)
+  if (entry.mode === GITLINK_MODE) return encodeText(`Subproject commit ${entry.oid}\n`)
   return readBlobBytes(repo, entry.oid)
 }
 
@@ -64,35 +64,13 @@ export async function filePatch(
   functionContext = false,
   forceText = false,
 ): Promise<string> {
-  if (before && after && before.mode.slice(0, 3) !== after.mode.slice(0, 3))
+  if (before && after && before.mode.slice(0, 3) !== after.mode.slice(0, 3)) {
+    const rest = [score, width, fully, count, functionContext, forceText] as const
     return (
-      (await filePatch(
-        repo,
-        path,
-        oldPath,
-        before,
-        null,
-        score,
-        width,
-        fully,
-        count,
-        functionContext,
-        forceText,
-      )) +
-      (await filePatch(
-        repo,
-        path,
-        oldPath,
-        null,
-        after,
-        score,
-        width,
-        fully,
-        count,
-        functionContext,
-        forceText,
-      ))
+      (await filePatch(repo, path, oldPath, before, null, ...rest)) +
+      (await filePatch(repo, path, oldPath, null, after, ...rest))
     )
+  }
   const source = quotePath(`a/${oldPath}`, false, fully),
     target = quotePath(`b/${path}`, false, fully)
   const head = [`diff --git ${source} ${target}`]

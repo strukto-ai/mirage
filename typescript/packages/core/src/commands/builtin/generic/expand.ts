@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { UINTMAX } from '../constants.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
@@ -23,6 +24,7 @@ import { reportedStream } from '../utils/operands.ts'
 import { asyncChain } from '../../../io/stream.ts'
 import { mapStream } from '../utils/lines.ts'
 import { quoteText } from '../../quote.ts'
+import { TAB_WIDTH } from '../../../utils/width.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
@@ -36,12 +38,6 @@ const DIGITS = new Set(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'])
 // newline, a carriage return, a vertical tab and a form feed are all invalid
 // characters rather than separators.
 const BLANKS = new Set([' ', '\t'])
-
-// The accumulator GNU overflows: a tab stop is read into `uintmax_t`. Held as
-// a bigint because the scan has to compare past Number.MAX_SAFE_INTEGER.
-const UINTMAX_MAX = 18446744073709551615n
-
-const DEFAULT_TAB_SIZE = 8
 
 // One resolved -t/--tabs list, as gnulib models it.
 //
@@ -169,7 +165,8 @@ function scanTabStops(raw: string, acc: TabAccumulator): void {
         digitsAt = index
       }
       value = value * 10n + BigInt(char)
-      if (value > UINTMAX_MAX) {
+      // The accumulator GNU overflows: a tab stop is read into `uintmax_t`.
+      if (value > UINTMAX) {
         let end = index
         while (end < raw.length && DIGITS.has(raw[end] ?? '')) end += 1
         acc.problems.push(`expand: tab stop is too large '${quoteText(raw.slice(digitsAt, end))}'`)
@@ -243,11 +240,11 @@ export function nextTabStop(tabs: TabStops, column: number): number {
     return last + tabs.increment * (Math.floor((column - last) / tabs.increment) + 1)
   }
   if (tabs.stops.length === 1) {
-    const size = tabs.stops[0] ?? DEFAULT_TAB_SIZE
+    const size = tabs.stops[0] ?? TAB_WIDTH
     return column + size - (column % size)
   }
   if (tabs.stops.length > 0) return column + 1
-  return column + DEFAULT_TAB_SIZE - (column % DEFAULT_TAB_SIZE)
+  return column + TAB_WIDTH - (column % TAB_WIDTH)
 }
 
 // Replace every TAB with blanks up to its tab stop.

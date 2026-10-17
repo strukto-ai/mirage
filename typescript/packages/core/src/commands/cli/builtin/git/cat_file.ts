@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import git from 'isomorphic-git'
+import git, { Errors } from 'isomorphic-git'
 import { IOResult } from '../../../../io/types.ts'
 import { readStdinAsync } from '../../../builtin/utils/stream.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -26,7 +26,8 @@ import {
   NoWorkspaceError,
   UsageError,
 } from './errors.ts'
-import { repoArgs, type Repo } from './repo.ts'
+import { OBJECT_TYPES } from './constants.ts'
+import { rawObject, repoArgs, type Repo } from './repo.ts'
 import { resolveObject } from './revparse.ts'
 import { opened } from './session.ts'
 import type { GitObject } from './types.ts'
@@ -35,7 +36,6 @@ import { checkSwitches, fatal, verbUsage } from './util.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-export const OBJECT_TYPES = ['blob', 'tree', 'commit', 'tag'] as const
 // The query modes, each named by the switch that selects it.
 const QUERIES = ['t', 's', 'e', 'p']
 const BATCH_FORMAT = '%(objectname) %(objecttype) %(objectsize)'
@@ -57,11 +57,7 @@ async function namedObject(repo: Repo, name: string): Promise<GitObject> {
 
 /** An object's bytes as stored. */
 async function raw(repo: Repo, oid: string): Promise<Uint8Array> {
-  // cat-file prints the stored content of any type, which only the general
-  // reader returns.
-  // eslint-disable-next-line @typescript-eslint/no-deprecated
-  const read = await git.readObject({ ...repoArgs(repo), oid, format: 'content' })
-  return read.object as Uint8Array
+  return (await rawObject(repo, oid)).raw
 }
 
 /**
@@ -102,8 +98,9 @@ async function query(repo: Repo, mode: string, name: string): Promise<[Uint8Arra
     try {
       await raw(repo, name)
       return [new Uint8Array(), 0]
-    } catch {
-      return [new Uint8Array(), 1]
+    } catch (err) {
+      if (err instanceof Errors.NotFoundError) return [new Uint8Array(), 1]
+      throw err
     }
   }
   const obj = await namedObject(repo, name)

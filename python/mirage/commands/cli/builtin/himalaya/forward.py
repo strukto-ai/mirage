@@ -28,7 +28,7 @@ async def forward(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     uid = first_text(texts, "message id")
-    mailbox = fl.as_str("mailbox") or "INBOX"
+    mailbox = fl.as_str("mailbox", "INBOX")
     accessor = EmailAccessor(config)
     try:
         original = await fetch_message(accessor, mailbox, uid)

@@ -20,7 +20,7 @@ import { eacces, enoent } from '../../../errors/fs.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { labelled, rgGeneric } from './rg.ts'
+import { rgGeneric } from './rg.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -317,19 +317,6 @@ describe('rgGeneric - an operand the walk refused', () => {
       'rg: locked.txt: Permission denied (os error 13)\n',
     )
     expect(io.exitCode).toBe(2)
-  })
-})
-
-describe('labelled', () => {
-  const base: Context = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/') }
-
-  it('asks for the filename a walk would have printed', () => {
-    expect(labelled(base).flags).toEqual({ with_filename: true })
-  })
-
-  it('lets -I win', () => {
-    const ctx = { ...base, flags: { no_filename: true } }
-    expect(labelled(ctx)).toBe(ctx)
   })
 })
 

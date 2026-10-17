@@ -14,7 +14,7 @@
 
 import { PathSpec } from '../../../../types.ts'
 import git from 'isomorphic-git'
-import { DWIM_RULES, HEAD } from './constants.ts'
+import { HEAD } from './constants.ts'
 import { dateClock } from './dates.ts'
 import { configValues } from './fs.ts'
 
@@ -39,11 +39,19 @@ import {
   UnmergedBranchError,
   UsageError,
 } from './errors.ts'
-import { parseFlags, select } from './history.ts'
 import { short } from './format.ts'
 import { readOptional, writeFile } from './io.ts'
 
-import { blockingRef, deleteRef, loadRefs, readHead, validRefName, writeRef } from './refs.ts'
+import {
+  BRANCH_PREFIX,
+  blockingRef,
+  deleteRef,
+  loadRefs,
+  readHead,
+  REMOTE_PREFIX,
+  validBranchName,
+  writeRef,
+} from './refs.ts'
 import { filterWords, refFilter, withoutFilterValues, type RefFilter } from './ref_filter.ts'
 import { displayWidth, formatRefs, listingFormat, usedFields } from './ref_format.ts'
 import {
@@ -51,10 +59,11 @@ import {
   headDescription,
   listingResult,
   matchShort,
+  reached,
   refListing,
   sortKeys,
 } from './ref_list.ts'
-import { commitFacts, configBool, repoArgs, type Repo } from './repo.ts'
+import { configBool, repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import {
   COMMIT,
@@ -80,8 +89,6 @@ import { checkSwitches, configSection, fatal, gitBool, verbUsage, withoutSection
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 const NEWLINE = 0x0a
-const HEADS_PREFIX = 'refs/heads/'
-const REMOTES_PREFIX = 'refs/remotes/'
 const REMOTE = 'remotes/'
 const AUTO_SETUP_MERGE = 'branch.autosetupmerge'
 const TRACK_WORDS: ReadonlyMap<string, Track> = new Map([
@@ -121,8 +128,8 @@ async function create(
   // Before the start point resolves, which is git's order here and the
   // opposite of switch's. A ref is a path below .git, so an unchecked name
   // reaches writeRef as one.
-  if (!validRefName(name)) throw new InvalidBranchNameError(name)
-  const ref = `${HEADS_PREFIX}${name}`
+  if (!validBranchName(name)) throw new InvalidBranchNameError(name)
+  const ref = `${BRANCH_PREFIX}${name}`
   if (refs.has(ref)) throw new BranchExistsError(name)
   // With no start point git starts from the current branch by its short name,
   // or from HEAD when it is detached, and it is that name the refusals and the
@@ -163,7 +170,7 @@ export async function remoteBranch(repo: Repo, name: string): Promise<string | n
   const depth = 3 + name.split('/').length - 1
   const found = [...refs.keys()].filter(
     (ref) =>
-      ref.startsWith(REMOTES_PREFIX) &&
+      ref.startsWith(REMOTE_PREFIX) &&
       ref.endsWith(`/${name}`) &&
       ref.split('/').length - 1 === depth,
   )
@@ -203,8 +210,8 @@ async function tracked(
   mode: Track,
 ): Promise<[string | null, string[], string, string]> {
   const values = (path: string): Promise<string[]> => configValues(repo.vfs, repo.location, path)
-  if (ref.startsWith(HEADS_PREFIX)) {
-    const source = ref.slice(HEADS_PREFIX.length)
+  if (ref.startsWith(BRANCH_PREFIX)) {
+    const source = ref.slice(BRANCH_PREFIX.length)
     if (mode === Track.ALWAYS) return ['.', [ref], '', '']
     if (mode !== Track.INHERIT) return [null, [], '', '']
     const remotes = await values(`branch.${source}.remote`)
@@ -219,8 +226,8 @@ async function tracked(
     const remote = remotes.at(-1) ?? '.'
     return [remote, merges, `${remote}/`, '']
   }
-  if (!ref.startsWith(REMOTES_PREFIX)) return [null, [], '', '']
-  const rest = ref.slice(REMOTES_PREFIX.length)
+  if (!ref.startsWith(REMOTE_PREFIX)) return [null, [], '', '']
+  const rest = ref.slice(REMOTE_PREFIX.length)
   const slash = rest.indexOf('/')
   const remote = rest.slice(0, slash)
   const name = rest.slice(slash + 1)
@@ -234,7 +241,7 @@ async function tracked(
       `warning: asked to inherit tracking from '${ref}', but no remote is set\n`,
     ]
   if (mode === Track.SIMPLE && name !== branch) return [null, [], '', '']
-  return [remote, [`${HEADS_PREFIX}${name}`], `${remote}/`, '']
+  return [remote, [`${BRANCH_PREFIX}${name}`], `${remote}/`, '']
 }
 
 /**
@@ -262,7 +269,7 @@ export async function setUpTracking(
   if (typed === HEAD) ref = head.ref
   else {
     const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
-    ref = DWIM_RULES.map((rule) => rule.replace('{}', typed)).find((name) => refs.has(name))
+    ref = refsNamed(refs, typed)[0]
   }
   if (ref === null || ref === undefined) return ['', '']
   const [remote, merges, prefix, warning] = await tracked(repo, ref, branch, mode)
@@ -321,7 +328,7 @@ async function remove(
   name: string,
   force: boolean,
 ): Promise<string> {
-  const ref = `${HEADS_PREFIX}${name}`
+  const ref = `${BRANCH_PREFIX}${name}`
   const sha = refs.get(ref)
   if (sha === undefined) throw new NoBranchError(name)
   if (name === head.branch) throw new CheckedOutBranchError(name, repo.location.worktree.virtual)
@@ -391,7 +398,7 @@ function listWidth(items: readonly RefItem[], bonus: number, description: string
     if (item.kind === RefKind.DETACHED) width = displayWidth(description)
     else {
       let name = item.name
-      for (const prefix of [HEADS_PREFIX, REMOTES_PREFIX])
+      for (const prefix of [BRANCH_PREFIX, REMOTE_PREFIX])
         if (name.startsWith(prefix)) name = name.slice(prefix.length)
       width = displayWidth(name) + (item.kind === RefKind.REMOTE ? bonus : 0)
     }
@@ -424,8 +431,8 @@ async function listBranches(
   const detached = head.commit !== null && !remotesOnly
   const wanted = (name: string): boolean =>
     ((name === HEAD && detached) ||
-      (!remotesOnly && name.startsWith(HEADS_PREFIX)) ||
-      (includeRemotes && name.startsWith(REMOTES_PREFIX))) &&
+      (!remotesOnly && name.startsWith(BRANCH_PREFIX)) ||
+      (includeRemotes && name.startsWith(REMOTE_PREFIX))) &&
     matchShort(name, patterns, icase)
   let fmt = listingFormat(template ?? buildFormat(verbose, 0, prefix))
   const [items, found, errors] = await refListing(
@@ -533,19 +540,12 @@ export async function upstreamOf(
   const merge = (await configValues(repo.vfs, repo.location, `branch.${branch}.merge`)).at(-1)
   if (remote === undefined || merge === undefined) return null
   const tracked =
-    remote === '.' ? merge : `refs/remotes/${remote}/${merge.replace(/^refs\/heads\//, '')}`
+    remote === '.' ? merge : `${REMOTE_PREFIX}${remote}/${merge.replace(/^refs\/heads\//, '')}`
   const label = tracked.replace(/^refs\/(heads|remotes)\//, '')
   const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
   if (!refs.has(tracked)) return { label, ahead: 0, behind: 0, gone: true }
-  const flags = parseFlags(new FlagView())
-  const ours = new Set(
-    (await select(repo, [await commitFacts(repo, tip)], flags)).map((c) => c.oid),
-  )
-  const theirs = new Set(
-    (await select(repo, [await commitFacts(repo, await resolveCommit(repo, tracked))], flags)).map(
-      (c) => c.oid,
-    ),
-  )
+  const ours = await reached(repo, tip)
+  const theirs = await reached(repo, await resolveCommit(repo, tracked))
   return {
     label,
     ahead: [...ours].filter((id) => !theirs.has(id)).length,
@@ -562,15 +562,15 @@ export async function branchUpstream(
 ): Promise<Upstream | null> {
   if (head.branch === null || noCommits) return null
   const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
-  if (!refs.has(`${HEADS_PREFIX}${head.branch}`)) return null
-  const tip = await resolveCommit(repo, `${HEADS_PREFIX}${head.branch}`)
+  if (!refs.has(`${BRANCH_PREFIX}${head.branch}`)) return null
+  const tip = await resolveCommit(repo, `${BRANCH_PREFIX}${head.branch}`)
   return upstreamOf(repo, head.branch, tip)
 }
 
 /** branch's refusal by a read-only mount: the lock on the ref it creates or deletes. */
 export const branchReadOnly: ReadOnlyRefusal = (texts, ctx, location) => {
   const fl = new FlagView(ctx.flags)
-  const ref = `${HEADS_PREFIX}${texts[0] ?? ''}`
+  const ref = `${BRANCH_PREFIX}${texts[0] ?? ''}`
   const path = (location?.commondir ?? PathSpec.fromStrPath('/.git')).join(ref)
   if (fl.asBool('delete') || fl.asBool('D')) return new RefDeleteReadOnlyError(ref, path.virtual)
   return new RefReadOnlyError(ref, path.virtual)

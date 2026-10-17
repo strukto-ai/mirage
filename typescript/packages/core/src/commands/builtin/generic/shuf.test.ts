@@ -18,12 +18,12 @@ import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import type { Context } from '../../config.ts'
+import { UINTMAX } from '../constants.ts'
 import { parseFlags as parseLineFlags } from '../../../workspace/executor/command/flags.ts'
 import {
   MAX_OUTPUT_LINES,
   MEMORY_EXHAUSTED,
   SIZE_MAX,
-  UINTMAX_MAX,
   emitCount,
   parseFlags,
   parseInputRange,
@@ -288,16 +288,16 @@ describe('shuf parseFlags is the one flag read', () => {
 // limit at SIZE_MAX and that one reads as the PLAIN message, the same one a
 // decreasing range gets. Every row measured against GNU coreutils 9.4 (ground
 // truth SH1, SH3, SH4).
-describe('shuf -i reads a bound as an exact integer up to UINTMAX_MAX', () => {
+describe('shuf -i reads a bound as an exact integer up to UINTMAX', () => {
   it.each([
     ['9007199254740992-9007199254740992', [2n ** 53n, 2n ** 53n]],
     ['9007199254740993-9007199254740993', [2n ** 53n + 1n, 2n ** 53n + 1n]],
     ['9223372036854775807-9223372036854775807', [2n ** 63n - 1n, 2n ** 63n - 1n]],
     ['9223372036854775808-9223372036854775808', [2n ** 63n, 2n ** 63n]],
-    [`${String(UINTMAX_MAX)}-${String(UINTMAX_MAX)}`, [UINTMAX_MAX, UINTMAX_MAX]],
-    [`${String(UINTMAX_MAX - 1n)}-${String(UINTMAX_MAX)}`, [UINTMAX_MAX - 1n, UINTMAX_MAX]],
-    [`0-${String(UINTMAX_MAX - 1n)}`, [0n, UINTMAX_MAX - 1n]],
-    [`1-${String(UINTMAX_MAX)}`, [1n, UINTMAX_MAX]],
+    [`${String(UINTMAX)}-${String(UINTMAX)}`, [UINTMAX, UINTMAX]],
+    [`${String(UINTMAX - 1n)}-${String(UINTMAX)}`, [UINTMAX - 1n, UINTMAX]],
+    [`0-${String(UINTMAX - 1n)}`, [0n, UINTMAX - 1n]],
+    [`1-${String(UINTMAX)}`, [1n, UINTMAX]],
   ] as [string, [bigint, bigint]][])('accepts -i %j', (raw, bounds) => {
     expect(parseInputRange(raw)).toEqual(bounds)
   })
@@ -363,7 +363,7 @@ describe('shuf -i reads a bound as an exact integer up to UINTMAX_MAX', () => {
 // one-element ranges, so the assertion is on the byte, and neither can hang
 // the suite even if the fix regresses in some other direction.
 describe('shuf -i emits a large bound exactly', () => {
-  it.each([2n ** 53n, 2n ** 53n + 1n, 2n ** 63n - 1n, 2n ** 63n, UINTMAX_MAX])(
+  it.each([2n ** 53n, 2n ** 53n + 1n, 2n ** 63n - 1n, 2n ** 63n, UINTMAX])(
     'prints %s for its own one-element range',
     async (low) => {
       const got = await run({ input_range: `${String(low)}-${String(low)}` })
@@ -380,7 +380,7 @@ describe('shuf -i emits a large bound exactly', () => {
 // implementation that enumerates fails by timing out rather than by assertion
 // -- which is exactly the failure the reviewer reported.
 describe('shuf -i samples a huge range without enumerating it', () => {
-  it.each([`1-${String(UINTMAX_MAX)}`, '1-1000000000000', '1-100000000'])(
+  it.each([`1-${String(UINTMAX)}`, '1-1000000000000', '1-100000000'])(
     'draws three distinct values from -i %s',
     async (raw) => {
       const got = await run({ input_range: raw, head_count: '3' })
@@ -397,7 +397,7 @@ describe('shuf -i samples a huge range without enumerating it', () => {
   )
 
   it('emits nothing for -n 0 however large the range is', async () => {
-    const got = await run({ input_range: `1-${String(UINTMAX_MAX)}`, head_count: '0' })
+    const got = await run({ input_range: `1-${String(UINTMAX)}`, head_count: '0' })
     expect(got.exit).toBe(0)
     expect(got.stdout).toBe('')
     expect(got.stderr).toBe('')
@@ -405,7 +405,7 @@ describe('shuf -i samples a huge range without enumerating it', () => {
 
   it('draws with replacement from a huge range too', async () => {
     const got = await run({
-      input_range: `1-${String(UINTMAX_MAX)}`,
+      input_range: `1-${String(UINTMAX)}`,
       head_count: '4',
       repeat: true,
     })
@@ -420,10 +420,10 @@ describe('shuf -i samples a huge range without enumerating it', () => {
 // rather than left to whatever the host survives.
 describe('shuf refuses an output it cannot render', () => {
   it.each([
-    [{ input_range: `1-${String(UINTMAX_MAX)}` }],
+    [{ input_range: `1-${String(UINTMAX)}` }],
     [{ input_range: '1-1000000000000' }],
     [{ input_range: `1-${String(MAX_OUTPUT_LINES + 1n)}` }],
-    [{ input_range: `1-${String(UINTMAX_MAX)}`, repeat: true }],
+    [{ input_range: `1-${String(UINTMAX)}`, repeat: true }],
     [{ input_range: '1-3', head_count: String(MAX_OUTPUT_LINES + 1n), repeat: true }],
   ] as [Record<string, FlagValue>][])('answers memory exhausted for %j', async (flags) => {
     const got = await run(flags)
@@ -454,7 +454,7 @@ describe('shuf refuses an output it cannot render', () => {
 // the bignum. Measured, ground truth SH6.
 describe('shuf -n clamps an overflowing count', () => {
   it.each([
-    String(UINTMAX_MAX),
+    String(UINTMAX),
     '18446744073709551616',
     '+18446744073709551616',
     '99999999999999999999999999',
@@ -493,8 +493,8 @@ describe('shuf decides the emitted count before anything is built', () => {
     [0n, 5n, true, 0n],
     [0n, null, true, 0n],
     [0n, 5n, false, 0n],
-    [UINTMAX_MAX, 3n, false, 3n],
-    [UINTMAX_MAX, null, false, UINTMAX_MAX],
+    [UINTMAX, 3n, false, 3n],
+    [UINTMAX, null, false, UINTMAX],
   ] as [bigint, bigint | null, boolean, bigint][])(
     'emitCount(%s, %s, %s) is %s',
     (available, count, repeat, expected) => {

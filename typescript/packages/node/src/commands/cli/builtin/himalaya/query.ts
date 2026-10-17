@@ -323,6 +323,16 @@ export function uidBudget(
   return Math.min(Math.max(page, 1) * pageSize, maxMessages)
 }
 
+/**
+ * `--page` and `--page-size` as upstream reads a page size of 0: upstream
+ * (v2.2.1 `envelope list`/`search`) filters it out to none at all, which
+ * lists the whole mailbox whatever page was asked for; the whole mailbox here
+ * is the account's message window. Mirrors Python's `page_window`.
+ */
+export function pageWindow(page: number, pageSize: number, maxMessages: number): [number, number] {
+  return pageSize === 0 ? [1, maxMessages] : [page, pageSize]
+}
+
 export function pageSlice<T>(items: readonly T[], page: number, pageSize: number): T[] {
   const start = Math.max(page - 1, 0) * pageSize
   return items.slice(start, start + pageSize)

@@ -41,7 +41,11 @@ from mirage.commands.builtin.utils.tree import before_full_scan
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.usage import argmatch_error, extra_operand_error
+from mirage.commands.spec.usage import (
+    argmatch_error,
+    extra_operand_error,
+    usage_hint,
+)
 from mirage.errors.classify import classify
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import enoent, fs_strerror
@@ -326,7 +330,7 @@ def parse_flags(fl: FlagView) -> CpFlags:
     ):
         raise UsageError(
             "cp: --backup is mutually exclusive with -n or "
-            "--update=none-fail\nTry 'cp --help' for more information.",
+            f"--update=none-fail\n{usage_hint('cp')}",
             1,
         )
     target_dir, no_target = target_flags("cp", fl)
@@ -584,7 +588,8 @@ async def copy_tree_links(
         leads = await copies.links.target_stat(virtual)
         if leads is None:
             errors.append(
-                f"cp: cannot stat '{shown}': No such file or directory"
+                f"cp: cannot stat '{shown}': "
+                f"{posix_phrase(FsCondition.ENOENT)}"
             )
             continue
         placed = replace(
@@ -665,7 +670,7 @@ def split_operands(
         target_dir (PathSpec | None): ``--target-directory`` value.
         no_target_dir (bool): ``-T``.
     """
-    hint = f"Try '{cmd_name} --help' for more information."
+    hint = usage_hint(cmd_name)
     if not paths:
         raise UsageError(f"{cmd_name}: missing file operand\n{hint}", 1)
     if target_dir is not None:
@@ -864,19 +869,59 @@ def overwrite_type_error(
         target_exists (bool): Whether the destination exists.
         target_is_dir (bool): Whether the destination is a directory.
     """
-    if not target_exists:
+    if not target_exists or src_is_dir == target_is_dir:
         return None
-    if src_is_dir and not target_is_dir:
+    return type_mismatch_error(cmd_name, src, target, src_is_dir)
+
+
+def type_mismatch_error(
+    cmd_name: str, src: PathSpec, target: PathSpec, src_is_dir: bool
+) -> str:
+    """GNU's line for a directory and a non-directory meeting at one name.
+
+    Args:
+        cmd_name (str): Command name for the error prefix.
+        src (PathSpec): Source operand.
+        target (PathSpec): Destination path, of the other kind.
+        src_is_dir (bool): Whether the source is the directory.
+    """
+    if src_is_dir:
         return (
             f"{cmd_name}: cannot overwrite non-directory "
             f"'{target.raw_path}' with directory '{src.raw_path}'"
         )
-    if not src_is_dir and target_is_dir:
-        return (
-            f"{cmd_name}: cannot overwrite directory "
-            f"'{target.raw_path}' with non-directory '{src.raw_path}'"
-        )
-    return None
+    return (
+        f"{cmd_name}: cannot overwrite directory "
+        f"'{target.raw_path}' with non-directory '{src.raw_path}'"
+    )
+
+
+def same_file_error(cmd_name: str, src: PathSpec, target: PathSpec) -> str:
+    """GNU's line for a source that is its own destination.
+
+    Args:
+        cmd_name (str): Command name for the error prefix.
+        src (PathSpec): Source operand.
+        target (PathSpec): Destination path naming the same file.
+    """
+    return (
+        f"{cmd_name}: '{src.raw_path}' and '{target.raw_path}' "
+        "are the same file"
+    )
+
+
+def just_created_error(cmd_name: str, src: PathSpec, target: PathSpec) -> str:
+    """GNU's line for a destination this line already wrote.
+
+    Args:
+        cmd_name (str): Command name for the error prefix.
+        src (PathSpec): The later source landing on it.
+        target (PathSpec): Destination path an earlier source created.
+    """
+    return (
+        f"{cmd_name}: will not overwrite just-created "
+        f"'{target.raw_path}' with '{src.raw_path}'"
+    )
 
 
 async def _holds_directory(stat: StatFn, path: PathSpec) -> bool:
@@ -919,10 +964,7 @@ def _onto_directory(
             f"{cmd_name}: cannot create regular file '{target.raw_path}': "
             f"{posix_phrase(FsCondition.EISDIR)}"
         )
-    return (
-        f"{cmd_name}: cannot overwrite directory '{target.raw_path}' "
-        f"with non-directory '{src.raw_path}'"
-    )
+    return type_mismatch_error(cmd_name, src, target, False)
 
 
 async def _clear_for_directory(
@@ -960,10 +1002,7 @@ async def _clear_for_directory(
         stays taken.
     """
     if copies is None or not backup_displaces(policy.backup):
-        errors.append(
-            f"{policy.cmd_name}: cannot overwrite non-directory "
-            f"'{target.raw_path}' with directory '{src.raw_path}'"
-        )
+        errors.append(type_mismatch_error(policy.cmd_name, src, target, True))
         return None
     target = link_name(copies, target) or target
     if typed_name(src) in (".", ".."):
@@ -1125,7 +1164,7 @@ async def _duplicate_for_backup(
     if strategy.dir_copy is None:
         errors.append(
             f"{cmd_name}: cannot backup '{target.raw_path}': "
-            "Operation not supported"
+            f"{posix_phrase(FsCondition.ENOTSUP)}"
         )
         return False
     await strategy.dir_copy(target, backup)
@@ -1954,10 +1993,7 @@ async def cp_generic(
                 else resolve_path(dst.raw_path or dst.virtual, copies.cwd)
             )
             if named == landing:
-                errors.append(
-                    f"cp: '{src.raw_path}' and '{target.raw_path}' "
-                    "are the same file"
-                )
+                errors.append(same_file_error("cp", src, target))
                 continue
             repeat = _repeated_source(
                 first_link.get(named), src, target, False, flags, key_of
@@ -1970,10 +2006,7 @@ async def cp_generic(
             if guards_created and key_of(target) in created:
                 if policy.ask is not None and not await policy.ask(target):
                     continue
-                errors.append(
-                    f"cp: will not overwrite just-created '{target.raw_path}' "
-                    f"with '{src.raw_path}'"
-                )
+                errors.append(just_created_error("cp", src, target))
                 continue
             if await make_link(
                 copies,
@@ -2006,15 +2039,10 @@ async def cp_generic(
             # A directory source it merges into the working directory;
             # mirage refuses that at the create, since reading the empty
             # name as the working directory is what `walk_error` is for.
-            errors.append(
-                "cp: cannot overwrite directory '' with "
-                f"non-directory '{src.raw_path}'"
-            )
+            errors.append(type_mismatch_error("cp", src, target, False))
             continue
         if key_of(src) == key_of(target):
-            errors.append(
-                f"cp: '{src.raw_path}' and '{target.raw_path}' are the same file"
-            )
+            errors.append(same_file_error("cp", src, target))
             continue
         # GNU copies a directory into its own subtree too: everything but
         # the new copy itself, before it says it could not (cp -r d d).
@@ -2080,11 +2108,7 @@ async def cp_generic(
             # name is taken. GNU will not create the file it points at
             # (POSIX would), and the link is a non-directory to a tree.
             if src_is_dir:
-                errors.append(
-                    f"cp: cannot overwrite non-directory "
-                    f"'{target.raw_path}' with directory "
-                    f"'{src.raw_path}'"
-                )
+                errors.append(type_mismatch_error("cp", src, target, True))
                 continue
             if flags.verbose:
                 lines.append(transfer_line(src, target, None))
@@ -2108,10 +2132,7 @@ async def cp_generic(
         if flags.recursive and src_is_dir:
             if guards_created and key_of(target) in created:
                 # As a file would be, but a directory is asked nothing.
-                errors.append(
-                    f"cp: will not overwrite just-created "
-                    f"'{target.raw_path}' with '{src.raw_path}'"
-                )
+                errors.append(just_created_error("cp", src, target))
                 continue
             # A whole-tree copy reads nothing here; any other copy goes
             # file by file, so the source's mount is asked before the
@@ -2249,7 +2270,7 @@ async def cp_generic(
             errors.extend(
                 "cp: cannot access "
                 f"'{spelled_from(mounted_path(src, root), src).raw_path}': "
-                "Permission denied"
+                f"{posix_phrase(FsCondition.EACCES)}"
                 for root in dict.fromkeys(unreadable)
             )
             for entry_mount in files:
@@ -2315,10 +2336,7 @@ async def cp_generic(
             # the answer says to replace.
             if policy.ask is not None and not await policy.ask(target):
                 continue
-            errors.append(
-                f"cp: will not overwrite just-created '{target.raw_path}' "
-                f"with '{src.raw_path}'"
-            )
+            errors.append(just_created_error("cp", src, target))
             continue
         if not await overwrite_gate(policy, stat, src, target, errors, copies):
             continue

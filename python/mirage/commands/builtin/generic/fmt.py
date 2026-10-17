@@ -8,13 +8,20 @@ from mirage.commands.builtin.utils.operands import (
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import stdin_stat, stdin_stream
+from mirage.commands.builtin.utils.strtol import (
+    EOVERFLOW_REASON,
+    ERANGE_REASON,
+    xstrtoumax,
+)
 from mirage.commands.config import Context
+from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
+from mirage.utils.width import TAB_WIDTH
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,13 +35,45 @@ class FmtFlags:
     uniform: bool = False
 
 
+def _width_refusal(text: str, value: int | None) -> str:
+    """fmt's refusal of a -w value, past its range a range error.
+
+    Args:
+        text (str): the value as typed.
+        value (int | None): what it scanned to, None for no number.
+    """
+    reason = "" if value is None else f": {ERANGE_REASON}"
+    return f"fmt: invalid width: '{quote_text(text)}'{reason}"
+
+
+def _goal_refusal(text: str, value: int | None) -> str:
+    """fmt's refusal of a -g value, past the width too large.
+
+    Args:
+        text (str): the value as typed.
+        value (int | None): what it scanned to, None for no number.
+    """
+    reason = "" if value is None else f": {EOVERFLOW_REASON}"
+    return f"fmt: invalid width: '{quote_text(text)}'{reason}"
+
+
 def parse_flags(flags: Mapping[str, FlagValue]) -> FmtFlags:
     fl = FlagView(flags, spec=SPECS["fmt"])
-    width_value = fl.as_str("width")
-    goal_value = fl.as_str("goal")
+    # GNU 9.7 reads -w with xdectoumax(optarg, 0, MAXCHARS / 2) and then
+    # -g with xdectoumax(optarg, 0, max_width).
+    width = fl.as_number(
+        "width", xstrtoumax, _width_refusal, low=0, high=MAX_CHARS // 2
+    )
+    goal = fl.as_number(
+        "goal",
+        xstrtoumax,
+        _goal_refusal,
+        low=0,
+        high=WIDTH if width is None else width,
+    )
     return FmtFlags(
-        width=int(width_value) if width_value is not None else None,
-        goal=int(goal_value) if goal_value is not None else None,
+        width=width,
+        goal=goal,
         prefix=fl.as_str("prefix"),
         split_only=fl.as_bool("split_only"),
         tagged=fl.as_bool("tagged_paragraph"),
@@ -46,7 +85,6 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> FmtFlags:
 WIDTH = 75
 LEEWAY = 7
 DEF_INDENT = 3
-TAB_WIDTH = 8
 MAX_WORDS = 1000
 MAX_CHARS = 5000
 EOF = -1

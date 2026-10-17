@@ -137,26 +137,6 @@ class Track(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class HeadMove:
-    """What moving HEAD carried across, and what it could not do.
-
-    Two things rather than one because git writes both: the paths whose
-    uncommitted change survived the move go to stdout with their status
-    letters, and a submodule directory the move could not remove is a
-    warning on stderr above the line saying the branch changed.
-
-    Args:
-        carried (dict[str, str]): each path whose uncommitted change was
-            carried across, against the status letter git prints for it.
-        warnings (str): the warning lines to write before the note,
-            empty when there are none.
-    """
-
-    carried: dict[str, str]
-    warnings: str
-
-
-@dataclass(frozen=True, slots=True)
 class AncestryStep:
     """One ``~`` or ``^`` suffix of a revision.
 

@@ -621,4 +621,8 @@ HELP_TOPICS: dict[str, str] = {
 }
 
 GITHUB_HOST = "github.com"
+# How gh 2.46 refuses a list verb's --limit under 1, before any request:
+# `invalid limit: 0`, and `invalid value for --limit: 0` from pr list.
+INVALID_LIMIT = "invalid limit"
+PR_INVALID_LIMIT = "invalid value for --limit"
 CONNECT_HINT = "check your internet connection or https://githubstatus.com"

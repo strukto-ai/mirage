@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from dulwich.index import IndexEntry
@@ -47,6 +47,7 @@ from mirage.commands.cli.builtin.git.io import (
     stat_of,
 )
 from mirage.commands.cli.builtin.git.pathspec import (
+    decoded,
     matched,
     repo_relative,
     under,
@@ -62,9 +63,9 @@ from mirage.commands.cli.builtin.git.revparse import (
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.tree import (
     Tree,
+    commit_entries,
     contents,
-    flat_tree,
-    tree_of,
+    tree_entries,
 )
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
@@ -119,15 +120,6 @@ def index_tree(entries: dict[bytes, IndexEntry]) -> Tree:
     return {path: (entry.mode, entry.sha) for path, entry in entries.items()}
 
 
-def decoded(paths: Iterable[bytes]) -> set[str]:
-    """Repository-relative paths as text.
-
-    Args:
-        paths (Iterable[bytes]): index, conflict or tree keys.
-    """
-    return {path.decode("utf-8", errors="replace") for path in paths}
-
-
 def source_tree(repo: BaseRepo, revision: str) -> tuple[bytes, Tree]:
     """Every path a ``--source`` names, commit-ish or tree-ish.
 
@@ -164,10 +156,10 @@ def source_tree(repo: BaseRepo, revision: str) -> tuple[bytes, Tree]:
     found = unwrapped(repo, found, revision)
     if isinstance(found, Commit):
         # git's one implicit peel: a commit stands for its tree here.
-        return found.tree, tree_of(repo, found.id)
+        return found.tree, commit_entries(repo, found.id)
     if found.type_name.decode() != TREE:
         raise UnreadableTreeError(found.id.decode())
-    return found.id, flat_tree(repo, found.id)
+    return found.id, tree_entries(repo, found.id)
 
 
 async def restore(

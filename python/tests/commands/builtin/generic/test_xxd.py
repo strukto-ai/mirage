@@ -18,30 +18,15 @@ from mirage.commands.builtin.generic.xxd import (
     XxdSeek,
     parse_limit,
     parse_seek,
-    strtol,
     xxd,
+    xxd_generic,
 )
+from mirage.commands.config import Context
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
 
 DATA = b"defgh"
 F = PathSpec(virtual="/f", directory="/", vfs_path="f", raw_path="/f")
-
-
-@pytest.mark.parametrize(
-    "raw,value",
-    [
-        ("2", 2),
-        ("0x2", 2),
-        ("017", 15),
-        ("2k", 2),
-        ("x", 0),
-        ("08", 0),
-        ("-3", -3),
-    ],
-)
-def test_strtol_reads_base_zero_and_drops_the_rest(raw, value):
-    assert strtol(raw) == value
 
 
 @pytest.mark.parametrize(
@@ -125,3 +110,14 @@ async def test_stdin_is_read_off_and_cannot_seek_back(seek, code, out):
 )
 def test_parse_limit_reads_no_limit_for_a_negative_count(raw, limit):
     assert parse_limit(raw) == limit
+
+
+@pytest.mark.asyncio
+async def test_a_direct_call_takes_integer_counts():
+    stdout, io = await xxd_generic(
+        [F], [], Context(flags={"c": 4, "g": 1}), _stream
+    )
+    assert (await materialize(stdout)).decode() == (
+        "00000000: 64 65 66 67  defg\n00000004: 68           h\n"
+    )
+    assert io.exit_code == 0

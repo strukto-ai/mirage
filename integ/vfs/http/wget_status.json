@@ -88,7 +88,7 @@
       "expect": {
         "exit": 0,
         "stdout": "exit=1\n",
-        "stderr": ""
+        "stderr": "/ro/w.txt: Read-only file system\n"
       }
     },
     {
@@ -115,6 +115,19 @@
         "exit": 0,
         "stdout": "8\n0\n",
         "stderr": ""
+      }
+    },
+    {
+      "id": "wget_empty_output_document",
+      "seq": 9940141,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "wget -O '' http://127.0.0.1:1/hello; echo rc=$?; wget -q -O '' http://127.0.0.1:1/hello",
+      "expect": {
+        "exit": 1,
+        "stdout": "rc=1\n",
+        "stderr": "No such file or directory\nNo such file or directory\n"
       }
     }
   ]

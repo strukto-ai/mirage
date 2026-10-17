@@ -20,18 +20,18 @@ import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { DETACHED_ADVICE, switchTo } from './checkout.ts'
 import { CloneReadOnlyError, GitError, NoWorkspaceError, UsageError } from './errors.ts'
-import { configuredHeaders, fetchObjects, HEADS, ignoreFunny, TAGS } from './fetch.ts'
+import { configuredHeaders, fetchObjects, ignoreFunny } from './fetch.ts'
 import { layOut } from './init.ts'
 import { readNames, removeTree, statOf, writeFile } from './io.ts'
 import { append, entry, IDENTITY, ZERO } from './reflog.ts'
-import { detachHead, setHead, validRefName, writeRef } from './refs.ts'
+import { DEFAULT_BRANCH } from './constants.ts'
+import { BRANCH_PREFIX, detachHead, setHead, TAG_PREFIX, validRefName, writeRef } from './refs.ts'
 import { openRepo } from './repo.ts'
 import { commitEntries } from './tree.ts'
 import { isLocal, openTransport, type Advertisement, type Transport } from './transport.ts'
 import type { ReadOnlyRefusal, RepoLocation } from './types.ts'
 
 const ENC = new TextEncoder()
-const DEFAULT_BRANCH = 'master'
 
 /** The directory git names a clone after, as `guess_dir_name` does. */
 export function defaultDirectory(url: string): string {
@@ -53,7 +53,7 @@ function config(url: string, remote: string, branch: string | null): string {
   if (branch !== null)
     text += configSection('branch', branch, [
       ['remote', remote],
-      ['merge', `${HEADS}${branch}`],
+      ['merge', `${BRANCH_PREFIX}${branch}`],
     ])
   return text
 }
@@ -64,16 +64,16 @@ export function remoteHead(
   chosen: string | null,
 ): [string | null, string | null] {
   if (chosen !== null) {
-    for (const ref of [`${HEADS}${chosen}`, `${TAGS}${chosen}`]) {
+    for (const ref of [`${BRANCH_PREFIX}${chosen}`, `${TAG_PREFIX}${chosen}`]) {
       const oid = adv.refs.get(ref)
       if (oid !== undefined)
-        return [ref.startsWith(HEADS) ? chosen : null, adv.peeled.get(ref) ?? oid]
+        return [ref.startsWith(BRANCH_PREFIX) ? chosen : null, adv.peeled.get(ref) ?? oid]
     }
     return [chosen, null]
   }
   if (adv.head !== null) {
     const oid = adv.refs.get(adv.head)
-    if (oid !== undefined) return [adv.head.slice(HEADS.length), oid]
+    if (oid !== undefined) return [adv.head.slice(BRANCH_PREFIX.length), oid]
   }
   return [null, adv.refs.get('HEAD') ?? null]
 }
@@ -173,7 +173,7 @@ async function populate(
   const vfs = ctx.vfs
   if (vfs === undefined) throw new NoWorkspaceError()
   const gitdir = target.join('.git')
-  const remote = fl.asStr('origin') ?? 'origin'
+  const remote = fl.asStr('origin', 'origin')
   if (!validRefName(`refs/remotes/${remote}/test`))
     throw new GitError(`'${remote}' is not a valid remote name`)
   await layOut(vfs, gitdir, DEFAULT_BRANCH, '')
@@ -186,11 +186,13 @@ async function populate(
   }
   const [wants, funny] = ignoreFunny(
     [...advertised.refs]
-      .filter(([ref]) => ref.startsWith(HEADS) || ref.startsWith(TAGS))
+      .filter(([ref]) => ref.startsWith(BRANCH_PREFIX) || ref.startsWith(TAG_PREFIX))
       .map(([ref, oid]) => ({
         remote: ref,
         oid,
-        local: ref.startsWith(HEADS) ? `refs/remotes/${remote}/${ref.slice(HEADS.length)}` : ref,
+        local: ref.startsWith(BRANCH_PREFIX)
+          ? `refs/remotes/${remote}/${ref.slice(BRANCH_PREFIX.length)}`
+          : ref,
         force: false,
         merge: false,
         listed: true,
@@ -211,12 +213,17 @@ async function populate(
   const commit = picked[1]
   if (chosen !== null && commit === null)
     throw new GitError(`Remote branch ${chosen} not found in upstream ${remote}`)
-  if (!advertised.refs.size) {
-    notes += 'warning: You appear to have cloned an empty repository.\n'
+  if (!advertised.refs.size) notes += 'warning: You appear to have cloned an empty repository.\n'
+  // No HEAD to start from, in an empty remote or one whose HEAD names a branch
+  // it lacks: the clone is born on the branch that HEAD names, as git's unborn
+  // advertisement leaves it, or on the default one.
+  if (branch === null && commit === null) {
     const head = advertised.head
     branch = (
-      head?.startsWith(HEADS) && validRefName(head) ? head : `${HEADS}${DEFAULT_BRANCH}`
-    ).slice(HEADS.length)
+      head?.startsWith(BRANCH_PREFIX) && validRefName(head)
+        ? head
+        : `${BRANCH_PREFIX}${DEFAULT_BRANCH}`
+    ).slice(BRANCH_PREFIX.length)
   }
   const [repo] = await fetchObjects(await openRepo(vfs, location), transport, adv, wants, false)
   for (const want of wants)
@@ -229,21 +236,23 @@ async function populate(
     await writeFile(
       vfs,
       gitdir.join(tracking),
-      ENC.encode(`ref: refs/remotes/${remote}/${adv.head.slice(HEADS.length)}\n`),
+      ENC.encode(`ref: refs/remotes/${remote}/${adv.head.slice(BRANCH_PREFIX.length)}\n`),
     )
     await append(vfs, gitdir, `logs/${tracking}`, entry(ZERO, headOid, IDENTITY, now, reason))
   }
   await writeFile(vfs, gitdir.join('config'), ENC.encode(config(url, remote, branch)))
   if (local) notes += 'done.\n'
   if (commit === null) {
-    await setHead(vfs, gitdir, `${HEADS}${branch ?? DEFAULT_BRANCH}`)
+    if (advertised.refs.size && !fl.asBool('no_checkout'))
+      notes += 'warning: remote HEAD refers to nonexistent ref, unable to checkout\n'
+    await setHead(vfs, gitdir, `${BRANCH_PREFIX}${branch ?? DEFAULT_BRANCH}`)
     return notes
   }
   const line = entry(ZERO, commit, IDENTITY, now, reason)
   if (branch !== null) {
-    await writeRef(vfs, gitdir, `${HEADS}${branch}`, commit)
-    await setHead(vfs, gitdir, `${HEADS}${branch}`)
-    await append(vfs, gitdir, `logs/${HEADS}${branch}`, line)
+    await writeRef(vfs, gitdir, `${BRANCH_PREFIX}${branch}`, commit)
+    await setHead(vfs, gitdir, `${BRANCH_PREFIX}${branch}`)
+    await append(vfs, gitdir, `logs/${BRANCH_PREFIX}${branch}`, line)
   } else {
     await detachHead(vfs, gitdir, commit)
     notes += `Note: switching to '${commit}'.\n\n${DETACHED_ADVICE}\n`

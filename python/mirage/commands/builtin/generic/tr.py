@@ -7,7 +7,11 @@ from mirage.commands.quote import quote_text, quote_word
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
-from mirage.commands.spec.usage import extra_operand_error, usage_hint
+from mirage.commands.spec.usage import (
+    extra_operand_error,
+    missing_operand_error,
+    usage_hint,
+)
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import byte_view, from_byte_view
 from mirage.types import PathSpec
@@ -127,7 +131,7 @@ async def tr_generic(
     flags: Mapping[str, FlagValue] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
-        raise ValueError("tr: missing operand" + _TRY_HELP)
+        raise missing_operand_error(CommandName.TR, None)
     parsed = parse_flags(flags or {})
     # -d without -s takes one string, so the extra operand is the second
     # one: `tr -d a b c` names b (tr.c reports argv[optind + max_operands]).

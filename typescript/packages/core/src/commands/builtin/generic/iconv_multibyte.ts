@@ -28,21 +28,21 @@ export type ByteRanges = readonly (readonly [number, number])[]
 export type Block = readonly ByteRanges[]
 export type StepFn = (raw: Uint8Array, at: number, table: Table) => Decoded
 
-export const GBK_TRAIL: ByteRanges = [
+const GBK_TRAIL: ByteRanges = [
   [0x40, 0x7e],
   [0x80, 0xfe],
 ]
-export const SJIS_TRAIL: ByteRanges = [
+const SJIS_TRAIL: ByteRanges = [
   [0x40, 0x7e],
   [0x80, 0xfc],
 ]
-export const EUC_BYTE: ByteRanges = [[0xa1, 0xfe]]
-export const FOUR_DIGIT: ByteRanges = [[0x30, 0x39]]
-export const FOUR_LETTER: ByteRanges = [[0x81, 0xfe]]
-export const PRIVATE_USE: readonly [number, number] = [0xe000, 0xf8ff]
-export const HALFWIDTH_KATAKANA = 0xfec0
-export const SUPPLEMENTARY_LEAD: readonly [number, number] = [0x90, 0xe3]
-export const LAST_CODE_POINT = 0x10ffff
+const EUC_BYTE: ByteRanges = [[0xa1, 0xfe]]
+const FOUR_DIGIT: ByteRanges = [[0x30, 0x39]]
+const FOUR_LETTER: ByteRanges = [[0x81, 0xfe]]
+const PRIVATE_USE: readonly [number, number] = [0xe000, 0xf8ff]
+const HALFWIDTH_KATAKANA = 0xfec0
+const SUPPLEMENTARY_LEAD: readonly [number, number] = [0x90, 0xe3]
+const LAST_CODE_POINT = 0x10ffff
 
 function key(raw: Uint8Array, at: number, width: number): number {
   let out = 0
@@ -62,7 +62,7 @@ function pair(raw: Uint8Array, at: number, table: Table, unmapped: number): Deco
 }
 
 /** One GBK character, as glibc 2.41's `gbk.c` reads it. */
-export function gbkStep(raw: Uint8Array, at: number, table: Table): Decoded {
+function gbkStep(raw: Uint8Array, at: number, table: Table): Decoded {
   const lead = raw[at] ?? 0
   if (lead < 0x80) return [lead, 1]
   if (lead === 0x80) return [0x20ac, 1]
@@ -74,7 +74,7 @@ export function gbkStep(raw: Uint8Array, at: number, table: Table): Decoded {
 }
 
 /** One EUC-CN (GB2312) character, as glibc's `euc-cn.c` reads it. */
-export function eucCnStep(raw: Uint8Array, at: number, table: Table): Decoded {
+function eucCnStep(raw: Uint8Array, at: number, table: Table): Decoded {
   const lead = raw[at] ?? 0
   if (lead < 0x80) return [lead, 1]
   if ((lead <= 0xa0 && lead !== 0x8e && lead !== 0x8f) || lead === 0xff) return [ILLEGAL, 1]
@@ -89,7 +89,7 @@ export function eucCnStep(raw: Uint8Array, at: number, table: Table): Decoded {
  * Bytes up to 0x9F stand for themselves, C1 controls included, and a
  * refused pair is skipped whole whatever its second byte is.
  */
-export function eucKrStep(raw: Uint8Array, at: number, table: Table): Decoded {
+function eucKrStep(raw: Uint8Array, at: number, table: Table): Decoded {
   const lead = raw[at] ?? 0
   if (lead <= 0x9f) return [lead, 1]
   if (lead === 0xa0) return [ILLEGAL, 1]
@@ -103,7 +103,7 @@ export function eucKrStep(raw: Uint8Array, at: number, table: Table): Decoded {
  * glibc reads 0x5C as YEN SIGN and 0x7E as OVERLINE, JIS X 0201's Roman
  * half, and 0xA1-0xDF as half-width katakana.
  */
-export function sjisStep(raw: Uint8Array, at: number, table: Table): Decoded {
+function sjisStep(raw: Uint8Array, at: number, table: Table): Decoded {
   const lead = raw[at] ?? 0
   if (lead === 0x5c) return [0xa5, 1]
   if (lead === 0x7e) return [0x203e, 1]
@@ -122,7 +122,7 @@ export function sjisStep(raw: Uint8Array, at: number, table: Table): Decoded {
  * 0212, whose rows outside 0x22-0x6D glibc refuses before it asks for the
  * third byte. glibc skips one byte of any refused sequence.
  */
-export function eucJpStep(raw: Uint8Array, at: number, table: Table): Decoded {
+function eucJpStep(raw: Uint8Array, at: number, table: Table): Decoded {
   const lead = raw[at] ?? 0
   if (lead < 0x8e || (lead >= 0x90 && lead <= 0x9f)) return [lead, 1]
   if (lead === 0xff) return [ILLEGAL, 1]
@@ -154,7 +154,7 @@ function supplementary(raw: Uint8Array, at: number): number | null {
 }
 
 /** One GB18030 character, as glibc's `gb18030.c` reads it. */
-export function gb18030Step(raw: Uint8Array, at: number, table: Table): Decoded {
+function gb18030Step(raw: Uint8Array, at: number, table: Table): Decoded {
   const lead = raw[at] ?? 0
   if (lead < 0x80) return [lead, 1]
   if (lead === 0x80 || lead === 0xff) return [ILLEGAL, 1]

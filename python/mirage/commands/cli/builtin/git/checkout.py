@@ -45,6 +45,7 @@ from mirage.commands.cli.builtin.git.errors import (
     DetachPathError,
     DetachWithCreateError,
     GitError,
+    InvalidBranchNameError,
     InvalidReferenceError,
     NoWorkspaceError,
     PathsWithBranchError,
@@ -53,7 +54,7 @@ from mirage.commands.cli.builtin.git.errors import (
     UnknownPathspecError,
     UnresolvableSourceError,
 )
-from mirage.commands.cli.builtin.git.format import short, subject
+from mirage.commands.cli.builtin.git.format import oneline, short
 from mirage.commands.cli.builtin.git.index_file import (
     read_index,
     refuse_unresolved,
@@ -73,6 +74,7 @@ from mirage.commands.cli.builtin.git.io import (
 )
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.pathspec import (
+    decoded,
     matched,
     repo_relative,
     under,
@@ -91,10 +93,11 @@ from mirage.commands.cli.builtin.git.refs import (
     detach_head,
     read_head,
     set_head,
+    valid_branch_name,
     write_ref,
 )
 from mirage.commands.cli.builtin.git.render import tracking_lines
-from mirage.commands.cli.builtin.git.repo import open_repo
+from mirage.commands.cli.builtin.git.repo import Repo, open_repo
 from mirage.commands.cli.builtin.git.reset import restored
 from mirage.commands.cli.builtin.git.restore import restore_paths, source_tree
 from mirage.commands.cli.builtin.git.revparse import (
@@ -103,11 +106,11 @@ from mirage.commands.cli.builtin.git.revparse import (
     resolve_commit,
 )
 from mirage.commands.cli.builtin.git.session import index_locked, opened
-from mirage.commands.cli.builtin.git.tree import Tree, contents, tree_of
+from mirage.commands.cli.builtin.git.tree import Tree, commit_entries, contents
 from mirage.commands.cli.builtin.git.types import (
-    HeadMove,
     HeadRef,
     RepoLocation,
+    Track,
 )
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
@@ -173,15 +176,6 @@ def _conflicts(before: Tree, after: Tree, dirty: set[str]) -> list[str]:
     )
 
 
-def _tree_names(tree: Tree) -> set[str]:
-    """The paths a tree records, as text.
-
-    Args:
-        tree (Tree): a flattened tree, keyed by encoded path.
-    """
-    return {name.decode("utf-8", errors="replace") for name in tree}
-
-
 def _written(before: Tree, after: Tree) -> Tree:
     """The entries a switch actually writes into the working tree.
 
@@ -224,7 +218,7 @@ def _overwritten(writing: Tree, untracked: list[str]) -> list[str]:
         writing (Tree): the entries the switch writes, from ``_written``.
         untracked (list[str]): every untracked path the walk found.
     """
-    names = _tree_names(writing)
+    names = decoded(writing)
     return sorted(
         path
         for path in untracked
@@ -257,7 +251,7 @@ def _blocked_ancestors(writing: Tree, dirty: set[str]) -> list[str]:
         dirty (set[str]): paths whose working tree or index differs from
             HEAD.
     """
-    names = _tree_names(writing)
+    names = decoded(writing)
     return sorted(
         path for path in dirty if any(under(name, path) for name in names)
     )
@@ -285,7 +279,7 @@ def _blocked_descendants(writing: Tree, dirty: set[str]) -> list[str]:
         dirty (set[str]): paths whose working tree or index differs from
             HEAD.
     """
-    names = _tree_names(writing)
+    names = decoded(writing)
     return sorted(
         path for path in dirty if any(under(path, name) for name in names)
     )
@@ -312,7 +306,7 @@ def _lost_directories(writing: Tree, untracked: list[str]) -> list[str]:
         writing (Tree): the entries the switch writes, from ``_written``.
         untracked (list[str]): every untracked path the walk found.
     """
-    replacing = _tree_names(
+    replacing = decoded(
         {path: entry for path, entry in writing.items() if entry[0] != GITLINK}
     )
     return sorted(
@@ -449,10 +443,7 @@ def previous_position(repo: BaseRepo, head: HeadRef) -> str:
     commit = repo.object_store[ObjectID(head.commit.encode())]
     if not isinstance(commit, Commit):
         return ""
-    return (
-        f"Previous HEAD position was "
-        f"{short(commit.id, abbrev_for(repo))} {subject(commit)}\n"
-    )
+    return f"Previous HEAD position was {oneline(commit, abbrev_for(repo))}\n"
 
 
 async def _attach(
@@ -554,17 +545,19 @@ def _stage_letters(
 
 async def move_head(
     vfs: Files,
-    repo: BaseRepo,
+    repo: Repo,
     location: RepoLocation,
     head: HeadRef,
     commit: Commit,
     target: str,
     ref: Ref | None,
     creating: bool,
-    start: str,
-    in_place: bool,
-) -> HeadMove:
-    """Move HEAD, the index and the working tree to a commit.
+    start: str | None,
+    mode: Track,
+    advise: bool,
+    quiet: bool,
+) -> tuple[ByteSource | None, IOResult]:
+    """Move HEAD, the index and the working tree to a commit, and say so.
 
     The one procedure ``checkout`` and ``switch`` share, since the two
     differ only in what they accept and how they word a miss. Refuses
@@ -576,9 +569,14 @@ async def move_head(
     was changed and not staged, and there is no reflog here to get it
     back from.
 
+    The paths whose uncommitted change was carried across go to stdout
+    with their status letters, then the upstream a branch tracks; a
+    submodule directory the move could not remove is a warning on
+    stderr above the line saying where HEAD went.
+
     Args:
         vfs (Files): the session's files.
-        repo (BaseRepo): the opened repository.
+        repo (Repo): the opened repository.
         location (RepoLocation): the discovered repository.
         head (HeadRef): what HEAD pointed at before the move.
         commit (Commit): the commit to move to.
@@ -587,15 +585,16 @@ async def move_head(
         ref (Ref | None): the branch to attach HEAD to, None to detach
             it at the commit.
         creating (bool): whether ``ref`` is a new branch to write first.
-        start (str): the start point a new branch was created from, as
-            typed.
-        in_place (bool): whether the line named no start point, so the
-            new branch is being created where HEAD already is.
-
-    Returns:
-        HeadMove: the paths whose uncommitted change was carried across,
-        and any warning the removals could not avoid.
+        start (str | None): the start point a new branch is created
+            from, as typed; None when the line named none.
+        mode (Track): ``branch.autoSetupMerge``, for a new branch's
+            upstream.
+        advise (bool): whether a detached HEAD gets git's advice on the
+            state it is in.
+        quiet (bool): ``-q``: only the warnings are printed.
     """
+    carried: dict[str, str] = {}
+    notes: list[str] = []
     # A branch created where HEAD already is moves nothing: git writes
     # the ref, points HEAD at it, and never touches the working tree or
     # the index, so an unmerged index survives ``git switch -c topic``
@@ -603,21 +602,59 @@ async def move_head(
     # shape of the line is what decides it, which is git's own reading
     # rather than a comparison of the two trees. Pinned against git
     # 2.50.1.
-    if in_place:
-        await _attach(
-            vfs,
-            repo,
-            location,
-            head,
-            commit,
-            target,
-            ref,
-            creating,
-            start,
-        )
-        return HeadMove({}, "")
+    if not (creating and start is None):
+        carried, notes = await _carry_across(vfs, repo, location, commit)
+    await _attach(
+        vfs, repo, location, head, commit, target, ref, creating, start or HEAD
+    )
+    tracking, warning = (
+        await set_up_tracking(repo, target, start, mode, head)
+        if creating
+        else ("", "")
+    )
+    out = "".join(
+        f"{letter}\t{path}\n" for path, letter in sorted(carried.items())
+    )
+    out += tracking
+    warnings = "".join(notes)
+    # git writes the warning above everything it says about the move,
+    # because the directory it could not remove is a fact about the
+    # working tree rather than about where HEAD went.
+    note = warnings + previous_position(repo, head) + warning
+    if ref is not None:
+        verb = "Switched to a new branch" if creating else "Switched to branch"
+        note += f"{verb} '{target}'\n"
+        if not creating:
+            out += await tracking_report(vfs, location, target)
+    else:
+        # Asked for by name, a detached HEAD needs no advice on how it
+        # happened.
+        if advise:
+            note += f"Note: switching to '{target}'.\n\n{DETACHED_ADVICE}\n"
+        note += f"HEAD is now at {oneline(commit, abbrev_for(repo))}\n"
+    if quiet:
+        return None, IOResult(stderr=(warnings + warning).encode())
+    return yield_bytes(out.encode()), IOResult(stderr=note.encode())
+
+
+async def _carry_across(
+    vfs: Files, repo: BaseRepo, location: RepoLocation, commit: Commit
+) -> tuple[dict[str, str], list[str]]:
+    """Move the index and the working tree to a commit's tree, refusing
+    when that would destroy work that is not committed.
+
+    Returns each path whose uncommitted change was carried across,
+    against the status letter git prints for it, and the warnings the
+    removals could not avoid.
+
+    Args:
+        vfs (Files): the session's files.
+        repo (BaseRepo): the opened repository.
+        location (RepoLocation): the discovered repository.
+        commit (Commit): the commit to move to.
+    """
     before = await asyncio.to_thread(head_entries, repo) or {}
-    after = await asyncio.to_thread(tree_of, repo, commit.id)
+    after = await asyncio.to_thread(commit_entries, repo, commit.id)
     state = await read_index(vfs, location.gitdir)
     # First, before either tree is compared and before the working tree
     # is walked, which is where git refuses it too. Every check below
@@ -625,9 +662,7 @@ async def move_head(
     # to all of them and the move would clear the stages and delete the
     # file, throwing away a resolution in progress.
     refuse_unresolved(state)
-    tracked = {
-        path.decode("utf-8", errors="replace") for path in state.entries
-    }
+    tracked = decoded(state.entries)
     # UNTRACKED_ALL, not the mode status uses: "normal" collapses a
     # wholly untracked directory to one ``dir/`` entry, and a
     # collision has to be decided per file. git names the file
@@ -652,11 +687,7 @@ async def move_head(
     lost = _lost_directories(writing, found.untracked)
     if blocked or overwritten or lost:
         raise CheckoutConflictError(blocked, overwritten, lost)
-    notes = await switch_to(vfs, repo, location, before, after)
-    await _attach(
-        vfs, repo, location, head, commit, target, ref, creating, start
-    )
-    return HeadMove(carried, "".join(notes))
+    return carried, await switch_to(vfs, repo, location, before, after)
 
 
 async def tracking_report(
@@ -674,11 +705,7 @@ async def tracking_report(
     """
     repo = await open_repo(vfs, location)
     upstream = await branch_upstream(
-        vfs,
-        repo,
-        location,
-        HeadRef(branch, f"refs/heads/{branch}", None),
-        False,
+        repo, HeadRef(branch, f"refs/heads/{branch}", None), False
     )
     if upstream is None:
         return ""
@@ -719,10 +746,7 @@ async def _names_path(
         operand (str): the operand as typed.
     """
     state = await read_index(vfs, location.gitdir)
-    names = {
-        path.decode("utf-8", errors="replace")
-        for path in [*state.entries, *state.conflicts]
-    }
+    names = decoded([*state.entries, *state.conflicts])
     return bool(matched(names, repo_relative(location, start, operand)))
 
 
@@ -806,20 +830,27 @@ async def checkout(
             raise NoWorkspaceError()
         check_switches(ctx, texts)
         detach = fl.as_bool("detach")
-        if detach and fl.as_bool("b"):
+        branch = fl.as_str("b")
+        if detach and branch is not None:
             raise DetachWithCreateError()
-        target = texts[0] if texts else (HEAD if detach else None)
+        target = (
+            branch
+            if branch is not None
+            else texts[0]
+            if texts
+            else (HEAD if detach else None)
+        )
         if target is None:
             raise UnknownPathspecError("")
         if detach and len(texts) > 1:
             raise DetachPathError(texts[1])
         repo, location = await opened(ctx, fl, work_tree=True)
-        mode = await track_mode(vfs, location)
+        mode = await track_mode(repo)
         head = await read_head(vfs, location.gitdir)
-        creating = fl.as_bool("b")
+        creating = branch is not None
         ref = Ref(f"{BRANCH_PREFIX}{target}".encode())
         known = repo.refs.allkeys()
-        if creating and len(texts) > 2:
+        if creating and len(texts) > 1:
             raise PathsWithBranchError(target)
         if not creating and not detach:
             leading, marked = split_marked(tuple(texts), ctx.argv)
@@ -848,8 +879,6 @@ async def checkout(
                     texts if treeish is None else texts[1:],
                     True,
                 )
-        if creating and ref in known:
-            raise BranchExistsError(target)
         guessed = None
         # The commit a target names when it is no local branch: a branch
         # of that name wins over every other reading, as git's checkout
@@ -888,20 +917,32 @@ async def checkout(
         # when one is given, HEAD otherwise. Forcing HEAD here put the new
         # branch on the current commit and dropped the operand without a
         # word, so every commit after it landed on the wrong history.
-        start = guessed or (texts[1] if creating and len(texts) > 1 else None)
+        start = guessed or (texts[0] if branch is not None and texts else None)
+        commit: Commit | None = None
         if start is not None:
             try:
                 commit = resolve_commit(repo, start)
             except GitError as exc:
                 raise BadStartPointError(start, target) from exc
             if guessed is None:
-                await refuse_ambiguous(vfs, location, repo, start, False)
-        elif named is not None:
+                await refuse_ambiguous(repo, start, False)
+        # After the start point and before HEAD is read, which is git's
+        # own order: an unborn HEAD refuses the name, not the line. And
+        # before it asks whether the branch exists, so a refs/heads/HEAD
+        # already there is still refused as a name. A ref is a path
+        # below .git, so an unchecked name reaches write_ref as one: -b
+        # ../../config would land on the repository's own configuration
+        # rather than on a branch.
+        if creating and not valid_branch_name(target):
+            raise InvalidBranchNameError(target)
+        if creating and ref in known:
+            raise BranchExistsError(target)
+        if named is not None:
             commit = named
         elif not creating and ref in known:
             note_ambiguity(repo, target)
             commit = resolve_commit(repo, ref.decode())
-        else:
+        if commit is None:
             commit = resolve_commit(repo, target if not creating else HEAD)
         # Before the working tree moves, which is where git refuses it
         # too: the ref is locked first and nothing is checked out when
@@ -910,7 +951,7 @@ async def checkout(
         if held is not None:
             raise RefLockError(ref.decode(), held)
         attached = not detach and (creating or ref in known)
-        moved = await move_head(
+        return await move_head(
             vfs,
             repo,
             location,
@@ -919,43 +960,13 @@ async def checkout(
             target,
             ref if attached else None,
             creating,
-            start or HEAD,
-            creating and start is None,
-        )
-        tracking, warning = (
-            await set_up_tracking(
-                vfs, repo, location, target, start, mode, head
-            )
-            if creating
-            else ("", "")
+            start,
+            mode,
+            not detach,
+            fl.as_bool("quiet"),
         )
     except GitError as exc:
         return fatal(exc)
-    carried = "".join(
-        f"{letter}\t{path}\n" for path, letter in sorted(moved.carried.items())
-    )
-    carried += tracking
-    # git writes the warning above everything it says about the move,
-    # because the directory it could not remove is a fact about the
-    # working tree rather than about where HEAD went.
-    note = moved.warnings + previous_position(repo, head) + warning
-    if attached:
-        verb = "Switched to a new branch" if creating else "Switched to branch"
-        note += f"{verb} '{target}'\n"
-        if not creating:
-            carried += await tracking_report(vfs, location, target)
-    else:
-        # Asked for by name, a detached HEAD needs no advice on how it
-        # happened.
-        if not detach:
-            note += f"Note: switching to '{target}'.\n\n{DETACHED_ADVICE}\n"
-        note += (
-            f"HEAD is now at {short(commit.id, abbrev_for(repo))} "
-            f"{subject(commit)}\n"
-        )
-    if fl.as_bool("quiet"):
-        return None, IOResult(stderr=(moved.warnings + warning).encode())
-    return yield_bytes(carried.encode()), IOResult(stderr=note.encode())
 
 
 def checkout_read_only(
@@ -963,16 +974,18 @@ def checkout_read_only(
 ) -> GitError:
     """checkout's refusal by a read-only mount.
 
-    The new branch's ref under ``-b``, whose lock git takes first, and
-    the index's otherwise.
+    git takes the new branch's ref lock first only for a bare ``-b NAME``:
+    a start point or ``-q`` sends it through the index first.
 
     Args:
         texts (list[str]): the line's operands.
         ctx (Context): the line's context.
         location (RepoLocation | None): the repository it opened.
     """
-    if not FlagView(ctx.flags).as_bool("b") or not texts:
+    fl = FlagView(ctx.flags, ctx.spec)
+    name = fl.as_str("b")
+    if name is None or texts or fl.as_bool("quiet"):
         return index_locked(texts, ctx, location)
-    ref = f"{BRANCH_PREFIX}{texts[0]}"
+    ref = f"{BRANCH_PREFIX}{name}"
     root = location.commondir.virtual if location is not None else ".git"
     return RefReadOnlyError(ref, posixpath.join(root, ref))

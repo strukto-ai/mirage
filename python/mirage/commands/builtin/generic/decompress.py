@@ -412,10 +412,7 @@ async def decompress_inputs(
                     out = beside_link(link, out_name)
                 existed = await output_taken(out, stat, resolver)
                 if existed and not force:
-                    report(
-                        f"gzip: {out_name} already exists;\tnot overwritten\n",
-                        2,
-                    )
+                    report(exists_line(out_name), 2)
                     continue
                 if failure is not None:
                     fail(failure, shown)
@@ -435,11 +432,7 @@ async def decompress_inputs(
                         continue
                     return
                 if not keep:
-                    await (
-                        unlink(path)
-                        if link is None or resolver is None
-                        else resolver.unlink(link)
-                    )
+                    await remove_input(path, link, unlink, resolver)
             finally:
                 await spool.close()
                 await close_quietly(source)
@@ -481,3 +474,33 @@ async def replace_output(
         await resolver.write(out.virtual, data)
         return
     await write(out, data)
+
+
+async def remove_input(
+    path: PathSpec,
+    link: str | None,
+    unlink: Callable[..., Awaitable[None]],
+    resolver: LinkResolver | None,
+) -> None:
+    """Remove an input once its in-place output is written: the link it
+    was named through, when there is one.
+
+    Args:
+        path (PathSpec): the operand.
+        link (str | None): the link the operand stood on.
+        unlink (Callable): the operand mount's unlink.
+        resolver (LinkResolver | None): the namespace's links.
+    """
+    if link is None or resolver is None:
+        await unlink(path)
+    else:
+        await resolver.unlink(link)
+
+
+def exists_line(name: str) -> str:
+    """gzip's refusal to replace an output already standing at its name.
+
+    Args:
+        name (str): the output as gzip names it.
+    """
+    return f"gzip: {name} already exists;\tnot overwritten\n"

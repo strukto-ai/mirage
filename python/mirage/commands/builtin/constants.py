@@ -18,6 +18,7 @@ from enum import Enum
 
 from mirage.commands.builtin.utils.size_suffix import size_suffixes
 from mirage.core.generic.find_eval import RowActionKind
+from mirage.types import ContentType
 
 
 class PatternType(str, Enum):
@@ -47,6 +48,18 @@ MIME_SYMLINK = "inode/symlink; charset=binary"
 # How much of a file `file` sniffs: only its first bytes are read.
 FILE_HEADER_BYTES = 512
 
+# The leading bytes `file` recognizes a format by, checked in order.
+MAGIC_SIGNATURES: tuple[tuple[bytes, ContentType], ...] = (
+    (b"\x89PNG", ContentType.IMAGE_PNG),
+    (b"\xff\xd8\xff", ContentType.IMAGE_JPEG),
+    (b"GIF8", ContentType.IMAGE_GIF),
+    (b"PK\x03\x04", ContentType.ZIP),
+    (b"\x1f\x8b", ContentType.GZIP),
+    (b"%PDF", ContentType.PDF),
+    (b"{\n", ContentType.JSON),
+    (b"[{", ContentType.JSON),
+)
+
 # od, split and cmp all read their counts with xstrtoumax, which skips leading
 # whitespace and allows one '+' before the digits, so `-b +10` and `-b " 10"`
 # are valid while `+ 10`, `++10`, `-10` and a trailing space are not.
@@ -54,6 +67,15 @@ FILE_HEADER_BYTES = 512
 # Unicode decimal digits.
 UINTMAX = 2**64 - 1
 INTMAX = 2**63 - 1
+INTMAX_MIN = -(2**63)
+
+# gnulib appends `strerror(ERANGE)` when a value parsed but fell outside
+# the option's range, and `strerror(EOVERFLOW)` when the value did not
+# fit the type it was scanned into. Measured under LC_ALL=C on glibc;
+# these are the two strings here most likely to read differently under
+# another libc or locale.
+ERANGE_TEXT = "Numerical result out of range"
+EOVERFLOW_TEXT = "Value too large for defined data type"
 
 OD_SIZE_UNITS = size_suffixes("bkKmMGTPE")
 # Q/R/Y/Z are in GNU od's suffix set but always overflow uintmax, so they
@@ -92,7 +114,6 @@ SPLIT_COUNT_PATTERN = re.compile(rf"{C_SPACE}\+?[0-9]+")
 # digits-only form.
 SPLIT_DIGITS = re.compile(r"[0-9]+")
 SPLIT_HEX_DIGITS = re.compile(r"[0-9a-f]+")
-SPLIT_TRY_HELP = "\nTry 'split --help' for more information."
 
 # gzip 1.13's file naming. The suffix gzip writes and looks for unless -S
 # names another; the suffixes it always recognizes on a name it
@@ -117,6 +138,8 @@ GZIP_MAX_SUFFIX = 30
 SED_MISSING_SCRIPT = "sed: missing script"
 SED_NO_INPUT_FILES = "sed: no input files"
 SED_NO_INPUT_EXIT = 4
+
+AWK_USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]"
 
 # The word an `-exec` argument that stands for the match is spelled as.
 EXEC_PLACEHOLDER = "{}"
@@ -189,3 +212,15 @@ FIND_ROW_ACTIONS: Mapping[str, RowActionKind] = {
     "-ls": "ls",
     "-delete": "delete",
 }
+
+# How many per-mount runs of one cross-mount line are in flight at once.
+OPERAND_CONCURRENCY = 4
+
+# Where mktemp creates a name when neither -p nor TMPDIR says.
+FALLBACK_TMPDIR = "/tmp"
+
+# The status of a command SIGPIPE ended, as a shell reports it (128 + 13).
+SIGPIPE_EXIT = 141
+
+# The one name every host answers with; hostname and uname -n print it.
+HOSTNAME = "mirage"

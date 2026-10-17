@@ -37,6 +37,43 @@
         "p",
         "i"
       ]
+    },
+    {
+      "id": "patch_p_refuses_what_gnu_refuses",
+      "seq": 9940305,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'hello\\n' > /data/pp.txt && for p in x '' -1 3x ' 1'; do printf -- '--- a\\n+++ a\\n@@ -1 +1 @@\\n-hello\\n+bye\\n' | patch -p \"$p\" /data/pp.txt; echo rc=$?; done; printf -- '--- a\\n+++ a\\n@@ -1 +1 @@\\n-hello\\n+bye\\n' | patch -p +0 /data/pp.txt; cat /data/pp.txt; rm /data/pp.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\nrc=2\nrc=2\nrc=2\npatching file /data/pp.txt\nbye\n",
+        "stderr": "patch: **** strip count x is not a number\npatch: **** strip count '' is not a number\npatch: **** strip count -1 is negative\npatch: **** strip count 3x is not a number\npatch: **** strip count ' 1' is not a number\n"
+      },
+      "flags": [
+        "p"
+      ]
     }
   ]
 }

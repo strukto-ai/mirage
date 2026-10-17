@@ -36,6 +36,14 @@ export const SYMLINK_MODE = '120000'
  * tree; git only makes sure a directory stands at the name.
  */
 export const GITLINK_MODE = '160000'
+// The same mode as `GITLINK_MODE`, as the index records it.
+export const GITLINK = 0o160000
+// The modes of a regular file and an executable one, as a tree entry spells
+// them.
+export const REGULAR_MODE = '100644'
+export const EXECUTABLE_MODE = '100755'
+// The object types git knows, in its own order.
+export const OBJECT_TYPES = ['blob', 'tree', 'commit', 'tag'] as const
 
 // The symbolic ref every verb resolves first.
 export const HEAD = 'HEAD'
@@ -50,6 +58,11 @@ export const GIT_SPACE: ReadonlySet<number> = new Set([0x20, 0x09, 0x0a, 0x0d])
 // repository under.
 export const GIT_DIR = '.git'
 
+// The pretty kinds a placeholder template spells, and the kinds that end every
+// entry with a newline rather than separating entries by one.
+export const TEMPLATE_KINDS: readonly string[] = ['format', 'tformat']
+export const TERMINATED_KINDS: readonly string[] = ['oneline', 'tformat']
+
 // The rules a short ref name is tried against, rev-parse's dwim_ref order.
 export const DWIM_RULES = [
   '{}',
@@ -59,3 +72,7 @@ export const DWIM_RULES = [
   'refs/remotes/{}',
   'refs/remotes/{}/HEAD',
 ]
+
+// The branch a new repository, or a clone whose remote names no usable HEAD,
+// starts on when nothing says otherwise.
+export const DEFAULT_BRANCH = 'master'

@@ -18,11 +18,15 @@ from dataclasses import replace
 from dulwich.objects import Commit
 from dulwich.repo import BaseRepo
 
-from mirage.commands.cli.builtin.git.constants import HEAD
+from mirage.commands.cli.builtin.git.constants import (
+    HEAD,
+    TEMPLATE_KINDS,
+    TERMINATED_KINDS,
+)
 from mirage.commands.cli.builtin.git.diff_output import (
     DiffFlags,
+    commit_entry,
     commit_output,
-    join_output,
     parse_diff_flags,
     renames_enabled,
     separator_line,
@@ -31,7 +35,7 @@ from mirage.commands.cli.builtin.git.errors import GitError, NoWorkspaceError
 from mirage.commands.cli.builtin.git.format import (
     FULL_SHA,
     Decorations,
-    oneline,
+    commit_header,
     preset_block,
     render_template,
 )
@@ -39,14 +43,13 @@ from mirage.commands.cli.builtin.git.graph import CommitGraph
 from mirage.commands.cli.builtin.git.history import (
     LogFlags,
     Walk,
-    decoration_for,
     decorations,
+    displayed,
     parse_flags,
     ref_commits,
     select,
     walked,
 )
-from mirage.commands.cli.builtin.git.mailmap import load_mailmap, use_mailmap
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.repo import config_bool
 from mirage.commands.cli.builtin.git.revparse import split_revisions
@@ -84,11 +87,7 @@ def _collect(
     starts, hidden = split_revisions(repo, revisions or (HEAD,))
     if flags.all_refs:
         starts.extend(ref_commits(repo))
-    decor = (
-        None
-        if flags.decorate is Decoration.NONE
-        else decorations(repo, flags.decorate)
-    )
+    decor = decorations(repo, flags.decorate)
     if flags.graph:
         return [], walked(repo, starts, flags, tuple(hidden)), decor
     return select(repo, starts, flags, tuple(hidden)), None, decor
@@ -104,12 +103,10 @@ def _rendered(
 
     ``format:`` separates entries with a newline and ends without one,
     and an entry that renders empty still claims its separator, so
-    ``--pretty=format:`` prints one newline per commit past the first.
-    ``tformat:`` (and any bare ``%`` string) terminates every entry,
-    empty ones included - except that an empty template prints nothing
-    at all, which is how ``--format=`` stays silent. Bytes go out
-    through ``encode_text`` because ``%xHH`` names a raw byte. Pinned
-    against git 2.37 and 2.54.
+    ``--pretty=format:`` prints one newline per commit past the first;
+    a block preset separates its entries the same way. ``tformat:``
+    (and any bare ``%`` string) and oneline terminate every entry
+    instead. Pinned against git 2.37 and 2.54.
 
     Args:
         commits (list[Commit]): the selected commits, in print order.
@@ -117,47 +114,10 @@ def _rendered(
         width (int): abbreviated id width for this repository.
         decor (Decorations | None): ref labels when the format asked.
     """
-    fmt = flags.pretty
-    if fmt.kind == "oneline":
-        length = width if flags.abbrev_commit else FULL_SHA
-        lines = [
-            render_template("%h%d %s", commit, length, decor)
-            if flags.decorate is not Decoration.NONE
-            else oneline(commit, length)
-            for commit in commits
-        ]
-        return ("\n".join(lines) + "\n").encode() if lines else b""
-    if fmt.kind in ("format", "tformat"):
-        rendered = [
-            render_template(
-                fmt.template or "",
-                commit,
-                width,
-                decor,
-                flags.date,
-                flags.mailmap,
-            )
-            for commit in commits
-        ]
-        if fmt.kind == "tformat":
-            if not fmt.template:
-                return b""
-            return encode_text("".join(f"{text}\n" for text in rendered))
-        return encode_text("\n".join(rendered))
-    lines = []
-    mailmap = flags.mailmap if flags.use_mailmap else ()
-    for index, commit in enumerate(commits):
-        if index:
-            lines.append("")
-        block = preset_block(commit, fmt.kind, width, flags.date, mailmap)
-        if (
-            flags.decorate is not Decoration.NONE
-            and block
-            and block[0].startswith("commit ")
-        ):
-            block[0] += render_template("%d", commit, width, decor)
-        lines.extend(block)
-    return ("\n".join(lines) + "\n").encode() if lines else b""
+    terminated = flags.pretty.kind in TERMINATED_KINDS
+    return (b"" if terminated else b"\n").join(
+        commit_header(commit, flags, width, decor) for commit in commits
+    )
 
 
 def _graphed(
@@ -203,8 +163,8 @@ def _graphed(
     graph = CommitGraph(walk.interesting.__contains__, flags.first_parent)
     mailmap = flags.mailmap if flags.use_mailmap else ()
     fmt = flags.pretty
-    user = fmt.kind in ("format", "tformat")
-    terminated = fmt.kind in ("oneline", "tformat")
+    user = fmt.kind in TEMPLATE_KINDS
+    terminated = fmt.kind in TERMINATED_KINDS
     empty = user and not fmt.template
     length = (
         FULL_SHA
@@ -304,14 +264,11 @@ async def log(
         check_operands(ctx, texts)
         parsed = parse_flags(fl, ctx.env)
         repo, location = await opened(ctx, fl)
+        mailmap, mapped, decorate = await displayed(
+            vfs, location, fl, parsed.pretty
+        )
         parsed = replace(
-            parsed,
-            mailmap=await load_mailmap(vfs, location),
-            use_mailmap=use_mailmap(
-                fl,
-                await config_bool(vfs, location, b"log", b"mailmap", True),
-            ),
-            decorate=await decoration_for(vfs, location, fl, parsed.pretty),
+            parsed, mailmap=mailmap, use_mailmap=mapped, decorate=decorate
         )
         commits, walk, decor = await asyncio.to_thread(
             _collect, repo, tuple(texts), parsed
@@ -350,25 +307,15 @@ async def log(
             diff_flags if diffing else None,
         )
     elif diffing:
-        blocks = []
-        for commit in commits:
-            head = _rendered([commit], parsed, abbrev_for(repo), decor)
-            bodies = await asyncio.to_thread(
-                commit_output, repo, commit, diff_flags
+        blocks = [
+            await asyncio.to_thread(
+                commit_entry, repo, commit, parsed, diff_flags, decor
             )
-            blocks.append(
-                join_output(
-                    commit,
-                    head,
-                    bodies,
-                    parsed.pretty.kind,
-                    abbrev_for(repo),
-                    diff_flags,
-                )
-            )
-        out = (
-            b"" if parsed.pretty.kind in ("tformat", "oneline") else b"\n"
-        ).join(blocks)
+            for commit in commits
+        ]
+        out = (b"" if parsed.pretty.kind in TERMINATED_KINDS else b"\n").join(
+            blocks
+        )
     else:
         out = _rendered(commits, parsed, abbrev_for(repo), decor)
     if not out:

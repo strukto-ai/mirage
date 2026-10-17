@@ -36,7 +36,7 @@ async def poll(
         fl.as_str("channel") or "",
         fl.as_str("question") or "",
         answers,
-        duration_hours=fl.as_int("duration") or 24,
+        duration_hours=fl.as_int("duration", 24),
         multiselect=fl.as_bool("multiselect"),
     )
     out = json.dumps(

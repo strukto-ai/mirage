@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { HEAD } from './constants.ts'
-import { loadMailmap, useMailmap } from './mailmap.ts'
+import { HEAD, TERMINATED_KINDS } from './constants.ts'
 import { dateClock, parseDateMode, showDate } from './dates.ts'
 import { Decoration, type DateMode, type GitObject, type MailmapEntry } from './types.ts'
 import git from 'isomorphic-git'
@@ -24,26 +23,19 @@ import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { GitError, UsageError } from './errors.ts'
+import type { LogFormat } from './format.ts'
+import { decorations, displayed, prettyFormat } from './history.ts'
 import {
-  FULL_SHA,
-  oneline,
-  presetBlock,
-  renderTemplate,
-  type CommitFacts,
-  type Decorations,
-  type LogFormat,
-} from './format.ts'
-import { decorationFor, decorations, prettyFormat } from './history.ts'
-import {
-  joinOutput,
+  commitEntry,
   commitOutput,
+  isCombined,
   parseDiffFlags,
   renamesEnabled,
   type DiffFlags,
 } from './diff_output.ts'
 import { pathspecPatterns } from './pathspec.ts'
 import { identDate } from './ref_fields.ts'
-import { commitFacts, configBool, repoArgs, type Repo } from './repo.ts'
+import { commitFacts, configBool, rawObject, repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { resolveCommit, resolveObject } from './revparse.ts'
 import {
@@ -94,50 +86,10 @@ function parseShowFlags(
     useMailmap: true,
     decorate: Decoration.NONE,
     abbrevCommit: fl.asBool('oneline'),
-    date: parseDateMode(fl.asStr('date') ?? 'default', dateClock(env)),
+    date: parseDateMode(fl.asStr('date', 'default'), dateClock(env)),
     diff: parseDiffFlags(fl, true, 'dense-combined', true, defaultRenames, quotePathFully),
     pretty,
   }
-}
-
-/**
- * The commit header in the requested format.
- *
- * `format:` is a separator, so a single commit prints with no trailing
- * newline at all; `tformat:` terminates the entry even when it renders
- * empty, except that an empty template prints nothing, matching
- * `log --format=`. Pinned against git 2.37 and 2.54. A decorated preset
- * labels the commit after its id, as `log` does.
- */
-function header(
-  commit: CommitFacts,
-  flags: ShowFlags,
-  width: number,
-  decor: Decorations | null,
-): string {
-  const fmt = flags.pretty
-  const decorated = flags.decorate !== Decoration.NONE
-  if (fmt.kind === 'oneline') {
-    const length = flags.abbrevCommit ? width : FULL_SHA
-    return `${decorated ? renderTemplate('%h%d %s', commit, length, decor) : oneline(commit, length)}\n`
-  }
-  if (fmt.kind === 'format' || fmt.kind === 'tformat') {
-    const text = renderTemplate(fmt.template ?? '', commit, width, decor, flags.date, flags.mailmap)
-    if (fmt.kind === 'tformat') {
-      return fmt.template === null || fmt.template === '' ? '' : `${text}\n`
-    }
-    return text
-  }
-  const block = presetBlock(
-    commit,
-    fmt.kind,
-    width,
-    flags.date,
-    flags.useMailmap ? flags.mailmap : [],
-  )
-  if (decorated && block[0]?.startsWith('commit '))
-    block[0] += renderTemplate('%d', commit, width, decor)
-  return `${block.join('\n')}\n`
 }
 
 const DEC = new TextDecoder()
@@ -164,11 +116,8 @@ function taggerLines(ident: string, flags: ShowFlags): string {
  * 2.50.1.
  */
 async function tagBlock(repo: Repo, oid: string, flags: ShowFlags): Promise<[string, GitObject]> {
-  // Deprecated upstream for being general, but the raw content is what git
-  // prints from, signature and all.
-  // eslint-disable-next-line @typescript-eslint/no-deprecated
-  const read = await git.readObject({ ...repoArgs(repo), oid, format: 'content' })
-  const text = DEC.decode(read.object as Uint8Array)
+  // The raw content is what git prints from, signature and all.
+  const text = DEC.decode((await rawObject(repo, oid)).raw)
   const end = text.indexOf('\n\n')
   const fields = (end === -1 ? text : text.slice(0, end)).split('\n')
   const value = (key: string): string =>
@@ -178,33 +127,6 @@ async function tagBlock(repo: Repo, oid: string, flags: ShowFlags): Promise<[str
     block + (end === -1 ? '' : text.slice(end + 1)),
     { oid: value('object'), type: value('type') },
   ]
-}
-
-/**
- * A commit's log entry and its diff against its parent. A commit that changes
- * nothing the pathspec names prints nothing at all.
- */
-async function commitEntry(
-  repo: Repo,
-  oid: string,
-  flags: ShowFlags,
-  decor: Decorations | null,
-): Promise<string> {
-  const facts = await commitFacts(repo, oid)
-  const head = header(facts, flags, repo.abbrev, decor)
-  const bodies = await commitOutput(repo, facts, flags.diff)
-  const combined =
-    facts.parents.length > 1 &&
-    (flags.diff.merge === 'combined' || flags.diff.merge === 'dense-combined')
-  return joinOutput(
-    facts,
-    head,
-    bodies,
-    flags.pretty.kind,
-    repo.abbrev,
-    flags.diff,
-    (flags.diff.summary || combined) && !flags.diff.noPatch,
-  )
 }
 
 /**
@@ -239,9 +161,7 @@ export async function show(
       await configBool(repo, 'core.quotepath', true),
       ctx.env,
     )
-    const mailmap = await loadMailmap(repo.vfs, repo.location)
-    const mapped = useMailmap(fl, await configBool(repo, 'log.mailmap', true))
-    const decorate = await decorationFor(repo, fl, base.pretty)
+    const [mailmap, mapped, decorate] = await displayed(repo, fl, base.pretty)
     const names = revisions.length > 0 ? revisions : [HEAD]
     const objects: [string, GitObject][] = []
     for (const name of names) objects.push([name, await resolveObject(repo, name)])
@@ -253,9 +173,8 @@ export async function show(
       decorate,
       diff: { ...base.diff, pathspecs },
     }
-    const decor =
-      parsed.decorate === Decoration.NONE ? null : await decorations(repo, parsed.decorate)
-    const terminated = parsed.pretty.kind === 'oneline' || parsed.pretty.kind === 'tformat'
+    const decor = await decorations(repo, parsed.decorate)
+    const terminated = TERMINATED_KINDS.includes(parsed.pretty.kind)
     const parts: Uint8Array[] = []
     const shownCommits = new Set<string>()
     let shownOne = false
@@ -282,7 +201,16 @@ export async function show(
       }
       if (shownCommits.has(target.oid)) continue
       shownCommits.add(target.oid)
-      const entry = await commitEntry(repo, target.oid, parsed, decor)
+      const facts = await commitFacts(repo, target.oid)
+      const combined = isCombined(facts, parsed.diff)
+      const entry = await commitEntry(
+        repo,
+        facts,
+        parsed,
+        parsed.diff,
+        decor,
+        (parsed.diff.summary || combined) && !parsed.diff.noPatch,
+      )
       parts.push(encodeText(`${shownOne && !terminated ? '\n' : ''}${entry}`))
       shownOne = true
     }

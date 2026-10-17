@@ -17,12 +17,7 @@ import { compilePosixRegex } from '../../utils/posix.ts'
 import { RegexSyntax } from './types.ts'
 import { BreError, translateBre, translateEre } from './utils/bre.ts'
 import { PcreError, hostFlags, translatePcre } from './utils/pcre.ts'
-import {
-  RustRegexError,
-  translateRust,
-  wholeLine,
-  wholeWord as rustWholeWord,
-} from './utils/rust_regex.ts'
+import { wholeLine } from './utils/rust_regex.ts'
 import type { HostRegex } from './utils/types.ts'
 import { UsageError } from '../errors.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
@@ -229,26 +224,6 @@ export function perlRegex(
   }
 }
 
-// ripgrep's default-engine pattern list as host source, or its refusal.
-export function rustSource(
-  pattern: string,
-  fixedString: boolean,
-  whole: boolean,
-  ignoreCase: boolean,
-): HostRegex {
-  let parts = pattern.split('\n')
-  if (fixedString) parts = parts.map(rustEscape)
-  let translated: HostRegex
-  try {
-    translated = translateRust(parts, ignoreCase)
-  } catch (err) {
-    if (err instanceof RustRegexError) throw new UsageError(`rg: ${err.message}`)
-    throw err
-  }
-  if (!whole) return translated
-  return { source: rustWholeWord(translated.source), ignoreCase: translated.ignoreCase }
-}
-
 // A literal as a Rust regex, the way `regex::escape` spells it.
 export function rustEscape(text: string): string {
   return text.replace(/[\\.+*?()|[\]{}^$#&\-~]/g, '\\$&')
@@ -290,11 +265,6 @@ export function compilePattern(
 ): RegExp {
   // GNU grep 3.11: -x overrides -w in either order.
   wholeWord = wholeWord && !lineRegexp
-  if (syntax === RegexSyntax.RUST) {
-    const translated = rustSource(pattern, fixedString, wholeWord, ignoreCase)
-    const source = lineRegexp ? wholeLine(translated.source, false) : translated.source
-    return new RegExp(source, translated.ignoreCase ? 'iu' : 'u')
-  }
   if (syntax === RegexSyntax.PERL && !fixedString) {
     const translated = perlRegex(pattern, ignoreCase, wholeWord)
     const source = lineRegexp ? wholeLine(translated.source, false) : translated.source

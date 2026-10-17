@@ -20,8 +20,12 @@ from dulwich import porcelain
 from dulwich.objects import Commit
 from dulwich.repo import Repo
 
-from mirage.commands.cli.builtin.git.pickaxe import contains, touches
-from tests.commands.cli.builtin.git.conftest import AUTHOR, commit_file
+from mirage.commands.cli.builtin.git.pickaxe import contains, greps, touches
+from tests.commands.cli.builtin.git.conftest import (
+    AUTHOR,
+    commit_file,
+    commit_gitlink,
+)
 
 
 def commits_of(repo_path: Path) -> list[Commit]:
@@ -45,14 +49,14 @@ def commits_of(repo_path: Path) -> list[Commit]:
 def test_a_root_commit_introduces_everything_it_adds(repo_path):
     with Repo(str(repo_path)) as repo:
         root = commits_of(repo_path)[-1]
-        assert touches(repo.object_store, root, b"one")
+        assert touches(repo, root, b"one")
 
 
 def test_a_commit_that_adds_the_string_is_reported(repo_path):
     commit_file(repo_path, "c.txt", "needle here\n", "fourth")
     with Repo(str(repo_path)) as repo:
         head = commits_of(repo_path)[0]
-        assert touches(repo.object_store, head, b"needle")
+        assert touches(repo, head, b"needle")
 
 
 def test_a_commit_that_removes_the_string_is_reported(repo_path):
@@ -60,7 +64,7 @@ def test_a_commit_that_removes_the_string_is_reported(repo_path):
     commit_file(repo_path, "c.txt", "gone\n", "fifth")
     with Repo(str(repo_path)) as repo:
         head = commits_of(repo_path)[0]
-        assert touches(repo.object_store, head, b"needle")
+        assert touches(repo, head, b"needle")
 
 
 def test_a_commit_that_leaves_the_count_alone_is_not_reported(repo_path):
@@ -69,7 +73,7 @@ def test_a_commit_that_leaves_the_count_alone_is_not_reported(repo_path):
     # exactly once and the commit is NOT a match. A grep would report it.
     with Repo(str(repo_path)) as repo:
         third = commits_of(repo_path)[0]
-        assert not touches(repo.object_store, third, b"one")
+        assert not touches(repo, third, b"one")
 
 
 def test_moving_a_line_between_files_is_reported(repo_path):
@@ -91,13 +95,13 @@ def test_moving_a_line_between_files_is_reported(repo_path):
     )
     with Repo(str(repo_path)) as repo:
         head = commits_of(repo_path)[0]
-        assert touches(repo.object_store, head, b"one changed")
+        assert touches(repo, head, b"one changed")
 
 
 def test_a_commit_touching_nothing_relevant_is_not_reported(repo_path):
     with Repo(str(repo_path)) as repo:
         second = commits_of(repo_path)[1]
-        assert not touches(repo.object_store, second, b"absent-string")
+        assert not touches(repo, second, b"absent-string")
 
 
 # git 2.47 on debian:stable-slim lists a commit under -S PATTERN
@@ -120,3 +124,16 @@ def test_a_commit_touching_nothing_relevant_is_not_reported(repo_path):
 def test_contains_counts_as_git_does(old, new, pattern, listed):
     regex = re.compile(pattern)
     assert (contains(old, regex) != contains(new, regex)) is listed
+
+
+def test_a_gitlink_is_read_as_its_subproject_line(repo_path):
+    # git's pickaxe fills a gitlink side with "Subproject commit <id>",
+    # the text its patch prints, rather than reading the id as a blob.
+    with Repo(str(repo_path)) as repo:
+        target = repo.refs[b"HEAD"]
+    commit_gitlink(repo_path, "sub")
+    with Repo(str(repo_path)) as repo:
+        head = commits_of(repo_path)[0]
+        assert touches(repo, head, b"Subproject commit " + target)
+        assert greps(repo, head, re.compile("^Subproject commit"))
+        assert not touches(repo, head, b"absent-string")

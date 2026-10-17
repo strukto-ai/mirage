@@ -31,6 +31,7 @@ import { readPrefix } from '../../../io/cooperative.ts'
 import { LINK_TARGET_KEY } from '../../../types.ts'
 import type { LinkView } from '../../../view/types.ts'
 import { CycleError } from '../../../utils/path.ts'
+import { hasAborted } from '../../../utils/abort.ts'
 import { formatRecords } from '../utils/output.ts'
 import { linksOf, mountsOf } from '../utils/links.ts'
 
@@ -135,7 +136,9 @@ export async function fileGeneric(
     let head: Uint8Array
     try {
       head = await header(stream, readRange, p, ctx.signal)
-    } catch {
+    } catch (err) {
+      if (hasAborted(ctx.signal)) throw err
+      console.debug(`file: failed to read header for ${p.virtual}: ${String(err)}`)
       head = new Uint8Array(0)
     }
     const result = detectFileType(head, s)

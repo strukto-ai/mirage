@@ -7,7 +7,6 @@ import pytest
 
 from mirage.commands.builtin import rg_search
 from mirage.commands.builtin.generic.rg import (
-    labelled,
     parse_flags,
     rg_generic,
 )
@@ -531,15 +530,6 @@ async def test_rg_walk_names_a_file_it_could_not_read_as_typed():
     assert out == b"sub/ok.txt:hit\n"
     assert err == b"rg: sub/locked.txt: Permission denied (os error 13)\n"
     assert io.exit_code == 2
-
-
-def test_labelled_asks_for_the_filename_a_walk_would_have_printed():
-    assert labelled(Context(flags={})).flags == {"with_filename": True}
-
-
-def test_labelled_lets_dash_upper_i_win():
-    ctx = Context(flags={"no_filename": True})
-    assert labelled(ctx) is ctx
 
 
 async def _walked(line: str) -> tuple[str, str, int]:

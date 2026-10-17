@@ -20,11 +20,12 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
+from mirage.utils.width import TAB_WIDTH
 
 
 @dataclass(frozen=True, slots=True)
 class UnexpandFlags:
-    tabsize: int = 8
+    tabsize: int = TAB_WIDTH
     all_spaces: bool = False
     first_only: bool = False
 
@@ -32,7 +33,7 @@ class UnexpandFlags:
 def parse_flags(flags: Mapping[str, FlagValue]) -> UnexpandFlags:
     fl = FlagView(flags, spec=SPECS["unexpand"])
     return UnexpandFlags(
-        tabsize=int(fl.as_str("tabs") or "8"),
+        tabsize=int(fl.as_nonempty("tabs", str(TAB_WIDTH))),
         all_spaces=fl.as_bool("all"),
         first_only=fl.as_bool("first_only"),
     )
@@ -79,7 +80,7 @@ async def unexpand(
     *,
     read_stream: PolymorphicReadFn,
     stdin: ByteSource | None = None,
-    tabsize: int = 8,
+    tabsize: int = TAB_WIDTH,
     all_spaces: bool = False,
     first_only: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:

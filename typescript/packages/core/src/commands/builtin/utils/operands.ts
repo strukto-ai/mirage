@@ -255,9 +255,23 @@ export async function* reportedStream(
     yield* source
   } catch (err) {
     if (!isFsError(err)) throw err
-    io.stderr = concat([await materialize(io.stderr), encodeText(fsErrorLine(cmdName, path, err))])
-    io.exitCode = 1
+    await reportFsError(io, cmdName, path, err)
   }
+}
+
+/**
+ * Report one operand's filesystem failure on a result whose output goes on:
+ * its fsErrorLine lands after the stderr already there, and the exit code
+ * becomes 1. Mirrors Python's report_fs_error.
+ */
+export async function reportFsError(
+  io: IOResult,
+  cmdName: string,
+  path: PathSpec,
+  err: unknown,
+): Promise<void> {
+  io.stderr = concat([await materialize(io.stderr), encodeText(fsErrorLine(cmdName, path, err))])
+  io.exitCode = 1
 }
 
 /** `each` over every operand in turn, or over stdin without one. Mirrors Python's per_operand. */

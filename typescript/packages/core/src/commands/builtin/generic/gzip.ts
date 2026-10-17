@@ -25,14 +25,17 @@ import { gnuBasename } from '../../../utils/path.ts'
 import { gzipCompressStream } from '../../../utils/compress.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { linkResolver } from '../utils/links.ts'
+import { formatRecords } from '../utils/output.ts'
 import { resolveSource, stdinStream } from '../utils/stream.ts'
 import { GZIP_SUFFIX } from '../constants.ts'
 import {
   besideLink,
   decompressInputs,
+  existsLine,
   gzipSuffix,
   openGzipInput,
   outputTaken,
+  removeInput,
   replaceOutput,
   suffixRefusal,
 } from './decompress.ts'
@@ -119,7 +122,7 @@ export async function gzipGeneric(
   const report = (line: string, code: number, warning: boolean): void => {
     if (!(warning && quiet)) {
       lines.push(line.replace(/\n$/, ''))
-      io.stderr = new TextEncoder().encode(lines.join('\n') + '\n')
+      io.stderr = formatRecords(lines)
     }
     if (io.exitCode !== 1) io.exitCode = code
   }
@@ -174,7 +177,7 @@ export async function gzipGeneric(
               : besideLink(link, p.rawPath + suffix)
           const existed = await outputTaken(out, stat, resolver)
           if (existed && !force) {
-            report(`gzip: ${p.rawPath}${suffix} already exists;\tnot overwritten`, 2, false)
+            report(existsLine(p.rawPath + suffix), 2, false)
             continue
           }
           try {
@@ -192,10 +195,7 @@ export async function gzipGeneric(
         } finally {
           await spool.close()
         }
-        if (!keep) {
-          if (link === null || resolver === null) await unlink(p)
-          else await resolver.unlink(link)
-        }
+        if (!keep) await removeInput(p, link, unlink, resolver)
       } finally {
         await closeQuietly(input)
       }

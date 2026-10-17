@@ -3,7 +3,9 @@ from types import SimpleNamespace
 import pytest
 
 from mirage.cache.index import RAMIndexCacheStore
+from mirage.commands.builtin.dify import search as command_search
 from mirage.commands.config import Context
+from mirage.core.dify import search, tree
 from mirage.io.types import materialize
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -37,8 +39,6 @@ def accessor() -> SimpleNamespace:
 async def test_search_command_resolves_globs_and_passes_multiple_documents(
     monkeypatch,
 ):
-    from mirage.commands.builtin.dify import search as command_search
-    from mirage.core.dify import search, tree
 
     calls: list[tuple[list[PathSpec], dict]] = []
 
@@ -80,8 +80,6 @@ async def test_search_command_resolves_globs_and_passes_multiple_documents(
 
 @pytest.mark.asyncio
 async def test_search_command_root_searches_whole_dataset(monkeypatch):
-    from mirage.commands.builtin.dify import search as command_search
-    from mirage.core.dify import search
 
     calls: list[tuple[list[PathSpec], dict]] = []
 
@@ -115,3 +113,33 @@ async def test_search_command_root_searches_whole_dataset(monkeypatch):
             },
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_search_command_sends_an_explicit_empty_method(monkeypatch):
+
+    calls: list[dict] = []
+
+    async def search_segments(accessor, query, paths, **kwargs):
+        calls.append(kwargs)
+        return []
+
+    monkeypatch.setattr(search, "search_segments", search_segments)
+    root = PathSpec(
+        vfs_path=mount_key("/knowledge", "/knowledge"),
+        virtual="/knowledge",
+        directory="/knowledge",
+    )
+
+    await command_search(
+        accessor(),
+        [root],
+        ["anything"],
+        Context(
+            flags={"method": ""},
+            io=io_for(DifyVFS, accessor()),
+            index=RAMIndexCacheStore(),
+        ),
+    )
+
+    assert calls[0]["method"] == ""

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from mirage.commands.builtin.utils.lines import split_lines
+from mirage.commands.builtin.utils.size_suffix import decimal_value
 from mirage.commands.builtin.utils.stream import read_stdin_async
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
@@ -564,7 +565,7 @@ async def patch(
     write_bytes: Callable[..., Awaitable[None]],
     has_vfs: bool,
     stdin: ByteSource | None = None,
-    p: str | None = None,
+    p: int = 0,
     R: bool = False,
     i: PathSpec | None = None,
     N: bool = False,
@@ -574,7 +575,7 @@ async def patch(
         raise extra_operand_error(
             CommandName.PATCH, paths[2].raw_path or paths[2].virtual
         )
-    strip_count = int(p) if p else 0
+    strip_count = p
     # `patch [ORIGFILE [PATCHFILE]]`: the second operand is the patch
     # file, ahead of -i, and the first is the one file every hunk goes to
     # in place of the names the patch's headers carry.
@@ -737,9 +738,36 @@ async def _save_rejects(
 __all__ = ["patch"]
 
 
+# GNU patch's numeric_string: one sign, then digits to the end of the word.
+STRIP_COUNT = re.compile(r"[+-]?[0-9]+")
+
+
+def _strip_count(text: str) -> int | None:
+    """``-p`` as GNU patch scans it, None for no number.
+
+    Args:
+        text (str): the value as typed.
+    """
+    if STRIP_COUNT.fullmatch(text) is None:
+        return None
+    value = decimal_value(text.lstrip("+-"))
+    return -value if text.startswith("-") else value
+
+
+def _strip_refusal(text: str, value: int | None) -> str:
+    """GNU patch's fatal line for a -p value that is no number or negative.
+
+    Args:
+        text (str): the value as typed.
+        value (int | None): what it scanned to, None for no number.
+    """
+    problem = "is not a number" if value is None else "is negative"
+    return f"patch: **** strip count {shell_quote(text)} {problem}"
+
+
 @dataclass(frozen=True, slots=True)
 class PatchFlags:
-    strip: str | None = None
+    strip: int = 0
     reverse: bool = False
     input_path: PathSpec | None = None
     forward: bool = False
@@ -748,8 +776,9 @@ class PatchFlags:
 def parse_flags(flags: Mapping[str, FlagValue]) -> PatchFlags:
     fl = FlagView(flags, spec=SPECS["patch"])
     input_flag = fl.raw("i")
+    strip = fl.as_number("p", _strip_count, _strip_refusal, low=0, exit_code=2)
     return PatchFlags(
-        strip=fl.as_str("p"),
+        strip=0 if strip is None else strip,
         reverse=fl.as_bool("R"),
         input_path=input_flag if isinstance(input_flag, PathSpec) else None,
         forward=fl.as_bool("N"),

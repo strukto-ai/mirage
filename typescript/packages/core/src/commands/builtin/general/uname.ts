@@ -20,7 +20,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { HOSTNAME } from './hostname.ts'
+import { HOSTNAME } from '../constants.ts'
 
 const ENC = new TextEncoder()
 

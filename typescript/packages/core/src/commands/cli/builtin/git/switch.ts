@@ -13,13 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec } from '../../../../types.ts'
-import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { refuseAmbiguous, remoteBranch, setUpTracking, trackMode } from './branch.ts'
-import { moveHead, previousPosition, trackingReport } from './checkout.ts'
+import { refuseAmbiguous, remoteBranch, trackMode } from './branch.ts'
+import { moveHead } from './checkout.ts'
 import { HEAD } from './constants.ts'
 import {
   BranchExistsError,
@@ -34,7 +33,6 @@ import {
   RefLockError,
   RefReadOnlyError,
 } from './errors.ts'
-import { short } from './format.ts'
 import { readIndex, refuseUnresolved } from './index_file.ts'
 
 import type { ReadOnlyRefusal } from './types.ts'
@@ -43,20 +41,16 @@ import {
   blockingRef,
   loadRefs,
   readHead,
+  REMOTE_PREFIX,
   setHead,
   TAG_PREFIX,
-  validRefName,
+  validBranchName,
 } from './refs.ts'
-import { repoArgs } from './repo.ts'
 import { indexLocked, opened } from './session.ts'
-import { noteAmbiguity, resolveCommit } from './revparse.ts'
+import { COMMIT, noteAmbiguity, resolveCommit, TAG } from './revparse.ts'
 import { checkSwitches, fatal } from './util.ts'
-import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
-const REMOTES_PREFIX = 'refs/remotes/'
-const COMMIT = 'commit'
-const TAG = 'tag'
 const REMOTE_BRANCH = 'remote branch'
 
 /** The parsed shape of a `git switch` invocation. */
@@ -80,7 +74,7 @@ function parseFlags(fl: FlagView): SwitchFlags {
  */
 export function expectedKind(known: ReadonlyMap<string, string>, name: string): string {
   if (known.has(`${TAG_PREFIX}${name}`)) return TAG
-  if (known.has(`${REMOTES_PREFIX}${name}`)) return REMOTE_BRANCH
+  if (known.has(`${REMOTE_PREFIX}${name}`)) return REMOTE_BRANCH
   return COMMIT
 }
 
@@ -100,9 +94,6 @@ export async function switchBranch(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  let carried: string
-  let note: string
-  let warnings = ''
   try {
     const vfs = ctx.vfs
     if (vfs === undefined) {
@@ -129,9 +120,7 @@ export async function switchBranch(
     let startPoint: string | undefined
     if (flags.create !== undefined) {
       target = flags.create
-      if (known.has(`${BRANCH_PREFIX}${target}`)) throw new BranchExistsError(target)
       startPoint = first
-      const start = first ?? HEAD
       // Before the first commit there is nothing for HEAD to resolve to, and
       // git makes the branch anyway: the line only repoints symbolic HEAD,
       // writing neither the ref nor a reflog line, because a branch with no
@@ -141,19 +130,31 @@ export async function switchBranch(
       // git 2.50.1.
       const unborn = first === undefined && head.ref !== null && !known.has(head.ref)
       oid = ''
-      if (!unborn) {
+      if (first !== undefined) {
         try {
-          oid = await resolveCommit(repo, start)
-        } catch {
-          throw new InvalidReferenceError(start)
+          oid = await resolveCommit(repo, first)
+        } catch (err) {
+          if (err instanceof GitError) throw new InvalidReferenceError(first)
+          throw err
         }
-        if (first !== undefined) await refuseAmbiguous(repo, first, false)
+        await refuseAmbiguous(repo, first, false)
       }
-      // After the start point and before anything is written, which is git's
-      // own order. A ref is a path below .git, so an unchecked name reaches
-      // writeRef as one: -c ../../config would land on the repository's own
+      // After a start point that was named and before HEAD is read or anything
+      // is written, which is git's own order, and before it asks whether the
+      // branch exists, so a refs/heads/HEAD already there is still refused as a
+      // name. A ref is a path below .git, so an unchecked name reaches writeRef
+      // as one: -c ../../config would land on the repository's own
       // configuration rather than on a branch.
-      if (!validRefName(target)) throw new InvalidBranchNameError(target)
+      if (!validBranchName(target)) throw new InvalidBranchNameError(target)
+      if (known.has(`${BRANCH_PREFIX}${target}`)) throw new BranchExistsError(target)
+      if (first === undefined && !unborn) {
+        try {
+          oid = await resolveCommit(repo, HEAD)
+        } catch (err) {
+          if (err instanceof GitError) throw new InvalidReferenceError(HEAD)
+          throw err
+        }
+      }
       // And before the working tree moves: git takes the ref lock first, so a
       // name whose path another ref holds refuses with nothing checked out.
       const held = blockingRef(new Set(known.keys()), `${BRANCH_PREFIX}${target}`)
@@ -206,15 +207,16 @@ export async function switchBranch(
       if (local) await noteAmbiguity(repo, target)
       try {
         oid = await resolveCommit(repo, local ? branch : (guessed ?? target))
-      } catch {
-        throw new InvalidReferenceError(target)
+      } catch (err) {
+        if (err instanceof GitError) throw new InvalidReferenceError(target)
+        throw err
       }
       attached = creating || (!flags.detach && known.has(`${BRANCH_PREFIX}${target}`))
       if (!flags.detach && !attached) {
         throw new BranchExpectedError(expectedKind(known, target), target)
       }
     }
-    const moved = await moveHead(
+    return await moveHead(
       vfs,
       repo,
       known,
@@ -223,48 +225,24 @@ export async function switchBranch(
       target,
       attached ? `${BRANCH_PREFIX}${target}` : null,
       creating,
-      startPoint ?? HEAD,
-      creating && startPoint === undefined,
+      startPoint,
+      mode,
+      false,
+      fl.asBool('quiet'),
     )
-    carried = [...moved.carried]
-      .sort(([a], [b]) => compareCodePoints(a, b))
-      .map(([path, letter]) => `${letter}\t${path}\n`)
-      .join('')
-    let warning = ''
-    if (creating) {
-      const [tracking, told] = await setUpTracking(repo, target, startPoint ?? null, mode, head)
-      carried += tracking
-      warning = told
-    }
-    // git writes the warning above everything it says about the move, because
-    // the directory it could not remove is a fact about the working tree
-    // rather than about where HEAD went.
-    warnings = moved.warnings + warning
-    note = moved.warnings + (await previousPosition(repo, head)) + warning
-    if (attached) {
-      const verb = creating ? 'Switched to a new branch' : 'Switched to branch'
-      note += `${verb} '${target}'\n`
-      if (!creating) carried += await trackingReport(repo, target)
-    } else {
-      const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
-      const subject = commit.message.split('\n')[0] ?? ''
-      note += `HEAD is now at ${short(oid, repo.abbrev)} ${subject}\n`
-    }
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
     throw err
   }
-  if (fl.asBool('quiet')) return [null, new IOResult({ stderr: ENC.encode(warnings) })]
-  return [ENC.encode(carried), new IOResult({ stderr: ENC.encode(note) })]
 }
 
 /**
- * switch's refusal by a read-only mount: the new branch's ref under `-c`, whose
- * lock git takes first, and the index's otherwise.
+ * switch's refusal by a read-only mount: the new branch's ref under a `-c` with
+ * no start point, whose lock git takes first, and the index's otherwise.
  */
 export const switchReadOnly: ReadOnlyRefusal = (texts, ctx, location) => {
-  const name = new FlagView(ctx.flags).asStr('create')
-  if (name === undefined) return indexLocked(texts, ctx, location)
+  const name = new FlagView(ctx.flags, ctx.spec).asStr('create')
+  if (name === undefined || texts.length > 0) return indexLocked(texts, ctx, location)
   const ref = `${BRANCH_PREFIX}${name}`
   return new RefReadOnlyError(
     ref,

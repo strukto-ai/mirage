@@ -191,6 +191,31 @@ async def test_creating_at_a_start_point_that_is_not_a_commit(git_rw):
 
 
 @pytest.mark.asyncio
+async def test_creating_refuses_a_name_that_escapes_the_ref_tree(
+    git_rw, repo_path: Path
+):
+    before = (repo_path / ".git" / "config").read_bytes()
+    code, _out, err = await run(git_rw, "checkout -b ../../config")
+    assert code == 128
+    assert err == (
+        b"fatal: '../../config' is not a valid branch name\n"
+        b"hint: See `man git check-ref-format`\n"
+        b'hint: Disable this message with "git config set '
+        b'advice.refSyntax false"\n'
+    )
+    assert (repo_path / ".git" / "config").read_bytes() == before
+
+
+@pytest.mark.asyncio
+async def test_creating_names_an_unresolvable_start_point_first(git_rw):
+    _code, _out, err = await run(git_rw, "checkout -b ../../config nosuchrev")
+    assert err == (
+        b"fatal: 'nosuchrev' is not a commit and a branch '../../config' "
+        b"cannot be created from it\n"
+    )
+
+
+@pytest.mark.asyncio
 async def test_creating_a_branch_that_exists_is_refused(git_rw):
     await run(git_rw, "branch topic")
     code, _out, err = await run(git_rw, "checkout -b topic")

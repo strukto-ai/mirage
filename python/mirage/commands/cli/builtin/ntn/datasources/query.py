@@ -38,6 +38,11 @@ from mirage.types import JsonValue, PathSpec
 from mirage.workspace.files import Files
 
 DEFAULT_LIMIT = 25
+# clap's refusal of a --limit under 1 (ntn 0.21.9), the value as typed.
+LIMIT_REFUSAL = (
+    "error: invalid value '{}' for '--limit <LIMIT>': limit must be at "
+    "least 1\n\nFor more information, try '--help'."
+)
 DIRECTIONS = {
     "asc": "ascending",
     "ascending": "ascending",
@@ -138,12 +143,16 @@ async def query(
     config: NotionConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
+    # clap checks a value as it parses it, ahead of the missing operand.
+    limit = fl.as_int("limit", DEFAULT_LIMIT)
+    if limit < 1:
+        raise UsageError(
+            LIMIT_REFUSAL.format(fl.as_str("limit", str(limit))), 2
+        )
     # The whole request body is built before the first call, so a bad
     # --filter refuses the line without having reached the API.
     ref = data_source_ref(first_text(texts, "data source id"))
-    body: dict[str, JsonValue] = {
-        "page_size": fl.as_int("limit") or DEFAULT_LIMIT
-    }
+    body: dict[str, JsonValue] = {"page_size": limit}
     cursor = fl.as_str("start_cursor")
     if cursor:
         body["start_cursor"] = cursor

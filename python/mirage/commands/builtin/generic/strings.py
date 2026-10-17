@@ -9,6 +9,7 @@ from mirage.commands.builtin.utils.operands import (
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import stdin_stat, stdin_stream
+from mirage.commands.builtin.utils.strtol import UINT_MAX, strtoul
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -18,6 +19,32 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
 
+def _min_length(text: str) -> int | None:
+    """``-n`` as binutils 2.44 scans it: strtoul at base 0, every byte.
+
+    Args:
+        text (str): the value as typed.
+    """
+    value, rest = strtoul(text)
+    return value if rest == "" else None
+
+
+def _min_length_refusal(text: str, value: int | None) -> str:
+    """binutils' set_string_min refusals, in the order it tests them.
+
+    Args:
+        text (str): the value as typed.
+        value (int | None): what it scanned to, None for no number.
+    """
+    if value is None:
+        return f"strings: invalid integer argument {text}"
+    if value > UINT_MAX:
+        return f"strings: minimum string length is too big: {text}"
+    if value == 0:
+        return f"strings: minimum string length is too small: {text}"
+    return f"strings: minimum string length {text} is too big"
+
+
 @dataclass(frozen=True, slots=True)
 class StringsFlags:
     min_len: int = 4
@@ -25,8 +52,10 @@ class StringsFlags:
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> StringsFlags:
     fl = FlagView(flags, spec=SPECS["strings"])
-    n_raw = fl.as_str("n")
-    return StringsFlags(min_len=int(n_raw) if n_raw else 4)
+    min_len = fl.as_number(
+        "n", _min_length, _min_length_refusal, low=1, high=UINT_MAX - 1
+    )
+    return StringsFlags(min_len=4 if min_len is None else min_len)
 
 
 async def _strings_stream(

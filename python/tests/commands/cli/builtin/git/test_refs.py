@@ -15,6 +15,7 @@
 import pytest
 from dulwich.refs import Ref
 
+from mirage.commands.cli.builtin.git.errors import BadRefNameUpdateError
 from mirage.commands.cli.builtin.git.refs import (
     blocking_ref,
     load_refs,
@@ -22,12 +23,15 @@ from mirage.commands.cli.builtin.git.refs import (
     parse_refspec,
     read_head,
     safe_ref_name,
+    valid_branch_name,
     valid_ref_name,
     whole_ref_name,
     without_packed,
+    write_ref,
 )
 from mirage.commands.cli.builtin.git.types import Refspec
 from mirage.io import IOResult
+from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
 from .conftest import GITDIR, make_branch, mounted, pack_refs
@@ -263,3 +267,40 @@ def test_safe_ref_name_follows_refname_is_safe(name: str, safe: bool):
 def test_a_bare_at_is_no_whole_ref_name():
     assert not whole_ref_name("@")
     assert whole_ref_name("HEAD")
+
+
+async def _no_dispatch(op: str, path, **kwargs):
+    raise AssertionError(f"{op} {path.virtual} reached the mount")
+
+
+@pytest.mark.asyncio
+async def test_write_ref_refuses_a_name_that_leaves_the_ref_tree():
+    with pytest.raises(BadRefNameUpdateError) as caught:
+        await write_ref(
+            Files([], _no_dispatch),
+            PathSpec.from_str_path("/repo/.git"),
+            "refs/heads/../../config",
+            DETACHED_SHA.encode(),
+        )
+    assert str(caught.value) == (
+        "refusing to update ref with bad name 'refs/heads/../../config'"
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "valid"),
+    [
+        ("main", True),
+        ("feature/HEAD", True),
+        ("HEADS", True),
+        ("x-", True),
+        ("@", True),
+        ("HEAD", False),
+        ("-x", False),
+        ("a..b", False),
+    ],
+)
+def test_a_new_branch_name_follows_strbuf_check_branch_ref(
+    name: str, valid: bool
+):
+    assert valid_branch_name(name) is valid

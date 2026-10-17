@@ -703,7 +703,7 @@
       }
     },
     {
-      "id": "gh_list_limits_apply_after_filters_and_preserve_zero",
+      "id": "gh_list_limits_apply_after_filters",
       "seq": 569055,
       "targets": [
         "cli-gh"
@@ -711,8 +711,8 @@
       "command": "gh issue list --limit 0 --json number; gh pr list --state merged --limit 1 --json number --jq '.[0].number'; gh workflow list --limit 1 --json id --jq '.[0].id'",
       "expect": {
         "exit": 0,
-        "stdout": "[]\n5\n101\n",
-        "stderr": ""
+        "stdout": "5\n101\n",
+        "stderr": "invalid limit: 0\n"
       }
     },
     {
@@ -2519,6 +2519,97 @@
       "expect": {
         "exit": 0,
         "stdout": "usage: gh auth token [--hostname HOSTNAME] [-u USER] [-h]\n\nToken display is unavailable in Mirage\n\noptions:\n  --hostname HOSTNAME   The hostname of the GitHub instance authenticated with\n  -u USER, --user USER  The account selector; tokens are never printed\n  -h, --help            Show this help and exit\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_list_verbs_refuse_a_zero_limit",
+      "seq": 9940101,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh issue list --limit 0; gh run list --limit 0; gh repo list integ --limit 0; gh workflow list --limit 0; gh pr list --limit 0; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "invalid limit: 0\ninvalid limit: 0\ninvalid limit: 0\ninvalid limit: 0\ninvalid value for --limit: 0\n"
+      }
+    },
+    {
+      "id": "gh_release_list_takes_a_zero_limit",
+      "seq": 9940102,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh release list --limit 0; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_api_empty_method_goes_out_as_get",
+      "seq": 9940103,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api -X '' repos/integ/repo-cli/issues -f title=never --jq type",
+      "expect": {
+        "exit": 0,
+        "stdout": "array\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_release_create_empty_title_is_the_tag",
+      "seq": 9940104,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh release create v9.9.9 --title '' --target '' --notes n > /dev/null && gh release view v9.9.9 --json name,targetCommitish --jq '[.name,.targetCommitish]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"v9.9.9\",\"main\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_auth_token_empty_hostname_is_the_default_host",
+      "seq": 9940105,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh auth token --hostname ''",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gh auth token: the token for 127.0.0.1 stays in Mirage configuration and is never printed; gh commands use it directly\n"
+      }
+    },
+    {
+      "id": "gh_list_empty_filters_are_unset",
+      "seq": 9940106,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "test \"$(gh issue list --assignee '' --author '')\" = \"$(gh issue list)\" && test \"$(gh pr list --base '' --head '')\" = \"$(gh pr list)\" && echo same",
+      "expect": {
+        "exit": 0,
+        "stdout": "same\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_repo_fork_empty_name_keeps_the_source_name",
+      "seq": 9940107,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo fork integ/repo-cli --fork-name ''",
+      "expect": {
+        "exit": 0,
+        "stdout": "✓ Created fork integ-user/repo-cli\n",
         "stderr": ""
       }
     }

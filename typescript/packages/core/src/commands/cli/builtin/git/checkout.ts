@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PathSpec } from '../../../../types.ts'
+import { FileType, PathSpec } from '../../../../types.ts'
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
@@ -35,6 +35,7 @@ import {
   DetachPathError,
   DetachWithCreateError,
   GitError,
+  InvalidBranchNameError,
   InvalidReferenceError,
   NoWorkspaceError,
   PathsWithBranchError,
@@ -67,6 +68,7 @@ import {
   loadRefs,
   readHead,
   setHead,
+  validBranchName,
   writeRef,
 } from './refs.ts'
 import { matched, repoRelative, under as inside } from './pathspec.ts'
@@ -76,8 +78,7 @@ import { noteAmbiguity, refsNamed, resolveCommit } from './revparse.ts'
 import { restorePaths, sourceTree } from './restore.ts'
 import { restored } from './reset.ts'
 import { commitEntries, type TreeEntry } from './tree.ts'
-import { FileType } from '../../../../types.ts'
-import type { HeadMove, HeadRef, IndexEntry, ReadOnlyRefusal } from './types.ts'
+import type { HeadRef, IndexEntry, ReadOnlyRefusal, Track } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import { checkSwitches, fatal, splitMarked, startPoint as lineStart } from './util.ts'
 import { scan, UNTRACKED_ALL } from './worktree.ts'
@@ -362,7 +363,7 @@ export async function switchTo(
  * detached is reachable from nothing once HEAD moves, and this is the one place
  * its id is still written down for the caller.
  */
-export async function previousPosition(repo: Repo, head: HeadRef): Promise<string> {
+async function previousPosition(repo: Repo, head: HeadRef): Promise<string> {
   if (head.commit === null) return ''
   const { commit } = await git.readCommit({ ...repoArgs(repo), oid: head.commit })
   const subject = commit.message.split('\n')[0] ?? ''
@@ -445,7 +446,7 @@ function stageLetters(
 }
 
 /**
- * Move HEAD, the index and the working tree to a commit.
+ * Move HEAD, the index and the working tree to a commit, and say so.
  *
  * The one procedure `checkout` and `switch` share, since the two differ only in
  * what they accept and how they word a miss. Refuses rather than overwriting
@@ -455,9 +456,12 @@ function stageLetters(
  * offer: without them a branch switch silently throws away whatever was changed
  * and not staged, and there is no reflog here to get it back from.
  *
+ * The paths whose uncommitted change was carried across go to stdout with their
+ * status letters, then the upstream a branch tracks; a submodule directory the
+ * move could not remove is a warning on stderr above the line saying where HEAD
+ * went.
+ *
  * @param vfs the session's files
- * @param links the name plane's link facts, null outside a workspace
- * @param mounts the name plane's mount boundaries, null outside a workspace
  * @param repo the opened repository
  * @param known every ref the repository publishes
  * @param head what HEAD pointed at before the move
@@ -465,11 +469,11 @@ function stageLetters(
  * @param target the operand as the user spelled it, for the reflog
  * @param ref the branch to attach HEAD to, null to detach it at the commit
  * @param creating whether `ref` is a new branch to write first
- * @param from the start point a new branch was created from, as typed
- * @param inPlace whether the line named no start point, so the new branch is
- *   being created where HEAD already is
- * @returns each path whose uncommitted change was carried across, against the
- *   status letter git prints for it
+ * @param start the start point a new branch is created from, as typed;
+ *   undefined when the line named none
+ * @param mode `branch.autoSetupMerge`, for a new branch's upstream
+ * @param advise whether a detached HEAD gets git's advice on the state it is in
+ * @param quiet `-q`: only the warnings are printed
  */
 export async function moveHead(
   vfs: Files,
@@ -480,19 +484,64 @@ export async function moveHead(
   target: string,
   ref: string | null,
   creating: boolean,
-  from: string,
-  inPlace: boolean,
-): Promise<HeadMove> {
+  start: string | undefined,
+  mode: Track,
+  advise: boolean,
+  quiet: boolean,
+): Promise<CommandFnResult> {
+  let carried: ReadonlyMap<string, string> = new Map()
+  let notes: string[] = []
   // A branch created where HEAD already is moves nothing: git writes the ref,
   // points HEAD at it, and never touches the working tree or the index, so an
   // unmerged index survives `git switch -c topic` and is refused by
   // `git switch -c topic HEAD` a word later. The shape of the line is what
   // decides it, which is git's own reading rather than a comparison of the two
   // trees. Pinned against git 2.50.1.
-  if (inPlace) {
-    await attach(vfs, repo, known, head, oid, target, ref, creating, from)
-    return { carried: new Map(), warnings: '' }
+  if (!(creating && start === undefined)) [carried, notes] = await carryAcross(vfs, repo, oid)
+  await attach(vfs, repo, known, head, oid, target, ref, creating, start ?? HEAD)
+  let out = [...carried]
+    .sort(([a], [b]) => compareCodePoints(a, b))
+    .map(([path, letter]) => `${letter}\t${path}\n`)
+    .join('')
+  let warning = ''
+  if (creating) {
+    const [tracking, told] = await setUpTracking(repo, target, start ?? null, mode, head)
+    out += tracking
+    warning = told
   }
+  const warnings = notes.join('')
+  // git writes the warning above everything it says about the move, because
+  // the directory it could not remove is a fact about the working tree rather
+  // than about where HEAD went.
+  let note = warnings + (await previousPosition(repo, head)) + warning
+  if (ref !== null) {
+    const verb = creating ? 'Switched to a new branch' : 'Switched to branch'
+    note += `${verb} '${target}'\n`
+    if (!creating) out += await trackingReport(repo, target)
+  } else {
+    const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
+    const subject = commit.message.split('\n')[0] ?? ''
+    // Asked for by name, a detached HEAD needs no advice on how it happened.
+    if (advise) note += `Note: switching to '${target}'.\n\n${DETACHED_ADVICE}\n`
+    note += `HEAD is now at ${short(oid, repo.abbrev)} ${subject}\n`
+  }
+  if (quiet) return [null, new IOResult({ stderr: ENC.encode(warnings + warning) })]
+  return [ENC.encode(out), new IOResult({ stderr: ENC.encode(note) })]
+}
+
+/**
+ * Move the index and the working tree to a commit's tree, refusing when that
+ * would destroy work that is not committed.
+ *
+ * @returns each path whose uncommitted change was carried across, against the
+ *   status letter git prints for it, and the warnings the removals could not
+ *   avoid
+ */
+async function carryAcross(
+  vfs: Files,
+  repo: Repo,
+  oid: string,
+): Promise<[ReadonlyMap<string, string>, string[]]> {
   const before = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
   const after = await commitEntries(repo, oid)
   const state = await readIndex(repo, vfs)
@@ -528,16 +577,14 @@ export async function moveHead(
   if (blocked.length > 0 || clobbered.length > 0 || lost.length > 0) {
     throw new CheckoutConflictError(blocked, clobbered, lost)
   }
-  const notes = await switchTo(repo, vfs, before, after)
-  await attach(vfs, repo, known, head, oid, target, ref, creating, from)
-  return { carried, warnings: notes.join('') }
+  return [carried, await switchTo(repo, vfs, before, after)]
 }
 
 /**
  * What a switch onto a branch prints about its upstream, on stdout. Read after
  * the move, so a branch created by the switch has its ref to count from.
  */
-export async function trackingReport(repo: Repo, branch: string): Promise<string> {
+async function trackingReport(repo: Repo, branch: string): Promise<string> {
   const upstream = await branchUpstream(
     repo,
     { branch, ref: `${BRANCH_PREFIX}${branch}`, commit: null },
@@ -643,9 +690,6 @@ export async function checkout(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  let carried: string
-  let note: string
-  let warnings = ''
   try {
     const vfs = ctx.vfs
     if (vfs === undefined) {
@@ -653,18 +697,19 @@ export async function checkout(
     }
     checkSwitches(ctx, texts)
     const detach = fl.asBool('detach')
-    if (detach && fl.asBool('b')) throw new DetachWithCreateError()
-    const target = texts[0] ?? (detach ? HEAD : undefined)
+    const branch = fl.asStr('b')
+    if (detach && branch !== undefined) throw new DetachWithCreateError()
+    const target = branch ?? texts[0] ?? (detach ? HEAD : undefined)
     if (target === undefined) throw new UnknownPathspecError('')
     const extra = texts[1]
     if (detach && extra !== undefined) throw new DetachPathError(extra)
     const repo = await opened(ctx, fl, true)
     const mode = await trackMode(repo)
     const head = await readHead(vfs, repo.location.gitdir)
-    let creating = fl.asBool('b')
+    let creating = branch !== undefined
     const ref = `${BRANCH_PREFIX}${target}`
     const known = await loadRefs(vfs, repo.location.gitdir, repo.location.commondir)
-    if (creating && texts.length > 2) throw new PathsWithBranchError(target)
+    if (creating && texts.length > 1) throw new PathsWithBranchError(target)
     if (!creating && !detach) {
       const [leading, marked] = splitMarked(texts, ctx.argv ?? [])
       if (marked.length > 0) {
@@ -677,7 +722,6 @@ export async function checkout(
         return await checkoutPaths(ctx, repo, fl, treeish, paths, true)
       }
     }
-    if (creating && known.has(ref)) throw new BranchExistsError(target)
     let guessed: string | null = null
     // The commit a target names when it is no local branch: a branch of that
     // name wins over every other reading, as git's checkout reads it.
@@ -685,7 +729,8 @@ export async function checkout(
     if (!creating && (detach || (!known.has(ref) && target !== head.branch))) {
       try {
         named = await resolveCommit(repo, target)
-      } catch {
+      } catch (err) {
+        if (!(err instanceof GitError)) throw err
         if (detach) throw new DetachPathError(target)
         if (await namesPath(repo, vfs, lineStart(fl).virtual, target)) {
           return await checkoutPaths(ctx, repo, fl, null, texts, true)
@@ -713,30 +758,39 @@ export async function checkout(
     // given, HEAD otherwise. Forcing HEAD here put the new branch on the
     // current commit and dropped the operand without a word, so every commit
     // after it landed on the wrong history.
-    const startPoint = guessed ?? (creating ? texts[1] : undefined)
-    let oid: string
+    const startPoint = guessed ?? (branch !== undefined ? texts[0] : undefined)
+    let oid: string | null = null
     if (startPoint !== undefined) {
       try {
         oid = await resolveCommit(repo, startPoint)
-      } catch {
-        throw new BadStartPointError(startPoint, target)
+      } catch (err) {
+        if (err instanceof GitError) throw new BadStartPointError(startPoint, target)
+        throw err
       }
       if (guessed === null) await refuseAmbiguous(repo, startPoint, false)
-    } else if (named !== null) {
+    }
+    // After the start point and before HEAD is read, which is git's own order:
+    // an unborn HEAD refuses the name, not the line. And before it asks whether
+    // the branch exists, so a refs/heads/HEAD already there is still refused as
+    // a name. A ref is a path below .git, so an unchecked name reaches writeRef
+    // as one: -b ../../config would land on the repository's own configuration
+    // rather than on a branch.
+    if (creating && !validBranchName(target)) throw new InvalidBranchNameError(target)
+    if (creating && known.has(ref)) throw new BranchExistsError(target)
+    if (named !== null) {
       oid = named
     } else if (!creating && known.has(ref)) {
       await noteAmbiguity(repo, target)
       oid = await resolveCommit(repo, ref)
-    } else {
-      oid = await resolveCommit(repo, creating ? 'HEAD' : target)
     }
+    oid ??= await resolveCommit(repo, creating ? 'HEAD' : target)
     // Before the working tree moves, which is where git refuses it too: the
     // ref is locked first and nothing is checked out when the lock cannot be
     // taken.
     const held = creating ? blockingRef(new Set(known.keys()), ref) : null
     if (held !== null) throw new RefLockError(ref, held)
     const attached = !detach && (creating || known.has(ref))
-    const moved = await moveHead(
+    return await moveHead(
       vfs,
       repo,
       known,
@@ -745,50 +799,26 @@ export async function checkout(
       target,
       attached ? ref : null,
       creating,
-      startPoint ?? HEAD,
-      creating && startPoint === undefined,
+      startPoint,
+      mode,
+      !detach,
+      fl.asBool('quiet'),
     )
-    carried = [...moved.carried]
-      .sort(([a], [b]) => compareCodePoints(a, b))
-      .map(([path, letter]) => `${letter}\t${path}\n`)
-      .join('')
-    let warning = ''
-    if (creating) {
-      const [tracking, told] = await setUpTracking(repo, target, startPoint ?? null, mode, head)
-      carried += tracking
-      warning = told
-    }
-    // git writes the warning above everything it says about the move, because
-    // the directory it could not remove is a fact about the working tree
-    // rather than about where HEAD went.
-    warnings = moved.warnings + warning
-    note = moved.warnings + (await previousPosition(repo, head)) + warning
-    if (attached) {
-      const verb = creating ? 'Switched to a new branch' : 'Switched to branch'
-      note += `${verb} '${target}'\n`
-      if (!creating) carried += await trackingReport(repo, target)
-    } else {
-      const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
-      const subject = commit.message.split('\n')[0] ?? ''
-      // Asked for by name, a detached HEAD needs no advice on how it happened.
-      if (!detach) note += `Note: switching to '${target}'.\n\n${DETACHED_ADVICE}\n`
-      note += `HEAD is now at ${short(oid, repo.abbrev)} ${subject}\n`
-    }
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
     throw err
   }
-  if (fl.asBool('quiet')) return [null, new IOResult({ stderr: ENC.encode(warnings) })]
-  return [ENC.encode(carried), new IOResult({ stderr: ENC.encode(note) })]
 }
 
 /**
- * checkout's refusal by a read-only mount: the new branch's ref under `-b`,
- * whose lock git takes first, and the index's otherwise.
+ * checkout's refusal by a read-only mount. git takes the new branch's ref
+ * lock first only for a bare `-b NAME`: a start point or `-q` sends it through
+ * the index first.
  */
 export const checkoutReadOnly: ReadOnlyRefusal = (texts, ctx, location) => {
-  const name = texts[0]
-  if (!new FlagView(ctx.flags).asBool('b') || name === undefined)
+  const fl = new FlagView(ctx.flags, ctx.spec)
+  const name = fl.asStr('b')
+  if (name === undefined || texts.length > 0 || fl.asBool('quiet'))
     return indexLocked(texts, ctx, location)
   const ref = `${BRANCH_PREFIX}${name}`
   return new RefReadOnlyError(

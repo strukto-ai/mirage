@@ -119,8 +119,9 @@ function parseFlags(fl: FlagView): TagFlags {
 async function resolveTarget(repo: Repo, revision: string): Promise<{ oid: string; type: string }> {
   try {
     return await resolveObject(repo, revision)
-  } catch {
-    throw new UnresolvedRefError(revision)
+  } catch (err) {
+    if (err instanceof GitError) throw new UnresolvedRefError(revision)
+    throw err
   }
 }
 

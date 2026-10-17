@@ -8,6 +8,7 @@ import { isWalkError, fsStrerror } from '../../../../errors/fs.ts'
 import { toHex } from '../../../../utils/hex.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
+import { GITLINK, GITLINK_MODE } from './constants.ts'
 import { GitError, NoWorkspaceError } from './errors.ts'
 import { readIndex } from './index_file.ts'
 import { readFile, readNames, readOptional, readRange, statOf } from './io.ts'
@@ -138,10 +139,10 @@ export async function fsck(
     const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
     const roots = new Set([...refs.values()].filter((oid) => !oid.startsWith('ref: ')))
     const index = await readIndex(repo, repo.vfs)
-    for (const entry of index.entries.values()) if (entry.mode !== 0o160000) roots.add(entry.oid)
+    for (const entry of index.entries.values()) if (entry.mode !== GITLINK) roots.add(entry.oid)
     for (const conflict of index.conflicts.values()) {
       for (const entry of [conflict.ancestor, conflict.this, conflict.other])
-        if (entry !== null && entry.mode !== 0o160000) roots.add(entry.oid)
+        if (entry !== null && entry.mode !== GITLINK) roots.add(entry.oid)
     }
     for (const directory of new Set([repo.location.gitdir, repo.location.commondir])) {
       for (const oid of await logRoots(repo.vfs, directory.join('logs'))) roots.add(oid)
@@ -169,7 +170,7 @@ export async function fsck(
           links.push(commit.tree, ...commit.parent)
         } else if (result.type === 'tree') {
           const { tree } = await git.readTree({ ...args, oid })
-          for (const entry of tree) if (entry.mode !== '160000') links.push(entry.oid)
+          for (const entry of tree) if (entry.mode !== GITLINK_MODE) links.push(entry.oid)
         } else if (result.type === 'tag') {
           const { tag } = await git.readTag({ ...args, oid })
           links.push(tag.object)

@@ -20,10 +20,11 @@ import { posixPhrase } from '../../errors/posix.ts'
 import type { FsCondition } from '../../errors/types.ts'
 import {
   IN_ORDER_OPERANDS,
+  NOT_GETOPT_LONG,
   OLD_OPTION_EXIT,
   OPERAND_EXIT,
   PYTHON_NAMES,
-  pythonUsage,
+  PYTHON_USAGE,
   READ_FAIL_EXIT,
   READ_FAIL_EXIT_ISDIR,
   RG_FLAG_NAMES,
@@ -144,7 +145,7 @@ export function readFailExitCodeFromLine(cmdName: string, rendered: string): num
  * registered command serves `--help`.
  */
 function pythonOptionError(cmdName: string, line: string): [Uint8Array, number] {
-  return [encodeText(line + pythonUsage(cmdName)), usageExitCode(cmdName)]
+  return [encodeText(line + PYTHON_USAGE.replace('{name}', cmdName)), usageExitCode(cmdName)]
 }
 
 /**
@@ -223,16 +224,6 @@ function trigrams(name: string): Set<string> {
   for (let i = 0; i + 3 <= name.length; i++) out.add(name.slice(i, i + 3))
   return out
 }
-
-// The programs that do NOT parse with getopt_long, and so answer an option
-// they will not take by naming the whole typed token as unknown rather than by
-// naming the option. Each one is measured: `curl --silent=2` is
-// `curl: option --silent=2: is unknown`, `python3 --version=2` is
-// `Unknown option: --version=2`, `jq --tab=2` is `jq: Unknown option --tab=2`,
-// and find reads the word as a predicate. Every other command here is a GNU
-// tool whose getopt_long words the refusal the other way, so the set is the
-// exception list and not the rule.
-const NOT_GETOPT_LONG = new Set<string>(['curl', 'jq', CommandName.FIND, ...PYTHON_NAMES])
 
 /**
  * getopt_long refusal for a BOOLEAN long option handed a value.

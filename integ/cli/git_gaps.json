@@ -1108,6 +1108,21 @@
       }
     },
     {
+      "id": "git_read_only_branch_creation_names_the_lock_git_takes_first",
+      "seq": 567834,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "session": "reader",
+      "command": "git -C /repo checkout -b c1; echo $?; git -C /repo checkout -q -b c2; echo $?; git -C /repo checkout -b c3 topic; echo $?; git -C /repo switch -c s1 topic; echo $?; git -C /repo switch -q -c s2; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "128\n128\n128\n128\n128\n",
+        "stderr": "fatal: cannot lock ref 'refs/heads/c1': Unable to create '/repo/.git/refs/heads/c1.lock': Read-only file system\nfatal: Unable to create '/repo/.git/index.lock': Read-only file system\nfatal: Unable to create '/repo/.git/index.lock': Read-only file system\nfatal: Unable to create '/repo/.git/index.lock': Read-only file system\nfatal: cannot lock ref 'refs/heads/s2': Unable to create '/repo/.git/refs/heads/s2.lock': Read-only file system\n"
+      }
+    },
+    {
       "id": "git_read_only_session_refuses_init_and_clone",
       "seq": 567834,
       "targets": [
@@ -1466,6 +1481,118 @@
       "expect": {
         "exit": 0,
         "stdout": "gone\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_empty_date_style",
+      "seq": 9940131,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log -1 --date= --format=%ad; git -C /repo show -s --date= --format=%ad HEAD",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: unknown date format \nfatal: unknown date format \n"
+      }
+    },
+    {
+      "id": "git_log_empty_since_is_now",
+      "seq": 9940132,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --since= --format=%s | wc -l; test \"$(git -C /repo log --until= --format=%H)\" = \"$(git -C /repo log --format=%H)\" && echo same",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\nsame\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_last_since_spelling_wins",
+      "seq": 9940133,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --since=2000-01-01 --after= --format=%s | wc -l; test \"$(git -C /repo log --after= --since=2000-01-01 --format=%H)\" = \"$(git -C /repo log --format=%H)\" && echo same",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\nsame\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_hash_object_empty_type",
+      "seq": 9940134,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf x | git -C /repo hash-object -t '' --stdin",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: invalid object type \"\"\n"
+      }
+    },
+    {
+      "id": "git_log_empty_diff_merges",
+      "seq": 9940135,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log -1 --diff-merges= --format=%s; git -C /repo log -1 --diff-merges=bogus --format=%s",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: invalid value for '--diff-merges': ''\nfatal: invalid value for '--diff-merges': 'bogus'\n"
+      }
+    },
+    {
+      "id": "git_init_empty_initial_branch",
+      "seq": 9940136,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git init -b '' /repo/empty-branch; status=$?; test -e /repo/empty-branch || echo gone; exit $status",
+      "expect": {
+        "exit": 128,
+        "stdout": "gone\n",
+        "stderr": "fatal: invalid initial branch name: ''\n"
+      }
+    },
+    {
+      "id": "git_clone_empty_origin",
+      "seq": 9940137,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "(cd /repo && git clone -o '' . c2; status=$?; test -e c2 || echo gone; exit $status)",
+      "expect": {
+        "exit": 128,
+        "stdout": "gone\n",
+        "stderr": "Cloning into 'c2'...\nfatal: '' is not a valid remote name\n"
+      }
+    },
+    {
+      "id": "git_empty_dash_c_keeps_the_directory",
+      "seq": 9940138,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "cd /repo && test \"$(git -C '' log -1 --format=%H)\" = \"$(git log -1 --format=%H)\" && echo same",
+      "expect": {
+        "exit": 0,
+        "stdout": "same\n",
         "stderr": ""
       }
     }

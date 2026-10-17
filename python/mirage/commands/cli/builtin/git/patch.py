@@ -14,11 +14,16 @@
 
 from collections.abc import Sequence
 from difflib import SequenceMatcher
+from stat import S_IFMT
 
 from dulwich.objects import Blob, ObjectID
 from dulwich.repo import BaseRepo
 
-from mirage.commands.cli.builtin.git.constants import FUNCNAME_START, GIT_SPACE
+from mirage.commands.cli.builtin.git.constants import (
+    FUNCNAME_START,
+    GIT_SPACE,
+    GITLINK,
+)
 from mirage.commands.cli.builtin.git.render import quote_path
 from mirage.commands.cli.builtin.git.summary import BINARY_SNIFF
 from mirage.shell.bytes import encode_text
@@ -40,7 +45,7 @@ def blob_data(repo: BaseRepo, entry: tuple[int, bytes] | None) -> bytes:
     """
     if entry is None:
         return b""
-    if entry[0] == 0o160000:
+    if entry[0] == GITLINK:
         return b"Subproject commit " + entry[1] + b"\n"
     obj = repo.object_store[ObjectID(entry[1])]
     assert isinstance(obj, Blob)
@@ -93,31 +98,10 @@ def file_patch(
         function_context (bool): ``-W``, widen hunks to whole functions.
         force_text (bool): render binary blobs as text under ``--text``.
     """
-    if old and new and old[0] & 0o170000 != new[0] & 0o170000:
-        return file_patch(
-            repo,
-            name,
-            origin,
-            old,
-            None,
-            score,
-            width,
-            fully,
-            context,
-            function_context,
-            force_text,
-        ) + file_patch(
-            repo,
-            name,
-            origin,
-            None,
-            new,
-            score,
-            width,
-            fully,
-            context,
-            function_context,
-            force_text,
+    if old and new and S_IFMT(old[0]) != S_IFMT(new[0]):
+        rest = (score, width, fully, context, function_context, force_text)
+        return file_patch(repo, name, origin, old, None, *rest) + file_patch(
+            repo, name, origin, None, new, *rest
         )
     source = quote_path(f"a/{origin}", False, fully)
     target = quote_path(f"b/{name}", False, fully)

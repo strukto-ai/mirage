@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { GENERAL_CURL, responseLines as renderResponseLines } from './curl.ts'
+import { enoent } from '../../../errors/fs.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -88,6 +89,7 @@ function mockStall(): void {
 async function runCurl(
   texts: string[],
   flags: Record<string, string | boolean | number | string[]> = {},
+  refuse?: Error,
 ): Promise<{
   out: string
   err: string
@@ -104,6 +106,7 @@ async function runCurl(
     flags,
     cwd: PathSpec.fromStrPath('/'),
     dispatch: (_op, path, args) => {
+      if (refuse !== undefined) return Promise.reject(refuse)
       writes[path.virtual] = args?.[0] as Uint8Array
       return Promise.resolve([null, new IOResult()])
     },
@@ -586,6 +589,27 @@ describe('curl -D and -k', () => {
     expect(r.exitCode).toBe(22)
     expect(r.out).toBe('HTTP/1.1 404 OK\r\ncontent-length: 10\r\ncontent-type: text/plain\r\n\r\n')
   })
+
+  it('-o reports a refused write as exit 23 with its strerror', async () => {
+    mockFetch('hello body')
+    const r = await runCurl(
+      ['http://x.test/f'],
+      { output: '/tmp/nope/out.txt' },
+      enoent('/tmp/nope/out.txt'),
+    )
+    expect(r.exitCode).toBe(23)
+    expect(r.err).toBe('curl: (23) /tmp/nope/out.txt: No such file or directory\n')
+  })
+
+  it.each(['output', 'dump_header'])(
+    'a %s write error outside the fs family propagates',
+    async (option) => {
+      mockFetch('hello body')
+      await expect(
+        runCurl(['http://x.test/f'], { [option]: '/tmp/out' }, new TypeError('backend bug')),
+      ).rejects.toThrow('backend bug')
+    },
+  )
 
   it('accepts --insecure', async () => {
     mockFetch('hello body')

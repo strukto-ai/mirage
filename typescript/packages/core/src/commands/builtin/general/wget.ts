@@ -18,9 +18,12 @@ import { PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
+import { HTTP_TIMEOUT_SECONDS } from '../utils/constants.ts'
 import { httpGet, isHttpError } from '../utils/http.ts'
 import { UsageError } from '../../errors.ts'
-import { resolveTarget } from './curl.ts'
+import { resolveTarget } from '../utils/paths.ts'
+import { said } from './curl.ts'
+import { fsStrerror, isWalkError } from '../../../errors/fs.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 
 const ENC = new TextEncoder()
@@ -49,6 +52,14 @@ async function wget(
   // -O is short-only, so it lands on the disambiguated `args_O` dest
   // (`AMBIGUOUS_NAMES`); a plain `O` key is one the parser never emits.
   const argsO = fl.asPath('args_O') ?? fl.asStr('args_O') ?? null
+  if ((argsO instanceof PathSpec ? argsO.rawPath : argsO) === '') {
+    // wget opens -O before it connects, and perror("") is the bare strerror,
+    // -q or not (GNU Wget 1.25.0).
+    return [
+      null,
+      new IOResult({ exitCode: EXIT_GENERIC, stderr: ENC.encode('No such file or directory\n') }),
+    ]
+  }
   const q = fl.asBool('q')
   const spider = fl.asBool('spider')
   const timeout = fl.asFloat('timeout')
@@ -60,38 +71,23 @@ async function wget(
   try {
     resp = await httpGet(url, {
       ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
-      timeoutMs: timeout === undefined ? 30_000 : timeout === 0 ? null : timeout * 1000,
+      timeoutMs:
+        timeout === undefined ? HTTP_TIMEOUT_SECONDS * 1000 : timeout === 0 ? null : timeout * 1000,
     })
   } catch (err) {
     if (!(err instanceof HttpConnectError) && !(err instanceof HttpTimeoutError)) throw err
     const reason = err instanceof HttpTimeoutError ? 'Connection timed out' : 'Connection refused'
     const line = `Connecting to ${err.host}:${String(err.port)}... failed: ${reason}.\n`
-    return [
-      null,
-      new IOResult({
-        exitCode: EXIT_NETWORK,
-        stderr: q ? new Uint8Array() : ENC.encode(line),
-      }),
-    ]
+    return [null, new IOResult({ exitCode: EXIT_NETWORK, stderr: said(q, line) })]
   }
   // --spider reports its verdict on stderr, not stdout, and inherits the same
   // exit 8 an error status gives a real download.
   if (spider) {
     if (isHttpError(resp)) {
-      return [
-        null,
-        new IOResult({
-          exitCode: EXIT_SERVER_ERROR,
-          stderr: q
-            ? new Uint8Array()
-            : ENC.encode('Remote file does not exist -- broken link!!!\n'),
-        }),
-      ]
+      const line = 'Remote file does not exist -- broken link!!!\n'
+      return [null, new IOResult({ exitCode: EXIT_SERVER_ERROR, stderr: said(q, line) })]
     }
-    return [
-      null,
-      new IOResult({ stderr: q ? new Uint8Array() : ENC.encode('Remote file exists.\n') }),
-    ]
+    return [null, new IOResult({ stderr: said(q, 'Remote file exists.\n') })]
   }
   if (
     argsO === '-' ||
@@ -102,10 +98,9 @@ async function wget(
       isHttpError(resp) ? null : resp.body,
       new IOResult({
         exitCode: isHttpError(resp) ? EXIT_SERVER_ERROR : 0,
-        stderr:
-          !q && isHttpError(resp)
-            ? ENC.encode(`ERROR ${String(resp.status)}: ${resp.reason}.\n`)
-            : new Uint8Array(),
+        stderr: isHttpError(resp)
+          ? said(q, `ERROR ${String(resp.status)}: ${resp.reason}.\n`)
+          : new Uint8Array(),
       }),
     ]
   }
@@ -119,29 +114,25 @@ async function wget(
     try {
       await ctx.dispatch('write', scope, [data])
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err)
+      if (!isWalkError(err)) throw err
+      // GNU wget opens the -O file before it fetches and answers a refused
+      // open as `NAME: strerror`, exit 1, which -q does not silence (wget
+      // 1.25.0). A stamped error's message is its path, so the strerror
+      // phrase stands alone.
+      const detail = fsStrerror(err) ?? (err instanceof Error ? err.message : String(err))
       return [
         null,
-        new IOResult({
-          exitCode: EXIT_GENERIC,
-          stderr: q ? new Uint8Array() : ENC.encode(`${dest}: ${errMsg}\n`),
-        }),
+        new IOResult({ exitCode: EXIT_GENERIC, stderr: ENC.encode(`${dest}: ${detail}\n`) }),
       ]
     }
   }
   if (isHttpError(resp)) {
     const line = `ERROR ${String(resp.status)}: ${resp.reason}.\n`
-    return [
-      null,
-      new IOResult({
-        exitCode: EXIT_SERVER_ERROR,
-        stderr: q ? new Uint8Array() : ENC.encode(line),
-      }),
-    ]
+    return [null, new IOResult({ exitCode: EXIT_SERVER_ERROR, stderr: said(q, line) })]
   }
   // Real wget puts its progress report on stderr and nothing on stdout.
   const line = `'${dest}' saved [${String(data.byteLength)}/${String(data.byteLength)}]\n`
-  return [null, new IOResult({ stderr: q ? new Uint8Array() : ENC.encode(line) })]
+  return [null, new IOResult({ stderr: said(q, line) })]
 }
 
 export const GENERAL_WGET = command({

@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from itertools import cycle
 
+from mirage.commands.builtin.utils.lines import record_separator
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
@@ -74,7 +75,7 @@ async def paste_generic(
     chars = _decode_delimiters(
         delimiter if delimiter is not None else delimiters
     )
-    separator = b"\0" if zero_terminated else b"\n"
+    separator = record_separator(zero_terminated)
     io = IOResult()
     return _paste_stream(inputs, chars, serial, separator, io), io
 

@@ -32,6 +32,16 @@ VERSION_OPTION = Argument(
     "--version", action="store_true", help="Show version information and exit"
 )
 
+# The operand slots most builtin specs declare, one shared object each:
+# an Argument is frozen, and only the two options above are ever told
+# apart by identity.
+PATHS_OPERAND = Argument("paths", type="path", nargs="*", metavar="")
+TEXTS_OPERAND = Argument("texts", nargs="*", metavar="")
+PATH_OPERAND = Argument("path", type="path", nargs="?", metavar="")
+PATH2_OPERAND = Argument("path2", type="path", nargs="?", metavar="")
+TEXT_OPERAND = Argument("text", nargs="?", metavar="")
+REMAINDER_OPERAND = Argument("texts", nargs="REMAINDER", metavar="")
+
 AMBIGUOUS_NAMES = {"l": "args_l", "O": "args_O", "I": "args_I", "1": "args_1"}
 
 # Stand-in name for a required operand whose slot declares none, so a
@@ -78,7 +88,6 @@ STDIN_DASH_COMMANDS = frozenset(
         "rg",
         "sed",
         "sha1sum",
-        "sha224sum",
         "sha256sum",
         "sha384sum",
         "sha512sum",
@@ -770,6 +779,17 @@ OPERAND_EXIT = {
 # source-selecting options a reader needs. Plain strings for the same
 # no-cycle reason as USAGE_EXIT above.
 PYTHON_NAMES = frozenset({"python", "python3"})
+
+# The programs that do NOT parse with getopt_long, and so answer an
+# option they will not take by naming the whole typed token as unknown
+# rather than by naming the option. Each one is measured: `curl
+# --silent=2` is `curl: option --silent=2: is unknown`, `python3
+# --version=2` is `Unknown option: --version=2`, `jq --tab=2` is `jq:
+# Unknown option --tab=2`, and find reads the word as a predicate. Every
+# other command here is a GNU tool whose getopt_long words the refusal
+# the other way, so the set is the exception list and not the rule.
+# Plain strings for the same no-cycle reason as USAGE_EXIT.
+NOT_GETOPT_LONG = frozenset({"curl", "jq", "find", *PYTHON_NAMES})
 
 # Pinned on CPython 3.12.13, including two quirks worth keeping: the
 # hint always spells the program `python` (never `python3`, whichever

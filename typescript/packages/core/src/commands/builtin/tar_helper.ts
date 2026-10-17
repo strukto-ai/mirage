@@ -17,10 +17,15 @@ import type { ByteSpool } from '../../io/spool.ts'
 import { ByteSlice } from '../../io/spool.ts'
 import { chunks } from '../../io/cooperative.ts'
 import type { ByteSource } from '../../io/types.ts'
+import { decodeText } from '../../shell/bytes.ts'
 
 const DIR_MODE = 0o755
 const LINK_MODE = 0o777
 const FILE_MODE = 0o644
+const BLOCK = 512
+const REPLACEMENT = '\ufffd'
+const META_FLAGS = new Set(['x', 'g', 'L', 'K'])
+const USTAR_MAGIC = 'ustar\0'
 
 export interface TarEntry {
   name: string
@@ -94,6 +99,124 @@ export async function readTar(data: Uint8Array): Promise<TarEntry[]> {
       isFile: entry.header.type === 'file' && !isDir,
       isDir,
       linkname: entry.header.linkname ?? '',
+    }
+  })
+}
+
+interface StoredNames {
+  name?: Uint8Array
+  linkname?: Uint8Array
+}
+
+function fieldBytes(block: Uint8Array, offset: number, size: number): Uint8Array {
+  const field = block.subarray(offset, offset + size)
+  const end = field.indexOf(0)
+  return end === -1 ? field : field.subarray(0, end)
+}
+
+// A header's size field: octal digits, or GNU's base-256 form when the
+// high bit of its first byte is set, read the way modern-tar reads it.
+function headerSize(block: Uint8Array): number {
+  const field = block.subarray(124, 136)
+  const lead = field[0] ?? 0
+  if ((lead & 0x80) !== 0)
+    return field.subarray(1).reduce((value, byte) => value * 256 + byte, lead & 0x7f)
+  let value = 0
+  for (const byte of field) {
+    if (byte === 0) break
+    if (byte !== 0x20) value = value * 8 + (byte - 0x30)
+  }
+  return value
+}
+
+function paxNames(data: Uint8Array): StoredNames {
+  const names: StoredNames = {}
+  let offset = 0
+  while (offset < data.length) {
+    const space = data.indexOf(0x20, offset)
+    if (space === -1) break
+    const length = Number.parseInt(decodeText(data.subarray(offset, space)), 10)
+    if (!(length > 0)) break
+    const record = data.subarray(space + 1, offset + length - 1)
+    const equals = record.indexOf(0x3d)
+    const key = equals > 0 ? decodeText(record.subarray(0, equals)) : ''
+    if (key === 'path') names.name = record.subarray(equals + 1)
+    if (key === 'linkpath') names.linkname = record.subarray(equals + 1)
+    offset += length
+  }
+  return names
+}
+
+/**
+ * The name and link target each entry was stored with, as bytes.
+ *
+ * Walks the headers again in the order modern-tar consumed them: zero
+ * blocks are skipped, a pax record or a GNU long name or link applies to
+ * the next entry (a global pax record to every later one), a ustar prefix
+ * joins its name with a slash, and each entry's body is skipped by the
+ * length modern-tar streamed for it.
+ */
+async function storedNames(
+  source: ByteSpool,
+  entries: readonly TarEntry[],
+): Promise<StoredNames[]> {
+  const globals: StoredNames = {}
+  const stored: StoredNames[] = []
+  let at = 0
+  for (const entry of entries) {
+    const pending: StoredNames = {}
+    let block = await source.read(at, BLOCK)
+    for (; block.length === BLOCK; block = await source.read(at, BLOCK)) {
+      at += BLOCK
+      if (block.every((byte) => byte === 0)) continue
+      const flag = String.fromCharCode(block[156] ?? 0)
+      if (!META_FLAGS.has(flag)) break
+      const size = headerSize(block)
+      const data = await source.read(at, size)
+      at += size + (-size & (BLOCK - 1))
+      const found =
+        flag === 'L'
+          ? { name: fieldBytes(data, 0, data.length) }
+          : flag === 'K'
+            ? { linkname: fieldBytes(data, 0, data.length) }
+            : paxNames(data)
+      Object.assign(flag === 'g' ? globals : pending, found)
+    }
+    if (block.length < BLOCK) break
+    const base = fieldBytes(block, 0, 100)
+    const ustar = decodeText(block.subarray(257, 263)) === USTAR_MAGIC
+    const prefix = ustar ? fieldBytes(block, 345, 155) : new Uint8Array()
+    const name = prefix.length > 0 ? Uint8Array.from([...prefix, 0x2f, ...base]) : base
+    stored.push({ name, linkname: fieldBytes(block, 157, 100), ...globals, ...pending })
+    const body = entry.body?.size ?? 0
+    at += body + (-body & (BLOCK - 1))
+  }
+  return stored
+}
+
+function lossyName(entry: TarEntry): boolean {
+  return entry.name.includes(REPLACEMENT) || (entry.linkname ?? '').includes(REPLACEMENT)
+}
+
+/**
+ * Put back the bytes modern-tar decoded away in member names.
+ *
+ * modern-tar reads every header string through a plain TextDecoder, so a
+ * name byte that is not UTF-8 arrives as U+FFFD. CPython's tarfile keeps it
+ * as its surrogate escape instead, and GNU tar lists it as an octal escape
+ * (`a\377b`), which needs the byte back. Only an archive whose decoded
+ * names hold U+FFFD pays for a second walk over its headers.
+ */
+async function restoreNames(source: ByteSpool, entries: TarEntry[]): Promise<TarEntry[]> {
+  if (!entries.some(lossyName)) return entries
+  const stored = await storedNames(source, entries)
+  return entries.map((entry, index) => {
+    const names = stored[index]
+    if (names === undefined || !lossyName(entry)) return entry
+    return {
+      ...entry,
+      name: names.name !== undefined ? decodeText(names.name) : entry.name,
+      linkname: names.linkname !== undefined ? decodeText(names.linkname) : (entry.linkname ?? ''),
     }
   })
 }
@@ -190,5 +313,5 @@ export async function readTarSpool(source: ByteSpool, contents: ByteSpool): Prom
     await reader.cancel()
     reader.releaseLock()
   }
-  return entries
+  return restoreNames(source, entries)
 }

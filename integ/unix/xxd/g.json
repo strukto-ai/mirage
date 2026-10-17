@@ -36,6 +36,44 @@
       "flags": [
         "g"
       ]
+    },
+    {
+      "id": "xxd_g_zero_turns_grouping_off",
+      "seq": 9940310,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for g in 0 abc '' 3x -1 32 4294967298; do printf 'hello world 12345\\n' | xxd -g \"$g\"; done; printf 'hello world 12345\\n' | xxd -g 0 -c 4",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000000: 68656c6c6f20776f726c642031323334  hello world 1234\n00000010: 350a                              5.\n00000000: 68656c6c6f20776f726c642031323334  hello world 1234\n00000010: 350a                              5.\n00000000: 68656c6c6f20776f726c642031323334  hello world 1234\n00000010: 350a                              5.\n00000000: 68656c 6c6f20 776f72 6c6420 313233 34  hello world 1234\n00000010: 350a                                   5.\n00000000: 6865 6c6c 6f20 776f 726c 6420 3132 3334  hello world 1234\n00000010: 350a                                     5.\n00000000: 68656c6c6f20776f726c642031323334  hello world 1234\n00000010: 350a                              5.\n00000000: 6865 6c6c 6f20 776f 726c 6420 3132 3334  hello world 1234\n00000010: 350a                                     5.\n00000000: 68656c6c  hell\n00000004: 6f20776f  o wo\n00000008: 726c6420  rld \n0000000c: 31323334  1234\n00000010: 350a      5.\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "c"
+      ]
     }
   ]
 }

@@ -20,10 +20,14 @@ from mirage.commands.builtin.generic_bind.adapter import (
 )
 from mirage.commands.builtin.utils.links import links_of
 from mirage.commands.config import CommandIO, Context
-from mirage.commands.errors import UsageError
-from mirage.commands.spec.usage import extra_operand_error
+from mirage.commands.spec.usage import (
+    extra_operand_error,
+    missing_operand_error,
+)
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 
@@ -36,11 +40,7 @@ async def unlink(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or not paths:
-        raise UsageError(
-            "unlink: missing operand\n"
-            "Try 'unlink --help' for more information.",
-            1,
-        )
+        raise missing_operand_error("unlink", None)
     paths = await ops.resolve_glob(accessor, paths, ctx.index)
     if len(paths) > 1:
         raise extra_operand_error("unlink", paths[1].raw_path)
@@ -59,7 +59,8 @@ async def unlink(
         return None, IOResult(
             exit_code=1,
             stderr=(
-                f"unlink: cannot unlink '{p.raw_path}': Not a directory\n"
+                f"unlink: cannot unlink '{p.raw_path}': "
+                f"{posix_phrase(FsCondition.ENOTDIR)}\n"
             ).encode(),
         )
     try:
@@ -75,7 +76,8 @@ async def unlink(
         return None, IOResult(
             exit_code=1,
             stderr=(
-                f"unlink: cannot unlink '{p.raw_path}': Is a directory\n"
+                f"unlink: cannot unlink '{p.raw_path}': "
+                f"{posix_phrase(FsCondition.EISDIR)}\n"
             ).encode(),
         )
     try:

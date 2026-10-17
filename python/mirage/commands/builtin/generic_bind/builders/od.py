@@ -1,14 +1,11 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.od import od_generic as generic_od
-from mirage.commands.builtin.generic.od import parse_count
 from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
     resolve_or_empty,
 )
 from mirage.commands.config import CommandIO, Context
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -20,27 +17,11 @@ async def od(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags, spec=SPECS["od"])
     paths = await resolve_or_empty(ops, accessor, paths, ctx.index)
-    formats = [
-        "c" if name == "c" else str(value)
-        for name, value in fl.occurrences("format", "c")
-    ]
-    # as_str, not `x or y`: the latter would swallow an explicitly empty
-    # value, which GNU rejects loudly (`od -N ''` is an invalid argument,
-    # not an absent flag).
-    skip_value = fl.as_str("skip_bytes")
-    limit_value = fl.as_str("read_bytes")
     return await generic_od(
         paths,
+        ctx,
         read_stream=bound_op(ops.read_stream, accessor, ctx.index),
-        stdin=ctx.stdin,
-        address_radix=fl.as_str("address_radix") or "o",
-        skip=(parse_count(skip_value, "-j") if skip_value is not None else 0),
-        limit=(
-            parse_count(limit_value, "-N") if limit_value is not None else None
-        ),
-        formats=formats,
     )
 
 

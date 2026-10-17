@@ -8,14 +8,17 @@ from mirage.commands.builtin.generic.archive.walk import StatFn
 from mirage.commands.builtin.generic.decompress import (
     beside_link,
     decompress_inputs,
+    exists_line,
     gzip_suffix,
     open_gzip_input,
     output_taken,
+    remove_input,
     replace_output,
     suffix_refusal,
 )
 from mirage.commands.builtin.utils.links import LinkResolver, link_resolver
 from mirage.commands.builtin.utils.operands import normalized_read
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import (
     resolve_source,
     stdin_stream,
@@ -99,7 +102,7 @@ async def gzip(
     def report(line: str, code: int, warning: bool = False) -> None:
         if not (warning and quiet):
             lines.append(line.rstrip("\n"))
-            io.stderr = ("\n".join(lines) + "\n").encode()
+            io.stderr = format_records(lines)
         if io.exit_code != 1:
             io.exit_code = code
 
@@ -158,11 +161,7 @@ async def gzip(
                     )
                     existed = await output_taken(out, stat, resolver)
                     if existed and not force:
-                        report(
-                            f"gzip: {p.raw_path}{suffix} already exists;"
-                            "\tnot overwritten",
-                            2,
-                        )
+                        report(exists_line(p.raw_path + suffix), 2)
                         continue
                     try:
                         await replace_output(
@@ -182,11 +181,7 @@ async def gzip(
                             continue
                         return
                 if not keep:
-                    await (
-                        unlink(p)
-                        if link is None or resolver is None
-                        else resolver.unlink(link)
-                    )
+                    await remove_input(p, link, unlink, resolver)
             finally:
                 await close_quietly(input_source)
 

@@ -51,7 +51,14 @@ import {
 import { C_SPACE, UINTMAX } from '../../constants.ts'
 import { UsageError } from '../../../errors.ts'
 import type { FlagValue } from '../../../spec/types.ts'
-import { checkDirectories, planCreate, type DirProbe, type StatFn, type WalkFn } from './create.ts'
+import {
+  cannot,
+  checkDirectories,
+  planCreate,
+  type DirProbe,
+  type StatFn,
+  type WalkFn,
+} from './create.ts'
 import { eisdir, fsStrerror, isFsError } from '../../../../errors/fs.ts'
 import { GzipDataError } from '../../../../utils/compress.ts'
 import { stdinStream } from '../../utils/stream.ts'
@@ -59,6 +66,8 @@ import { lsModeString } from '../../utils/formatting.ts'
 import { ensureDir, extractDest } from '../archive/extract.ts'
 import type { Compression, CompressionKind, CreateResult, ReadResult } from './types.ts'
 import { linksOf, mountsOf } from '../../utils/links.ts'
+import { formatOptionalRecords } from '../../utils/output.ts'
+import { escapeQuote } from '../../../../utils/quote.ts'
 
 const ENC = new TextEncoder()
 
@@ -378,7 +387,7 @@ function cutShort(failure: GzipDataError | null, lines: readonly string[]): Uint
 }
 
 function stderrOf(lines: readonly string[]): Uint8Array | null {
-  return lines.length > 0 ? ENC.encode(`${lines.join('\n')}\n`) : null
+  return formatOptionalRecords(lines)
 }
 
 // One of tar's own lines, spoken by `who` instead of `tar`.
@@ -408,8 +417,8 @@ function openFailure(
   const code = (err as { code?: string }).code
   const lines =
     reading && code === 'EISDIR'
-      ? [`${who}: ${shown}: Cannot read: ${String(fsStrerror(err))}`, voiced(TAPE_START, who)]
-      : [`${who}: ${shown}: Cannot open: ${String(fsStrerror(err))}`]
+      ? [cannot(shown, 'read', String(fsStrerror(err)), who), voiced(TAPE_START, who)]
+      : [cannot(shown, 'open', String(fsStrerror(err)), who)]
   lines.push(voiced(FATAL_TRAILER, who))
   if (compression !== null) {
     if (reading && code !== 'ENOENT') lines.push(...(EMPTY_PIPE[compression] ?? []))
@@ -468,9 +477,7 @@ async function writeArchive(
             } else source = await primeStream(deps.stream(member.path))
           } catch (error) {
             if (!isFsError(error)) throw error
-            notices.push(
-              `tar: ${member.spelled ?? member.name}: Cannot open: ${String(fsStrerror(error))}`,
-            )
+            notices.push(cannot(member.spelled ?? member.name, 'open', String(fsStrerror(error))))
             result.exitCode = CREATE_ERROR_EXIT
             continue
           }
@@ -508,7 +515,7 @@ async function writeArchive(
           },
           body: body(),
         }
-        names.push(member.name)
+        names.push(escapeQuote(member.name))
       } finally {
         await closeQuietly(source)
         await spool.close()
@@ -531,7 +538,7 @@ async function writeArchive(
     if (!isFsError(error)) throw error
     return [null, openFailure(archivePath.rawPath, error, compression, false)]
   }
-  const stdout = verbose && names.length > 0 ? ENC.encode(`${names.join('\n')}\n`) : null
+  const stdout = verbose ? formatOptionalRecords(names) : null
   return [stdout, result]
 }
 
@@ -554,13 +561,9 @@ function longMember(entry: TarEntry, name: string): string {
     Math.max(1, 19 - owner.length),
   )
   const stamp = (header?.mtime ?? new Date(0)).toISOString().slice(0, 16).replace('T', ' ')
-  const suffix =
-    kind === 'symlink'
-      ? ` -> ${entry.linkname ?? ''}`
-      : kind === 'link'
-        ? ` link to ${entry.linkname ?? ''}`
-        : ''
-  return `${mode} ${owner}${size} ${stamp} ${name}${suffix}`
+  const target = escapeQuote(entry.linkname ?? '')
+  const suffix = kind === 'symlink' ? ` -> ${target}` : kind === 'link' ? ` link to ${target}` : ''
+  return `${mode} ${owner}${size} ${stamp} ${escapeQuote(name)}${suffix}`
 }
 
 export async function tarGeneric(
@@ -650,9 +653,11 @@ export async function tarGeneric(
       const shown = entries.flatMap((entry, index) => {
         const name = names[index] ?? entry.name
         const reached = cut === null || index <= cut
-        return keep.has(index) && reached ? [verbose ? longMember(entry, name) : name] : []
+        return keep.has(index) && reached
+          ? [verbose ? longMember(entry, name) : escapeQuote(name)]
+          : []
       })
-      const out: ByteSource | null = shown.length > 0 ? ENC.encode(shown.join('\n') + '\n') : null
+      const out: ByteSource | null = formatOptionalRecords(shown)
       if (cut !== null) {
         return [out, new IOResult({ exitCode: 2, stderr: cutShort(failure, notices) })]
       }
@@ -714,18 +719,18 @@ export async function tarGeneric(
                 await ensureDir(outDir, toSpec, deps.mkdir, deps.stat, made)
               } catch (err) {
                 if (!isFsError(err)) throw err
-                notices.push(`tar: ${parts.join('/')}: Cannot mkdir: ${String(fsStrerror(err))}`)
+                notices.push(cannot(parts.join('/'), 'mkdir', String(fsStrerror(err))))
                 failed = true
                 continue
               }
-              if (verbose) verboseLines.push(`${rstripSlash(entry.name)}/`)
+              if (verbose) verboseLines.push(escapeQuote(`${rstripSlash(entry.name)}/`))
             }
           }
           continue
         }
         if (toStdout) {
           outputs.push(entry.body?.stream() ?? entry.data)
-          if (verbose) verboseLines.push(entry.name)
+          if (verbose) verboseLines.push(escapeQuote(entry.name))
           continue
         }
         const parts = outParts(entry.name, stripN, notices)
@@ -740,8 +745,8 @@ export async function tarGeneric(
             // GNU tar 1.35 (debian:stable-slim) reports ENOENT for the
             // member after its parent mkdir failed.
             notices.push(
-              `tar: ${parts.slice(0, -1).join('/')}: Cannot mkdir: ${String(fsStrerror(err))}`,
-              `tar: ${parts.join('/')}: Cannot open: No such file or directory`,
+              cannot(parts.slice(0, -1).join('/'), 'mkdir', String(fsStrerror(err))),
+              cannot(parts.join('/'), 'open', 'No such file or directory'),
             )
             failed = true
             continue
@@ -751,11 +756,11 @@ export async function tarGeneric(
           await deps.write(makePathSpec(outPath, mountPrefix), entry.body?.stream() ?? entry.data)
         } catch (err) {
           if (!isFsError(err)) throw err
-          notices.push(`tar: ${parts.join('/')}: Cannot open: ${String(fsStrerror(err))}`)
+          notices.push(cannot(parts.join('/'), 'open', String(fsStrerror(err))))
           failed = true
           continue
         }
-        if (verbose) verboseLines.push(entry.name)
+        if (verbose) verboseLines.push(escapeQuote(entry.name))
       }
       if (toStdout) {
         // GNU moves the verbose listing to stderr when stdout carries the
@@ -772,18 +777,17 @@ export async function tarGeneric(
         if (failure !== null) {
           return [merged, new IOResult({ exitCode: 2, stderr: childFailure(failure, errLines) })]
         }
-        if (misses.length > 0) errLines.push(...misses, ERROR_TRAILER)
+        if (misses.length > 0 || failed) errLines.push(...misses, ERROR_TRAILER)
         const stderr = stderrOf(errLines)
         return [
           merged,
           new IOResult({
-            exitCode: misses.length > 0 ? 2 : 0,
+            exitCode: misses.length > 0 || failed ? 2 : 0,
             ...(stderr !== null ? { stderr } : {}),
           }),
         ]
       }
-      const stdout =
-        verbose && verboseLines.length > 0 ? ENC.encode(verboseLines.join('\n') + '\n') : null
+      const stdout = verbose ? formatOptionalRecords(verboseLines) : null
       if (cut !== null) {
         return [stdout, new IOResult({ exitCode: 2, stderr: cutShort(failure, notices) })]
       }

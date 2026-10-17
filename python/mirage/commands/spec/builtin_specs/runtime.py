@@ -12,6 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec.constants import (
+    REMAINDER_OPERAND,
+    TEXT_OPERAND,
+    TEXTS_OPERAND,
+)
 from mirage.commands.spec.types import Argument, CommandSpec
 
 # CPython's own option table, minus four switches that describe a
@@ -128,78 +133,51 @@ _JS_SCRIPT = Argument(
     "path", type="path", nargs="?", metavar="", provided_by=("-e",)
 )
 
+PYTHON = CommandSpec(
+    description="Run Python on the workspace's bound runtime.",
+    arguments=(
+        *_PYTHON_OPTIONS,
+        _PYTHON_SCRIPT,
+        REMAINDER_OPERAND,
+    ),
+)
+
+# js and node take the remainder for the same reason python does: the
+# first operand is a program, so the words after it are that program's
+# argv, not the interpreter's flags. `node - -e x` runs the piped
+# program and hands it `-e x`; `node s.js -m` hands s.js its own -m.
+# Pinned against node 22.8.0.
+JS = CommandSpec(
+    description="Run JavaScript on a sandboxed quickjs engine.",
+    arguments=(
+        Argument(
+            "-v",
+            "--version",
+            action="store_true",
+            help="Show runtime version information and exit.",
+        ),
+        Argument(
+            "-e",
+            help="Evaluate the next argument as a script.",
+        ),
+        Argument(
+            "-m",
+            "--module",
+            action="store_true",
+            help="Run as an ES module (top-level "
+            "import/export/await); .mjs files "
+            "select this automatically.",
+        ),
+        _JS_SCRIPT,
+        REMAINDER_OPERAND,
+    ),
+)
+
 SPECS: dict[str, CommandSpec] = {
-    "python": CommandSpec(
-        description="Run Python on the workspace's bound runtime.",
-        arguments=(
-            *_PYTHON_OPTIONS,
-            _PYTHON_SCRIPT,
-            Argument("texts", nargs="REMAINDER", metavar=""),
-        ),
-    ),
-    "python3": CommandSpec(
-        description="Run Python on the workspace's bound runtime.",
-        arguments=(
-            *_PYTHON_OPTIONS,
-            _PYTHON_SCRIPT,
-            Argument("texts", nargs="REMAINDER", metavar=""),
-        ),
-    ),
-    # js and node take the remainder for the same reason python does: the
-    # first operand is a program, so the words after it are that program's
-    # argv, not the interpreter's flags. `node - -e x` runs the piped
-    # program and hands it `-e x`; `node s.js -m` hands s.js its own -m.
-    # Pinned against node 22.8.0.
-    "js": CommandSpec(
-        description="Run JavaScript on a sandboxed quickjs engine.",
-        arguments=(
-            Argument(
-                "-v",
-                "--version",
-                action="store_true",
-                help="Show runtime version information and exit.",
-            ),
-            Argument(
-                "-e",
-                help="Evaluate the next argument as a script.",
-            ),
-            Argument(
-                "-m",
-                "--module",
-                action="store_true",
-                help="Run as an ES module (top-level "
-                "import/export/await); .mjs files "
-                "select this automatically.",
-            ),
-            _JS_SCRIPT,
-            Argument("texts", nargs="REMAINDER", metavar=""),
-        ),
-    ),
-    "node": CommandSpec(
-        description="Run JavaScript on a sandboxed quickjs engine.",
-        arguments=(
-            Argument(
-                "-v",
-                "--version",
-                action="store_true",
-                help="Show runtime version information and exit.",
-            ),
-            Argument(
-                "-e",
-                help="Evaluate the next argument as a script.",
-            ),
-            Argument(
-                "-m",
-                "--module",
-                action="store_true",
-                help="Run as an ES module (top-level "
-                "import/export/await); .mjs files "
-                "select this automatically.",
-            ),
-            _JS_SCRIPT,
-            Argument("texts", nargs="REMAINDER", metavar=""),
-        ),
-    ),
+    "python": PYTHON,
+    "python3": PYTHON,
+    "js": JS,
+    "node": JS,
     "mktemp": CommandSpec(
         arguments=(
             Argument("-d", "--directory", action="store_true"),
@@ -209,7 +187,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-u", "--dry-run", action="store_true"),
             Argument("-q", "--quiet", action="store_true"),
             Argument("--suffix"),
-            Argument("text", nargs="?", metavar=""),
+            TEXT_OPERAND,
         )
     ),
     "bc": CommandSpec(
@@ -223,12 +201,12 @@ SPECS: dict[str, CommandSpec] = {
             Argument(
                 "-q", action="store_true", help="Suppress the welcome banner."
             ),
-            Argument("texts", nargs="*", metavar=""),
+            TEXTS_OPERAND,
         ),
     ),
     "expr": CommandSpec(
         description="Evaluate expressions.",
-        arguments=(Argument("texts", nargs="*", metavar=""),),
+        arguments=(TEXTS_OPERAND,),
     ),
     "history": CommandSpec(
         description="Show command history for the session.",
@@ -272,7 +250,7 @@ SPECS: dict[str, CommandSpec] = {
                 action="store_true",
                 help="Read-new: no-op (file and store are the same).",
             ),
-            Argument("texts", nargs="*", metavar=""),
+            TEXTS_OPERAND,
         ),
     ),
     "date": CommandSpec(
@@ -318,7 +296,7 @@ SPECS: dict[str, CommandSpec] = {
                 action="store_true",
                 help="Use Coordinated Universal Time (UTC).",
             ),
-            Argument("text", nargs="?", metavar=""),
+            TEXT_OPERAND,
         ),
     ),
     "uname": CommandSpec(
@@ -378,7 +356,7 @@ SPECS: dict[str, CommandSpec] = {
                 action="store_true",
                 help="Print the operating system.",
             ),
-            Argument("texts", nargs="*", metavar=""),
+            TEXTS_OPERAND,
         ),
     ),
     "hostname": CommandSpec(
@@ -435,7 +413,7 @@ SPECS: dict[str, CommandSpec] = {
                 "-y", "--yp", action="store_true", help="NIS/YP domain name."
             ),
             Argument("--nis", action="store_true", help="NIS/YP domain name."),
-            Argument("texts", nargs="*", metavar=""),
+            TEXTS_OPERAND,
         ),
     ),
     "id": CommandSpec(
@@ -491,7 +469,7 @@ SPECS: dict[str, CommandSpec] = {
                 help="Delimit entries with NUL characters, not "
                 "whitespace; not permitted in default format.",
             ),
-            Argument("texts", nargs="*", metavar=""),
+            TEXTS_OPERAND,
         ),
     ),
     "getconf": CommandSpec(
@@ -507,12 +485,12 @@ SPECS: dict[str, CommandSpec] = {
                 "-v",
                 help="Give values for compilation environment SPEC.",
             ),
-            Argument("texts", nargs="*", metavar=""),
+            TEXTS_OPERAND,
         ),
     ),
     "sleep": CommandSpec(
         description="Delay for a specified amount of time.",
-        arguments=(Argument("texts", nargs="*", metavar=""),),
+        arguments=(TEXTS_OPERAND,),
     ),
     "bash": CommandSpec(
         description="Run a program in a nested Mirage shell: the text after `-c`, "
@@ -589,7 +567,7 @@ SPECS: dict[str, CommandSpec] = {
                 action="store_true",
                 help="Print input lines as they are read.",
             ),
-            Argument("texts", nargs="*", metavar=""),
+            TEXTS_OPERAND,
         ),
     ),
 }

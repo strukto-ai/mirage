@@ -65,15 +65,14 @@ class RegexSyntax(Enum):
     """The regex dialect a search pattern is written in.
 
     One translator per dialect turns it into host source: ``BASIC`` and
-    ``EXTENDED`` are glibc's (grep's default and -E), ``PERL`` is
-    PCRE2's (grep -P, rg -P) and ``RUST`` is ripgrep's default engine.
-    The value is also the spelling a pushed-down search carries.
+    ``EXTENDED`` are glibc's (grep's default and -E) and ``PERL`` is
+    PCRE2's (grep -P, rg -P). The value is also the spelling a
+    pushed-down search carries.
     """
 
     BASIC = "basic"
     EXTENDED = "extended"
     PERL = "perl"
-    RUST = "rust"
 
 
 @dataclass(frozen=True, slots=True)

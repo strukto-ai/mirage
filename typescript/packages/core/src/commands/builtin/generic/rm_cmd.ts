@@ -16,7 +16,7 @@ import { IOResult } from '../../../io/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
 import { isEnoent, isFsError } from '../../../errors/fs.ts'
 import type { CommandFnResult } from '../../config.ts'
-import { UsageError } from '../../errors.ts'
+import { missingOperandError } from '../../spec/usage.ts'
 import { descendantPath } from '../utils/paths.ts'
 import type { MountView } from '../../../view/types.ts'
 
@@ -25,7 +25,7 @@ import type { MountView } from '../../../view/types.ts'
 // Python's rm_without_operands.
 export function rmWithoutOperands(force: boolean): CommandFnResult {
   if (force) return [null, new IOResult()]
-  throw new UsageError("rm: missing operand\nTry 'rm --help' for more information.", 1)
+  throw missingOperandError('rm', null)
 }
 
 /**

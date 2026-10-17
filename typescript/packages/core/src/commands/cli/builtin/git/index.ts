@@ -315,7 +315,7 @@ const COMMIT_OPTIONS = [
 ]
 
 const CHECKOUT_OPTIONS = [
-  new Argument('-b', { action: 'store_true', help: 'Create the branch and switch to it' }),
+  new Argument('-b', { metavar: 'branch', help: 'Create the branch and switch to it' }),
   new Argument('--detach', { action: 'store_true', help: 'Leave HEAD on the commit itself' }),
   new Argument(['-q', '--quiet'], { action: 'store_true', help: 'Suppress feedback messages' }),
 ]
@@ -1059,12 +1059,12 @@ export const GIT = new CLI({
     reflog: new CLIHandler({ fn: verb(reflog) }),
     'for-each-ref': new CLIHandler({ fn: verb(forEachRef) }),
     'cat-file': new CLIHandler({ fn: verb(catFile) }),
-    'hash-object': new CLIHandler({ fn: verb(hashObject, hashObjectReadOnly) }),
+    'hash-object': new CLIHandler({ fn: verb(hashObject, hashObjectReadOnly), write: true }),
     grep: new CLIHandler({ fn: verb(grep) }),
     'ls-tree': new CLIHandler({ fn: verb(lsTree) }),
     'ls-files': new CLIHandler({ fn: verb(lsFiles) }),
-    fetch: new CLIHandler({ fn: verb(fetch, fetchReadOnly) }),
-    clone: new CLIHandler({ fn: verb(clone, cloneReadOnly) }),
+    fetch: new CLIHandler({ fn: verb(fetch, fetchReadOnly), write: true }),
+    clone: new CLIHandler({ fn: verb(clone, cloneReadOnly), write: true }),
     help: new CLIHandler({ fn: verb(helpCmd) }),
     init: new CLIHandler({ fn: verb(init), write: true }),
     fsck: new CLIHandler({ fn: verb(fsck) }),

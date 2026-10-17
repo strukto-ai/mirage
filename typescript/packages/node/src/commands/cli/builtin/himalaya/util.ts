@@ -97,7 +97,7 @@ export async function route(
 ): Promise<CommandFnResult> {
   const raw = build(
     {
-      sender: fl.asStr('from') ?? config.username,
+      sender: fl.asStr('from', config.username),
       to: splitAddresses(fl.asList('to')),
       cc: splitAddresses(fl.asList('cc')),
       bcc: splitAddresses(fl.asList('bcc')),

@@ -11,7 +11,8 @@ from functools import partial
 from typing import Any
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.awk_types import USAGE, AwkFlags
+from mirage.commands.builtin.constants import AWK_USAGE
+from mirage.commands.builtin.generic.awk_types import AwkFlags
 from mirage.commands.builtin.generic_bind.dispatch import caller_stream
 from mirage.commands.builtin.utils.links import mount_view
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
@@ -420,7 +421,7 @@ async def awk_generic(
     elif texts:
         source = texts[0]
     else:
-        raise UsageError(USAGE)
+        raise UsageError(AWK_USAGE)
 
     try:
         program = parse(source)

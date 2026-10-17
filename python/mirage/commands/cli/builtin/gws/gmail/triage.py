@@ -32,8 +32,8 @@ async def triage(
     config: GoogleConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    query = fl.as_str("query") or "is:unread"
-    max_results = fl.as_int("max") or 20
+    query = fl.as_str("query", "is:unread")
+    max_results = fl.as_int("max", 20)
     summaries = []
     async with TokenManager(config) as token_manager:
         msgs = await list_messages(

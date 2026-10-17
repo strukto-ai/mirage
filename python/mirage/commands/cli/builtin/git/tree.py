@@ -12,25 +12,28 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dulwich.object_store import BaseObjectStore, iter_tree_contents
+from dulwich.object_store import iter_tree_contents
 from dulwich.objects import Blob, Commit, ObjectID, ShaFile
 from dulwich.objects import Tree as GitTree
 from dulwich.objectspec import parse_commit
 from dulwich.repo import BaseRepo
 
+from mirage.commands.cli.builtin.git.constants import TREE
 from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.revparse import resolve_object, unwrapped
 
 Tree = dict[bytes, tuple[int, bytes]]
 
 
-def tree_entries(
-    store: BaseObjectStore, tree: bytes | None
-) -> dict[bytes, tuple[int, bytes]]:
-    """Every blob a tree holds, keyed by repository-relative path.
+def tree_entries(repo: BaseRepo, tree: bytes | None) -> Tree:
+    """Every blob a tree holds, keyed by repository-relative path, with
+    its mode and blob id.
+
+    Synchronous, and called on a worker thread: reading a tree pulls
+    objects through the dispatcher.
 
     Args:
-        store (BaseObjectStore): the object database.
+        repo (BaseRepo): the opened repository.
         tree (bytes | None): the tree id, None for the empty tree a
             root commit diffs against.
     """
@@ -38,31 +41,18 @@ def tree_entries(
         return {}
     return {
         entry.path: (entry.mode, entry.sha)
-        for entry in iter_tree_contents(store, ObjectID(tree))
+        for entry in iter_tree_contents(repo.object_store, ObjectID(tree))
     }
 
 
-def flat_tree(repo: BaseRepo, tree_id: ObjectID) -> Tree:
-    """Every path one tree holds, with its mode and blob id.
-
-    Synchronous, and called on a worker thread: reading a tree pulls
-    objects through the dispatcher.
-
-    Args:
-        repo (BaseRepo): the opened repository.
-        tree_id (ObjectID): the tree to read.
-    """
-    return tree_entries(repo.object_store, tree_id)
-
-
-def tree_of(repo: BaseRepo, commit_id: ObjectID) -> Tree:
+def commit_entries(repo: BaseRepo, commit_id: ObjectID) -> Tree:
     """Every path a commit's tree holds, with its mode and blob id.
 
     Args:
         repo (BaseRepo): the opened repository.
         commit_id (ObjectID): the commit to read.
     """
-    return flat_tree(repo, parse_commit(repo, commit_id).tree)
+    return tree_entries(repo, parse_commit(repo, commit_id).tree)
 
 
 def contents(repo: BaseRepo, shas: list[bytes]) -> dict[bytes, bytes]:
@@ -135,7 +125,7 @@ def listed_tree(
             for pattern in patterns
         )
         row = (path, f"{entry.mode:06o}", entry.sha.decode())
-        if entry.mode != 0o40000:
+        if entry.mode != TREE:
             if selected and not directories:
                 out.append(row)
             continue

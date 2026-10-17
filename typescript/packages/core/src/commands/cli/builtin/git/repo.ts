@@ -13,16 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '../../../../types.ts'
-import git from 'isomorphic-git'
+import git, { Errors } from 'isomorphic-git'
 
 import { abbrevLength, type CommitFacts } from './format.ts'
 import { configValues, gitFs } from './fs.ts'
 import { exists, readNames, readRange, writeFile } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 
+import { toHex } from '../../../../utils/hex.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { gitBool } from './util.ts'
-import type { RepoLocation } from './types.ts'
+import type { RefObject, RepoLocation } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 
 const PACK_DIR = 'objects/pack'
@@ -105,10 +106,6 @@ async function packedCount(vfs: Files, commondir: PathSpec): Promise<number> {
   return total
 }
 
-function hex(bytes: Uint8Array): string {
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
 /**
  * The ids one pack index holds whose first byte is `byte`: its fanout table
  * says where that bucket of the sorted names starts and ends, so only the
@@ -134,7 +131,7 @@ async function packedUnder(vfs: Files, path: PathSpec, byte: number): Promise<st
   )
   const ids: string[] = []
   for (let at = skip; at + SHA_BYTES <= names.byteLength; at += stride)
-    ids.push(hex(names.subarray(at, at + SHA_BYTES)))
+    ids.push(toHex(names.subarray(at, at + SHA_BYTES)))
   return ids
 }
 
@@ -162,16 +159,23 @@ export async function idsUnder(repo: Repo, fanout: string): Promise<string[]> {
   return [...found].sort(compareCodePoints)
 }
 
+/** An object's type and its bytes as stored, whichever kind of object it is. */
+export async function rawObject(repo: Repo, oid: string): Promise<RefObject> {
+  // Deprecated upstream for being general, but the general answer is what the
+  // callers need: which kind this id names and its stored content, without
+  // reading it as each kind in turn until one does not throw.
+  // eslint-disable-next-line @typescript-eslint/no-deprecated
+  const read = await git.readObject({ ...repoArgs(repo), oid, format: 'content' })
+  return { oid, type: read.type, raw: read.object as Uint8Array }
+}
+
 /** Which of commit/tag/tree/blob an id names, null when the repository lacks it. */
 export async function objectType(repo: Repo, oid: string): Promise<string | null> {
   try {
-    // Deprecated upstream for being general, but the general answer is what a
-    // walk needs: which kind this id names, without reading it as each in turn
-    // until one does not throw.
-    // eslint-disable-next-line @typescript-eslint/no-deprecated
-    return (await git.readObject({ ...repoArgs(repo), oid, format: 'content' })).type
-  } catch {
-    return null
+    return (await rawObject(repo, oid)).type
+  } catch (err) {
+    if (err instanceof Errors.NotFoundError) return null
+    throw err
   }
 }
 
@@ -184,9 +188,7 @@ export async function objectType(repo: Repo, oid: string): Promise<string | null
  */
 export async function storePack(repo: Repo, data: Uint8Array): Promise<void> {
   if (!data.length) return
-  const checksum = [...data.subarray(data.length - 20)]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
+  const checksum = toHex(data.subarray(data.length - 20))
   const dir = repo.location.commondir.join(PACK_DIR)
   const name = `pack-${checksum}.pack`
   if (await exists(repo.vfs, dir.join(name.replace(/\.pack$/, IDX_SUFFIX)))) return

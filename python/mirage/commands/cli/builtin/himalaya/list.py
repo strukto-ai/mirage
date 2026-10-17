@@ -15,6 +15,7 @@
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.query import (
     page_slice,
+    page_window,
     sort_headers,
     uid_budget,
 )
@@ -34,9 +35,12 @@ async def list_envelopes(
     config: EmailConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    mailbox = fl.as_str("mailbox") or "INBOX"
-    page = fl.as_int("page") or 1
-    page_size = fl.as_int("page_size") or DEFAULT_PAGE_SIZE
+    mailbox = fl.as_str("mailbox", "INBOX")
+    page, page_size = page_window(
+        fl.as_int("page", 1),
+        fl.as_int("page_size", DEFAULT_PAGE_SIZE),
+        config.max_messages,
+    )
     budget = uid_budget(page, page_size, (), config.max_messages)
     accessor = EmailAccessor(config)
     try:
