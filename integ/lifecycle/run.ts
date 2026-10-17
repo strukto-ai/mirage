@@ -496,7 +496,7 @@ async function action(
       )
       break
     case 'unregister_cli':
-      ws.unregisterCli(step.name)
+      await ws.unregisterCli(step.name)
       break
     case 'clis':
       return [...ws.clis().keys()].sort()

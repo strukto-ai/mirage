@@ -15,6 +15,7 @@
 import asyncio
 from dataclasses import replace
 
+from mirage.accessor import NOOPAccessor
 from mirage.commands.builtin.aggregators import concat_aggregate
 from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.builtin.generic_bind.adapter import command_io
@@ -168,7 +169,10 @@ class CommandService(RAMVFS):
 
 
 async def scope_probe(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: NOOPAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ):
     assert ctx.vfs is not None
     size = 0

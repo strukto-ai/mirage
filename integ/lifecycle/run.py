@@ -383,7 +383,7 @@ async def action(
             step.get("config"),
         )
     elif op == "unregister_cli":
-        ws.unregister_cli(step["name"])
+        await ws.unregister_cli(step["name"])
     elif op == "clis":
         return sorted(ws.clis())
     elif op == "add_runtime":

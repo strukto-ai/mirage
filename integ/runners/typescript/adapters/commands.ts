@@ -167,7 +167,7 @@ export const CLI = new CLIProgram({
   }),
   handlers: {
     '': new CLIHandler({
-      fn: async (_config, paths, _texts, ctx) => {
+      fn: async (_accessor, paths, _texts, ctx) => {
         let size = 0
         for (const path of paths) {
           size += (await ctx.vfs!.stat(path)).size ?? 0

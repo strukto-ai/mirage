@@ -109,7 +109,7 @@ class NotesVFS extends BaseVFS<NotesAccessor> {
 }
 
 async function noteInfo(
-  _config: unknown,
+  _accessor: unknown,
   paths: PathSpec[],
   _texts: string[],
   ctx: Context,

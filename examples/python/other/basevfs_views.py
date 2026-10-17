@@ -112,7 +112,10 @@ class NotesVFS(BaseVFS):
 
 
 async def note_info(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[bytes, IOResult]:
     vfs, session = ctx.vfs, ctx.session
     if vfs is None or session is None:

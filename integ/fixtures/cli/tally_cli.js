@@ -2,9 +2,9 @@ import { CLI, CLIHandler, CommandSpec, IOResult, Argument, z } from '@struktoai/
 
 const TallyConfig = z.object({ unit: z.string() })
 
-function total(config, _paths, texts) {
+function total(accessor, _paths, texts) {
   const sum = texts.reduce((acc, text) => acc + Number(text), 0)
-  const line = `total ${sum} ${config.unit}\n`
+  const line = `total ${sum} ${accessor.config.unit}\n`
   return [new TextEncoder().encode(line), new IOResult()]
 }
 
