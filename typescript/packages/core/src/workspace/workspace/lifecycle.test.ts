@@ -77,6 +77,38 @@ beforeAll(async () => {
   parser = await getTestParser()
 })
 
+it.each([
+  '(exec 3</data/file; cat <&3)',
+  'x=$(exec 3</data/file)',
+  'exec 3</data/file | cat',
+  '{ exec 3</data/file; } & wait',
+  "bash -c 'exec 3</data/file'",
+  'cat <(exec 3</data/file)',
+])('a child shell closes what it opened: %s', async (line) => {
+  const vfs = new RAMVFS()
+  vfs.loadState({ type: 'ram', files: { '/file': new TextEncoder().encode('seed') } })
+  const ws = new Workspace({ '/data': vfs }, { shellParser: parser })
+  try {
+    const result = await ws.shell(line)
+    expect(result.exitCode).toBe(0)
+    expect(['', 'seed']).toContain(result.stdoutText)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const verdict = await Promise.race([
+      ws.unmount('/data').then(() => 'unmounted'),
+      new Promise(
+        (resolve) =>
+          (timer = setTimeout(() => {
+            resolve('blocked')
+          }, 5000)),
+      ),
+    ])
+    clearTimeout(timer)
+    expect(verdict).toBe('unmounted')
+  } finally {
+    await ws.close()
+  }
+})
+
 function buildWs(): Workspace {
   return new Workspace(
     { '/m': [new RAMVFS(), MountMode.WRITE] },

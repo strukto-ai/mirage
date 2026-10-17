@@ -328,7 +328,7 @@ class JobRoute(JobOutput):
         has moved on, so it never stops the line that released it."""
         try:
             held = self.recorder
-            while isinstance(held, Recorder) and held.chunks:
+            while isinstance(held, Recorder) and held.busy:
                 self.recorder = Recorder()
                 for key, source in await held.take():
                     try:

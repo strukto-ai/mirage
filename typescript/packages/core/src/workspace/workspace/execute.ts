@@ -696,50 +696,54 @@ async function runPreparedLine(
               innerOpts.sink = capture
             }
 
-            let io: IOResult
             try {
-              const res = await env.execute(cmd, innerOpts)
-              // The record rides back with the streams: a refusal the inner
-              // line earned is the outer line's to report.
-              if (res.refusal !== null) nested.latest = res.refusal
-              io = new IOResult({
-                exitCode: res.exitCode,
-                stdout: res.stdout,
-                stderr: res.stderr,
-                refusal: res.refusal,
-              })
-            } catch (err) {
-              // A substitution runs on a copy of the caller's frames, and it
-              // is a child shell: whatever unwinds out of it ends it.
-              if (!substitution || !isUnwinding(err)) throw err
-              io = ended(err)
+              let io: IOResult
+              try {
+                const res = await env.execute(cmd, innerOpts)
+                // The record rides back with the streams: a refusal the inner
+                // line earned is the outer line's to report.
+                if (res.refusal !== null) nested.latest = res.refusal
+                io = new IOResult({
+                  exitCode: res.exitCode,
+                  stdout: res.stdout,
+                  stderr: res.stderr,
+                  refusal: res.refusal,
+                })
+              } catch (err) {
+                // A substitution runs on a copy of the caller's frames, and it
+                // is a child shell: whatever unwinds out of it ends it.
+                if (!substitution || !isUnwinding(err)) throw err
+                io = ended(err)
+              }
+              if (!substitution) return io
+              const { node, handed: outer, signal, executionScope } = opts
+              const shellJobs = innerOpts.jobTable
+              io = await finishShell(
+                (action, o) =>
+                  executeFn(action, {
+                    ...o,
+                    session,
+                    ...(node !== undefined ? { node } : {}),
+                    ...(outer !== undefined ? { handed: outer } : {}),
+                    ...(signal !== undefined ? { signal } : {}),
+                    ...(executionScope !== undefined ? { executionScope } : {}),
+                    ...(shellJobs !== undefined ? { jobTable: shellJobs } : {}),
+                  }),
+                session,
+                io,
+                opts.stdin ?? null,
+                opts.callStack ?? null,
+              )
+              await capture.emit(Channel.STDOUT, await io.materializeStdout())
+              await capture.emit(Channel.STDERR, await io.materializeStderr())
+              await waits.join(rest)
+              const [out, err] = capture.take()
+              io.stdout = out.byteLength > 0 ? out : null
+              io.stderr = err.byteLength > 0 ? err : null
+              return io
+            } finally {
+              if (substitution) await session.closeInputs()
             }
-            if (!substitution) return io
-            const { node, handed: outer, signal, executionScope } = opts
-            const shellJobs = innerOpts.jobTable
-            io = await finishShell(
-              (action, o) =>
-                executeFn(action, {
-                  ...o,
-                  session,
-                  ...(node !== undefined ? { node } : {}),
-                  ...(outer !== undefined ? { handed: outer } : {}),
-                  ...(signal !== undefined ? { signal } : {}),
-                  ...(executionScope !== undefined ? { executionScope } : {}),
-                  ...(shellJobs !== undefined ? { jobTable: shellJobs } : {}),
-                }),
-              session,
-              io,
-              opts.stdin ?? null,
-              opts.callStack ?? null,
-            )
-            await capture.emit(Channel.STDOUT, await io.materializeStdout())
-            await capture.emit(Channel.STDERR, await io.materializeStderr())
-            await waits.join(rest)
-            const [out, err] = capture.take()
-            io.stdout = out.byteLength > 0 ? out : null
-            io.stderr = err.byteLength > 0 ? err : null
-            return io
           }
 
           const lineDeps: ExecuteNodeDeps = {

@@ -187,6 +187,7 @@ async def handle_pipe(
             ios[i] = io
             child_nodes[i] = child_exec
             reset_current_session(token)
+            await child.close_inputs()
         return io.exit_code
 
     tasks: list[asyncio.Task[int]] = []

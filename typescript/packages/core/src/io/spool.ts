@@ -98,17 +98,14 @@ export class ByteSpool {
       return this.cache.slice(start, start + size)
     }
     const result = new Uint8Array(Math.max(0, Math.min(size, this.size - offset)))
-    let position = 0
-    let written = 0
-    for (const part of this.memory) {
-      if (position + part.length > offset && written < result.length) {
-        const start = Math.max(0, offset - position)
-        const count = Math.min(part.length - start, result.length - written)
-        result.set(part.subarray(start, start + count), written)
-        written += count
-      }
-      position += part.length
-      if (written === result.length) break
+    let index = Math.floor(offset / CHUNK_SIZE)
+    let start = offset - index * CHUNK_SIZE
+    for (let written = 0; written < result.length; index++, start = 0) {
+      const part = this.memory[index]
+      if (part === undefined) break
+      const count = Math.min(part.length - start, result.length - written)
+      result.set(part.subarray(start, start + count), written)
+      written += count
     }
     return result
   }

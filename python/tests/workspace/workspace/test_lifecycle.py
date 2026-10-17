@@ -173,6 +173,31 @@ async def test_first_mount_access_prepares_expansion(action):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "(exec 3</data/file; cat <&3)",
+        "x=$(exec 3</data/file)",
+        "exec 3</data/file | cat",
+        "{ exec 3</data/file; } & wait",
+        "bash -c 'exec 3</data/file'",
+        "cat <(exec 3</data/file)",
+    ],
+)
+async def test_a_child_shell_closes_what_it_opened(line):
+    vfs = RAMVFS()
+    vfs.load_state({"files": {"/file": b"seed"}})
+    ws = Workspace({"/data": vfs})
+    try:
+        result = await ws.shell(line)
+        assert result.exit_code == 0
+        assert result.stdout in (b"", b"seed", None)
+        await asyncio.wait_for(ws.unmount("/data"), timeout=5)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_unmount_waits_for_an_inflight_cache_write(monkeypatch):
     class CachedRAM(RAMVFS):
         caches_reads = True

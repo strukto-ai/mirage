@@ -204,20 +204,25 @@ export async function handleBash(
   // A nested shell is a program of its own: the builtins it runs are its
   // builtins again, whatever `find -exec` marked the outer line.
 
-  const io = await runAsShell(async () =>
-    finishShell(
-      (action, opts) => executeFn(action, { ...opts, ...jobs, context }),
-      session,
-      await executeFn(script, {
-        context,
-        sessionId: session.sessionId,
+  let io: IOResult
+  try {
+    io = await runAsShell(async () =>
+      finishShell(
+        (action, opts) => executeFn(action, { ...opts, ...jobs, context }),
+        session,
+        await executeFn(script, {
+          context,
+          sessionId: session.sessionId,
+          stdin,
+          ...(sink === undefined ? {} : { sink }),
+          ...jobs,
+        }),
         stdin,
-        ...(sink === undefined ? {} : { sink }),
-        ...jobs,
-      }),
-      stdin,
-    ),
-  )
+      ),
+    )
+  } finally {
+    await session.closeInputs()
+  }
 
   const label = parsed.path !== null ? `${name} ${parsed.path}` : `${name} -c ${script}`
   return [io.stdout, io, new ExecutionNode({ command: label, exitCode: io.exitCode })]

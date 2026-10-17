@@ -125,7 +125,13 @@ export class Recorder extends JobConsole {
   readonly owner: StreamOwner = Symbol('recorder')
   private storage = new ByteSpool()
   private writing = Promise.resolve()
+  private pending = 0
+  /** Whether a write is under way or recorded bytes wait to be taken. Mirrors Python's busy. */
+  get busy(): boolean {
+    return this.pending > 0 || this.chunks.length > 0
+  }
   private async record(key: Channel | Inherited, data: Uint8Array): Promise<void> {
+    this.pending++
     const before = this.writing
     let done = (): void => undefined
     this.writing = new Promise((resolve) => {
@@ -139,6 +145,7 @@ export class Recorder extends JobConsole {
       if (last?.[0] === key) last[2] += data.length
       else this.chunks.push([key, start, data.length])
     } finally {
+      this.pending--
       done()
     }
   }

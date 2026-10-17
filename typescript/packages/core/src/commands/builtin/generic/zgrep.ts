@@ -203,14 +203,15 @@ export async function zgrepGeneric(
             let match: RegExpExecArray | null
             while ((match = global.exec(line)) !== null) {
               selected.push([matchStart(match), matchText(match)])
-              if (maxCount !== null && count + selected.length >= maxCount) break
               if (match[0] === '')
                 global.lastIndex += (line.codePointAt(match.index) ?? 0) > 0xffff ? 2 : 1
             }
           } else if (pattern.test(line) !== parsed.invert) selected.push([0, line])
-          for (const [at, text] of selected) {
+          if (selected.length > 0) {
             count++
             anyMatch = true
+          }
+          for (const [at, text] of selected) {
             if (!(parsed.count || filesOnly || filesWithoutMatch || quiet)) {
               if (utf8 && !validUtf8(encodeText(text))) binary = true
               else {
@@ -221,7 +222,6 @@ export async function zgrepGeneric(
                 yield encodeText(prefix + textView(text, utf8) + '\n')
               }
             }
-            if (maxCount !== null && count >= maxCount) break
           }
         }
       } finally {

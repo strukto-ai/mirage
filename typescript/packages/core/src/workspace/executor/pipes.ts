@@ -183,6 +183,7 @@ export async function handlePipe(
         ios[i] = io
         childNodes[i] = childExec
         if (failed) await discardIo(io)
+        await child.closeInputs()
       }
     }
     const execute = () =>

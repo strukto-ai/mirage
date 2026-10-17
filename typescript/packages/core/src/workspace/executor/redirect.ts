@@ -263,7 +263,7 @@ export class JobRoute extends JobOutput {
   async release(): Promise<void> {
     try {
       let held = this.recorder
-      while (held instanceof Recorder && held.chunks.length > 0) {
+      while (held instanceof Recorder && held.busy) {
         this.recorder = new Recorder()
         for (const [key, source] of await held.take()) {
           try {

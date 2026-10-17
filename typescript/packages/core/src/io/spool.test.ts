@@ -31,6 +31,7 @@ it.each([0, 13, 2000000])('spills, replays and reads windows with budget %s', as
     expect(spool.size).toBe(expected.length)
     expect(await spool.read(262141, 11)).toEqual(expected.slice(262141, 262152))
     expect(await spool.read(0, 9)).toEqual(expected.slice(0, 9))
+    expect(await spool.read(16383, 40000)).toEqual(expected.slice(16383, 56383))
     expect(await materialize(spool.stream())).toEqual(expected)
     expect(await materialize(spool.stream(70000, 5000))).toEqual(expected.slice(70000, 75000))
     expect(await spool.read(expected.length, 8)).toEqual(new Uint8Array())

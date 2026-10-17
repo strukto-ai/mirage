@@ -365,6 +365,7 @@ async def handle_background(
         finally:
             release_job()
             reset_caller(token)
+            await bg_session.close_inputs()
             for source in held_inputs:
                 await source.lines.unhold()
             if job_handed is not None and decisions is not None:

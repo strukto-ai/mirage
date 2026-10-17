@@ -391,6 +391,7 @@ async def recurse(
         if substitution:
             if child_token is not None:
                 reset_current_session(child_token)
+            await session.close_inputs()
     if io.refusal is not None:
         nested.latest = io.refusal
     return io

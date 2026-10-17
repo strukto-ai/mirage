@@ -1437,6 +1437,7 @@ async def _execute_node(
                 reset_current_session(token)
                 if program_token is not None:
                     reset_program_invocation(program_token)
+                await child.session.close_inputs()
 
         try:
             process = sub_table.processes.start(

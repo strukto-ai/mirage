@@ -1355,9 +1355,13 @@ async function executeNodeBody(
               sink ?? null,
               executeFn,
             )
-          result = await runWithEvaluation(child, () =>
-            asProgram ? runAsProgram(child.session, body) : body(),
-          )
+          try {
+            result = await runWithEvaluation(child, () =>
+              asProgram ? runAsProgram(child.session, body) : body(),
+            )
+          } finally {
+            await child.session.closeInputs()
+          }
           return result[1].exitCode
         },
       })

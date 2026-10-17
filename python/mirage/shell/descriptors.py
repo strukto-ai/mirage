@@ -139,16 +139,27 @@ class Recorder(JobConsole, StreamOwner):
         self.chunks: list[tuple[Channel | Inherited, int, int]] = []
         self.storage = ByteSpool()
         self.writing = asyncio.Lock()
+        self.pending = 0
+
+    @property
+    def busy(self) -> bool:
+        """Whether a write is under way or recorded bytes wait to be
+        taken."""
+        return bool(self.pending or self.chunks)
 
     async def _record(self, key: Channel | Inherited, data: bytes) -> None:
-        async with self.writing:
-            start = self.storage.size
-            await self.storage.append(data)
-            if self.chunks and self.chunks[-1][0] == key:
-                _, offset, size = self.chunks[-1]
-                self.chunks[-1] = (key, offset, size + len(data))
-            else:
-                self.chunks.append((key, start, len(data)))
+        self.pending += 1
+        try:
+            async with self.writing:
+                start = self.storage.size
+                await self.storage.append(data)
+                if self.chunks and self.chunks[-1][0] == key:
+                    _, offset, size = self.chunks[-1]
+                    self.chunks[-1] = (key, offset, size + len(data))
+                else:
+                    self.chunks.append((key, start, len(data)))
+        finally:
+            self.pending -= 1
 
     async def emit(self, channel: Channel, data: bytes) -> None:
         await self._record(channel, data)

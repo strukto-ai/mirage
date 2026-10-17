@@ -849,6 +849,15 @@ export class SessionState {
   }
 
   /**
+   * Close the readers this child shell opened, as it ends; the ones it
+   * inherited stay with the shell that opened them. Mirrors Python's
+   * close_inputs.
+   */
+  closeInputs(): Promise<void> {
+    return releaseInputs(this.openInputs(), this.borrowed)
+  }
+
+  /**
    * The durable-field payload persisted by SessionStore and snapshots.
    * Keys are snake_case, byte-identical to Python's `SessionState.to_dict`,
    * so both languages can share one store (a py daemon creates the

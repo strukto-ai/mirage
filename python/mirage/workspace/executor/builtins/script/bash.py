@@ -241,6 +241,7 @@ async def handle_bash(
     finally:
         reset_program_invocation(token)
         reset_current_session(child_token)
+        await session.close_inputs()
     label = f"{name} {parsed.path}" if parsed.path else f"{name} -c {script}"
     return io.stdout, io, ExecutionNode(command=label, exit_code=io.exit_code)
 

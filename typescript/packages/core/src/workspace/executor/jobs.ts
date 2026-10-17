@@ -313,6 +313,7 @@ export async function handleBackground(
       return await (asyncContextIsolatesTasks ? runWithCaller(own, body) : body())
     } finally {
       releaseProgram()
+      await bgSession.closeInputs()
       for (const source of heldInputs) await source.lines.unhold()
 
       if (jobHanded !== null && decisions !== null) {

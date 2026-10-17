@@ -65,6 +65,40 @@
       "flags": [
         "m"
       ]
+    },
+    {
+      "id": "zgrep_m_counts_lines_under_o",
+      "seq": 14490067,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/zgm; printf 'aa\\nxa a\\nb\\n' | gzip -c > /data/zgm/f.gz; zgrep -o -m1 a /data/zgm/f.gz; zgrep -o -m2 a /data/zgm/f.gz; zgrep -o -c a /data/zgm/f.gz; zgrep -o -n -b -m1 a /data/zgm/f.gz; rc=$?; rm -r /data/zgm; exit $rc",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\na\na\na\na\na\n2\n1:0:a\n1:1:a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "m",
+        "o"
+      ]
     }
   ]
 }

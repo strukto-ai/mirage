@@ -21,7 +21,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.shell.console import Channel, JobConsole
+from mirage.shell.descriptors import FileDescription, Recorder
 from mirage.types import PathSpec
+from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.redirect import JobRoute
+from mirage.workspace.session.session import SessionState
 
 
 async def _workspace() -> Workspace:
@@ -870,3 +875,40 @@ async def test_file_read_failing_midway_keeps_streamed_output():
         assert "Permission denied" in await io.stderr_str()
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_job_write_under_way_when_the_route_releases_lands():
+    landed: list[bytes] = []
+    gate = asyncio.Event()
+
+    async def collect(data: bytes) -> None:
+        landed.append(data)
+
+    async def dispatch(op: str, scope: PathSpec, **kwargs):
+        raise AssertionError(f"unexpected {op}")
+
+    recorder = Recorder()
+    append = recorder.storage.append
+
+    async def slow_append(data: bytes) -> None:
+        await gate.wait()
+        await append(data)
+
+    recorder.storage.append = slow_append  # type: ignore[method-assign]
+    stdout = FileDescription(PathSpec.from_str_path("/f"), emit=collect)
+    route = JobRoute(
+        recorder,
+        {1: stdout},
+        JobConsole(),
+        dispatch,
+        EvaluationContext(SessionState("s")),
+    )
+    route.record(recorder)
+    writing = asyncio.create_task(route.emit(Channel.STDOUT, b"job\n"))
+    await asyncio.sleep(0)
+    releasing = asyncio.create_task(route.release())
+    await asyncio.sleep(0)
+    gate.set()
+    await asyncio.gather(writing, releasing)
+    assert landed == [b"job\n"]

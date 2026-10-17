@@ -540,6 +540,11 @@ class SessionState:
         """
         await release_inputs(inputs, [*self.open_inputs(), *self._borrowed])
 
+    async def close_inputs(self) -> None:
+        """Close the readers this child shell opened, as it ends; the
+        ones it inherited stay with the shell that opened them."""
+        await release_inputs(self.open_inputs(), self._borrowed)
+
     def to_dict(self) -> dict[str, Any]:
         # A managed name serializes as its pointer, never its value: a
         # stored session may leak only where a secret lives. `env` skips

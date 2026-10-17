@@ -27,7 +27,9 @@ import type { ExecuteNodeFn } from './command/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { handleRedirect } from './redirect.ts'
+import { JobRoute, handleRedirect } from './redirect.ts'
+import { Channel, JobConsole } from '../../shell/console/index.ts'
+import { FileDescription, Recorder } from '../../shell/descriptors.ts'
 
 function encode(s: string): Uint8Array {
   return new TextEncoder().encode(s)
@@ -1134,4 +1136,29 @@ it('fails only the redirect when a file read fails midway', async () => {
   } finally {
     await ws.close()
   }
+})
+
+describe('JobRoute.release', () => {
+  it('lands a job write still under way when the route releases', async () => {
+    const landed: string[] = []
+    const stdout = new FileDescription(PathSpec.fromStrPath('/f'))
+    stdout.emit = async (data) => {
+      await Promise.resolve()
+      landed.push(new TextDecoder().decode(data))
+    }
+    const dispatch: DispatchFn = () => Promise.reject(new Error('unexpected dispatch'))
+    const recorder = new Recorder()
+    const route = new JobRoute(
+      recorder,
+      new Map([[1, stdout]]),
+      new JobConsole(),
+      dispatch,
+      new SessionState({ sessionId: 's' }),
+    )
+    route.record(recorder)
+    const writing = route.emit(Channel.STDOUT, new TextEncoder().encode('job\n'))
+    await route.release()
+    await writing
+    expect(landed).toEqual(['job\n'])
+  })
 })

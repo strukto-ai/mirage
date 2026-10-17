@@ -1,5 +1,5 @@
 import re
-from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
 
@@ -176,22 +176,23 @@ async def zgrep_generic(
                     ):
                         continue
                     line = byte_view(raw, utf8)
-                    selected: Iterator[tuple[int, str]]
+                    selected: list[tuple[int, str]]
                     if (
                         f.only_matching
                         and not f.invert
                         and not (f.files_only or f.files_without_match)
                     ):
-                        selected = (
+                        selected = [
                             (match_start(m), match_text(m))
                             for m in compiled.finditer(line)
-                        )
+                        ]
                     else:
                         hit = bool(compiled.search(line)) != f.invert
-                        selected = iter(((0, line),) if hit else ())
-                    for at, text in selected:
+                        selected = [(0, line)] if hit else []
+                    if selected:
                         count += 1
                         any_match = True
+                    for at, text in selected:
                         if not (
                             f.count
                             or f.files_only
@@ -214,8 +215,6 @@ async def zgrep_generic(
                                 yield encode_text(
                                     prefix + text_view(text, utf8) + "\n"
                                 )
-                        if f.max_count is not None and count >= f.max_count:
-                            break
             finally:
                 await reader.discard()
             diagnostic = await io.materialize_stderr()
