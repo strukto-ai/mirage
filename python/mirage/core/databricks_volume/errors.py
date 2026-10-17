@@ -16,6 +16,10 @@ import aiohttp
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 
+class DatabricksVolumeCredentialError(RuntimeError):
+    pass
+
+
 class DatabricksVolumeApiError(Exception):
     def __init__(
         self, status_code: int, error_code: str | None, message: str

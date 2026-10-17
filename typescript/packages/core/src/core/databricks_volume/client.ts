@@ -16,7 +16,7 @@ import { z } from 'zod'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
 import { apiRequest, apiStream, NO_RETRY } from '../api/client.ts'
-import { DatabricksVolumeApiError } from './errors.ts'
+import { DatabricksVolumeApiError, DatabricksVolumeCredentialError } from './errors.ts'
 import type { DirectoryEntry, FileMetadata } from './types.ts'
 
 type Endpoint = 'files' | 'directories'
@@ -44,7 +44,13 @@ function url(accessor: DatabricksVolumeAccessor, endpoint: Endpoint, path: strin
 
 async function headers(accessor: DatabricksVolumeAccessor): Promise<Record<string, string>> {
   const credential = accessor.config.token
-  const token = typeof credential === 'function' ? await credential() : credential
+  let token: unknown
+  try {
+    token = typeof credential === 'function' ? await credential() : credential
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'AbortError') throw cause
+    throw new DatabricksVolumeCredentialError(cause)
+  }
   if (typeof token !== 'string' || token.trim() === '' || /[\r\n]/.test(token)) {
     throw new Error('databricks_volume: token must be a nonblank string without CR or LF')
   }
@@ -155,7 +161,7 @@ export async function* downloadStream(
   yield* apiStream(url(accessor, 'files', path), {
     headers: requestHeaders,
     errorOf,
-    signal: AbortSignal.timeout(accessor.config.timeout * 1000),
+    signal: AbortSignal.timeout(Math.ceil(accessor.config.timeout * 1000)),
   })
 }
 

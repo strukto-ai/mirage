@@ -12,6 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+export class DatabricksVolumeCredentialError extends Error {
+  constructor(cause: unknown) {
+    super('databricks_volume: credential provider failed', { cause })
+    this.name = 'DatabricksVolumeCredentialError'
+  }
+}
+
 export class DatabricksVolumeApiError extends Error {
   readonly statusCode: number
   readonly errorCode: string | null

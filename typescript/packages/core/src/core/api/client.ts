@@ -277,7 +277,7 @@ export async function apiRequest(
     if (options.json !== undefined) init.body = JSON.stringify(options.json)
     else if (options.body !== undefined) init.body = options.body
     if (options.timeoutSeconds !== undefined) {
-      init.signal = AbortSignal.timeout(options.timeoutSeconds * 1000)
+      init.signal = AbortSignal.timeout(Math.ceil(options.timeoutSeconds * 1000))
     }
     let response: Response
     try {

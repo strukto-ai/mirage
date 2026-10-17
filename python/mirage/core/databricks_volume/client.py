@@ -22,7 +22,10 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, TypeAdapter
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.core.api.client import NO_RETRY, api_request, api_stream
-from mirage.core.databricks_volume.errors import error_of
+from mirage.core.databricks_volume.errors import (
+    DatabricksVolumeCredentialError,
+    error_of,
+)
 from mirage.core.databricks_volume.types import DirectoryEntry, FileMetadata
 from mirage.utils.ranges import ByteWindow
 
@@ -53,11 +56,18 @@ def _url(
 
 async def _headers(accessor: DatabricksVolumeAccessor) -> dict[str, str]:
     provider = accessor.config.token
-    token = (
-        await asyncio.to_thread(provider) if callable(provider) else provider
-    )
-    if inspect.isawaitable(token):
-        token = await token
+    try:
+        token = (
+            await asyncio.to_thread(provider)
+            if callable(provider)
+            else provider
+        )
+        if inspect.isawaitable(token):
+            token = await token
+    except Exception as exc:
+        raise DatabricksVolumeCredentialError(
+            "databricks_volume: credential provider failed"
+        ) from exc
     if isinstance(token, SecretStr):
         token = token.get_secret_value()
     if (
