@@ -24,13 +24,6 @@ import aiohttp
 
 from mirage.accessor.base import Accessor
 from mirage.core.api.client import SessionArg
-from mirage.core.generic.find_eval import (
-    FindEntry,
-    PredNode,
-    build_tree,
-    emit_start_path,
-    keep,
-)
 from mirage.core.msgraph.client import (
     GraphError,
     cancel_upload,
@@ -46,7 +39,6 @@ from mirage.core.msgraph.client import (
     graph_stream,
     id_segment,
     poll_monitor,
-    session_scope,
     upload_chunk,
 )
 from mirage.core.msgraph.config import MsGraphConfig
@@ -65,7 +57,6 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.ranges import window_for
-from mirage.utils.stat_view import DIR_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -906,127 +897,6 @@ def _placed(
             base = f"{base}/{name}" if base and name else name or None
         places[link] = base
     return places[folder]
-
-
-async def find_items(
-    config: MsGraphConfig,
-    loc: DriveLoc,
-    start_name: str,
-    dir_exists: Callable[[], Awaitable[bool]],
-    name: str | None = None,
-    type: str | None = None,
-    min_size: int | None = None,
-    max_size: int | None = None,
-    maxdepth: int | None = None,
-    name_exclude: str | None = None,
-    or_names: list[str] | None = None,
-    iname: str | None = None,
-    path_pattern: str | None = None,
-    mindepth: int | None = None,
-    empty: bool = False,
-    tree: PredNode | None = None,
-    depth_offset: int = 0,
-    emit_start: bool = True,
-    session: SessionArg = None,
-) -> list[str]:
-    """Walk a drive subtree and return the matching mount-relative keys.
-
-    ``depth_offset`` and ``emit_start`` exist for callers that stack this
-    walk under synthetic namespace levels (SharePoint's site and library
-    directories): the offset shifts reported depths so ``-maxdepth`` and
-    ``-mindepth`` count from the real start path, and ``emit_start``
-    suppresses the per-library start path so only the caller's own start
-    is emitted.
-
-    Args:
-        config (MsGraphConfig): Graph config.
-        loc (DriveLoc): subtree root.
-        start_name (str): basename of the start path, as find prints it.
-        dir_exists (Callable): resolves whether the start is a directory.
-        name (str | None): -name pattern.
-        type (str | None): -type filter.
-        min_size (int | None): inclusive lower size bound.
-        max_size (int | None): inclusive upper size bound.
-        maxdepth (int | None): -maxdepth.
-        name_exclude (str | None): negated -name pattern.
-        or_names (list[str] | None): -o'd -name patterns.
-        iname (str | None): -iname pattern.
-        path_pattern (str | None): -path pattern.
-        mindepth (int | None): -mindepth.
-        empty (bool): whether -empty is in effect.
-        tree (PredNode | None): pre-built predicate tree.
-        depth_offset (int): added to every reported depth.
-        emit_start (bool): whether to emit the start path itself.
-        session (SessionArg): pool or live session to ride.
-    """
-    base = loc.virt
-    results: list[str] = []
-    saw_descendant = False
-    start_children = 0
-    tree = (
-        tree
-        if tree is not None
-        else build_tree(
-            name=name,
-            iname=iname,
-            path_pattern=path_pattern,
-            type=type,
-            name_exclude=name_exclude,
-            or_names=or_names,
-            empty=empty,
-        )
-    )
-    async with session_scope(config, session) as sess:
-        async for rel, item, is_dir in iter_tree(config, loc, session=sess):
-            relative = rel[len(base) :].lstrip("/") if base else rel
-            rel_depth = relative.count("/") + 1
-            depth = rel_depth + depth_offset
-            if rel_depth == 1:
-                start_children += 1
-            if maxdepth is not None and depth > maxdepth:
-                continue
-            saw_descendant = True
-            entry_name = rel.rsplit("/", 1)[-1]
-            full_path = "/" + rel
-            size = item.get("size", 0)
-            is_empty = (
-                None
-                if not empty
-                else (folder_child_count(item) == 0 if is_dir else size == 0)
-            )
-            entry = FindEntry(
-                key=full_path,
-                name=entry_name,
-                kind="d" if is_dir else "f",
-                depth=depth,
-                is_empty=is_empty,
-            )
-            if not keep(entry, tree, mindepth):
-                continue
-            if min_size is not None or max_size is not None:
-                effective = DIR_SIZE if is_dir else size
-                if min_size is not None and effective < min_size:
-                    continue
-                if max_size is not None and effective > max_size:
-                    continue
-            results.append(full_path)
-    exists = emit_start and (saw_descendant or await dir_exists())
-    if exists:
-        root_key = "/" + base if base else "/"
-        emit_start_path(
-            results,
-            root_key,
-            start_name,
-            kind="d",
-            is_empty=start_children == 0 if empty else None,
-            exists=True,
-            tree=tree,
-            maxdepth=maxdepth,
-            mindepth=mindepth,
-            min_size=min_size,
-            max_size=max_size,
-        )
-    return sorted(results)
 
 
 async def drive_root_empty(

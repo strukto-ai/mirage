@@ -15,7 +15,6 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from functools import partial
 from typing import Any, Literal
 from urllib.parse import quote
@@ -25,7 +24,6 @@ import aiohttp
 from mirage.core.api.client import (
     RetryPolicy,
     SessionArg,
-    SessionPool,
     api_request,
     header_delay,
     resolve_session,
@@ -92,31 +90,6 @@ def headers(config: MsGraphConfig) -> dict[str, str]:
 
 def _timeout(config: MsGraphConfig) -> aiohttp.ClientTimeout:
     return aiohttp.ClientTimeout(total=config.timeout)
-
-
-def new_session(config: MsGraphConfig) -> aiohttp.ClientSession:
-    return aiohttp.ClientSession(timeout=_timeout(config))
-
-
-@asynccontextmanager
-async def session_scope(
-    config: MsGraphConfig, session: SessionArg
-) -> AsyncIterator[aiohttp.ClientSession | SessionPool]:
-    """A borrowed session or pool as-is, or an owned session closed on exit.
-
-    Args:
-        config (MsGraphConfig): supplies the timeout for an owned session.
-        session (SessionArg): a pool or live session to thread onward;
-            None opens one session for this scope only.
-    """
-    if session is not None:
-        yield session
-        return
-    own = new_session(config)
-    try:
-        yield own
-    finally:
-        await own.close()
 
 
 def _policy(config: MsGraphConfig) -> RetryPolicy:

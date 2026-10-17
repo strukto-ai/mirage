@@ -15,7 +15,6 @@
 import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { enotsup } from '../../errors/fs.ts'
-import { buildTree, emitStartPath, keep, type PredNode } from '../generic/find_eval.ts'
 import {
   record,
   recordStream,
@@ -23,7 +22,6 @@ import {
   revisionFor,
   startOp,
 } from '../../observe/context.ts'
-import type { FindOptions } from '../../vfs/types.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { eexist, enoent, enotdir, listingError } from '../../errors/fs.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
@@ -50,7 +48,6 @@ import {
 } from './client.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { sleep } from '../../utils/abort.ts'
-import { DIR_SIZE } from '../../utils/stat_view.ts'
 
 const SIMPLE_UPLOAD_MAX = 4 * 1024 * 1024
 const UPLOAD_CHUNK = 10 * 327680
@@ -768,75 +765,6 @@ function placed(
     places.set(link, base)
   }
   return places.get(folder) ?? null
-}
-
-// Walk knobs for callers that stack findItems under synthetic namespace
-// levels (SharePoint's site/library directories): `depthOffset` shifts the
-// reported depth so `-maxdepth`/`-mindepth` count from the real start path,
-// and `emitStart` suppresses the per-library start path so only the caller's
-// own start is emitted.
-export interface DriveWalk {
-  depthOffset?: number
-  emitStart?: boolean
-}
-
-export async function findItems(
-  config: MsGraphConfigResolved,
-  loc: DriveLoc,
-  startName: string,
-  dirExists: () => Promise<boolean>,
-  options: FindOptions = {},
-  walk: DriveWalk = {},
-): Promise<string[]> {
-  const results: string[] = []
-  let sawDescendant = false
-  const tree: PredNode =
-    options.tree ??
-    buildTree({
-      name: options.name,
-      iname: options.iname,
-      pathPattern: options.pathPattern,
-      type: options.type,
-      nameExclude: options.nameExclude,
-      orNames: options.orNames,
-      empty: options.empty,
-    })
-  const offset = walk.depthOffset ?? 0
-  let startChildren = 0
-  for await (const [relative, item, folder] of iterTree(config, loc)) {
-    const childPath = loc.virtual === '' ? relative : relative.slice(loc.virtual.length + 1)
-    const relDepth = childPath.split('/').length
-    const depth = relDepth + offset
-    if (relDepth === 1) startChildren += 1
-    if (options.maxDepth != null && depth > options.maxDepth) continue
-    sawDescendant = true
-    const size = asNumber(item.size) ?? 0
-    const entry = {
-      key: `/${relative}`,
-      name: baseName(relative),
-      kind: folder ? ('d' as const) : ('f' as const),
-      depth,
-      isEmpty: options.empty === true ? (folder ? folderChildCount(item) === 0 : size === 0) : null,
-    }
-    if (!keep(entry, tree, options.minDepth)) continue
-    const effective = folder ? DIR_SIZE : size
-    if (options.minSize != null && effective < options.minSize) continue
-    if (options.maxSize != null && effective > options.maxSize) continue
-    results.push(entry.key)
-  }
-  if (walk.emitStart !== false && (sawDescendant || (await dirExists()))) {
-    emitStartPath(results, loc.virtual === '' ? '/' : `/${loc.virtual}`, startName, {
-      kind: 'd',
-      isEmpty: options.empty === true ? startChildren === 0 : null,
-      exists: true,
-      tree,
-      maxDepth: options.maxDepth,
-      minDepth: options.minDepth,
-      minSize: options.minSize,
-      maxSize: options.maxSize,
-    })
-  }
-  return results.sort(compareCodePoints)
 }
 
 // One bounded page, not graphList: the answer is a yes/no, and graphList
