@@ -66,3 +66,41 @@ def test_reach_defaults_to_process():
     # may act around the workspace gate. Only an explicit "workspace"
     # narrows it.
     assert MarkerRuntime().reach == "process"
+
+
+class SlowCloseRuntime(Runtime):
+    name = "slow-close"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+        self.closed = 0
+
+    async def open_engine(self) -> object:
+        return object()
+
+    async def close_engine(self, engine: object) -> None:
+        self.entered.set()
+        await self.release.wait()
+        self.closed += 1
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_close_still_closes_the_engine_and_a_retry_waits():
+    # A host cancelling Workspace.close() mid close_engine must not leave
+    # the engine open: the close keeps running, and the retried close
+    # waits for it instead of finding nothing left to close.
+    rt = SlowCloseRuntime()
+    await rt.engine()
+    first = asyncio.ensure_future(rt.close())
+    await rt.entered.wait()
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    retry = asyncio.ensure_future(rt.close())
+    await asyncio.sleep(0)
+    assert not retry.done()
+    rt.release.set()
+    await retry
+    assert rt.closed == 1

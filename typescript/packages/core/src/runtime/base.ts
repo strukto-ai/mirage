@@ -75,6 +75,7 @@ export abstract class Runtime<E = unknown> {
   private readonly activity = new Activity()
   private retired = false
   private opening: Promise<E> | null = null
+  private closing: Promise<void> | null = null
 
   constructor(
     options: RuntimeOptions<RuntimeConfig> = {},
@@ -251,8 +252,20 @@ export abstract class Runtime<E = unknown> {
     await this.activity.wait()
   }
 
-  /** Close the engine, when one was opened. */
+  /**
+   * Close the engine, when one was opened. A close that comes while another
+   * runs waits for that one rather than finding nothing left to close.
+   */
   async close(): Promise<void> {
+    const closing = (this.closing ??= this.dropEngine())
+    try {
+      await closing
+    } finally {
+      if (this.closing === closing) this.closing = null
+    }
+  }
+
+  private async dropEngine(): Promise<void> {
     const opening = this.opening
     this.opening = null
     if (opening === null) return

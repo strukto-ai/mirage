@@ -83,6 +83,7 @@ class Runtime(ABC, Generic[E]):
     _activity: Activity | None = None
     _retired: bool = False
     _engine_task: "asyncio.Future[E] | None" = None
+    _closing: "asyncio.Task[None] | None" = None
 
     def __init__(
         self,
@@ -324,7 +325,24 @@ class Runtime(ABC, Generic[E]):
             await self._activity.wait()
 
     async def close(self) -> None:
-        """Close the engine, when one was opened."""
+        """Close the engine, when one was opened.
+
+        The close runs as its own task, so a cancelled caller leaves it
+        running, and a close that comes while it runs waits for it rather
+        than finding nothing left to close.
+        """
+        closing = self._closing
+        if closing is None:
+            closing = self._closing = asyncio.ensure_future(
+                self._drop_engine()
+            )
+        try:
+            await asyncio.shield(closing)
+        finally:
+            if closing.done() and self._closing is closing:
+                self._closing = None
+
+    async def _drop_engine(self) -> None:
         opening, self._engine_task = self._engine_task, None
         if opening is None:
             return
