@@ -36,6 +36,44 @@
       "flags": [
         "f"
       ]
+    },
+    {
+      "id": "sort_f_folds_to_upper_case",
+      "seq": 960032,
+      "note": "GNU 9.7, LC_ALL=C: -f folds with toupper, so '[' and '_' (0x5B, 0x5F) sort after the letters. Both trees folded to lower case and put them first.",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n_x\\nB\\n[y\\n' | sort -f",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nB\n[y\n_x\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
     }
   ]
 }

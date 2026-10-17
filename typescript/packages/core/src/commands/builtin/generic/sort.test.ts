@@ -18,8 +18,7 @@ import { PathSpec } from '../../../types.ts'
 import { unreadableStdin } from '../../../shell/descriptors.ts'
 import { enoent } from '../../../errors/fs.ts'
 import type { Context } from '../../config.ts'
-import { buildConfig, sortLines } from '../sort_keys.ts'
-import { parseFlags, sortGeneric } from './sort.ts'
+import { parseFlags, SORT_RUN_BYTES, sortGeneric } from './sort.ts'
 
 const DEC = new TextDecoder()
 
@@ -267,46 +266,62 @@ describe('sort inputs', () => {
   })
 })
 
-describe('sort past one chunk', () => {
-  const words = ['b', 'a', 'B', '10', '9', 'c x', 'a y', 'a x']
-  const lines = Array.from(
-    { length: 128 * 5 + 3 },
-    (_, i) =>
-      `${words[i % words.length] ?? ''} ${words[(i * 7) % words.length] ?? ''} ${String(i % 5)}`,
-  )
-  it.each<Context['flags']>([
-    {},
-    { reverse: true },
-    { unique: true },
-    { numeric_sort: true, unique: true },
-    { key: ['2,2'], stable: true },
-    { ignore_case: true, unique: true, reverse: true },
-  ])('orders as one stable sort under %o', async (flags) => {
-    const [out] = await run({
+describe('sort past one run', () => {
+  it('spills sorted runs and merges them in order', async () => {
+    // Each record counts its length plus 64 against a run, so this is two.
+    const count = Math.ceil(SORT_RUN_BYTES / 64) + 1000
+    const values = Array.from({ length: count }, (_, i) => (i * 7919) % count)
+    const [out, , code] = await run({
       paths: [spec('/data/in.txt')],
-      files: { '/data/in.txt': bytes(lines.join('\n')) },
-      flags,
+      files: { '/data/in.txt': bytes(values.join('\n')) },
+      flags: { numeric_sort: true },
     })
-    const want = sortLines(lines, buildConfig(parseFlags(flags)))
-    expect(out).toBe(want.map((line) => line + '\n').join(''))
+    expect(code).toBe(0)
+    expect(out).toBe(Array.from({ length: count }, (_, i) => `${String(i)}\n`).join(''))
   })
 })
 
-describe('sort of long records', () => {
-  it('orders as one stable sort when records outgrow a chunk', async () => {
-    const words = ['b', 'a', 'B', '10', '9', 'c x', 'a y', 'a x']
-    const lines = Array.from(
-      { length: 60 },
-      (_, i) => `${(words[i % words.length] ?? '').repeat((i * 997) % 4000)} ${String(i % 3)}`,
-    )
-    const flags = { key: ['2,2'] }
-    const [out] = await run({
-      paths: [spec('/data/in.txt')],
-      files: { '/data/in.txt': bytes(lines.join('\n')) },
-      flags,
+describe('sort records', () => {
+  it('ends each input at its last record', async () => {
+    expect(
+      await run({
+        paths: [spec('/data/a'), spec('/data/b')],
+        files: { '/data/a': bytes('c'), '/data/b': bytes('b\na') },
+      }),
+    ).toEqual(['a\nb\nc\n', '', 0])
+    expect(
+      await run({
+        paths: [spec('/data/a')],
+        files: { '/data/a': bytes('b\na') },
+        flags: { merge: true },
+      }),
+    ).toEqual(['b\na\n', '', 0])
+  })
+
+  it('hands back bytes that are not UTF-8 unchanged', async () => {
+    const ctx = {
+      stdin: Uint8Array.of(0xff, 10, 98, 10, 0xc3, 0xa9, 10),
+      flags: {},
+      cwd: PathSpec.fromStrPath('/'),
+      vfs: { kind: 'ram' } as never,
+    } as Context
+    const result = await sortGeneric([], ctx, () => {
+      throw new Error('paths are empty; the source is stdin')
     })
-    const want = sortLines(lines, buildConfig(parseFlags(flags)))
-    expect(out).toBe(want.map((line) => line + '\n').join(''))
+    if (result === null) throw new Error('sort returned no result')
+    expect(await materialize(result[0] ?? new Uint8Array())).toEqual(
+      Uint8Array.of(98, 10, 0xc3, 0xa9, 10, 0xff, 10),
+    )
+  })
+
+  it('names the disordered record under -c', async () => {
+    expect(
+      await run({
+        paths: [spec('/data/a')],
+        files: { '/data/a': bytes('a\nc\nb\n') },
+        flags: { c: true },
+      }),
+    ).toEqual(['', 'sort: /data/a:3: disorder: b\n', 1])
   })
 })
 

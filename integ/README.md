@@ -206,6 +206,7 @@ flowchart LR
     TSX["typescript/**"] --> ts & data & database
     IN["integ/**<br/>command JSON + crossmount coverage gate"] --> core & ts & data
     D["data/**"] --> core
+    RS["rust/**<br/>mirage-rs, built into both hosts"] --> core & ts & data & database & runtime
     DB["mongodb · postgres · chroma · qdrant<br/>python layers, integ/vfs/&lt;name&gt;,<br/>integ/runners, targets.json"] --> database
     OB["langfuse · jaeger layers<br/>integ/vfs/observability, seeds,<br/>integ/runners, targets.json"] --> observability
     FS["fuse and mount core modules,<br/>workspace fuse wiring<br/>integ/fuse, check_json.py"] --> fuse
@@ -231,18 +232,19 @@ packages use these same whole-host filters; `integ/unix/bc/` runs their shared
 GNU bc 1.07.1 arithmetic and math precision cases. The following paths select
 additional jobs:
 
-| Changed                                                                                                      | Also sets               |
-| ------------------------------------------------------------------------------------------------------------ | ----------------------- |
-| python or typescript source, except the runtime drop list below                                              | runtime                 |
-| `integ/runtime/`, `integ/fixtures/runtime/`, `integ/tsconfig.json`                                           | runtime                 |
-| `integ/package.json`                                                                                         | runtime, fuse           |
-| the python mongodb, postgres, chroma and qdrant layers; their `integ/vfs/` cases                             | database                |
-| the langfuse and jaeger layers in either language; `integ/vfs/observability/`; the langfuse and jaeger seeds | observability           |
-| `integ/runners/`, `integ/targets.json`                                                                       | database, observability |
-| the FUSE and mount core modules and the FUSE wiring in either language; `integ/fuse/`, `integ/check_json.py` | fuse                    |
-| generated document accessor/core/command/VFS modules and `workspace/documentation/` in either language       | fuse                    |
-| `data/`                                                                                                      | core only               |
-| `test_integ.yml`                                                                                             | every filter            |
+| Changed                                                                                                      | Also sets                         |
+| ------------------------------------------------------------------------------------------------------------ | --------------------------------- |
+| python or typescript source, except the runtime drop list below                                              | runtime                           |
+| `integ/runtime/`, `integ/fixtures/runtime/`, `integ/tsconfig.json`                                           | runtime                           |
+| `integ/package.json`                                                                                         | runtime, fuse                     |
+| the python mongodb, postgres, chroma and qdrant layers; their `integ/vfs/` cases                             | database                          |
+| the langfuse and jaeger layers in either language; `integ/vfs/observability/`; the langfuse and jaeger seeds | observability                     |
+| `integ/runners/`, `integ/targets.json`                                                                       | database, observability           |
+| the FUSE and mount core modules and the FUSE wiring in either language; `integ/fuse/`, `integ/check_json.py` | fuse                              |
+| generated document accessor/core/command/VFS modules and `workspace/documentation/` in either language       | fuse                              |
+| `rust/`, the mirage-rs crate both hosts run their command streams through                                    | core, ts, data, database, runtime |
+| `data/`                                                                                                      | core only                         |
+| `test_integ.yml`                                                                                             | every filter                      |
 
 The runtime drop list is the only subtraction in any filter, and it holds
 only what nothing integ-runtime loads can import, directly or not: unit

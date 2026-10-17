@@ -340,6 +340,310 @@
       "flags": [
         "L"
       ]
+    },
+    {
+      "id": "wc_m_skips_invalid_bytes",
+      "seq": 960068,
+      "note": "GNU wc 9.7 in the pinned image (debian@sha256:5bc3287b..., C.UTF-8): a byte that is not valid UTF-8 is no character, so 'a <FF> b' counts 5. Both trees counted it as one U+FFFD (6).",
+      "targets": [
+        "ram",
+        "opfs",
+        "disk",
+        "redis",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a \\377 b\\n' | wc -m",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\n",
+        "stderr": ""
+      },
+      "flags": [
+        "m"
+      ]
+    },
+    {
+      "id": "wc_w_invalid_bytes_are_word_characters",
+      "seq": 960069,
+      "note": "GNU wc 9.7 in the pinned image (debian@sha256:5bc3287b..., C.UTF-8): the invalid byte is still part of a word, so the line holds three.",
+      "targets": [
+        "ram",
+        "opfs",
+        "disk",
+        "redis",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a \\377 b\\n' | wc -w",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "wc_L_invalid_bytes_take_no_columns",
+      "seq": 960070,
+      "note": "GNU wc 9.7 in the pinned image (debian@sha256:5bc3287b..., C.UTF-8): an invalid byte occupies no column. Both trees measured its U+FFFD as 1 (3).",
+      "targets": [
+        "ram",
+        "opfs",
+        "disk",
+        "redis",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\377b\\n' | wc -L",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "L"
+      ]
+    },
+    {
+      "id": "wc_m_reads_the_31_bit_range",
+      "seq": 960071,
+      "note": "GNU wc 9.7 in the pinned image (debian@sha256:5bc3287b..., C.UTF-8): a 4-byte form past U+10FFFF and a 5-byte form each count as one character.",
+      "targets": [
+        "ram",
+        "opfs",
+        "disk",
+        "redis",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\364\\220\\200\\200\\370\\210\\200\\200\\200\\n' | wc -m",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      },
+      "flags": [
+        "m"
+      ]
+    },
+    {
+      "id": "wc_w_word_joiner_separates_words",
+      "seq": 960072,
+      "note": "GNU wc 9.7 in the pinned image (debian@sha256:5bc3287b..., C.UTF-8): U+2060 WORD JOINER ends a word, as U+00A0, U+2007 and U+202F do.",
+      "targets": [
+        "ram",
+        "opfs",
+        "disk",
+        "redis",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\342\\201\\240b\\n' | wc -w",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "wc_L_bidi_controls_take_no_columns",
+      "seq": 960073,
+      "note": "GNU wc 9.7 in the pinned image (debian@sha256:5bc3287b..., C.UTF-8): U+202B and U+202C take no column. Both trees measured them as 1 (4).",
+      "targets": [
+        "ram",
+        "opfs",
+        "disk",
+        "redis",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\342\\200\\253ab\\342\\200\\254\\n' | wc -L",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "L"
+      ]
+    },
+    {
+      "id": "wc_L_trigram_is_wide",
+      "seq": 960074,
+      "note": "GNU wc 9.7 in the pinned image (debian@sha256:5bc3287b..., C.UTF-8): U+2630 measures 2 columns. Both trees measured 1.",
+      "targets": [
+        "ram",
+        "opfs",
+        "disk",
+        "redis",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\342\\230\\260\\n' | wc -L",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "L"
+      ]
+    },
+    {
+      "id": "wc_L_hangul_jamo_extended_b_is_zero",
+      "seq": 960075,
+      "note": "GNU wc 9.7 in the pinned image (debian@sha256:5bc3287b..., C.UTF-8): U+D7B0 combines like the other medial jamo and takes no column. Both trees measured the line as 2.",
+      "targets": [
+        "ram",
+        "opfs",
+        "disk",
+        "redis",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\355\\236\\260x\\n' | wc -L",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "L"
+      ]
     }
   ]
 }

@@ -1,5 +1,6 @@
-from collections.abc import Awaitable, Callable, Iterator, Mapping
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping
+from contextlib import aclosing
+from dataclasses import asdict, dataclass
 from enum import Enum
 
 from mirage.commands.builtin.errors import SortKeyError
@@ -7,10 +8,8 @@ from mirage.commands.builtin.sort_keys import (
     KeyMods,
     SortConfig,
     build_config,
-    compare_lines,
-    merged,
     parse_keydef,
-    sort_lines,
+    tab_byte,
 )
 from mirage.commands.builtin.utils.lines import record_separator
 from mirage.commands.builtin.utils.stream import (
@@ -25,11 +24,13 @@ from mirage.commands.spec.usage import argmatch_error
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.types import BadDescriptorError, FileTooLargeError
-from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.cooperative import chunks
 from mirage.io.spool import ByteSpool
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
-from mirage.types import PathSpec, PolymorphicReadFn
+from mirage.rs import StreamRefusal, open_stream, run_stream
+from mirage.rs.stream import OpenStream
+from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
 from mirage.utils.quote import shell_quote
 
 # `check_args` as gnulib's `argmatch_valid` prints it: `quiet` and
@@ -39,10 +40,6 @@ CHECK_ARGS = (("quiet", "silent"), ("diagnose-first",))
 MULTIPLE_OUTPUTS = "sort: multiple output files specified"
 
 CHECK_MODES_CONFLICT = "sort: options '-cC' are incompatible"
-
-CHUNK = 128
-
-CHUNK_CHARS = 16 * 1024
 
 # sort.c's `sort_die` prefixes. GNU tests every input with
 # euidaccess(R_OK) before it reads any (`cannot read`), opens the output
@@ -177,7 +174,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> SortFlags:
 
     Each option is validated in its original scan order, including
     interleaved accumulating options and repeated scalar check modes.
-    Output paths are compared after resolution in both languages.
+    Output paths are compared as typed, in both languages.
 
     Args:
         flags (Mapping[str, FlagValue]): the dispatcher's flag bag.
@@ -194,8 +191,16 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> SortFlags:
     # (STREQ), so `-o ./out -o out` names two outputs even though they
     # are one file.
     typed = iter(fl.as_paths("output"))
-    for dest, value in fl.occurrences("key", "output", "c", "C", "check"):
-        if dest == "key" and isinstance(value, str):
+    tab: int | None = None
+    for dest, value in fl.occurrences(
+        "key", "output", "c", "C", "check", "field_separator"
+    ):
+        if dest == "field_separator" and isinstance(value, str):
+            byte = tab_byte(value)
+            if tab is not None and byte != tab:
+                raise UsageError("sort: incompatible tabs")
+            tab = byte
+        elif dest == "key" and isinstance(value, str):
             parse_keydef(value, KeyMods(), False)
         elif dest == "output":
             path = next(typed)
@@ -295,104 +300,68 @@ def _label(path: PathSpec | None) -> str:
     return path.raw_path
 
 
-async def _drain(
-    lines: Iterator[str | None], budget: YieldBudget
-) -> list[str]:
-    out: list[str] = []
-    for line in lines:
-        if line is not None:
-            out.append(line)
-        await budget.run()
-    return out
-
-
-def _chunked(records: list[str]) -> Iterator[list[str]]:
-    start = 0
-    while start < len(records):
-        end, size = start + 1, len(records[start])
-        while (
-            end < len(records)
-            and end - start < CHUNK
-            and size + len(records[end]) <= CHUNK_CHARS
-        ):
-            size += len(records[end])
-            end += 1
-        yield records[start:end]
-        start = end
-
-
-async def _ordered_records(
-    runs: list[list[str]], cfg: SortConfig
-) -> list[str]:
-    """The records in output order, worked out on the loop.
-
-    Sorting always ends, so it needs no worker, only steps a YieldBudget
-    paces: up to CHUNK records, and CHUNK_CHARS characters unless one
-    record alone is longer, sort as one step, then the sorted chunks
-    merge pairwise, a tie going to the earlier chunk, which is the order
-    one stable sort of every record gives, ``-u`` included. A large sort
-    shares the loop's core rather than using another
-    (strukto-ai/mirage#1590).
+def stream_config(
+    cfg: SortConfig, zero_terminated: bool
+) -> dict[str, JsonValue]:
+    """The mirage-rs sort configuration every mode shares.
 
     Args:
-        runs (list[list[str]]): one record list per input.
         cfg (SortConfig): the comparison.
+        zero_terminated (bool): ``-z``.
     """
-    budget = YieldBudget()
-    chunks: list[list[str]] = []
-    for chunk in _chunked([record for run in runs for record in run]):
-        chunks.append(sort_lines(chunk, cfg))
-        await budget.run()
-    while len(chunks) > 1:
-        chunks = [
-            await _drain(merged(chunks[i : i + 2], cfg), budget)
-            for i in range(0, len(chunks), 2)
-        ]
-    return chunks[0] if chunks else []
+    return {"compare": asdict(cfg), "zero_terminated": zero_terminated}
 
 
+# A run is sorted once its records reach SORT_RUN_BYTES, each counting its
+# length plus 64, and spooled; MERGE_FAN_IN runs merge into one at a time,
+# so a sort of any size holds one run and one chunk per merged input.
 SORT_RUN_BYTES = 8 * 1024 * 1024
 MERGE_FAN_IN = 16
 
 
 async def _merge_spools(
-    runs: list[ByteSpool], cfg: SortConfig, separator: bytes
+    runs: list[ByteSpool], config: Mapping[str, JsonValue]
 ) -> ByteSpool:
+    """A k-way merge of sorted spools, each read as the merge asks.
+
+    Args:
+        runs (list[ByteSpool]): the runs, closed once merged.
+        config (Mapping[str, JsonValue]): ``stream_config``'s.
+    """
     output = ByteSpool()
-    readers = [AsyncLineIterator(run.stream()) for run in runs]
+    readers = [chunks(run.stream()) for run in runs]
     budget = YieldBudget()
 
-    async def head(reader: AsyncLineIterator) -> str | None:
-        raw = await reader.readline(separator)
-        return None if raw is None else raw.decode()
+    # A call merges a bounded amount and leaves the stream busy with the
+    # rest, so the loop yields between steps.
+    async def add(produced: bytes) -> None:
+        if produced:
+            await output.append(produced)
+        while stream.busy():
+            if piece := stream.drain():
+                await output.append(piece)
+            await budget.run()
+        await budget.run()
 
     try:
-        heads = [await head(reader) for reader in readers]
-        previous: str | None = None
-        while any(text is not None for text in heads):
-            chosen = -1
-            line = ""
-            for index, text in enumerate(heads):
-                if text is not None and (
-                    chosen < 0 or compare_lines(text, line, cfg) < 0
-                ):
-                    chosen, line = index, text
-            if (
-                not cfg.unique
-                or previous is None
-                or compare_lines(previous, line, cfg) != 0
-            ):
-                await output.append(line.encode() + separator)
-                previous = line
-            heads[chosen] = await head(readers[chosen])
-            await budget.run()
+        stream = open_stream(
+            "sort", {**config, "mode": "merge", "inputs": len(runs)}
+        )
+        while (index := stream.wants()) is not None:
+            chunk = await anext(readers[index], None)
+            await add(
+                stream.end_input(index)
+                if chunk is None
+                else stream.feed_input(index, chunk)
+            )
+        await add(stream.finish())
         return output
     except BaseException:
         await output.close()
         raise
     finally:
         for reader in readers:
-            await reader.discard()
+            await reader.aclose()
         for run in runs:
             await run.close()
 
@@ -405,11 +374,19 @@ async def _external_records(
     cfg: SortConfig,
 ) -> ByteSpool | bytes:
     separator = record_separator(parsed.zero_terminated)
+    config = stream_config(cfg, parsed.zero_terminated)
     levels: list[list[ByteSpool]] = [[]]
     refused: tuple[InputStage, bytes] | None = None
     stream = stdin_stream(read, stdin)
-    buffer: list[str] = []
-    size = merges = 0
+    sorter = (
+        None
+        if parsed.merge
+        else open_stream(
+            "sort", {**config, "mode": "sort", "run_bytes": SORT_RUN_BYTES}
+        )
+    )
+    merges = 0
+    budget = YieldBudget()
 
     async def add_run(run: ByteSpool) -> None:
         nonlocal merges
@@ -421,40 +398,47 @@ async def _external_records(
             if len(levels[level]) < MERGE_FAN_IN:
                 return
             group, levels[level] = levels[level], []
-            run = await _merge_spools(group, cfg, separator)
+            run = await _merge_spools(group, config)
             merges += 1
             level += 1
 
-    async def flush() -> None:
-        nonlocal buffer, size
-        if not buffer:
-            return
-        ordered = await _ordered_records([buffer], cfg)
-        run = ByteSpool()
-        try:
-            for line in ordered:
-                await run.append(line.encode() + separator)
-            await add_run(run)
-        except BaseException:
-            await run.close()
-            raise
-        buffer, size = [], 0
+    async def add_sorted(stream: OpenStream) -> None:
+        # While the stream is busy each drain is one bounded step of a run
+        # and what it writes belongs to that run, so the loop yields between
+        # steps; a feed of no bytes then starts a run already buffered.
+        while stream.busy():
+            run = ByteSpool()
+            try:
+                while stream.busy():
+                    if piece := stream.drain():
+                        await run.append(piece)
+                    await budget.run()
+                await add_run(run)
+            except BaseException:
+                await run.close()
+                raise
+            stream.feed(b"")
 
     try:
         for path in list(paths) if paths else [None]:
             source = stream(path) if path is not None else stdin or b""
-            reader = AsyncLineIterator(source)
             run = ByteSpool() if parsed.merge else None
+            last = separator
             try:
-                while (raw := await reader.readline(separator)) is not None:
-                    text = raw.decode(errors="replace")
-                    if run is not None:
-                        await run.append(text.encode() + separator)
-                    else:
-                        buffer.append(text)
-                        size += len(raw) + 64
-                        if size >= SORT_RUN_BYTES:
-                            await flush()
+                async with aclosing(chunks(source)) as bounded:
+                    async for chunk in bounded:
+                        if not chunk:
+                            continue
+                        last = chunk[-1:]
+                        if run is not None:
+                            await run.append(chunk)
+                        elif sorter is not None:
+                            sorter.feed(chunk)
+                            await add_sorted(sorter)
+                # Each input's last record ends at its end, as GNU reads it.
+                if sorter is not None and last != separator:
+                    sorter.feed(separator)
+                    await add_sorted(sorter)
                 if run is not None:
                     await add_run(run)
                     run = None
@@ -471,29 +455,30 @@ async def _external_records(
                 if stage is InputStage.ACCESS:
                     break
             finally:
-                await reader.discard()
                 if run is not None:
                     await run.close()
         if refused is not None:
             return refused[1]
-        await flush()
+        if sorter is not None:
+            sorter.finish()
+            await add_sorted(sorter)
         runs = [run for level in reversed(levels) for run in level]
         # Ownership remains in levels until each merge closes its inputs.
         while len(runs) > 1:
             next_runs = []
             for start in range(0, len(runs), MERGE_FAN_IN):
                 merged_run = await _merge_spools(
-                    runs[start : start + MERGE_FAN_IN], cfg, separator
+                    runs[start : start + MERGE_FAN_IN], config
                 )
                 merges += 1
                 levels.append([merged_run])
                 next_runs.append(merged_run)
             runs = next_runs
         output = runs[0] if runs else ByteSpool()
-        # A single -m input still needs -u's adjacent duplicate removal;
-        # merged inputs already had it.
-        if parsed.merge and cfg.unique and merges == 0:
-            output = await _merge_spools([output], cfg, separator)
+        # A single -m input is still merged alone: -u's adjacent duplicates
+        # go and a last record gets its separator; merged inputs had both.
+        if parsed.merge and merges == 0:
+            output = await _merge_spools([output], config)
         for level in levels:
             for run in level:
                 if run is not output:
@@ -512,32 +497,22 @@ async def _check_stream(
     parsed: SortFlags,
     cfg: SortConfig,
 ) -> IOResult:
-    reader = AsyncLineIterator(source)
-    previous: str | None = None
-    index = 0
+    config = {**stream_config(cfg, parsed.zero_terminated), "mode": "check"}
     try:
-        while (
-            raw := await reader.readline(
-                record_separator(parsed.zero_terminated)
+        async with aclosing(run_stream("sort", config, source)) as checked:
+            async for _ in checked:
+                pass
+    except StreamRefusal as disorder:
+        # The refusal's message is the record's number, its output the
+        # record, which GNU writes with its own terminator.
+        error = None
+        if not parsed.check_quiet:
+            error = (
+                f"sort: {_label(path)}:{disorder.message}: disorder: ".encode()
+                + disorder.output
+                + record_separator(parsed.zero_terminated)
             )
-        ) is not None:
-            current = raw.decode(errors="replace")
-            index += 1
-            comparison = (
-                compare_lines(previous, current, cfg)
-                if previous is not None
-                else -1
-            )
-            if comparison > 0 or (
-                previous is not None and parsed.unique and comparison == 0
-            ):
-                error = (
-                    None
-                    if parsed.check_quiet
-                    else f"sort: {_label(path)}:{index}: disorder: {current}\n".encode()
-                )
-                return IOResult(stderr=error, exit_code=1)
-            previous = current
+        return IOResult(stderr=error, exit_code=1)
     except FS_ERRORS as exc:
         strerror = fs_strerror(exc) or str(exc)
         stage = input_stage(strerror, False)
@@ -545,8 +520,6 @@ async def _check_stream(
             stderr=sort_die(_stage_verb(stage, True), _label(path), strerror),
             exit_code=2,
         )
-    finally:
-        await reader.discard()
     return IOResult()
 
 

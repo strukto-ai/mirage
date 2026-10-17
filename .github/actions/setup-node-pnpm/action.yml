@@ -14,6 +14,10 @@ inputs:
 runs:
   using: composite
   steps:
+    # uv builds mirage-rs and the TypeScript build embeds its wasm, both
+    # with cargo, so every job that sets up either language gets Rust too.
+    - uses: ./.github/actions/setup-rust
+
     - name: Install pnpm
       uses: pnpm/action-setup@v6.0.10
       with:

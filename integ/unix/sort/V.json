@@ -36,6 +36,85 @@
       "flags": [
         "V"
       ]
+    },
+    {
+      "id": "sort_V_orders_tilde_digits_and_suffixes",
+      "seq": 960035,
+      "note": "GNU 9.7: under -V a '~' sorts before the end of a string, digits before letters, and a '.tar.gz' suffix only breaks a tie. Both trees compared digit runs alone and put 1.0 before 1.0~rc1.",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a.tar.gz\\na\\n1.0~rc1\\n1.0\\n1.10\\n1.2\\n' | sort -V",
+      "expect": {
+        "exit": 0,
+        "stdout": "1.0~rc1\n1.0\n1.2\n1.10\na\na.tar.gz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "V"
+      ]
+    },
+    {
+      "id": "sort_dV_iV_read_the_filtered_key",
+      "seq": 960038,
+      "note": "GNU 9.7, LC_ALL=C: -d and -i filter a -V key before it is compared, so under -dVu 'a-b' and 'a\\001b' repeat 'ab', and -iV drops only the control byte. The version comparison read the unfiltered key.",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'ab\\na-b\\na\\001b\\n' | sort -dVu; printf 'ab\\na-b\\na\\001b\\n' | sort -iV",
+      "expect": {
+        "exit": 0,
+        "stdout": "ab\na\u0001b\nab\na-b\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d",
+        "i",
+        "u",
+        "V"
+      ]
     }
   ]
 }

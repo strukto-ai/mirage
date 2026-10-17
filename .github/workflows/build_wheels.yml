@@ -1,0 +1,108 @@
+name: Build (mirage-rs wheels)
+
+permissions:
+  contents: read
+
+# Called by test_rust.yml on every change to the crate and by release.yml
+# before it publishes, so a release ships the wheels CI has been checking.
+"on":
+  workflow_call:
+
+jobs:
+  # abi3 wheels (CPython 3.11 and later), one per platform mirage-ai installs
+  # on. Linux builds in maturin's manylinux and musllinux containers, aarch64
+  # cross-compiled there; macOS x86_64 cross-compiles on the arm64 runner.
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, manylinux: auto }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu, manylinux: auto }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, manylinux: musllinux_1_2 }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, manylinux: musllinux_1_2 }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { os: windows-11-arm, target: aarch64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v7
+      # The abi3 import library is linked against the runner's own Python.
+      - if: runner.os == 'Windows'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          working-directory: rust/python
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+          args: --release --locked --out dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mirage-rs-wheel-${{ matrix.target }}
+          path: rust/python/dist/*.whl
+
+  # Anything without a wheel above builds from this with Rust 1.85 or later.
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          working-directory: rust/python
+          command: sdist
+          args: --out dist
+      # Built as an installer without a wheel would: pip, maturin from PyPI
+      # and the runner's own Rust, since the sdist carries no toolchain pin.
+      - name: Install the sdist and run every stream
+        run: |
+          python3 -m venv .venv-sdist
+          .venv-sdist/bin/pip install rust/python/dist/*.tar.gz
+          .venv-sdist/bin/python scripts/check_mirage_rs_wheel.py
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mirage-rs-sdist
+          path: rust/python/dist/*.tar.gz
+
+  # Each wheel installs and runs on a machine of its own platform, on the
+  # oldest Python its abi3 tag admits: arm64 wheels on arm64 runners, the
+  # x86_64 macOS wheel on an Intel one, the musl wheels in Alpine.
+  check:
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, alpine: true }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, alpine: true }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-15-intel, target: x86_64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { os: windows-11-arm, target: aarch64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: mirage-rs-wheel-${{ matrix.target }}
+          path: dist
+      - if: ${{ !matrix.alpine }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install the wheel and run every stream
+        if: ${{ !matrix.alpine }}
+        shell: bash
+        run: |
+          python -m pip install --no-index --find-links dist mirage-rs
+          python scripts/check_mirage_rs_wheel.py
+      - name: Install the wheel in Alpine and run every stream
+        if: ${{ matrix.alpine }}
+        run: >-
+          docker run --rm -v "$PWD:/w" -w /w python:3.11-alpine
+          sh -c "pip install --no-index --find-links dist mirage-rs
+          && python scripts/check_mirage_rs_wheel.py"

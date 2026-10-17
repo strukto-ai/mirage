@@ -16,7 +16,6 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
-import { encodeBase64 } from '../../../utils/base64.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { resolveSource, stdinStat, stdinStream } from '../utils/stream.ts'
 import { splitReadable } from '../utils/operands.ts'
@@ -25,11 +24,10 @@ import { INTMAX } from '../constants.ts'
 import { quoteText } from '../../quote.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
-import { chunks } from '../../../io/cooperative.ts'
-import { concat } from '../../../utils/bytes.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { runStream } from '../../../rs/stream.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
-const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 // GNU base64's line length when -w names none.
 const WRAP_WIDTH = 76
 
@@ -62,36 +60,7 @@ async function* base64EncodeStream(
   wrap: number | null,
   signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
-  const width = wrap ?? WRAP_WIDTH
-  let pending: Uint8Array = new Uint8Array()
-  let column = 0
-  const stream = chunks(source, signal)
-  try {
-    for (;;) {
-      const chunk = await stream.next()
-      const data = concat([pending, chunk.value ?? new Uint8Array()])
-      const size = chunk.done === true ? data.length : Math.floor(data.length / 3) * 3
-      const encoded = encodeBase64(data.subarray(0, size))
-      pending = data.slice(size)
-      const output: string[] = []
-      let offset = 0
-      while (offset < encoded.length) {
-        const take = width ? Math.min(encoded.length - offset, width - column) : encoded.length
-        output.push(encoded.slice(offset, offset + take))
-        offset += take
-        column += take
-        if (width && column === width) {
-          output.push('\n')
-          column = 0
-        }
-      }
-      if (output.length > 0) yield encodeText(output.join(''))
-      if (chunk.done === true) break
-    }
-    if (width && column) yield encodeText('\n')
-  } finally {
-    await stream.return?.()
-  }
+  yield* runStream('base64', { mode: 'encode', wrap: wrap ?? WRAP_WIDTH }, source, signal)
 }
 
 async function* base64DecodeStream(
@@ -100,54 +69,15 @@ async function* base64DecodeStream(
   io: IOResult,
   signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
-  // GNU coreutils 9.7 accepts unpadded tails and concatenated padded
-  // blocks. Decode as bytes arrive so an invalid suffix keeps its prefix.
-  let digits = 0
-  let value = 0
-  let padding = false
-  for await (const chunk of chunks(source, signal)) {
-    const output: number[] = []
-    let failed = false
-    for (const byte of chunk) {
-      const digit = ALPHABET.indexOf(String.fromCharCode(byte))
-      if (byte === 10 || (ignoreGarbage && digit < 0 && byte !== 61)) continue
-      if (padding) {
-        if (byte !== 61) {
-          failed = true
-          break
-        }
-        padding = false
-      } else if (digit >= 0) {
-        value = (value << 6) | digit
-        digits += 1
-        if (digits >= 2) output.push((value >> (2 * (4 - digits))) & 255)
-        if (digits === 4) {
-          digits = 0
-          value = 0
-        }
-      } else if (byte === 61 && (digits === 2 || digits === 3)) {
-        if (value & ((1 << (2 * (4 - digits))) - 1)) {
-          failed = true
-          break
-        }
-        padding = digits === 2
-        digits = 0
-        value = 0
-      } else {
-        failed = true
-        break
-      }
-    }
-    if (failed) {
-      io.exitCode = 1
-      io.stderr = encodeText('base64: invalid input\n')
-    }
-    if (output.length > 0) yield Uint8Array.from(output)
-    if (failed) return
-  }
-  if (padding || digits === 1 || (digits && value & ((1 << (2 * (4 - digits))) - 1))) {
+  // A refusal carries what decoded before the invalid input: record the
+  // failure first, then pass that prefix on, as GNU 9.7 writes it.
+  try {
+    yield* runStream('base64', { mode: 'decode', ignore_garbage: ignoreGarbage }, source, signal)
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
     io.exitCode = 1
-    io.stderr = encodeText('base64: invalid input\n')
+    io.stderr = encodeText(`${err.message}\n`)
+    if (err.output.byteLength > 0) yield err.output
   }
 }
 

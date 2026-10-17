@@ -1,5 +1,5 @@
-import base64 as b64lib
 from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import aclosing
 from dataclasses import dataclass
 
 from mirage.commands.builtin.constants import INTMAX
@@ -16,11 +16,10 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error
-from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec, ReadStreamFn, StatFn
+from mirage.rs import StreamRefusal, run_stream
+from mirage.types import JsonValue, PathSpec, ReadStreamFn, StatFn
 
-ALPHABET = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 # GNU base64's line length when -w names none.
 WRAP_WIDTH = 76
 
@@ -28,93 +27,32 @@ WRAP_WIDTH = 76
 async def _base64_encode_stream(
     source: AsyncIterator[bytes], wrap: int | None
 ) -> AsyncIterator[bytes]:
-    width = WRAP_WIDTH if wrap is None else wrap
-    pending = b""
-    column = 0
-    stream = chunks(source)
-    try:
-        while True:
-            chunk = await anext(stream, None)
-            data = pending + (chunk or b"")
-            size = len(data) if chunk is None else len(data) // 3 * 3
-            encoded = b64lib.b64encode(data[:size])
-            pending = data[size:]
-            output: list[bytes] = []
-            offset = 0
-            while offset < len(encoded):
-                take = (
-                    min(len(encoded) - offset, width - column)
-                    if width
-                    else len(encoded)
-                )
-                output.append(encoded[offset : offset + take])
-                offset += take
-                column += take
-                if width and column == width:
-                    output.append(b"\n")
-                    column = 0
-            if output:
-                yield b"".join(output)
-            if chunk is None:
-                break
-        if width and column:
-            yield b"\n"
-    finally:
-        await stream.aclose()
+    config: dict[str, JsonValue] = {
+        "mode": "encode",
+        "wrap": WRAP_WIDTH if wrap is None else wrap,
+    }
+    async with aclosing(run_stream("base64", config, source)) as parts:
+        async for part in parts:
+            yield part
 
 
 async def _base64_decode_stream(
     source: AsyncIterator[bytes], ignore_garbage: bool, io: IOResult
 ) -> AsyncIterator[bytes]:
-    # GNU coreutils 9.7 accepts unpadded tails and concatenated padded
-    # blocks. Decode as bytes arrive so an invalid suffix keeps its prefix.
-    digits = 0
-    value = 0
-    padding = False
-    stream = chunks(source)
+    # A refusal carries what decoded before the invalid input: record the
+    # failure first, then pass that prefix on, as GNU 9.7 writes it.
+    config: dict[str, JsonValue] = {
+        "mode": "decode",
+        "ignore_garbage": ignore_garbage,
+    }
     try:
-        async for chunk in stream:
-            output = bytearray()
-            failed = False
-            for byte in chunk:
-                digit = ALPHABET.find(byte)
-                if byte == 10 or (ignore_garbage and digit < 0 and byte != 61):
-                    continue
-                if padding:
-                    if byte != 61:
-                        failed = True
-                        break
-                    padding = False
-                elif digit >= 0:
-                    value = (value << 6) | digit
-                    digits += 1
-                    if digits >= 2:
-                        output.append((value >> (2 * (4 - digits))) & 255)
-                    if digits == 4:
-                        digits, value = 0, 0
-                elif byte == 61 and digits in (2, 3):
-                    if value & ((1 << (2 * (4 - digits))) - 1):
-                        failed = True
-                        break
-                    padding = digits == 2
-                    digits, value = 0, 0
-                else:
-                    failed = True
-                    break
-            if failed:
-                io.exit_code, io.stderr = 1, b"base64: invalid input\n"
-            if output:
-                yield bytes(output)
-            if failed:
-                return
-        if (
-            padding
-            or digits == 1
-            or (digits and value & ((1 << (2 * (4 - digits))) - 1))
-        ):
-            io.exit_code, io.stderr = 1, b"base64: invalid input\n"
-    finally:
-        await stream.aclose()
+        async with aclosing(run_stream("base64", config, source)) as parts:
+            async for part in parts:
+                yield part
+    except StreamRefusal as refusal:
+        io.exit_code, io.stderr = 1, f"{refusal.message}\n".encode()
+        if refusal.output:
+            yield refusal.output
 
 
 async def base64_cmd(

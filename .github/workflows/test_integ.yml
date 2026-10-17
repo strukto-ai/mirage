@@ -12,9 +12,11 @@ permissions:
       - data/**
       - python/**
       - typescript/**
+      - rust/**
       - .github/workflows/test_integ.yml
       - .github/actions/setup-node-pnpm/action.yml
       - .github/actions/setup-uv/action.yml
+      - .github/actions/setup-rust/action.yml
       - .github/actions/integ-battery-setup/action.yml
       - .github/actions/nextcloud-tune/action.yml
   pull_request:
@@ -73,6 +75,8 @@ jobs:
               - 'integ/**'
               - 'data/**'
               - 'python/**'
+              - 'rust/**'
+              - '.github/actions/setup-rust/action.yml'
               - '.github/workflows/test_integ.yml'
               - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/setup-uv/action.yml'
@@ -80,6 +84,8 @@ jobs:
             ts:
               - 'integ/**'
               - 'typescript/**'
+              - 'rust/**'
+              - '.github/actions/setup-rust/action.yml'
               - '.github/workflows/test_integ.yml'
               - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/setup-uv/action.yml'
@@ -114,14 +120,18 @@ jobs:
               - 'python/mirage/core/vector/**'
               - 'python/mirage/commands/builtin/generic/search.py'
               - 'typescript/**'
+              - 'rust/**'
               - '.github/workflows/test_integ.yml'
               - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/setup-uv/action.yml'
+              - '.github/actions/setup-rust/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
             data:
               - 'integ/**'
               - 'python/**'
               - 'typescript/**'
+              - 'rust/**'
+              - '.github/actions/setup-rust/action.yml'
               - '.github/workflows/test_integ.yml'
               - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/setup-uv/action.yml'
@@ -188,9 +198,11 @@ jobs:
               - 'integ/tsconfig.json'
               - 'python/**'
               - 'typescript/**'
+              - 'rust/**'
               - '.github/workflows/test_integ.yml'
               - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/setup-uv/action.yml'
+              - '.github/actions/setup-rust/action.yml'
               - '!**/*.md'
               - '!python/tests/**'
               - '!typescript/**/*.test.ts'

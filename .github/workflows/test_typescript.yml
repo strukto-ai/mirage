@@ -11,6 +11,8 @@ permissions:
       # here for knip, which builds its file set through it (root `dist/`
       # is why knip does not see built output).
       - typescript/**
+      # mirage-rs is built into every Python and TypeScript test run.
+      - rust/**
       - examples/typescript/**
       - integ/**
       # Pre-commit skips knip and integ-typecheck, so a hook definition
@@ -19,6 +21,7 @@ permissions:
       - .gitignore
       - .github/workflows/test_typescript.yml
       - .github/actions/setup-node-pnpm/action.yml
+      - .github/actions/setup-rust/action.yml
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -43,12 +46,14 @@ jobs:
             # Keep in lockstep with `push.paths` above.
             hit:
               - 'typescript/**'
+              - 'rust/**'
               - 'examples/typescript/**'
               - 'integ/**'
               - '.pre-commit-config.yaml'
               - '.gitignore'
               - '.github/workflows/test_typescript.yml'
               - '.github/actions/setup-node-pnpm/action.yml'
+              - '.github/actions/setup-rust/action.yml'
 
   test:
     needs: changes

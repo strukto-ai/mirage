@@ -1,0 +1,32 @@
+# Mirage is Apache-2.0 and may ship commercially, so only permissive licenses
+# reach the wheel and the wasm: no GPL, LGPL, AGPL or MPL, and nothing
+# unlicensed.
+[licenses]
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unlicense",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "bzip2-1.0.6",
+]
+confidence-threshold = 0.9
+unused-allowed-license = "allow"
+
+# A build dependency of pyo3-build-config, never compiled into the wheel.
+[[licenses.exceptions]]
+crate = "target-lexicon"
+allow = ["Apache-2.0 WITH LLVM-exception"]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

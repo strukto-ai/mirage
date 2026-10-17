@@ -864,6 +864,45 @@
         "C",
         "o"
       ]
+    },
+    {
+      "id": "sort_cz_disorder_ends_with_the_record_terminator",
+      "seq": 960037,
+      "note": "GNU 9.7: -c writes the disordered record with its own terminator, a NUL under -z. Both trees wrote a newline.",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\0c\\0b\\0' | sort -cz 2>&1 | tr '\\0' '@'",
+      "expect": {
+        "exit": 0,
+        "stdout": "sort: -:3: disorder: b@",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "z"
+      ]
     }
   ]
 }

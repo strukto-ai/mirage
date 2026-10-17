@@ -3911,6 +3911,7 @@ dependencies = [
     { name = "jq" },
     { name = "jsonschema" },
     { name = "mcp" },
+    { name = "mirage-rs" },
     { name = "multidict" },
     { name = "orjson" },
     { name = "pyjwt", extra = ["crypto"] },
@@ -4174,6 +4175,7 @@ requires-dist = [
     { name = "mirage-ai", extras = ["s3"], marker = "extra == 'sandbox'" },
     { name = "mirage-ai", extras = ["ssh"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["ssh"], marker = "extra == 'sandbox'" },
+    { name = "mirage-rs", directory = "../rust/python" },
     { name = "multidict", specifier = ">=6.0" },
     { name = "onepassword-sdk", marker = "extra == '1password'", specifier = ">=0.4.1" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=2.46.0" },
@@ -4220,6 +4222,10 @@ dev = [
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "websockets", specifier = ">=15.0.1" },
 ]
+
+[[package]]
+name = "mirage-rs"
+source = { directory = "../rust/python" }
 
 [[package]]
 name = "mmh3"

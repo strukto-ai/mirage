@@ -1,0 +1,17 @@
+[package]
+name = "mirage-rs-python"
+description = "Python bindings for mirage-rs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "mirage_rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+streams = { package = "mirage-rs", path = "../mirage-rs" }
+pyo3.workspace = true

@@ -36,13 +36,12 @@ def _in_ranges(cp: int, ranges: tuple[tuple[int, int], ...]) -> bool:
 def char_width(ch: str) -> int:
     """How many terminal columns *ch* occupies.
 
-    Mirrors what glibc's ``wcwidth`` reports to GNU ``wc -L``: 2 for an East
-    Asian wide or fullwidth character, 0 for a combining mark, a Hangul jamo
-    medial or final, or one of the zero-width format characters, and 1 for
-    everything else. A control character measures 0, which is how ``wc``
-    accounts for ``wcwidth``'s -1; callers handle tab, newline, carriage
-    return and form feed themselves, since those move the cursor rather than
-    occupy a column.
+    Mirrors glibc's ``wcwidth``: 2 for an East Asian wide or fullwidth
+    character, 0 for a combining mark, a Hangul jamo medial or final, or one
+    of the zero-width format characters, and 1 for everything else. A
+    control character measures 0 rather than ``wcwidth``'s -1; callers
+    handle tab, newline, carriage return and form feed themselves, since
+    those move the cursor rather than occupy a column.
 
     Divergence: an unassigned code point measures 1 here and 0 in glibc,
     which would need the assigned-character set on top of the width table.
@@ -74,30 +73,28 @@ def text_width(text: str) -> int:
 
 
 def is_space(ch: str) -> bool:
-    """Whether *ch* separates words for ``wc -w``.
+    """Whether *ch* is a space to glibc's ``iswspace``.
 
-    GNU splits on glibc's ``iswspace``, which is Unicode White_Space minus
-    U+0085. ``str.isspace`` is not that set: it also reports True for
-    U+001C-U+001F and U+0085, so ``wc -w`` over-counted words containing
-    them. The generated table is the pinned set.
+    That is Unicode White_Space minus U+0085. ``str.isspace`` is not that
+    set: it also reports True for U+001C-U+001F and U+0085. The generated
+    table is the pinned set.
 
     Args:
         ch (str): A single character.
 
     Returns:
-        bool: True when GNU would break a word here.
+        bool: True for an ``iswspace`` character.
     """
     return _in_ranges(ord(ch), WHITESPACE)
 
 
 def advance_column(column: int, ch: str) -> int:
-    """Move *column* past *ch*, GNU ``wc -L`` style.
+    """Move *column* past *ch*, as a terminal moves its cursor.
 
-    A tab jumps to the next multiple of ``TAB_WIDTH`` -- so a tab in column
-    0 lands on 8, which is why ``printf 'a\\tb' | wc -L`` is 9 and not 3.
-    Carriage return and form feed return the cursor to column 0 rather than
-    ending the line, so ``printf 'a\\rb' | wc -L`` is 1. Callers handle the
-    newline, which ends the line outright.
+    A tab jumps to the next multiple of ``TAB_WIDTH``, so a tab in column 0
+    lands on 8. Carriage return and form feed return the cursor to column 0
+    rather than ending the line. Callers handle the newline, which ends the
+    line outright.
 
     Args:
         column (int): The current column.

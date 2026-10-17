@@ -1,0 +1,29 @@
+name: Set up Rust
+description: >-
+  The toolchain rust/rust-toolchain.toml pins, wasm target included, and a
+  cache of the cargo registry and rust/target, so `uv sync` can build
+  mirage-rs and the TypeScript build can embed its wasm.
+# setup-uv and setup-node-pnpm both run this, so a job using both gets it
+# twice; the second run finds MIRAGE_RUST_READY and does nothing.
+runs:
+  using: composite
+  steps:
+    - name: Install the pinned toolchain
+      if: env.MIRAGE_RUST_READY != 'true'
+      shell: bash
+      working-directory: rust
+      run: rustup toolchain install
+
+    - name: Cache cargo and rust/target
+      if: env.MIRAGE_RUST_READY != 'true'
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        workspaces: rust
+        # Each job's entry is ~40 MB, so PRs saving their own would push
+        # the uv and pnpm caches out of the repository's 10 GB. A PR
+        # restores main's entries instead, which every branch can read.
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+
+    - name: Mark Rust as set up
+      shell: bash
+      run: echo "MIRAGE_RUST_READY=true" >> "$GITHUB_ENV"

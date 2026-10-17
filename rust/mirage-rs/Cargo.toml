@@ -1,0 +1,17 @@
+[package]
+name = "mirage-rs"
+description = "Byte-level command streams shared by Mirage's Python and TypeScript hosts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+md5.workspace = true
+memchr.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+serde.workspace = true
+serde_json.workspace = true

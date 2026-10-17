@@ -1,4 +1,3 @@
-import hashlib
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing
@@ -32,11 +31,11 @@ from mirage.context.session_context import current_caller
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
-from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.rs import run_stream
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
-from mirage.types import PathSpec, PolymorphicReadFn, StatFn
+from mirage.types import JsonValue, PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import resolve_path
 
@@ -153,13 +152,12 @@ async def hash_source(source: ByteSource, algorithm: str) -> str:
 
     Args:
         source (ByteSource): bytes or a producer consumed through EOF.
-        algorithm (str): the hashlib algorithm name.
+        algorithm (str): the digest name, e.g. ``"sha256"``.
     """
-    digest = hashlib.new(algorithm)
-    async with aclosing(chunks(source)) as bounded:
-        async for part in bounded:
-            digest.update(part)
-    return digest.hexdigest()
+    config: dict[str, JsonValue] = {"algorithm": algorithm}
+    async with aclosing(run_stream("digest", config, source)) as parts:
+        hexdigest = b"".join([part async for part in parts])
+    return hexdigest.decode()
 
 
 async def _report(
@@ -186,7 +184,7 @@ async def hash_operands(
         paths (list[PathSpec]): the operands, stdin as ``-``.
         read (Callable[[PathSpec], ByteSource]): an operand's bytes,
             opened now, inside the command's cache scope.
-        algorithm (str): the hashlib algorithm name.
+        algorithm (str): the digest name.
         prog (str): the command named on stderr.
         render (Callable[[str, str], bytes]): the line for a digest and
             the operand as spelled.
@@ -489,7 +487,7 @@ async def checksum(
 
     Args:
         paths (list[PathSpec]): the operands, none for stdin.
-        algorithm (str): the hashlib algorithm name, e.g. ``"md5"``.
+        algorithm (str): the digest name, e.g. ``"md5"``.
         read_bytes (Callable): bound whole reader.
         read_stream (Callable): bound streamed reader, stdin for ``-``.
         check (bool): -c.

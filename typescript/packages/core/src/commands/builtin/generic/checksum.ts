@@ -12,9 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import Hash from 'sha.js'
-import { Md5, Sha1 } from '../../../utils/hash.ts'
-import { chunks } from '../../../io/cooperative.ts'
+import { runStream } from '../../../rs/stream.ts'
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -54,14 +52,9 @@ interface ChecksumFlags {
 }
 
 async function hashSource(source: ByteSource, algorithm: string): Promise<string> {
-  if (algorithm === 'md5' || algorithm === 'sha1') {
-    const hash = algorithm === 'md5' ? new Md5() : new Sha1()
-    for await (const part of chunks(source)) hash.update(part)
-    return hash.digest()
-  }
-  const hash = Hash(algorithm as 'sha256' | 'sha384' | 'sha512')
-  for await (const part of chunks(source)) hash.update(part)
-  return hash.digest('hex')
+  const parts: Uint8Array[] = []
+  for await (const part of runStream('digest', { algorithm }, source)) parts.push(part)
+  return DEC.decode(concat(parts))
 }
 
 async function report(io: IOResult, prog: string, path: PathSpec, err: unknown): Promise<void> {

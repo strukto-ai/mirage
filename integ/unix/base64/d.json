@@ -36,6 +36,44 @@
       "flags": [
         "d"
       ]
+    },
+    {
+      "id": "base64_d_invalid_input_fails_when_head_stops_early",
+      "seq": 960039,
+      "note": "GNU 9.7: base64 -d writes the valid prefix and still exits 1 with 'invalid input' when the reader takes only that prefix, so pipefail sees the failure.",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(set -o pipefail; printf 'YWJj!ZA==' | base64 -d | head -c 3; echo \" $?\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "abc 1\n",
+        "stderr": "base64: invalid input\n"
+      },
+      "flags": [
+        "d"
+      ]
     }
   ]
 }

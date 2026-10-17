@@ -1,0 +1,171 @@
+name: Release
+
+permissions:
+  contents: read
+
+# A pushed `v*` tag builds, checks and publishes. Run by hand, on a branch
+# or a tag, it is a dry run: every build and check, nothing published.
+"on":
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # The tag, mirage-ai, its mirage-rs pin, the crate and every published npm
+  # package carry one version, bumped by hand, so a drift stops here.
+  versions:
+    runs-on: ubuntu-latest
+    outputs:
+      npm-tag: ${{ steps.check.outputs.npm-tag }}
+      npm-packages: ${{ steps.check.outputs.npm-packages }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: check
+        env:
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: python3 scripts/check_release_versions.py "$TAG"
+
+  wheels:
+    needs: versions
+    uses: ./.github/workflows/build_wheels.yml
+
+  # mirage-ai is pure Python. It is built without uv's path source, as PyPI
+  # will resolve it, and installed beside the mirage-rs wheel built above.
+  python:
+    needs: wheels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Pinned by commit, as this job builds what publish-pypi uploads; the
+      # uv version is setup-uv's.
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.12.9"
+      - name: Build mirage-ai
+        working-directory: python
+        run: uv build --no-sources --out-dir dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: mirage-rs-wheel-x86_64-unknown-linux-gnu
+          path: wheels
+      - name: Install mirage-ai and its pinned mirage-rs, and run a pipeline
+        run: |
+          uv venv --python 3.11 .venv-release
+          uv pip install --python .venv-release --find-links wheels python/dist/*.whl
+          .venv-release/bin/python scripts/check_mirage_rs_wheel.py
+          .venv-release/bin/python - <<'EOF'
+          import asyncio
+
+          from mirage import MountMode, Workspace
+          from mirage.vfs.ram import RAMVFS
+
+
+          async def main() -> None:
+              ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+              run = await ws.shell("printf 'b\\na\\n' | sort | base64 | base64 -d | wc -l")
+              out = await run.materialize_stdout()
+              assert (run.exit_code, out) == (0, b"2\n"), (run.exit_code, out)
+
+
+          asyncio.run(main())
+          EOF
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mirage-ai-dist
+          path: python/dist/*
+
+  # The core build embeds the mirage-rs wasm, so it needs cargo; the tarballs
+  # it packs need nothing but Node.
+  npm:
+    needs: versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: "24"
+      - name: Install
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile
+      - name: Build and pack
+        working-directory: typescript
+        env:
+          PACKAGES: ${{ needs.versions.outputs.npm-packages }}
+        run: |
+          filters=()
+          for name in $PACKAGES; do
+            filters+=(--filter "@struktoai/mirage-$name")
+          done
+          pnpm -r "${filters[@]}" build
+          for name in $PACKAGES; do
+            pnpm --filter "@struktoai/mirage-$name" pack --pack-destination "$RUNNER_TEMP/npm"
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-tarballs
+          path: ${{ runner.temp }}/npm/*.tgz
+
+  # PyPI trusted publishing: no token, the pypi environment's OIDC identity.
+  # mirage-ai pins mirage-rs at its own version, so mirage-rs goes first, and
+  # a rerun skips what an earlier attempt already uploaded.
+  publish-pypi:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [python, npm]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: mirage-rs-*
+          path: dist/mirage-rs
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: mirage-ai-dist
+          path: dist/mirage-ai
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/mirage-rs/
+          skip-existing: true
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/mirage-ai/
+          skip-existing: true
+
+  # npm trusted publishing (npm 11.5.1 or later), with provenance, under the
+  # dist-tag the version names: `alpha` for 0.0.7-alpha.3, `latest` for 0.0.7.
+  publish-npm:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [versions, publish-pypi]
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@11.20.0
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-tarballs
+          path: npm
+      - name: Publish each package not yet on npm
+        env:
+          NPM_TAG: ${{ needs.versions.outputs.npm-tag }}
+        run: |
+          for tarball in npm/*.tgz; do
+            spec=$(tar -xOzf "$tarball" package/package.json | node -p 'const p = JSON.parse(require("fs").readFileSync(0)); `${p.name}@${p.version}`')
+            if [ -n "$(npm view "$spec" version 2> /dev/null)" ]; then
+              echo "$spec is already published"
+              continue
+            fi
+            npm publish "$tarball" --access public --tag "$NPM_TAG"
+          done

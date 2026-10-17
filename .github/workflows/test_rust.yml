@@ -1,0 +1,93 @@
+name: Test (Rust)
+
+permissions:
+  contents: read
+
+"on":
+  push:
+    branches: [main]
+    paths:
+      - rust/**
+      - scripts/gen_unicode_width.py
+      - scripts/gen_rust_notices.py
+      - scripts/check_mirage_rs_wheel.py
+      - licenses/third_party/**
+      - typescript/packages/core/THIRD_PARTY_NOTICES
+      - .github/workflows/test_rust.yml
+      - .github/workflows/build_wheels.yml
+      - .github/actions/setup-rust/action.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - rust/**
+      - scripts/gen_unicode_width.py
+      - scripts/gen_rust_notices.py
+      - licenses/third_party/**
+      - typescript/packages/core/THIRD_PARTY_NOTICES
+      - .github/workflows/test_rust.yml
+      - .github/actions/setup-rust/action.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: rust
+
+jobs:
+  # One job: with the cache warm each check takes seconds, about what a
+  # job of its own would spend setting up.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-rust
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The browser's target. Every TypeScript job also builds the release
+      # wasm through embed-rs.mjs.
+      - name: Clippy (wasm)
+        run: cargo clippy -p mirage-rs-wasm --target wasm32-unknown-unknown --locked -- -D warnings
+      # A host no wheel covers, so a dependency that needs a C toolchain,
+      # threads or the filesystem fails here and not in a release.
+      - name: Check (Android)
+        run: |
+          rustup target add aarch64-linux-android
+          cargo check -p mirage-rs --target aarch64-linux-android --locked
+      - name: Test
+        run: cargo test --workspace --locked
+      # The sdist builds with whatever Rust the installer has, so the
+      # workspace's rust-version has to compile, not only the pinned one.
+      - name: Check on the declared rust-version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].rust_version')
+          rustup toolchain install "$version" --profile minimal --target wasm32-unknown-unknown
+          cargo "+$version" check --workspace --all-targets
+          cargo "+$version" check -p mirage-rs-wasm --target wasm32-unknown-unknown
+      - name: Licenses
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: rust/Cargo.toml
+          arguments: --all-features
+          command: check licenses bans sources
+      # Both generators still write what is committed: the notices from the
+      # locked tree, the width table from the pinned Unicode data.
+      - name: Install cargo-about
+        run: cargo about --version 2> /dev/null | grep -qx 'cargo-about 0.9.2' || cargo install --locked --features cli cargo-about@0.9.2
+      - name: Regenerate the generated files
+        working-directory: .
+        run: |
+          python3 scripts/gen_rust_notices.py
+          python3 scripts/gen_unicode_width.py
+          git diff --exit-code
+
+  # Every wheel platform is built and run on main, and by the release
+  # workflow before anything publishes; a pull request has the Python jobs'
+  # Linux build. Run Release by hand on a branch to try a wheel change.
+  wheels:
+    if: github.event_name != 'pull_request'
+    uses: ./.github/workflows/build_wheels.yml

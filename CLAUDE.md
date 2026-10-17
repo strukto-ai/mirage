@@ -20,6 +20,16 @@ semantics.
   `cli`, `server`, `agents`, `dsh`, `opencode`): `pnpm install`,
   `pnpm build`, `pnpm typecheck`, `pnpm test`. Rebuild the dists after a
   merge; integ and the examples import them.
+- Rust lives in `rust/`, one Cargo workspace: `mirage-rs` holds the command
+  streams both hosts run, `rust/python` is its PyO3 module (`mirage_rs`,
+  built by `uv sync`, which rebuilds it after a Rust change) and `rust/wasm`
+  the module the TypeScript core embeds
+  (`typescript/packages/core/scripts/embed-rs.mjs`, run by `prepare`,
+  `build`, `test` and `typecheck`). Both need cargo on `PATH`;
+  `rust/rust-toolchain.toml` pins it. Test: `cargo test --workspace` in
+  `rust/`. `scripts/gen_unicode_width.py` (Unicode's data files) and
+  `scripts/gen_rust_notices.py` (`cargo about` 0.9.2) regenerate their
+  outputs; CI fails when either is stale.
 - Lint everything: `./python/.venv/bin/pre-commit run --all-files` from the
   repo root (the venv binary, so `examples/` is included).
 - Examples run from the repo root with the venv interpreter:
@@ -47,6 +57,23 @@ semantics.
   A pull request runs only the integ jobs whose path filter matches (charted
   in `integ/README.md`), so adding, moving or renaming a module updates the
   filters in `test_integ.yml` and that chart.
+
+### Licensing
+
+Mirage is Apache-2.0 and may ship commercially, so all of it stays
+permissively licensed.
+
+- Dependencies are MIT, Apache-2.0, BSD, ISC, Zlib, Unicode-3.0 or alike,
+  never GPL, LGPL, AGPL or MPL. Check before adding one; `cargo deny`
+  (`rust/deny.toml`) gates the Rust tree.
+- Match GNU's behaviour, never its code: do not translate, copy or
+  paraphrase GNU, gnulib or glibc source, or any copyleft code. Work from
+  POSIX, the GNU manuals and the pinned image's output. Ship no table
+  captured from their code; derive it from the primary source, as
+  `scripts/gen_unicode_width.py` reads Unicode's data files.
+- Code adapted from a permissive project (uutils is MIT) keeps a header
+  naming the source and version, its license text in `licenses/third_party/`,
+  and for Rust an `ADAPTED` entry in `scripts/gen_rust_notices.py`.
 
 ### Patterns
 

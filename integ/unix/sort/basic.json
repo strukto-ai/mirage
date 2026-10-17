@@ -445,6 +445,42 @@
         "m",
         "c"
       ]
+    },
+    {
+      "id": "sort_keeps_bytes_that_are_not_utf8",
+      "seq": 960034,
+      "note": "GNU 9.7, LC_ALL=C: records compare and come back as bytes, so 0xff sorts last and is written unchanged. Both trees wrote U+FFFD.",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'b\\n\\377\\na\\n' | sort | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": " 61 0a 62 0a ff 0a\n",
+        "stderr": ""
+      },
+      "flags": []
     }
   ]
 }

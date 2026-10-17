@@ -5,14 +5,9 @@ import pytest
 import mirage.commands.builtin.generic.sort as sort_module
 from mirage.commands.builtin.errors import SortKeyError
 from mirage.commands.builtin.generic.sort import (
-    CHUNK,
-    CHUNK_CHARS,
-    _chunked,
-    _config,
     parse_flags,
     sort_generic,
 )
-from mirage.commands.builtin.sort_keys import sort_lines
 from mirage.commands.errors import UsageError
 from mirage.io.types import IOResult, materialize
 from mirage.shell.descriptors import unreadable_stdin
@@ -265,6 +260,16 @@ async def test_merge_trusts_its_inputs_and_never_reorders_one():
 WORDS = ["b", "a", "B", "10", "9", "c x", "a y", "a x"]
 
 
+async def _sorted(lines, flags):
+    stdout, result = await sort_generic(
+        [_spec("/data/in.txt")],
+        read_bytes=_reader({"/data/in.txt": "\n".join(lines).encode()}),
+        flags=flags,
+    )
+    assert result.exit_code == 0
+    return await materialize(stdout)
+
+
 @pytest.mark.parametrize(
     "flags",
     [
@@ -277,42 +282,64 @@ WORDS = ["b", "a", "B", "10", "9", "c x", "a y", "a x"]
     ],
 )
 @pytest.mark.asyncio
-async def test_a_sort_past_one_chunk_orders_as_one_stable_sort(flags):
+async def test_a_sort_spilled_into_runs_orders_as_one_sort(flags, monkeypatch):
     lines = [
         f"{WORDS[i % len(WORDS)]} {WORDS[i * 7 % len(WORDS)]} {i % 5}"
-        for i in range(CHUNK * 5 + 3)
+        for i in range(643)
     ]
-    stdout, _ = await sort_generic(
-        [_spec("/data/in.txt")],
-        read_bytes=_reader({"/data/in.txt": "\n".join(lines).encode()}),
-        flags=flags,
-    )
-    want = sort_lines(lines, _config(parse_flags(flags)))
-    assert (await materialize(stdout)).decode().splitlines() == want
-
-
-def test_a_chunk_ends_at_its_character_budget_unless_one_record_fills_it():
-    records = ["x" * (CHUNK_CHARS + 1), "a", "b", "y" * 9000, "z" * 9000]
-    assert [len(chunk) for chunk in _chunked(records)] == [1, 3, 1]
-    assert [len(chunk) for chunk in _chunked(["a"] * (CHUNK + 1))] == [
-        CHUNK,
-        1,
-    ]
+    want = await _sorted(lines, flags)
+    monkeypatch.setattr(sort_module, "SORT_RUN_BYTES", 256)
+    monkeypatch.setattr(sort_module, "MERGE_FAN_IN", 2)
+    assert await _sorted(lines, flags) == want
 
 
 @pytest.mark.asyncio
-async def test_long_records_sort_as_one_stable_sort():
+async def test_long_records_sort_as_one_sort(monkeypatch):
     lines = [
         f"{WORDS[i % len(WORDS)] * (i * 997 % 4000)} {i % 3}"
         for i in range(60)
     ]
+    want = await _sorted(lines, {"key": ["2,2"]})
+    monkeypatch.setattr(sort_module, "SORT_RUN_BYTES", 4096)
+    monkeypatch.setattr(sort_module, "MERGE_FAN_IN", 2)
+    assert await _sorted(lines, {"key": ["2,2"]}) == want
+
+
+@pytest.mark.asyncio
+async def test_each_input_ends_its_last_record():
     stdout, _ = await sort_generic(
-        [_spec("/data/in.txt")],
-        read_bytes=_reader({"/data/in.txt": "\n".join(lines).encode()}),
-        flags={"key": ["2,2"]},
+        [_spec("/data/a"), _spec("/data/b")],
+        read_bytes=_reader({"/data/a": b"c", "/data/b": b"b\na"}),
+        flags={},
     )
-    want = sort_lines(lines, _config(parse_flags({"key": ["2,2"]})))
-    assert (await materialize(stdout)).decode().splitlines() == want
+    assert await materialize(stdout) == b"a\nb\nc\n"
+    stdout, _ = await sort_generic(
+        [_spec("/data/a")],
+        read_bytes=_reader({"/data/a": b"b\na"}),
+        flags={"merge": True},
+    )
+    assert await materialize(stdout) == b"b\na\n"
+
+
+@pytest.mark.asyncio
+async def test_bytes_that_are_not_utf8_come_back_unchanged():
+    stdout, _ = await sort_generic(
+        [_spec("/data/a")],
+        read_bytes=_reader({"/data/a": b"\xff\nb\n\xc3\xa9\n"}),
+        flags={},
+    )
+    assert await materialize(stdout) == b"b\n\xc3\xa9\n\xff\n"
+
+
+@pytest.mark.asyncio
+async def test_check_names_the_disordered_record():
+    _, result = await sort_generic(
+        [_spec("/data/a")],
+        read_bytes=_reader({"/data/a": b"a\nc\nb\n"}),
+        flags={"c": True},
+    )
+    assert result.exit_code == 1
+    assert await _stderr(result) == b"sort: /data/a:3: disorder: b\n"
 
 
 @pytest.mark.asyncio

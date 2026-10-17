@@ -26,9 +26,11 @@ import { argmatch } from '../../spec/argmatch.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { advanceColumn, isSpace } from '../../../utils/width.ts'
+import { runStream } from '../../../rs/stream.ts'
 import { shellQuote } from '../../../utils/quote.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+
+const decoder = new TextDecoder()
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
@@ -83,61 +85,25 @@ export function parseFlags(bag: Record<string, FlagValue>): WcFlags | string {
   }
 }
 
-// Word splitting and column geometry are separate questions about the same
-// character: `\t` both ends a word and jumps to the next tab stop, while a
-// combining mark ends nothing and occupies nothing. maxLineLength is a
-// running maximum rather than a per-line one because carriage return and form
-// feed rewind the column without ending the line -- which is why the old
-// `split(/\r?\n/)` could not express it. Mirrors Python's `_scan_text`.
+// GNU wc's counts, streamed through mirage-rs. Only -l and -c count without
+// decoding; any other count decodes UTF-8, and a byte that decodes to no
+// character is part of a word but no character and no column. Mirrors
+// Python's wc.
 async function countsOf(source: ByteSource, ctx: Context, flags: WcFlags): Promise<WcCounts> {
-  const byteCountsOnly =
-    (flags.lines || flags.bytes) && !flags.words && !flags.chars && !flags.maxLineLength
-  if (byteCountsOnly) {
-    let lines = 0
-    let bytes = 0
-    for await (const chunk of guardInput(source, ctx)) {
-      bytes += chunk.byteLength
-      if (flags.lines) for (let i = 0; i < chunk.byteLength; i++) if (chunk[i] === 0x0a) lines++
-    }
-    return { lines, words: 0, bytes, chars: 0, maxLineLength: 0 }
+  const config = {
+    lines: flags.lines,
+    words: flags.words,
+    bytes: flags.bytes,
+    chars: flags.chars,
+    max_line_length: flags.maxLineLength,
   }
-  const decoder = new TextDecoder('utf-8', { fatal: false })
-  let bytes = 0
-  let lines = 0
-  let words = 0
-  let chars = 0
-  let inWord = false
-  let column = 0
-  let maxLineLength = 0
-  const scan = (text: string): void => {
-    for (const ch of text) {
-      const cp = ch.codePointAt(0) ?? 0
-      chars += 1
-      if (isSpace(cp)) {
-        if (inWord) {
-          words += 1
-          inWord = false
-        }
-      } else {
-        inWord = true
-      }
-      if (cp === 0x0a) {
-        lines += 1
-        if (column > maxLineLength) maxLineLength = column
-        column = 0
-        continue
-      }
-      column = advanceColumn(column, cp)
-      if (column > maxLineLength) maxLineLength = column
-    }
+  let report = ''
+  for await (const part of runStream('wc', config, guardInput(source, ctx))) {
+    report += decoder.decode(part)
   }
-  for await (const chunk of guardInput(source, ctx)) {
-    bytes += chunk.byteLength
-    scan(decoder.decode(chunk, { stream: true }))
-  }
-  scan(decoder.decode())
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- scan mutates inWord across decoded chunks.
-  if (inWord) words += 1
+  const [lines = 0, words = 0, bytes = 0, chars = 0, maxLineLength = 0] = report
+    .split(' ')
+    .map((value) => Number(value))
   return { lines, words, bytes, chars, maxLineLength }
 }
 

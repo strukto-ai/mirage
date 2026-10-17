@@ -1,0 +1,26 @@
+[workspace]
+resolver = "3"
+members = ["mirage-rs", "python", "wasm"]
+
+[workspace.package]
+version = "0.0.7-alpha.2"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/strukto-ai/mirage"
+rust-version = "1.85"
+
+[workspace.dependencies]
+mirage-rs = { path = "mirage-rs" }
+md5 = { package = "md-5", version = "0.11", default-features = false }
+sha1 = { version = "0.11", default-features = false }
+sha2 = { version = "0.11", default-features = false }
+memchr = { version = "2", default-features = false, features = ["std"] }
+serde = { version = "1", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+pyo3 = { version = "0.30", features = ["abi3-py311"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

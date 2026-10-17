@@ -27,6 +27,10 @@ inputs:
 runs:
   using: composite
   steps:
+    # uv builds mirage-rs and the TypeScript build embeds its wasm, both
+    # with cargo, so every job that sets up either language gets Rust too.
+    - uses: ./.github/actions/setup-rust
+
     - uses: astral-sh/setup-uv@v7
       with:
         version: "0.12.9"

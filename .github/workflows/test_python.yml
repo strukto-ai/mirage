@@ -9,6 +9,8 @@ permissions:
     paths:
       # Keep in lockstep with the `changes` filter below.
       - python/**
+      # mirage-rs is built into every Python and TypeScript test run.
+      - rust/**
       - examples/python/**
       - integ/**
       # mypy reads these now. Without the entry a PR touching only a
@@ -21,6 +23,7 @@ permissions:
       - .pre-commit-config.yaml
       - .github/workflows/test_python.yml
       - .github/actions/setup-uv/action.yml
+      - .github/actions/setup-rust/action.yml
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -54,12 +57,14 @@ jobs:
             # Keep in lockstep with `push.paths` above.
             hit:
               - 'python/**'
+              - 'rust/**'
               - 'examples/python/**'
               - 'integ/**'
               - 'scripts/**'
               - '.pre-commit-config.yaml'
               - '.github/workflows/test_python.yml'
               - '.github/actions/setup-uv/action.yml'
+              - '.github/actions/setup-rust/action.yml'
 
   test:
     needs: changes

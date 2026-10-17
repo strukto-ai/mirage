@@ -15,7 +15,8 @@ async def test_wc_timeout_closes_producer():
     async def source():
         nonlocal closed
         try:
-            yield b"line\n" * 200_000
+            while True:
+                yield b"line\n" * 200_000
         finally:
             closed = True
 

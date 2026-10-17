@@ -13,18 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { openStream } from '../../rs/stream.ts'
 import { SortKeyError } from './errors.ts'
-import {
-  buildConfig,
-  compareLines,
-  computeFields,
-  extract,
-  type KeyMods,
-  merged,
-  parseKeydef,
-  type SortConfig,
-  sortLines,
-} from './sort_keys.ts'
+import { SORT_RUN_BYTES, streamConfig } from './generic/sort.ts'
+import { buildConfig, type KeyMods, parseKeydef, type SortConfig } from './sort_keys.ts'
 
 const G: KeyMods = {
   numeric: false,
@@ -56,23 +48,72 @@ function configOf(flags: Record<string, string | boolean | number | string[]> = 
   })
 }
 
+const ENC = new TextEncoder()
+const DEC = new TextDecoder()
+
+// Records end in NUL so one may hold a newline, which is still a blank.
+function records(list: readonly string[]): Uint8Array {
+  return ENC.encode(list.map((record) => `${record}\0`).join(''))
+}
+
+function split(output: readonly Uint8Array[]): string[] {
+  return DEC.decode(Buffer.concat(output)).split('\0').slice(0, -1)
+}
+
+async function sortLines(list: readonly string[], cfg: SortConfig): Promise<string[]> {
+  const stream = await openStream('sort', {
+    ...streamConfig(cfg, true),
+    mode: 'sort',
+    run_bytes: SORT_RUN_BYTES,
+  })
+  try {
+    stream.feed(records(list))
+    stream.finish()
+    const output: Uint8Array[] = []
+    while (stream.busy()) output.push(stream.drain())
+    return split(output)
+  } finally {
+    stream.close()
+  }
+}
+
+async function merge(runs: readonly string[][], cfg: SortConfig): Promise<string[]> {
+  const stream = await openStream('sort', {
+    ...streamConfig(cfg, true),
+    mode: 'merge',
+    inputs: runs.length,
+  })
+  try {
+    const output: Uint8Array[] = []
+    const settle = (produced: Uint8Array): void => {
+      output.push(produced)
+      while (stream.busy()) output.push(stream.drain())
+    }
+    for (const [index, run] of runs.entries()) settle(stream.feedInput(index, records(run)))
+    for (const index of runs.keys()) settle(stream.endInput(index))
+    settle(stream.finish())
+    return split(output)
+  } finally {
+    stream.close()
+  }
+}
+
 function lines(
   text: string,
   flags: Record<string, string | boolean | number | string[]> = {},
-): string[] {
+): Promise<string[]> {
   return sortLines(text.split('\n'), configOf(flags))
 }
 
 describe('field model', () => {
-  it('default sep: leading blanks belong to the following field', () => {
-    const fields = computeFields('  zeta    5  x', null)
-    expect(fields.map((f) => f[0])).toEqual([0, 6, 11])
+  it('default sep: leading blanks belong to the following field', async () => {
+    expect(await lines('a 1\na  2', { k: '2,2' })).toEqual(['a  2', 'a 1'])
+    expect(await lines('a 1\na  2', { k: '2,2', b: true })).toEqual(['a 1', 'a  2'])
   })
 
-  it('explicit sep: no blank collapsing, empty fields kept', () => {
-    const fields = computeFields('a::b', ':')
-    expect(fields.length).toBe(3)
-    expect(fields[1]).toEqual([2, 2, 2])
+  it('explicit sep: no blank collapsing, empty fields kept', async () => {
+    expect(await lines('x::b\ny::a', { k: '3,3', t: ':' })).toEqual(['y::a', 'x::b'])
+    expect(await lines('y::a\nx::b', { k: '2,2', t: ':', s: true })).toEqual(['y::a', 'x::b'])
   })
 })
 
@@ -239,90 +280,92 @@ describe('ordering compatibility', () => {
 })
 
 describe('extract', () => {
-  it('field-to-EOL includes leading separator', () => {
-    const line = 'a 2 z'
-    expect(extract(line, computeFields(line, null), parseKeydef('2', G, false))).toBe(' 2 z')
+  it('field-to-EOL includes leading separator', async () => {
+    expect(await lines('a 2 z\nb 2 a', { k: '2' })).toEqual(['b 2 a', 'a 2 z'])
   })
 
-  it('single-field range includes leading blank', () => {
-    const line = 'a 2 z'
-    expect(extract(line, computeFields(line, null), parseKeydef('2,2', G, false))).toBe(' 2')
+  it('single-field range includes leading blank', async () => {
+    expect(await lines('b 2 a\na 2 z', { k: '2,2', s: true })).toEqual(['b 2 a', 'a 2 z'])
+    expect(await lines('a 1\nb  2', { k: '2,2' })).toEqual(['b  2', 'a 1'])
   })
 
-  it('char offset past field reaches separator', () => {
-    const line = 'y 5'
-    expect(extract(line, computeFields(line, null), parseKeydef('1.2', G, false))).toBe(' 5')
+  it('char offset past field reaches separator', async () => {
+    expect(await lines('xa\ny 5', { k: '1.2' })).toEqual(['y 5', 'xa'])
   })
 
-  it('missing field is empty', () => {
-    const line = 'x 3'
-    expect(extract(line, computeFields(line, null), parseKeydef('3,3', G, false))).toBe('')
+  it('missing field is empty', async () => {
+    expect(await lines('a b c\nx 3', { k: '3,3' })).toEqual(['x 3', 'a b c'])
   })
 })
 
 describe('sortLines KEYDEF', () => {
-  it('-k2 extends to EOL, differs from -k2,2', () => {
+  it('-k2 extends to EOL, differs from -k2,2', async () => {
     const data = 'a 2 z\nb 2 a\nc 1 m'
-    expect(lines(data, { k: '2' })).toEqual(['c 1 m', 'b 2 a', 'a 2 z'])
-    expect(lines(data, { k: '2,2' })).toEqual(['c 1 m', 'a 2 z', 'b 2 a'])
+    expect(await lines(data, { k: '2' })).toEqual(['c 1 m', 'b 2 a', 'a 2 z'])
+    expect(await lines(data, { k: '2,2' })).toEqual(['c 1 m', 'a 2 z', 'b 2 a'])
   })
 
-  it('per-key numeric', () => {
+  it('per-key numeric', async () => {
     const data = 'apple 3\nbanana 1\ncherry 2\napple 10'
-    expect(lines(data, { k: '2,2n' })).toEqual(['banana 1', 'cherry 2', 'apple 3', 'apple 10'])
+    expect(await lines(data, { k: '2,2n' })).toEqual([
+      'banana 1',
+      'cherry 2',
+      'apple 3',
+      'apple 10',
+    ])
   })
 
-  it('global reverse ignored by a per-key typed key', () => {
+  it('global reverse ignored by a per-key typed key', async () => {
     const data = 'z 2\nm 2\na 2'
-    expect(lines(data, { k: '2,2n', r: true })).toEqual(['z 2', 'm 2', 'a 2'])
+    expect(await lines(data, { k: '2,2n', r: true })).toEqual(['z 2', 'm 2', 'a 2'])
   })
 
-  it('stable disables the last-resort compare', () => {
+  it('stable disables the last-resort compare', async () => {
     const data = 'z 2\nm 2\na 2'
-    expect(lines(data, { k: '2,2n' })).toEqual(['a 2', 'm 2', 'z 2'])
-    expect(lines(data, { k: '2,2n', s: true })).toEqual(['z 2', 'm 2', 'a 2'])
+    expect(await lines(data, { k: '2,2n' })).toEqual(['a 2', 'm 2', 'z 2'])
+    expect(await lines(data, { k: '2,2n', s: true })).toEqual(['z 2', 'm 2', 'a 2'])
   })
 
-  it('multiple keys applied in order', () => {
+  it('multiple keys applied in order', async () => {
     const data = 'a 2 z\nb 2 a\nc 1 m'
-    expect(lines(data, { k: ['2,2n', '1,1r'] })).toEqual(['c 1 m', 'b 2 a', 'a 2 z'])
+    expect(await lines(data, { k: ['2,2n', '1,1r'] })).toEqual(['c 1 m', 'b 2 a', 'a 2 z'])
   })
 
-  it('blank-only key sorts as string under global numeric', () => {
+  it('blank-only key sorts as string under global numeric', async () => {
     const data = '  a 30\n  b 5\n  c 200'
-    expect(lines(data, { k: '2b', n: true })).toEqual(['  c 200', '  a 30', '  b 5'])
+    expect(await lines(data, { k: '2b', n: true })).toEqual(['  c 200', '  a 30', '  b 5'])
   })
 
-  it('char offsets with explicit separator', () => {
+  it('char offsets with explicit separator', async () => {
     const data = 'apple:12\nbee:3\ncat:100'
-    expect(lines(data, { k: '1.2,1.3', t: ':' })).toEqual(['cat:100', 'bee:3', 'apple:12'])
+    expect(await lines(data, { k: '1.2,1.3', t: ':' })).toEqual(['cat:100', 'bee:3', 'apple:12'])
   })
 })
 
 // Measured against GNU coreutils 9.7 on debian:stable-slim, LC_ALL=C.
 // Mirrors TestUniqueStopsAtTheKeys in test_sort_keys.py.
 describe('unique stops at the keys', () => {
-  it('compares key-equal lines equal under unique', () => {
-    expect(compareLines('b 1', 'a 1', configOf({ k: '2,2', u: true }))).toBe(0)
-    expect(compareLines('b 1', 'a 1', configOf({ k: '2,2' }))).toBeGreaterThan(0)
+  it('compares key-equal lines equal under unique', async () => {
+    expect(await lines('b 1\na 1', { k: '2,2', u: true })).toEqual(['b 1'])
+    expect(await lines('b 1\na 1', { k: '2,2' })).toEqual(['a 1', 'b 1'])
   })
 
-  it('keeps the first key-equal line in input order', () => {
-    expect(lines('b 1\na 1', { k: '2,2', u: true })).toEqual(['b 1'])
-    expect(lines('b\na\nB', { f: true, u: true })).toEqual(['a', 'b'])
+  it('keeps the first key-equal line in input order', async () => {
+    expect(await lines('b 1\na 1', { k: '2,2', u: true })).toEqual(['b 1'])
+    expect(await lines('b\na\nB', { f: true, u: true })).toEqual(['a', 'b'])
   })
 
-  it('keeps input order among ties under reverse', () => {
-    expect(lines('a 1\nb 1\nc 2', { k: '2,2', u: true, r: true })).toEqual(['c 2', 'a 1'])
+  it('keeps input order among ties under reverse', async () => {
+    expect(await lines('a 1\nb 1\nc 2', { k: '2,2', u: true, r: true })).toEqual(['c 2', 'a 1'])
   })
 })
 
 // -n and -h in the C locale, pinned against GNU sort 9.7. Mirrors
 // TestNumericKeys in test_sort_keys.py.
 describe('numeric keys', () => {
-  it('takes a newline as a blank before a number', () => {
+  it('takes a newline as a blank before a number', async () => {
     // A -z record may hold one; sort.c's blanks table counts it.
-    expect(sortLines(['\n5', '3', '\n-5', '-4'], configOf({ n: true }))).toEqual([
+    expect(await sortLines(['\n5', '3', '\n-5', '-4'], configOf({ n: true }))).toEqual([
       '\n-5',
       '-4',
       '3',
@@ -330,20 +373,20 @@ describe('numeric keys', () => {
     ])
   })
 
-  it('separates fields at a newline', () => {
-    expect(sortLines(['b\n1', 'a\n2'], configOf({ k: '2,2n' }))).toEqual(['b\n1', 'a\n2'])
+  it('separates fields at a newline', async () => {
+    expect(await sortLines(['b\n1', 'a\n2'], configOf({ k: '2,2n' }))).toEqual(['b\n1', 'a\n2'])
   })
 
-  it('ranks the unit above the magnitude', () => {
-    expect(lines('1500\n1.5K\n2000\n1K', { h: true })).toEqual(['1500', '2000', '1K', '1.5K'])
+  it('ranks the unit above the magnitude', async () => {
+    expect(await lines('1500\n1.5K\n2000\n1K', { h: true })).toEqual(['1500', '2000', '1K', '1.5K'])
   })
 
-  it('takes only k as a unit in lowercase', () => {
-    expect(lines('1m\n1M\n2\n1k', { h: true })).toEqual(['1m', '2', '1k', '1M'])
+  it('takes only k as a unit in lowercase', async () => {
+    expect(await lines('1m\n1M\n2\n1k', { h: true })).toEqual(['1m', '2', '1k', '1M'])
   })
 
-  it('negates a negative number unit and gives zero none', () => {
-    expect(lines('-1K\n-2\n1\n-1M\n0\n-0K\n0K', { h: true })).toEqual([
+  it('negates a negative number unit and gives zero none', async () => {
+    expect(await lines('-1K\n-2\n1\n-1M\n0\n-0K\n0K', { h: true })).toEqual([
       '-1M',
       '-1K',
       '-2',
@@ -354,8 +397,8 @@ describe('numeric keys', () => {
     ])
   })
 
-  it('reads the unit after the digits and points', () => {
-    expect(lines('5.K\n3K\n.5K\n3\nK', { h: true, s: true })).toEqual([
+  it('reads the unit after the digits and points', async () => {
+    expect(await lines('5.K\n3K\n.5K\n3\nK', { h: true, s: true })).toEqual([
       'K',
       '3',
       '.5K',
@@ -364,27 +407,23 @@ describe('numeric keys', () => {
     ])
   })
 
-  it('compares human numbers exactly', () => {
-    expect(lines('1.000000000000000002K\n1.000000000000000001K', { h: true, s: true })).toEqual([
-      '1.000000000000000001K',
-      '1.000000000000000002K',
-    ])
+  it('compares human numbers exactly', async () => {
+    expect(
+      await lines('1.000000000000000002K\n1.000000000000000001K', { h: true, s: true }),
+    ).toEqual(['1.000000000000000001K', '1.000000000000000002K'])
   })
 })
 
 // Mirrors TestMergeLines in test_sort_keys.py.
 describe('merged', () => {
-  const merge = (runs: string[][], cfg: SortConfig): string[] =>
-    [...merged(runs, cfg)].filter((line) => line !== null)
-
-  it('never reorders a run', () => {
-    expect(merge([['b', 'a']], configOf())).toEqual(['b', 'a'])
+  it('never reorders a run', async () => {
+    expect(await merge([['b', 'a']], configOf())).toEqual(['b', 'a'])
   })
 
-  it('emits the smallest head first', () => {
-    expect(merge([['c', 'a'], ['b']], configOf())).toEqual(['b', 'c', 'a'])
+  it('emits the smallest head first', async () => {
+    expect(await merge([['c', 'a'], ['b']], configOf())).toEqual(['b', 'c', 'a'])
     expect(
-      merge(
+      await merge(
         [
           ['a', 'd'],
           ['b', 'e'],
@@ -395,22 +434,22 @@ describe('merged', () => {
     ).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
   })
 
-  it('gives a tie to the earlier run', () => {
+  it('gives a tie to the earlier run', async () => {
     const runs = [['k 3'], ['k 1'], ['k 2']]
-    expect(merge(runs, configOf({ k: '1,1', s: true }))).toEqual(['k 3', 'k 1', 'k 2'])
-    expect(merge(runs, configOf({ k: '1,1' }))).toEqual(['k 1', 'k 2', 'k 3'])
+    expect(await merge(runs, configOf({ k: '1,1', s: true }))).toEqual(['k 3', 'k 1', 'k 2'])
+    expect(await merge(runs, configOf({ k: '1,1' }))).toEqual(['k 1', 'k 2', 'k 3'])
   })
 
-  it('skips empty runs', () => {
-    expect(merge([[], ['b', 'a'], []], configOf())).toEqual(['b', 'a'])
-    expect(merge([[], []], configOf())).toEqual([])
+  it('skips empty runs', async () => {
+    expect(await merge([[], ['b', 'a'], []], configOf())).toEqual(['b', 'a'])
+    expect(await merge([[], []], configOf())).toEqual([])
   })
 
-  it('collapses only adjacent duplicates under unique', () => {
+  it('collapses only adjacent duplicates under unique', async () => {
     const cfg = configOf({ u: true })
-    expect(merge([['a', 'b', 'a']], cfg)).toEqual(['a', 'b', 'a'])
+    expect(await merge([['a', 'b', 'a']], cfg)).toEqual(['a', 'b', 'a'])
     expect(
-      merge(
+      await merge(
         [
           ['a', 'b'],
           ['a', 'c'],
@@ -420,26 +459,8 @@ describe('merged', () => {
     ).toEqual(['a', 'b', 'c'])
   })
 
-  it('keeps the first line of a key-equal series under unique', () => {
-    expect(merge([['x 1'], ['a 1']], configOf({ k: '2,2', u: true }))).toEqual(['x 1'])
-    expect(merge([['b'], ['B']], configOf({ f: true, u: true }))).toEqual(['b'])
-  })
-
-  it('hands back every record even when unique drops it', () => {
-    const lines = Array.from({ length: 1000 }, () => 'a')
-    const records = [...merged([lines, lines], configOf({ u: true }))]
-    expect(records).toHaveLength(2 + 2000)
-    expect(records.filter((line) => line !== null)).toEqual(['a'])
-  })
-
-  it('hands back a step for every run placed at the start', () => {
-    const runs = Array.from({ length: 500 }, (_, i) => [String(500 - i)])
-    const records = merged(runs, configOf({ n: true }))
-    expect(records.next().value).toBeNull()
-    const rest = [...records]
-    expect(rest).toHaveLength(499 + 500)
-    expect(rest.filter((line) => line !== null)).toEqual(
-      Array.from({ length: 500 }, (_, i) => String(i + 1)),
-    )
+  it('keeps the first line of a key-equal series under unique', async () => {
+    expect(await merge([['x 1'], ['a 1']], configOf({ k: '2,2', u: true }))).toEqual(['x 1'])
+    expect(await merge([['b'], ['B']], configOf({ f: true, u: true }))).toEqual(['b'])
   })
 })

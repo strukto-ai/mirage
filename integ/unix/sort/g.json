@@ -227,6 +227,45 @@
       "flags": [
         "g"
       ]
+    },
+    {
+      "id": "sort_gu_keeps_a_nan_of_each_sign",
+      "seq": 960036,
+      "note": "GNU 9.7: -g orders NaNs by how %Lf prints them, so -nan sorts before nan and -u keeps one of each; NaN prints as nan and collapses into it.",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'nan\\n-nan\\n1\\nNaN\\n' | sort -gu",
+      "expect": {
+        "exit": 0,
+        "stdout": "-nan\nnan\n1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "g",
+        "u"
+      ]
     }
   ]
 }

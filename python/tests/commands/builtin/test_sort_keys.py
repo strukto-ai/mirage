@@ -1,18 +1,18 @@
 import pytest
 
 from mirage.commands.builtin.errors import SortKeyError
-from mirage.commands.builtin.generic.sort import sort_generic
+from mirage.commands.builtin.generic.sort import (
+    SORT_RUN_BYTES,
+    sort_generic,
+    stream_config,
+)
 from mirage.commands.builtin.sort_keys import (
     KeyMods,
-    _compute_fields,
-    _extract,
     build_config,
-    compare_lines,
-    merged,
     parse_keydef,
-    sort_lines,
 )
 from mirage.io.types import materialize
+from mirage.rs import open_stream
 
 _G = KeyMods()
 
@@ -34,8 +34,51 @@ def _cfg(key_defs=None, **kw):
     return build_config(key_defs or [], **defaults)
 
 
+# Records end in NUL so one may hold a newline, which is still a blank.
+def _records(records):
+    return b"".join(record.encode() + b"\0" for record in records)
+
+
+def _split(output):
+    return output.decode().split("\0")[:-1]
+
+
+def sort_lines(records, cfg):
+    stream = open_stream(
+        "sort",
+        {
+            **stream_config(cfg, True),
+            "mode": "sort",
+            "run_bytes": SORT_RUN_BYTES,
+        },
+    )
+    stream.feed(_records(records))
+    stream.finish()
+    output = b""
+    while stream.busy():
+        output += stream.drain()
+    return _split(output)
+
+
 def _merge(runs, cfg):
-    return [line for line in merged(runs, cfg) if line is not None]
+    stream = open_stream(
+        "sort",
+        {**stream_config(cfg, True), "mode": "merge", "inputs": len(runs)},
+    )
+
+    def settled(produced):
+        while stream.busy():
+            produced += stream.drain()
+        return produced
+
+    output = b"".join(
+        settled(stream.feed_input(index, _records(run)))
+        for index, run in enumerate(runs)
+    )
+    output += b"".join(
+        settled(stream.end_input(index)) for index in range(len(runs))
+    )
+    return _split(output + settled(stream.finish()))
 
 
 def _lines(text, key_defs=None, **kw):
@@ -44,14 +87,18 @@ def _lines(text, key_defs=None, **kw):
 
 class TestFieldModel:
     def test_default_sep_leading_blanks_belong_to_following_field(self):
-        fields = _compute_fields("  zeta    5  x", None)
-        assert [start for start, _, _ in fields] == [0, 6, 11]
-        assert "".join("  zeta    5  x"[c:e] for _, c, e in fields) == "zeta5x"
+        assert _lines("a 1\na  2", ["2,2"]) == ["a  2", "a 1"]
+        assert _lines("a 1\na  2", ["2,2"], ignore_blanks=True) == [
+            "a 1",
+            "a  2",
+        ]
 
     def test_explicit_sep_no_blank_collapsing(self):
-        fields = _compute_fields("a::b", ":")
-        assert len(fields) == 3
-        assert fields[1] == (2, 2, 2)
+        assert _lines("x::b\ny::a", ["3,3"], field_sep=":") == ["y::a", "x::b"]
+        assert _lines("y::a\nx::b", ["2,2"], field_sep=":", stable=True) == [
+            "y::a",
+            "x::b",
+        ]
 
 
 class TestParseKeydef:
@@ -282,24 +329,20 @@ class TestOrderingCompatibility:
 
 class TestExtract:
     def test_field_to_eol_includes_leading_separator(self):
-        line = "a 2 z"
-        key = parse_keydef("2", _G, False)
-        assert _extract(line, _compute_fields(line, None), key) == " 2 z"
+        assert _lines("a 2 z\nb 2 a", ["2"]) == ["b 2 a", "a 2 z"]
 
     def test_range_single_field_includes_leading_blank(self):
-        line = "a 2 z"
-        key = parse_keydef("2,2", _G, False)
-        assert _extract(line, _compute_fields(line, None), key) == " 2"
+        assert _lines("b 2 a\na 2 z", ["2,2"], stable=True) == [
+            "b 2 a",
+            "a 2 z",
+        ]
+        assert _lines("a 1\nb  2", ["2,2"]) == ["b  2", "a 1"]
 
     def test_char_offset_past_field_reaches_separator(self):
-        line = "y 5"
-        key = parse_keydef("1.2", _G, False)
-        assert _extract(line, _compute_fields(line, None), key) == " 5"
+        assert _lines("xa\ny 5", ["1.2"]) == ["y 5", "xa"]
 
     def test_missing_field_is_empty(self):
-        line = "x 3"
-        key = parse_keydef("3,3", _G, False)
-        assert _extract(line, _compute_fields(line, None), key) == ""
+        assert _lines("a b c\nx 3", ["3,3"]) == ["x 3", "a b c"]
 
 
 class TestSortKeydef:
@@ -521,9 +564,8 @@ class TestSortMixed:
 # Measured against GNU coreutils 9.7 on debian:stable-slim, LC_ALL=C.
 class TestUniqueStopsAtTheKeys:
     def test_key_equal_lines_compare_equal_under_unique(self):
-        cfg = _cfg(["2,2"], unique=True)
-        assert compare_lines("b 1", "a 1", cfg) == 0
-        assert compare_lines("b 1", "a 1", _cfg(["2,2"])) > 0
+        assert _lines("b 1\na 1", ["2,2"], unique=True) == ["b 1"]
+        assert _lines("b 1\na 1", ["2,2"]) == ["a 1", "b 1"]
 
     def test_unique_keeps_the_first_key_equal_line_in_input_order(self):
         assert _lines("b 1\na 1", ["2,2"], unique=True) == ["b 1"]
@@ -575,19 +617,4 @@ class TestMergeLines:
         ]
         assert _merge([["b"], ["B"]], _cfg(fold_case=True, unique=True)) == [
             "b"
-        ]
-
-    def test_every_record_comes_back_even_when_unique_drops_it(self):
-        records = list(merged([["a"] * 1000, ["a"] * 1000], _cfg(unique=True)))
-        assert len(records) == 2 + 2000
-        assert [r for r in records if r is not None] == ["a"]
-
-    def test_every_run_placed_at_the_start_comes_back_as_a_step(self):
-        runs = [[str(n)] for n in range(500, 0, -1)]
-        records = merged(runs, _cfg(numeric=True))
-        assert next(records) is None
-        rest = list(records)
-        assert len(rest) == 499 + 500
-        assert [r for r in rest if r is not None] == [
-            str(n) for n in range(1, 501)
         ]

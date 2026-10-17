@@ -64,10 +64,10 @@
     "THIRD_PARTY_NOTICES"
   ],
   "scripts": {
-    "build": "node scripts/embed-runtime.mjs && node scripts/clean.mjs && tsc -p tsconfig.build.json",
-    "test": "node scripts/embed-runtime.mjs && vitest run",
-    "typecheck": "node scripts/embed-runtime.mjs && tsc --noEmit",
-    "prepare": "node scripts/embed-runtime.mjs"
+    "build": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/clean.mjs && tsc -p tsconfig.build.json",
+    "test": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && vitest run",
+    "typecheck": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && tsc --noEmit",
+    "prepare": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/server": "^2.3.0",

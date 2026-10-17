@@ -76,6 +76,45 @@
         "k",
         "n"
       ]
+    },
+    {
+      "id": "sort_t_takes_one_byte",
+      "seq": 960044,
+      "note": "GNU 9.7, LC_ALL=C: -t takes any one byte, '\\0' names NUL, and a longer separator, a second different one or an empty one is refused. The separator crossed into the sort stream as text, so a byte that is not UTF-8 failed the stream's config, and a multibyte one was accepted.",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\377z\\nb\\377y\\n' | sort -t $'\\377' -k2,2 | tr '\\377' '|'; printf 'b\\0002\\na\\0001\\n' | sort -t '\\0' -k2,2 | tr '\\0' '|'; printf '' | sort -t é -k2,2; echo rc=$?; printf '' | sort -t , -t ';'; echo rc=$?; printf '' | sort -t ''; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "b|y\na|z\na|1\nb|2\nrc=2\nrc=2\nrc=2\n",
+        "stderr": "sort: multi-character tab '\\303\\251'\nsort: incompatible tabs\nsort: empty tab\n"
+      },
+      "flags": [
+        "t",
+        "k"
+      ]
     }
   ]
 }

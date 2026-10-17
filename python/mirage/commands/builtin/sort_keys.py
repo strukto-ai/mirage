@@ -12,78 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
-from collections.abc import Iterator
 from dataclasses import dataclass
-from functools import cmp_to_key, partial
-from typing import TypeAlias
 
 from mirage.commands.builtin.errors import SortKeyError
-from mirage.commands.builtin.utils.strtod import STRTOD, strtod_double
+from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 
-
-@dataclass(frozen=True, slots=True)
-class NumericKey:
-    """A decimal with no leading or trailing zeroes; zero is never negative."""
-
-    negative: bool
-    integer: str
-    fraction: str
-
-
-# One run of a version string: digits rank before non-digits, so the two
-# shapes never compare against each other.
-_VersionPart: TypeAlias = tuple[int, int] | tuple[int, str]
-# What one key field collapses to before comparison: a month index, a
-# parsed number, the (unit, number) pair -h orders by, the (rank, value)
-# pair -g uses to order junk before NaN before real numbers, the version
-# run list, or the text itself.
-_SortKey: TypeAlias = (
-    NumericKey
-    | str
-    | int
-    | float
-    | tuple[int, NumericKey]
-    | tuple[int, float]
-    | list[_VersionPart]
-)
-# sort.c's `unit_order`: the suffixes -h ranks, lowercase only for k.
-_UNIT_ORDERS = {
-    "K": 1,
-    "k": 1,
-    "M": 2,
-    "G": 3,
-    "T": 4,
-    "P": 5,
-    "E": 6,
-    "Z": 7,
-    "Y": 8,
-    "R": 9,
-    "Q": 10,
-}
-# sort.c's `blanks`: isblank() in the C locale plus the newline a -z
-# record can hold. They separate fields, and -b, -n, -h and -M skip them.
-_FIELD_BLANKS = " \t\n"
-# strnumcmp's number in the C locale: no `+`, exponent or thousands
-# separator. find_unit_order reads the byte after the digits and points.
-_NUMBER_RE = re.compile(r"[ \t\n]*(-?)([0-9]*)(?:\.([0-9]*))?")
-_UNIT_RE = re.compile(r"[ \t\n]*(-?)([0-9.]*)(.?)")
-_VERSION_RE = re.compile(r"([0-9]+)|([^0-9]+)")
-_MONTHS = {
-    "jan": 1,
-    "feb": 2,
-    "mar": 3,
-    "apr": 4,
-    "may": 5,
-    "jun": 6,
-    "jul": 7,
-    "aug": 8,
-    "sep": 9,
-    "oct": 10,
-    "nov": 11,
-    "dec": 12,
-}
 # The letters sort.c's `set_ordering` takes after a KEYDEF position. R is
 # recognized, so it still keeps a key off the global options and counts
 # against the others it is incompatible with, but it does not shuffle.
@@ -120,7 +54,7 @@ class Key:
 @dataclass(frozen=True, slots=True)
 class SortConfig:
     keys: tuple[Key, ...]
-    field_sep: str | None
+    field_sep: int | None
     reverse: bool
     unique: bool
     stable: bool
@@ -297,6 +231,25 @@ def _incompatible_letters(mods: KeyMods) -> str:
     return "".join(letter for letter, given in spelled if given)
 
 
+def tab_byte(text: str) -> int:
+    """``-t``'s separator as GNU sort reads it: one byte, ``\\0`` for NUL.
+
+    Args:
+        text (str): the option argument, raw bytes surrogate-escaped.
+
+    Raises:
+        UsageError: an empty or a multi-character tab.
+    """
+    raw = text.encode("utf-8", "surrogateescape")
+    if not raw:
+        raise UsageError("sort: empty tab")
+    if raw == b"\\0":
+        return 0
+    if len(raw) > 1:
+        raise UsageError(f"sort: multi-character tab '{quote_text(text)}'")
+    return raw[0]
+
+
 def build_config(
     key_defs: list[str],
     field_sep: str | None,
@@ -324,7 +277,7 @@ def build_config(
 
     Args:
         key_defs (list[str]): each ``-k`` as typed.
-        field_sep (str | None): ``-t``.
+        field_sep (str | None): ``-t`` as typed.
         reverse (bool): ``-r``.
         numeric (bool): ``-n``.
         unique (bool): ``-u``.
@@ -367,273 +320,8 @@ def build_config(
             raise SortKeyError(f"options '-{letters}' are incompatible")
     return SortConfig(
         keys=keys,
-        field_sep=field_sep,
+        field_sep=None if field_sep is None else tab_byte(field_sep),
         reverse=reverse,
         unique=unique,
         stable=stable,
     )
-
-
-def _compute_fields(
-    line: str, field_sep: str | None
-) -> list[tuple[int, int, int]]:
-    fields: list[tuple[int, int, int]] = []
-    n = len(line)
-    if field_sep:
-        pos = 0
-        seplen = len(field_sep)
-        while True:
-            nxt = line.find(field_sep, pos)
-            if nxt == -1:
-                fields.append((pos, pos, n))
-                break
-            fields.append((pos, pos, nxt))
-            pos = nxt + seplen
-        return fields
-    i = 0
-    while i < n:
-        lead_start = i
-        while i < n and line[i] in _FIELD_BLANKS:
-            i += 1
-        content_start = i
-        while i < n and line[i] not in _FIELD_BLANKS:
-            i += 1
-        fields.append((lead_start, content_start, i))
-    return fields
-
-
-def _extract(line: str, fields: list[tuple[int, int, int]], key: Key) -> str:
-    n = len(line)
-    nf = len(fields)
-    if key.start_field > nf:
-        return ""
-    lead_start, content_start, _ = fields[key.start_field - 1]
-    base = content_start if key.start_skip else lead_start
-    start = min(base + (key.start_char - 1), n)
-    if key.end_field is None:
-        end = n
-    elif key.end_field > nf:
-        end = n
-    else:
-        e_lead, e_content, e_end = fields[key.end_field - 1]
-        if key.end_char is None or key.end_char == 0:
-            end = e_end
-        else:
-            e_base = e_content if key.end_skip else e_lead
-            end = min(e_base + key.end_char, n)
-    if end < start:
-        end = start
-    return line[start:end]
-
-
-def _version_key(s: str) -> list[_VersionPart]:
-    parts: list[_VersionPart] = []
-    for m in _VERSION_RE.finditer(s):
-        if m.group(1):
-            parts.append((0, int(m.group(1))))
-        else:
-            parts.append((1, m.group(2)))
-    return parts
-
-
-def _leading_number(field: str) -> NumericKey:
-    """Read a C-locale GNU -n prefix without losing decimal precision.
-
-    Args:
-        field (str): extracted sort key, possibly followed by nonnumeric text.
-    """
-    match = _NUMBER_RE.match(field)
-    assert match is not None
-    integer = match[2].lstrip("0")
-    fraction = (match[3] or "").rstrip("0")
-    return NumericKey(
-        bool(match[1] and (integer or fraction)), integer, fraction
-    )
-
-
-def _human_number(field: str) -> tuple[int, NumericKey]:
-    """sort.c's ``human_numcompare`` key: the unit's order, then the number.
-
-    The unit is the byte after the run of digits and decimal points, so
-    ``5.K`` carries K. Its order is negated for a negative number and is
-    zero for a zero one, and it outranks the magnitude, so ``1500`` sorts
-    before ``1K``.
-
-    Args:
-        field (str): extracted sort key, possibly followed by other text.
-    """
-    match = _UNIT_RE.match(field)
-    assert match is not None
-    order = 0
-    if any("1" <= char <= "9" for char in match[2]):
-        order = _UNIT_ORDERS.get(match[3], 0)
-    return (-order if match[1] else order), _leading_number(field)
-
-
-def _parse_general_float(field: str) -> float | None:
-    """The number strtold reads at the start of a field, None for none.
-
-    The rest of the field is ignored, as GNU sort -g ignores it.
-
-    Args:
-        field (str): the key field.
-    """
-    found = STRTOD.match(field)
-    return None if found is None else strtod_double(found)
-
-
-def _transform(field: str, mods: KeyMods) -> _SortKey:
-    if mods.dictionary:
-        field = "".join(
-            char for char in field if char.isalnum() or char in _FIELD_BLANKS
-        )
-    elif mods.ignore_nonprinting:
-        field = "".join(char for char in field if char.isprintable())
-    if mods.month:
-        return _MONTHS.get(field.lstrip(_FIELD_BLANKS)[:3].lower(), 0)
-    if mods.human:
-        return _human_number(field)
-    if mods.version:
-        return _version_key(field)
-    if mods.numeric:
-        return _leading_number(field)
-    if mods.general_numeric:
-        value = _parse_general_float(field)
-        if value is None:
-            return (0, 0.0)
-        if value != value:
-            return (1, 0.0)
-        return (2, value)
-    if mods.fold:
-        return field.lower()
-    return field
-
-
-def _cmp(a: _SortKey | _VersionPart, b: _SortKey | _VersionPart) -> int:
-    if isinstance(a, NumericKey) and isinstance(b, NumericKey):
-        if a.negative != b.negative:
-            return -1 if a.negative else 1
-        left = (len(a.integer), a.integer, a.fraction)
-        right = (len(b.integer), b.integer, b.fraction)
-        order = (left > right) - (left < right)
-        return -order if a.negative else order
-    if isinstance(a, tuple) and isinstance(b, tuple):
-        return _cmp(a[0], b[0]) or _cmp(a[1], b[1])
-    if isinstance(a, list) and isinstance(b, list):
-        for x, y in zip(a, b):
-            c = _cmp(x, y)
-            if c:
-                return c
-        return (len(a) > len(b)) - (len(a) < len(b))
-    return (a > b) - (a < b)  # type: ignore[operator]
-
-
-def compare_lines(a: str, b: str, cfg: SortConfig) -> int:
-    """GNU sort's ``compare``: the keys, then the whole line as a last resort.
-
-    ``-s`` and ``-u`` both stop at the keys, so under ``-u`` two lines
-    whose keys tie are equal however else they differ, which is what makes
-    ``sort -u -k2,2`` keep the first of them in input order and what makes
-    ``sort -c -u`` call the pair a disorder. GNU's own condition is
-    ``diff || unique || stable``.
-
-    Args:
-        a (str): the earlier line.
-        b (str): the later line.
-        cfg (SortConfig): the keys and global options to compare by.
-    """
-    fa = _compute_fields(a, cfg.field_sep)
-    fb = _compute_fields(b, cfg.field_sep)
-    for key in cfg.keys:
-        ka = _transform(_extract(a, fa, key), key.mods)
-        kb = _transform(_extract(b, fb, key), key.mods)
-        c = _cmp(ka, kb)
-        if key.mods.reverse:
-            c = -c
-        if c:
-            return c
-    if cfg.stable or cfg.unique:
-        return 0
-    c = (a > b) - (a < b)
-    if cfg.reverse:
-        c = -c
-    return c
-
-
-def sort_lines(lines: list[str], cfg: SortConfig) -> list[str]:
-    compare = partial(compare_lines, cfg=cfg)
-    ordered = sorted(lines, key=cmp_to_key(compare))
-    if not cfg.unique:
-        return ordered
-    deduped: list[str] = []
-    for line in ordered:
-        if not deduped or compare_lines(deduped[-1], line, cfg) != 0:
-            deduped.append(line)
-    return deduped
-
-
-def _merge_before(
-    runs: list[list[str]], heads: list[int], a: int, b: int, cfg: SortConfig
-) -> bool:
-    c = compare_lines(runs[a][heads[a]], runs[b][heads[b]], cfg)
-    return c < 0 or (c == 0 and a < b)
-
-
-def merged(runs: list[list[str]], cfg: SortConfig) -> Iterator[str | None]:
-    """GNU sort's ``mergefps``: merge runs it trusts to be sorted already.
-
-    The line emitted next is always the smallest head, a tie going to the
-    earlier run, and a run is never reordered, so ``sort -m`` over an
-    unsorted file hands it back as it found it, the way GNU does. The runs
-    are kept ordered by their heads and a run whose head moves is
-    reinserted by binary search, GNU's own ``ord`` table, so a merge of
-    ``k`` runs costs ``log k`` comparisons a line. Under ``-u`` a line is
-    dropped when it compares equal to the first line of the series it
-    would extend, so only adjacent duplicates collapse: ``a b a`` stays
-    three lines. Records come one at a time, None standing for a run
-    placed at the start or a record ``-u`` drops, so a caller can yield to
-    the loop at every step, many inputs or a long run of duplicates
-    included.
-
-    Args:
-        runs (list[list[str]]): one record list per input, in operand
-            order.
-        cfg (SortConfig): the comparison every line is merged by.
-    """
-    heads = [0] * len(runs)
-    order: list[int] = []
-    for run in (i for i, lines in enumerate(runs) if lines):
-        lo, hi = 0, len(order)
-        while lo < hi:
-            probe = (lo + hi) // 2
-            if _merge_before(runs, heads, run, order[probe], cfg):
-                hi = probe
-            else:
-                lo = probe + 1
-        order.insert(lo, run)
-        yield None
-    saved: str | None = None
-    while order:
-        run = order[0]
-        line = runs[run][heads[run]]
-        if (
-            not cfg.unique
-            or saved is None
-            or compare_lines(saved, line, cfg) != 0
-        ):
-            yield line
-            saved = line
-        else:
-            yield None
-        heads[run] += 1
-        if heads[run] == len(runs[run]):
-            order.pop(0)
-            continue
-        lo, hi = 1, len(order)
-        while lo < hi:
-            probe = (lo + hi) // 2
-            if _merge_before(runs, heads, run, order[probe], cfg):
-                hi = probe
-            else:
-                lo = probe + 1
-        order[0:lo] = order[1:lo] + [run]

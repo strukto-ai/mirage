@@ -112,6 +112,44 @@
         "d",
         "V"
       ]
+    },
+    {
+      "id": "sort_d_keeps_ascii_alphanumerics_only",
+      "seq": 960033,
+      "note": "GNU 9.7, LC_ALL=C: -d keeps the bytes isalnum and isblank accept in the C locale, so the two bytes of an e-acute drop out and 'a' is the key. Both trees kept it as a letter.",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'b\\n\\303\\251a\\n' | sort -d",
+      "expect": {
+        "exit": 0,
+        "stdout": "éa\nb\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d"
+      ]
     }
   ]
 }

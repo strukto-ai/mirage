@@ -1,5 +1,5 @@
 {
-  "baseline": 3514,
+  "baseline": 3509,
  "modules": {
   "core/api/client": {
    "typescript_only": {
@@ -30,6 +30,16 @@
     "Request": "Structured-clone message shape; Python uses a tuple on its private pipe.",
     "execute": "Web Worker message callback dispatches a computation asynchronously.",
     "node": "Selects the Node worker port or browser message handler."
+   }
+  },
+  "rs/stream": {
+   "typescript_only": {
+    "Exports": "The raw ABI mirage-rs-wasm exports; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
+    "RECYCLE_BYTES": "Linear memory never shrinks, so a grown instance is dropped past this size; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
+    "bytesAt": "Copies bytes out of linear memory; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
+    "compiled": "The compiled module, shared by every instance; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
+    "current": "The live instance; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
+    "instance": "Compiles and instantiates the module once; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle."
    }
   },
   "utils/regex": {

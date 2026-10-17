@@ -1,6 +1,6 @@
-import codecs
 import inspect
 from collections.abc import AsyncIterator, Awaitable, Mapping
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -20,12 +20,11 @@ from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import argmatch_error
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
-from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, CountedRun, IOResult
+from mirage.rs import run_stream
 from mirage.shell.bytes import encode_text
-from mirage.types import PathSpec, PolymorphicReadFn
+from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
 from mirage.utils.quote import shell_quote
-from mirage.utils.width import advance_column, is_space
 
 # GNU's `total_types` in declaration order, which is both the accepted
 # set and what `--total=x` lists back. No aliases, so one per line.
@@ -83,92 +82,32 @@ class WCCounts:
             self.max_line_length = other.max_line_length
 
 
-def _scan_text(
-    text: str,
-    in_word: bool,
-    column: int,
-    max_len: int,
-) -> tuple[int, int, int, bool]:
-    """Fold one chunk into the word count and the widest-line measurement.
-
-    Word splitting and column geometry are separate questions about the same
-    character: ``\\t`` both ends a word and jumps to the next tab stop, while
-    a combining mark ends nothing and occupies nothing. ``max_len`` is a
-    running maximum rather than a per-line one because carriage return and
-    form feed rewind the column without ending the line.
-
-    Args:
-        text (str): The decoded chunk.
-        in_word (bool): Whether the previous chunk ended mid-word.
-        column (int): The column the previous chunk ended on.
-        max_len (int): The widest line seen so far.
-
-    Returns:
-        tuple[int, int, int, bool]: words closed by this chunk, the new
-            column, the new maximum, and whether it ended mid-word.
-    """
-    words_added = 0
-    for ch in text:
-        if is_space(ch):
-            if in_word:
-                words_added += 1
-                in_word = False
-        else:
-            in_word = True
-        if ch == "\n":
-            if column > max_len:
-                max_len = column
-            column = 0
-            continue
-        column = advance_column(column, ch)
-        if column > max_len:
-            max_len = column
-    return words_added, column, max_len, in_word
-
-
 async def wc(
     src: bytes | AsyncIterator[bytes], *, flags: WCFlags | None = None
 ) -> WCCounts:
-    if (
-        flags is not None
-        and (flags.lines or flags.bytes_)
-        and not (flags.words or flags.chars or flags.max_line_length)
-    ):
-        counts = WCCounts()
-        async for chunk in chunks(src):
-            counts.bytes_ += len(chunk)
-            if flags.lines:
-                counts.lines += chunk.count(b"\n")
-        return counts
-    bytes_count = 0
-    lines = 0
-    words = 0
-    chars = 0
-    max_len = 0
-    in_word = False
-    column = 0
-    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    """GNU wc's counts of *src*, streamed through mirage-rs.
 
-    async for chunk in chunks(src):
-        bytes_count += len(chunk)
-        lines += chunk.count(b"\n")
-        text = decoder.decode(chunk)
-        chars += len(text)
-        added, column, max_len, in_word = _scan_text(
-            text, in_word, column, max_len
-        )
-        words += added
+    Only ``-l`` and ``-c`` count without decoding; any other count decodes
+    UTF-8, and a byte that decodes to no character is part of a word but
+    no character and no column.
 
-    final_text = decoder.decode(b"", final=True)
-    chars += len(final_text)
-    added, column, max_len, in_word = _scan_text(
-        final_text, in_word, column, max_len
+    Args:
+        src (bytes | AsyncIterator[bytes]): The input.
+        flags (WCFlags | None): The counts asked for; None counts all.
+    """
+    asked = flags or WCFlags()
+    config: dict[str, JsonValue] = {
+        "lines": asked.lines,
+        "words": asked.words,
+        "bytes": asked.bytes_,
+        "chars": asked.chars,
+        "max_line_length": asked.max_line_length,
+    }
+    async with aclosing(run_stream("wc", config, src)) as parts:
+        report = b"".join([part async for part in parts])
+    lines, words, bytes_count, chars, max_len = (
+        int(value) for value in report.split()
     )
-    words += added
-
-    if in_word:
-        words += 1
-
     return WCCounts(
         lines=lines,
         words=words,
