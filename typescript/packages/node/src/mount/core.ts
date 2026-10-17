@@ -925,13 +925,20 @@ export class MountCore {
     }
   }
 
+  /**
+   * Land a handle's buffered writes and let it go. The handle goes even
+   * when the landing fails, as close(2) releases its descriptor: no
+   * adapter retries a release, so a kept handle would never close. The
+   * failure still reaches the caller.
+   */
   async release(fd: number): Promise<void> {
     const ctx = this.handles.get(fd)
-    if (ctx !== undefined) {
+    try {
       // The FSKit shim sends RELEASE with no FLUSH before it.
-      await this.flush(ctx.path, fd)
+      if (ctx !== undefined) await this.flush(ctx.path, fd)
+    } finally {
+      this.handles.pop(fd)
     }
-    this.handles.pop(fd)
   }
 
   async flush(_path: string, fd: number): Promise<void> {
