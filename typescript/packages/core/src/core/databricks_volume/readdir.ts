@@ -17,48 +17,23 @@ import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { dbxFetch, type DbxEndpoint } from './client.ts'
+import { getMetadata, getDirectoryMetadata, listDirectoryContents } from './client.ts'
+import type { DirectoryEntry } from './types.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { listingError } from '../../errors/fs.ts'
 
-export interface DbxDirectoryEntry {
-  path: string
-  is_directory?: boolean
-  file_size?: number
-  last_modified?: number
-  name?: string
-}
-
-interface DbxDirectoryPage {
-  contents?: DbxDirectoryEntry[]
-  next_page_token?: string
-}
-
-export async function listDirectoryContents(
-  accessor: DatabricksVolumeAccessor,
-  remotePath: string,
-): Promise<DbxDirectoryEntry[]> {
-  const entries: DbxDirectoryEntry[] = []
-  let pageToken: string | undefined
-  do {
-    const query: Record<string, string> = pageToken !== undefined ? { page_token: pageToken } : {}
-    const r = await dbxFetch(accessor, 'GET', 'directories', remotePath, { query })
-    const page = (await r.json()) as DbxDirectoryPage
-    entries.push(...(page.contents ?? []))
-    pageToken = page.next_page_token !== '' ? page.next_page_token : undefined
-  } while (pageToken !== undefined)
-  return entries
-}
-
 async function head(
   accessor: DatabricksVolumeAccessor,
-  endpoint: DbxEndpoint,
+  endpoint: 'files' | 'directories',
   key: string,
 ): Promise<boolean> {
   try {
-    await dbxFetch(accessor, 'HEAD', endpoint, backendPath(accessor.config, key))
+    await (endpoint === 'files' ? getMetadata : getDirectoryMetadata)(
+      accessor,
+      backendPath(accessor.config, key),
+    )
   } catch (exc) {
     if (isNotFound(exc)) return false
     throw exc
@@ -79,7 +54,7 @@ export async function readdir(
 ): Promise<FileStat[]> {
   const listPath = path.pattern !== null ? path.dir : path
   const remotePath = backendPath(accessor.config, listPath)
-  let entries: DbxDirectoryEntry[]
+  let entries: DirectoryEntry[]
   try {
     entries = await listDirectoryContents(accessor, remotePath)
   } catch (exc) {
@@ -99,25 +74,18 @@ export async function readdir(
   const rows: FileStat[] = []
   for (const entry of [...entries].sort((a, b) => compareCodePoints(a.path, b.path))) {
     const name = rstripSlash(entry.path).split('/').pop() ?? entry.path
-    if (entry.is_directory === true) {
+    if (entry.isDirectory) {
       rows.push(new FileStat({ name, type: FileType.DIRECTORY }))
       continue
     }
-    let size = typeof entry.file_size === 'number' ? entry.file_size : null
-    if (size === null) {
-      // DirectoryEntry normally carries file_size; when the lister omits it,
-      // one HEAD per affected file fills the gap so no row carries an
-      // unknown size.
-      const r = await dbxFetch(accessor, 'HEAD', 'files', entry.path)
-      const lengthHeader = r.headers.get('content-length')
-      size = lengthHeader !== null && lengthHeader !== '' ? Number(lengthHeader) : null
-    }
+    let size = entry.fileSize
+    size ??= (await getMetadata(accessor, entry.path)).contentLength
+
     rows.push(
       new FileStat({
         name,
         size,
-        modified:
-          typeof entry.last_modified === 'number' ? toIsoZ(new Date(entry.last_modified)) : null,
+        modified: entry.lastModified === null ? null : toIsoZ(new Date(entry.lastModified)),
         type: FileType.FILE,
         content: contentTypeForPath(name),
       }),

@@ -12,13 +12,46 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import aiohttp
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+
+class DatabricksVolumeApiError(Exception):
+    def __init__(
+        self, status_code: int, error_code: str | None, message: str
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.error_code = error_code
+
+
+class _ErrorBody(BaseModel):
+    model_config = ConfigDict(strict=True)
+    error_code: str | None = None
+    message: str | None = None
+
+
+def error_of(
+    response: aiohttp.ClientResponse, text: str
+) -> DatabricksVolumeApiError:
+    try:
+        body = _ErrorBody.model_validate_json(text)
+    except ValidationError:
+        return DatabricksVolumeApiError(
+            response.status, None, text or f"HTTP {response.status}"
+        )
+    return DatabricksVolumeApiError(
+        response.status,
+        body.error_code,
+        body.message or text or f"HTTP {response.status}",
+    )
+
 
 def is_not_found(exc: Exception) -> bool:
-    status_code = getattr(exc, "status_code", None)
-    if status_code == 404:
-        return True
-    error_code = getattr(exc, "error_code", None)
-    if error_code in {"RESOURCE_DOES_NOT_EXIST", "NOT_FOUND"}:
-        return True
-    message = str(exc).lower()
-    return "not found" in message or "does not exist" in message
+    return isinstance(exc, DatabricksVolumeApiError) and (
+        exc.status_code == 404
+        or (
+            exc.status_code == 400
+            and exc.error_code in {"RESOURCE_DOES_NOT_EXIST", "NOT_FOUND"}
+        )
+    )

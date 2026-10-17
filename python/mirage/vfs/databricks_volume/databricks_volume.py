@@ -51,11 +51,10 @@ class DatabricksVolumeVFS(BaseVFS):
     def __init__(
         self,
         config: DatabricksVolumeConfig,
-        client: Any | None = None,
     ) -> None:
         super().__init__()
         self.config = config
-        self.accessor = DatabricksVolumeAccessor(self.config, client)
+        self.accessor = DatabricksVolumeAccessor(self.config)
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:
         return await _readdir(self.accessor, path)
@@ -105,10 +104,8 @@ class DatabricksVolumeVFS(BaseVFS):
         await _copy(self.accessor, src, dst)
 
     def storage_location(self) -> str:
-        # The workspace and the volume path pin the files two mounts would
-        # share; a profile names its workspace where no host is given.
         cfg = self.config
-        workspace = cfg.host or f"profile:{cfg.profile or ''}"
+        workspace = cfg.host
         root = cfg.root_path.rstrip("/")
         volume = f"/Volumes/{cfg.catalog}/{cfg.schema_name}/{cfg.volume}"
         return f"{self.name}:{workspace}:{volume}{root}"

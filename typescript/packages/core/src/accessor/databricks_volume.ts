@@ -18,14 +18,10 @@ import type { DatabricksVolumeConfig } from '../vfs/databricks_volume/config.ts'
 export class DatabricksVolumeAccessor extends Accessor {
   readonly config: DatabricksVolumeConfig
   readonly host: string
-  readonly token: string
 
-  constructor(config: DatabricksVolumeConfig, host: string, token: string) {
+  constructor(config: DatabricksVolumeConfig) {
     super()
     this.config = config
-    let h = host
-    while (h.endsWith('/')) h = h.slice(0, -1)
-    this.host = h
-    this.token = token
+    this.host = config.host
   }
 }

@@ -13,8 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
+from collections.abc import Awaitable, Callable
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+
+TokenProvider = Callable[[], str | SecretStr | Awaitable[str | SecretStr]]
 
 
 class DatabricksVolumeConfig(BaseModel):
@@ -23,24 +27,68 @@ class DatabricksVolumeConfig(BaseModel):
         populate_by_name=True,
         serialize_by_alias=True,
         extra="forbid",
+        arbitrary_types_allowed=True,
+        hide_input_in_errors=True,
     )
 
     catalog: str
-    # Public config key is still "schema"
-    # internal name avoids warning overwriting BaseModel.schema.
     schema_name: str = Field(alias="schema")
     volume: str
     root_path: str = "/"
-    host: str | None = None
-    token: SecretStr | None = None
-    profile: str | None = None
-    timeout: int = 30
+    host: str
+    token: SecretStr | TokenProvider
+    timeout: int = Field(default=30, gt=0)
 
     @field_validator("catalog", "schema_name", "volume")
     @classmethod
     def validate_volume_part(cls, value: str) -> str:
         if not value or "/" in value:
             raise ValueError("must be a non-empty path segment")
+        return value
+
+    @field_validator("host")
+    @classmethod
+    def normalize_host(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or parsed.path not in {"", "/"}
+            or any(char.isspace() for char in value)
+            or "?" in value
+            or "#" in value
+            or "\\" in value
+        ):
+            raise ValueError("host must be an HTTP(S) origin")
+        port = parsed.port
+        hostname = parsed.hostname
+        if ":" in hostname:
+            hostname = f"[{hostname}]"
+        else:
+            hostname = hostname.encode("idna").decode("ascii")
+        default_port = 80 if parsed.scheme == "http" else 443
+        authority = (
+            hostname
+            if port is None or port == default_port
+            else f"{hostname}:{port}"
+        )
+        return f"{parsed.scheme}://{authority}"
+
+    @field_validator("token")
+    @classmethod
+    def validate_token(
+        cls, value: SecretStr | TokenProvider
+    ) -> SecretStr | TokenProvider:
+        if isinstance(value, SecretStr):
+            token = value.get_secret_value()
+            if not token.strip() or "\r" in token or "\n" in token:
+                raise ValueError(
+                    "token must be nonblank and contain no CR or LF"
+                )
         return value
 
     @field_validator("root_path")

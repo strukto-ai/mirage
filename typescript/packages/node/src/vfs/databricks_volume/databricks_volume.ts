@@ -23,29 +23,10 @@ import {
   type DatabricksVolumeConfig,
   type DatabricksVolumeConfigRedacted,
 } from './config.ts'
-import { loadDatabricksProfile } from './profile.ts'
 
 export interface DatabricksVolumeVFSState {
   type: string
   config: DatabricksVolumeConfigRedacted
-}
-
-async function resolveAuth(config: DatabricksVolumeConfig): Promise<[string, string]> {
-  let host = config.host ?? process.env.DATABRICKS_HOST
-  let token = config.token ?? process.env.DATABRICKS_TOKEN
-  if (host === undefined || host === '' || token === undefined || token === '') {
-    const profileName = config.profile ?? process.env.DATABRICKS_CONFIG_PROFILE ?? 'DEFAULT'
-    const profile = await loadDatabricksProfile(profileName)
-    host = host !== undefined && host !== '' ? host : profile.host
-    token = token !== undefined && token !== '' ? token : profile.token
-  }
-  if (host === undefined || host === '' || token === undefined || token === '') {
-    throw new Error(
-      'databricks_volume: missing credentials; set host/token in the config, ' +
-        'DATABRICKS_HOST/DATABRICKS_TOKEN env vars, or a ~/.databrickscfg profile',
-    )
-  }
-  return [host, token]
 }
 
 export class DatabricksVolumeVFS extends DatabricksVolumeVFSBase {
@@ -65,10 +46,9 @@ export class DatabricksVolumeVFS extends DatabricksVolumeVFSBase {
     this.accessor = accessor
   }
 
-  static async create(config: DatabricksVolumeConfig): Promise<DatabricksVolumeVFS> {
-    const [host, token] = await resolveAuth(config)
-    const accessor = new DatabricksVolumeAccessor(config, host, token)
-    return new DatabricksVolumeVFS(config, accessor)
+  static create(config: DatabricksVolumeConfig): Promise<DatabricksVolumeVFS> {
+    const accessor = new DatabricksVolumeAccessor(config)
+    return Promise.resolve(new DatabricksVolumeVFS(config, accessor))
   }
 
   override getState(): Promise<DatabricksVolumeVFSState> {

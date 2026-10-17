@@ -16,38 +16,27 @@ import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.
 
 import { FileType, type PathSpec } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { dbxFetch } from './client.ts'
+import { download, upload, createDirectory, listDirectoryContents } from './client.ts'
 import { ensurePathSpec } from './_helpers.ts'
 import { backendPath } from './path.ts'
 import { read } from './read.ts'
-import { listDirectoryContents } from './readdir.ts'
 import { stat } from './stat.ts'
-import { uploadBytes, write } from './write.ts'
+import { write } from './write.ts'
 import { eisdir } from '../../errors/fs.ts'
-
-async function downloadBytes(
-  accessor: DatabricksVolumeAccessor,
-  remotePath: string,
-): Promise<Uint8Array> {
-  const r = await dbxFetch(accessor, 'GET', 'files', remotePath, {
-    headers: { Accept: 'application/octet-stream' },
-  })
-  return new Uint8Array(await r.arrayBuffer())
-}
 
 async function copyTree(
   accessor: DatabricksVolumeAccessor,
   remoteSrc: string,
   remoteDst: string,
 ): Promise<void> {
-  await dbxFetch(accessor, 'PUT', 'directories', remoteDst)
+  await createDirectory(accessor, remoteDst)
   for (const entry of await listDirectoryContents(accessor, remoteSrc)) {
     const name = rstripSlash(entry.path).split('/').pop() ?? ''
     const childDst = `${rstripSlash(remoteDst)}/${name}`
-    if (entry.is_directory === true) {
+    if (entry.isDirectory) {
       await copyTree(accessor, entry.path, childDst)
     } else {
-      await uploadBytes(accessor, childDst, await downloadBytes(accessor, entry.path))
+      await upload(accessor, childDst, await download(accessor, entry.path), true)
     }
   }
 }

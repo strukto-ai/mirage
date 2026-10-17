@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "dbx_http_escaped_path_byte_windows",
+      "seq": 950289,
+      "targets": [
+        "databricks",
+        "databricks-prefix"
+      ],
+      "command": "printf abcdefgh > '/data/http-percent%question? space-한글.txt'; tail -c +4 '/data/http-percent%question? space-한글.txt'; printf '|'; head -c 2 '/data/http-percent%question? space-한글.txt'; rm '/data/http-percent%question? space-한글.txt'",
+      "expect": {
+        "exit": 0,
+        "stdout": "defgh|ab",
+        "stderr": ""
+      }
+    }
+  ]
+}

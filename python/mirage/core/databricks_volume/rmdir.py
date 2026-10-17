@@ -12,29 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-from typing import Any
-
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
+from mirage.core.databricks_volume.client import (
+    delete_directory,
+    list_directory_contents,
+)
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.stat import stat
 from mirage.errors.fs import enoent, enotdir, enotempty
 from mirage.types import FileType, PathSpec
-
-
-def _list_directory_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> list[Any]:
-    return list(accessor.files.list_directory_contents(remote_path))
-
-
-def _delete_directory_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> None:
-    accessor.files.delete_directory(remote_path)
 
 
 async def rmdir(
@@ -46,9 +33,7 @@ async def rmdir(
         raise enotdir(path)
     remote_path = backend_path(accessor.config, path)
     try:
-        entries = await asyncio.to_thread(
-            _list_directory_sync, accessor, remote_path
-        )
+        entries = await list_directory_contents(accessor, remote_path)
     except Exception as exc:
         if is_not_found(exc):
             raise enoent(path) from exc
@@ -56,7 +41,7 @@ async def rmdir(
     if entries:
         raise enotempty(path)
     try:
-        await asyncio.to_thread(_delete_directory_sync, accessor, remote_path)
+        await delete_directory(accessor, remote_path)
     except Exception as exc:
         if is_not_found(exc):
             raise enoent(path) from exc

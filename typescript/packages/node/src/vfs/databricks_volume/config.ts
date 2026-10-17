@@ -18,5 +18,6 @@ export {
 } from '@struktoai/mirage-core/vfs/databricks_volume/config'
 export type {
   DatabricksVolumeConfig,
+  TokenProvider,
   DatabricksVolumeConfigRedacted,
 } from '@struktoai/mirage-core/vfs/databricks_volume/config'

@@ -19,6 +19,7 @@ import aiohttp
 import pytest
 import pytest_asyncio
 from aiohttp import web
+from aiohttp.test_utils import TestServer
 from aioresponses import aioresponses
 from yarl import URL
 
@@ -369,6 +370,55 @@ async def test_transport_retry_covers_timeouts():
         m.get(TARGET, exception=asyncio.TimeoutError())
         with pytest.raises(asyncio.TimeoutError):
             await api_request("GET", TARGET, error_of=_error_of)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retry_connection", [None, False])
+@pytest.mark.parametrize("recreate", ["close", "loop"])
+async def test_pool_connection_replay_policy_survives_recreation(
+    retry_connection, recreate
+):
+    requests = []
+
+    async def disconnect(request):
+        requests.append(await request.read())
+        assert request.transport is not None
+        request.transport.close()
+        return web.Response(status=204)
+
+    app = web.Application()
+    app.router.add_put("/file", disconnect)
+    pool = (
+        SessionPool()
+        if retry_connection is None
+        else SessionPool(retry_connection=retry_connection)
+    )
+    try:
+        async with TestServer(app) as server:
+            for generation in (1, 2):
+                with pytest.raises(aiohttp.ClientConnectionError):
+                    await api_request(
+                        "PUT",
+                        str(server.make_url("/file")),
+                        error_of=_error_of,
+                        data=b"committed",
+                        session=pool,
+                        retry=NO_RETRY,
+                    )
+                assert requests == [b"committed"] * (
+                    generation * (1 if retry_connection is False else 2)
+                )
+                if recreate == "close":
+                    await pool.close()
+                else:
+                    stale = pool.get()
+                    dead = asyncio.new_event_loop()
+                    dead.close()
+                    pool._loop = dead
+                    assert pool.get() is not stale
+                    await stale.close()
+    finally:
+        await pool.close()
 
 
 @pytest.mark.asyncio

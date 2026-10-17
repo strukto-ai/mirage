@@ -78,11 +78,7 @@ export {
   DatabricksVolumeVFS,
   type DatabricksVolumeVFSState,
 } from './vfs/databricks_volume/databricks_volume.ts'
-export {
-  loadDatabricksProfile,
-  parseDatabricksCfg,
-  type DatabricksProfile,
-} from './vfs/databricks_volume/profile.ts'
+
 export {
   normalizeS3Config,
   redactConfig as redactS3Config,

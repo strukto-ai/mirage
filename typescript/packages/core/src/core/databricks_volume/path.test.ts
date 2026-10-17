@@ -25,6 +25,8 @@ const CONFIG: DatabricksVolumeConfig = normalizeDatabricksVolumeConfig({
   catalog: 'main',
   schema: 'default',
   volume: 'agent_files',
+  host: 'https://dbc.example.com',
+  token: 'tok',
   root_path: '/root',
 })
 
@@ -50,6 +52,8 @@ describe('volumeRoot / configuredRoot', () => {
       catalog: 'main',
       schema: 'default',
       volume: 'agent_files',
+      host: 'https://dbc.example.com',
+      token: 'tok',
     })
     expect(configuredRoot(config)).toBe('/Volumes/main/default/agent_files')
   })
@@ -100,6 +104,8 @@ describe('config root_path validation', () => {
         catalog: 'main',
         schema: 'default',
         volume: 'agent_files',
+        host: 'https://dbc.example.com',
+        token: 'tok',
         root_path: '/root/../other',
       }),
     ).toThrow()

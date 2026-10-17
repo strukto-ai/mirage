@@ -27,11 +27,9 @@ export class DatabricksVolumeApiError extends Error {
 const NOT_FOUND_CODES = new Set(['RESOURCE_DOES_NOT_EXIST', 'NOT_FOUND'])
 
 export function isNotFound(exc: unknown): boolean {
-  if (!(exc instanceof Error)) return false
-  const statusCode = (exc as { statusCode?: unknown }).statusCode
-  if (statusCode === 404) return true
-  const errorCode = (exc as { errorCode?: unknown }).errorCode
-  if (typeof errorCode === 'string' && NOT_FOUND_CODES.has(errorCode)) return true
-  const message = exc.message.toLowerCase()
-  return message.includes('not found') || message.includes('does not exist')
+  return (
+    exc instanceof DatabricksVolumeApiError &&
+    (exc.statusCode === 404 ||
+      (exc.statusCode === 400 && exc.errorCode !== null && NOT_FOUND_CODES.has(exc.errorCode)))
+  )
 }

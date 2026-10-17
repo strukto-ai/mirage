@@ -12,13 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-from io import BytesIO
-
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.core.databricks_volume._helpers import (
-    is_directory_metadata,
-    parent_path,
+from mirage.core.databricks_volume._helpers import parent_path
+from mirage.core.databricks_volume.client import (
+    get_directory_metadata,
+    get_metadata,
+    upload,
 )
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
@@ -27,41 +26,25 @@ from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
-def _ensure_parent_directory_sync(
+async def _ensure_parent_directory(
     accessor: DatabricksVolumeAccessor,
     remote_parent: str,
     virtual_target: str,
 ) -> None:
     try:
-        accessor.files.get_directory_metadata(remote_parent)
+        await get_directory_metadata(accessor, remote_parent)
         return
     except Exception as exc:
         if not is_not_found(exc):
             raise
         not_found = exc
     try:
-        metadata = accessor.files.get_metadata(remote_parent)
+        await get_metadata(accessor, remote_parent)
     except Exception as exc:
         if is_not_found(exc):
             raise enoent(virtual_target) from not_found
         raise
-    if not is_directory_metadata(metadata):
-        raise enotdir(virtual_target)
-
-
-def upload_bytes_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-    data: bytes,
-) -> None:
-    """Upload bytes over a volume file, blocking; callers run it in a thread.
-
-    Args:
-        accessor (DatabricksVolumeAccessor): Databricks accessor.
-        remote_path (str): path inside the volume.
-        data (bytes): the file's whole content.
-    """
-    accessor.files.upload(remote_path, BytesIO(data), overwrite=True)
+    raise enotdir(virtual_target)
 
 
 async def write(
@@ -73,15 +56,9 @@ async def write(
     remote_parent = backend_path(accessor.config, parent)
     remote_path = backend_path(accessor.config, path)
     timer = start_op()
-    # TODO native async client calling HTTP API as databricks sdk is sync
-    await asyncio.to_thread(
-        _ensure_parent_directory_sync,
-        accessor,
-        remote_parent,
-        path.virtual,
-    )
+    await _ensure_parent_directory(accessor, remote_parent, path.virtual)
     try:
-        await asyncio.to_thread(upload_bytes_sync, accessor, remote_path, data)
+        await upload(accessor, remote_path, data, overwrite=True)
     except Exception as exc:
         if is_not_found(exc):
             raise enoent(path) from exc

@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-from typing import Any
-
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
+from mirage.core.databricks_volume.client import (
+    delete_directory,
+    delete_file,
+    list_directory_contents,
+)
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path, virtual_path
 from mirage.core.databricks_volume.stat import stat
@@ -24,48 +26,27 @@ from mirage.errors.fs import enoent
 from mirage.types import FileType, PathSpec
 
 
-def _list_directory_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> list[Any]:
-    return list(accessor.files.list_directory_contents(remote_path))
-
-
-def _delete_file_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> None:
-    accessor.files.delete(remote_path)
-
-
-def _delete_directory_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> None:
-    accessor.files.delete_directory(remote_path)
-
-
-def _remove_tree_recurse(
+async def _remove_tree_recurse(
     accessor: DatabricksVolumeAccessor,
     remote_dir: str,
     removed: list[str],
 ) -> None:
-    for entry in _list_directory_sync(accessor, remote_dir):
-        if getattr(entry, "is_directory", False):
-            _remove_tree_recurse(accessor, entry.path, removed)
+    for entry in await list_directory_contents(accessor, remote_dir):
+        if entry.is_directory:
+            await _remove_tree_recurse(accessor, entry.path, removed)
         else:
-            _delete_file_sync(accessor, entry.path)
+            await delete_file(accessor, entry.path)
             removed.append(entry.path)
-    _delete_directory_sync(accessor, remote_dir)
+    await delete_directory(accessor, remote_dir)
     removed.append(remote_dir)
 
 
-def _remove_tree_sync(
+async def _remove_tree(
     accessor: DatabricksVolumeAccessor,
     remote_root: str,
 ) -> list[str]:
     removed: list[str] = []
-    _remove_tree_recurse(accessor, remote_root, removed)
+    await _remove_tree_recurse(accessor, remote_root, removed)
     return removed
 
 
@@ -79,9 +60,7 @@ async def rm_recursive(
         return [path.mount_path]
     remote_root = backend_path(accessor.config, path)
     try:
-        removed = await asyncio.to_thread(
-            _remove_tree_sync, accessor, remote_root
-        )
+        removed = await _remove_tree(accessor, remote_root)
     except Exception as exc:
         if is_not_found(exc):
             raise enoent(path) from exc

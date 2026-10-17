@@ -38,10 +38,18 @@ class SessionAccessor(Accessor):
     Args:
         timeout (aiohttp.ClientTimeout | None): applied to the pool's
             session at creation; None takes aiohttp's default.
+        retry_connection (bool): allow aiohttp's automatic connection retry.
     """
 
-    def __init__(self, timeout: aiohttp.ClientTimeout | None = None) -> None:
-        self.pool = SessionPool(timeout=timeout)
+    def __init__(
+        self,
+        timeout: aiohttp.ClientTimeout | None = None,
+        *,
+        retry_connection: bool = True,
+    ) -> None:
+        self.pool = SessionPool(
+            timeout=timeout, retry_connection=retry_connection
+        )
 
     async def close(self) -> None:
         await self.pool.close()

@@ -1,98 +1,81 @@
-from mirage.accessor import databricks_volume as accessor_module
+import pytest
+from pydantic import ValidationError
+
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.vfs.databricks_volume import DatabricksVolumeConfig
 
 
-class FakeWorkspaceClient:
-    calls: list[dict] = []
-
-    def __init__(self, **kwargs) -> None:
-        self.calls.append(kwargs)
-        self.files = object()
-
-
-class FakeWorkspaceConfig:
-    def __init__(self, **kwargs) -> None:
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-
-
-def test_accessor_passes_timeout_to_workspace_client(monkeypatch):
-    FakeWorkspaceClient.calls = []
-    monkeypatch.setattr(
-        accessor_module,
-        "WorkspaceClient",
-        FakeWorkspaceClient,
+def config(**kwargs) -> DatabricksVolumeConfig:
+    return DatabricksVolumeConfig(
+        catalog="main", schema="default", volume="agent_files", **kwargs
     )
-    monkeypatch.setattr(
-        accessor_module,
-        "WorkspaceConfig",
-        FakeWorkspaceConfig,
-    )
-    config = DatabricksVolumeConfig(
-        catalog="main",
-        schema="default",
-        volume="agent_files",
-        host="https://example.cloud.databricks.com",
-        token="secret",
-        timeout=17,
-    )
-    accessor = DatabricksVolumeAccessor(config)
-    assert accessor.files is not None
-    sdk_config = FakeWorkspaceClient.calls[0]["config"]
-    assert sdk_config.host == "https://example.cloud.databricks.com"
-    assert sdk_config.token == "secret"
-    assert sdk_config.http_timeout_seconds == 17
 
 
-def test_accessor_sets_pat_auth_type_for_explicit_token(monkeypatch):
-    FakeWorkspaceClient.calls = []
-    monkeypatch.setattr(
-        accessor_module,
-        "WorkspaceClient",
-        FakeWorkspaceClient,
+def test_pool_is_lazy_and_uses_configured_timeout():
+    accessor = DatabricksVolumeAccessor(
+        config(host="https://example.com/", token="secret", timeout=17)
     )
-    monkeypatch.setattr(
-        accessor_module,
-        "WorkspaceConfig",
-        FakeWorkspaceConfig,
-    )
-    config = DatabricksVolumeConfig(
-        catalog="main",
-        schema="default",
-        volume="agent_files",
-        host="https://example.cloud.databricks.com",
-        token="request-token",
-    )
-    accessor = DatabricksVolumeAccessor(config)
-
-    assert accessor.files is not None
-    sdk_config = FakeWorkspaceClient.calls[0]["config"]
-    assert sdk_config.auth_type == "pat"
-    assert sdk_config.token == "request-token"
+    assert accessor.config.host == "https://example.com"
+    assert accessor.pool._session is None
+    assert accessor.pool._timeout.total == 17
 
 
-def test_accessor_leaves_auth_type_unset_for_profile(monkeypatch):
-    FakeWorkspaceClient.calls = []
-    monkeypatch.setattr(
-        accessor_module,
-        "WorkspaceClient",
-        FakeWorkspaceClient,
-    )
-    monkeypatch.setattr(
-        accessor_module,
-        "WorkspaceConfig",
-        FakeWorkspaceConfig,
-    )
-    config = DatabricksVolumeConfig(
-        catalog="main",
-        schema="default",
-        volume="agent_files",
-        profile="default",
-    )
-    accessor = DatabricksVolumeAccessor(config)
+@pytest.mark.parametrize(
+    "host",
+    [
+        "",
+        "example.com",
+        "file:///tmp/x",
+        "https://u:p@example.com",
+        "https://example.com/api",
+        "https://example.com?",
+        "https://example.com#",
+        "https://example.com/?a=b",
+        "https://example.com/#fragment",
+        "https://example.com:invalid",
+        "https://example.com\n",
+        "https://example.com\\extra",
+    ],
+)
+def test_rejects_non_origin_host(host):
+    with pytest.raises(ValidationError):
+        config(host=host, token="secret")
 
-    assert accessor.files is not None
-    sdk_config = FakeWorkspaceClient.calls[0]["config"]
-    assert not hasattr(sdk_config, "auth_type")
-    assert sdk_config.profile == "default"
+
+@pytest.mark.parametrize("token", ["", "  ", "secret\n", "secret\r"])
+def test_rejects_unsafe_static_token_without_exposing_it(token):
+    with pytest.raises(ValidationError) as error:
+        config(host="https://example.com", token=token)
+    assert "input_value" not in str(error.value)
+    assert "secret" not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"host": "https://example.com"},
+        {"token": "secret"},
+        {
+            "host": "https://example.com",
+            "token": "secret",
+            "profile": "DEFAULT",
+        },
+        {"host": "https://example.com", "token": "secret", "timeout": 0},
+    ],
+)
+def test_requires_explicit_credentials_and_positive_timeout(kwargs):
+    with pytest.raises(ValidationError):
+        config(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "host, normalized",
+    [
+        ("HTTPS://EXAMPLE.COM:443/", "https://example.com"),
+        ("http://example.com:80", "http://example.com"),
+        ("http://[::1]:8000/", "http://[::1]:8000"),
+    ],
+)
+def test_normalizes_origin(host, normalized):
+    assert config(host=host, token="secret").host == normalized

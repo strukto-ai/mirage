@@ -1,8 +1,6 @@
-import asyncio
-from datetime import datetime, timezone
-
 import pytest
 
+from mirage.core.databricks_volume.errors import DatabricksVolumeApiError
 from mirage.core.databricks_volume.readdir import readdir
 from mirage.core.databricks_volume.stat import (
     _name_from_backend_path,
@@ -11,9 +9,7 @@ from mirage.core.databricks_volume.stat import (
 )
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
-
-from .conftest import (
-    ToThreadRecorder,
+from tests.fixtures.databricks_api import (
     directory_entry,
     file_entry,
     file_metadata,
@@ -36,18 +32,12 @@ def test_modified_returns_unparseable_string_verbatim():
     assert modified_to_iso("not a date") == "not a date"
 
 
-def test_modified_coerces_naive_datetime_to_utc():
-    naive = datetime(2023, 11, 14, 22, 13, 20)
-    assert modified_to_iso(naive) == "2023-11-14T22:13:20Z"
-
-
-def test_modified_converts_aware_datetime_to_utc():
-    aware = datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc)
-    assert modified_to_iso(aware) == "2023-11-14T22:13:20Z"
-
-
 def test_modified_treats_large_int_as_epoch_milliseconds():
     assert modified_to_iso(1_700_000_000_000) == "2023-11-14T22:13:20Z"
+
+
+def test_modified_treats_small_int_as_epoch_milliseconds():
+    assert modified_to_iso(1000) == "1970-01-01T00:00:01Z"
 
 
 def test_name_from_backend_path_file():
@@ -135,7 +125,7 @@ async def test_a_listed_folder_row_matches_its_stat(
 
 
 @pytest.mark.asyncio
-async def test_stat_root_does_not_call_sdk(accessor, files):
+async def test_stat_root_does_not_make_requests(accessor, files):
     path = PathSpec.from_str_path("/volume", mount_key("/volume", "/volume"))
     result = await stat(accessor, path)
     assert result.name == "/"
@@ -202,7 +192,7 @@ async def test_stat_metadata_error_propagates(accessor, files, remote_root):
     path = PathSpec.from_str_path(
         "/volume/reports", mount_key("/volume/reports", "/volume")
     )
-    with pytest.raises(RuntimeError, match="metadata failed"):
+    with pytest.raises(DatabricksVolumeApiError, match="HTTP 500"):
         await stat(accessor, path)
     assert files.get_metadata_calls == [remote_path]
     assert files.get_directory_metadata_calls == []
@@ -221,48 +211,7 @@ async def test_stat_directory_metadata_error_propagates(
     path = PathSpec.from_str_path(
         "/volume/reports", mount_key("/volume/reports", "/volume")
     )
-    with pytest.raises(RuntimeError, match="directory metadata failed"):
+    with pytest.raises(DatabricksVolumeApiError, match="HTTP 500"):
         await stat(accessor, path)
     assert files.get_metadata_calls == [remote_path]
     assert files.get_directory_metadata_calls == [remote_path]
-
-
-@pytest.mark.asyncio
-async def test_stat_runs_blocking_metadata_off_event_loop(
-    accessor,
-    files,
-    remote_root,
-    monkeypatch,
-):
-    to_thread = ToThreadRecorder()
-    monkeypatch.setattr(asyncio, "to_thread", to_thread)
-    files.metadata[f"{remote_root}/reports/latest.md"] = file_metadata(size=6)
-    path = PathSpec.from_str_path(
-        "/volume/reports/latest.md",
-        mount_key("/volume/reports/latest.md", "/volume"),
-    )
-
-    result = await stat(accessor, path)
-
-    assert result.name == "latest.md"
-    assert len(to_thread.calls) == 1
-
-
-@pytest.mark.asyncio
-async def test_stat_directory_fallback_runs_off_event_loop(
-    accessor,
-    files,
-    remote_root,
-    monkeypatch,
-):
-    to_thread = ToThreadRecorder()
-    monkeypatch.setattr(asyncio, "to_thread", to_thread)
-    files.directory_metadata.add(f"{remote_root}/reports")
-    path = PathSpec.from_str_path(
-        "/volume/reports", mount_key("/volume/reports", "/volume")
-    )
-
-    result = await stat(accessor, path)
-
-    assert result.type == FileType.DIRECTORY
-    assert len(to_thread.calls) == 2

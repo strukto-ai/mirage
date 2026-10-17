@@ -6,33 +6,40 @@ description: Set up Databricks credentials for the Unity Catalog volume VFS.
 
 ## Credentials
 
-The VFS reads a Unity Catalog volume over the Databricks SDK. It needs a
-workspace host plus one auth method: a personal access token, a config
-profile, or the SDK defaults (handy inside Databricks Apps).
+The VFS accesses a Unity Catalog volume through the Databricks Files REST API.
+Both Python and TypeScript require an explicit workspace host and token.
+The token can be a personal access token, an OAuth access token, or a callback
+that supplies the current access token. No extra Python package is required.
 
-### 1. Get Your Workspace Host
+### Set the workspace host
 
-Your workspace URL, e.g. `https://dbc-xxxxxxxx-xxxx.cloud.databricks.com`
-(AWS) or `https://adb-xxxxxxxxxxxx.xx.azuredatabricks.net` (Azure).
+Use your workspace origin, such as
+`https://dbc-xxxxxxxx-xxxx.cloud.databricks.com` on AWS or
+`https://adb-xxxxxxxxxxxx.xx.azuredatabricks.net` on Azure.
+The host accepts HTTP or HTTPS and rejects a path, query, fragment, or userinfo.
+A trailing slash is allowed.
 
-### 2. Create a Personal Access Token
+### Supply a token
 
-1. In the workspace, open **Settings** -> **Developer** -> **Access tokens**.
-1. Click **Generate new token**, set a comment and lifetime, and copy it.
-
-### 3. Set Environment Variables
+Pass your token and host to the VFS configuration. For example, your application
+can read them from environment variables:
 
 ```bash
-# .env.development
 DATABRICKS_HOST=https://dbc-xxxxxxxx-xxxx.cloud.databricks.com
 DATABRICKS_TOKEN=dapi...
 ```
 
-### Alternatives
+Mirage does not discover environment variables, SDK profiles, or default
+credentials. Your application can use an external SDK or credential broker to
+obtain a token, then pass the token or a callback to Mirage. A callback owns
+refresh, caching, and coordination between concurrent requests. Mirage does not
+retry an unauthorized request with another credential source.
 
-- **Config profile:** add a profile to `~/.databrickscfg` and pass
-  `profile="DEV"` instead of host/token.
-- **SDK defaults:** omit host, token, and profile to fall through to the
-  Databricks SDK default auth chain (for example inside Databricks Apps).
+Keep each VFS and workspace bound to one principal and permission scope. Isolate
+file caches, indexes, and external cache prefixes across identities. If the
+principal or permission scope changes, rebuild the workspace or invalidate its
+caches. Token refresh for the same principal and scope can use the existing VFS.
 
-For Python configuration, see the [Python Databricks Volume VFS](/python/vfs/databricks_volume) page.
+See the [Python Databricks Volume VFS](/python/vfs/databricks_volume) or
+[TypeScript Databricks Volume VFS](/typescript/setup/databricks_volume) page for
+configuration examples.

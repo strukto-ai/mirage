@@ -373,15 +373,6 @@ function vfsDefect(value: unknown): string | null {
   return null
 }
 
-/**
- * Build a VFS from a colon reference naming a class directly.
- *
- * `static create` is honored ahead of the constructor because that is
- * how a backend whose setup needs I/O is spelled here (github and
- * databricks_volume both do), and it is the one thing this tier has that
- * Python's does not: `build_vfs` is synchronous there, so an
- * out-of-tree Python class hydrates lazily instead.
- */
 async function buildFromRef(ref: string, config: Record<string, unknown>): Promise<BaseVFS> {
   const exported = await loadAttr(ref)
   if (typeof exported !== 'function') {

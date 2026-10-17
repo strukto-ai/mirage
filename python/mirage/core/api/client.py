@@ -121,10 +121,18 @@ class SessionPool:
     Args:
         timeout (aiohttp.ClientTimeout | None): applied to the session
             at creation; None takes aiohttp's default.
+        retry_connection (bool): allow aiohttp's automatic replay after
+            a connection failure, independently of the API retry policy.
     """
 
-    def __init__(self, timeout: aiohttp.ClientTimeout | None = None) -> None:
+    def __init__(
+        self,
+        timeout: aiohttp.ClientTimeout | None = None,
+        *,
+        retry_connection: bool = True,
+    ) -> None:
         self._timeout = timeout
+        self._retry_connection = retry_connection
         self._session: aiohttp.ClientSession | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -154,6 +162,9 @@ class SessionPool:
             self._session = None
         if self._session is None:
             self._session = aiohttp.ClientSession(timeout=self._timeout)
+            # aiohttp exposes no public switch for its automatic replay
+            # after disconnect, which can repeat an already committed write.
+            self._session._retry_connection = self._retry_connection
             self._loop = loop
         return self._session
 

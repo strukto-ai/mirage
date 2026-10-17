@@ -14,7 +14,7 @@
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { FileType, type PathSpec } from '../../types.ts'
-import { dbxFetch } from './client.ts'
+import { createDirectory as createRemoteDirectory } from './client.ts'
 import { ensurePathSpec, parentPath } from './_helpers.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
@@ -27,7 +27,7 @@ async function createDirectory(
   virtualTarget: string,
 ): Promise<void> {
   try {
-    await dbxFetch(accessor, 'PUT', 'directories', remotePath)
+    await createRemoteDirectory(accessor, remotePath)
   } catch (exc) {
     if (isNotFound(exc)) throw enoent(virtualTarget)
     throw exc

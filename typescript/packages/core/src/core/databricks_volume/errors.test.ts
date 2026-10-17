@@ -21,14 +21,23 @@ describe('isNotFound', () => {
   })
 
   it('matches databricks not-found error codes', () => {
-    expect(isNotFound(new DatabricksVolumeApiError('x', 500, 'RESOURCE_DOES_NOT_EXIST'))).toBe(true)
-    expect(isNotFound(new DatabricksVolumeApiError('x', 500, 'NOT_FOUND'))).toBe(true)
+    expect(isNotFound(new DatabricksVolumeApiError('x', 400, 'RESOURCE_DOES_NOT_EXIST'))).toBe(true)
+    expect(isNotFound(new DatabricksVolumeApiError('x', 400, 'NOT_FOUND'))).toBe(true)
   })
 
-  it('matches not-found phrasing in messages', () => {
-    expect(isNotFound(new Error('path Not Found'))).toBe(true)
-    expect(isNotFound(new Error('object does not exist'))).toBe(true)
+  it('does not classify arbitrary exception messages', () => {
+    expect(isNotFound(new Error('path Not Found'))).toBe(false)
+    expect(isNotFound(new Error('object does not exist'))).toBe(false)
   })
+
+  it.each([401, 403, 500])(
+    'preserves status %i despite contradictory missing-resource codes',
+    (status) => {
+      expect(isNotFound(new DatabricksVolumeApiError('does not exist', status, 'NOT_FOUND'))).toBe(
+        false,
+      )
+    },
+  )
 
   it('rejects other errors and non-errors', () => {
     expect(isNotFound(new DatabricksVolumeApiError('denied', 403, 'PERMISSION_DENIED'))).toBe(false)

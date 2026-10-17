@@ -1346,20 +1346,6 @@ wheels = [
 ]
 
 [[package]]
-name = "databricks-sdk"
-version = "0.108.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "google-auth" },
-    { name = "protobuf" },
-    { name = "requests" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/d3/13/05a1dbf9c2c43639b032128c18227953777a2a2da66e4b97d1914ceacb68/databricks_sdk-0.108.0.tar.gz", hash = "sha256:c43f1099b8228e5e9ecb4569381ec8f49b739129d35a826be72a61bc5eaaf1a6", size = 940266, upload-time = "2026-05-12T09:04:03.75Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/56/38/9b59ebb34ccaef79095f168eff1fab5f8d645b961680c7bcbc320434acd0/databricks_sdk-0.108.0-py3-none-any.whl", hash = "sha256:010528183abb475acf7f4058e331049dc7932e73a314d9808b123f5cbb722579", size = 887647, upload-time = "2026-05-12T09:04:01.771Z" },
-]
-
-[[package]]
 name = "daytona"
 version = "0.207.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3956,7 +3942,6 @@ all = [
     { name = "chardet" },
     { name = "chromadb-client" },
     { name = "claude-agent-sdk" },
-    { name = "databricks-sdk" },
     { name = "daytona" },
     { name = "deepagents" },
     { name = "e2b" },
@@ -3988,9 +3973,6 @@ claude-agent-sdk = [
 ]
 claude-managed-agents = [
     { name = "anthropic" },
-]
-databricks = [
-    { name = "databricks-sdk" },
 ]
 daytona = [
     { name = "daytona" },
@@ -4082,7 +4064,6 @@ sandbox = [
     { name = "asyncssh" },
     { name = "botocore" },
     { name = "chromadb-client" },
-    { name = "databricks-sdk" },
     { name = "langfuse" },
     { name = "mfusepy" },
     { name = "opendal" },
@@ -4135,7 +4116,6 @@ requires-dist = [
     { name = "chardet", marker = "extra == 'pydantic-ai'", specifier = ">=5.2.0" },
     { name = "chromadb-client", marker = "extra == 'chroma'", specifier = ">=1.0.0" },
     { name = "claude-agent-sdk", marker = "extra == 'claude-agent-sdk'", specifier = ">=0.2.123" },
-    { name = "databricks-sdk", marker = "extra == 'databricks'", specifier = ">=0.72.0" },
     { name = "daytona", marker = "extra == 'daytona'", specifier = ">=0.176.0" },
     { name = "deepagents", marker = "extra == 'deepagents'", specifier = ">=0.7.6" },
     { name = "dulwich", specifier = ">=1.2.9" },
@@ -4156,8 +4136,6 @@ requires-dist = [
     { name = "mirage-ai", extras = ["chroma"], marker = "extra == 'sandbox'" },
     { name = "mirage-ai", extras = ["claude-agent-sdk"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["claude-managed-agents"], marker = "extra == 'all'" },
-    { name = "mirage-ai", extras = ["databricks"], marker = "extra == 'all'" },
-    { name = "mirage-ai", extras = ["databricks"], marker = "extra == 'sandbox'" },
     { name = "mirage-ai", extras = ["daytona"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["deepagents"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["dotenv"], marker = "extra == 'all'" },
@@ -4225,7 +4203,7 @@ requires-dist = [
     { name = "wasmtime", marker = "extra == 'quickjs'", specifier = ">=46" },
     { name = "wasmtime", marker = "extra == 'wasi'", specifier = ">=46" },
 ]
-provides-extras = ["monty", "wasi", "quickjs", "s3", "r2", "gcs", "oci", "databricks", "ssh", "nextcloud", "hf-buckets", "fuse", "mongodb", "gridfs", "postgres", "redis", "email", "dotenv", "aws-sm", "1password", "langfuse", "chroma", "qdrant", "openai", "pydantic-ai", "deepagents", "openhands", "agno", "claude-agent-sdk", "claude-managed-agents", "daytona", "all", "sandbox", "lancedb", "mem0", "e2b"]
+provides-extras = ["monty", "wasi", "quickjs", "s3", "r2", "gcs", "oci", "ssh", "nextcloud", "hf-buckets", "fuse", "mongodb", "gridfs", "postgres", "redis", "email", "dotenv", "aws-sm", "1password", "langfuse", "chroma", "qdrant", "openai", "pydantic-ai", "deepagents", "openhands", "agno", "claude-agent-sdk", "claude-managed-agents", "daytona", "all", "sandbox", "lancedb", "mem0", "e2b"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -40,12 +40,9 @@ export class DatabricksVolumeVFSBase extends BaseVFS<DatabricksVolumeAccessor> {
   override readonly readsRanges: boolean = true
 
   override storageLocation(): string {
-    // The workspace and the volume path pin the files two mounts would
-    // share; a profile names its workspace where no host is given.
     const cfg = this.accessor.config
-    const workspace = cfg.host ?? `profile:${cfg.profile ?? ''}`
     const volume = `/Volumes/${cfg.catalog}/${cfg.schema}/${cfg.volume}`
-    return `${this.name}:${workspace}:${volume}${rstripSlash(cfg.rootPath)}`
+    return `${this.name}:${cfg.host}:${volume}${rstripSlash(cfg.rootPath)}`
   }
 
   override readdir(path: PathSpec): Promise<FileStat[]> {

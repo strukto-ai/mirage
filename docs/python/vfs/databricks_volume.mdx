@@ -13,17 +13,21 @@ For auth and environment setup, see [Databricks Volume Setup](/home/setup/databr
 ## Config
 
 ```python
+import os
+
 from mirage import MountMode, Workspace
 from mirage.vfs.databricks_volume import (
-    DatabricksVolumeConfig,
-    DatabricksVolumeVFS,
+	DatabricksVolumeConfig,
+	DatabricksVolumeVFS,
 )
 
 vfs = DatabricksVolumeVFS(DatabricksVolumeConfig(
-    catalog="main",
-    schema="default",
-    volume="agent_files",
-    root_path="/reports",
+	catalog="main",
+	schema="default",
+	volume="agent_files",
+	root_path="/reports",
+	host=os.environ["DATABRICKS_HOST"],
+	token=os.environ["DATABRICKS_TOKEN"],
 ))
 ws = Workspace({"/dbx": vfs}, mode=MountMode.READ)
 ```
@@ -34,9 +38,8 @@ ws = Workspace({"/dbx": vfs}, mode=MountMode.READ)
 | `schema` | required | Unity Catalog schema name. |
 | `volume` | required | Unity Catalog volume name. |
 | `root_path` | `/` | Subdirectory inside the volume to expose. |
-| `host` | `None` | Optional workspace host override. |
-| `token` | `None` | Optional PAT override. Redacted in snapshots. |
-| `profile` | `None` | Optional Databricks SDK profile name. |
+| `host` | required | HTTP or HTTPS workspace origin. No path, query, fragment, or userinfo. |
+| `token` | required | Access token as `str`, `SecretStr`, or a synchronous or asynchronous callback. Redacted in snapshots. |
 | `timeout` | `30` | Request timeout in seconds. |
 
 ## Mount mode
@@ -51,10 +54,12 @@ Given:
 
 ```python
 DatabricksVolumeConfig(
-    catalog="main",
-    schema="default",
-    volume="agent_files",
-    root_path="/reports/2026",
+	catalog="main",
+	schema="default",
+	volume="agent_files",
+	root_path="/reports/2026",
+	host=os.environ["DATABRICKS_HOST"],
+	token=os.environ["DATABRICKS_TOKEN"],
 )
 ```
 
@@ -79,8 +84,8 @@ Reads: `readdir`, `stat`, `exists`, `read_bytes` (whole or a byte range),
 `read_stream`, and glob resolution. Writes: `write`, `create`, `mkdir`,
 `rmdir`, `unlink`, recursive `rm`, `cp`, and `mv`.
 
-`mv`/`cp` are non-atomic download + upload — the Files API has no server-side
-rename.
+`mv` and `cp` download and upload the file. These operations are not atomic
+because the Files API has no server-side rename.
 
 ## Shell Commands
 
@@ -132,65 +137,98 @@ or local-only utilities).
 | ------- | ----------------------- |
 | `ls`    | List directory contents |
 
-## Snapshot behavior
+## Rotating tokens
 
-`token` is redacted in VFS state. A load needs the mount handed back through
-`mounts=`.
-
-## Databricks Apps
-
-For Databricks Apps, prefer SDK-default auth and keep Mirage in-process:
+Pass a callback as `token` when your application refreshes access tokens:
 
 ```python
+def current_token() -> str:
+	return os.environ["DATABRICKS_TOKEN"]
+
+
 config = DatabricksVolumeConfig(
-    catalog="main",
-    schema="default",
-    volume="agent_files",
+	catalog="main",
+	schema="default",
+	volume="agent_files",
+	host=os.environ["DATABRICKS_HOST"],
+	token=current_token,
 )
 vfs = DatabricksVolumeVFS(config)
 ws = Workspace({"/dbx/": vfs}, mode=MountMode.READ)
 ```
 
-This does not require FUSE. The agent can access the mounted workspace through
-Mirage's backend adapters or `Workspace.shell(...)`.
+This callback reads the application's current token. Replace its body with your
+credential broker or token store. The callback takes no arguments and returns
+`str` or `SecretStr`. It can be synchronous or asynchronous. Mirage runs a
+synchronous callback off the event loop and awaits any returned awaitable.
+
+Mirage resolves the callback before each HTTP request, including each directory
+page. A deferred read stream resolves its token when the stream opens. Cached
+reads, construction, and snapshots do not invoke the callback. Tokens must be
+nonblank and contain no carriage return or newline.
+
+Your callback owns token refresh, caching, and coordination between concurrent
+requests. Mirage propagates provider errors and authentication failures. It does
+not replay a request after a 401 or fall back to profiles or default credentials.
+
+Keep each VFS and workspace bound to one principal and permission scope. Isolate
+file caches, indexes, and external cache prefixes across identities. If the
+principal or permission scope changes, rebuild the workspace or invalidate its
+caches. Token rotation for the same principal and scope can keep the existing
+VFS.
+
+## Snapshot behavior
+
+Mirage redacts static tokens and token callbacks in VFS snapshots. Restore the
+mount through `mounts=` when loading the workspace.
+
+## Databricks Apps
+
+Keep Mirage in-process and supply the workspace host and token explicitly.
+Your application's OAuth or SDK integration can supply a token callback. This
+does not require FUSE. The agent accesses the mounted workspace through Mirage's
+backend adapters or `Workspace.shell(...)`.
 
 ## Example
 
 ```python
 import asyncio
+import os
 
 from mirage import MountMode, Workspace
 from mirage.vfs.databricks_volume import (
-    DatabricksVolumeConfig,
-    DatabricksVolumeVFS,
+	DatabricksVolumeConfig,
+	DatabricksVolumeVFS,
 )
 
 vfs = DatabricksVolumeVFS(DatabricksVolumeConfig(
-    catalog="main",
-    schema="default",
-    volume="agent_files",
-    root_path="/reports",
+	catalog="main",
+	schema="default",
+	volume="agent_files",
+	root_path="/reports",
+	host=os.environ["DATABRICKS_HOST"],
+	token=os.environ["DATABRICKS_TOKEN"],
 ))
 
 
 async def main() -> None:
-    ws = Workspace({"/dbx/": vfs}, mode=MountMode.READ)
+	ws = Workspace({"/dbx/": vfs}, mode=MountMode.READ)
 
-    r = await ws.shell("ls /dbx/")
-    print(await r.stdout_str())
+	r = await ws.shell("ls /dbx/")
+	print(await r.stdout_str())
 
-    r = await ws.shell("find /dbx/ -name '*.md'")
-    print(await r.stdout_str())
+	r = await ws.shell("find /dbx/ -name '*.md'")
+	print(await r.stdout_str())
 
-    r = await ws.shell('head -n 20 "/dbx/q1/summary.md"')
-    print(await r.stdout_str())
+	r = await ws.shell('head -n 20 "/dbx/q1/summary.md"')
+	print(await r.stdout_str())
 
-    r = await ws.shell('stat "/dbx/q1/summary.md"')
-    print(await r.stdout_str())
+	r = await ws.shell('stat "/dbx/q1/summary.md"')
+	print(await r.stdout_str())
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+	asyncio.run(main())
 ```
 
 See:

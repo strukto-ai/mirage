@@ -15,11 +15,10 @@
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 
-import { dbxFetch } from './client.ts'
+import { deleteDirectory, listDirectoryContents } from './client.ts'
 import { ensurePathSpec } from './_helpers.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
-import { listDirectoryContents } from './readdir.ts'
 import { stat } from './stat.ts'
 import { enoent, enotdir, enotempty } from '../../errors/fs.ts'
 
@@ -41,7 +40,7 @@ export async function rmdir(accessor: DatabricksVolumeAccessor, path: PathSpec):
     throw enotempty(p.virtual)
   }
   try {
-    await dbxFetch(accessor, 'DELETE', 'directories', remotePath)
+    await deleteDirectory(accessor, remotePath)
   } catch (exc) {
     if (isNotFound(exc)) throw enoent(p.virtual)
     throw exc

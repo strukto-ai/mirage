@@ -16,7 +16,7 @@ import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.
 import { concat } from '../../utils/bytes.ts'
 import { recordStream } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
-import { dbxFetch } from './client.ts'
+import { downloadStream } from './client.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
 import { enoent } from '../../errors/fs.ts'
@@ -30,27 +30,9 @@ export async function* readStream(
   const virtual = path.virtual
   const remotePath = backendPath(accessor.config, path)
   const rec = recordStream('read', virtual, VFSName.DATABRICKS_VOLUME)
-  let r: Response
-  try {
-    r = await dbxFetch(accessor, 'GET', 'files', remotePath, {
-      headers: { Accept: 'application/octet-stream' },
-    })
-  } catch (exc) {
-    if (isNotFound(exc)) throw enoent(path.virtual)
-    throw exc
-  }
-  const body = r.body
-  if (body === null) return
-  const reader = body.getReader()
   let pending: Uint8Array = new Uint8Array(0)
-  let completed = false
   try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) {
-        completed = true
-        break
-      }
+    for await (const value of downloadStream(accessor, remotePath)) {
       pending = concat([pending, value])
       while (pending.byteLength >= DEFAULT_CHUNK_SIZE) {
         const piece = pending.slice(0, DEFAULT_CHUNK_SIZE)
@@ -63,11 +45,8 @@ export async function* readStream(
       if (rec !== null) rec.bytes += pending.byteLength
       yield pending
     }
-  } finally {
-    try {
-      if (!completed) await reader.cancel()
-    } finally {
-      reader.releaseLock()
-    }
+  } catch (exc) {
+    if (isNotFound(exc)) throw enoent(path.virtual)
+    throw exc
   }
 }

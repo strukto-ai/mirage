@@ -12,84 +12,180 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { z } from 'zod'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
+import type { ByteWindow } from '../../utils/ranges.ts'
+import { apiRequest, apiStream, NO_RETRY } from '../api/client.ts'
 import { DatabricksVolumeApiError } from './errors.ts'
+import type { DirectoryEntry, FileMetadata } from './types.ts'
 
-export type DbxEndpoint = 'files' | 'directories'
+type Endpoint = 'files' | 'directories'
 
-export interface DbxFetchOptions {
-  query?: Record<string, string>
-  headers?: Record<string, string>
-  body?: Uint8Array | string
-}
+const ENTRY = z.object({
+  path: z.string(),
+  is_directory: z.boolean().default(false),
+  file_size: z.number().int().nonnegative().nullish(),
+  last_modified: z.number().int().nullish(),
+})
+const PAGE = z.object({
+  contents: z.array(ENTRY).default([]),
+  next_page_token: z.string().nullish(),
+})
+const RESPONSE = z.object({ headers: z.record(z.string(), z.string()) })
+const ERROR = z.object({ error_code: z.string().nullish(), message: z.string().nullish() })
 
-export function encodeRemotePath(remotePath: string): string {
-  return remotePath
+function url(accessor: DatabricksVolumeAccessor, endpoint: Endpoint, path: string): string {
+  const encoded = path
     .split('/')
     .map((part) => encodeURIComponent(part))
     .join('/')
+  return `${accessor.host}/api/2.0/fs/${endpoint}${encoded}`
 }
 
-export function dbxUrl(
-  accessor: DatabricksVolumeAccessor,
-  endpoint: DbxEndpoint,
-  remotePath: string,
-  query?: Record<string, string>,
-): string {
-  let url = `${accessor.host}/api/2.0/fs/${endpoint}${encodeRemotePath(remotePath)}`
-  if (query !== undefined && Object.keys(query).length > 0) {
-    url += `?${new URLSearchParams(query).toString()}`
+async function headers(accessor: DatabricksVolumeAccessor): Promise<Record<string, string>> {
+  const credential = accessor.config.token
+  const token = typeof credential === 'function' ? await credential() : credential
+  if (typeof token !== 'string' || token.trim() === '' || /[\r\n]/.test(token)) {
+    throw new Error('databricks_volume: token must be a nonblank string without CR or LF')
   }
-  return url
+  return { Authorization: `Bearer ${token}` }
 }
 
-async function errorFromResponse(method: string, url: string, r: Response): Promise<Error> {
-  let errorCode: string | null = null
-  let message = ''
-  const text = await r.text().catch(() => '')
+function errorOf(response: Response, text: string): Error {
+  let payload: unknown = null
   try {
-    const data = JSON.parse(text) as { error_code?: string; message?: string }
-    errorCode = data.error_code ?? null
-    message = data.message ?? text
+    payload = JSON.parse(text)
   } catch {
-    message = text
+    payload = null
   }
+  const parsed = ERROR.safeParse(payload)
+  const code = parsed.success ? (parsed.data.error_code ?? null) : null
+  const message = parsed.success ? (parsed.data.message ?? text) : text
   return new DatabricksVolumeApiError(
-    `databricks_volume: ${method} ${url} → ${String(r.status)} ${message}`,
-    r.status,
-    errorCode,
+    `databricks_volume: HTTP ${String(response.status)} ${message}`,
+    response.status,
+    code,
   )
 }
 
-export async function dbxFetch(
+async function request(
   accessor: DatabricksVolumeAccessor,
   method: string,
-  endpoint: DbxEndpoint,
-  remotePath: string,
-  options: DbxFetchOptions = {},
-): Promise<Response> {
-  const url = dbxUrl(accessor, endpoint, remotePath, options.query)
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${accessor.token}`,
-    ...options.headers,
+  endpoint: Endpoint,
+  path: string,
+  options: Pick<Parameters<typeof apiRequest>[2], 'read' | 'params' | 'body' | 'window'> = {},
+): Promise<unknown> {
+  return apiRequest(method, url(accessor, endpoint, path), {
+    ...options,
+    headers: {
+      ...(await headers(accessor)),
+      ...(options.body === undefined ? {} : { 'Content-Type': 'application/octet-stream' }),
+    },
+    errorOf,
+    retry: NO_RETRY,
+    timeoutSeconds: accessor.config.timeout,
+  })
+}
+
+export async function getMetadata(
+  accessor: DatabricksVolumeAccessor,
+  path: string,
+): Promise<FileMetadata> {
+  const response = RESPONSE.parse(
+    await request(accessor, 'HEAD', 'files', path, { read: 'response' }),
+  )
+  const length = response.headers['content-length']
+  const parsed = length === undefined || length === '' ? null : Number(length)
+  return {
+    contentLength: parsed !== null && Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null,
+    lastModified: response.headers['last-modified'] ?? null,
   }
-  const controller = new AbortController()
-  const timer = setTimeout(() => {
-    controller.abort()
-  }, accessor.config.timeout * 1000)
-  let r: Response
-  try {
-    r = await fetch(url, {
-      method,
-      headers,
-      ...(options.body !== undefined ? { body: options.body as BodyInit } : {}),
-      signal: controller.signal,
-    })
-  } finally {
-    clearTimeout(timer)
-  }
-  if (!r.ok) {
-    throw await errorFromResponse(method, url, r)
-  }
-  return r
+}
+
+export async function getDirectoryMetadata(
+  accessor: DatabricksVolumeAccessor,
+  path: string,
+): Promise<void> {
+  await request(accessor, 'HEAD', 'directories', path, { read: 'none' })
+}
+
+export async function listDirectoryContents(
+  accessor: DatabricksVolumeAccessor,
+  path: string,
+): Promise<DirectoryEntry[]> {
+  const entries: DirectoryEntry[] = []
+  let token: string | null | undefined
+  do {
+    const page = PAGE.parse(
+      await request(accessor, 'GET', 'directories', path, {
+        params: token === undefined || token === null ? {} : { page_token: token },
+      }),
+    )
+    entries.push(
+      ...page.contents.map((entry) => ({
+        path: entry.path,
+        isDirectory: entry.is_directory,
+        fileSize: entry.file_size ?? null,
+        lastModified: entry.last_modified ?? null,
+      })),
+    )
+    token = page.next_page_token
+  } while (token !== undefined && token !== null && token !== '')
+  return entries
+}
+
+export async function download(
+  accessor: DatabricksVolumeAccessor,
+  path: string,
+  window?: ByteWindow,
+): Promise<Uint8Array> {
+  return z.instanceof(Uint8Array).parse(
+    await request(accessor, 'GET', 'files', path, {
+      read: 'bytes',
+      window,
+    }),
+  )
+}
+
+export async function* downloadStream(
+  accessor: DatabricksVolumeAccessor,
+  path: string,
+): AsyncIterable<Uint8Array> {
+  const requestHeaders = await headers(accessor)
+  yield* apiStream(url(accessor, 'files', path), {
+    headers: requestHeaders,
+    errorOf,
+    signal: AbortSignal.timeout(accessor.config.timeout * 1000),
+  })
+}
+
+export async function upload(
+  accessor: DatabricksVolumeAccessor,
+  path: string,
+  data: Uint8Array,
+  overwrite: boolean,
+): Promise<void> {
+  await request(accessor, 'PUT', 'files', path, {
+    params: { overwrite },
+    body: new Uint8Array(data),
+    read: 'none',
+  })
+}
+
+export async function createDirectory(
+  accessor: DatabricksVolumeAccessor,
+  path: string,
+): Promise<void> {
+  await request(accessor, 'PUT', 'directories', path, { read: 'none' })
+}
+
+export async function deleteFile(accessor: DatabricksVolumeAccessor, path: string): Promise<void> {
+  await request(accessor, 'DELETE', 'files', path, { read: 'none' })
+}
+
+export async function deleteDirectory(
+  accessor: DatabricksVolumeAccessor,
+  path: string,
+): Promise<void> {
+  await request(accessor, 'DELETE', 'directories', path, { read: 'none' })
 }
