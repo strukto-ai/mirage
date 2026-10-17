@@ -1,6 +1,5 @@
 from mirage.commands.builtin.generic.tar.constants import (
     READ_MODES,
-    WRITE_MODES,
 )
 from mirage.commands.builtin.generic.tar.create import (
     excluded,
@@ -20,7 +19,6 @@ from mirage.commands.builtin.generic.tar.types import (
     CreateResult,
     Member,
     ReadMode,
-    WriteMode,
 )
 
 __all__ = [
@@ -30,8 +28,6 @@ __all__ = [
     "READ_MODES",
     "ReadMode",
     "TarFlags",
-    "WRITE_MODES",
-    "WriteMode",
     "excluded",
     "member_name",
     "parse_flags",

@@ -68,7 +68,6 @@ from mirage.types import PathSpec, PolymorphicReadFn
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import resolve_path
 
-ReadBytes = Callable[..., Awaitable[bytes]]
 WriteBytes = Callable[..., Awaitable[None]]
 
 

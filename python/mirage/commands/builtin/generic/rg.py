@@ -44,7 +44,6 @@ from mirage.commands.builtin.rg_search import (
     search_haystack,
     smart_case_folds,
 )
-from mirage.commands.builtin.types import RegexSyntax
 from mirage.commands.builtin.utils.constants import STDIN_OPERAND
 from mirage.commands.builtin.utils.links import (
     LinkResolver,
@@ -809,19 +808,6 @@ def parse_flags(fl: FlagView) -> RgFlags:
     )
 
 
-def rg_syntax(f: RgFlags) -> RegexSyntax:
-    """The dialect rg's patterns are written in, for a pushed-down search.
-
-    ``auto`` reads as the default engine's: a pattern only PCRE2 takes
-    fails the default translation and the search falls back to the
-    generic scan, which runs PCRE2.
-
-    Args:
-        f (RgFlags): the parsed flags.
-    """
-    return RegexSyntax.PERL if f.engine == "pcre2" else RegexSyntax.RUST
-
-
 def engine_flag(fl: FlagView) -> str:
     """The regex engine the line asks for, the last of -P, --no-pcre2,
     --engine and the deprecated --auto-hybrid-regex pair winning
@@ -1048,57 +1034,6 @@ async def ignore_rules(
         except FS_ERRORS as exc:
             notes.append(f"rg: {path.raw_path}: {os_error_text(exc)}")
     return IgnoreRules(lines)
-
-
-def needs_every_file(fl: FlagView, f: RgFlags) -> bool:
-    """Whether the answer depends on files a pattern search cannot find.
-
-    A search push-down narrows a walk to the files that contain the
-    pattern, which drops exactly the files -v, --files-without-match,
-    --files, --passthru and --include-zero answer for, so those keep the
-    whole walk. So does --max-filesize, which only a walk's stat can
-    apply (a narrowed file is searched as an operand, whatever its size),
-    and a pattern file, whose patterns the search never saw.
-
-    Args:
-        fl (FlagView): the invocation's flags.
-        f (RgFlags): the same flags parsed.
-    """
-    return (
-        f.invert
-        or f.files_without_match
-        or f.list_files
-        or f.passthru
-        or f.include_zero
-        or f.null_data
-        or f.max_filesize is not None
-        or bool(fl.raw("file"))
-    )
-
-
-def refuse_missing_pattern(
-    pattern: str | None, fl: FlagView, f: RgFlags
-) -> None:
-    """ripgrep's refusal of a search with no pattern, for a wrapper to
-    raise before it spends a request on one.
-
-    Not for --files or --type-list, which search nothing, nor when -f
-    named a pattern file: an empty one matches nothing.
-
-    Args:
-        pattern (str | None): the pattern ``pattern_arg`` resolved.
-        fl (FlagView): the invocation's flags.
-        f (RgFlags): the same flags parsed.
-
-    Raises:
-        UsageError: the line gave no pattern to search with.
-    """
-    if (
-        pattern is None
-        and fl.raw("file") is None
-        and not (f.list_files or f.type_list)
-    ):
-        raise UsageError(RG_NO_PATTERN)
 
 
 def filters_files(f: RgFlags) -> bool:

@@ -57,7 +57,6 @@ import { STDIN_OPERAND } from '../utils/constants.ts'
 import { type LinkResolver, linkResolver, mountsOf } from '../utils/links.ts'
 import { formatRecords } from '../utils/output.ts'
 import { isStdin, stdinStream, wrapBytes } from '../utils/stream.ts'
-import { RegexSyntax } from '../types.ts'
 import { PcreError, hostFlags, translatePcre } from '../utils/pcre.ts'
 import { RustRegexError, translateRust, wholeLine, wholeWord } from '../utils/rust_regex.ts'
 import { concat } from '../../../utils/bytes.ts'
@@ -612,16 +611,6 @@ export function foldsCase(pattern: string, fixed: boolean, f: RgFlags): boolean 
 }
 
 /**
- * The dialect rg's patterns are written in, for a pushed-down search. `auto`
- * reads as the default engine's: a pattern only PCRE2 takes fails the default
- * translation and the search falls back to the generic scan, which runs
- * PCRE2.
- */
-export function rgSyntax(f: RgFlags): RegexSyntax {
-  return f.engine === 'pcre2' ? RegexSyntax.PERL : RegexSyntax.RUST
-}
-
-/**
  * The regex engine the line asks for, the last of -P, --no-pcre2, --engine
  * and the deprecated --auto-hybrid-regex pair winning (ripgrep 14.1.1: `rg -P
  * --no-pcre2` is the default engine, `rg --no-pcre2 -P` is PCRE2, and
@@ -777,47 +766,6 @@ export async function ignoreRules(
     }
   }
   return new IgnoreRules(lines)
-}
-
-/**
- * Whether the answer depends on files a pattern search cannot find. A search
- * push-down narrows a walk to the files that contain the pattern, which
- * drops exactly the files -v, --files-without-match, --files, --passthru and
- * --include-zero answer for, so those keep the whole walk. So does
- * --max-filesize, which only a walk's stat can apply (a narrowed file is
- * searched as an operand, whatever its size), and a pattern file, whose
- * patterns the search never saw.
- */
-export function needsEveryFile(fl: FlagView, f: RgFlags): boolean {
-  const file = fl.raw('file')
-  return (
-    f.invert ||
-    f.filesWithoutMatch ||
-    f.listFiles ||
-    f.passthru ||
-    f.includeZero ||
-    f.nullData ||
-    f.maxFilesize !== null ||
-    (Array.isArray(file) ? file.length > 0 : file !== undefined)
-  )
-}
-
-/**
- * ripgrep's refusal of a search with no pattern, for a wrapper to answer
- * before it spends a request on one, or null to go on. Not for --files or
- * --type-list, which search nothing, nor when -f named a pattern file: an
- * empty one matches nothing.
- */
-export function refuseMissingPattern(
-  pattern: string | null,
-  fl: FlagView,
-  f: RgFlags,
-): CommandFnResult | null {
-  const file = fl.raw('file')
-  if (pattern !== null || file !== undefined || f.listFiles || f.typeList) {
-    return null
-  }
-  return usage(RG_NO_PATTERN)
 }
 
 // Whether -g, --iglob, -t or -T filter the files a walk searches.

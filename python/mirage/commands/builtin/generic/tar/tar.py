@@ -44,7 +44,6 @@ from mirage.commands.builtin.generic.tar.constants import (
     TAPE_START,
     UNEXPECTED_EOF,
     USAGE_HINT,
-    WRITE_MODES,
 )
 from mirage.commands.builtin.generic.tar.create import (
     check_directories,
@@ -56,7 +55,6 @@ from mirage.commands.builtin.generic.tar.types import (
     Member,
     ReadMode,
     ReadResult,
-    WriteMode,
 )
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.operands import normalized_read
@@ -93,10 +91,6 @@ def _compression_suffix(z: bool, j: bool, J: bool) -> CompressionSuffix:
     if J:
         return ":xz"
     return ""
-
-
-def _write_mode(suffix: CompressionSuffix) -> WriteMode:
-    return WRITE_MODES[suffix]
 
 
 def _read_mode(suffix: CompressionSuffix) -> ReadMode:
