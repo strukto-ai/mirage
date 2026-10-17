@@ -14,6 +14,7 @@
 
 import pytest
 from dulwich import porcelain
+from dulwich.repo import Repo
 
 from tests.commands.cli.builtin.git.conftest import commit_file
 
@@ -149,6 +150,29 @@ async def test_all_includes_commits_from_other_branches(git_ws, repo_path):
     assert "side work" not in plain.stdout.decode()
     assert "side work" in everything.stdout.decode()
     assert subjects_of(plain.stdout) == ["third", "second", "first"]
+
+
+def _point_a_branch_at_nothing(repo_path) -> None:
+    Repo(str(repo_path)).refs.set_symbolic_ref(
+        b"refs/heads/ghost", b"refs/heads/missing"
+    )
+
+
+@pytest.mark.asyncio
+async def test_all_skips_a_symref_to_an_unborn_branch(git_ws, repo_path):
+    _point_a_branch_at_nothing(repo_path)
+    result = await git_ws.shell("git -C /repo log --all --oneline")
+    assert (result.exit_code, result.stderr) == (0, None)
+    assert subjects_of(result.stdout) == ["third", "second", "first"]
+
+
+@pytest.mark.asyncio
+async def test_decorations_skip_a_symref_to_an_unborn_branch(
+    git_ws, repo_path
+):
+    _point_a_branch_at_nothing(repo_path)
+    result = await git_ws.shell("git -C /repo log -n 1 --format='%d'")
+    assert result.stdout == b" (HEAD -> main)\n"
 
 
 @pytest.mark.asyncio

@@ -225,6 +225,7 @@ export class LocalTransport implements Transport {
       try {
         oid = await git.resolveRef({ ...repoArgs(this.repo), ref: name })
       } catch {
+        // A symref to an unborn branch names nothing yet.
         continue
       }
       refs.set(name, oid)

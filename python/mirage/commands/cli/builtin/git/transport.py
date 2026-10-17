@@ -14,6 +14,7 @@
 
 import asyncio
 import base64
+import logging
 import re
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -41,6 +42,8 @@ from mirage.commands.cli.builtin.git.refs import read_head
 from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.config import Context
 from mirage.types import PathSpec
+
+logger = logging.getLogger(__name__)
 
 FLUSH = b"0000"
 SERVICE = "git-upload-pack"
@@ -250,7 +253,8 @@ class LocalTransport:
         for name in sorted(self._repo.refs.allkeys()):
             try:
                 oid = self._repo.refs[name]
-            except KeyError:
+            except KeyError as exc:
+                logger.debug("ref %r names no commit yet: %s", name, exc)
                 continue
             if name != b"HEAD" and not name.startswith(b"refs/"):
                 continue
@@ -509,7 +513,8 @@ async def open_transport(
                 candidate.parent,
                 candidate,
             )
-        except GitError:
+        except GitError as exc:
+            logger.debug("no repository at %s: %s", candidate.virtual, exc)
             continue
         head = await read_head(vfs, location.gitdir)
         return LocalTransport(await open_repo(vfs, location), head.ref)

@@ -396,3 +396,13 @@ async def test_gh_repo_clone_sends_the_token_only_as_authorization(repos):
     assert b"t0k" not in config.stdout
     auth = "Basic " + base64.b64encode(b"x-access-token:t0k").decode()
     assert seen == [("GET", auth), ("POST", auth)]
+
+
+@pytest.mark.asyncio
+async def test_a_plain_directory_is_no_repository_to_clone(git_rw):
+    await git_rw.shell("mkdir /repo/plain")
+    result = await git_rw.shell("git -C /repo clone /repo/plain /repo/c")
+    assert (result.exit_code, result.stderr) == (
+        128,
+        b"fatal: repository '/repo/plain' does not exist\n",
+    )

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import heapq
+import logging
 import math
 import re
 from collections.abc import Iterable, Iterator, Mapping
@@ -61,6 +62,8 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.posix import compile_posix_regex
 from mirage.workspace.files import Files
+
+logger = logging.getLogger(__name__)
 
 REMOTE_PREFIX = b"refs/remotes/"
 BASIC_REGEXP = "basic_regexp"
@@ -383,8 +386,9 @@ def ref_commits(repo: BaseRepo) -> list[Commit]:
     for name in sorted(repo.refs.allkeys()):
         try:
             sha = repo.refs[name]
-        except KeyError:
+        except KeyError as exc:
             # A symref to an unborn branch names nothing yet.
+            logger.debug("ref %r names no commit yet: %s", name, exc)
             continue
         commit = peel_to_commit(repo, sha)
         if commit is not None:
@@ -485,7 +489,8 @@ def decorations(
             continue
         try:
             sha = repo.refs[name]
-        except KeyError:
+        except KeyError as exc:
+            logger.debug("ref %r names no commit yet: %s", name, exc)
             continue
         commit = peel_to_commit(repo, sha)
         if commit is None:
