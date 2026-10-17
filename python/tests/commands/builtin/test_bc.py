@@ -1135,6 +1135,26 @@ def test_bc_a_runtime_error_alone_discards_nothing():
     assert _out("bc", b"ibase=1;1+1;ibase\n")[0] == b"2\n2\n"
 
 
+def test_bc_a_refusal_does_not_hide_a_later_syntax_error():
+    # GNU compiles the whole statement before it runs any of it, so the
+    # refusal partway through cannot stop the parse: the stray `2` still
+    # discards the line, `x` included, and only the syntax error reports.
+    big = b"9" * 16001
+    for text in (
+        b"x=5;2^1000000 2\nx\n",
+        b"x=5;1/0 2\nx\n",
+        b"x=5;foo(1) 2\nx\n",
+        b"x=5;" + big + b" 2\nx\n",
+        b"halt;2^1000000 2\nx\n",
+    ):
+        stdout, io = _out("bc", text)
+        assert stdout == b"0\n", text
+        assert _stderr_text(io) == "(standard_in) 1: syntax error\n", text
+    stdout, io = _out("bc", b'print "a", 1/0 2\n')
+    assert stdout == b""
+    assert _stderr_text(io) == "(standard_in) 1: syntax error\n"
+
+
 def test_bc_the_discarded_unit_is_the_logical_line():
     # A block comment stretches one statement list over two input lines,
     # and the whole list is still one unit: the `1+1` is discarded by the

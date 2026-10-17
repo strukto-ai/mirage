@@ -22,6 +22,7 @@ from .numbers import (
     call_builtin,
     clamp_scale,
     read_base_number,
+    split_literal,
     truncate_int,
 )
 from .render import render_number
@@ -58,15 +59,25 @@ class Parser:
             statement produced before a runtime error survives it:
             `print "x", 1/0` writes the `x` GNU had already written when
             the division refused.
+        check (bool): parse without evaluating. Nothing is computed,
+            converted, rendered or stored, so the parse cannot refuse
+            at runtime and only a syntax error can stop it.
     """
 
-    __slots__ = ("_src", "_pos", "_state", "_writes")
+    __slots__ = ("_src", "_pos", "_state", "_writes", "_check")
 
-    def __init__(self, src: str, state: BcState, writes: list[str]) -> None:
+    def __init__(
+        self,
+        src: str,
+        state: BcState,
+        writes: list[str],
+        check: bool = False,
+    ) -> None:
         self._src = src
         self._pos = 0
         self._state = state
         self._writes = writes
+        self._check = check
 
     def _skip_blanks(self) -> None:
         while (
@@ -128,10 +139,12 @@ class Parser:
             and self._src[self._pos] in constants.NUMBER_CHARS
         ):
             self._pos += 1
+        raw = self._src[start : self._pos]
         try:
-            return read_base_number(
-                self._src[start : self._pos], self._state.ibase
-            )
+            if self._check:
+                split_literal(raw)
+                return ZERO
+            return read_base_number(raw, self._state.ibase)
         except BcParseError as exc:
             raise BcParseError(exc.text, exc.incomplete, start) from exc
 
@@ -165,6 +178,8 @@ class Parser:
         Returns:
             str: the value in the output base as it stands now.
         """
+        if self._check:
+            return ""
         self._state.last = num
         return render_number(num, self._state.obase)
 
@@ -279,7 +294,7 @@ class Parser:
     def _assign(self, name: str, op: str, rhs: BcNumber) -> BcNumber:
         value = rhs
         if op != "":
-            value = apply_binary(op, self._read_value(name), rhs, self._state)
+            value = self._binary(op, self._read_value(name), rhs)
         self._store(name, value)
         return self._read_value(name)
 
@@ -296,6 +311,8 @@ class Parser:
         return state.variables.get(name, ZERO)
 
     def _store(self, name: str, num: BcNumber) -> None:
+        if self._check:
+            return
         state = self._state
         requested = truncate_int(num)
         if name == constants.SCALE_NAME:
@@ -322,6 +339,11 @@ class Parser:
             state.last = num
             return
         state.variables[name] = num
+
+    def _binary(self, op: str, a: BcNumber, b: BcNumber) -> BcNumber:
+        if self._check:
+            return ZERO
+        return apply_binary(op, a, b, self._state)
 
     def _clamp_base(self, requested: int, ceiling: int, warning: str) -> int:
         if requested < constants.MIN_BASE:
@@ -358,7 +380,7 @@ class Parser:
             if self._src.startswith(char * 2, self._pos):
                 return left
             self._consume()
-            left = apply_binary(char, left, self._parse_term(), self._state)
+            left = self._binary(char, left, self._parse_term())
 
     def _parse_term(self) -> BcNumber:
         left = self._parse_unary()
@@ -367,7 +389,7 @@ class Parser:
             if char not in ("*", "/", "%"):
                 return left
             self._consume()
-            left = apply_binary(char, left, self._parse_unary(), self._state)
+            left = self._binary(char, left, self._parse_unary())
 
     def _parse_unary(self) -> BcNumber:
         if self._match("++"):
@@ -389,9 +411,7 @@ class Parser:
         if not assignable(name):
             raise self.unexpected()
         old = self._read_value(name)
-        self._store(
-            name, apply_binary("+", old, BcNumber(delta, 0), self._state)
-        )
+        self._store(name, self._binary("+", old, BcNumber(delta, 0)))
         return self._read_value(name)
 
     def _parse_power(self) -> BcNumber:
@@ -399,7 +419,7 @@ class Parser:
         if self._peek() != "^":
             return base
         self._consume()
-        return apply_binary("^", base, self._parse_unary(), self._state)
+        return self._binary("^", base, self._parse_unary())
 
     def _parse_atom(self) -> BcNumber:
         char = self._peek()
@@ -447,6 +467,8 @@ class Parser:
             arg = self.parse_expr()
             if not self._match(")"):
                 raise self.unexpected()
+            if self._check:
+                return ZERO
             if self._state.math_mode and name in constants.MATH_FUNCS:
                 return call_function(name, arg, self._state.scale)
             # GNU compiles the call and only then finds no such function,
@@ -459,6 +481,8 @@ class Parser:
         arg = self.parse_expr()
         if not self._match(")"):
             raise self.unexpected()
+        if self._check:
+            return ZERO
         return call_builtin(name, arg, self._state.scale)
 
     def _parse_postfix(self, name: str) -> BcNumber:
@@ -466,13 +490,9 @@ class Parser:
         # reserved word is an error.
         value = self._read_value(name)
         if self._match("++"):
-            self._store(
-                name, apply_binary("+", value, BcNumber(1, 0), self._state)
-            )
+            self._store(name, self._binary("+", value, BcNumber(1, 0)))
         elif self._match("--"):
-            self._store(
-                name, apply_binary("-", value, BcNumber(1, 0), self._state)
-            )
+            self._store(name, self._binary("-", value, BcNumber(1, 0)))
         return value
 
     def done(self) -> bool:
@@ -496,10 +516,34 @@ def eval_statement(text: str, state: BcState, writes: list[str]) -> None:
             written before it.
 
     Raises:
-        BcParseError: the statement cannot be parsed.
+        BcParseError: the statement cannot be parsed, even when a runtime
+            error stopped its evaluation before the bad text was reached.
         BcRuntimeError: a non-fatal runtime error such as a zero divisor.
     """
     parser = Parser(text, state, writes)
+    try:
+        parser.parse_statement()
+    except BcRuntimeError:
+        # GNU compiles the whole statement before running any of it, so a
+        # refusal partway through cannot hide a syntax error after it:
+        # `x=5;2^1000000 2` is a syntax error that leaves `x` unset.
+        check_statement(text, state)
+        raise
+    if not parser.done():
+        raise parser.unexpected()
+
+
+def check_statement(text: str, state: BcState) -> None:
+    """Parse one bc statement without evaluating any of it.
+
+    Args:
+        text (str): the statement, already split off and stripped.
+        state (BcState): the run's state, read but never written.
+
+    Raises:
+        BcParseError: the statement cannot be parsed.
+    """
+    parser = Parser(text, state, [], check=True)
     parser.parse_statement()
     if not parser.done():
         raise parser.unexpected()

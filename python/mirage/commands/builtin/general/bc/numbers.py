@@ -100,10 +100,15 @@ def digit_value(char: str, ibase: int, clamp: bool) -> int:
     return min(value, ibase - 1) if clamp else value
 
 
-def read_base_number(raw: str, ibase: int) -> BcNumber:
+def split_literal(raw: str) -> tuple[str, str]:
     whole, _, fraction = raw.partition(".")
     if "." in fraction:
         raise BcParseError(constants.SYNTAX_ERROR)
+    return whole, fraction
+
+
+def read_base_number(raw: str, ibase: int) -> BcNumber:
+    whole, fraction = split_literal(raw)
     if len(whole) + len(fraction) > constants.MAX_LITERAL_DIGITS:
         raise BcRuntimeError(constants.ARITHMETIC_LIMIT)
     scale = len(fraction)

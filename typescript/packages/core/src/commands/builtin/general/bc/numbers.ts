@@ -81,11 +81,16 @@ export function digitValue(char: string, ibase: number, clamp: boolean): number 
   return clamp && value >= ibase ? ibase - 1 : value
 }
 
-export function readBaseNumber(raw: string, ibase: number): BcNumber {
+export function splitLiteral(raw: string): [string, string] {
   const dot = raw.indexOf('.')
   const whole = dot < 0 ? raw : raw.slice(0, dot)
   const fraction = dot < 0 ? '' : raw.slice(dot + 1)
   if (fraction.includes('.')) throw new BcParseError(constants.SYNTAX_ERROR)
+  return [whole, fraction]
+}
+
+export function readBaseNumber(raw: string, ibase: number): BcNumber {
+  const [whole, fraction] = splitLiteral(raw)
   if (whole.length + fraction.length > constants.MAX_LITERAL_DIGITS)
     throw new BcRuntimeError(constants.ARITHMETIC_LIMIT)
   const scale = fraction.length

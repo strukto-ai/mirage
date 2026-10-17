@@ -16,7 +16,7 @@ import { BcParseError, BcRuntimeError, BcHalt, runtimeWarningLine } from './erro
 import type { BcNumber, BcState } from './types.ts'
 import { ZERO } from './numbers.ts'
 import * as constants from './constants.ts'
-import { readBaseNumber, truncateInt, applyBinary, callBuiltin } from './numbers.ts'
+import { readBaseNumber, splitLiteral, truncateInt, applyBinary, callBuiltin } from './numbers.ts'
 import { callFunction } from './math.ts'
 import { renderNumber } from './render.ts'
 import { stringEnd, unescape } from './lexer.ts'
@@ -31,6 +31,7 @@ export class Parser {
     private readonly src: string,
     private readonly state: BcState,
     private readonly writes: string[],
+    private readonly check = false,
   ) {}
 
   private skipBlanks(): void {
@@ -72,8 +73,13 @@ export class Parser {
     const start = this.pos
     while (this.pos < this.src.length && constants.NUMBER_CHARS.has(this.src.charAt(this.pos)))
       this.pos++
+    const raw = this.src.slice(start, this.pos)
     try {
-      return readBaseNumber(this.src.slice(start, this.pos), this.state.ibase)
+      if (this.check) {
+        splitLiteral(raw)
+        return ZERO
+      }
+      return readBaseNumber(raw, this.state.ibase)
     } catch (err) {
       if (err instanceof BcParseError) throw new BcParseError(err.text, err.incomplete, start)
       throw err
@@ -91,6 +97,7 @@ export class Parser {
   }
 
   private emit(num: BcNumber): string {
+    if (this.check) return ''
     this.state.last = num
     return renderNumber(num, this.state.obase)
   }
@@ -186,7 +193,7 @@ export class Parser {
   }
 
   private assign(name: string, op: string, rhs: BcNumber): BcNumber {
-    const value = op === '' ? rhs : applyBinary(op, this.readValue(name), rhs, this.state)
+    const value = op === '' ? rhs : this.binary(op, this.readValue(name), rhs)
     this.store(name, value)
     return this.readValue(name)
   }
@@ -201,6 +208,7 @@ export class Parser {
   }
 
   private store(name: string, num: BcNumber): void {
+    if (this.check) return
     const state = this.state
     let requested = truncateInt(num)
     if (name === constants.SCALE_NAME) {
@@ -228,6 +236,11 @@ export class Parser {
     state.variables.set(name, num)
   }
 
+  private binary(op: string, a: BcNumber, b: BcNumber): BcNumber {
+    if (this.check) return ZERO
+    return applyBinary(op, a, b, this.state)
+  }
+
   private clampBase(requested: bigint, ceiling: number, warning: string): number {
     if (requested < BigInt(constants.MIN_BASE)) {
       this.state.warnings.push(runtimeWarningLine(warning))
@@ -250,7 +263,7 @@ export class Parser {
       if (c !== '+' && c !== '-') return left
       if (this.src.startsWith(c + c, this.pos)) return left
       this.consume()
-      left = applyBinary(c, left, this.parseTerm(), this.state)
+      left = this.binary(c, left, this.parseTerm())
     }
   }
 
@@ -260,7 +273,7 @@ export class Parser {
       const c = this.peek()
       if (c !== '*' && c !== '/' && c !== '%') return left
       this.consume()
-      left = applyBinary(c, left, this.parseUnary(), this.state)
+      left = this.binary(c, left, this.parseUnary())
     }
   }
 
@@ -280,7 +293,7 @@ export class Parser {
     const name = this.readTarget()
     if (!assignable(name)) throw this.unexpected()
     const old = this.readValue(name)
-    this.store(name, applyBinary('+', old, { coefficient: BigInt(delta), scale: 0 }, this.state))
+    this.store(name, this.binary('+', old, { coefficient: BigInt(delta), scale: 0 }))
     return this.readValue(name)
   }
 
@@ -288,7 +301,7 @@ export class Parser {
     const base = this.parseAtom()
     if (this.peek() !== '^') return base
     this.consume()
-    return applyBinary('^', base, this.parseUnary(), this.state)
+    return this.binary('^', base, this.parseUnary())
   }
 
   private parseAtom(): BcNumber {
@@ -323,6 +336,7 @@ export class Parser {
     if (this.match('(')) {
       const arg = this.parseExpr()
       if (!this.match(')')) throw this.unexpected()
+      if (this.check) return ZERO
       if (this.state.mathMode && constants.MATH_FUNCS.has(name)) {
         return callFunction(name, arg, this.state.scale)
       }
@@ -335,15 +349,16 @@ export class Parser {
     this.consume()
     const arg = this.parseExpr()
     if (!this.match(')')) throw this.unexpected()
+    if (this.check) return ZERO
     return callBuiltin(name, arg, this.state.scale)
   }
 
   private parsePostfix(name: string): BcNumber {
     const value = this.readValue(name)
     if (this.match('++')) {
-      this.store(name, applyBinary('+', value, { coefficient: 1n, scale: 0 }, this.state))
+      this.store(name, this.binary('+', value, { coefficient: 1n, scale: 0 }))
     } else if (this.match('--')) {
-      this.store(name, applyBinary('-', value, { coefficient: 1n, scale: 0 }, this.state))
+      this.store(name, this.binary('-', value, { coefficient: 1n, scale: 0 }))
     }
     return value
   }
@@ -356,6 +371,20 @@ export class Parser {
 
 export function evalStatement(text: string, state: BcState, writes: string[]): void {
   const parser = new Parser(text, state, writes)
+  try {
+    parser.parseStatement()
+  } catch (err) {
+    // GNU compiles the whole statement before running any of it, so a
+    // refusal partway through cannot hide a syntax error after it:
+    // `x=5;2^1000000 2` is a syntax error that leaves `x` unset.
+    if (err instanceof BcRuntimeError) checkStatement(text, state)
+    throw err
+  }
+  if (!parser.done()) throw parser.unexpected()
+}
+
+export function checkStatement(text: string, state: BcState): void {
+  const parser = new Parser(text, state, [], true)
   parser.parseStatement()
   if (!parser.done()) throw parser.unexpected()
 }

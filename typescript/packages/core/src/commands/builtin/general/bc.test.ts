@@ -1265,6 +1265,32 @@ describe('bc', () => {
     expect((await runBc('ibase=1;1+1;ibase\n')).out).toBe('2\n2\n')
   })
 
+  it('a refusal does not hide a later syntax error', async () => {
+    // GNU compiles the whole statement before it runs any of it, so the
+    // refusal partway through cannot stop the parse: the stray `2` still
+    // discards the line, `x` included, and only the syntax error reports.
+    const big = '9'.repeat(16001)
+    const texts = [
+      'x=5;2^1000000 2\nx\n',
+      'x=5;1/0 2\nx\n',
+      'x=5;foo(1) 2\nx\n',
+      `x=5;${big} 2\nx\n`,
+      'halt;2^1000000 2\nx\n',
+    ]
+    for (const text of texts) {
+      expect(await runBc(text)).toEqual({
+        out: '0\n',
+        err: '(standard_in) 1: syntax error\n',
+        exitCode: 0,
+      })
+    }
+    expect(await runBc('print "a", 1/0 2\n')).toEqual({
+      out: '',
+      err: '(standard_in) 1: syntax error\n',
+      exitCode: 0,
+    })
+  })
+
   it('the discarded unit is the logical line', async () => {
     // A block comment stretches one statement list over two input lines,
     // and the whole list is still one unit: the `1+1` is discarded by the
