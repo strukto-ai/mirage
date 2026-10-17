@@ -287,7 +287,7 @@ export function dropsMountCaches(spec: CLI): boolean {
  * consumes subcommand words and group options; the leaf's own argv
  * uses the shared CommandSpec parser. The leaf gets the line's one Context,
  * built here and nowhere else: an fn leaf runs as
- * `fn(config, paths, texts, ctx)`, a script
+ * `fn(accessor, paths, texts, ctx)`, a script
  * leaf runs its embedded program on a workspace runtime
  * (scriptOutput), so usage refusals, limits, and classification all
  * happen in front of either tier. Help too, for every node that declared
@@ -302,6 +302,26 @@ export async function handleCli(
   stdin: ByteSource | null = null,
   context: CLIContext = {},
   dropCaches: (() => Promise<void>) | null = null,
+): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
+  // Taken before the first await, so a removal racing this line waits for
+  // the leaf and its output rather than closing the accessor under them.
+  const release = install.activity.acquire()
+  try {
+    const [stdout, io, node] = await runCli(install, parts, session, stdin, context, dropCaches)
+    return [stdout === null ? null : install.activity.hold(stdout), io, node]
+  } finally {
+    release()
+  }
+}
+
+/** handleCli's body, run while the install is held. */
+async function runCli(
+  install: CLIInstall,
+  parts: readonly (string | PathSpec)[],
+  session: SessionState,
+  stdin: ByteSource | null,
+  context: CLIContext,
+  dropCaches: (() => Promise<void>) | null,
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
   // Words re-enter string space as typed (wordText): the walk owns
   // interpretation, so a quoted "Lunch?" must not arrive as the
@@ -502,6 +522,10 @@ export async function handleCli(
     // call sat inside the try.
     body = Promise.resolve().then(() => fn(install.accessor, paths, texts, ctx))
   }
+  // Racing a promise does not stop its work: a body still running past its
+  // timeout keeps the install's accessor until it settles.
+  const settled = install.activity.acquire()
+  void body.then(settled, settled)
   // The leaf's declared limit bounds the handler body and its
   // streams, exactly like mount dispatch: without the wrap a blocking
   // leaf hangs forever and an unbounded-output leaf ignores its own

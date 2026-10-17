@@ -351,7 +351,7 @@ async def handle_cli(
     consumes subcommand words and group options; the leaf's own argv
     uses the shared CommandSpec parser. The leaf gets the line's one
     Context, built here and nowhere else: an fn leaf runs as
-    ``fn(config, paths, texts, ctx)``, a
+    ``fn(accessor, paths, texts, ctx)``, a
     script leaf runs its embedded program on a workspace runtime
     (_script_output), so usage refusals, limits, and classification all
     happen in front of either tier. Help too, for every node that
@@ -376,6 +376,29 @@ async def handle_cli(
             service by id and no vfs path can be derived from that, so
             per-path invalidation has nothing to aim at.
     """
+    # Taken before the first await, so a removal racing this line waits
+    # for the leaf and its output rather than closing the accessor under
+    # them.
+    release = install.activity.acquire()
+    try:
+        stdout, io, node = await _run_cli(
+            install, parts, session, stdin, context, drop_caches
+        )
+        held = None if stdout is None else install.activity.hold(stdout)
+        return held, io, node
+    finally:
+        release()
+
+
+async def _run_cli(
+    install: CLIInstall,
+    parts: list[str | PathSpec],
+    session: SessionState,
+    stdin: ByteSource | None,
+    context: CLIContext,
+    drop_caches: Callable[[], Awaitable[None]] | None,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """``handle_cli``'s body, run while the install is held."""
     entries = context.entries
     vfs = context.vfs
     # Words re-enter string space as typed (word_text): the walk owns

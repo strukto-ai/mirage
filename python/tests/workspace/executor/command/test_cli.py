@@ -42,6 +42,7 @@ from mirage.types import Limit, MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.cli import (
     CLIContext,
@@ -1427,3 +1428,50 @@ async def test_the_streamed_stderr_of_a_handler_reaches_the_caller(kind):
         result = await ws.shell("warns")
         assert result.stdout == b"out\n"
         assert result.stderr == b"warn\n"
+
+
+class ClosingAccessor(NOOPAccessor):
+    closed = False
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_removal_closes_the_accessor_after_the_leaf_and_its_output():
+    entered = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def stream_when_told(accessor, paths, texts, ctx: Context):
+        entered.set()
+        await finish.wait()
+
+        async def out():
+            yield b"done\n"
+
+        return out(), IOResult()
+
+    registry = CLIRegistry()
+    install = registry.install(
+        "prog",
+        CLI(
+            spec=CommandSpec(name="prog"),
+            handlers={"": CLIHandler(fn=stream_when_told)},
+            accessor=ClosingAccessor,
+        ),
+    )
+    running = asyncio.create_task(
+        handle_cli(install, ["prog"], SessionState("t"))
+    )
+    await entered.wait()
+    removing = asyncio.create_task(registry.uninstall("prog"))
+    await asyncio.sleep(0)
+    assert registry.get("prog") is None
+    assert not install.accessor.closed
+    finish.set()
+    stdout, io, _ = await running
+    await asyncio.sleep(0)
+    assert not install.accessor.closed
+    assert await materialize(stdout) == b"done\n"
+    await asyncio.wait_for(removing, 1)
+    assert install.accessor.closed

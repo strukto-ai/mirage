@@ -107,6 +107,7 @@ from mirage.types import (
     WalkProbe,
     WritePolicy,
 )
+from mirage.utils.activity import Activity
 from mirage.utils.context_scope import ContextScope
 from mirage.utils.filetype import get_extension
 from mirage.utils.ids import uuid7
@@ -118,7 +119,6 @@ from mirage.vfs.call import declared
 from mirage.vfs.constants import WRITE_EFFECTS
 from mirage.vfs.types import Effect, SearchQuery
 from mirage.view.types import StatPath
-from mirage.workspace.mount.activity import VFSActivity
 from mirage.workspace.mount.constants import HANDED, STORED_OPS
 from mirage.workspace.mount.listing import (
     beyond_window,
@@ -177,7 +177,7 @@ def _wrap_mount_streams(
     result: tuple[ByteSource | None, IOResult],
     revisions: dict[str, str] | None,
     mount_id: str | None = None,
-    activity: VFSActivity | None = None,
+    activity: Activity | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Wrap the stream in ``result`` with the mount identity and active
     revisions, so ``record_stream`` and ``revision_for`` calls inside the
@@ -203,7 +203,7 @@ def _wrap_mount_streams(
     return (activity.hold(wrapped) if activity is not None else wrapped), io
 
 
-def _wrap_stream(result: Any, mount_id: str, activity: VFSActivity) -> Any:
+def _wrap_stream(result: Any, mount_id: str, activity: Activity) -> Any:
     """Hold the host-I/O bypass around an op result that streams.
 
     An op that returns an async iterator has not run its body yet: the
@@ -467,7 +467,7 @@ class MountEntry:
             if index_config is not None
             else None
         )
-        self.activity = VFSActivity()
+        self.activity = Activity()
         self.retiring = False
         self.before_use: Callable[[], Awaitable[None]] | None = None
         self._ready_lock = asyncio.Lock()

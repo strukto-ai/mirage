@@ -14,6 +14,7 @@
 
 import type { Accessor } from '../../accessor/base.ts'
 import type { CLI } from '../../commands/cli/types.ts'
+import type { Activity } from '../../utils/activity.ts'
 
 /**
  * One installed CLI: a head word bound to a program tree.
@@ -23,10 +24,13 @@ import type { CLI } from '../../commands/cli/types.ts'
  * are two independent entries whose help and errors attribute to their
  * installed head. `config` is the installation's validated configModel
  * output, null when the spec declares none; every leaf fn gets `accessor`.
+ * `activity` counts the lines running on the install and the output streams
+ * they handed back; removal waits for it before closing `accessor`.
  */
 export interface CLIInstall {
   readonly name: string
   readonly cli: CLI
   readonly config: unknown
   readonly accessor: Accessor
+  readonly activity: Activity
 }

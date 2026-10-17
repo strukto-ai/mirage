@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.cli.types import CLI
 from mirage.types import JsonValue
+from mirage.utils.activity import Activity
 
 
 @dataclass(frozen=True)
@@ -41,9 +42,15 @@ class CLIInstall:
         accessor (Accessor): what ``cli.accessor`` built from
             ``config`` at install, handed to every leaf ``fn``; closed
             when the install goes.
+        activity (Activity): the lines running on this install and
+            the output streams they handed back; removal waits for it
+            before closing ``accessor``.
     """
 
     name: str
     cli: CLI
     config: "BaseModel | dict[str, JsonValue] | None" = None
     accessor: Accessor = field(default_factory=NOOPAccessor)
+    activity: Activity = field(
+        default_factory=Activity, compare=False, repr=False
+    )

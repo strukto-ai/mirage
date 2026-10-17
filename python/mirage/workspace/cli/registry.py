@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from collections.abc import Callable, Iterable, Mapping
 
 from pydantic import BaseModel, ValidationError
@@ -61,6 +62,7 @@ class CLIRegistry:
     ) -> None:
         self._installs: dict[str, CLIInstall] = {}
         self._peers = peers
+        self._retiring: dict[int, asyncio.Task[None]] = {}
 
     def install(
         self,
@@ -168,22 +170,43 @@ class CLIRegistry:
             raise ValueError(f"CLI {name!r}: {error_summary(exc)}") from None
 
     async def uninstall(self, name: str) -> None:
-        """Remove an installed CLI and close its accessor; its head word
-        stops resolving (127).
+        """Remove an installed CLI now and close its accessor once the
+        lines running on it and their output streams are done; its head
+        word stops resolving (127) at once.
 
         Args:
             name (str): installed head word.
         """
-        if name not in self._installs:
+        install = self._installs.pop(name, None)
+        if install is None:
             raise KeyError(f"CLI name {name!r} is not installed")
-        await self._installs.pop(name).accessor.close()
+        identity = id(install)
+        closing = asyncio.create_task(_retire(install))
+        self._retiring[identity] = closing
+        try:
+            await asyncio.shield(closing)
+        finally:
+            if closing.done():
+                self._retiring.pop(identity, None)
 
     async def close(self) -> None:
-        """Close every install's accessor, as the workspace closes."""
+        """Close every install's accessor, including the ones still
+        being removed, as the workspace closes; one failed close does not
+        skip the rest."""
         installs = list(self._installs.values())
         self._installs.clear()
-        for install in installs:
-            await install.accessor.close()
+        results = await asyncio.gather(
+            *(install.accessor.close() for install in installs),
+            *(asyncio.shield(task) for task in self._retiring.values()),
+            return_exceptions=True,
+        )
+        failures = [r for r in results if isinstance(r, BaseException)]
+        if failures:
+            raise (
+                failures[0]
+                if len(failures) == 1
+                else BaseExceptionGroup("CLI close failed", failures)
+            )
 
     def get(self, name: str) -> CLIInstall | None:
         """Look up an installation by head word.
@@ -200,3 +223,8 @@ class CLIRegistry:
     def names(self) -> frozenset[str]:
         """The installed head words."""
         return frozenset(self._installs)
+
+
+async def _retire(install: CLIInstall) -> None:
+    await install.activity.wait()
+    await install.accessor.close()

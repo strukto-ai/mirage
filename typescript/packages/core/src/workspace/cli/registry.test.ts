@@ -17,7 +17,8 @@ import { describe, expect, it } from 'vitest'
 
 import { z } from 'zod'
 
-import { CLI, type CLIConfigModel } from '../../commands/cli/types.ts'
+import { Accessor, NOOPAccessor } from '../../accessor/base.ts'
+import { CLI, type CLIAccessorFn, type CLIConfigModel } from '../../commands/cli/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { DISCORD } from '../../commands/cli/builtin/discord/index.ts'
 import { GIT } from '../../commands/cli/builtin/git/index.ts'
@@ -45,9 +46,26 @@ function noop(): [null, IOResult] {
   return [null, new IOResult()]
 }
 
-function tree(configModel: CLIConfigModel | null = null): CLI {
+/** Records its close, and fails it for the token `bad`. */
+class ClosingAccessor extends Accessor {
+  closed = false
+  constructor(readonly config: TokenConfig) {
+    super()
+  }
+  override close(): Promise<void> {
+    this.closed = true
+    if (this.config.token === 'bad') return Promise.reject(new Error('logout failed'))
+    return Promise.resolve()
+  }
+}
+
+function tree(
+  configModel: CLIConfigModel | null = null,
+  accessor: CLIAccessorFn = (config) => new NOOPAccessor(config),
+): CLI {
   return new CLI({
     configModel,
+    accessor,
     spec: new CommandSpec({ name: 'prog', subcommands: [new CommandSpec({ name: 'run' })] }),
     handlers: { run: new CLIHandler({ fn: noop }) },
   })
@@ -127,6 +145,17 @@ describe('CLIRegistry', () => {
     await reg.uninstall('prog')
     expect(reg.get('prog')).toBeNull()
     await expect(reg.uninstall('prog')).rejects.toThrow(/not installed/)
+  })
+
+  it('close closes every accessor past a failed one', async () => {
+    const reg = new CLIRegistry()
+    const spec = tree(tokenConfig, (config) => new ClosingAccessor(config as TokenConfig))
+    const failing = reg.install('one', spec, { token: 'bad' })
+    const other = reg.install('two', spec, { token: 'ok' })
+    await expect(reg.close()).rejects.toThrow('logout failed')
+    expect((failing.accessor as ClosingAccessor).closed).toBe(true)
+    expect((other.accessor as ClosingAccessor).closed).toBe(true)
+    expect(reg.names().size).toBe(0)
   })
 })
 

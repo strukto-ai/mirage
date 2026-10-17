@@ -13,7 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+
+from mirage.io.types import ByteSource
 
 
 class Activity:
@@ -42,3 +44,40 @@ class Activity:
 
     async def wait(self) -> None:
         await self._idle.wait()
+
+    def hold(self, source: ByteSource) -> ByteSource:
+        """Count ``source`` in flight until it ends or is closed."""
+        if isinstance(source, (bytes, bytearray)):
+            return source
+        return ActivityStream(source, self.acquire())
+
+
+class ActivityStream:
+    """Release a stream's resource on EOF, error, or explicit close."""
+
+    def __init__(
+        self, source: AsyncIterator[bytes], release: Callable[[], None]
+    ) -> None:
+        self._source = source.__aiter__()
+        self._release = release
+        self._pull_lock = asyncio.Lock()
+
+    def __aiter__(self) -> "ActivityStream":
+        return self
+
+    async def __anext__(self) -> bytes:
+        async with self._pull_lock:
+            try:
+                return await self._source.__anext__()
+            except BaseException:
+                self._release()
+                raise
+
+    async def aclose(self) -> None:
+        async with self._pull_lock:
+            try:
+                close = getattr(self._source, "aclose", None)
+                if close is not None:
+                    await close()
+            finally:
+                self._release()

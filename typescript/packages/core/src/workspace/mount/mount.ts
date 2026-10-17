@@ -77,7 +77,7 @@ import { joinOrAbort, mergeSignals } from '../../utils/abort.ts'
 import { callerSignal } from '../abort.ts'
 import { runWithMountContext, runWithRevisions, withMountContext } from '../../observe/context.ts'
 import { uuid7 } from '../../utils/ids.ts'
-import { VFSActivity } from './activity.ts'
+import { Activity } from '../../utils/activity.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import {
   type Limit,
@@ -296,7 +296,7 @@ export class MountEntry {
   readonly indexStore: IndexCacheStore
   readonly indexConfig: IndexConfig | undefined
   readonly vfsRef: string | null
-  activity = new VFSActivity()
+  activity = new Activity()
   retiring = false
   beforeUse: (() => Promise<void>) | null = null
   private readonly readyLock = new KeyLock()
@@ -2051,7 +2051,7 @@ async function* commandOutput(
 }
 
 /** Preserve a streaming operation's recording owner after its dispatch frame exits. */
-export function wrapStream(result: unknown, mountId: string, activity: VFSActivity): unknown {
+export function wrapStream(result: unknown, mountId: string, activity: Activity): unknown {
   if (result !== null && typeof result === 'object' && Symbol.asyncIterator in result) {
     return activity.hold(withMountContext(result as AsyncIterable<Uint8Array>, mountId))
   }
@@ -2064,7 +2064,7 @@ export function wrapStream(result: unknown, mountId: string, activity: VFSActivi
 function wrapMountStreams(
   result: [ByteSource | null, IOResult],
   mountId: string,
-  activity: VFSActivity,
+  activity: Activity,
 ): [ByteSource | null, IOResult] {
   const [stream, io] = result
   if (stream === null || stream instanceof Uint8Array) return [stream, io]

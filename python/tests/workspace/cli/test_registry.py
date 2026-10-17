@@ -15,6 +15,7 @@
 import pytest
 from pydantic import BaseModel
 
+from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.cli.builtin.discord import DISCORD
 from mirage.commands.cli.builtin.slack import SLACK
 from mirage.commands.cli.types import CLI, CLIHandler
@@ -31,11 +32,25 @@ async def noop(config, paths, *texts, **flags):
     return None, IOResult()
 
 
-def tree(config_model=None) -> CLI:
+class ClosingAccessor(Accessor):
+    """Records its close, and fails it for the token ``bad``."""
+
+    def __init__(self, config: TokenConfig) -> None:
+        self.config = config
+        self.closed = False
+
+    async def close(self) -> None:
+        self.closed = True
+        if self.config.token == "bad":
+            raise RuntimeError("logout failed")
+
+
+def tree(config_model=None, accessor=NOOPAccessor) -> CLI:
     return CLI(
         spec=CommandSpec(name="prog", subcommands=(CommandSpec(name="run"),)),
         handlers={"run": CLIHandler(fn=noop)},
         config_model=config_model,
+        accessor=accessor,
     )
 
 
@@ -183,6 +198,19 @@ async def test_uninstall_removes_and_unknown_raises():
     assert reg.get("prog") is None
     with pytest.raises(KeyError, match="not installed"):
         await reg.uninstall("prog")
+
+
+@pytest.mark.asyncio
+async def test_close_closes_every_accessor_past_a_failed_one():
+    reg = CLIRegistry()
+    spec = tree(TokenConfig, ClosingAccessor)
+    failing = reg.install("one", spec, {"token": "bad"})
+    other = reg.install("two", spec, {"token": "ok"})
+    with pytest.raises(RuntimeError, match="logout failed"):
+        await reg.close()
+    assert failing.accessor.closed
+    assert other.accessor.closed
+    assert reg.names() == frozenset()
 
 
 @pytest.mark.parametrize("name,spec", [("slack", SLACK), ("discord", DISCORD)])

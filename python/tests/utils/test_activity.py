@@ -16,13 +16,13 @@ import asyncio
 
 import pytest
 
-from mirage.workspace.mount.activity import VFSActivity
+from mirage.utils.activity import Activity
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("finish", ["eof", "error", "close"])
-async def test_vfs_usage_ends_with_its_stream(finish):
-    activity = VFSActivity()
+async def test_usage_ends_with_its_stream(finish):
+    activity = Activity()
 
     async def chunks():
         yield b"value"
@@ -53,7 +53,7 @@ async def test_vfs_usage_ends_with_its_stream(finish):
 
 @pytest.mark.asyncio
 async def test_close_waits_for_a_pending_pull_before_releasing_usage():
-    activity = VFSActivity()
+    activity = Activity()
     entered = asyncio.Event()
     release = asyncio.Event()
 

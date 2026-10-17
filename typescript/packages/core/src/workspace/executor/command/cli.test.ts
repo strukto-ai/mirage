@@ -24,7 +24,9 @@ import { Argument, UsageStyle } from '../../../commands/spec/types.ts'
 import { FlagView } from '../../../commands/spec/flag_view.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { Limit, PathSpec } from '../../../types.ts'
+import { CLIRegistry } from '../../cli/registry.ts'
 import type { CLIInstall } from '../../cli/types.ts'
+import { Activity } from '../../../utils/activity.ts'
 import { ScriptSource } from '../../../runtime/types.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
 import { PythonRuntime } from '../../../runtime/python/base.ts'
@@ -79,7 +81,7 @@ function makeInstall(name = 'prog'): CLIInstall {
 }
 
 function installOf(name: string, cli: CLI, config: unknown = null): CLIInstall {
-  return { name, cli, config, accessor: new NOOPAccessor(config) }
+  return { name, cli, config, accessor: new NOOPAccessor(config), activity: new Activity() }
 }
 
 describe('handleCli', () => {
@@ -1107,3 +1109,58 @@ class HeldSource implements AsyncIterableIterator<Uint8Array> {
     return Promise.resolve({ done: true, value: undefined })
   }
 }
+
+class ClosingAccessor extends NOOPAccessor {
+  closed = false
+  override close(): Promise<void> {
+    this.closed = true
+    return Promise.resolve()
+  }
+}
+
+describe('handleCli install lifetime', () => {
+  it('removal closes the accessor after the leaf and its output', async () => {
+    let enter!: () => void
+    const entered = new Promise<void>((resolve) => (enter = resolve))
+    let finish!: () => void
+    const finished = new Promise<void>((resolve) => (finish = resolve))
+    async function* out(): AsyncGenerator<Uint8Array> {
+      yield await Promise.resolve(new TextEncoder().encode('done\n'))
+    }
+    const registry = new CLIRegistry()
+    const install = registry.install(
+      'prog',
+      new CLI({
+        spec: new CommandSpec({ name: 'prog' }),
+        handlers: {
+          '': new CLIHandler({
+            fn: async () => {
+              enter()
+              await finished
+              return [out(), new IOResult()]
+            },
+          }),
+        },
+        accessor: (config) => new ClosingAccessor(config),
+      }),
+    )
+    const accessor = install.accessor as ClosingAccessor
+    const running = handleCli(install, ['prog'], new SessionState({ sessionId: 't' }))
+    await entered
+    let removed = false
+    const removing = registry.uninstall('prog').then(() => {
+      removed = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(registry.get('prog')).toBeNull()
+    expect(accessor.closed).toBe(false)
+    finish()
+    const [stdout] = await running
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(removed).toBe(false)
+    expect(accessor.closed).toBe(false)
+    expect(dec.decode(await materialize(stdout))).toBe('done\n')
+    await removing
+    expect(accessor.closed).toBe(true)
+  })
+})

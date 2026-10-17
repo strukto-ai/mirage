@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { KeyLock } from '../cache/lock.ts'
+import type { ByteSource } from '../io/types.ts'
+
 /** Work in flight on one resource, awaited before it is released. */
 export class Activity {
   private count = 0
@@ -34,6 +37,56 @@ export class Activity {
     if (this.count === 0) return Promise.resolve()
     return new Promise((resolve) => {
       this.waiters.push(resolve)
+    })
+  }
+
+  /** Count `source` in flight until it ends or is closed. */
+  hold(source: ByteSource): ByteSource {
+    if (source instanceof Uint8Array) return source
+    return new ActivityStream(source, this.acquire())
+  }
+}
+
+/** Explicit return releases even a stream that was never pulled. */
+class ActivityStream implements AsyncIterableIterator<Uint8Array> {
+  private readonly source: AsyncIterator<Uint8Array>
+  private readonly pullLock = new KeyLock()
+  constructor(
+    source: AsyncIterable<Uint8Array>,
+    private readonly release: () => void,
+  ) {
+    this.source = source[Symbol.asyncIterator]()
+  }
+  [Symbol.asyncIterator](): AsyncIterableIterator<Uint8Array> {
+    return this
+  }
+  next(): Promise<IteratorResult<Uint8Array>> {
+    return this.pullLock.withLock('', async () => {
+      try {
+        const step = await this.source.next()
+        if (step.done === true) this.release()
+        return step
+      } catch (error) {
+        this.release()
+        throw error
+      }
+    })
+  }
+  return(): Promise<IteratorResult<Uint8Array>> {
+    // A pull can wait on a source that only yields when something lands (a
+    // follow), so the source is told to close before the pull ends, not
+    // after: its own close is what ends that wait.
+    const closing = this.source.return?.()
+    // Handled here so a failed close is not unhandled while the pull ends;
+    // awaiting it below still hands the failure to the caller.
+    void closing?.catch(() => undefined)
+    return this.pullLock.withLock('', async () => {
+      try {
+        await closing
+        return { done: true, value: undefined }
+      } finally {
+        this.release()
+      }
     })
   }
 }

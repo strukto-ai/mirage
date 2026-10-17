@@ -13,10 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
-import { VFSActivity } from './activity.ts'
+import { Activity } from './activity.ts'
 
-it.each(['eof', 'error', 'close'])('VFS usage ends with its stream (%s)', async (finish) => {
-  const activity = new VFSActivity()
+it.each(['eof', 'error', 'close'])('usage ends with its stream (%s)', async (finish) => {
+  const activity = new Activity()
   async function* chunks(): AsyncGenerator<Uint8Array> {
     yield await Promise.resolve(new Uint8Array([1]))
     if (finish === 'error') throw new Error('read failed')
@@ -54,7 +54,7 @@ it.each(['eof', 'error', 'close'])('VFS usage ends with its stream (%s)', async 
 })
 
 it('close waits for a pending pull before releasing usage', async () => {
-  const activity = new VFSActivity()
+  const activity = new Activity()
   let entered = (): void => undefined
   let resume = (): void => undefined
   const started = new Promise<void>((resolve) => {
@@ -90,7 +90,7 @@ it('close waits for a pending pull before releasing usage', async () => {
 })
 
 it('close ends a pull waiting on a source that only its close ends', async () => {
-  const activity = new VFSActivity()
+  const activity = new Activity()
   let wake = (): void => undefined
   const idle: AsyncIterableIterator<Uint8Array> = {
     next: () =>

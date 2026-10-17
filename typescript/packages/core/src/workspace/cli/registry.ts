@@ -20,6 +20,7 @@ import { snakeToCamel } from '../../utils/normalize.ts'
 import { JOB_BUILTINS, KEYWORDS, NAMESPACE_COMMANDS, SHELL_NAMES } from '../lookup/constants.ts'
 import { z } from 'zod'
 
+import { Activity } from '../../utils/activity.ts'
 import type { CLIInstall } from './types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
@@ -44,6 +45,7 @@ import { compareCodePoints } from '../../utils/sort.ts'
  */
 export class CLIRegistry {
   private readonly installs = new Map<string, CLIInstall>()
+  private readonly retiring = new Map<CLIInstall, Promise<void>>()
 
   /** @param peers the mounts' accessors, which an install may share an account with. */
   constructor(private readonly peers: () => readonly Accessor[] = () => []) {}
@@ -75,7 +77,13 @@ export class CLIRegistry {
     const validated = this.validateConfig(name, spec, config)
     const accessor = spec.accessor(validated)
     accessor.join?.([...this.peers(), ...[...this.installs.values()].map((i) => i.accessor)])
-    const install: CLIInstall = { name, cli: spec, config: validated, accessor }
+    const install: CLIInstall = {
+      name,
+      cli: spec,
+      config: validated,
+      accessor,
+      activity: new Activity(),
+    }
     this.installs.set(name, install)
     return install
   }
@@ -161,21 +169,38 @@ export class CLIRegistry {
     return result
   }
 
-  /** Remove an installed CLI and close its accessor; its head word stops resolving (127). */
+  /**
+   * Remove an installed CLI now and close its accessor once the lines running
+   * on it and their output streams are done; its head word stops resolving
+   * (127) at once.
+   */
   async uninstall(name: string): Promise<void> {
     const install = this.installs.get(name)
     if (install === undefined) {
       throw new Error(`CLI name '${name}' is not installed`)
     }
     this.installs.delete(name)
-    await install.accessor.close?.()
+    const closing = retire(install).finally(() => {
+      this.retiring.delete(install)
+    })
+    this.retiring.set(install, closing)
+    await closing
   }
 
-  /** Close every install's accessor, as the workspace closes. */
+  /**
+   * Close every install's accessor, including the ones still being removed,
+   * as the workspace closes; one failed close does not skip the rest.
+   */
   async close(): Promise<void> {
     const installs = [...this.installs.values()]
     this.installs.clear()
-    for (const install of installs) await install.accessor.close?.()
+    const results = await Promise.allSettled([
+      ...installs.map((install) => install.accessor.close?.()),
+      ...this.retiring.values(),
+    ])
+    const failures = results.flatMap((r) => (r.status === 'rejected' ? [r.reason as unknown] : []))
+    if (failures.length > 0)
+      throw failures.length === 1 ? failures[0] : new AggregateError(failures, 'CLI close failed')
   }
 
   /** Look up an installation by head word. */
@@ -192,4 +217,9 @@ export class CLIRegistry {
   names(): ReadonlySet<string> {
     return new Set(this.installs.keys())
   }
+}
+
+async function retire(install: CLIInstall): Promise<void> {
+  await install.activity.wait()
+  await install.accessor.close?.()
 }
