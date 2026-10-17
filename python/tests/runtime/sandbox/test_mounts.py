@@ -19,7 +19,12 @@ import shlex
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.context import get_admission, get_current_session, line_running
+from mirage.context import (
+    current_caller,
+    get_admission,
+    get_current_session,
+    line_running,
+)
 from mirage.runtime.sandbox import mounts
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import SSHFS_OPTIONS
@@ -36,13 +41,17 @@ class Sink:
         return None
 
 
+async def lent_a_line() -> bool:
+    return current_caller().stop is not None
+
+
 class Drain:
     """A served prefix's server that reads its pipe to the end."""
 
-    def __init__(self, files, session, admission):
+    def __init__(self, files, session, run):
         self.files = files
         self.session = session
-        self.admission = admission
+        self.run = run
 
     async def serve(self, reader, writer):
         await reader.read()
@@ -400,8 +409,9 @@ async def test_a_line_returns_once_every_server_has_landed(monkeypatch):
     # sshfs sends the close that lands a line's writes after the line has
     # ended, so the line lands them itself, one server at a time, outside
     # the line but with its write admission: a capture waiting for the
-    # line lets those writes through. Served requests carry that admission
-    # until the line has landed them, and none after.
+    # line lets those writes through. Served requests run on that
+    # admission until the line has landed them, the line waits out the
+    # ones still running, and none run on it after.
     held = asyncio.Queue()
     landed = []
 
@@ -411,7 +421,7 @@ async def test_a_line_returns_once_every_server_has_landed(monkeypatch):
             await held.put((go, self))
             await go.wait()
             await self.files.write("/data/landed.txt", b"x")
-            landed.append((line_running(), self.admission().stop is not None))
+            landed.append((line_running(), await self.run(lent_a_line())))
 
     monkeypatch.setattr(mounts, "PipeServer", Server)
     ws = workspace(FakeSandbox("ssh"))
@@ -424,11 +434,18 @@ async def test_a_line_returns_once_every_server_has_landed(monkeypatch):
     first.set()
     second, _ = await asyncio.wait_for(held.get(), 5)
     assert not line.done()
+    still = asyncio.Event()
+    borrowed = asyncio.create_task(server.run(still.wait()))
+    await asyncio.sleep(0)
     second.set()
+    await asyncio.sleep(0.05)
+    assert not line.done()
+    still.set()
     assert (await asyncio.wait_for(line, 5)).exit_code == 0
     await asyncio.wait_for(capture, 5)
+    await borrowed
     assert landed == [(False, True), (False, True)]
-    assert server.admission().stop is None
+    assert not await server.run(lent_a_line())
     await ws.close()
 
 

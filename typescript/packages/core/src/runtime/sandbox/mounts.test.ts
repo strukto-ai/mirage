@@ -14,7 +14,12 @@
 
 import { beforeAll, describe, expect, it } from 'vitest'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
-import { getAdmission, getCurrentSession, lineRunning } from '../../context/session_context.ts'
+import {
+  currentCaller,
+  getAdmission,
+  getCurrentSession,
+  lineRunning,
+} from '../../context/session_context.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Limit, MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -143,6 +148,16 @@ async function workspace(
       ...(commandLimits === undefined ? {} : { commandLimits }),
     },
   )
+}
+
+// Whether `run` runs a request with a line's write admission.
+async function lentALine(run: (op: () => Promise<void>) => Promise<void>): Promise<boolean> {
+  let stop: unknown = null
+  await run(() => {
+    stop = currentCaller().stop
+    return Promise.resolve()
+  })
+  return stop !== null
 }
 
 async function until(ready: () => boolean): Promise<void> {
@@ -426,19 +441,20 @@ describe('SandboxMounts', () => {
     // sshfs sends the close that lands a line's writes after the line has
     // ended, so the line lands them itself, one server at a time, outside
     // the line but with its write admission: a capture waiting for the
-    // line lets those writes through. Served requests carry that admission
-    // until the line has landed them, and none after.
+    // line lets those writes through. Served requests run on that
+    // admission until the line has landed them, the line waits out the
+    // ones still running, and none run on it after.
     const holds: (() => void)[] = []
     const landed: [boolean, boolean][] = []
-    const admissions: (() => { stop: unknown })[] = []
-    registerPipeServer((files, session, admission) => {
-      admissions.push(admission)
+    const runs: ((op: () => Promise<void>) => Promise<void>)[] = []
+    registerPipeServer((files, session, run) => {
+      runs.push(run)
       return {
         ...drain(files, session),
         sync: async () => {
           await new Promise<void>((resolve) => holds.push(resolve))
           await files.write('/data/landed.txt', 'x')
-          landed.push([lineRunning(), admission().stop !== null])
+          landed.push([lineRunning(), await lentALine(run)])
         },
       }
     })
@@ -455,14 +471,25 @@ describe('SandboxMounts', () => {
       holds[0]?.()
       await until(() => holds.length === 2)
       expect(done).toBe(false)
+      let still = (): void => undefined
+      const borrowed = runs[0]?.(
+        () =>
+          new Promise<void>((resolve) => {
+            still = resolve
+          }),
+      )
       holds[1]?.()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(done).toBe(false)
+      still()
       expect((await line).exitCode).toBe(0)
       await capture
+      await borrowed
       expect(landed).toEqual([
         [false, true],
         [false, true],
       ])
-      expect(admissions.map((admission) => admission().stop)).toEqual([null, null])
+      expect(await Promise.all(runs.map(lentALine))).toEqual([false, false])
       await ws.close()
     } finally {
       registerPipeServer(drain)

@@ -48,14 +48,14 @@ let pipeServer: Parameters<typeof registerPipeServer>[0] | null = null
 
 /**
  * Where node puts the SFTP server a served prefix's pipe runs: as
- * `session`, each request run with the write admission `admission` gives
- * then. Core has none of its own: MountCore and ssh2 are node's.
+ * `session`, each request run by `run`. Core has none of its own:
+ * MountCore and ssh2 are node's.
  */
 export function registerPipeServer(
   make: (
     files: Files,
     session: SessionState,
-    admission: () => Pick<Caller, 'stop' | 'writeHeld'>,
+    run: (op: () => Promise<void>) => Promise<void>,
   ) => PipeServer,
 ): void {
   pipeServer = make
@@ -176,7 +176,8 @@ interface Served {
  */
 export class SandboxMounts {
   private session: SessionState | null = null
-  private readonly lines: Pick<Caller, 'stop' | 'writeHeld'>[] = []
+  // Each running line's write admission, and the served requests running on it.
+  private readonly lines: (Pick<Caller, 'stop' | 'writeHeld'> & { lent: Set<Promise<void>> })[] = []
   private readonly served = new Map<string, Served>()
   private seen: string | null = null
   private lock: Promise<unknown> = Promise.resolve()
@@ -222,7 +223,7 @@ export class SandboxMounts {
       )
     }
     const { stop, writeHeld } = currentCaller()
-    this.lines.push({ stop, writeHeld })
+    this.lines.push({ stop, writeHeld, lent: new Set() })
     return this.locked(async () => {
       const served = this.session
       const session = getSession(current.sessionId)
@@ -263,7 +264,9 @@ export class SandboxMounts {
    * this lands every one, outside the line as that close would, and
    * `fileEffectsDispatched` holds. Each landing keeps the line's write
    * admission alone: a capture waiting for the line lets it through rather
-   * than waiting on it.
+   * than waiting on it. Then the line lends its admission to no more
+   * requests, and waits out the ones it lent it to, so a capture never
+   * reads past one still running.
    */
   async sync(): Promise<void> {
     const { stop, writeHeld } = currentCaller()
@@ -275,19 +278,32 @@ export class SandboxMounts {
       }
     } finally {
       const index = this.lines.findIndex((held) => held.stop === stop)
-      if (index >= 0) this.lines.splice(index, 1)
+      const [line] = index >= 0 ? this.lines.splice(index, 1) : []
+      if (line !== undefined) await Promise.all(line.lent)
     }
   }
 
   /**
-   * The write admission a served request runs with: the latest line running
-   * in the sandbox's, from its `admit` to its `sync`, and none between
-   * lines. A program's file op then counts as its line's, so a capture
-   * waiting for that line lets it land rather than holding it while the
-   * line waits on it.
+   * Run one served request with the write admission of the latest line
+   * running in the sandbox, from its `admit` to its `sync`, and none
+   * between lines. A program's file op then counts as its line's, so a
+   * capture waiting for that line lets it land rather than holding it while
+   * the line waits on it.
    */
-  private admission(): Pick<Caller, 'stop' | 'writeHeld'> {
-    return this.lines.at(-1) ?? { stop: null, writeHeld: false }
+  private async lend(op: () => Promise<void>): Promise<void> {
+    const line = this.lines.at(-1)
+    if (line === undefined) return op()
+    let done = (): void => undefined
+    const running = new Promise<void>((resolve) => {
+      done = resolve
+    })
+    line.lent.add(running)
+    try {
+      await runWithCaller({ ...currentCaller(), stop: line.stop, writeHeld: line.writeHeld }, op)
+    } finally {
+      line.lent.delete(running)
+      done()
+    }
   }
 
   private refusal(ruled: ReadonlySet<string>): string | null {
@@ -353,7 +369,7 @@ export class SandboxMounts {
       try {
         for (const prefix of fresh) {
           await this.serve(
-            make(files, session, () => this.admission()),
+            make(files, session, (op) => this.lend(op)),
             prefix,
             present,
             signal,

@@ -16,15 +16,17 @@ import asyncio
 import logging
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Coroutine, Iterable
 from contextvars import Context
-from typing import Any
+from dataclasses import replace
+from typing import Any, TypeVar
 
 from mirage.context import (
     Caller,
     bind_caller,
     current_caller,
     get_current_session,
+    reset_caller,
 )
 from mirage.runtime.binding import WorkspaceBinding, restricted_mounts_for
 from mirage.runtime.sandbox.constants import (
@@ -42,6 +44,8 @@ from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 PipeServer: Any
 try:
@@ -169,7 +173,9 @@ class SandboxMounts:
         self._run = run
         self._open_pipe = open_pipe
         self._session: SessionState | None = None
-        self._lines: list[Caller] = []
+        # Each running line's write admission, and the served requests
+        # running on it.
+        self._lines: list[tuple[Caller, set[asyncio.Future[None]]]] = []
         self._served: dict[
             str, tuple[SandboxPipe, asyncio.Task[None], Any]
         ] = {}
@@ -206,7 +212,8 @@ class SandboxMounts:
                 "and this line runs as none"
             )
         line = current_caller()
-        self._lines.append(Caller(stop=line.stop, write_held=line.write_held))
+        held = Caller(stop=line.stop, write_held=line.write_held)
+        self._lines.append((held, set()))
         rules = current.commands
         if rules is not None and any(
             rule.commands and (rule.paths or rule.mount)
@@ -259,7 +266,9 @@ class SandboxMounts:
         so this lands every one, outside the line as that close would,
         and ``file_effects_dispatched`` holds. Each landing keeps the
         line's write admission alone: a capture waiting for the line lets
-        it through rather than waiting on it.
+        it through rather than waiting on it. Then the line lends its
+        admission to no more requests, and waits out the ones it lent it
+        to, so a capture never reads past one still running.
         """
         line = current_caller()
         admitted = Caller(stop=line.stop, write_held=line.write_held)
@@ -269,19 +278,41 @@ class SandboxMounts:
                 context.run(bind_caller, admitted)
                 await asyncio.create_task(server.sync(), context=context)
         finally:
-            for index, held in enumerate(self._lines):
+            for index, (held, lent) in enumerate(self._lines):
                 if held.stop is line.stop:
                     del self._lines[index]
+                    if lent:
+                        await asyncio.wait(lent)
                     break
 
-    def _admission(self) -> Caller:
-        """The write admission a served request runs with: the latest line
-        running in the sandbox's, from its ``admit`` to its ``sync``, and
-        none between lines. A program's file op then counts as its line's,
-        so a capture waiting for that line lets it land rather than
-        holding it while the line waits on it.
+    async def _lend(self, op: Coroutine[Any, Any, T]) -> T:
+        """Run one served request with the write admission of the latest
+        line running in the sandbox, from its ``admit`` to its ``sync``,
+        and none between lines.
+
+        A program's file op then counts as its line's, so a capture
+        waiting for that line lets it land rather than holding it while
+        the line waits on it.
+
+        Args:
+            op (Coroutine[Any, Any, T]): the request's work.
         """
-        return self._lines[-1] if self._lines else Caller()
+        if not self._lines:
+            return await op
+        held, lent = self._lines[-1]
+        done: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        lent.add(done)
+        token = bind_caller(
+            replace(
+                current_caller(), stop=held.stop, write_held=held.write_held
+            )
+        )
+        try:
+            return await op
+        finally:
+            reset_caller(token)
+            lent.discard(done)
+            done.set_result(None)
 
     def _refusal(self, ruled: frozenset[str]) -> str | None:
         for prefix in sorted(ruled):
@@ -346,7 +377,7 @@ class SandboxMounts:
             try:
                 for prefix in new:
                     await self._serve(
-                        PipeServer(files, session, self._admission),
+                        PipeServer(files, session, self._lend),
                         prefix,
                         present,
                     )

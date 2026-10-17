@@ -17,12 +17,13 @@ import inspect
 import io
 import stat
 import struct
+from dataclasses import replace
 
 import asyncssh
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.context import Caller
+from mirage.context import bind_caller, current_caller, reset_caller
 from mirage.mount.constants import LISTING_CONCURRENCY
 from mirage.mount.sftp import (
     MirageSFTPServer,
@@ -218,7 +219,7 @@ async def test_a_pipe_answers_as_its_session():
     await ws.session("agent", profile="agent")
     requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
     served = asyncio.create_task(
-        PipeServer(ws.vfs, ws.get_session("agent"), Caller).serve(
+        PipeServer(ws.vfs, ws.get_session("agent")).serve(
             requests, Feed(answers)
         )
     )
@@ -243,7 +244,7 @@ async def test_a_pipe_accepts_sshfs_symlink_wire_order(target):
     await ws.session("agent")
     requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
     served = asyncio.create_task(
-        PipeServer(ws.vfs, ws.get_session("agent"), Caller).serve(
+        PipeServer(ws.vfs, ws.get_session("agent")).serve(
             requests, Feed(answers)
         )
     )
@@ -284,7 +285,7 @@ async def test_a_pipe_closed_before_it_speaks_ends_quietly():
     requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
     requests.feed_eof()
     await asyncio.wait_for(
-        PipeServer(ws.vfs, ws.get_session("agent"), Caller).serve(
+        PipeServer(ws.vfs, ws.get_session("agent")).serve(
             requests, Feed(answers)
         ),
         5,
@@ -328,7 +329,7 @@ async def test_a_sync_lands_what_a_pipe_acknowledged_before_its_close():
     # close that lands it later, on its own: the sync between them lands it.
     ws = Workspace({"/notes": RAMVFS()}, mode=MountMode.WRITE)
     await ws.session("agent")
-    server = PipeServer(ws.vfs, ws.get_session("agent"), Caller)
+    server = PipeServer(ws.vfs, ws.get_session("agent"))
     requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
     served = asyncio.create_task(server.serve(requests, Feed(answers)))
     try:
@@ -353,18 +354,24 @@ async def test_a_sync_lands_what_a_pipe_acknowledged_before_its_close():
 
 @pytest.mark.asyncio
 async def test_a_running_lines_request_lands_past_a_capture_waiting_for_it():
-    # A request runs with the admission it is given: the running line's
-    # lets it land while a capture waits for that line, rather than wait
-    # on the capture the line is holding up.
+    # A request run with the running line's write admission lands while a
+    # capture waits for that line, rather than wait on the capture the
+    # line is holding up.
     ws = Workspace({"/notes": RAMVFS()}, mode=MountMode.WRITE)
     await ws.session("agent")
     line = asyncio.create_task(ws.shell("sleep 30"))
     while not ws._admitted:
         await asyncio.sleep(0)
     (stop,) = ws._admitted
-    server = PipeServer(
-        ws.vfs, ws.get_session("agent"), lambda: Caller(stop=stop)
-    )
+
+    async def as_line(op):
+        token = bind_caller(replace(current_caller(), stop=stop))
+        try:
+            return await op
+        finally:
+            reset_caller(token)
+
+    server = PipeServer(ws.vfs, ws.get_session("agent"), as_line)
     requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
     served = asyncio.create_task(server.serve(requests, Feed(answers)))
     capture = asyncio.create_task(ws.snapshot(io.BytesIO()))

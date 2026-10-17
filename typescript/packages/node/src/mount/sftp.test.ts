@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { currentCaller, runWithCaller } from '@struktoai/mirage-core/context/session_context'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { describe, expect, it } from 'vitest'
@@ -57,9 +58,6 @@ function stat(ident: number, path: string): Buffer {
   body.writeUInt32BE(name.length, 4)
   return packet(FXP_STAT, Buffer.concat([body, name]))
 }
-
-// Requests that run outside any line.
-const NO_LINE = () => ({ stop: null, writeHeld: false })
 
 async function until(ready: () => boolean): Promise<void> {
   for (let tries = 0; tries < 1000 && !ready(); tries++) {
@@ -181,10 +179,7 @@ describe('PipeServer', () => {
     await ws.vfs.write('/notes/real', 'target')
     await ws.session('agent')
     const end = client()
-    const served = new PipeServer(ws.vfs, ws.getSession('agent'), NO_LINE).serve(
-      end.reader,
-      end.writer,
-    )
+    const served = new PipeServer(ws.vfs, ws.getSession('agent')).serve(end.reader, end.writer)
     try {
       end.send(packet(FXP_INIT, uint32(3)))
       await end.answer()
@@ -220,10 +215,7 @@ describe('PipeServer', () => {
     await ws.vfs.write('/notes/secret.txt', 'salaries')
     await ws.session('agent', { profile: 'agent' })
     const end = client()
-    const served = new PipeServer(ws.vfs, ws.getSession('agent'), NO_LINE).serve(
-      end.reader,
-      end.writer,
-    )
+    const served = new PipeServer(ws.vfs, ws.getSession('agent')).serve(end.reader, end.writer)
     const version = Buffer.alloc(4)
     version.writeUInt32BE(3)
     end.send(packet(FXP_INIT, version))
@@ -248,7 +240,7 @@ describe('PipeServer', () => {
     await ws.session('agent')
     const end = client()
     end.close()
-    await new PipeServer(ws.vfs, ws.getSession('agent'), NO_LINE).serve(end.reader, end.writer)
+    await new PipeServer(ws.vfs, ws.getSession('agent')).serve(end.reader, end.writer)
     await ws.close()
   })
 
@@ -256,10 +248,7 @@ describe('PipeServer', () => {
     const ws = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.session('agent')
     const end = client()
-    const served = new PipeServer(ws.vfs, ws.getSession('agent'), NO_LINE).serve(
-      end.reader,
-      end.writer,
-    )
+    const served = new PipeServer(ws.vfs, ws.getSession('agent')).serve(end.reader, end.writer)
     end.send(packet(FXP_INIT, uint32(3)))
     await end.answer()
     const flags = OPEN.WRITE | OPEN.CREAT | OPEN.TRUNC
@@ -294,7 +283,7 @@ describe('PipeServer', () => {
     // close that lands it later, on its own: the sync between them lands it.
     const ws = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.session('agent')
-    const server = new PipeServer(ws.vfs, ws.getSession('agent'), NO_LINE)
+    const server = new PipeServer(ws.vfs, ws.getSession('agent'))
     const end = client()
     const served = server.serve(end.reader, end.writer)
     const read = async () => new TextDecoder().decode(await ws.vfs.read('/notes/new.txt'))
@@ -318,9 +307,9 @@ describe('PipeServer', () => {
   })
 
   it("lands a running line's request past a capture waiting for it", async () => {
-    // A request runs with the admission it is given: the running line's
-    // lets it land while a capture waits for that line, rather than wait
-    // on the capture the line is holding up.
+    // A request run with the running line's write admission lands while a
+    // capture waits for that line, rather than wait on the capture the
+    // line is holding up.
     const ws = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.session('agent')
     const internals = ws as unknown as { admitted: Set<AbortController>; capturing: boolean }
@@ -328,10 +317,9 @@ describe('PipeServer', () => {
     const line = ws.shell('sleep 30', { signal: abort.signal }).catch(() => undefined)
     await until(() => internals.admitted.size === 1)
     const [stop = null] = internals.admitted
-    const server = new PipeServer(ws.vfs, ws.getSession('agent'), () => ({
-      stop,
-      writeHeld: false,
-    }))
+    const server = new PipeServer(ws.vfs, ws.getSession('agent'), (op) =>
+      runWithCaller({ ...currentCaller(), stop }, op),
+    )
     const end = client()
     const served = server.serve(end.reader, end.writer)
     const capture = ws.snapshot()

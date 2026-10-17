@@ -17,11 +17,6 @@ import { createRequire } from 'node:module'
 import { constants as osConstants } from 'node:os'
 import { posix } from 'node:path'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
-import {
-  currentCaller,
-  runWithCaller,
-  type Caller,
-} from '@struktoai/mirage-core/context/session_context'
 import { eexist, eisdir, enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
 import { registerPipeServer } from '@struktoai/mirage-core/runtime/sandbox/mounts'
 import type { PipeWriter } from '@struktoai/mirage-core/runtime/types'
@@ -472,8 +467,8 @@ function loadSftp(): Ssh2Sftp {
  *
  * The client is `sshfs -o passive`, using OpenSSH's reversed symlink
  * wire order. Every request it makes is a request of `session`,
- * held to its hides, modes and policies, and runs with the write
- * admission `admission` gives when it arrives.
+ * held to its hides, modes and policies. `run` runs each request (with a
+ * line's write admission, for a sandbox).
  */
 export class PipeServer {
   private readonly core: MountCore
@@ -481,7 +476,7 @@ export class PipeServer {
   constructor(
     files: Files,
     session: SessionState,
-    private readonly admission: () => Pick<Caller, 'stop' | 'writeHeld'>,
+    private readonly run: (op: () => Promise<void>) => Promise<void> = (op) => op(),
   ) {
     this.core = new MountCore(files, { session })
   }
@@ -509,7 +504,7 @@ export class PipeServer {
       () => Promise.resolve(this.core),
       undefined,
       true,
-      (op) => runWithCaller({ ...currentCaller(), ...this.admission() }, op),
+      this.run,
     ).attach()
     const chunks = reader.getReader()
     try {
@@ -530,4 +525,4 @@ export class PipeServer {
   }
 }
 
-registerPipeServer((files, session, admission) => new PipeServer(files, session, admission))
+registerPipeServer((files, session, run) => new PipeServer(files, session, run))
