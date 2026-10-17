@@ -927,29 +927,6 @@ export function requirePathsWritable(
   }
 }
 
-/**
- * Refuse a service-addressed write unless the whole mount's effective
- * mode grants writes.
- *
- * For bespoke commands whose write is addressed by a service id rather
- * than a path (trello's card writes): the admission gate lets them run
- * while any shown subtree grants writes, but an id names no path a
- * per-path check could judge, so only the mount-wide grant counts and
- * a write-granting carve-out alone refuses, failing toward refusal.
- * Inert outside a mount's command. `mountPrefix` is the asking
- * command's own (`opts.mountPrefix`), which is what lets the fallback
- * storage select the right gate; the isolating runtimes answer from
- * the binding alone.
- */
-export function requireMountWritable(mountPrefix: string, access?: SessionAccess): void {
-  const gate = mountGateFor(mountPrefix)
-  if (gate === null) return
-  const [prefix, mode] = gate
-  if (effectiveMountMode(prefix, mode, access) === MountMode.READ) {
-    throw erofs(prefix, `mount ${prefix} is read-only`)
-  }
-}
-
 /** Bind access to its owner before an asynchronous operation can suspend. */
 export function sessionAccess(session: SessionAccess | null): SessionAccess {
   return (

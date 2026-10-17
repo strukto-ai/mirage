@@ -83,7 +83,7 @@
         },
         {
           "facade": {
-            "method": "cat",
+            "method": "read",
             "path": "/data/new.txt"
           },
           "expect": {

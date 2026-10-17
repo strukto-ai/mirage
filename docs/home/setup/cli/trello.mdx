@@ -1,0 +1,31 @@
+---
+title: Trello
+icon: trello
+description: Set up the Trello CLI with Python or TypeScript.
+---
+
+Mirage defines this command tree over the [Trello REST API](https://developer.atlassian.com/cloud/trello/rest/).
+
+Create an API key and token in [Trello setup](/home/setup/trello), then
+register them on an existing `ws`. Commands:
+[Python](/python/cli/trello) · [TypeScript](/typescript/cli/trello).
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage.commands.cli.builtin.trello import TRELLO
+    from mirage.core.trello.config import TrelloConfig
+
+    config = TrelloConfig(api_key="...", api_token="...")
+    ws.register_cli("trello", TRELLO, config.model_dump())
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { TRELLO } from '@struktoai/mirage-core'
+
+    const config = { apiKey: '...', apiToken: '...' }
+    ws.registerCli('trello', TRELLO, config)
+    ```
+  </Tab>
+</Tabs>

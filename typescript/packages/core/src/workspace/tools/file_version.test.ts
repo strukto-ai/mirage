@@ -20,6 +20,8 @@ import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { FileVersionTracker, StaleMirageFileError, fingerprint } from './file_version.ts'
 
+const DEC = new TextDecoder()
+
 let ws: Workspace
 
 beforeEach(async () => {
@@ -36,8 +38,7 @@ beforeEach(async () => {
 // of the condition.
 function renderingVfs(inner: Workspace): Files {
   const prefix = new TextEncoder().encode('rendered:')
-  return {
-    links: inner.vfs.links,
+  return Object.assign(Object.create(inner.vfs) as Files, {
     read: async (path: string): Promise<Uint8Array> => {
       const stored = await inner.vfs.read(path, { raw: true })
       return new Uint8Array([...prefix, ...stored])
@@ -45,7 +46,7 @@ function renderingVfs(inner: Workspace): Files {
     write: (path: string, content: string | Uint8Array): Promise<void> =>
       inner.vfs.write(path, content),
     exists: (path: string): Promise<boolean> => inner.vfs.exists(path),
-  } as unknown as Files
+  })
 }
 
 // A read seam that holds the reads at the given call indices once they
@@ -78,8 +79,7 @@ function heldVfs(
     )
   }
   let reads = 0
-  const vfs = {
-    links: inner.vfs.links,
+  const vfs = Object.assign(Object.create(inner.vfs) as Files, {
     read: async (path: string, options?: { raw?: boolean }): Promise<Uint8Array> => {
       const n = reads++
       const bytes = await inner.vfs.read(path, options)
@@ -92,7 +92,7 @@ function heldVfs(
     },
     write: (path: string, content: string): Promise<void> => inner.vfs.write(path, content),
     exists: (path: string): Promise<boolean> => inner.vfs.exists(path),
-  } as unknown as Files
+  })
   return { vfs, fetched, release }
 }
 
@@ -114,7 +114,7 @@ describe('FileVersionTracker', () => {
     held.release.get(0)?.()
     expect(new TextDecoder().decode(await reading)).toBe('two')
     await tracker.write('/a.txt', 'three')
-    expect(await ws.vfs.cat('/a.txt')).toBe('three')
+    expect(DEC.decode(await ws.vfs.read('/a.txt'))).toBe('three')
   })
 
   it('keeps the shown stamp when writes land during both fetches of a read', async () => {
@@ -130,7 +130,7 @@ describe('FileVersionTracker', () => {
     held.release.get(2)?.()
     expect(new TextDecoder().decode(await reading)).toBe('two')
     await expect(tracker.write('/a.txt', 'four')).rejects.toThrow(StaleMirageFileError)
-    expect(await ws.vfs.cat('/a.txt')).toBe('three')
+    expect(DEC.decode(await ws.vfs.read('/a.txt'))).toBe('three')
   })
 
   it('hands back bytes the caller can change without changing the file', async () => {
@@ -138,7 +138,7 @@ describe('FileVersionTracker', () => {
     await ws.vfs.write('/a.txt', 'one')
     const bytes = await tracker.read('/a.txt')
     bytes[0] = 0x4f
-    expect(await ws.vfs.cat('/a.txt')).toBe('one')
+    expect(DEC.decode(await ws.vfs.read('/a.txt'))).toBe('one')
   })
 
   it('refuses a write to a file that changed underneath', async () => {
@@ -155,7 +155,7 @@ describe('FileVersionTracker', () => {
     await tracker.read('/a.txt')
     await tracker.write('/a.txt', 'two')
     await tracker.write('/a.txt', 'three')
-    expect(await ws.vfs.cat('/a.txt')).toBe('three')
+    expect(DEC.decode(await ws.vfs.read('/a.txt'))).toBe('three')
   })
 
   it('stamps what a later read returns, not the bytes handed in', async () => {
@@ -165,7 +165,7 @@ describe('FileVersionTracker', () => {
     const tracker = new FileVersionTracker(renderingVfs(ws))
     await tracker.write('/a.txt', 'one')
     await tracker.write('/a.txt', 'two')
-    expect(await ws.vfs.cat('/a.txt')).toBe('two')
+    expect(DEC.decode(await ws.vfs.read('/a.txt'))).toBe('two')
   })
 
   it('reads for edit after its own write on a rendering mount', async () => {
@@ -184,7 +184,7 @@ describe('FileVersionTracker', () => {
     await tracker.read('/alias.txt')
     await ws.vfs.write('/a.txt', 'moved underneath')
     await expect(tracker.write('/a.txt', 'two')).rejects.toThrow(StaleMirageFileError)
-    expect(await ws.vfs.cat('/a.txt')).toBe('moved underneath')
+    expect(DEC.decode(await ws.vfs.read('/a.txt'))).toBe('moved underneath')
   })
 
   it('sees the target read when the edit arrives through the alias', async () => {
@@ -202,6 +202,6 @@ describe('FileVersionTracker', () => {
     await tracker.read('/a.txt')
     await ws.vfs.write('/a.txt', 'moved underneath')
     await tracker.write('/a.txt', 'two')
-    expect(await ws.vfs.cat('/a.txt')).toBe('two')
+    expect(DEC.decode(await ws.vfs.read('/a.txt'))).toBe('two')
   })
 })

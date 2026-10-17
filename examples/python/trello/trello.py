@@ -19,6 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.trello import TRELLO
 from mirage.types import PathSpec
 from mirage.vfs.trello import TrelloConfig, TrelloVFS
 
@@ -33,6 +34,7 @@ vfs = TrelloVFS(config=config)
 
 async def main() -> None:
     ws = Workspace({"/trello": vfs}, mode=MountMode.WRITE)
+    ws.register_cli("trello", TRELLO, config.model_dump())
 
     print("=== not-found errors show the full virtual path ===")
     for cmd in (

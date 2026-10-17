@@ -34,7 +34,7 @@ from mirage.utils.path import (
 )
 from mirage.view.namespace_view import namespace_names
 from mirage.view.types import FollowOperands, LinkView, MountView
-from mirage.workspace.files import Files
+from mirage.workspace.files import Files, namespace_of
 from mirage.workspace.types import MountRow
 
 logger = logging.getLogger(__name__)
@@ -289,8 +289,11 @@ def link_view(files: Files | None) -> LinkView | None:
     Args:
         files (Files | None): the session's files.
     """
-    table = files._links if files is not None else None
-    if files is None or table is None:
+    if files is None:
+        return None
+    namespace = namespace_of(files)
+    table = namespace.links
+    if table is None:
         return None
     seen, links = files, table
 
@@ -307,7 +310,7 @@ def link_view(files: Files | None) -> LinkView | None:
         ]
 
     def resolve(virtual: str) -> str:
-        if not path_visible(seen._vis(), virtual):
+        if not path_visible(namespace.vis(), virtual):
             return virtual
         return posixpath.normpath(links.follow(virtual))
 
@@ -357,7 +360,7 @@ def mount_view(
     """
     if files is None:
         return None
-    seen = files
+    namespace = namespace_of(files)
 
     def below(virtual: str) -> list[str]:
         if crossing:
@@ -365,23 +368,23 @@ def mount_view(
         base = norm_dir(virtual)
         return [
             m.prefix.rstrip("/") or "/"
-            for m in sorted(seen._served(), key=lambda m: m.prefix)
+            for m in sorted(namespace.mounts(), key=lambda m: m.prefix)
             if m.prefix != base and m.prefix.startswith(base)
         ]
 
     def visible_below(virtual: str) -> list[str]:
-        vis = seen._vis()
+        vis = namespace.vis()
         return [root for root in below(virtual) if path_visible(vis, root)]
 
     def owner(virtual: str) -> MountRow | None:
-        prefixes = [m.prefix for m in seen._served()]
-        found = owner_prefix(prefixes, virtual)
-        return next((m for m in seen._served() if m.prefix == found), None)
+        served = namespace.mounts()
+        found = owner_prefix([m.prefix for m in served], virtual)
+        return next((m for m in served if m.prefix == found), None)
 
     def is_root(virtual: str) -> bool:
         if crossing:
             return False
-        return any(m.prefix == norm_dir(virtual) for m in seen._served())
+        return any(m.prefix == norm_dir(virtual) for m in namespace.mounts())
 
     def root_of(virtual: str) -> str:
         row = owner(virtual)
@@ -417,10 +420,11 @@ def owed_names(files: Files | None, directory: str) -> list[str]:
     """
     if files is None:
         return []
+    namespace = namespace_of(files)
     return namespace_names(
-        files._vis(),
-        [m.prefix for m in files._served()],
-        files._links,
+        namespace.vis(),
+        [m.prefix for m in namespace.mounts()],
+        namespace.links,
         directory,
     )
 
@@ -478,7 +482,7 @@ def follow_of(ctx: Context) -> FollowOperands | None:
     Args:
         ctx (Context): the invocation's context.
     """
-    return ctx.vfs._follow if ctx.vfs is not None else None
+    return namespace_of(ctx.vfs).follow if ctx.vfs is not None else None
 
 
 __all__ = [

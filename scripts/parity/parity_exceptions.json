@@ -53,15 +53,9 @@
     }
   },
   "unconstructible_vfs_names": {
-    "browser": {
-      "history": "See python: the history view mount is workspace-internal."
-    },
-    "node": {
-      "history": "See python: the history view mount is workspace-internal."
-    },
-    "python": {
-      "history": "The /.bash_history view mount is created by the workspace itself and is never named in YAML or a snapshot, so it registers commands without a build_vfs entry."
-    }
+    "browser": {},
+    "node": {},
+    "python": {}
   },
   "variant_vfs_facts": {
     "capabilities": {}

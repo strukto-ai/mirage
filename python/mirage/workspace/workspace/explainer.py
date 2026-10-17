@@ -180,14 +180,6 @@ class VfsExplainer:
         """
         return await _dry("is_file", (path,), lambda: self._vfs.stat(path))
 
-    async def cat(self, path: str) -> VfsExplanation:
-        """Explain ``session.vfs.cat``, judged as the read it makes.
-
-        Args:
-            path (str): the path.
-        """
-        return await _dry("cat", (path,), lambda: self._vfs.read(path))
-
     async def list_files(self, path: str) -> VfsExplanation:
         """Explain ``session.vfs.list_files``, judged as the readdir it
         makes; the entries it would then stat are named only by that

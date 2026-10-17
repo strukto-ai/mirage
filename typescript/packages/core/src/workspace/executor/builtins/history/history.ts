@@ -12,30 +12,44 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../../../commands/spec/builtins.ts'
+import { FlagView } from '../../../../commands/spec/flag_view.ts'
+import type { FlagValue } from '../../../../commands/spec/types.ts'
+import { renderHistoryListing } from '../../../../core/history/render.ts'
 import { IOResult } from '../../../../io/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'
-import { HISTORY_PREFIX } from '../../../../vfs/history/history.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
-import type { FlagValue } from '../../../../commands/spec/types.ts'
 import type { BuiltinCall, Result } from '../types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
-import { PathSpec } from '../../../../types.ts'
-import { sessionView } from '../../../session/state.ts'
 
 const USAGE =
   'history: usage: history [-c] [-d offset] [n] or ' +
   'history -anrw [filename] or history -ps arg [arg...]\n'
 const OPTION_CHARS = 'cdanrwsp'
 
-function usageError(message: string): Result {
-  const err = encodeText(message + USAGE)
+/** The builtin's output, status and execution-tree node. */
+function result(stdout: Uint8Array | null, exitCode = 0, stderr: Uint8Array | null = null): Result {
   return [
-    null,
-    new IOResult({ exitCode: 2, stderr: err }),
-    new ExecutionNode({ command: 'history', exitCode: 2, stderr: err }),
+    stdout,
+    new IOResult({ exitCode, stderr }),
+    new ExecutionNode({ command: 'history', exitCode, stderr: stderr ?? new Uint8Array() }),
   ]
+}
+
+function outOfRange(value: string): Result {
+  return result(null, 1, encodeText(`bash: history: ${value}: history position out of range\n`))
+}
+
+// Mirrors Python int(): trims surrounding whitespace, accepts an
+// optional sign, requires all digits. Unlike Number.parseInt it rejects
+// trailing garbage ("3abc") and decimals ("3.5"), matching bash, which
+// treats those as a non-numeric argument.
+function parseIntStrict(value: string): number | null {
+  const trimmed = value.trim()
+  if (!/^[+-]?\d+$/.test(trimmed)) return null
+  return Number.parseInt(trimmed, 10)
 }
 
 interface ParsedArgs {
@@ -89,12 +103,14 @@ function parseArgs(args: string[]): ParsedArgs {
 }
 
 /**
- * Dispatch the history shell builtin to the /.bash_history view mount.
+ * GNU's history builtin over the workspace's recorder.
  *
  * GNU lookup order: builtins resolve before mount commands, so a
- * mount-local command named "history" can never shadow this one. The
- * semantics live on the view VFS; this handler parses options and
- * routes.
+ * mount-local command named "history" can never shadow this one.
+ * -a/-r/-w/-n are accepted no-ops: bash uses them to sync the in-memory
+ * list with the histfile, but here both are the same store and always
+ * in sync. -p prints its args verbatim; when -s and -p are combined, -s
+ * wins and nothing is printed (bash-verified).
  */
 export async function handleHistory(
   registry: MountRegistry,
@@ -102,30 +118,59 @@ export async function handleHistory(
   session: SessionState,
 ): Promise<Result> {
   const { flags, texts, error } = parseArgs(args)
-  if (error !== null) return usageError(error)
+  if (error !== null) return result(null, 2, encodeText(error + USAGE))
   // bash abandons everything still to run, as `exit 1 2` does; `-p` and
   // `-s` take any number of words.
   if (Object.keys(flags).length === 0 && texts.length > 1) {
     throw new ExitSignal(1, encodeText('bash: history: too many arguments\n'))
   }
-  const mount = registry.tryMountFor(HISTORY_PREFIX)
-  if (mount === null) {
-    const err = encodeText('bash: history: not enabled for this workspace\n')
-    return [
-      null,
-      new IOResult({ exitCode: 1, stderr: err }),
-      new ExecutionNode({ command: 'history', exitCode: 1, stderr: err }),
-    ]
+  const observer = registry.observer
+  if (observer === null) {
+    return result(null, 1, encodeText('bash: history: not enabled for this workspace\n'))
   }
-  const [stream, io] = await mount.runCommand('history', [], texts, flags, {
-    cwd: PathSpec.fromStrPath(session.cwd),
-    session: sessionView(session, registry.policies),
-  })
-  // The view command always returns byte stderr, but io.stderr is typed
-  // as a ByteSource (a possible lazy stream); resolve it to bytes so the
-  // execution-tree node holds concrete stderr, never an unread stream.
-  const stderr = await io.materializeStderr()
-  return [stream, io, new ExecutionNode({ command: 'history', exitCode: io.exitCode, stderr })]
+  const fl = new FlagView(flags, specOf('history'))
+  const c = fl.asBool('c')
+  const d = fl.asStr('d')
+  const s = fl.asBool('s')
+  const p = fl.asBool('p')
+  const sid = session.sessionId
+  if (c) await observer.logClear(sid)
+  if (d !== undefined) {
+    const offset = parseIntStrict(d)
+    if (offset === null) return outOfRange(d)
+    const visible = await observer.sessionCommandEvents(sid)
+    const idx = offset > 0 ? offset - 1 : visible.length + offset
+    if (idx < 0 || idx >= visible.length) return outOfRange(d)
+    await observer.logDelete(sid, offset)
+  }
+  if (s && texts.length > 0) {
+    await observer.logCommandText(texts.join(' '), sid, session.cwd)
+  }
+  if (p && !s) {
+    return result(encodeText(texts.length > 0 ? texts.join('\n') + '\n' : ''))
+  }
+  if (
+    c ||
+    d !== undefined ||
+    s ||
+    fl.asBool('a') ||
+    fl.asBool('r') ||
+    fl.asBool('w') ||
+    fl.asBool('n')
+  ) {
+    return result(null)
+  }
+  let count: number | undefined
+  const arg = texts[0]
+  if (arg !== undefined) {
+    const parsed = parseIntStrict(arg)
+    if (parsed === null) {
+      return result(null, 1, encodeText(`bash: history: ${arg}: numeric argument required\n`))
+    }
+    count = parsed
+  }
+  const events = await observer.sessionCommandEvents(sid)
+  return result(encodeText(renderHistoryListing(events, count)))
 }
 
 /** The `history` arm. */

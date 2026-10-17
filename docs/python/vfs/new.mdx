@@ -365,7 +365,7 @@ Most of a backend is already written as a kit. Reach for one before writing a la
 | Object store | `mirage.core.object_store` | a flat key space (S3-style buckets, GridFS) |
 | Render | `mirage.core.render` (`json_bytes`, `jsonl_bytes`) | records rendered as the bytes the tree's files hold |
 
-Two builtins are the references. Trello is the hierarchy kit end to end: a scope table, listers, id-addressed readers, and nested `trello <noun> <verb>` commands. Jaeger is the client shape to copy: its `_get(accessor, ...)` takes the accessor and passes `accessor.pool` itself, so no call can forget the pool. Paths are always `PathSpec` values inside the VFS; never pass a path as a raw string.
+Two builtins are the references. Trello is the hierarchy kit end to end: a scope table, listers and id-addressed readers, with its id-addressed verbs in the `trello` CLI. Jaeger is the client shape to copy: its `_get(accessor, ...)` takes the accessor and passes `accessor.pool` itself, so no call can forget the pool. Paths are always `PathSpec` values inside the VFS; never pass a path as a raw string.
 
 ## File Structure
 
@@ -427,7 +427,7 @@ A hierarchy backend writes its tree once, as `SCOPES` in `core/<name>/scope.py`,
 - A listing that is a filtered or truncated view (one page of a bounded query, a time window, a glob-scoped span) returns `DirListing(entries, partial=True)`. Cached as the whole directory, it would prove every entry it left out absent.
 - `entry_stat("<id_key>", ...)` names the id under the key its path slot declares.
 - `FileStat.size` is the rendered byte length or `None`, never a storage-side number. Set `sizes_always_known` only when every listed size is computed from the same payload a read renders.
-- Id-addressed commands honor the same scope knobs the listing does (Trello's `commands/builtin/trello/_scope.py`).
+- Id-addressed verbs honor the same scope knobs the listing does, read from their own config (the trello CLI's `commands/cli/builtin/trello/scope.py`).
 
 Glob resolution is not a per-backend file: the mount derives `glob` from the VFS's `readdir`, capped by its `max_glob_matches`, and expands patterns through it.
 
@@ -475,7 +475,8 @@ already.
 The generic commands are registered once per workspace, and every mount falls back to them after its VFS's own. Each runs over the functions of the mount it runs on (`ctx.io`), and the generic command owns flag interpretation, so a backend wrapper is wiring only. A command of the same name in the backend's `COMMANDS` replaces the generic on that backend; `generic("<name>")` hands the replacement the default command for what it does not support, and `generic("<name>", vfs=..., table=...)` registers the default over a changed table (`/dev`'s endless `cat`).
 
 - Let grep and rg skip files by defining `files_containing` (and `lines_containing` for row stores) on the VFS; `search` serves the `search` command.
-- A verb (`trello card create`) declares its own `CommandSpec` with every id as a flag, reads flags through `FlagView(ctx.flags, spec=SPEC)` (never `flags.get(...)`), registers `write=True` for a mutation, and calls `require_mount_writable()` before the client. Specs declared inline are dumped to `.cache/spec/python/vfs_commands/` and compared with TypeScript's, and a prompt that teaches the verbs is pinned against their specs (`tests/vfs/trello/test_prompt.py`).
+- A mount verb (`chroma-query`) declares its own `CommandSpec`, reads flags through `FlagView(ctx.flags, spec=SPEC)` (never `flags.get(...)`) and registers `write=True` for a mutation. Specs declared inline are dumped to `.cache/spec/python/vfs_commands/` and compared with TypeScript's.
+- A verb addressed by a service id rather than a path (`trello card create`) is an account [CLI](/python/cli/custom), not a mount command: a `CLI` under `commands/cli/builtin/<name>/` with a `config_model` and an `accessor`, which consults no mount and marks its writes on the `CLIHandler`. A VFS prompt that shows such verbs is pinned against the CLI's specs (`tests/vfs/trello/test_prompt.py`).
 - Handlers take `(accessor, paths, texts, opts)`. Read `stdin`, `index`, `prefix`, and namespace facts from `opts`; do not add injected parameters or a second handler convention.
 - A handler that reads its `accessor` directly is trusted host code. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands. A command handed through `commands=[...]` does not run where the session restricts its mount.
 

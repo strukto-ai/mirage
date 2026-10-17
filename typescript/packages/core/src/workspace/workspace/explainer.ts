@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Files } from '../files.ts'
+import { type Files, withCaller } from '../files.ts'
 import { Explained } from '../../policy/errors.ts'
 import { Outcome, type ShellExplanation, type VfsExplanation } from '../../policy/types.ts'
 import type { SetAttrFields } from '../../types.ts'
@@ -120,11 +120,6 @@ export class VfsExplainer {
     return dry('isFile', [path], this.files, (files) => files.stat(path))
   }
 
-  /** Explain `session.vfs.cat`, judged as the read it makes. */
-  cat(path: string): Promise<VfsExplanation> {
-    return dry('cat', [path], this.files, (files) => files.read(path))
-  }
-
   /**
    * Explain `session.vfs.listFiles`, judged as the readdir it makes; the
    * entries it would then stat are named only by that read, which a dry run
@@ -229,7 +224,7 @@ async function dry(
   const trace: VfsExplanation[] = []
   let ran = false
   try {
-    await run(files.forCaller({ explaining: trace }))
+    await run(withCaller(files, { explaining: trace }))
     ran = true
   } catch (err) {
     if (!(err instanceof Explained) && (trace.length > 0 || !isFsError(err))) throw err

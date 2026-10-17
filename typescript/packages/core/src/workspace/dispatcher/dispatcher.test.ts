@@ -277,7 +277,7 @@ it('keeps no copy from before an empty streamed append waited', async () => {
     await pending
     const cached = await ws.cache.get('/dst/f')
     expect(cached === null ? null : new TextDecoder().decode(cached)).not.toBe('old')
-    expect(await ws.vfs.cat('/dst/f')).toBe('oldnew')
+    expect(DEC.decode(await ws.vfs.read('/dst/f'))).toBe('oldnew')
   } finally {
     await ws.close()
   }
@@ -383,7 +383,7 @@ describe('native streamed writes', () => {
       const result = await ws.shell(line)
       expect(result.exitCode, DEC.decode(await materialize(result.stderr))).toBe(0)
       expect(destination.streamed.some(([, path]) => path === target)).toBe(true)
-      expect(await ws.vfs.cat(target)).toBe(expected)
+      expect(DEC.decode(await ws.vfs.read(target))).toBe(expected)
       expect(Math.max(0, ...destination.chunkSizes)).toBeLessThanOrEqual(16384)
     } finally {
       await ws.close()
@@ -403,7 +403,8 @@ describe('native streamed writes', () => {
       await ws.vfs.write('/dst/f', 'a\nb\nc')
       const result = await ws.shell(line)
       expect(result.exitCode, DEC.decode(await materialize(result.stderr))).toBe(0)
-      for (const [path, data] of Object.entries(expected)) expect(await ws.vfs.cat(path)).toBe(data)
+      for (const [path, data] of Object.entries(expected))
+        expect(DEC.decode(await ws.vfs.read(path))).toBe(data)
       const streamed = destination.streamed.map(([, path]) => path)
       expect(streamed).not.toContain('/dst/f')
       for (const path of Object.keys(expected))
@@ -422,7 +423,7 @@ describe('native streamed writes', () => {
     let closed = false
     try {
       await ws.vfs.write('/dst/f', 'old')
-      expect(await ws.vfs.cat('/dst/f')).toBe('old')
+      expect(DEC.decode(await ws.vfs.read('/dst/f'))).toBe('old')
       destination.fail = true
       async function* source(): AsyncGenerator<Uint8Array> {
         await Promise.resolve()
@@ -436,7 +437,7 @@ describe('native streamed writes', () => {
       await expect(ws.vfs.write('/dst/f', source())).rejects.toThrow('write failed')
       expect(closed).toBe(true)
       expect(await ws.cache.exists('/dst/f')).toBe(false)
-      expect(await ws.vfs.cat('/dst/f')).toBe('new')
+      expect(DEC.decode(await ws.vfs.read('/dst/f'))).toBe('new')
     } finally {
       await ws.close()
     }
@@ -1520,7 +1521,7 @@ describe('a cold read keeps its bytes for the next reader', () => {
     expect(DEC.decode(await ws.vfs.read('/data/f.count', { offset: 0, size: 2 }))).toBe('BO')
     expect(DEC.decode(await ws.vfs.read('/data/f.count', { offset: 2, size: 2 }))).toBe('DY')
     expect(DEC.decode(await ws.vfs.read('/data/f.count', { offset: 0, size: 0 }))).toBe('')
-    expect(await ws.vfs.cat('/data/f.count')).toBe('BODY')
+    expect(DEC.decode(await ws.vfs.read('/data/f.count'))).toBe('BODY')
     expect(fetched).toEqual(['/data/f.count'])
   })
 
@@ -1649,7 +1650,7 @@ describe('a cold read keeps its bytes for the next reader', () => {
     await ws.vfs.write('/data/f.count', 'STORED')
     await ws.cache.remove('/data/f.count')
     await ws.vfs.read('/data/f.count')
-    expect(await ws.vfs.cat('/data/f.count')).toBe('NEWER')
+    expect(DEC.decode(await ws.vfs.read('/data/f.count'))).toBe('NEWER')
     expect(fetched).toHaveLength(1)
   })
 

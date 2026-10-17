@@ -646,7 +646,7 @@ describe('prejudge', () => {
     expect(elsewhere[0]?.outcome).toBe(Outcome.ASK)
     const waited = await w.shell('wait', { sessionId: 's' })
     expect(waited.exitCode).toBe(0)
-    expect(await w.vfs.cat('/data/read.txt')).toBe('s\n')
+    expect(DEC.decode(await w.vfs.read('/data/read.txt'))).toBe('s\n')
     expect(w.decisions.list('s')).toEqual([])
   })
 
@@ -1223,7 +1223,7 @@ describe('prejudge scope', () => {
     expect(w.decisions.list('s')).toHaveLength(1)
     const waited = await w.shell('wait', { sessionId: 's' })
     expect(waited.exitCode).toBe(0)
-    expect(await w.vfs.cat('/data/read.txt')).toBe('s\ns\n')
+    expect(DEC.decode(await w.vfs.read('/data/read.txt'))).toBe('s\ns\n')
     expect(asked).toHaveLength(1)
     expect(w.decisions.list('s')).toEqual([])
   })

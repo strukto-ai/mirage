@@ -18,10 +18,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.trello import TrelloAccessor
+from mirage.core.trello.config import TrelloConfig
 from mirage.core.trello.read import read
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.vfs.trello import TrelloVFS
-from mirage.vfs.trello.config import TrelloConfig
 from mirage.workspace import Workspace
 from tests.fixtures.vfs_io import vfs_over
 

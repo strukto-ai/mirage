@@ -44,7 +44,7 @@ describe('gcal VFS', () => {
   })
 
   it('reads calendar.json cold at the dispatcher', async () => {
-    const text = await workspace().vfs.cat('/cal/primary/calendar.json')
+    const text = new TextDecoder().decode(await workspace().vfs.read('/cal/primary/calendar.json'))
     expect(JSON.parse(text)).toMatchObject({ bucketTimeZone: HK })
   })
 

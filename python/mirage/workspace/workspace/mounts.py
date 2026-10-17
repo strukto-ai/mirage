@@ -32,7 +32,7 @@ from mirage.types import (
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
 from mirage.vfs.ram import RAMVFS
-from mirage.workspace.files import Files
+from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.read_policy import check_read_capability
@@ -289,7 +289,7 @@ def prepare_added_mount(
 
 async def unmount(
     registry: MountRegistry,
-    files: Files,
+    files: WorkspaceFiles,
     prefix: str,
     is_shutting_down: Callable[[], bool],
     shared_mounts: set[int],
@@ -305,7 +305,7 @@ async def unmount(
 
     Args:
         registry (MountRegistry): the workspace's mount table.
-        files (Files): the facade to detach the prefix from.
+        files (WorkspaceFiles): the facade to detach the prefix from.
         prefix (str): the mount's virtual prefix.
         is_shutting_down: live admission check after asynchronous cleanup.
         shared_mounts: instances owned by another workspace.

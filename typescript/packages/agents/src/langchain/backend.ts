@@ -33,7 +33,7 @@ import type {
 } from 'deepagents'
 import { ioToExecuteResponse, ioToFileInfos, ioToGrepMatches } from './convert.ts'
 import { gnuDirname } from '@struktoai/mirage-core/utils/path'
-import { replaceText } from '@struktoai/mirage-core/workspace/tools/io_text'
+import { decode, replaceText } from '@struktoai/mirage-core/workspace/tools/io_text'
 
 const TEXT_EXTENSIONS = new Set([
   'txt',
@@ -240,7 +240,7 @@ export class LangchainWorkspace implements SandboxBackendProtocol {
   ): Promise<EditResult> {
     let current: string
     try {
-      current = await this.vfs.cat(filePath)
+      current = decode(await this.vfs.read(filePath))
     } catch {
       return { error: `Error: file '${filePath}' not found` }
     }

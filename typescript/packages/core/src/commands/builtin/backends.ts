@@ -16,20 +16,16 @@ import type { BaseVFS } from '../../vfs/base.ts'
 import { ChromaVFS } from '../../vfs/chroma/chroma.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import { DifyVFS } from '../../vfs/dify/dify.ts'
-import { HistoryViewVFS } from '../../vfs/history/history.ts'
 import { LanceDBVFSBase } from '../../vfs/lancedb/lancedb.ts'
 import { Mem0VFS } from '../../vfs/mem0/mem0.ts'
 import { QdrantVFS } from '../../vfs/qdrant/qdrant.ts'
-import { TrelloVFS } from '../../vfs/trello/trello.ts'
 import { Command } from '../config.ts'
 import { CHROMA_COMMANDS } from './chroma/index.ts'
 import { DEV_COMMANDS } from './dev/index.ts'
 import { DIFY_COMMANDS } from './dify/index.ts'
-import { HISTORY_COMMANDS } from './history/index.ts'
 import { LANCEDB_COMMANDS } from './lancedb/index.ts'
 import { MEM0_COMMANDS } from './mem0/index.ts'
 import { QDRANT_COMMANDS } from './qdrant/index.ts'
-import { TRELLO_COMMANDS } from './trello/index.ts'
 
 // A VFS class, whatever its constructor's visibility (one may build
 // through a factory).
@@ -106,8 +102,6 @@ export function commandsFor(vfs: BaseVFS): Command[] {
 registerBackendCommands(ChromaVFS, () => CHROMA_COMMANDS)
 registerBackendCommands(DevVFS, () => DEV_COMMANDS)
 registerBackendCommands(DifyVFS, () => DIFY_COMMANDS)
-registerBackendCommands(HistoryViewVFS, () => HISTORY_COMMANDS)
 registerBackendCommands(LanceDBVFSBase, () => LANCEDB_COMMANDS)
 registerBackendCommands(Mem0VFS, () => MEM0_COMMANDS)
 registerBackendCommands(QdrantVFS, () => QDRANT_COMMANDS)
-registerBackendCommands(TrelloVFS, () => TRELLO_COMMANDS)

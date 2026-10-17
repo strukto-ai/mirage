@@ -20,6 +20,8 @@ import { Workspace } from '@struktoai/mirage-node'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { mirageTools, miragePlugin } from './index.ts'
 
+const DEC = new TextDecoder()
+
 function mkWs(): Workspace {
   const ram = new RAMVFS()
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE })
@@ -79,13 +81,13 @@ describe('opencode mirageTools.write', () => {
     const ws = mkWs()
     const out = await callTool(mirageTools(ws).write, { filePath: '/out.txt', content: 'data' })
     expect(out).toContain('/out.txt')
-    expect(await ws.vfs.cat('/out.txt')).toBe('data')
+    expect(DEC.decode(await ws.vfs.read('/out.txt'))).toBe('data')
   })
 
   it('creates missing parent directories', async () => {
     const ws = mkWs()
     await callTool(mirageTools(ws).write, { filePath: '/a/b/c.txt', content: 'x' })
-    expect(await ws.vfs.cat('/a/b/c.txt')).toBe('x')
+    expect(DEC.decode(await ws.vfs.read('/a/b/c.txt'))).toBe('x')
   })
 
   it('rejects an overwrite after the file changed since the session read it', async () => {
@@ -98,7 +100,7 @@ describe('opencode mirageTools.write', () => {
     const out = await callTool(tools.write, { filePath: '/out.txt', content: 'replacement' })
 
     expect(out).toContain('File changed since it was last read')
-    expect(await ws.vfs.cat('/out.txt')).toBe('changed elsewhere')
+    expect(DEC.decode(await ws.vfs.read('/out.txt'))).toBe('changed elsewhere')
   })
 
   it('can disable stale write protection', async () => {
@@ -110,7 +112,7 @@ describe('opencode mirageTools.write', () => {
 
     await callTool(tools.write, { filePath: '/out.txt', content: 'replacement' })
 
-    expect(await ws.vfs.cat('/out.txt')).toBe('replacement')
+    expect(DEC.decode(await ws.vfs.read('/out.txt'))).toBe('replacement')
   })
 })
 
@@ -124,7 +126,7 @@ describe('opencode mirageTools.edit', () => {
       newString: 'BAR',
     })
     expect(out).toContain('1 occurrence')
-    expect(await ws.vfs.cat('/f.txt')).toBe('foo BAR baz')
+    expect(DEC.decode(await ws.vfs.read('/f.txt'))).toBe('foo BAR baz')
   })
 
   it('rejects multiple occurrences without replaceAll', async () => {
@@ -148,7 +150,7 @@ describe('opencode mirageTools.edit', () => {
       replaceAll: true,
     })
     expect(out).toContain('2 occurrences')
-    expect(await ws.vfs.cat('/f.txt')).toBe('X X')
+    expect(DEC.decode(await ws.vfs.read('/f.txt'))).toBe('X X')
   })
 
   it('returns error when string not found', async () => {
@@ -176,7 +178,7 @@ describe('opencode mirageTools.edit', () => {
     })
 
     expect(out).toContain('File changed since it was last read')
-    expect(await ws.vfs.cat('/f.txt')).toBe('changed elsewhere')
+    expect(DEC.decode(await ws.vfs.read('/f.txt'))).toBe('changed elsewhere')
   })
 })
 
@@ -279,7 +281,7 @@ describe('opencode resolver (per-session workspace)', () => {
     const out = await exec(tools.write)({ filePath: '/note.txt', content: 'three' }, ctxA)
 
     expect(out).toContain('File changed since it was last read')
-    expect(await ws.vfs.cat('/note.txt')).toBe('two')
+    expect(DEC.decode(await ws.vfs.read('/note.txt'))).toBe('two')
   })
 })
 

@@ -26,11 +26,9 @@ _MODULES: dict[str, str] = {
     "mirage.vfs.chroma.chroma.ChromaVFS": "mirage.commands.builtin.chroma",
     "mirage.vfs.dev.dev.DevVFS": "mirage.commands.builtin.dev",
     "mirage.vfs.dify.dify.DifyVFS": "mirage.commands.builtin.dify",
-    "mirage.vfs.history.history.HistoryViewVFS": "mirage.commands.builtin.history",
     "mirage.vfs.lancedb.lancedb.LanceDBVFS": "mirage.commands.builtin.lancedb",
     "mirage.vfs.mem0.mem0.Mem0VFS": "mirage.commands.builtin.mem0",
     "mirage.vfs.qdrant.qdrant.QdrantVFS": "mirage.commands.builtin.qdrant",
-    "mirage.vfs.trello.trello.TrelloVFS": "mirage.commands.builtin.trello",
 }
 
 

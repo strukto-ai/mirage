@@ -241,7 +241,7 @@ describe('patchNodeFs — routed calls', () => {
     await fs.promises.writeFile(relative(process.cwd(), join(scratch, 'here.txt')), 'host')
     await fs.promises.writeFile('/there.txt', 'mount')
     expect(readFileSync(join(scratch, 'here.txt'), 'utf8')).toBe('host')
-    expect(await ws.vfs.cat('/there.txt')).toBe('mount')
+    expect(new TextDecoder().decode(await ws.vfs.read('/there.txt'))).toBe('mount')
     await ws.close()
   })
 

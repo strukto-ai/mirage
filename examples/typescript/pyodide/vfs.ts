@@ -92,7 +92,7 @@ with open('/ram/out.txt', 'w') as f:
 print('wrote /ram/out.txt')
 `,
     )
-    console.log('host sees:', await ws.vfs.cat('/ram/out.txt'))
+    console.log('host sees:', new TextDecoder().decode(await ws.vfs.read('/ram/out.txt')))
 
     // 2. Lazy-on-miss — host writes a new path AFTER preload; Python still sees it.
     await ws.shell('mkdir -p /ram/synth/today')
@@ -185,7 +185,10 @@ json.dump(out, open('/ram/summary.json', 'w'), indent=2)
 print(f'wrote {len(out)} teams to /ram/summary.json')
 `,
       )
-      console.log('host sees:', (await ws.vfs.cat('/ram/summary.json')).slice(0, 200))
+      console.log(
+        'host sees:',
+        new TextDecoder().decode(await ws.vfs.read('/ram/summary.json')).slice(0, 200),
+      )
     }
   } finally {
     await ws.close()

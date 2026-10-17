@@ -34,7 +34,7 @@ import { formatFsError } from '../../errors/render.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
-import type { Files } from '../files.ts'
+import { type Files, namespaceOf } from '../files.ts'
 
 const TRAVERSAL_CMDS: ReadonlySet<string> = new Set(['find', 'du'])
 
@@ -195,7 +195,7 @@ export async function fanOutTraversal(
   // Only the mounts the walk can reach bound its output: a hidden one never
   // contributes a row, so its stricter limit must not apply.
   const prefixes = new Set([primaryMount.prefix])
-  const vis = vfs?.vis()
+  const vis = vfs === undefined ? undefined : namespaceOf(vfs).vis()
   for (const path of paths) {
     if (path.walkError !== null) continue
     for (const mount of registry.descendantMounts(path.virtual))

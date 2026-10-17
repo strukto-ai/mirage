@@ -62,6 +62,7 @@ import {
   LINEAR,
   NTN,
   SLACK,
+  TRELLO,
   HfBucketsVFS,
   HfDatasetsVFS,
   HfModelsVFS,
@@ -105,7 +106,7 @@ import {
 import { parseSessionProfile, type SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { normalizePostgresConfig } from '@struktoai/mirage-core/vfs/postgres/config'
 import { normalizeMongoDBConfig } from '@struktoai/mirage-core/vfs/mongodb/config'
-import { normalizeTrelloConfig } from '@struktoai/mirage-core/vfs/trello/config'
+import { normalizeTrelloConfig } from '@struktoai/mirage-core/core/trello/config'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import * as lancedb from '@lancedb/lancedb'
 import { QdrantClient } from '@qdrant/js-client-rest'
@@ -2200,13 +2201,13 @@ async function openTrello(target: Target): Promise<Open> {
   // again -- and before the other host's run, which shares this server.
   const reset = await fetch(`${endpoint}/reset`, { method: 'POST' })
   if (!reset.ok) throw new Error(`trello /reset failed: ${String(reset.status)}`)
-  const mounts: Record<string, TrelloVFS | RAMVFS> = {}
+  const mounts: Record<string, TrelloVFS | RAMVFS | [TrelloVFS, MountMode]> = {}
   for (const m of target.mounts) {
     if (m.vfs === 'ram') {
       mounts[m.path] = new RAMVFS()
       continue
     }
-    mounts[m.path] = new TrelloVFS(
+    const vfs = new TrelloVFS(
       normalizeTrelloConfig({
         apiKey: 'integ-key',
         apiToken: 'integ-token',
@@ -2216,8 +2217,20 @@ async function openTrello(target: Target): Promise<Open> {
         ...m.config,
       }),
     )
+    mounts[m.path] = m.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  // A target may scope the install to one mount's workspace and boards, so
+  // the CLI and that mount cover the same boards.
+  if (target.clis?.includes('trello') === true) {
+    const scope = target.mounts.find((m) => m.path === target.cli_scope)?.config ?? {}
+    ws.registerCli('trello', TRELLO, {
+      api_key: 'integ-key',
+      api_token: 'integ-token',
+      base_url: endpoint,
+      ...scope,
+    })
+  }
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 

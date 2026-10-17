@@ -318,7 +318,7 @@ describe('a renderer registered beside the VFS', () => {
       const result = await ws.shell(line)
       expect(result.exitCode).toBe(0)
       expect(await ws.cache.exists('/data/books.tally')).toBe(true)
-      expect(await ws.vfs.cat('/data/books.tally')).toBe('RENDERED')
+      expect(DEC.decode(await ws.vfs.read('/data/books.tally'))).toBe('RENDERED')
     } finally {
       await ws.close()
     }

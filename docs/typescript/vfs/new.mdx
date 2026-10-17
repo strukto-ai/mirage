@@ -373,7 +373,7 @@ Most of a backend is already written as a kit. Reach for one before writing a la
 | Object store | `core/object_store/` | a flat key space (S3-style buckets, GridFS) |
 | Render | `core/render/json.ts` (`jsonBytes`, `jsonlBytes`) | records rendered as the bytes the tree's files hold |
 
-Two builtins are the references. Trello is the hierarchy kit end to end: a scope table, listers, id-addressed readers, and nested `trello <noun> <verb>` commands. Jaeger is the client shape to copy: every call takes the mount's transport, the one handle the accessor owns.
+Two builtins are the references. Trello is the hierarchy kit end to end: a scope table, listers and id-addressed readers, with its id-addressed verbs in the `trello` CLI. Jaeger is the client shape to copy: every call takes the mount's transport, the one handle the accessor owns.
 
 ## File Structure
 
@@ -420,7 +420,7 @@ A hierarchy backend writes its tree once, as the scope table in `core/<name>/sco
 - A backend whose readers reach the API by the ids in the path slots passes `parented: true`, so the kit proves the file's parent through the row its listing names first. Without it, a path outside the configured scope (Trello's `workspaceId` and `boardIds`) reads while `ls` and `stat` say it does not exist.
 - A listing that is a filtered or truncated view (one page of a bounded query, a time window, a glob-scoped span) returns `new DirListing({ entries, partial: true })`. Cached as the whole directory, it would prove every entry it left out absent.
 - `entryStat('<idKey>', ...)` names the id under the key its path slot declares.
-- Id-addressed commands honor the same scope knobs the listing does (Trello's `commands/builtin/trello/_scope.ts`).
+- Id-addressed verbs honor the same scope knobs the listing does, read from their own config (the trello CLI's `commands/cli/builtin/trello/scope.ts`).
 
 `FileStat.size` must be the rendered content's byte length or `null`, never a storage-side number: a confidently wrong size makes `wc -c` and `ls -l` lie over FUSE, while `null` rides the unknown-size machinery. Put the storage number in `extra` if it is worth reporting. Set `sizesAlwaysKnown` only when every listed size is computed from the same payload a read renders.
 
@@ -454,7 +454,8 @@ marks already.
 The generic commands are registered once per workspace, and every mount falls back to them after its VFS's own. Each runs over the functions of the mount it runs on (`ctx.io`), and the generic command owns flag interpretation, so a backend wrapper is wiring only. A command of the same name replaces the generic on that backend; `generic('<name>')` hands the replacement the default command for what it does not support, and `generic('<name>', { vfs, table })` registers the default over a changed table (`/dev`'s endless `cat`). Export a backend's own commands as `<NAME>_COMMANDS` from `commands/builtin/<name>/index.ts`, and register it for the VFS class in the package's `commands/builtin/backends.ts` with `registerBackendCommands(MyVFS, () => MY_VFS_COMMANDS)`. The registry is keyed by the class itself, so a minified bundle still finds it, and a subclass serves its base's commands.
 
 - Let grep and rg skip files by defining `filesContaining` (and `linesContaining` for row stores) on the VFS; `search` serves the `search` command.
-- A verb (`trello card create`) declares its own `new CommandSpec({...})` with every id as a flag, reads flags through `new FlagView(ctx.flags, SPEC)` (never `flags.get(...)`), registers `write: true` for a mutation, and calls `requireMountWritable(...)` before the client. Specs declared inline are dumped to `.cache/spec/typescript/<node|browser>/vfs_commands/` and compared with Python's, and a prompt that teaches the verbs is pinned against their specs (`vfs/trello/prompt.test.ts`).
+- A mount verb (`chroma-query`) declares its own `new CommandSpec({...})`, reads flags through `new FlagView(ctx.flags, SPEC)` (never `flags.get(...)`) and registers `write: true` for a mutation. Specs declared inline are dumped to `.cache/spec/typescript/<node|browser>/vfs_commands/` and compared with Python's.
+- A verb addressed by a service id rather than a path (`trello card create`) is an account [CLI](/typescript/cli/custom), not a mount command: a `CLI` under `commands/cli/builtin/<name>/` with a `configModel` and an `accessor`, which consults no mount and marks its writes on the `CLIHandler`. A VFS prompt that shows such verbs is pinned against the CLI's specs (`vfs/trello/prompt.test.ts`).
 - A handler that reads its `accessor` directly is trusted host code. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands. A command handed through `commands` does not run where the session restricts its mount.
 
 ## 5. VFS Class

@@ -21,7 +21,11 @@ import { HttpTrelloTransport } from '../../core/trello/client.ts'
 import { PROMPT, WRITE_PROMPT } from './prompt.ts'
 import { type DirListing, VFSName } from '../../types.ts'
 
-import { redactTrelloConfig, type TrelloConfig, type TrelloConfigRedacted } from './config.ts'
+import {
+  redactTrelloConfig,
+  type TrelloConfig,
+  type TrelloConfigRedacted,
+} from '../../core/trello/config.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as trelloReaddir } from '../../core/trello/readdir.ts'

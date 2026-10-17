@@ -34,7 +34,7 @@
         },
         {
           "facade": {
-            "method": "cat",
+            "method": "read",
             "path": "/data/digits.txt"
           },
           "expect": {
@@ -73,7 +73,7 @@
         },
         {
           "facade": {
-            "method": "cat",
+            "method": "read",
             "path": "/data/digits.txt"
           },
           "expect": {
@@ -112,7 +112,7 @@
         },
         {
           "facade": {
-            "method": "cat",
+            "method": "read",
             "path": "/data/digits.txt"
           },
           "expect": {
@@ -155,7 +155,7 @@
         },
         {
           "facade": {
-            "method": "cat",
+            "method": "read",
             "path": "/data/new.txt"
           },
           "expect": {

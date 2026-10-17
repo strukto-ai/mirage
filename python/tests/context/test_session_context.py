@@ -26,18 +26,14 @@ from mirage.context import (
     hidden_refusal,
     program_invocation,
     readonly_below,
-    require_mount_writable,
     reset_current_session,
-    reset_mount_gate,
     reset_program_invocation,
     session_visibility,
     set_current_evaluation,
     set_current_session,
-    set_mount_gate,
     set_program_invocation,
     strongest_mode_under,
 )
-from mirage.errors.types import ReadOnlyError
 from mirage.types import (
     HiddenPaths,
     MountMode,
@@ -354,36 +350,6 @@ def test_readonly_below_blames_the_operand_for_a_pattern():
         assert readonly_below("/other/tree", "/repo", MountMode.WRITE) is None
     finally:
         reset_current_session(token)
-
-
-def test_require_mount_writable_needs_the_broad_grant():
-    sess = SessionState(
-        session_id="agent",
-        mount_modes={"/trello": MountMode.READ},
-        visibility=Visibility(
-            shown=ShownPaths(
-                entries=(ShowEntry("/trello/board", MountMode.WRITE),)
-            )
-        ),
-    )
-    session_token = set_current_session(sess)
-    gate_token = set_mount_gate("/trello", MountMode.WRITE)
-    try:
-        # The carve-out admits the command, but an id-addressed write
-        # names no path, so only the mount-wide grant counts.
-        with pytest.raises(ReadOnlyError):
-            require_mount_writable()
-    finally:
-        reset_mount_gate(gate_token)
-        reset_current_session(session_token)
-    # Unrestricted (no session narrowing) writes pass, and with no
-    # mount bound the check is inert.
-    gate_token = set_mount_gate("/trello", MountMode.WRITE)
-    try:
-        require_mount_writable()
-    finally:
-        reset_mount_gate(gate_token)
-    require_mount_writable()
 
 
 def test_hidden_under_is_per_operand():

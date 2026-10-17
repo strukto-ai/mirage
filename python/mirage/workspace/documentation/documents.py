@@ -28,7 +28,7 @@ from mirage.utils.hidden import path_visible
 from mirage.utils.path import norm, parent
 from mirage.vfs.document.document import DocumentVFS
 from mirage.workspace.documentation import render
-from mirage.workspace.files import Files
+from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.session.resolve import apply_profile
@@ -40,7 +40,7 @@ class Documents:
 
     Args:
         registry (MountRegistry): the workspace's mounts.
-        files (Files): the workspace's ``ws.vfs``.
+        files (WorkspaceFiles): the workspace's ``ws.vfs``.
         manager (SessionManager): the workspace's sessions.
         session (Callable[[str | None], SessionState]): the session a
             call through a facade of this session id runs as, None for
@@ -57,7 +57,7 @@ class Documents:
     def __init__(
         self,
         registry: MountRegistry,
-        files: Files,
+        files: WorkspaceFiles,
         manager: SessionManager,
         session: Callable[[str | None], SessionState],
         profile: Callable[[str], CompiledProfile],

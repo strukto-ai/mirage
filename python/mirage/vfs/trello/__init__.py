@@ -14,7 +14,7 @@
 
 from typing import TYPE_CHECKING
 
-from mirage.vfs.trello.config import TrelloConfig
+from mirage.core.trello.config import TrelloConfig
 
 if TYPE_CHECKING:
     from mirage.vfs.trello.trello import TrelloVFS

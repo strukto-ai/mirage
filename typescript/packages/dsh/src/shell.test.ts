@@ -25,6 +25,8 @@ import { MirageShellExecutor } from './shell.ts'
 import type { MirageShellConfig } from './shell.ts'
 import type { ShellExecSpec, ShellExecutor, ShellRunResult } from '@deepseek-ai/dsh-shell'
 
+const DEC = new TextDecoder()
+
 /** A foreground run, as dsh's own tools await one: the execution's result. */
 async function runOn(shell: ShellExecutor, spec: ShellExecSpec): Promise<ShellRunResult> {
   return (await shell.execute(spec)).result()
@@ -841,7 +843,7 @@ describe('spill', () => {
     if (stdoutPath === undefined) throw new Error('expected a stdout spill path')
     // The delta kept only the tail; the spill file has the whole stream.
     expect(out.delta).not.toContain('aaaa')
-    const full = await ws.vfs.cat(stdoutPath)
+    const full = DEC.decode(await ws.vfs.read(stdoutPath))
     expect(full).toContain('aaaa')
     expect(full).toContain('dddd')
   })
@@ -857,8 +859,8 @@ describe('spill', () => {
     const stderrPath = out.stderrSpillPath
     if (stdoutPath === undefined) throw new Error('expected a stdout spill path')
     if (stderrPath === undefined) throw new Error('expected a stderr spill path')
-    expect(await ws.vfs.cat(stdoutPath)).toContain('out1')
-    expect(await ws.vfs.cat(stderrPath)).toContain('err1')
+    expect(DEC.decode(await ws.vfs.read(stdoutPath))).toContain('out1')
+    expect(DEC.decode(await ws.vfs.read(stderrPath))).toContain('err1')
   })
 
   it('spills both commands when two overrun into a missing directory at once', async () => {
@@ -874,7 +876,7 @@ describe('spill', () => {
     expect(paths[0]).not.toBe(paths[1])
     for (const path of paths) {
       if (path === undefined) throw new Error('expected a stdout spill path')
-      expect(await ws.vfs.cat(path)).toContain('aaaa')
+      expect(DEC.decode(await ws.vfs.read(path))).toContain('aaaa')
     }
   })
 
@@ -885,7 +887,7 @@ describe('spill', () => {
     const path = proc.readOutput().stdoutSpillPath
     if (path === undefined) throw new Error('expected a stdout spill path')
     expect(path.startsWith('/data/runs/spill/')).toBe(true)
-    expect(await ws.vfs.cat(path)).toContain('aaaa')
+    expect(DEC.decode(await ws.vfs.read(path))).toContain('aaaa')
   })
 })
 
@@ -976,7 +978,7 @@ describe('foreground output fidelity', () => {
     expect(result.stdout.text).toBe('bbbbb')
     const path = result.stdout.spillPath
     if (path === undefined) throw new Error('expected a spill path')
-    expect(await ws.vfs.cat(path)).toBe('aaaaabbbbb')
+    expect(DEC.decode(await ws.vfs.read(path))).toBe('aaaaabbbbb')
   })
 
   it('keeps a foreground stream larger than any console retention budget', async () => {
@@ -990,7 +992,7 @@ describe('foreground output fidelity', () => {
     expect(result.stdout.text).toBe('x'.repeat(64))
     const path = result.stdout.spillPath
     if (path === undefined) throw new Error('expected a spill path')
-    expect(await ws.vfs.cat(path)).toBe('x'.repeat(4000))
+    expect(DEC.decode(await ws.vfs.read(path))).toBe('x'.repeat(4000))
   })
 
   it('leaves spillPath unset when nothing was truncated', async () => {

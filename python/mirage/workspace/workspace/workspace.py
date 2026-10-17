@@ -141,7 +141,7 @@ from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.statement import restore_status
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.expand.globs import GlobOptions, resolve_globs
-from mirage.workspace.files import Files
+from mirage.workspace.files import Files, WorkspaceFiles
 from mirage.workspace.lookup import lookup, program, program_note, programs
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountEntry, MountRegistry
@@ -487,6 +487,7 @@ class Workspace:
         )
 
         self.observer = Observer(store=stores.observe)
+        self._registry.observer = self.observer
         # The stores this workspace's state lives in, whether the state
         # store built them or the caller passed one in directly: delete
         # clears these, not only what the state store would hand out.
@@ -523,7 +524,7 @@ class Workspace:
         # and the policy gates fire exactly once, at that entry point. It runs
         # as the default session, as a bare ``shell`` does, so the
         # default profile confines it too.
-        self._files = Files(
+        self._files = WorkspaceFiles(
             self._registry.mount_rows(),
             observer=self.observer,
             links=self._namespace,
@@ -760,7 +761,7 @@ class Workspace:
         return self._session_mgr.has_managed_env
 
     @property
-    def vfs(self) -> Files:
+    def vfs(self) -> WorkspaceFiles:
         """The file API: read/write/stat/readdir/... against the mounts.
 
         Named as TypeScript names it (`ws.vfs`), so one host API reads the

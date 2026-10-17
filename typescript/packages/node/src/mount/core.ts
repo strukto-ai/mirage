@@ -14,7 +14,7 @@
 
 import { constants as fsConstants } from 'node:fs'
 import { posix } from 'node:path'
-import type { Files } from '@struktoai/mirage-core/workspace/files'
+import { type Files, namespaceOf } from '@struktoai/mirage-core/workspace/files'
 import {
   ChunkedHandle,
   FileTable,
@@ -652,7 +652,7 @@ export class MountCore {
    */
   identity(path: string, follow = true): string {
     const virtual = this.resolve(path)
-    const links = this.files.links
+    const links = namespaceOf(this.files).links
     if (links === null) return virtual
     if (follow) return links.follow(virtual)
     // An op on the entry itself (unlink, rename, lsetattr) names the link,

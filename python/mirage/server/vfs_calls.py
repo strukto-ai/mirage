@@ -115,7 +115,6 @@ VFS_CALLS: tuple[VfsCall, ...] = (
         ("path",),
         "is_file",
     ),
-    VfsCall("cat", "A file's text.", PATH_ONLY, ("path",), "text"),
     VfsCall(
         "list_files",
         "The names of a directory's files.",

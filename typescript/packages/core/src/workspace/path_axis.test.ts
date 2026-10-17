@@ -21,6 +21,8 @@ import { runWithSession } from '../context/session_context.ts'
 import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
 import { Session, Workspace } from './workspace/workspace.ts'
 
+const DEC = new TextDecoder()
+
 /** Refuse the unlink of one exact path, whatever entry point asked. */
 class DenyRemnantUnlink implements Policy {
   preVfs(ctx: VfsContext): Action | null {
@@ -191,10 +193,10 @@ describe('the path axis end to end', () => {
     open.push(ws)
     const host = ws.createSession('host', { profile: parseSessionProfile({}) })
     const files = new Session(ws, host.sessionId).vfs
-    expect(files.records).toBe(ws.vfs.records)
     await files.mkdir('/data/vault')
+    expect(ws.vfs.records.map((r) => [r.op, r.path]).at(-1)).toEqual(['mkdir', '/data/vault'])
     await files.write('/data/vault/secret', 'top\n')
-    expect(await files.cat('/data/vault/secret')).toBe('top\n')
+    expect(DEC.decode(await files.read('/data/vault/secret'))).toBe('top\n')
     await expect(ws.vfs.read('/data/vault/secret')).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(ws.stat('/data/vault')).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(ws.dispatch('read', '/data/vault/secret')).rejects.toMatchObject({
@@ -203,7 +205,7 @@ describe('the path axis end to end', () => {
     expect(await ws.readdir('/data')).toEqual([])
     expect(await ws.vfs.readdir('/data')).toEqual([])
     await runWithSession(host, async () => {
-      expect(await ws.vfs.cat('/data/vault/secret')).toBe('top\n')
+      expect(DEC.decode(await ws.vfs.read('/data/vault/secret'))).toBe('top\n')
     })
   })
 
@@ -232,12 +234,12 @@ describe('the path axis end to end', () => {
         await expect(ws.vfs.read('/data/vault/secret')).rejects.toMatchObject({
           code: 'ENOENT',
         })
-        expect(await files.cat('/data/vault/secret')).toBe('top\n')
+        expect(DEC.decode(await files.read('/data/vault/secret'))).toBe('top\n')
       },
       { owner: other.sessionManager },
     )
     await runWithSession(wide, async () => {
-      expect(await ws.vfs.cat('/data/vault/secret')).toBe('top\n')
+      expect(DEC.decode(await ws.vfs.read('/data/vault/secret'))).toBe('top\n')
     })
   })
 
@@ -254,12 +256,12 @@ describe('the path axis end to end', () => {
     await files.write('/data/pub.txt', 'pub\n')
     await files.mkdir('/data/vault')
     await files.symlink('/data/vault/lk', '/data/pub.txt')
-    expect(await files.cat('/data/vault/lk')).toBe('pub\n')
+    expect(DEC.decode(await files.read('/data/vault/lk'))).toBe('pub\n')
     await expect(ws.vfs.read('/data/vault/lk')).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(ws.vfs.write('/data/vault/lk', 'x\n')).rejects.toMatchObject({
       code: 'ENOENT',
     })
-    expect(await files.cat('/data/pub.txt')).toBe('pub\n')
+    expect(DEC.decode(await files.read('/data/pub.txt'))).toBe('pub\n')
   })
 
   it('a write below the mode reads Read-only file system', async () => {

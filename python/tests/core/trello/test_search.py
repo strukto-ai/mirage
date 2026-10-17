@@ -18,10 +18,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.trello import TrelloAccessor
+from mirage.core.trello.config import TrelloConfig
 from mirage.core.trello.normalize import unsearched_text
 from mirage.core.trello.search import SEARCH_LIMIT, files_containing
 from mirage.types import JsonValue, PathSpec
-from mirage.vfs.trello.config import TrelloConfig
 
 CARDS = [
     {

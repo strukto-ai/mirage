@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.types import MountBackend
-from mirage.workspace.files import Files
+from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.session import SessionManager
 
@@ -28,7 +28,9 @@ class KernelMounts:
     same subtree can be exposed both unbound and bound to a session.
     """
 
-    def __init__(self, files: Files, sessions: SessionManager) -> None:
+    def __init__(
+        self, files: WorkspaceFiles, sessions: SessionManager
+    ) -> None:
         self._files = files
         self._sessions = sessions
         self._mountpoints: dict[str, str] = {}

@@ -127,7 +127,7 @@ describe('object-store write fingerprint (mocked S3)', () => {
     try {
       await ws.vfs.write('/s3/x.txt', 'hello\n')
       mock.calls.clear()
-      expect(await ws.vfs.cat('/s3/x.txt')).toBe('hello\n')
+      expect(DEC.decode(await ws.vfs.read('/s3/x.txt'))).toBe('hello\n')
       expect(await ws.cache.isFresh('/s3/x.txt', etagOf('hello\n'))).toBe(true)
       expect(mock.calls.get('GetObject') ?? 0).toBe(0)
     } finally {

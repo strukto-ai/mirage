@@ -723,8 +723,8 @@ function checkOps(expect: Expect, seen: string[]): string[] {
 }
 
 // One facade step: call a typed Files convenience (`ws.vfs`) and check its
-// value. The JSON carries the python facade spelling (`is_dir`,
-// `list_files`); snakeToCamel maps it onto the TS method.
+// value, bytes as their UTF-8 text. The JSON carries the python facade
+// spelling (`is_dir`, `list_files`); snakeToCamel maps it onto the TS method.
 async function runFacade(ws: Workspace, expect: Expect, spec: FacadeSpec): Promise<string[]> {
   const facade = ws.vfs as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
   const method = facade[snakeToCamel(spec.method)]
@@ -761,7 +761,8 @@ async function runFacade(ws: Workspace, expect: Expect, spec: FacadeSpec): Promi
     }
     return ['facade: expected an error, none raised']
   }
-  const value = await method.apply(ws.vfs, args)
+  const answer = await method.apply(ws.vfs, args)
+  const value = answer instanceof Uint8Array ? DEC.decode(answer) : answer
   if (
     expect.value !== undefined &&
     JSON.stringify(value ?? null) !== JSON.stringify(expect.value)

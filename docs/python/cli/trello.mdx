@@ -1,0 +1,108 @@
+---
+title: trello
+description: "Supported Trello commands for boards, lists, labels, cards and comments."
+icon: trello
+---
+
+Read Trello boards, lists, labels, cards and comments, and create, update, move, assign, label and comment on cards. Mirage defines this command tree over the [Trello REST API](https://developer.atlassian.com/cloud/trello/rest/); every command prints normalized JSON for `jq`.
+
+## Setup
+
+Create an API key and token using [Trello setup](/home/setup/trello).
+
+```python
+from mirage import Workspace
+from mirage.commands.cli.builtin.trello import TRELLO
+from mirage.core.trello.config import TrelloConfig
+
+config = TrelloConfig(api_key="...", api_token="...")
+ws = Workspace({})
+ws.register_cli("trello", TRELLO, config)
+```
+
+No service mount is required. For YAML and multiple accounts, see the
+[CLI overview](/python/cli/index#register-a-cli).
+
+{/* BEGIN GENERATED CLI COMMANDS */}
+## Supported commands
+
+Run `trello <command> --help` for the supported flags and operands.
+This list is generated from Mirage's registered command tree.
+
+| Command | Description |
+| --- | --- |
+| `trello board list` | List the boards in scope as JSON |
+| `trello board show` | Get one board by ID |
+| `trello board members` | List a board's members |
+| `trello list list` | List a board's lists |
+| `trello label list` | List a board's labels |
+| `trello card list` | List the cards in a list |
+| `trello card show` | Get one card by ID |
+| `trello card comments` | List a card's comments |
+| `trello card create` | Create a new card |
+| `trello card update` | Update an existing card |
+| `trello card move` | Move a card to a different list |
+| `trello card assign` | Assign a member to a card |
+| `trello card label` | Add a label to a card |
+| `trello card unlabel` | Remove a label from a card |
+| `trello card comment` | Add a comment to a card |
+| `trello card comment-update` | Update an existing comment |
+{/* END GENERATED CLI COMMANDS */}
+
+## Find work
+
+```bash
+trello board list
+trello board show brd_001
+trello board members brd_001
+trello list list brd_001
+trello label list brd_001
+trello card list lst_001
+trello card show crd_001
+trello card comments crd_001
+```
+
+Reads take a board, list or card ID as a positional operand. The
+[Trello VFS](/python/vfs/trello) embeds each ID after the last `__` of a
+directory or file name.
+
+## Update cards
+
+```bash
+trello card create --list_id lst_001 --name "Fix login" --desc "Details here"
+cat brief.md | trello card create --list_id lst_001 --name "Agent bug"
+trello card update --card_id crd_001 --name "Updated title" --due 2026-11-01
+trello card update --card_id crd_001 --closed true
+trello card move --card_id crd_001 --list_id lst_002
+trello card assign --card_id crd_001 --member_id mem_001
+trello card label --card_id crd_001 --label_id lbl_001
+trello card unlabel --card_id crd_001 --label_id lbl_001
+trello card comment --card_id crd_001 --text "Looks good"
+trello card comment-update --card_id crd_001 --comment_id cmt_001 --text "Updated text"
+```
+
+Writes take every ID as a flag. A description or comment comes from `--desc`
+or `--text`, from the file `--desc_file` or `--text_file` names, or from
+stdin; `--desc ''` clears a description. `--closed true`, `1` or `yes`
+archives a card and any other value restores it. Each write prints the card
+or comment it changed.
+
+## Scope, VFS and limits
+
+The CLI uses its own account config and needs no Trello mount.
+
+- `workspace_id` and `board_ids` narrow the CLI as they narrow the mount:
+  `trello board list` shows only the boards in scope, and a board, list or
+  card ID on a board outside them is refused before any read or write
+  (`trello card show: card crd_009 is outside the configured scope`, exit 1).
+- `--desc_file` and `--text_file` read a workspace file through the session,
+  from any mount the session can read.
+- A read-only Trello mount does not make the CLI read-only: the CLI consults
+  no mount. Use command policy, such as a profile rule denying
+  `trello card create`, to restrict writes.
+- API failures exit 1 with Trello's error.
+
+This is Mirage's Apache-2.0 command implementation for the REST API.
+No compatibility with a separate Trello CLI is claimed; the API link
+documents the service rather than an upstream CLI implementation. See
+[compatibility and licenses](/home/setup/clis#compatibility-and-licenses).

@@ -47,5 +47,5 @@ const result = await run(agent, task, { sandbox: { client: new MirageSandboxClie
 console.log(result.finalOutput)
 
 console.log('\n--- /summary.txt ---')
-console.log(await ws.vfs.cat('/summary.txt'))
+console.log(new TextDecoder().decode(await ws.vfs.read('/summary.txt')))
 await ws.close()

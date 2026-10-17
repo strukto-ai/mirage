@@ -23,6 +23,8 @@ import { getTestParser, stdoutStr } from '../fixtures/workspace_fixture.ts'
 import type { ExecuteOptions, SessionExecuteOptions } from './types.ts'
 import { Session, Workspace } from './workspace.ts'
 
+const DEC = new TextDecoder()
+
 const open: Workspace[] = []
 
 afterEach(async () => {
@@ -58,12 +60,12 @@ describe('Session', () => {
     expect(reviewer.state).toBe(ws.getSession('reviewer'))
     expect(stdoutStr(await reviewer.shell('cat /repo/README.md'))).toBe('hello\n')
     expect((await reviewer.shell('cat /repo/secrets/key.pem')).exitCode).toBe(1)
-    expect(await reviewer.vfs.cat('/repo/README.md')).toBe('hello\n')
+    expect(DEC.decode(await reviewer.vfs.read('/repo/README.md'))).toBe('hello\n')
+    expect(ws.vfs.records.map((r) => [r.op, r.path]).at(-1)).toEqual(['read', '/repo/README.md'])
     await expect(reviewer.vfs.read('/repo/secrets/key.pem')).rejects.toMatchObject({
       code: 'ENOENT',
     })
-    expect(await ws.vfs.cat('/repo/secrets/key.pem')).toBe('PRIVATE\n')
-    expect(reviewer.vfs.records).toBe(ws.vfs.records)
+    expect(DEC.decode(await ws.vfs.read('/repo/secrets/key.pem'))).toBe('PRIVATE\n')
     expect(await reviewer.glob('/repo/*')).toEqual(['/repo/README.md'])
     expect(await ws.glob('/repo/*')).toEqual(['/repo/README.md', '/repo/secrets'])
   })
@@ -117,7 +119,7 @@ describe('Session', () => {
       // A session already bound is kept by the dispatcher, so a handle
       // reached from inside the default session's own command reads
       // as that session, never wider.
-      expect(await reviewer.vfs.cat('/repo/secrets/key.pem')).toBe('PRIVATE\n')
+      expect(DEC.decode(await reviewer.vfs.read('/repo/secrets/key.pem'))).toBe('PRIVATE\n')
     })
   })
 })

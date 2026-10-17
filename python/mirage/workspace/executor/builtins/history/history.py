@@ -12,17 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.config import Context
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.io.types import ByteSource, IOResult
+from mirage.core.history.render import render_history_listing
+from mirage.io.types import IOResult
 from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ExitSignal
-from mirage.types import PathSpec
-from mirage.vfs.history import HISTORY_PREFIX
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session.session import SessionState
-from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode
 
 # bash 5.2.21's own string, letters in ITS order (`history -anrw`, not
@@ -34,10 +33,28 @@ _USAGE = (
 _OPTION_CHARS = "cdanrwsp"
 
 
-def _usage_error(message: str) -> tuple[None, IOResult, ExecutionNode]:
-    err = encode_text(message + _USAGE)
-    io = IOResult(exit_code=2, stderr=err)
-    return None, io, ExecutionNode(command="history", exit_code=2, stderr=err)
+def _result(
+    stdout: bytes | None, exit_code: int = 0, stderr: bytes | None = None
+) -> Result:
+    """The builtin's output, status and execution-tree node.
+
+    Args:
+        stdout (bytes | None): what the builtin prints.
+        exit_code (int): its status.
+        stderr (bytes | None): what it says on stderr.
+    """
+    return (
+        stdout,
+        IOResult(exit_code=exit_code, stderr=stderr),
+        ExecutionNode(
+            command="history", exit_code=exit_code, stderr=stderr or b""
+        ),
+    )
+
+
+def _out_of_range(value: str) -> Result:
+    err = f"bash: history: {value}: history position out of range\n"
+    return _result(None, 1, encode_text(err))
 
 
 def _parse_args(
@@ -99,55 +116,81 @@ async def handle_history(
     registry: MountRegistry,
     args: list[str],
     session: SessionState,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Dispatch the history shell builtin to the view mount.
+) -> Result:
+    """GNU's history builtin over the workspace's recorder.
 
     GNU lookup order: builtins resolve before mount commands, so a
     mount-local command named "history" can never shadow this one.
-    The actual semantics live on the /.bash_history view VFS;
-    this handler only parses options and routes.
+    -a/-r/-w/-n are accepted no-ops: bash uses them to sync the
+    in-memory list with the histfile, but here both are the same
+    store and always in sync. -p prints its args verbatim (mirage's
+    shell has no `!` history expansion, so every word is its own
+    expansion); unlike bash, the `history -p` invocation itself is
+    still recorded, because the recorder is also the audit log.
+    When -s and -p are combined, -s wins and nothing is printed
+    (bash-verified for both -ps and -sp).
 
     Args:
-        registry (MountRegistry): The workspace's mount registry.
+        registry (MountRegistry): The workspace's mount registry, which
+            carries its recorder.
         args (list[str]): Raw builtin args (flags and counts).
         session (SessionState): Calling session.
     """
     flags, texts, error = _parse_args(args)
     if error is not None:
-        return _usage_error(error)
+        return _result(None, 2, encode_text(error + _USAGE))
     if not flags and len(texts) > 1:
         # bash abandons everything still to run, as `exit 1 2` does;
         # `-p` and `-s` take any number of words.
         raise ExitSignal(1, stderr=b"bash: history: too many arguments\n")
-    mount = registry.try_mount_for(HISTORY_PREFIX)
-    if mount is None:
-        err = b"bash: history: not enabled for this workspace\n"
-        return (
-            None,
-            IOResult(exit_code=1, stderr=err),
-            ExecutionNode(command="history", exit_code=1, stderr=err),
+    observer = registry.observer
+    if observer is None:
+        return _result(
+            None, 1, b"bash: history: not enabled for this workspace\n"
         )
-    stream, io = await mount.run_command(
-        "history",
-        [],
-        texts,
-        flags,
-        Context(
-            cwd=PathSpec.from_str_path(session.cwd),
-            session=session_view(session, registry.policies),
-        ),
-    )
-    # The view command always returns byte stderr, but io.stderr is typed
-    # as a ByteSource (a possible lazy stream); resolve it to bytes so the
-    # execution-tree node holds concrete stderr, never an unread stream.
-    stderr = await io.materialize_stderr()
-    return (
-        stream,
-        io,
-        ExecutionNode(
-            command="history", exit_code=io.exit_code, stderr=stderr
-        ),
-    )
+    fl = FlagView(flags, spec=SPECS["history"])
+    c = fl.as_bool("c")
+    d = fl.as_str("d")
+    s = fl.as_bool("s")
+    p = fl.as_bool("p")
+    sid = session.session_id
+    if c:
+        await observer.log_clear(session=sid)
+    if d is not None:
+        try:
+            offset = int(d)
+        except ValueError:
+            return _out_of_range(d)
+        visible = await observer.session_command_events(sid)
+        idx = offset - 1 if offset > 0 else len(visible) + offset
+        if not 0 <= idx < len(visible):
+            return _out_of_range(d)
+        await observer.log_delete(session=sid, offset=offset)
+    if s and texts:
+        await observer.log_command_text(
+            " ".join(texts), session=sid, cwd=session.cwd
+        )
+    if p and not s:
+        return _result(encode_text("\n".join(texts) + "\n" if texts else ""))
+    if (
+        c
+        or d is not None
+        or s
+        or fl.as_bool("a")
+        or fl.as_bool("r")
+        or fl.as_bool("w")
+        or fl.as_bool("n")
+    ):
+        return _result(None)
+    count = None
+    if texts:
+        try:
+            count = int(texts[0])
+        except ValueError:
+            err = f"bash: history: {texts[0]}: numeric argument required\n"
+            return _result(None, 1, encode_text(err))
+    events = await observer.session_command_events(sid)
+    return _result(encode_text(render_history_listing(events, n=count)))
 
 
 async def history_builtin(call: BuiltinCall) -> Result:

@@ -123,7 +123,8 @@ request construction, config validation and VFS/policy boundaries.
 
 The consolidated smoke coverage is `sl_send_message`, `sl_missing_required`,
 `dc_send`, `ln_cli_missing_team`, `gw_gmail_missing_to`,
-`gw_unknown_nested_verb`, `at_cli_help` and `at_cli_usage_missing_base`.
+`gw_unknown_nested_verb`, `at_cli_help`, `at_cli_usage_missing_base`,
+`tr_cli_help` and `tr_cli_unknown_verb`.
 These replace the equivalent Python workspace smoke tests; the refusal cases
 assert exit code, stdout and stderr directly. Stateful account and mount
 tests remain separate because their setup and assertions are different.

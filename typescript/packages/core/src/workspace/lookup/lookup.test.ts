@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { CLIHandler } from '../../commands/cli/types.ts'
+import { command } from '../../commands/config.ts'
 
 import { describe, expect, it } from 'vitest'
 import { CLI } from '../../commands/cli/types.ts'
@@ -374,6 +375,9 @@ describe('program', () => {
 
   it('has no file for a shell word a mount also registers', () => {
     const { session, ws } = fixture()
+    ws.mount('/ram').registerCommands(
+      command({ name: 'history', vfs: 'ram', spec: new CommandSpec(), fn: noopVerb }),
+    )
     expect(lookupAll('history', session, ws.registry)).toEqual([Consumer.SESSION, Consumer.MOUNT])
     expect(program('history', session, ws.registry)).toBeNull()
     expect(programs(session, ws.registry)).not.toContain('history')

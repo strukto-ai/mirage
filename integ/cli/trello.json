@@ -1,0 +1,381 @@
+{
+  "cases": [
+    {
+      "id": "tr_cmd_board_list",
+      "seq": 550017,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello board list | jq -r '.[].board_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Roadmap Q3\nOps\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_cmd_board_show",
+      "seq": 550018,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello board show brd_roadmap | jq -r '.board_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Roadmap Q3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_cmd_board_members",
+      "seq": 550019,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello board members brd_roadmap | jq -r '.[].full_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Alex Kim\nSam Rivera\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_cmd_list_list",
+      "seq": 550020,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello list list brd_roadmap | jq -r '.[].list_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "To Do\nIn Progress\nDone\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_cmd_label_list",
+      "seq": 550021,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello label list brd_roadmap | jq -r '.[].label_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "feature\nbug\nurgent\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_cmd_card_list",
+      "seq": 550022,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello card list lst_todo | jq -r '.[].card_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Add full-text search\nCSV export for reports\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_cmd_card_show",
+      "seq": 550023,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello card show crd_search | jq -r '.card_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Add full-text search\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_cmd_card_comments",
+      "seq": 550024,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello card comments crd_search | jq -r '.[].text'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Prototype uses the index cache store.\nPlease add grep push-down too.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_write_card_create_inline_desc",
+      "seq": 940010,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello card create --list_id lst_todo --name 'Ship flag parity' --desc 'written by integ' | jq -r '.card_id + \"|\" + .card_name + \"|\" + .desc + \"|\" + .list_id'",
+      "expect": {
+        "exit": 0,
+        "stdout": "crd_new_1|Ship flag parity|written by integ|lst_todo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_write_card_create_lands_in_list",
+      "seq": 940011,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello card create --list_id lst_todo --name 'Second card' >/dev/null && trello card list lst_todo | jq -r '.[].card_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Add full-text search\nCSV export for reports\nShip flag parity\nSecond card\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_write_card_update_desc_file",
+      "seq": 940012,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello card update --card_id crd_export --desc_file /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/members/Sam_Rivera__mem_sam.json | jq -r '.desc' | jq -r '.full_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Sam Rivera\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_write_card_update_inline_desc",
+      "seq": 940013,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello card update --card_id crd_search --name 'Renamed by integ' --desc 'inline update' | jq -r '.card_name + \"|\" + .desc'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Renamed by integ|inline update\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_write_comment_text_file",
+      "seq": 940014,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello card comment --card_id crd_search --text_file /board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/board.json | jq -r '.text' | jq -r '.board_name'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Roadmap Q3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_write_comment_stdin",
+      "seq": 940015,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "printf 'comment from stdin\\n' | trello card comment --card_id crd_search | jq -r '.text'",
+      "expect": {
+        "exit": 0,
+        "stdout": "comment from stdin\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_write_comment_appends_to_thread",
+      "seq": 940016,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello card comment --card_id crd_search --text 'third note' >/dev/null && trello card comments crd_search | jq -r '.[].text' | tail -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "\nthird note\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_write_assign_label_move",
+      "seq": 940017,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello card assign --card_id crd_search --member_id mem_sam >/dev/null && trello card label --card_id crd_search --label_id lbl_bug >/dev/null && trello card move --card_id crd_search --list_id lst_doing >/dev/null && trello card show crd_search | jq -r '(.member_ids | join(\",\")) + \"|\" + (.label_ids | join(\",\")) + \"|\" + .list_id'",
+      "expect": {
+        "exit": 0,
+        "stdout": "mem_alex,mem_sam|lbl_feature,lbl_bug|lst_doing\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_write_unlabel",
+      "seq": 940018,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello card unlabel --card_id crd_search --label_id lbl_feature >/dev/null && trello card show crd_search | jq -r '.label_ids | join(\",\")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "lbl_bug\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_write_desc_file_other_mount",
+      "seq": 940019,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "printf 'off-mount\\n' > /scratch/desc.txt && trello card update --card_id crd_search --desc_file /scratch/desc.txt | jq -r '.desc'",
+      "expect": {
+        "exit": 0,
+        "stdout": "off-mount\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_write_card_update_missing_card",
+      "seq": 940020,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello card update --card_id crd_nope --name x",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "trello card update: Trello API error (/cards/crd_nope): HTTP 404: {\"message\":\"card not found\"}\n"
+      }
+    },
+    {
+      "id": "tr_write_card_update_empty_desc",
+      "seq": 9940007,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello card update --card_id crd_export --desc '' | jq -c .desc",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_write_card_create_empty_desc",
+      "seq": 9940008,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello card create --list_id lst_todo --name 'Empty desc' --desc '' | jq -c .desc",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_write_desc_file_missing",
+      "seq": 940025,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello card update --card_id crd_search --desc_file /scratch/nope.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "trello card update: /scratch/nope.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "tr_write_comment_update",
+      "seq": 940026,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "id=$(trello card comment --card_id crd_search --text 'draft note' | jq -r '.comment_id') && trello card comment-update --card_id crd_search --comment_id \"$id\" --text 'edited note' | jq -r '.text' && trello card comments crd_search | jq -r '.[].text' | tail -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "edited note\nedited note\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_scope_show_denied",
+      "seq": 939002,
+      "targets": [
+        "cli-trello-scoped"
+      ],
+      "command": "trello board show brd_roadmap",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "trello board show: board brd_roadmap is outside the configured scope\n"
+      }
+    },
+    {
+      "id": "tr_scope_create_denied",
+      "seq": 939003,
+      "targets": [
+        "cli-trello-scoped"
+      ],
+      "command": "trello card create --list_id lst_todo --name forbidden",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "trello card create: list lst_todo is outside the configured scope\n"
+      }
+    },
+    {
+      "id": "tr_scope_update_denied",
+      "seq": 939004,
+      "targets": [
+        "cli-trello-scoped"
+      ],
+      "command": "trello card update --card_id crd_search --name forbidden",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "trello card update: card crd_search is outside the configured scope\n"
+      }
+    },
+    {
+      "id": "tr_scope_card_writes_denied",
+      "seq": 939006,
+      "targets": [
+        "cli-trello-scoped"
+      ],
+      "command": "trello card comment --card_id crd_search --text hi; echo rc=$?; trello card comment-update --card_id crd_search --comment_id act_x --text hi; echo rc=$?; trello card assign --card_id crd_search --member_id mem_sam; echo rc=$?; trello card label --card_id crd_search --label_id lbl_bug; echo rc=$?; trello card unlabel --card_id crd_search --label_id lbl_bug; echo rc=$?; trello card move --card_id crd_search --list_id lst_doing; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "trello card comment: card crd_search is outside the configured scope\ntrello card comment-update: card crd_search is outside the configured scope\ntrello card assign: card crd_search is outside the configured scope\ntrello card label: card crd_search is outside the configured scope\ntrello card unlabel: card crd_search is outside the configured scope\ntrello card move: card crd_search is outside the configured scope\n"
+      }
+    },
+    {
+      "id": "tr_cli_help",
+      "seq": 550025,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello card create --help",
+      "expect": {
+        "exit": 0,
+        "stdout": "usage: trello card create [--list_id LIST_ID] [--name NAME] [--desc DESC] [--desc_file DESC_FILE] [-h]\n\nCreate a new card\n\noptions:\n  --list_id LIST_ID      Trello list ID\n  --name NAME            Card name\n  --desc DESC            Inline description text\n  --desc_file DESC_FILE  Path to file containing description\n  -h, --help             Show this help and exit\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_cli_unknown_verb",
+      "seq": 550026,
+      "targets": [
+        "cli-trello"
+      ],
+      "command": "trello card nope",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "trello: 'nope' is not a trello card command. See 'trello card --help'.\n"
+      }
+    }
+  ]
+}

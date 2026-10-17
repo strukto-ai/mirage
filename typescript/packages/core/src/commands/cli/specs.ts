@@ -21,6 +21,7 @@ import { GWS } from './builtin/gws/index.ts'
 import { LINEAR } from './builtin/linear/index.ts'
 import { NTN } from './builtin/ntn/index.ts'
 import { SLACK } from './builtin/slack/index.ts'
+import { TRELLO } from './builtin/trello/index.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
 // Named CLI trees the YAML `clis:` section resolves against
@@ -31,7 +32,10 @@ import { compareCodePoints } from '../../utils/sort.ts'
 // packages add theirs through registerCliSpec from their entry point,
 // and user programs do the same before the workspace loads.
 const CLI_SPECS = new Map<string, CLI>(
-  [AIRTABLE, DISCORD, GH, GIT, GWS, LINEAR, NTN, SLACK].map((spec) => [spec.spec.name, spec]),
+  [AIRTABLE, DISCORD, GH, GIT, GWS, LINEAR, NTN, SLACK, TRELLO].map((spec) => [
+    spec.spec.name,
+    spec,
+  ]),
 )
 
 /** Make a CLI resolvable by name from YAML; its root name is the key. */

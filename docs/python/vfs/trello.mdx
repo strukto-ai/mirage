@@ -84,8 +84,8 @@ Example:
 ```
 
 Directory and file names embed the Trello ID after `__` so that
-VFS-specific commands can reference the correct VFS without
-extra lookups.
+[trello CLI](/python/cli/trello) commands can take an ID without extra
+lookups.
 
 ### Workspaces
 
@@ -286,147 +286,10 @@ Standard commands available on the mounted Trello tree:
 | `dirname`       | Extract directory from path                |
 | `realpath`      | Resolve path to absolute form              |
 
-## VFS-Specific Commands
+## Acting on Trello
 
-The command surface mirrors a Trello CLI: nested `trello <noun> <verb>` names
-that emit normalized JSON to stdout, so you can pipe any of them to `jq`.
-
-`workspace_id` and `board_ids` narrow these commands the way they narrow the
-tree: `trello board list` shows the boards the mount lists, and a board, list
-or card id on a board outside them is refused before any read or write
-(`trello card show: card crd_009 is outside this mount's scope`, exit 1).
-
-### Read commands
-
-```bash
-trello board list                         # the boards the mount lists
-trello board show brd_001
-trello board members brd_001
-trello list list brd_001                  # lists on a board
-trello label list brd_001
-trello card list lst_001                  # cards in a list
-trello card show crd_001
-trello card comments crd_001
-```
-
-### `trello card create`
-
-Create a new card. Description can be passed via `--desc`, `--desc_file`, or stdin.
-
-```bash
-trello card create --list_id LST123 --name "Fix login"
-trello card create --list_id LST123 --name "Fix login" --desc "Details here"
-cat brief.md | trello card create --list_id LST123 --name "Agent bug"
-```
-
-| Option        | Required | Description                         |
-| ------------- | -------- | ----------------------------------- |
-| `--list_id`   | yes      | Trello list ID                      |
-| `--name`      | yes      | Card name                           |
-| `--desc`      | no       | Inline description text             |
-| `--desc_file` | no       | Path to file containing description |
-
-### `trello card update`
-
-Update an existing card. Description can be passed via `--desc`, `--desc_file`, or stdin.
-
-```bash
-trello card update --card_id CRD123 --name "Updated title"
-trello card update --card_id CRD123 --desc "New description"
-trello card update --card_id CRD123 --closed true
-```
-
-| Option        | Required | Description                         |
-| ------------- | -------- | ----------------------------------- |
-| `--card_id`   | yes      | Trello card ID                      |
-| `--name`      | no       | New card name                       |
-| `--desc`      | no       | Inline description text             |
-| `--desc_file` | no       | Path to file containing description |
-| `--due`       | no       | Due date                            |
-| `--closed`    | no       | Archive card (true/false)           |
-
-### `trello card move`
-
-Move a card to a different list.
-
-```bash
-trello card move --card_id CRD123 --list_id LST999
-```
-
-| Option      | Required | Description    |
-| ----------- | -------- | -------------- |
-| `--card_id` | yes      | Trello card ID |
-| `--list_id` | yes      | Trello list ID |
-
-### `trello card assign`
-
-Assign a member to a card.
-
-```bash
-trello card assign --card_id CRD123 --member_id MEM001
-```
-
-| Option        | Required | Description      |
-| ------------- | -------- | ---------------- |
-| `--card_id`   | yes      | Trello card ID   |
-| `--member_id` | yes      | Trello member ID |
-
-### `trello card comment`
-
-Add a comment to a card. Text can be passed via `--text`, `--text_file`, or stdin.
-
-```bash
-trello card comment --card_id CRD123 --text "Looks good"
-cat note.md | trello card comment --card_id CRD123
-```
-
-| Option        | Required | Description                  |
-| ------------- | -------- | ---------------------------- |
-| `--card_id`   | yes      | Trello card ID               |
-| `--text`      | \*       | Inline comment text          |
-| `--text_file` | \*       | Path to file containing text |
-
-\* One of `--text`, `--text_file`, or stdin is required.
-
-### `trello card comment-update`
-
-Update an existing comment. Text can be passed via `--text`, `--text_file`, or stdin.
-
-```bash
-trello card comment-update --comment_id CMT001 --card_id CRD123 --text "Updated text"
-```
-
-| Option         | Required | Description                  |
-| -------------- | -------- | ---------------------------- |
-| `--comment_id` | yes      | Trello comment ID            |
-| `--card_id`    | yes      | Trello card ID               |
-| `--text`       | \*       | Inline comment text          |
-| `--text_file`  | \*       | Path to file containing text |
-
-\* One of `--text`, `--text_file`, or stdin is required.
-
-### `trello card label`
-
-Add a label to a card.
-
-```bash
-trello card label --card_id CRD123 --label_id LBL001
-```
-
-| Option       | Required | Description     |
-| ------------ | -------- | --------------- |
-| `--card_id`  | yes      | Trello card ID  |
-| `--label_id` | yes      | Trello label ID |
-
-### `trello card unlabel`
-
-Remove a label from a card.
-
-```bash
-trello card unlabel --card_id CRD123 --label_id LBL001
-```
-
-| Option       | Required | Description     |
-| ------------ | -------- | --------------- |
-| `--card_id`  | yes      | Trello card ID  |
-| `--label_id` | yes      | Trello label ID |
+Reads and writes on Trello entities by ID (boards, members, lists, labels,
+cards, comments) go through the [trello CLI](/python/cli/trello) when
+installed; the mounted tree serves the same entities as normalized JSON files.
+The CLI takes `workspace_id` and `board_ids` in its own config, so it covers
+the boards the mount lists only when both are configured alike.

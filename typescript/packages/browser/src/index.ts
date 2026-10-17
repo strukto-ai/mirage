@@ -189,7 +189,7 @@ export {
   redactTrelloConfig,
   type TrelloConfig,
   type TrelloConfigRedacted,
-} from '@struktoai/mirage-core/vfs/trello/config'
+} from '@struktoai/mirage-core/core/trello/config'
 export { LinearVFS, type LinearVFSState } from '@struktoai/mirage-core/vfs/linear/linear'
 export {
   normalizeLinearConfig,
@@ -329,7 +329,7 @@ export {
   ExecuteResult,
   type WorkspaceOptions,
 } from '@struktoai/mirage-core/workspace/workspace/types'
-export { Files } from '@struktoai/mirage-core/workspace/files'
+export { Files, WorkspaceFiles } from '@struktoai/mirage-core/workspace/files'
 export { Namespace } from '@struktoai/mirage-core/workspace/mount/namespace/namespace'
 
 export { WandbVFS } from '@struktoai/mirage-core/vfs/wandb/wandb'

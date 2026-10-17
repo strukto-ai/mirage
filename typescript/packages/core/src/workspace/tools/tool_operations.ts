@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { strongestUnderSession } from '../../context/session_context.ts'
-import type { Files } from '../files.ts'
+import { type Files, withCaller } from '../files.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { patternMatches } from '../../policy/match/pattern.ts'
@@ -162,9 +162,10 @@ export function writes(session: SessionState, mounts: readonly MountEntry[]): bo
 function oneCall<T>(session: SessionLike, run: (vfs: Files) => Promise<T>): Promise<T> {
   return session.decisions.withinCall(session.sessionId, (handed) =>
     run(
-      session.vfs
-        .forSession(session.sessionId)
-        .forCaller({ call: [session.decisions, handed, session.sessionId], refusals: null }),
+      withCaller(session.vfs.forSession(session.sessionId), {
+        call: [session.decisions, handed, session.sessionId],
+        refusals: null,
+      }),
     ),
   )
 }

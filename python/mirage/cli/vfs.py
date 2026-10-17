@@ -118,7 +118,6 @@ def _text(key: str) -> Callable[[dict[str, Any]], str]:
 HUMAN: dict[str, Callable[[dict[str, Any]], str]] = {
     "read": _text("data_base64"),
     "getxattr": _text("value_base64"),
-    "cat": lambda result: result["text"],
     "readdir": lambda result: "\n".join(result["entries"]),
     "list_files": lambda result: "\n".join(result["files"]),
     "listxattr": lambda result: "\n".join(result["names"]),

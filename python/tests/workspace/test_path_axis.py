@@ -147,8 +147,11 @@ def test_the_dispatcher_runs_as_the_default_session():
 
     async def run():
         files = Session(ws, host.session_id).vfs
-        assert files.records is ws.vfs.records
         await files.mkdir("/data/vault")
+        assert (ws.vfs.records[-1].op, ws.vfs.records[-1].path) == (
+            "mkdir",
+            "/data/vault",
+        )
         await files.write("/data/vault/secret", b"top\n")
         assert await files.read("/data/vault/secret") == b"top\n"
         with pytest.raises(FileNotFoundError):

@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.trello import TrelloAccessor
+from mirage.core.trello.config import TrelloConfig
 from mirage.core.trello.normalize import (
     normalize_card,
     normalize_workspace,
@@ -30,7 +31,6 @@ from mirage.core.trello.readdir import (
 )
 from mirage.types import PathSpec
 from mirage.vfs.trello import TrelloVFS
-from mirage.vfs.trello.config import TrelloConfig
 from mirage.workspace import Workspace
 from tests.fixtures.vfs_io import vfs_over
 

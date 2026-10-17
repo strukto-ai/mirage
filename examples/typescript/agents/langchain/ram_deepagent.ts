@@ -57,7 +57,7 @@ const findOut = findAll.stdoutText
 console.log(findOut)
 
 for (const path of findOut.trim().split('\n').filter(Boolean)) {
-  const content = await ws.vfs.cat(path)
+  const content = new TextDecoder().decode(await ws.vfs.read(path))
   console.log(`cat ${path}:\n${content}`)
 }
 

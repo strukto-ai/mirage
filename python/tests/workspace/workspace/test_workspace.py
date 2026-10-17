@@ -76,10 +76,13 @@ async def test_a_handle_binds_both_entry_points_to_one_session():
         hidden = await reviewer.shell("cat /repo/secrets/key.pem")
         assert hidden.exit_code == 1
         assert await reviewer.vfs.read("/repo/README.md") == b"hello\n"
+        assert (ws.vfs.records[-1].op, ws.vfs.records[-1].path) == (
+            "read",
+            "/repo/README.md",
+        )
         with pytest.raises(FileNotFoundError):
             await reviewer.vfs.read("/repo/secrets/key.pem")
         assert await ws.vfs.read("/repo/secrets/key.pem") == b"PRIVATE\n"
-        assert reviewer.vfs.records is ws.vfs.records
         assert await reviewer.glob("/repo/*") == ["/repo/README.md"]
         assert await ws.glob("/repo/*") == ["/repo/README.md", "/repo/secrets"]
     finally:

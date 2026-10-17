@@ -258,7 +258,7 @@ async function runSessionProbe(
   result.session_shell_listing = dec.decode(listing.stdout).trim()
   const capped = await ws.shell('echo x > /data/pub.txt', { sessionId: 'agent' })
   result.session_shell_write_refused = capped.exitCode !== 0
-  result.session_host_reads_hidden = (await ws.vfs.cat('/data/vault/secret.txt')).trim()
+  result.session_host_reads_hidden = dec.decode(await ws.vfs.read('/data/vault/secret.txt')).trim()
   await ws.vfsMd('/VFS.md')
   await ws.skillMd('/SKILL.md', { sessionId: 'agent' })
   const handle = await fuseMount(ws, { session })

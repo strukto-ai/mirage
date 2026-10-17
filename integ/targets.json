@@ -2330,6 +2330,58 @@
       ]
     },
     {
+      "id": "cli-trello",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "trello",
+      "facet": "cli",
+      "clis": [
+        "trello"
+      ],
+      "mounts": [
+        {
+          "path": "/board",
+          "vfs": "trello",
+          "backend": "trello",
+          "mode": "read"
+        },
+        {
+          "path": "/scratch",
+          "vfs": "ram",
+          "backend": "memory"
+        }
+      ]
+    },
+    {
+      "id": "cli-trello-scoped",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "trello",
+      "facet": "cli",
+      "clis": [
+        "trello"
+      ],
+      "cli_scope": "/scoped",
+      "mounts": [
+        {
+          "path": "/scoped",
+          "vfs": "trello",
+          "backend": "trello",
+          "mode": "read",
+          "config": {
+            "workspace_id": "org_strukto",
+            "board_ids": [
+              "brd_ops"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "id": "cli-airtable",
       "hosts": [
         "python",

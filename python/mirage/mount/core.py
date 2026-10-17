@@ -45,7 +45,7 @@ from mirage.utils.stat_view import (
     mtime_ns,
     posix_mode,
 )
-from mirage.workspace.files import Files
+from mirage.workspace.files import Files, namespace_of
 from mirage.workspace.session.session import SessionState
 
 logger = logging.getLogger(__name__)
@@ -1183,7 +1183,7 @@ class MountCore:
                 which may loop.
         """
         virtual = self.resolve(path)
-        links = self._files._links
+        links = namespace_of(self._files).links
         if links is None:
             return virtual
         if follow:

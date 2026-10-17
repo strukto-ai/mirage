@@ -91,7 +91,6 @@ const text =
 const HUMAN: Readonly<Record<string, (result: Answer) => string>> = {
   read: text('data_base64'),
   getxattr: text('value_base64'),
-  cat: (result) => String(result.text),
   readdir: (result) => (result.entries as string[]).join('\n'),
   list_files: (result) => (result.files as string[]).join('\n'),
   listxattr: (result) => (result.names as string[]).join('\n'),

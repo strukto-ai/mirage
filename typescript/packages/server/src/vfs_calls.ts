@@ -137,7 +137,6 @@ export const VFS_CALLS: readonly VfsCall[] = [
   row('is_file', 'Whether a path is a file.', PATH_ONLY, ['path'], 'is_file', (t, a) =>
     t.isFile(str(a, 'path')),
   ),
-  row('cat', "A file's text.", PATH_ONLY, ['path'], 'text', (t, a) => t.cat(str(a, 'path'))),
   row('list_files', "The names of a directory's files.", PATH_ONLY, ['path'], 'files', (t, a) =>
     t.listFiles(str(a, 'path')),
   ),

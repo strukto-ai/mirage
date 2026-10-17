@@ -15,6 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
+import { TRELLO } from '@struktoai/mirage-core'
 import {
   MountMode,
   TrelloVFS,
@@ -57,6 +58,7 @@ async function main(): Promise<void> {
     { '/trello': new TrelloVFS(buildConfig()) },
     { mode: MountMode.WRITE },
   )
+  ws.registerCli('trello', TRELLO, buildConfig() as unknown as Record<string, unknown>)
   try {
     console.log('=== ls /trello/ ===')
     await run(ws, 'ls /trello/')

@@ -15,8 +15,8 @@
 import pytest
 
 from mirage.commands.builtin.backends import commands_for
+from mirage.core.trello.config import TrelloConfig
 from mirage.types import VFSName
-from mirage.vfs.trello.config import TrelloConfig
 from mirage.vfs.trello.trello import TrelloVFS
 
 
@@ -41,6 +41,6 @@ def test_vfs_accessor(config):
     assert vfs.accessor.config is config
 
 
-def test_vfs_commands_registered(config):
+def test_vfs_serves_no_commands_of_its_own(config):
     vfs = TrelloVFS(config)
-    assert len(commands_for(vfs)) >= 10
+    assert commands_for(vfs) == []

@@ -71,8 +71,8 @@ console.log('\n--- Per-file content match ---')
 let matched = 0
 let differ = 0
 for (const path of origFiles) {
-  const a = await ws.vfs.cat(path)
-  const b = await fresh.vfs.cat(path)
+  const a = new TextDecoder().decode(await ws.vfs.read(path))
+  const b = new TextDecoder().decode(await fresh.vfs.read(path))
   if (a === b) {
     console.log(`  ✓ ${path}  (${a.length} chars match)`)
     matched += 1

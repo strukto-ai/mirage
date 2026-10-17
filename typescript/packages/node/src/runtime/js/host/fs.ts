@@ -360,7 +360,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
         (directory) => ws.namespace.linkNamesUnder(directory),
       ),
     )
-    this.descriptors = new Descriptors(this.files, native, ws.vfs.links)
+    this.descriptors = new Descriptors(this.files, native, ws.namespace)
   }
 
   /** Whether `path` is under a mount the patch answers for. The synthetic
