@@ -877,6 +877,10 @@ async def test_file_read_failing_midway_keeps_streamed_output():
         await ws.close()
 
 
+async def _refuse_dispatch(op: str, scope: PathSpec, **kwargs):
+    raise AssertionError(f"unexpected {op}")
+
+
 @pytest.mark.asyncio
 async def test_a_job_write_under_way_when_the_route_releases_lands():
     landed: list[bytes] = []
@@ -884,9 +888,6 @@ async def test_a_job_write_under_way_when_the_route_releases_lands():
 
     async def collect(data: bytes) -> None:
         landed.append(data)
-
-    async def dispatch(op: str, scope: PathSpec, **kwargs):
-        raise AssertionError(f"unexpected {op}")
 
     recorder = Recorder()
     append = recorder.storage.append
@@ -901,7 +902,7 @@ async def test_a_job_write_under_way_when_the_route_releases_lands():
         recorder,
         {1: stdout},
         JobConsole(),
-        dispatch,
+        _refuse_dispatch,
         EvaluationContext(SessionState("s")),
     )
     route.record(recorder)

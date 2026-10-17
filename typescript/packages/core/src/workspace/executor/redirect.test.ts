@@ -1138,6 +1138,8 @@ it('fails only the redirect when a file read fails midway', async () => {
   }
 })
 
+const refuseDispatch: DispatchFn = () => Promise.reject(new Error('unexpected dispatch'))
+
 describe('JobRoute.release', () => {
   it('lands a job write still under way when the route releases', async () => {
     const landed: string[] = []
@@ -1146,13 +1148,12 @@ describe('JobRoute.release', () => {
       await Promise.resolve()
       landed.push(new TextDecoder().decode(data))
     }
-    const dispatch: DispatchFn = () => Promise.reject(new Error('unexpected dispatch'))
     const recorder = new Recorder()
     const route = new JobRoute(
       recorder,
       new Map([[1, stdout]]),
       new JobConsole(),
-      dispatch,
+      refuseDispatch,
       new SessionState({ sessionId: 's' }),
     )
     route.record(recorder)
