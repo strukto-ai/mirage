@@ -38,7 +38,7 @@ async def test_execution_identity_links_pipeline_threaded_cli_and_observation():
     ws = _make_ws()
     seen = []
 
-    def probe(inv):
+    def probe(config, paths, texts, ctx):
         seen.append(current_execution_id())
         return b"tracked\n", IOResult()
 
@@ -71,7 +71,7 @@ async def test_sync_cli_does_not_block_other_sessions_or_escape_cancellation():
     entered, release = asyncio.Event(), threading.Event()
     finished = []
 
-    def blocking(inv):
+    def blocking(config, paths, texts, ctx):
         loop.call_soon_threadsafe(entered.set)
         assert release.wait(2)
         finished.append(True)
@@ -605,7 +605,7 @@ async def test_nested_lines_run_while_the_outer_line_holds_the_session():
 async def test_host_callback_reentering_its_own_session_runs_inline():
     ws = _make_ws()
 
-    async def again(inv):
+    async def again(config, paths, texts, ctx):
         inner = await ws.shell("echo inner")
         return inner.stdout, IOResult()
 
@@ -627,7 +627,7 @@ async def test_line_queued_behind_a_running_one_is_refused_once_close_starts():
     ws = _make_ws()
     gate = asyncio.Event()
 
-    async def stall(inv):
+    async def stall(config, paths, texts, ctx):
         await gate.wait()
         return None, IOResult()
 
@@ -698,10 +698,10 @@ async def test_invocation_shell_reenters_exact_session_and_expires(line):
     ws = _make_ws()
     saved = []
 
-    async def again(inv):
-        saved.append(inv.shell)
+    async def again(config, paths, texts, ctx):
+        saved.append(ctx.shell)
         await asyncio.sleep(0)
-        inner = await inv.shell("Z=inner; echo inner")
+        inner = await ctx.shell("Z=inner; echo inner")
         return inner.stdout, inner
 
     ws.register_cli(
@@ -729,10 +729,10 @@ async def test_invocation_shell_does_not_admit_unrelated_calls(named):
     entered = asyncio.Event()
     held = asyncio.Event()
 
-    async def again(inv):
+    async def again(config, paths, texts, ctx):
         entered.set()
         await held.wait()
-        inner = await inv.shell('X=inner; echo "$X"')
+        inner = await ctx.shell('X=inner; echo "$X"')
         return inner.stdout, inner
 
     ws.register_cli(

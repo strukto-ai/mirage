@@ -19,8 +19,9 @@ import {
   CLIHandler,
   CommandSpec,
   FlagView,
-  type CLIInvocation,
+  type Context,
   IOResult,
+  type PathSpec,
   Argument,
   RAMVFS,
   Workspace,
@@ -36,7 +37,7 @@ interface Incident {
   acknowledgedBy?: string
 }
 
-// A real CLI would construct its service client from inv.config. This
+// A real CLI would construct its service client from config. This
 // deterministic service keeps the example runnable without credentials or
 // network access while preserving the same per-account semantics.
 const INCIDENTS: Record<PagerConfig['account'], Record<string, Incident>> = {
@@ -50,9 +51,9 @@ const INCIDENTS: Record<PagerConfig['account'], Record<string, Incident>> = {
 
 const enc = new TextEncoder()
 
-function configOf(inv: CLIInvocation): PagerConfig {
+function configOf(config: unknown): PagerConfig {
   // registerCli validates the account before the handler runs.
-  return inv.config as PagerConfig
+  return config as PagerConfig
 }
 
 function accountIncidents(account: PagerConfig['account']): Record<string, Incident> {
@@ -63,10 +64,15 @@ function accountIncidents(account: PagerConfig['account']): Record<string, Incid
 // needs: the executor awaits either, so a handler that reaches a service
 // and one that answers from memory are written the same way, and one that
 // throws before any await is refused exactly like one that rejects.
-function listIncidents(inv: CLIInvocation): Promise<CommandFnResult> {
-  const { account } = configOf(inv)
-  const wanted = new Set(inv.texts)
-  const status = new FlagView(inv.flags, inv.spec).asStr('state')
+function listIncidents(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const { account } = configOf(config)
+  const wanted = new Set(texts)
+  const status = new FlagView(ctx.flags, ctx.spec).asStr('state')
   const lines = Object.entries(accountIncidents(account))
     .filter(
       ([id, incident]) =>
@@ -87,10 +93,15 @@ function listIncidents(inv: CLIInvocation): Promise<CommandFnResult> {
   ])
 }
 
-function acknowledge(inv: CLIInvocation): CommandFnResult {
-  const { account } = configOf(inv)
-  const incidentId = inv.texts[0]
-  const by = new FlagView(inv.flags, inv.spec).asStr('by')
+function acknowledge(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): CommandFnResult {
+  const { account } = configOf(config)
+  const incidentId = texts[0]
+  const by = new FlagView(ctx.flags, ctx.spec).asStr('by')
   if (incidentId === undefined) throw new Error('INCIDENT_ID is required')
   const incidents = accountIncidents(account)
   const incident = Object.hasOwn(incidents, incidentId) ? incidents[incidentId] : undefined

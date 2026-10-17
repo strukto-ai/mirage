@@ -34,7 +34,7 @@ from mirage.commands.builtin.utils.slash_links import (
     rm_link_refusal,
 )
 from mirage.commands.builtin.utils.verbose import removal_lines
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
@@ -50,9 +50,9 @@ async def rm(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(opts.flags, spec=SPECS["rm"])
+    fl = FlagView(ctx.flags, spec=SPECS["rm"])
     f = fl.as_bool("f")
     v = fl.as_bool("v")
     d = fl.as_bool("d")
@@ -60,11 +60,11 @@ async def rm(
         return rm_without_operands(f)
     if not ops.is_mounted(accessor):
         raise ValueError("rm: missing operand")
-    paths = await ops.resolve_glob(accessor, paths, opts.index)
+    paths = await ops.resolve_glob(accessor, paths, ctx.index)
     recursive = fl.as_bool("r") or fl.as_bool("R")
     verbose_parts: list[str] = []
     errors: list[str] = []
-    links = links_of(opts)
+    links = links_of(ctx)
     for p in paths:
         if is_slashed_link(p, links):
             refusal = await rm_link_refusal(
@@ -74,7 +74,7 @@ async def rm(
                 errors.append(refusal)
             continue
         try:
-            s = await ops.stat(accessor, p, index=opts.index)
+            s = await ops.stat(accessor, p, index=ctx.index)
         except FS_ERRORS as exc:
             # ENOTDIR is a component that is a plain file: the operand
             # sits under one, or carried a trailing slash that named one
@@ -93,9 +93,9 @@ async def rm(
             if s.type == FileType.DIRECTORY:
                 if recursive:
                     readdir = functools.partial(
-                        ops.readdir, accessor, index=opts.index
+                        ops.readdir, accessor, index=ctx.index
                     )
-                    stat = bound_op(ops.stat, accessor, opts.index)
+                    stat = bound_op(ops.stat, accessor, ctx.index)
                     # -v names each entry before the tree goes in one
                     # call; a tree it cannot list whole goes entry by
                     # entry, as does one the dispatcher declines for
@@ -129,7 +129,7 @@ async def rm(
                             rmdir=functools.partial(
                                 require_op(ops, Operation.RMDIR), accessor
                             ),
-                            mounts=mounts_of(opts),
+                            mounts=mounts_of(ctx),
                             force=f,
                         )
                         errors.extend(
@@ -144,7 +144,7 @@ async def rm(
                         f"rm: skipping '{operand_spelling(root, p)}', "
                         "since it's on a different device"
                         for root in mount_points(
-                            mounts_of(opts),
+                            mounts_of(ctx),
                             p.virtual,
                         )
                     )
@@ -152,14 +152,14 @@ async def rm(
                         verbose_parts.extend(entry_lines)
                         continue
                 elif d:
-                    if await ops.readdir(accessor, p, index=opts.index):
+                    if await ops.readdir(accessor, p, index=ctx.index):
                         errors.append(
                             f"rm: cannot remove '{p.raw_path}': "
                             "Directory not empty"
                         )
                         continue
                     await require_op(ops, Operation.RMDIR)(
-                        accessor, p, index=opts.index
+                        accessor, p, index=ctx.index
                     )
                     entry_lines = [f"removed directory '{p.raw_path}'"]
                 else:

@@ -17,7 +17,7 @@ import json
 import pytest
 
 from mirage.commands.cli.builtin.linear import reads
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.core.linear.config import LinearConfig
 from mirage.io.types import materialize
 
@@ -41,7 +41,7 @@ async def test_team_list_filters_config_team_ids(monkeypatch):
     monkeypatch.setitem(reads.__dict__, "list_teams", fake_list_teams)
     monkeypatch.setitem(reads.__dict__, "normalize_team", fake_normalize)
     config = LinearConfig(api_key="k", team_ids=["team-2"])
-    out, _io = await reads.team_list(CLIInvocation(config))
+    out, _io = await reads.team_list(config, [], [], Context())
     assert await _json(out) == [{"team_id": "team-2"}]
 
 
@@ -66,7 +66,7 @@ async def test_issue_get_resolves_issue_keys(monkeypatch):
     )
     monkeypatch.setitem(reads.__dict__, "get_issue", fake_get_issue)
     monkeypatch.setitem(reads.__dict__, "normalize_issue", fake_normalize)
-    out, _io = await reads.issue_get(CLIInvocation(CONFIG, texts=("ENG-42",)))
+    out, _io = await reads.issue_get(CONFIG, [], ["ENG-42"], Context())
     assert calls == ["ENG-42"]
     assert (await _json(out))["issue_id"] == "issue-uuid"
 
@@ -74,7 +74,7 @@ async def test_issue_get_resolves_issue_keys(monkeypatch):
 @pytest.mark.asyncio
 async def test_issue_list_requires_team(monkeypatch):
     with pytest.raises(ValueError, match="--team is required"):
-        await reads.issue_list(CLIInvocation(CONFIG))
+        await reads.issue_list(CONFIG, [], [], Context())
 
 
 @pytest.mark.asyncio
@@ -86,8 +86,8 @@ async def test_search_takes_flag_or_operand(monkeypatch):
         return [{"issue_key": "ENG-1"}]
 
     monkeypatch.setitem(reads.__dict__, "search_issues", fake_search)
-    await reads.search(CLIInvocation(CONFIG, texts=("login bug",)))
-    await reads.search(CLIInvocation(CONFIG, flags={"query": "crash"}))
+    await reads.search(CONFIG, [], ["login bug"], Context())
+    await reads.search(CONFIG, [], [], Context(flags={"query": "crash"}))
     assert queries == ["login bug", "crash"]
     with pytest.raises(ValueError, match="query is required"):
-        await reads.search(CLIInvocation(CONFIG))
+        await reads.search(CONFIG, [], [], Context())

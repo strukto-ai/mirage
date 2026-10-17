@@ -79,6 +79,7 @@ from mirage.workspace.executor.command.run import (
     drop_mount_caches,
     exec_node,
     find_start_points,
+    run_nested_line,
     run_on_mount,
     scalar_find_flags,
 )
@@ -301,7 +302,7 @@ async def handle_command(
     # below functions (a user can wrap an installed CLI, bash-style)
     # and above every mount branch (a CLI consults no mount). A CLI that
     # works on files rather than an API (`git`) reaches them through
-    # `inv.view.vfs`, the session's files made by the command; the rest
+    # `ctx.vfs`, the session's files made by the command; the rest
     # never look.
     cli_install = registry.clis.get(cmd_name)
     if cli_install is not None:
@@ -313,7 +314,7 @@ async def handle_command(
             CLIContext(
                 shell=(
                     functools.partial(
-                        execute_fn, session_id=session.session_id
+                        run_nested_line, execute_fn, session.session_id
                     )
                     if execute_fn is not None
                     else None
@@ -321,7 +322,7 @@ async def handle_command(
                 command_limits=registry.command_limits,
                 entries=registry.runtime_entries,
                 vfs=files,
-                session_view=session_view(
+                session=session_view(
                     session,
                     registry.policies,
                     diagnostics=context.frame.diagnostics,

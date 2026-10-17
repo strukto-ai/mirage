@@ -13,7 +13,7 @@ from mirage.commands.builtin.utils.stream import (
     stdin_stat,
     stdin_stream,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
@@ -153,7 +153,7 @@ async def cut(
 async def cut_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     stat: StatFn,
     stream: PolymorphicReadFn,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -162,7 +162,7 @@ async def cut_generic(
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
         texts (list[str]): Non-path words, unused by cut.
-        opts (CommandOpts): Flags and stdin from the dispatcher.
+        ctx (Context): Flags and stdin from the dispatcher.
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
@@ -174,8 +174,8 @@ async def cut_generic(
         await cut(
             readable,
             read_stream=normalized_read(stream),
-            stdin=opts.stdin,
-            flags=opts.flags,
+            stdin=ctx.stdin,
+            flags=ctx.flags,
         ),
         err,
     )

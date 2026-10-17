@@ -21,7 +21,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import {
   AwkIOError,
@@ -50,8 +50,8 @@ const STDIN_NAMES: ReadonlySet<string> = new Set(['-', '/dev/stdin'])
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
-function parseFlags(opts: CommandOpts): AwkFlags {
-  const fl = new FlagView(opts.flags, specOf('awk'))
+function parseFlags(ctx: Context): AwkFlags {
+  const fl = new FlagView(ctx.flags, specOf('awk'))
   const assignments = fl.asList('v')
   const programFiles = fl.asPaths('f')
   return {
@@ -84,10 +84,10 @@ function isFatal(err: unknown): err is AwkRuntimeError | AwkSyntaxError {
  * serves is read through the dispatcher. Outside a workspace (no name plane)
  * every operand is the mount's own.
  */
-export function servedHere(opts: CommandOpts, path: PathSpec): boolean {
-  const mounts = mountsOf(opts)
+export function servedHere(ctx: Context, path: PathSpec): boolean {
+  const mounts = mountsOf(ctx)
   if (mounts === undefined) return true
-  const home = (opts.mountPrefix ?? '').replace(/\/+$/, '')
+  const home = (ctx.mountPrefix ?? '').replace(/\/+$/, '')
   return mounts.rootOf(path.virtual).replace(/\/+$/, '') === home
 }
 
@@ -115,15 +115,15 @@ export class AwkStreams implements AwkHost {
   private readonly operands: readonly PathSpec[]
   private readonly stream: Stream
   private readonly stdin: AsyncIterator<Uint8Array>
-  private readonly opts: CommandOpts
+  private readonly ctx: Context
   private readonly caller = currentCaller()
   private readonly outputs = new Map<string, ByteWriter>()
 
-  constructor(operands: readonly PathSpec[], stream: Stream, opts: CommandOpts) {
+  constructor(operands: readonly PathSpec[], stream: Stream, ctx: Context) {
     this.operands = operands
     this.stream = stream
-    this.stdin = resolveSource(opts.stdin)[Symbol.asyncIterator]()
-    this.opts = opts
+    this.stdin = resolveSource(ctx.stdin)[Symbol.asyncIterator]()
+    this.ctx = ctx
   }
 
   private async *stdinView(): AsyncIterable<Uint8Array> {
@@ -139,9 +139,9 @@ export class AwkStreams implements AwkHost {
    * back what it printed. `local`: an operand this mount's backend serves.
    */
   private async *readPath(name: string | PathSpec, local = false): AsyncIterable<Uint8Array> {
-    const dispatch = this.opts.dispatch
+    const dispatch = this.ctx.dispatch
     if (dispatch === undefined && !local) throw new AwkIOError(posixPhrase('ENOENT'))
-    const path = PathSpec.fromStrPath(name, undefined, this.opts.cwd)
+    const path = PathSpec.fromStrPath(name, undefined, this.ctx.cwd)
     await this.flushOutput()
     yield* local || dispatch === undefined
       ? this.stream(path)
@@ -159,7 +159,7 @@ export class AwkStreams implements AwkHost {
       const operand = this.operands[index - 1]
       if (operand?.rawPath === name) {
         if (isStdin(operand)) return guarded(this.stdinView())
-        return guarded(this.readPath(operand, servedHere(this.opts, operand)))
+        return guarded(this.readPath(operand, servedHere(this.ctx, operand)))
       }
     }
     if (STDIN_NAMES.has(name)) return guarded(this.stdinView())
@@ -167,9 +167,9 @@ export class AwkStreams implements AwkHost {
   }
 
   async writeFile(name: string, body: string, append: boolean): Promise<void> {
-    const dispatch = this.opts.dispatch
+    const dispatch = this.ctx.dispatch
     if (dispatch === undefined) throw new AwkRuntimeError('awk: file output requires a workspace')
-    const path = PathSpec.fromStrPath(textView(name), undefined, this.opts.cwd)
+    const path = PathSpec.fromStrPath(textView(name), undefined, this.ctx.cwd)
     try {
       if (!append) {
         await this.flushOutput()
@@ -221,7 +221,7 @@ export class AwkStreams implements AwkHost {
    * ending in a backslash runs as `sh -c` would run it.
    */
   async run(command: string, stdin: ByteSource | null): Promise<CommandRun> {
-    const shell = this.opts.shell
+    const shell = this.ctx.shell
     if (shell === undefined) {
       throw new AwkRuntimeError('awk: running a command requires a workspace')
     }
@@ -298,11 +298,11 @@ async function* awkStream(
 export async function awkGeneric(
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: Stream,
 ): Promise<CommandFnResult> {
-  const f = parseFlags(opts)
-  const streams = new AwkStreams(paths, stream, opts)
+  const f = parseFlags(ctx)
+  const streams = new AwkStreams(paths, stream, ctx)
   let program: string
   if (f.programFiles.length > 0) {
     const pieces: string[] = []
@@ -340,9 +340,9 @@ export async function awkGeneric(
     paths.map((p) => byteView(p.rawPath)),
     splitAssignments(f.assignments),
     Object.fromEntries(
-      Object.entries(opts.env ?? {}).map(([name, value]) => [byteView(name), byteView(value)]),
+      Object.entries(ctx.env ?? {}).map(([name, value]) => [byteView(name), byteView(value)]),
     ),
-    opts.signal,
+    ctx.signal,
   )
   if (f.fieldSeparator !== null) interp.setVar('FS', text(unescape(byteView(f.fieldSeparator))))
 

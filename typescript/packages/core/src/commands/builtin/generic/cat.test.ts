@@ -16,7 +16,7 @@ import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { efbig } from '../../../errors/fs.ts'
 import { catGeneric } from './cat.ts'
 
@@ -43,8 +43,8 @@ function spec(path: string): PathSpec {
   })
 }
 
-function opts(): CommandOpts {
-  return { stdin: null, flags: {}, cwd: '/' } as CommandOpts
+function ctx(): Context {
+  return { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/') } as Context
 }
 
 async function* fileStream(path: string, pulled: string[]): AsyncIterable<Uint8Array> {
@@ -62,7 +62,7 @@ function statFn(p: PathSpec): Promise<FileStat> {
 describe('catGeneric multi-file streaming', () => {
   it('prints each file in order and leaves the cache to the dispatcher', async () => {
     const pulled: string[] = []
-    const result = await catGeneric([spec('/a.txt'), spec('/b.txt')], [], opts(), statFn, (p) =>
+    const result = await catGeneric([spec('/a.txt'), spec('/b.txt')], [], ctx(), statFn, (p) =>
       fileStream(p.virtual, pulled),
     )
     expect(result).not.toBeNull()
@@ -72,7 +72,7 @@ describe('catGeneric multi-file streaming', () => {
 
   it('does not pull the second file when the consumer stops early', async () => {
     const pulled: string[] = []
-    const result = await catGeneric([spec('/a.txt'), spec('/b.txt')], [], opts(), statFn, (p) =>
+    const result = await catGeneric([spec('/a.txt'), spec('/b.txt')], [], ctx(), statFn, (p) =>
       fileStream(p.virtual, pulled),
     )
     const [stdout] = result ?? [null]
@@ -94,7 +94,7 @@ describe('catGeneric without display flags', () => {
         yield ENC.encode(chunk)
       }
     }
-    const result = await catGeneric([spec('/a.txt')], [], opts(), statFn, () => chunks())
+    const result = await catGeneric([spec('/a.txt')], [], ctx(), statFn, () => chunks())
     const [stdout] = result ?? [null]
     const iter = (stdout as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
     const first = await iter.next()
@@ -113,7 +113,7 @@ describe('catGeneric per-operand read failure', () => {
     // A table past its mount's read cap stats fine and refuses the rest of
     // the read; GNU cat keeps what it printed, reports the operand and goes
     // on to the next.
-    const result = await catGeneric([spec('/a.txt'), spec('/b.txt')], [], opts(), statFn, (p) =>
+    const result = await catGeneric([spec('/a.txt'), spec('/b.txt')], [], ctx(), statFn, (p) =>
       p.virtual === '/a.txt'
         ? (async function* () {
             await Promise.resolve()
@@ -134,7 +134,7 @@ describe('displayLines flags', () => {
     const result = await catGeneric(
       [spec('/a.txt')],
       [],
-      { ...opts(), flags } as CommandOpts,
+      { ...ctx(), flags } as Context,
       statFn,
       () =>
         (async function* () {
@@ -166,7 +166,7 @@ describe('displayLines flags', () => {
     const result = await catGeneric(
       [],
       [],
-      { ...opts(), flags, stdin: ready(), signal: abort.signal } as CommandOpts,
+      { ...ctx(), flags, stdin: ready(), signal: abort.signal } as Context,
       statFn,
       () => ready(),
     )
@@ -188,12 +188,12 @@ describe('displayLines flags', () => {
       [],
       [],
       {
-        ...opts(),
+        ...ctx(),
         flags: { squeeze_blank: true },
         stdin: ENC.encode('\n'.repeat(20_000_000)),
         timeoutSeconds: 0.02,
         command: 'cat',
-      } as CommandOpts,
+      } as Context,
       statFn,
       (p) => fileStream(p.virtual, []),
     )
@@ -210,7 +210,7 @@ describe('displayLines flags', () => {
     const result = await catGeneric(
       [],
       [],
-      { ...opts(), flags: { number: true }, stdin: stalled(), signal: abort.signal } as CommandOpts,
+      { ...ctx(), flags: { number: true }, stdin: stalled(), signal: abort.signal } as Context,
       statFn,
       () => stalled(),
     )
@@ -230,7 +230,7 @@ describe('displayLines flags', () => {
 
 it('stats each operand once while retaining its stream', async () => {
   const stat = vi.fn(statFn)
-  const [stdout] = (await catGeneric([spec('/a.txt'), spec('/b.txt')], [], opts(), stat, (p) =>
+  const [stdout] = (await catGeneric([spec('/a.txt'), spec('/b.txt')], [], ctx(), stat, (p) =>
     fileStream(p.virtual, []),
   )) ?? [null]
   expect(DEC.decode(await materialize(stdout))).toBe('a1\na2\na3\nb1\nb2\n')

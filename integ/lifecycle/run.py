@@ -27,7 +27,8 @@ from pathlib import Path
 from typing import Any
 
 from mirage import ShellExecution
-from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.config import Context
 from mirage.commands.spec.types import CommandSpec
 from mirage.config import load_config
 from mirage.context import reset_current_session, set_current_session
@@ -148,13 +149,13 @@ class TrackedStreamCLI:
         self.pulls = 0
         self.closed = 0
 
-    async def invoke(self, inv: CLIInvocation):
+    async def invoke(self, config, paths, texts, ctx: Context):
         result = IOResult(stderr=self.stderr)
-        return self.output(inv, result), result
+        return self.output(ctx, result), result
 
-    async def output(self, inv: CLIInvocation, result: IOResult):
+    async def output(self, ctx: Context, result: IOResult):
         try:
-            async with aclosing(chunks(inv.stdin or b"")) as source:
+            async with aclosing(chunks(ctx.stdin or b"")) as source:
                 async for chunk in source:
                     self.pulls += 1
                     yield chunk

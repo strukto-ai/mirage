@@ -19,7 +19,7 @@ import git from 'isomorphic-git'
 
 import { HttpConnectError } from '../../../builtin/errors.ts'
 import { httpRequest } from '../../../builtin/utils/http.ts'
-import type { CLIView } from '../../types.ts'
+import type { Context } from '../../../config.ts'
 import { GITLINK_MODE } from './constants.ts'
 import { discover } from './discover.ts'
 import { GitError, MissingRepositoryError, NoWorkspaceError } from './errors.ts'
@@ -404,9 +404,9 @@ export function extraHeaders(values: readonly string[]): Record<string, string> 
  * userinfo, dropped with it on a redirect elsewhere.
  */
 export async function openTransport(
+  ctx: Context,
   url: string,
   start: PathSpec,
-  view: CLIView,
   headers: Record<string, string>,
   scoped: Readonly<Record<string, string>> = {},
 ): Promise<Transport> {
@@ -420,7 +420,7 @@ export async function openTransport(
     throw new GitError(`Unable to find remote helper for '${helper}'`)
   if (helper === null && SCP_LIKE.test(url))
     throw new GitError("Unable to find remote helper for 'ssh'")
-  const { vfs } = view
+  const vfs = ctx.vfs
   if (vfs === undefined) throw new NoWorkspaceError()
   const raw = helper === null ? url : decodeURIComponent(new URL(url).pathname)
   const path = PathSpec.fromStrPath(raw, undefined, start)

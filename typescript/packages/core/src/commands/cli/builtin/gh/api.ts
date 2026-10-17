@@ -14,8 +14,8 @@
 
 import { IOResult } from '../../../../io/types.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CommandFnResult } from '../../../config.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 import { expand } from '../../../../core/github/placeholder.ts'
 import type { GhConfig } from '../../../../core/github/config.ts'
 import { GRAPHQL_PATH } from '../../../../core/github/constants.ts'
@@ -125,15 +125,19 @@ function setField(fields: Record<string, unknown>, key: string, value: unknown):
   put(fields, keyParts(key), value)
 }
 
-async function fieldValue(inv: CLIInvocation, value: string): Promise<Json> {
-  const expanded = expand(value, inv.config as GhConfig)
+async function fieldValue(config: unknown, ctx: Context, value: string): Promise<Json> {
+  const expanded = expand(value, config as GhConfig)
   if (expanded.startsWith('@')) {
-    return new TextDecoder().decode(await readCliFile(inv, expanded.slice(1), '--field'))
+    return new TextDecoder().decode(await readCliFile(ctx, expanded.slice(1), '--field'))
   }
   return typed(expanded)
 }
 
-async function fields(inv: CLIInvocation, fl: FlagView): Promise<Record<string, unknown>> {
+async function fields(
+  config: unknown,
+  ctx: Context,
+  fl: FlagView,
+): Promise<Record<string, unknown>> {
   const result: Record<string, unknown> = {}
   for (const pair of fl.asList('raw_field')) {
     const [key, value] = split(pair)
@@ -141,7 +145,7 @@ async function fields(inv: CLIInvocation, fl: FlagView): Promise<Record<string, 
   }
   for (const pair of fl.asList('field')) {
     const [key, value] = split(pair, true)
-    setField(result, key, value === EMPTY_ARRAY ? value : await fieldValue(inv, value))
+    setField(result, key, value === EMPTY_ARRAY ? value : await fieldValue(config, ctx, value))
   }
   return result
 }
@@ -156,12 +160,12 @@ function requestHeaders(fl: FlagView): Record<string, string> {
   return result
 }
 
-async function inputBody(inv: CLIInvocation, fl: FlagView): Promise<Json | undefined> {
+async function inputBody(ctx: Context, fl: FlagView): Promise<Json | undefined> {
   const raw = fl.raw('input')
   if (raw === undefined) return undefined
   const path = fl.asPaths('input')[0]?.rawPath ?? fl.asStr('input') ?? ''
   try {
-    return JSON.parse(new TextDecoder().decode(await readCliFile(inv, raw, '--input'))) as Json
+    return JSON.parse(new TextDecoder().decode(await readCliFile(ctx, raw, '--input'))) as Json
   } catch (err) {
     if (err instanceof SyntaxError) throw new Error(`invalid JSON in ${path}: ${err.message}`)
     throw err
@@ -198,16 +202,21 @@ function nextPath(link: string | undefined, baseUrl: string | undefined): string
   return undefined
 }
 
-export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const endpoint = inv.texts[0] ?? ''
+export async function api(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const endpoint = texts[0] ?? ''
   if (endpoint === '') throw new Error('an API endpoint is required')
-  const values = await fields(inv, fl)
-  const input = await inputBody(inv, fl)
+  const values = await fields(config, ctx, fl)
+  const input = await inputBody(ctx, fl)
   const hasInput = fl.raw('input') !== undefined
   const method = fl.asStr('method') ?? (Object.keys(values).length > 0 || hasInput ? 'POST' : 'GET')
   const upper = method.toUpperCase()
-  const expanded = expand(endpoint, inv.config as GhConfig)
+  const expanded = expand(endpoint, config as GhConfig)
   const path =
     expanded === GRAPHQL_PATH ? expanded : expanded.startsWith('/') ? expanded : `/${expanded}`
 
@@ -229,7 +238,7 @@ export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
 
   const pages: Printed[] = []
   const include = ghBool(fl, 'include')
-  const transport = ghTransport(inv.config)
+  const transport = ghTransport(config)
   let current: string | undefined = path
   let first = true
   while (current !== undefined) {
@@ -275,7 +284,7 @@ export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
     pages.push({ data: response.data, head })
     first = false
     current = ghBool(fl, 'paginate')
-      ? nextPath(response.headers.link, (inv.config as GhConfig).baseUrl)
+      ? nextPath(response.headers.link, (config as GhConfig).baseUrl)
       : undefined
   }
 

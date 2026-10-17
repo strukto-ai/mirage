@@ -39,14 +39,15 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
+from mirage.types import PathSpec
 
 
 async def ls_files(
-    inv: CLIInvocation[None],
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """List index paths, including conflict stages when requested.
 
@@ -56,21 +57,23 @@ async def ls_files(
     subdirectory prints ``../README.md``).
 
     Args:
-        inv (CLIInvocation[None]): parsed index-listing invocation.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the pathspecs.
+        ctx (Context): the line's context.
     """
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     try:
-        check_switches(inv, inv.texts)
-        view = inv.view or CLIView()
-        _, location = await opened(fl, view)
-        assert view.vfs is not None
+        check_switches(ctx, texts)
+        _, location = await opened(ctx, fl)
+        assert ctx.vfs is not None
         fully = await config_bool(
-            view.vfs, location, b"core", b"quotepath", True
+            ctx.vfs, location, b"core", b"quotepath", True
         )
-        state = await read_index(view.vfs, location.gitdir)
+        state = await read_index(ctx.vfs, location.gitdir)
         start = start_point(fl).virtual
         prefix = repo_relative(location, start, ".")
-        patterns = pathspec_patterns(location, start, inv.texts)
+        patterns = pathspec_patterns(location, start, texts)
         rows = [(path, 0, entry) for path, entry in state.entries.items()]
         rows.extend(
             (path, stage, entry)
@@ -100,22 +103,24 @@ async def ls_files(
 
 
 async def ls_tree(
-    inv: CLIInvocation[None],
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """List tree metadata without reading file contents.
 
     Args:
-        inv (CLIInvocation[None]): parsed tree-listing invocation.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the tree-ish, then the paths to list.
+        ctx (Context): the line's context.
     """
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     try:
-        check_switches(inv, inv.texts)
-        if not inv.texts:
-            raise UsageError("", verb_usage(inv))
-        view = inv.view or CLIView()
-        repo, location = await opened(fl, view)
-        assert view.vfs is not None
-        name, *paths = inv.texts
+        check_switches(ctx, texts)
+        if not texts:
+            raise UsageError("", verb_usage(ctx))
+        repo, location = await opened(ctx, fl)
+        assert ctx.vfs is not None
+        name, *pathspecs = texts
         try:
             tree = await asyncio.to_thread(resolve_tree, repo, name)
         except (AmbiguousArgumentError, InvalidRevisionNameError) as exc:
@@ -126,7 +131,7 @@ async def ls_tree(
         )
         prefix = repo_relative(location, start, ".")
         selected: list[str] = []
-        for path in paths:
+        for path in pathspecs:
             if path == "":
                 raise EmptyPathspecError()
             relative = repo_relative(location, start, path)
@@ -148,7 +153,7 @@ async def ls_tree(
             fl.as_bool("d"),
         )
         fully = await config_bool(
-            view.vfs, location, b"core", b"quotepath", True
+            ctx.vfs, location, b"core", b"quotepath", True
         )
         nul = fl.as_bool("z")
         names = fl.as_bool("name_only") or fl.as_bool("name_status")

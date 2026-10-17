@@ -15,8 +15,8 @@
 import { FlagView } from '../../../spec/flag_view.ts'
 import { getSelf } from '../../../../core/notion/pages.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 import { notionTransport, prettyJson } from './util.ts'
 
 const ENC = new TextEncoder()
@@ -65,9 +65,14 @@ export function whoamiRow(me: Record<string, unknown>): ByteSource {
   return ENC.encode(`${columns.join('\t')}\n`)
 }
 
-export async function whoami(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const me = await getSelf(notionTransport(inv.config, inv.flags))
+export async function whoami(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const me = await getSelf(notionTransport(config, ctx.flags))
   if (fl.asBool('json')) return [prettyJson(me), new IOResult()]
   return [whoamiRow(me), new IOResult()]
 }

@@ -25,9 +25,14 @@ import { flagOccurrences } from '../../../commands/spec/flag_view.ts'
 import type { ProcessView } from '../../../process/view.ts'
 import { CLAP_EXIT, CLI_CONFIG_ENV, GIT_LONG_OPTIONS } from '../../../commands/cli/constants.ts'
 import type { CLI } from '../../../commands/cli/types.ts'
-import { type CLIInvocation, type CLIView } from '../../../commands/cli/types.ts'
+import type { Context } from '../../../commands/config.ts'
 import { listedNode, nodeHelp, ownsArgv, walk } from '../../../commands/cli/walk.ts'
-import { type DispatchFn, type RunResult, type ScriptSource } from '../../../runtime/types.ts'
+import {
+  type DispatchFn,
+  type RunResult,
+  type ScriptSource,
+  type ShellFn,
+} from '../../../runtime/types.ts'
 import type { SessionView } from '../../../view/types.ts'
 import type { Files } from '../../files.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
@@ -186,18 +191,19 @@ function missing(message: string): IOResult {
  * (runOutput). `prog` is the installed head word.
  */
 async function scriptOutput(
-  inv: CLIInvocation,
+  config: unknown,
+  ctx: Context,
   script: ScriptSource,
   runtime: LanguageRuntime,
   prog: string,
   timeout: number | null,
   signal: AbortSignal,
 ): Promise<[Uint8Array | null, IOResult]> {
-  const env: Record<string, string> = { ...inv.env }
-  if (inv.config !== null && inv.config !== undefined) {
-    env[CLI_CONFIG_ENV] = JSON.stringify(inv.config)
+  const env: Record<string, string> = { ...ctx.env }
+  if (config !== null && config !== undefined) {
+    env[CLI_CONFIG_ENV] = JSON.stringify(config)
   }
-  const stdin = inv.stdin !== null ? await materialize(inv.stdin) : null
+  const stdin = ctx.stdin !== null ? await materialize(ctx.stdin) : null
   let result: RunResult
   try {
     // A .mjs source needs the engine's module mode, the same bit the js
@@ -206,10 +212,10 @@ async function scriptOutput(
       kind: 'code',
       language: runtime.language,
       code: script.source,
-      args: [...inv.argv],
+      args: [...(ctx.argv ?? [])],
       prog,
       scriptCli: true,
-      cwd: inv.cwd,
+      cwd: ctx.cwd,
       env,
       stdin,
       signal,
@@ -236,7 +242,7 @@ async function scriptOutput(
  * `links` follows for mount commands).
  */
 export interface CLIContext {
-  shell?: (command: string) => Promise<IOResult>
+  shell?: ShellFn
   signal?: AbortSignal
   commandLimits?: Readonly<Record<string, Limit>>
   /**
@@ -250,7 +256,7 @@ export interface CLIContext {
    * for a CLI whose subject is files rather than an API.
    */
   vfs?: Files
-  sessionView?: SessionView
+  session?: SessionView
   processes?: ProcessView
   /** The line's placement, which a script leaf runs its program under. */
   routing?: RouteDecision<Runtime>
@@ -278,14 +284,15 @@ export function dropsMountCaches(spec: CLI): boolean {
  * validated config; no mount is consulted and no operand path picks a
  * backend (the one executor divergence from mount commands). The walk
  * consumes subcommand words and group options; the leaf's own argv
- * uses the shared CommandSpec parser. The leaf handler renders the line's one CLIInvocation,
- * built here and nowhere else: an fn leaf runs as `fn(inv)`, a script
+ * uses the shared CommandSpec parser. The leaf gets the line's one Context,
+ * built here and nowhere else: an fn leaf runs as
+ * `fn(config, paths, texts, ctx)`, a script
  * leaf runs its embedded program on a workspace runtime
  * (scriptOutput), so usage refusals, limits, and classification all
  * happen in front of either tier. Help too, for every node that declared
  * a grammar to render it from (parseSpecFor). The workspace facts in
- * `context` reach a verb as one `inv.view` field, one entry point per state
- * plane, so a verb that never reads it cannot touch a mount.
+ * `context` reach a verb on its `ctx`, so a verb that never reads `ctx.vfs`
+ * cannot touch a mount.
  */
 export async function handleCli(
   install: CLIInstall,
@@ -419,35 +426,28 @@ export async function handleCli(
   // itself is handed the value it asked for.
   if (mirageHelp) delete flags.help
 
-  // The workspace entry points a mount-reading verb needs ride the record as one
-  // field. Most CLIs never read it: an API client has no filesystem,
-  // while `git` is nothing but one. Absent outside a workspace, so a verb
-  // that needs a mount refuses there on its own.
-  const view: CLIView = {
-    ...(context.processes === undefined ? {} : { processes: context.processes }),
-    ...(context.vfs !== undefined ? { vfs: context.vfs } : {}),
-    ...(context.sessionView !== undefined ? { sessionView: context.sessionView } : {}),
-  }
   let active = true
-  const shell = async (command: string): Promise<IOResult> => {
+  const shell: ShellFn = async (line, data = null) => {
     if (!active || context.signal?.aborted === true) {
       throw new Error('CLI shell is no longer active')
     }
     if (context.shell === undefined) throw new Error('CLI shell is unavailable')
-    return context.shell(command)
+    return context.shell(line, data)
   }
-  const inv: CLIInvocation = {
-    config: install.config,
-    ...(context.shell !== undefined ? { shell } : {}),
-    argv,
-    paths,
-    texts,
-    cwd: PathSpec.fromStrPath(session.cwd),
-    flags,
+  // Most CLIs never read the files: an API client has no filesystem, while
+  // `git` is nothing but one. Absent outside a workspace, so a verb that
+  // needs a mount refuses there on its own.
+  const ctx: Context = {
     stdin,
+    flags,
+    cwd: PathSpec.fromStrPath(session.cwd),
     env: envSnapshot(session),
-    ...(Object.keys(view).length > 0 ? { view } : {}),
+    argv,
     spec: leaf,
+    ...(context.vfs !== undefined ? { vfs: context.vfs } : {}),
+    ...(context.session !== undefined ? { session: context.session } : {}),
+    ...(context.processes === undefined ? {} : { processes: context.processes }),
+    ...(context.shell !== undefined ? { shell } : {}),
   }
 
   // The outer timer bounds the whole invocation; the runtime deadline
@@ -483,7 +483,15 @@ export async function handleCli(
         new ExecutionNode({ command: cmdStr, exitCode: refused.exitCode, stderr }),
       ]
     }
-    body = scriptOutput(inv, install.cli.script, runtime, prog, timeout, abort.signal)
+    body = scriptOutput(
+      install.config,
+      ctx,
+      install.cli.script,
+      runtime,
+      prog,
+      timeout,
+      abort.signal,
+    )
   } else {
     const fn = binding.fn
     if (fn === null) {
@@ -495,7 +503,7 @@ export async function handleCli(
     // Defer the call into the promise: a synchronously-thrown leaf
     // error must land in the catch arms below, exactly as when the
     // call sat inside the try.
-    body = Promise.resolve().then(() => fn(inv))
+    body = Promise.resolve().then(() => fn(install.config, paths, texts, ctx))
   }
   // The leaf's declared limit bounds the handler body and its
   // streams, exactly like mount dispatch: without the wrap a blocking

@@ -18,7 +18,7 @@ import { OPERAND, SPELLED } from '../../spec/constants.ts'
 import { FlagView, spreadOperands } from '../../spec/flag_view.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { quoteText } from '../../quote.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
@@ -317,7 +317,7 @@ class Options {
  * Mirrors parse_flags in join.py.
  */
 export function parseFlags(
-  flags: CommandOpts['flags'],
+  flags: Context['flags'],
   operands: readonly string[] | null = null,
   argv: readonly string[] = [],
 ): JoinFlags {
@@ -620,7 +620,7 @@ async function* joinStream(merge: Merge, io: IOResult): AsyncIterable<Uint8Array
  */
 export async function joinGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   resolveGlob: (targets: PathSpec[]) => Promise<PathSpec[]>,
   read: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
@@ -628,16 +628,16 @@ export async function joinGeneric(
   for (const path of paths) groups.push(await resolveGlob([path]))
   const resolved = groups.flat()
   const flags = spreadOperands(
-    opts.flags,
+    ctx.flags,
     groups.map((group) => group.map((path) => path.rawPath)),
   )
   return join(resolved, {
     read,
-    stdin: opts.stdin,
+    stdin: ctx.stdin,
     flags: parseFlags(
       flags,
       resolved.map((path) => path.rawPath),
-      opts.argv ?? [],
+      ctx.argv ?? [],
     ),
   })
 }

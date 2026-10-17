@@ -18,7 +18,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -28,18 +28,18 @@ async def diff(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("diff: no VFS")
-    resolved = await ops.resolve_glob(accessor, paths, opts.index)
+    resolved = await ops.resolve_glob(accessor, paths, ctx.index)
     return await diff_generic(
         resolved,
         list(texts),
-        opts,
-        bound_op(ops.read_bytes, accessor, opts.index),
-        bound_op(ops.readdir, accessor, opts.index),
-        bound_op(ops.stat, accessor, opts.index),
+        ctx,
+        bound_op(ops.read_bytes, accessor, ctx.index),
+        bound_op(ops.readdir, accessor, ctx.index),
+        bound_op(ops.stat, accessor, ctx.index),
     )
 
 

@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { eacces, enoent } from '../../../errors/fs.ts'
 import { materialize } from '../../../io/types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { PipeErrors, parseFlags, teeGeneric, writeOutput } from './tee.ts'
 
 const DEC = new TextDecoder()
@@ -241,8 +241,8 @@ describe('teeGeneric', () => {
       {
         stdin: quiet,
         flags: { output_error: 'exit' },
-        cwd: '/',
-      } as unknown as CommandOpts,
+        cwd: PathSpec.fromStrPath('/'),
+      } as unknown as Context,
       () => {
         throw enoent('/unused')
       },

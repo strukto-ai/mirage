@@ -14,20 +14,21 @@
 
 import json
 
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.gmail.send import forward_message
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 
 async def forward(
-    inv: CLIInvocation[GoogleConfig],
+    config: GoogleConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    async with TokenManager(inv.config) as tm:
+    fl = FlagView(ctx.flags)
+    async with TokenManager(config) as tm:
         result = await forward_message(
             tm, fl.as_str("message_id") or "", fl.as_str("to") or ""
         )

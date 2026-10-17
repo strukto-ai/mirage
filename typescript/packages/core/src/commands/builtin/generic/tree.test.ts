@@ -16,7 +16,7 @@ import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import { Files } from '../../../workspace/files.ts'
@@ -39,12 +39,12 @@ function spec(path: string): PathSpec {
   })
 }
 
-function opts(flags: Record<string, string | boolean | number | string[]>): CommandOpts {
+function ctx(flags: Record<string, string | boolean | number | string[]>): Context {
   return {
     stdin: null,
     flags,
-    cwd: '/',
-  } as unknown as CommandOpts
+    cwd: PathSpec.fromStrPath('/'),
+  } as unknown as Context
 }
 
 const stat = (p: PathSpec): Promise<FileStat> =>
@@ -73,10 +73,7 @@ async function run(
   readdir: (p: PathSpec) => Promise<string[]>,
   flags: Record<string, string | boolean | number | string[]>,
 ): Promise<string> {
-  const [out] = (await treeGeneric([spec('/')], opts(flags), readdir, stat)) as [
-    Uint8Array,
-    unknown,
-  ]
+  const [out] = (await treeGeneric([spec('/')], ctx(flags), readdir, stat)) as [Uint8Array, unknown]
   return DEC.decode(out)
 }
 
@@ -95,13 +92,13 @@ describe('treeGeneric with trailing-slash folder entries', () => {
 })
 
 describe('treeGeneric operand that is not a directory', () => {
-  function optsWith(start: FileStat | null): CommandOpts {
+  function optsWith(start: FileStat | null): Context {
     return {
       stdin: null,
       flags: {},
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
       statPath: () => Promise.resolve(start),
-    } as unknown as CommandOpts
+    } as unknown as Context
   }
 
   const unreached = (): Promise<never> => {
@@ -167,10 +164,10 @@ describe('treeGeneric across a nested mount', () => {
     return Promise.resolve(new FileStat({ name: key(p).split('/').pop() ?? '', type }))
   }
 
-  function crossOpts(): CommandOpts {
+  function crossOpts(): Context {
     const nothing: DispatchFn = () => Promise.resolve([null, new IOResult()])
     return {
-      ...opts({}),
+      ...ctx({}),
       vfs: new Files(nothing, null, null, () => null, { prefixes: () => ['/', `${ROOT}/`] }),
       readdirPath: (virtual: string) => Promise.resolve(listing(owner(virtual), virtual)),
       statPath: (path: string | PathSpec) => {
@@ -180,7 +177,7 @@ describe('treeGeneric across a nested mount', () => {
           type === undefined ? null : new FileStat({ name: virtual.split('/').pop() ?? '', type }),
         )
       },
-    } as unknown as CommandOpts
+    } as unknown as Context
   }
 
   // Real tree draws the mounted filesystem's entries under the mount
@@ -211,7 +208,7 @@ describe('treeGeneric across a nested mount', () => {
   })
 
   it('stops at the mount point under -L 1', async () => {
-    const withDepth = { ...crossOpts(), flags: { L: '1' } } as unknown as CommandOpts
+    const withDepth = { ...crossOpts(), flags: { L: '1' } } as unknown as Context
     const [out] = (await treeGeneric([spec('/base')], withDepth, backendReaddir, backendStat)) as [
       Uint8Array,
       unknown,

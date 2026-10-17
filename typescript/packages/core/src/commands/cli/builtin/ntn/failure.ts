@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { NotionAPIError } from '../../../../core/notion/client.ts'
-import type { CLIInvocation, CLIVerbFn } from '../../types.ts'
+import type { CLIVerbFn } from '../../types.ts'
+import type { PathSpec } from '../../../../types.ts'
 
 const ENC = new TextEncoder()
 
@@ -100,9 +101,14 @@ export const GUARDED = Symbol.for('ntn.guarded')
 // exactly the three fields a caller branches on. failure.test.ts fails if a
 // leaf is left unwrapped.
 export function guarded(fn: CLIVerbFn): CLIVerbFn {
-  const wrapped = async (inv: CLIInvocation): Promise<CommandFnResult> => {
+  const wrapped = async (
+    config: unknown,
+    paths: PathSpec[],
+    texts: string[],
+    ctx: Context,
+  ): Promise<CommandFnResult> => {
     try {
-      return await fn(inv)
+      return await fn(config, paths, texts, ctx)
     } catch (err) {
       if (!(err instanceof NotionAPIError)) throw err
       const [stderr, exitCode] = apiFailure(err)

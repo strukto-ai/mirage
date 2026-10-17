@@ -21,15 +21,15 @@ import { treeWalk } from '../../utils/tree.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
-import type { CommandFnResult, CommandOpts, CommandIO } from '../../../config.ts'
+import type { CommandFnResult, Context, CommandIO } from '../../../config.ts'
 import { type GenericCommand, resolveGlobOf } from '../adapter.ts'
 
 export const BUILDER: GenericCommand = {
   name: 'find',
-  fn: async (ops, accessor, paths, texts, opts) => {
-    const idx = opts.index ?? undefined
+  fn: async (ops, accessor, paths, texts, ctx) => {
+    const idx = ctx.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return findWalk(ops, accessor, resolved, texts, opts)
+    return findWalk(ops, accessor, resolved, texts, ctx)
   },
 }
 
@@ -43,17 +43,17 @@ export function findWalk<A extends Accessor>(
   accessor: A,
   resolved: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): Promise<CommandFnResult> {
-  const idx = opts.index ?? undefined
-  const flags = new FlagView(opts.flags, specOf('find'))
+  const idx = ctx.index ?? undefined
+  const flags = new FlagView(ctx.flags, specOf('find'))
   const bounded = flags.asBool('xdev') || flags.asBool('mount')
   // The last of -H, -L and -P decides, as in GNU; only -L follows the links
   // the walk meets.
   const follow = flags.typedOrder('H', 'L', 'P').at(-1) === 'L'
   const loops: [string, string][] = []
-  const mounts = mountsOf(opts)
-  const links = linksOf(opts) ?? null
+  const mounts = mountsOf(ctx)
+  const links = linksOf(ctx) ?? null
   const { readTree } = ops
   // The walk classifies entries through stat (see walkFind). A directory the guarded readdir
   // refuses, and an entry whose stat fails, are collected here and
@@ -63,7 +63,7 @@ export function findWalk<A extends Accessor>(
   return findGeneric(
     resolved,
     texts,
-    opts,
+    ctx,
     (root, options) => {
       // A walk -maxdepth bounds reads its own levels, not the whole tree.
       const whole = readTree !== undefined && (options.maxDepth ?? null) === null

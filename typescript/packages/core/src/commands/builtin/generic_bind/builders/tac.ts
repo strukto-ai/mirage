@@ -20,10 +20,10 @@ import {
   type GenericCommandFn,
 } from '../adapter.ts'
 
-const tac: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
-  const idx = opts.index ?? undefined
+const tac: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return tacGeneric(resolved, opts, dirAwareStream(ops, accessor, opts))
+  return tacGeneric(resolved, ctx, dirAwareStream(ops, accessor, ctx))
 }
 
 export const BUILDER: GenericCommand = {

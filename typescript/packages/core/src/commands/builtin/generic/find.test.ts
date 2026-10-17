@@ -18,7 +18,7 @@ import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 import type { FindOptions } from '../../../vfs/types.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { findGeneric as streamFind } from './find.ts'
 import { modifiedTs } from '../../../core/generic/find.ts'
 
@@ -30,8 +30,8 @@ async function findGeneric(...args: Parameters<typeof streamFind>) {
 
 const DEC = new TextDecoder()
 
-function makeOpts(): CommandOpts {
-  return { stdin: null, flags: {}, cwd: '/' } as unknown as CommandOpts
+function makeOpts(): Context {
+  return { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/') } as unknown as Context
 }
 
 function enoent(p: string): Error {
@@ -50,13 +50,13 @@ function fakeFind(root: PathSpec, _options: FindOptions): Promise<string[]> {
   return Promise.resolve(['/found.txt'])
 }
 
-function optsWith(stat: FileStat | null, flags: Record<string, unknown> = {}): CommandOpts {
+function optsWith(stat: FileStat | null, flags: Record<string, unknown> = {}): Context {
   return {
     stdin: null,
     flags,
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     statPath: () => Promise.resolve(stat),
-  } as unknown as CommandOpts
+  } as unknown as Context
 }
 
 describe('generic command find', () => {

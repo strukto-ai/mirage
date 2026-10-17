@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { chunks } from '../../../io/cooperative.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import type { LinkView, MountView } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { FileStat } from '../../../types.ts'
@@ -277,8 +277,8 @@ export function owedNames(files: Files | undefined, directory: string): string[]
 
 /** The workspace's links as the command's session sees them, read off its
  * files; undefined outside a workspace. Mirrors Python's links_of. */
-export function linksOf(opts: CommandOpts): LinkView | undefined {
-  return linkView(opts.vfs)
+export function linksOf(ctx: Context): LinkView | undefined {
+  return linkView(ctx.vfs)
 }
 
 /**
@@ -288,14 +288,14 @@ export function linksOf(opts: CommandOpts): LinkView | undefined {
  * descends into every mount, so it has no boundary to stop at. Mirrors
  * Python's mounts_of.
  */
-export function mountsOf(opts: CommandOpts): MountView | undefined {
-  return mountView(opts.vfs, opts.io === undefined && opts.dispatch !== undefined)
+export function mountsOf(ctx: Context): MountView | undefined {
+  return mountView(ctx.vfs, ctx.io === undefined && ctx.dispatch !== undefined)
 }
 
 /** The link resolver an invocation carries: null outside a workspace.
  * Mirrors Python's link_resolver. */
-export function linkResolver(opts: CommandOpts): LinkResolver | null {
-  const links = linksOf(opts)
-  if (links === undefined || opts.dispatch === undefined) return null
-  return new LinkResolver(links, opts.dispatch, opts.cwd)
+export function linkResolver(ctx: Context): LinkResolver | null {
+  const links = linksOf(ctx)
+  if (links === undefined || ctx.dispatch === undefined) return null
+  return new LinkResolver(links, ctx.dispatch, ctx.cwd.virtual)
 }

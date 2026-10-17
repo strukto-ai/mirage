@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from dulwich.index import IndexEntry
@@ -54,7 +55,7 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
 )
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -102,7 +103,7 @@ def parse_flags(fl: FlagView) -> RmFlags:
 def select(
     location: RepoLocation,
     start: str,
-    operands: tuple[str, ...],
+    operands: Sequence[str],
     tracked: set[str],
     flags: RmFlags,
 ) -> list[str]:
@@ -118,7 +119,7 @@ def select(
     Args:
         location (RepoLocation): the discovered repository.
         start (str): absolute virtual path git is running in.
-        operands (tuple[str, ...]): the pathspecs as typed.
+        operands (Sequence[str]): the pathspecs as typed.
         tracked (set[str]): repository-relative paths the index holds.
         flags (RmFlags): the parsed flags.
     """
@@ -275,7 +276,9 @@ async def clear_worktree(
         removed = True
 
 
-async def rm(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
+async def rm(
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+) -> tuple[ByteSource | None, IOResult]:
     """Remove paths from the index, and from the working tree too.
 
     ``--cached`` leaves the file where it is and only stops tracking it.
@@ -284,22 +287,22 @@ async def rm(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     hand an agent: there is no reflog here to recover a file from.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model; it reads its repository
-            through ``inv.view.vfs``.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context; git reads its repository
+            through ``ctx.vfs``.
     """
-    view = inv.view or CLIView()
-    vfs = view.vfs
-    texts = inv.texts
-    fl = FlagView(inv.flags)
+    vfs = ctx.vfs
+    fl = FlagView(ctx.flags)
     try:
         if vfs is None:
             raise NoWorkspaceError()
-        check_switches(inv, texts)
+        check_switches(ctx, texts)
         flags = parse_flags(fl)
         if not texts:
             raise NoPathspecRemoveError()
-        repo, location = await opened(fl, view, work_tree=not flags.cached)
+        repo, location = await opened(ctx, fl, work_tree=not flags.cached)
         state = await read_index(vfs, location.gitdir)
         tracked = {
             path.decode("utf-8", errors="replace")

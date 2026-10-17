@@ -17,7 +17,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { perOperand } from '../utils/operands.ts'
 import { mapStream } from '../utils/lines.ts'
@@ -96,14 +96,14 @@ function foldRecord(
 
 export function foldGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): CommandFnResult {
-  stream = stdinStream(stream, opts.stdin)
-  const { width, breakSpaces, countBytes } = parseFlags(opts.flags)
+  stream = stdinStream(stream, ctx.stdin)
+  const { width, breakSpaces, countBytes } = parseFlags(ctx.flags)
   const io = new IOResult()
   const transform = (line: Uint8Array): Uint8Array =>
     foldRecord(line, width, breakSpaces, countBytes)
   const each = (source: ByteSource) => mapStream(source, transform)
-  return [perOperand(paths, stream, opts.stdin, io, 'fold', each), io]
+  return [perOperand(paths, stream, ctx.stdin, io, 'fold', each), io]
 }

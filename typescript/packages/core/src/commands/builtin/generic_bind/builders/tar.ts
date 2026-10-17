@@ -20,14 +20,14 @@ import { tarGeneric } from '../../generic/tar/tar.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 import { isDirOf, relayIsDirOf, walkOf } from '../archive_io.ts'
 
-const tar: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
-  const idx = opts.index ?? undefined
+const tar: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const write = requireOp(ops.write, 'write')
   const mkdir = requireOp(ops.mkdir, 'mkdir')
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   const stat = async (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, idx)
-  const dispatch = opts.dispatch
-  const fl = new FlagView(opts.flags, specOf('tar'))
+  const dispatch = ctx.dispatch
+  const fl = new FlagView(ctx.flags, specOf('tar'))
   if (dispatch !== undefined && !fl.asBool('create')) {
     // -t reads and -x writes wherever cwd or -C says, which need not
     // be this mount, so both run on dispatch-relayed calls and each
@@ -36,7 +36,7 @@ const tar: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
     return tarGeneric(
       resolved,
       texts,
-      opts,
+      ctx,
       {
         stream: fileStreamOp(dispatch),
         write: async (p, data) => {
@@ -46,13 +46,13 @@ const tar: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
           await dispatch('mkdir', p)
         },
         stat: statOp(dispatch),
-        walk: walkOf(ops, accessor, idx, opts.dispatch, 'tar'),
+        walk: walkOf(ops, accessor, idx, ctx.dispatch, 'tar'),
         isDir: relayIsDirOf(dispatch),
       },
       true,
     )
   }
-  return tarGeneric(resolved, texts, opts, {
+  return tarGeneric(resolved, texts, ctx, {
     stream: (p) => ops.readStream(accessor, p, idx),
     // Archive output follows links even when the member scan preserves them.
     write: async (p, data) => {
@@ -61,7 +61,7 @@ const tar: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
     },
     mkdir: (p, parents) => mkdir(accessor, p, parents),
     stat,
-    walk: walkOf(ops, accessor, idx, opts.dispatch, 'tar'),
+    walk: walkOf(ops, accessor, idx, ctx.dispatch, 'tar'),
     isDir: isDirOf(ops, accessor, idx),
   })
 }

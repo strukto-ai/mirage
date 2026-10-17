@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { PathSpec } from '../../../types.ts'
 import { createRequire } from 'node:module'
 import { afterEach, beforeAll, expect, it, vi } from 'vitest'
 import { createShellParser, type ShellParser } from '../../../shell/parse/index.ts'
@@ -55,7 +56,7 @@ it.each([undefined, enoent('/format'), eacces('/format')])(
       await expect(
         cmd.fn(new RAMVFS().accessor, [], ['https://example.test/hello'], {
           stdin: null,
-          cwd: '/',
+          cwd: PathSpec.fromStrPath('/'),
           flags: {
             write_out: '@/format',
             silent: silent ?? false,

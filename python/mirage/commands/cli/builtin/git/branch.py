@@ -107,10 +107,11 @@ from mirage.commands.cli.builtin.git.util import (
     verb_usage,
     without_section,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
 HEADS_PREFIX = b"refs/heads/"
@@ -593,7 +594,7 @@ def list_width(items: list[RefItem], bonus: int, description: str) -> int:
 
 
 async def _list_branches(
-    inv: CLIInvocation[None],
+    ctx: Context,
     fl: FlagView,
     vfs: Files,
     repo: BaseRepo,
@@ -612,7 +613,7 @@ async def _list_branches(
     makes.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
+        ctx (Context): the line's context, for its env.
         fl (FlagView): spec-bound options.
         vfs (Files): the session's files.
         repo (BaseRepo): the opened repository.
@@ -642,7 +643,7 @@ async def _list_branches(
     fmt = listing_format(
         template if template is not None else build_format(verbose, 0, prefix)
     )
-    items, ctx, errors = await ref_listing(
+    items, ref_ctx, errors = await ref_listing(
         vfs,
         repo,
         location,
@@ -650,25 +651,25 @@ async def _list_branches(
         used_fields(fmt, keys or ()),
         wanted,
         filt,
-        date_clock(inv.env),
+        date_clock(ctx.env),
     )
     if any(item.kind is RefKind.DETACHED for item in items):
-        ctx = replace(
-            ctx,
+        ref_ctx = replace(
+            ref_ctx,
             head_description=await head_description(vfs, repo, location, head),
         )
     if template is None and verbose:
         fmt = listing_format(
             build_format(
                 verbose,
-                list_width(items, len(prefix), ctx.head_description),
+                list_width(items, len(prefix), ref_ctx.head_description),
                 prefix,
             )
         )
     out, stopped = format_refs(
         fmt,
         items,
-        ctx,
+        ref_ctx,
         keys,
         omit_empty=fl.as_bool("omit_empty"),
         icase=icase,
@@ -679,7 +680,7 @@ async def _list_branches(
 
 
 async def branch(
-    inv: CLIInvocation[None],
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """List, create or delete branches.
 
@@ -699,15 +700,16 @@ async def branch(
     with its usage.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model; it reads its repository
-            through ``inv.view.vfs``.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context; git reads its repository
+            through ``ctx.vfs``.
     """
-    view = inv.view or CLIView()
-    vfs = view.vfs
-    words = filter_words(inv)
-    texts = without_filter_values(inv.texts, words)
-    flags = inv.flags
+    vfs = ctx.vfs
+    words = filter_words(ctx)
+    operands = without_filter_values(texts, words)
+    flags = ctx.flags
     fl = FlagView(flags)
     remotes_only = fl.as_bool("r")
     include_remotes = remotes_only or fl.as_bool("a")
@@ -715,8 +717,8 @@ async def branch(
     try:
         if vfs is None:
             raise NoWorkspaceError()
-        check_switches(inv, texts)
-        repo, location = await opened(fl, view)
+        check_switches(ctx, operands)
+        repo, location = await opened(ctx, fl)
         mode = await track_mode(vfs, location)
         filt = await asyncio.to_thread(ref_filter, repo, words)
         head = await read_head(vfs, location.gitdir)
@@ -727,25 +729,25 @@ async def branch(
         force = fl.as_bool("D")
         if fl.as_bool("delete") or force:
             if listing:
-                raise UsageError("", verb_usage(inv))
-            if not texts:
+                raise UsageError("", verb_usage(ctx))
+            if not operands:
                 raise BranchNameRequiredError()
             deleted = b"".join(
                 [
                     await _delete(vfs, repo, location, head, name, force)
-                    for name in texts
+                    for name in operands
                 ]
             )
             if fl.as_bool("quiet"):
                 return None, IOResult()
             return yield_bytes(deleted), IOResult()
-        if texts and not listing:
+        if operands and not listing:
             tracking, warning = await _create(
                 vfs,
                 repo,
                 location,
-                texts[0],
-                texts[1] if len(texts) > 1 else None,
+                operands[0],
+                operands[1] if len(operands) > 1 else None,
                 mode,
                 head,
             )
@@ -756,13 +758,13 @@ async def branch(
                 IOResult(stderr=warning.encode()),
             )
         return await _list_branches(
-            inv,
+            ctx,
             fl,
             vfs,
             repo,
             location,
             head,
-            texts if listing else (),
+            operands if listing else (),
             filt,
             remotes_only,
             include_remotes,
@@ -839,17 +841,18 @@ async def branch_upstream(
 
 
 def branch_read_only(
-    inv: CLIInvocation[None], location: RepoLocation | None
+    texts: list[str], ctx: Context, location: RepoLocation | None
 ) -> GitError:
     """branch's refusal by a read-only mount: the lock on the ref it
     creates or deletes.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
+        texts (list[str]): the line's operands.
+        ctx (Context): the line's context.
         location (RepoLocation | None): the repository it opened.
     """
-    fl = FlagView(inv.flags)
-    ref = f"{HEADS_PREFIX.decode()}{inv.texts[0] if inv.texts else ''}"
+    fl = FlagView(ctx.flags)
+    ref = f"{HEADS_PREFIX.decode()}{texts[0] if texts else ''}"
     root = location.commondir.virtual if location is not None else ".git"
     path = posixpath.join(root, ref)
     if fl.as_bool("delete") or fl.as_bool("D"):

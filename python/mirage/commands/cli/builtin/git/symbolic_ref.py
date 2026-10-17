@@ -57,7 +57,7 @@ from mirage.commands.cli.builtin.git.util import (
     fatal,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -97,16 +97,17 @@ def owner_of(location: RepoLocation, name: str) -> PathSpec:
 
 
 def symbolic_ref_read_only(
-    inv: CLIInvocation[None], location: RepoLocation | None
+    texts: list[str], ctx: Context, location: RepoLocation | None
 ) -> GitError:
     """symbolic-ref's refusal by a read-only mount, at the lock on the
     ref it names.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
+        texts (list[str]): the line's operands.
+        ctx (Context): the line's context.
         location (RepoLocation | None): the repository it opened.
     """
-    name = inv.texts[0] if inv.texts else ""
+    name = texts[0] if texts else ""
     root = ".git" if location is None else owner_of(location, name).virtual
     return SymbolicRefReadOnlyError(name, posixpath.join(root, name))
 
@@ -186,7 +187,7 @@ async def set_symbolic(
 
 
 async def symbolic_ref(
-    inv: CLIInvocation[None],
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """``git symbolic-ref``: read, change or delete a symbolic ref.
 
@@ -199,27 +200,29 @@ async def symbolic_ref(
     2.47.3.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context.
     """
-    fl = FlagView(inv.flags)
-    view = inv.view or CLIView()
-    vfs = view.vfs
+    fl = FlagView(ctx.flags)
+    vfs = ctx.vfs
     try:
         if vfs is None:
             raise NoWorkspaceError()
-        check_switches(inv, inv.texts)
-        _, location = await opened(fl, view)
+        check_switches(ctx, texts)
+        _, location = await opened(ctx, fl)
         message = fl.as_str("m")
         if message == "":
             raise EmptyUpdateMessageError()
         quiet = _switched(fl, "quiet", False)
         gitdir = location.gitdir
         table = await load_refs(vfs, gitdir, location.commondir)
-        names = tuple(inv.texts)
+        names = tuple(texts)
         name = names[0] if names else ""
         if _switched(fl, "delete", False):
             if len(names) != 1:
-                raise UsageError("", verb_usage(inv))
+                raise UsageError("", verb_usage(ctx))
             found = await resolve_symbolic(vfs, gitdir, table, name, False)
             if found is None:
                 raise NoSuchRefError(name)
@@ -237,13 +240,13 @@ async def symbolic_ref(
                 raise HeadOutsideRefsError()
             if not whole_ref_name(target):
                 raise InvalidSymbolicTargetError(name, target)
-            who = identity(fl, view.session_view)
+            who = identity(fl, ctx.session)
             await set_symbolic(
                 vfs, location, table, name, target, who, message or ""
             )
             return None, IOResult()
         if len(names) != 1:
-            raise UsageError("", verb_usage(inv))
+            raise UsageError("", verb_usage(ctx))
         found = await resolve_symbolic(
             vfs, gitdir, table, name, _switched(fl, "recurse", True)
         )

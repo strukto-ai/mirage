@@ -16,7 +16,7 @@ import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { checksumGeneric } from './checksum.ts'
 
 const ENC = new TextEncoder()
@@ -32,8 +32,8 @@ function spec(path: string): PathSpec {
   })
 }
 
-function opts(flags: Record<string, string | boolean | number | string[]>, cwd = '/'): CommandOpts {
-  return { stdin: null, flags, cwd } as CommandOpts
+function ctx(flags: Record<string, string | boolean | number | string[]>, cwd = '/'): Context {
+  return { stdin: null, flags, cwd: PathSpec.fromStrPath(cwd) } as Context
 }
 
 function makeStream(files: Record<string, string>) {
@@ -63,7 +63,7 @@ async function runCheck(
 ): Promise<[string, string, number]> {
   const result = await checksumGeneric(
     paths.map(spec),
-    opts({ check: true, ...flags }, cwd),
+    ctx({ check: true, ...flags }, cwd),
     makeStream(files),
     'md5sum',
   )
@@ -110,7 +110,7 @@ describe('checksum --check', () => {
       return gen()
     }
     await expect(
-      checksumGeneric([spec('/sums.txt')], opts({ check: true }), stream, 'md5sum'),
+      checksumGeneric([spec('/sums.txt')], ctx({ check: true }), stream, 'md5sum'),
     ).rejects.toThrow('403 Forbidden')
   })
 })
@@ -130,7 +130,7 @@ describe('a stored digest', () => {
     }
     const result = await checksumGeneric(
       [spec('/a'), spec('/b')],
-      opts({}),
+      ctx({}),
       read,
       'md5sum',
       () => Promise.resolve(null),
@@ -151,7 +151,7 @@ describe('a stored digest', () => {
     const stored = (): Promise<string | null> => Promise.reject(new Error('asked under -c'))
     const result = await checksumGeneric(
       [spec('/list')],
-      opts({ check: true }),
+      ctx({ check: true }),
       makeStream({ '/list': `${DIGEST}  /f\n`, '/f': 'abc' }),
       'md5sum',
       () => Promise.resolve(null),
@@ -169,7 +169,7 @@ it('reports a failed stored digest and hashes the rest', async () => {
       : Promise.resolve('f'.repeat(32))
   const result = await checksumGeneric(
     [spec('/a'), spec('/b'), spec('/c')],
-    opts({}),
+    ctx({}),
     makeStream({}),
     'md5sum',
     () => Promise.resolve(null),

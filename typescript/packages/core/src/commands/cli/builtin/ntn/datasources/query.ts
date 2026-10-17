@@ -21,8 +21,9 @@ import {
   queryDataSourcePage,
 } from '../../../../../core/notion/pages.ts'
 import { IOResult } from '../../../../../io/types.ts'
-import type { CommandFnResult } from '../../../../config.ts'
-import type { CLIInvocation } from '../../../types.ts'
+import type { CommandFnResult, Context } from '../../../../config.ts'
+import type { PathSpec } from '../../../../../types.ts'
+import type { Files } from '../../../../../workspace/files.ts'
 import {
   firstText,
   notionTransport,
@@ -107,35 +108,39 @@ async function resolveSource(
 // mount as a second view of its own account's data.
 async function filterBody(
   fl: FlagView,
-  view: CLIInvocation['view'],
+  vfs: Files | undefined,
 ): Promise<Record<string, unknown> | null> {
   const inline = fl.asStr('filter')
   if (inline !== undefined && inline !== '') return parseJsonText(inline, '--filter')
   const source = fl.asPath('filter_file')
   if (source === undefined) return null
-  const vfs = view?.vfs
   if (vfs === undefined) throw new Error('--filter-file needs a workspace to read files from')
   return parseJsonText(DEC.decode(await vfs.read(source)), '--filter-file')
 }
 
-export async function query(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function query(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const body: Record<string, unknown> = {}
   let ref: string
   try {
-    ref = dataSourceRef(firstText(inv.texts, 'data source id'))
+    ref = dataSourceRef(firstText(texts, 'data source id'))
     body.page_size = fl.asInt('limit') ?? DEFAULT_LIMIT
     const cursor = fl.asStr('start_cursor')
     if (cursor !== undefined && cursor !== '') body.start_cursor = cursor
     const sorts = fl.asList('sort').map(parseSort)
     if (sorts.length > 0) body.sorts = sorts
-    const chosen = await filterBody(fl, inv.view)
+    const chosen = await filterBody(fl, ctx.vfs)
     if (chosen !== null) body.filter = chosen
   } catch (err) {
     return usageError(err)
   }
 
-  const transport = notionTransport(inv.config, inv.flags)
+  const transport = notionTransport(config, ctx.flags)
   const dataSource = await resolveSource(transport, ref)
   const result = await queryDataSourcePage(transport, strOf(dataSource, 'id'), body)
   if (fl.asBool('json')) return [prettyJson(result), new IOResult()]

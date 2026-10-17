@@ -14,8 +14,7 @@
 import { describe, expect, it } from 'vitest'
 import { ScriptSource } from '../../runtime/types.ts'
 import { Argument, CommandSpec } from '../spec/types.ts'
-import type { CommandOpts } from '../config.ts'
-import { CLI, CLIHandler, type CLIView, type CLIVerbFn } from './types.ts'
+import { CLI, CLIHandler, type CLIVerbFn } from './types.ts'
 
 const verb: CLIVerbFn = () => null
 const configModel = (input: Record<string, unknown>) => input
@@ -156,13 +155,5 @@ describe('CLI registration', () => {
           script,
         }),
     ).toThrow(/serves the whole program/)
-  })
-})
-
-describe('view parity with the command tier', () => {
-  it('spells every view field the way CommandOpts spells it', () => {
-    type Shared = { [K in keyof CLIView]: CommandOpts[K] }
-    const parity: Shared = {} as CLIView
-    expect(parity).toBeDefined()
   })
 })

@@ -14,9 +14,9 @@
 
 import { visibleEntries, matched, repoRelative } from './pathspec.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { headEntries, workChanges } from './changes.ts'
 import { isBare, requireWorkTree } from './discover.ts'
 import {
@@ -78,18 +78,21 @@ export function restored(oid: string, mode: number): StagedEntry {
  * A pathspec limits the reset to those paths, which is how a single file is
  * unstaged.
  */
-export async function reset(inv: CLIInvocation): Promise<CommandFnResult> {
-  const view = inv.view ?? {}
-  const texts = [...inv.texts]
-  const fl = new FlagView(inv.flags)
+export async function reset(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   let unstaged: Map<string, string>
   try {
-    const vfs = view.vfs
+    const vfs = ctx.vfs
     if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
-    checkSwitches(inv, texts)
-    const repo = await opened(fl, view)
+    checkSwitches(ctx, texts)
+    const repo = await opened(ctx, fl)
     const named = fl.asPath('work_tree') !== undefined
     if (!named && (await isBare(vfs, repo.location))) throw new BareResetError()
     await requireWorkTree(vfs, repo.location, named)

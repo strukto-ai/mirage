@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { materialize, type ByteSource, type IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { eacces, enoent } from '../../../errors/fs.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
@@ -79,8 +79,8 @@ async function run(
   stdin: ByteSource | null,
   read: (p: PathSpec) => AsyncIterable<Uint8Array> = stream,
 ): Promise<[string, number]> {
-  const opts = { stdin, flags, cwd: '/' } as unknown as CommandOpts
-  const [out, io] = (await rgGeneric(paths, [pattern], opts, stat, readdir, read)) as [
+  const ctx = { stdin, flags, cwd: PathSpec.fromStrPath('/') } as unknown as Context
+  const [out, io] = (await rgGeneric(paths, [pattern], ctx, stat, readdir, read)) as [
     ByteSource,
     IOResult,
   ]
@@ -219,8 +219,8 @@ describe('rgGeneric - unreadable paths are named as typed', () => {
     paths: PathSpec[],
     flags: Readonly<Record<string, string | boolean | readonly string[]>>,
   ): Promise<[string, string, number]> {
-    const opts = { stdin: null, flags, cwd: '/d' } as unknown as CommandOpts
-    const [out, io] = (await rgGeneric(paths, ['hit'], opts, statOf, readdirOf, streamOf)) as [
+    const ctx = { stdin: null, flags, cwd: PathSpec.fromStrPath('/d') } as unknown as Context
+    const [out, io] = (await rgGeneric(paths, ['hit'], ctx, statOf, readdirOf, streamOf)) as [
       ByteSource,
       IOResult,
     ]
@@ -251,12 +251,12 @@ describe('rgGeneric - an operand the walk refused', () => {
     })
   }
   async function runAll(paths: PathSpec[]): Promise<[string, string, number]> {
-    const opts = {
+    const ctx = {
       stdin: null,
       flags: {},
-      cwd: '/sub',
-    } as unknown as CommandOpts
-    const [out, io] = (await rgGeneric(paths, ['o'], opts, stat, readdir, stream)) as [
+      cwd: PathSpec.fromStrPath('/sub'),
+    } as unknown as Context
+    const [out, io] = (await rgGeneric(paths, ['o'], ctx, stat, readdir, stream)) as [
       ByteSource,
       IOResult,
     ]
@@ -295,7 +295,7 @@ describe('rgGeneric - an operand the walk refused', () => {
     // ripgrep 14.1.1 opens a lone file operand after the stat said it is one,
     // so a file it may not read is `rg: locked.txt: Permission denied (os
     // error 13)`, exit 2, not the shared handler's exit 1.
-    const opts = { stdin: null, flags: {}, cwd: '/' } as unknown as CommandOpts
+    const ctx = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/') } as unknown as Context
     const typedLocked = new PathSpec({
       virtual: '/a.txt',
       directory: '/',
@@ -308,7 +308,7 @@ describe('rgGeneric - an operand the walk refused', () => {
       await Promise.resolve()
       throw eacces('/a.txt')
     }
-    const [out, io] = (await rgGeneric([typedLocked], ['o'], opts, stat, readdir, denied)) as [
+    const [out, io] = (await rgGeneric([typedLocked], ['o'], ctx, stat, readdir, denied)) as [
       ByteSource,
       IOResult,
     ]
@@ -321,15 +321,15 @@ describe('rgGeneric - an operand the walk refused', () => {
 })
 
 describe('labelled', () => {
-  const base: CommandOpts = { stdin: null, flags: {}, cwd: '/' }
+  const base: Context = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/') }
 
   it('asks for the filename a walk would have printed', () => {
     expect(labelled(base).flags).toEqual({ with_filename: true })
   })
 
   it('lets -I win', () => {
-    const opts = { ...base, flags: { no_filename: true } }
-    expect(labelled(opts)).toBe(opts)
+    const ctx = { ...base, flags: { no_filename: true } }
+    expect(labelled(ctx)).toBe(ctx)
   })
 })
 

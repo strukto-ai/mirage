@@ -15,8 +15,8 @@
 import { basenameFn } from '../../generic/basename.ts'
 import type { GenericCommand, GenericCommandFn } from '../adapter.ts'
 
-const basename: GenericCommandFn = (_ops, accessor, paths, texts, opts) =>
-  basenameFn(accessor, paths, texts, opts)
+const basename: GenericCommandFn = (_ops, accessor, paths, texts, ctx) =>
+  basenameFn(accessor, paths, texts, ctx)
 
 export const BUILDER: GenericCommand = {
   name: 'basename',

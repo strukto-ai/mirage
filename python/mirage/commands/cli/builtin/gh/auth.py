@@ -1,16 +1,17 @@
 from urllib.parse import urlsplit
 
 from mirage.commands.cli.builtin.gh.accessor import web_origin
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.client import GitHubApiError
 from mirage.core.github.config import GhConfig
 from mirage.core.github.repo import login
 from mirage.io.types import IOResult
+from mirage.types import PathSpec
 
 
 async def status(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[bytes | None, IOResult]:
     """Check the configured credential without accessing a mount.
 
@@ -18,11 +19,14 @@ async def status(
     identify that source honestly and never print the credential itself.
 
     Args:
-        inv (CLIInvocation[GhConfig]): configured GitHub invocation.
+        config (GhConfig): the configured GitHub account.
+        paths (list[PathSpec]): the path operands.
+        texts (list[str]): the text operands.
+        ctx (Context): the invocation's context.
     """
-    host = urlsplit(web_origin(inv.config)).hostname
+    host = urlsplit(web_origin(config)).hostname
     try:
-        account = await login(inv.config)
+        account = await login(config)
     except GitHubApiError as exc:
         if exc.status not in (401, 403):
             raise
@@ -44,17 +48,20 @@ async def status(
 
 
 async def token(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[bytes | None, IOResult]:
     """``gh auth token``, refused: the token stays in Mirage
     configuration, where every gh verb reads it, and is never printed.
 
     Args:
-        inv (CLIInvocation[GhConfig]): configured GitHub invocation.
+        config (GhConfig): the configured GitHub account.
+        paths (list[PathSpec]): the path operands.
+        texts (list[str]): the text operands.
+        ctx (Context): the invocation's context; ``--hostname`` rides its flags.
     """
     host = (
-        FlagView(inv.flags).as_str("hostname")
-        or urlsplit(web_origin(inv.config)).hostname
+        FlagView(ctx.flags).as_str("hostname")
+        or urlsplit(web_origin(config)).hostname
     )
     text = (
         f"gh auth token: the token for {host} stays in Mirage "

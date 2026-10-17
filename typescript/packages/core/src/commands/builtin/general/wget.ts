@@ -15,7 +15,7 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
 import { httpGet, isHttpError } from '../utils/http.ts'
@@ -39,13 +39,13 @@ async function wget(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): Promise<CommandFnResult> {
   const url = texts[0]
   if (url === undefined) {
     throw new UsageError(USAGE, EXIT_GENERIC)
   }
-  const fl = new FlagView(opts.flags, specOf('wget'))
+  const fl = new FlagView(ctx.flags, specOf('wget'))
   // -O is short-only, so it lands on the disambiguated `args_O` dest
   // (`AMBIGUOUS_NAMES`); a plain `O` key is one the parser never emits.
   const argsO = fl.asPath('args_O') ?? fl.asStr('args_O') ?? null
@@ -59,7 +59,7 @@ async function wget(
   let resp
   try {
     resp = await httpGet(url, {
-      ...(opts.signal === undefined ? {} : { signal: opts.signal }),
+      ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
       timeoutMs: timeout === undefined ? 30_000 : timeout === 0 ? null : timeout * 1000,
     })
   } catch (err) {
@@ -114,10 +114,10 @@ async function wget(
   // An error status still creates the destination, empty, the way GNU wget
   // truncates the -O target before it learns the response code.
   const data = isHttpError(resp) ? new Uint8Array() : resp.body
-  if (opts.dispatch !== undefined) {
-    const scope = resolveTarget(target, opts.cwd)
+  if (ctx.dispatch !== undefined) {
+    const scope = resolveTarget(target, ctx.cwd.virtual)
     try {
-      await opts.dispatch('write', scope, [data])
+      await ctx.dispatch('write', scope, [data])
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
       return [

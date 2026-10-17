@@ -22,7 +22,7 @@ from mirage.commands.builtin.utils.stream import (
     stdin_stat,
     stdin_stream,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
@@ -845,7 +845,7 @@ async def _unfollowable(
 async def tail_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     stat: StatFn,
     stream: PolymorphicReadFn,
     read_range: ReadRangeFn | None = None,
@@ -869,7 +869,7 @@ async def tail_generic(
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
         texts (list[str]): Non-path words, unused by tail.
-        opts (CommandOpts): Flags and stdin from the dispatcher.
+        ctx (Context): Flags and stdin from the dispatcher.
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
@@ -886,9 +886,9 @@ async def tail_generic(
             an answer of None, polls.
     """
     stat = stdin_stat(stat)
-    stream = stdin_stream(stream, opts.stdin)
+    stream = stdin_stream(stream, ctx.stdin)
     try:
-        parsed = parse_flags(opts.flags)
+        parsed = parse_flags(ctx.flags)
     except UsageError as exc:
         return None, IOResult(
             exit_code=exc.exit_code, stderr=encode_text(f"{exc}\n")
@@ -950,10 +950,10 @@ async def tail_generic(
             # cache and past the stat the command's freshness probe kept:
             # they look for exactly the change neither has yet.
             poll_stat, poll_read, poll_range = stat, stream, read_range
-            if opts.dispatch is not None:
-                poll_stat = functools.partial(_polled_stat, opts.dispatch)
-                poll_read = functools.partial(_polled_file, opts.dispatch)
-                poll_range = functools.partial(_polled_window, opts.dispatch)
+            if ctx.dispatch is not None:
+                poll_stat = functools.partial(_polled_stat, ctx.dispatch)
+                poll_read = functools.partial(_polled_file, ctx.dispatch)
+                poll_range = functools.partial(_polled_window, ctx.dispatch)
             return _follow(
                 opened,
                 pending,
@@ -983,7 +983,7 @@ async def tail_generic(
             unread=unread,
             io=io,
         ), io
-    source = resolve_source(opts.stdin)
+    source = resolve_source(ctx.stdin)
     body = tail(
         source,
         n=counts.lines,

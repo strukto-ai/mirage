@@ -3,7 +3,7 @@ from json import JSONDecodeError
 import pytest
 
 from mirage.commands.builtin.generic.grep import grep_generic, labelled
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.errors.fs import no_mount
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -204,7 +204,7 @@ async def test_grep_recursive_files_only_mount_prefix():
     output, _ = await grep_generic(
         [p],
         ["apple"],
-        CommandOpts(flags={"recursive": True, "files_with_matches": True}),
+        Context(flags={"recursive": True, "files_with_matches": True}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -244,7 +244,7 @@ async def test_grep_recursive_not_a_directory_operand_keeps_the_others():
     output, io = await grep_generic(
         [_spec("/a.txt/x"), _spec("/real")],
         ["foo"],
-        CommandOpts(flags={"recursive": True, "files_with_matches": True}),
+        Context(flags={"recursive": True, "files_with_matches": True}),
         readdir=readdir_enotdir,
         stat=stat_enoent,
         read_bytes=rb,
@@ -259,9 +259,9 @@ async def _nothing(op: str, path: PathSpec, **_):
     return None, None
 
 
-def _on_a_mount(descendant: str) -> CommandOpts:
+def _on_a_mount(descendant: str) -> Context:
     """A bag whose files' mount table puts one mount under a path."""
-    return CommandOpts(
+    return Context(
         flags={"recursive": True},
         vfs=Files(
             [
@@ -334,7 +334,7 @@ async def test_grep_still_reports_a_path_with_no_mount_below_it():
 def test_labelled_asks_for_filenames_only_when_the_line_did_not_decide(
     flags, expected
 ):
-    out = labelled(CommandOpts(flags=flags))
+    out = labelled(Context(flags=flags))
     assert out.flags == expected
     assert list(out.flags) == list(expected)
 
@@ -354,7 +354,7 @@ async def test_excluded_entry_that_fails_stat_does_not_stop_the_walk():
     output, io = await grep_generic(
         [_spec("/data")],
         ["apple"],
-        CommandOpts(flags={"recursive": True, "exclude_dir": ["0ghost"]}),
+        Context(flags={"recursive": True, "exclude_dir": ["0ghost"]}),
         readdir=listing,
         stat=stat,
         read_bytes=rb,
@@ -378,7 +378,7 @@ async def test_grep_recursive_separates_context_groups_between_files():
     output, io = await grep_generic(
         [_spec("/d")],
         ["a"],
-        CommandOpts(flags={"recursive": True, "after_context": "1"}),
+        Context(flags={"recursive": True, "after_context": "1"}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -414,7 +414,7 @@ async def test_recursive_grep_stops_reading_and_closes_stream(quiet):
     output, io = await grep_generic(
         [_spec("/d"), _spec("/later")],
         ["hit"],
-        CommandOpts(flags={"recursive": True, "quiet": quiet}),
+        Context(flags={"recursive": True, "quiet": quiet}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -443,7 +443,7 @@ async def test_recursive_quiet_no_match_visits_every_file():
     output, io = await grep_generic(
         [_spec("/d")],
         ["hit"],
-        CommandOpts(flags={"recursive": True, "quiet": True}),
+        Context(flags={"recursive": True, "quiet": True}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -488,7 +488,7 @@ async def test_grep_no_messages_keeps_operand_failures(
     output, io = await grep_generic(
         [_spec(path) for path in paths],
         ["alice"],
-        CommandOpts(flags={"no_messages": True, **flags}),
+        Context(flags={"no_messages": True, **flags}),
         readdir=readdir,
         stat=stat,
         read_bytes=read_bytes,
@@ -539,9 +539,7 @@ async def test_grep_propagates_non_filesystem_read_failures(
     output, _ = await grep_generic(
         [_spec(path) for path in paths],
         ["alice"],
-        CommandOpts(
-            flags={"no_messages": no_messages, "recursive": recursive}
-        ),
+        Context(flags={"no_messages": no_messages, "recursive": recursive}),
         readdir=readdir,
         stat=stat,
         read_bytes=read_bytes,
@@ -579,7 +577,7 @@ async def test_grep_publishes_status_before_output_and_on_close(
     output, io = await grep_generic(
         [_spec(path) for path in (["/missing"] if missing else []) + paths],
         ["alice"],
-        CommandOpts(flags=flags),
+        Context(flags=flags),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -609,9 +607,7 @@ async def test_grep_preserves_binary_notice_before_read_failure(no_messages):
     output, io = await grep_generic(
         [_spec("/data/a.txt")],
         ["alice"],
-        CommandOpts(
-            flags={"no_messages": no_messages}, env={"LC_ALL": "C.UTF-8"}
-        ),
+        Context(flags={"no_messages": no_messages}, env={"LC_ALL": "C.UTF-8"}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -631,7 +627,7 @@ async def test_grep_preserves_stderr_added_before_drain():
     output, io = await grep_generic(
         [_spec("/missing"), _spec("/data/a.txt")],
         ["*alice"],
-        CommandOpts(flags={"extended_regexp": True}),
+        Context(flags={"extended_regexp": True}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -658,7 +654,7 @@ async def test_grep_settles_late_binary_detection_after_a_match():
     output, io = await grep_generic(
         [_spec("/data/a.txt")],
         ["alice"],
-        CommandOpts(flags={"args_I": True}),
+        Context(flags={"args_I": True}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -681,7 +677,7 @@ async def test_grep_flushes_binary_notice_on_early_close():
     output, io = await grep_generic(
         [_spec("/data/a.txt")],
         ["alice"],
-        CommandOpts(env={"LC_ALL": "C.UTF-8"}),
+        Context(env={"LC_ALL": "C.UTF-8"}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -699,7 +695,7 @@ async def test_false_flags_turn_nothing_on():
     output, io = await grep_generic(
         [_spec("/data/a.txt"), _spec("/data")],
         ["apple"],
-        CommandOpts(flags={"ignore_case": False, "recursive": False}),
+        Context(flags={"ignore_case": False, "recursive": False}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,

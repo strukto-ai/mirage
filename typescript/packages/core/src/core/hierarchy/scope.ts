@@ -94,7 +94,7 @@ export class Scope {
  * for a kind named in `patternKinds` and null everywhere else. A lister whose
  * listing is a window moves that window to the span the glob asks for instead
  * of filtering its own; every other consumer ignores the field, the way a
- * command ignores the `CommandOpts` facts it does not read.
+ * command ignores the `Context` facts it does not read.
  */
 export interface ScopeMatch {
   readonly kind: string

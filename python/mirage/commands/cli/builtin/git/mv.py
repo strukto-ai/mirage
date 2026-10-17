@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from mirage.commands.cli.builtin.git.errors import (
@@ -43,7 +44,7 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.posix import posix_phrase
@@ -298,7 +299,7 @@ async def plan(
     vfs: Files,
     location: RepoLocation,
     start: str,
-    operands: tuple[str, ...],
+    operands: Sequence[str],
     tracked: set[str],
     conflicted: set[str],
     flags: MvFlags,
@@ -313,7 +314,7 @@ async def plan(
         vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         start (str): absolute virtual path git is running in.
-        operands (tuple[str, ...]): the operands as typed.
+        operands (Sequence[str]): the operands as typed.
         tracked (set[str]): repository-relative paths the index holds,
             unmerged ones included.
         conflicted (set[str]): of those, the ones left unmerged.
@@ -437,26 +438,28 @@ async def apply(
         state.conflicts.pop(landing, None)
 
 
-async def mv(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
+async def mv(
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+) -> tuple[ByteSource | None, IOResult]:
     """Move or rename a file or directory, and stage the move.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model; it reads its repository
-            through ``inv.view.vfs``.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context; git reads its repository
+            through ``ctx.vfs``.
     """
-    view = inv.view or CLIView()
-    vfs = view.vfs
-    texts = inv.texts
-    fl = FlagView(inv.flags)
+    vfs = ctx.vfs
+    fl = FlagView(ctx.flags)
     try:
         if vfs is None:
             raise NoWorkspaceError()
-        check_switches(inv, texts)
+        check_switches(ctx, texts)
         flags = parse_flags(fl)
         if len(texts) < 2:
-            raise UsageError("", verb_usage(inv))
-        repo, location = await opened(fl, view, work_tree=True)
+            raise UsageError("", verb_usage(ctx))
+        repo, location = await opened(ctx, fl, work_tree=True)
         state = await read_index(vfs, location.gitdir)
         conflicted = {
             path.decode("utf-8", errors="replace") for path in state.conflicts

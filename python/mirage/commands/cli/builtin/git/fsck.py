@@ -18,7 +18,7 @@ from mirage.commands.cli.builtin.git.io import (
 from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.builtin.git.session import located
 from mirage.commands.cli.builtin.git.util import fatal
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import WALK_ERRORS
 from mirage.errors.fs import fs_strerror
@@ -207,21 +207,26 @@ def check(
     )
 
 
-async def fsck(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
+async def fsck(
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+) -> tuple[ByteSource | None, IOResult]:
     """Check the mounted repository without invoking host Git.
 
     Args:
-        inv (CLIInvocation[None]): repository and fsck options.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context, with the repository and fsck
+            options.
     """
     try:
-        view = inv.view or CLIView()
-        fl = FlagView(inv.flags)
-        location = await located(fl, view)
-        assert view.vfs is not None and view.vfs is not None
-        await check_packs(view.vfs, location.commondir)
-        repo = await open_repo(view.vfs, location)
+        fl = FlagView(ctx.flags)
+        location = await located(ctx, fl)
+        assert ctx.vfs is not None and ctx.vfs is not None
+        await check_packs(ctx.vfs, location.commondir)
+        repo = await open_repo(ctx.vfs, location)
         roots: set[bytes] = set(repo.refs.as_dict().values())
-        index = await read_index(view.vfs, location.gitdir)
+        index = await read_index(ctx.vfs, location.gitdir)
         roots.update(
             entry.sha
             for entry in index.entries.values()
@@ -234,7 +239,7 @@ async def fsck(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 if entry is not None and entry.mode != 0o160000
             )
         for directory in {location.gitdir, location.commondir}:
-            roots.update(await log_roots(view.vfs, directory.join("logs")))
+            roots.update(await log_roots(ctx.vfs, directory.join("logs")))
         out, io = await asyncio.to_thread(
             check,
             repo,
@@ -243,7 +248,7 @@ async def fsck(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             fl.as_bool("unreachable"),
         )
         if not roots:
-            head = await read_optional(view.vfs, location.gitdir.join("HEAD"))
+            head = await read_optional(ctx.vfs, location.gitdir.join("HEAD"))
             branch = (
                 (head or b"").decode().strip().removeprefix("ref: refs/heads/")
             )

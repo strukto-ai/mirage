@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
@@ -213,14 +213,14 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> CommFlags:
 async def comm_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     read_stream: PolymorphicReadFn,
 ) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     return await comm(
         paths,
         read_stream=read_stream,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         suppress1=parsed.suppress1,
         suppress2=parsed.suppress2,
         suppress3=parsed.suppress3,

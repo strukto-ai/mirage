@@ -35,9 +35,10 @@ from mirage.commands.cli.builtin.git.util import (
     git_bool,
     start_point,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.types import PathSpec
 
 # The ambiguity warnings the running invocation collects, None when
 # nothing collects them.
@@ -50,12 +51,13 @@ LOCATIONS: ContextVar[RepoLocation | None] = ContextVar(
 
 
 def index_locked(
-    inv: CLIInvocation[None], location: RepoLocation | None
+    texts: list[str], ctx: Context, location: RepoLocation | None
 ) -> GitError:
     """The refusal of every verb whose first write is the index's.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
+        texts (list[str]): the line's operands.
+        ctx (Context): the line's context.
         location (RepoLocation | None): the repository it opened.
     """
     return IndexLockError(
@@ -64,7 +66,7 @@ def index_locked(
 
 
 def git_would_refuse(
-    inv: CLIInvocation[None], location: RepoLocation | None, path: str | None
+    ctx: Context, location: RepoLocation | None, path: str | None
 ) -> bool:
     """Whether a write a read-only mount refused is one git is refused
     first, on the lock in its own directory.
@@ -76,13 +78,13 @@ def git_would_refuse(
     mount of its own, is not, and keeps its own error.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
+        ctx (Context): the line's context, whose files hold the mounts.
         location (RepoLocation | None): the repository it opened.
         path (str | None): where the refused write went.
     """
     if location is None or not path:
         return True
-    vfs = (inv.view or CLIView()).vfs
+    vfs = ctx.vfs
     root = (
         vfs.mount_of(location.commondir) if vfs is not None else None
     ) or "/"
@@ -94,11 +96,13 @@ def git_would_refuse(
 
 def verb(
     fn: Callable[
-        [CLIInvocation[None]], Awaitable[tuple[ByteSource | None, IOResult]]
+        [None, list[PathSpec], list[str], Context],
+        Awaitable[tuple[ByteSource | None, IOResult]],
     ],
     refused: ReadOnlyRefusal | None = None,
 ) -> Callable[
-    [CLIInvocation[None]], Awaitable[tuple[ByteSource | None, IOResult]]
+    [None, list[PathSpec], list[str], Context],
+    Awaitable[tuple[ByteSource | None, IOResult]],
 ]:
     """A git verb whose ``refname is ambiguous`` warnings reach stderr,
     and whose refusal by a read-only mount is in git's words.
@@ -117,23 +121,23 @@ def verb(
     """
 
     async def run(
-        inv: CLIInvocation[None],
+        config: None, paths: list[PathSpec], texts: list[str], ctx: Context
     ) -> tuple[ByteSource | None, IOResult]:
         lines: list[str] = []
         warned = AMBIGUOUS.set(lines)
         placed = LOCATIONS.set(None)
         try:
             try:
-                out, io = await fn(inv)
+                out, io = await fn(config, paths, texts, ctx)
             except OSError as exc:
                 location = LOCATIONS.get()
                 if (
                     refused is None
                     or exc.errno != errno.EROFS
-                    or not git_would_refuse(inv, location, exc.filename)
+                    or not git_would_refuse(ctx, location, exc.filename)
                 ):
                     raise
-                out, io = fatal(refused(inv, location))
+                out, io = fatal(refused(texts, ctx, location))
         finally:
             AMBIGUOUS.reset(warned)
             LOCATIONS.reset(placed)
@@ -145,7 +149,7 @@ def verb(
 
 
 async def opened(
-    fl: FlagView, view: CLIView, work_tree: bool = False
+    ctx: Context, fl: FlagView, work_tree: bool = False
 ) -> tuple[BaseRepo, RepoLocation]:
     """Discover and open the repository a verb was invoked against.
 
@@ -159,9 +163,9 @@ async def opened(
     answer a runtime's guest gets.
 
     Args:
+        ctx (Context): the line's context, one field per state plane.
         fl (FlagView): the leaf's flag bag, read for ``-C``,
             ``--git-dir`` and ``--work-tree``.
-        view (CLIView): the invocation's view, one per state plane.
         work_tree (bool): the verb reads or writes working files, so
             there must be a work tree to enter, as git's
             ``NEED_WORK_TREE`` asks.
@@ -170,8 +174,8 @@ async def opened(
         NoWorkspaceError: a plane this verb needs is not wired.
         NotAWorkTreeError: ``work_tree`` and there is none to enter.
     """
-    location = await located(fl, view)
-    vfs = view.vfs
+    location = await located(ctx, fl)
+    vfs = ctx.vfs
     assert vfs is not None
     LOCATIONS.set(location)
     if work_tree:
@@ -186,14 +190,14 @@ async def opened(
     return repo, location
 
 
-async def located(fl: FlagView, view: CLIView) -> RepoLocation:
+async def located(ctx: Context, fl: FlagView) -> RepoLocation:
     """Locate a repository without opening potentially damaged objects.
 
     Args:
+        ctx (Context): the line's context, whose files git reads.
         fl (FlagView): repository-selection flags.
-        view (CLIView): the invocation's view, whose files git reads.
     """
-    vfs = view.vfs
+    vfs = ctx.vfs
     if vfs is None:
         raise NoWorkspaceError()
     chosen = fl.as_path("work_tree")

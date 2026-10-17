@@ -28,7 +28,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
 )
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.tree import WalkCall, tree_walk
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
@@ -393,31 +393,31 @@ async def du(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("du: no VFS")
-    mounts = mounts_of(opts)
+    mounts = mounts_of(ctx)
     budget = WalkBudget(ops.max_du_entries, mounts=mounts)
-    fl = FlagView(opts.flags, spec=SPECS["du"])
-    links = links_of(opts)
+    fl = FlagView(ctx.flags, spec=SPECS["du"])
+    links = links_of(ctx)
     follow = (
         Dereference(links, mounts if fl.as_bool("one_file_system") else None)
         if links is not None and fl.typed_order("L", "P")[-1:] == ["L"]
         else None
     )
     compute_size: ComputeSize = partial(
-        walk_size, ops, accessor, opts.index, budget, follow
+        walk_size, ops, accessor, ctx.index, budget, follow
     )
     compute_entries: ComputeEntries = partial(
-        walk_entries, ops, accessor, opts.index, budget, follow
+        walk_entries, ops, accessor, ctx.index, budget, follow
     )
     return await du_generic(
         paths,
         list(texts),
-        opts,
-        lambda targets: ops.resolve_glob(accessor, targets, opts.index),
-        lambda p: ops.stat(accessor, p, opts.index),
+        ctx,
+        lambda targets: ops.resolve_glob(accessor, targets, ctx.index),
+        lambda p: ops.stat(accessor, p, ctx.index),
         compute_size,
         compute_entries,
         truncated=lambda: budget.hit,

@@ -27,7 +27,7 @@ from mirage.commands.builtin.utils.paths import (
     nearest_ancestor,
 )
 from mirage.commands.builtin.utils.slash_links import mkdir_link_refusal
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import missing_operand_error
@@ -51,9 +51,9 @@ async def mkdir(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(opts.flags, spec=SPECS["mkdir"])
+    fl = FlagView(ctx.flags, spec=SPECS["mkdir"])
     parents = fl.as_bool("parents")
     verbose = fl.as_bool("verbose")
     mode_text = fl.as_str("mode")
@@ -78,14 +78,14 @@ async def mkdir(
         # parents made by `-p` keep that default (GNU gives them
         # `u+wx` on top of the mask, which the one backend op cannot
         # tell apart from the named directory).
-        umask = session_umask(opts.access)
+        umask = session_umask(ctx.access)
         if umask != DEFAULT_UMASK:
             mode = 0o777 & ~umask
     mkdir_fn = require_op(ops, Operation.MKDIR)
-    paths = await ops.resolve_glob(accessor, paths, opts.index)
+    paths = await ops.resolve_glob(accessor, paths, ctx.index)
     lines: list[str] = []
     errors: list[str] = []
-    links = links_of(opts)
+    links = links_of(ctx)
     for path in paths:
         taken, refusal = await mkdir_link_refusal(path, links, parents=parents)
         if taken:

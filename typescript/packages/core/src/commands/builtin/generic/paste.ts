@@ -19,7 +19,7 @@ import { IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 
 const ENC = new TextEncoder()
@@ -58,15 +58,15 @@ function joinFields(fields: readonly string[], delimiters: readonly string[]): s
 
 export function pasteGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): CommandFnResult {
-  const fl = new FlagView(opts.flags, specOf('paste'))
+  const fl = new FlagView(ctx.flags, specOf('paste'))
   const delimiterValue = fl.asStr('delimiters')
   const delimiters = decodeDelimiters(typeof delimiterValue === 'string' ? delimiterValue : '\t')
   const serial = fl.asBool('serial')
   const zeroTerminated = fl.asBool('zero_terminated')
-  const shared = new AsyncLineIterator(opts.stdin ?? new Uint8Array())
+  const shared = new AsyncLineIterator(ctx.stdin ?? new Uint8Array())
   const operands = paths.length === 0 ? [PathSpec.fromStrPath('-')] : paths
   const inputs = operands.map(
     (p) => [p, isStdin(p) ? shared : new AsyncLineIterator(stream(p))] as const,

@@ -22,7 +22,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
 )
 from mirage.commands.builtin.utils.tree import tree_walk
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, PathSpec
 
@@ -32,20 +32,20 @@ async def find(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("find: no VFS")
-    resolved = await ops.resolve_glob(accessor, paths, opts.index)
+    resolved = await ops.resolve_glob(accessor, paths, ctx.index)
     readdir = partial(ops.readdir, accessor)
     stat: Callable[..., Awaitable[FileStat]] = partial(ops.stat, accessor)
     whole_readdir, whole_stat = tree_walk(
-        bound_op(ops.read_tree, accessor, opts.index), readdir, stat
+        bound_op(ops.read_tree, accessor, ctx.index), readdir, stat
     )
     return await find_walk_generic(
         resolved,
         list(texts),
-        opts,
+        ctx,
         readdir=readdir,
         stat=stat,
         unbounded=(whole_readdir, whole_stat),

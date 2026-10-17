@@ -17,7 +17,7 @@ import { missingOperandError } from '../../spec/usage.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec, type StatFn, type Visibility } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { eloop, enoent, enotdir, isMissingPath } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
@@ -48,7 +48,7 @@ export interface RealpathFlags {
   relativeBase: string | null
 }
 
-export function parseFlags(flags: CommandOpts['flags']): RealpathFlags {
+export function parseFlags(flags: Context['flags']): RealpathFlags {
   const fl = new FlagView(flags, specOf('realpath'))
   const mode = fl.typedOrder(...Object.keys(MODES)).pop()
   const links = fl.typedOrder(...Object.keys(LINKS)).pop()
@@ -220,14 +220,14 @@ export async function realpath(
 export async function realpathGeneric(
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
   stat: (p: PathSpec) => Promise<unknown>,
 ): Promise<CommandFnResult> {
   const first = paths[0]
   const prefix = first !== undefined ? mountPrefixOf(first.virtual, first.vfsPath) : ''
   const pathStat: StatFn =
-    opts.dispatch !== undefined
-      ? dispatchStat(opts.dispatch)
+    ctx.dispatch !== undefined
+      ? dispatchStat(ctx.dispatch)
       : async (path) =>
           (await stat(
             PathSpec.fromStrPath(path.virtual, mountKey(path.virtual, prefix)),
@@ -235,9 +235,9 @@ export async function realpathGeneric(
   return realpath(
     paths,
     pathStat,
-    opts.cwd,
-    linkTarget(linksOf(opts)),
-    parseFlags(opts.flags),
-    opts.vfs?.vis() ?? null,
+    ctx.cwd.virtual,
+    linkTarget(linksOf(ctx)),
+    parseFlags(ctx.flags),
+    ctx.vfs?.vis() ?? null,
   )
 }

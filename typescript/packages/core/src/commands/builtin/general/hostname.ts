@@ -15,7 +15,7 @@
 import type { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { SYNOPSES } from '../../spec/synopsis.ts'
@@ -52,9 +52,9 @@ function hostname(
   _accessor: Accessor,
   _paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): CommandFnResult {
-  const fl = new FlagView(opts.flags, specOf('hostname'))
+  const fl = new FlagView(ctx.flags, specOf('hostname'))
   const typed = fl.typedOrder(...Object.keys(DISPLAY))
   if (texts.length > 1 || (texts.length > 0 && typed.length > 0)) {
     return [null, new IOResult({ exitCode: usageExitCode('hostname'), stderr: ENC.encode(USAGE) })]

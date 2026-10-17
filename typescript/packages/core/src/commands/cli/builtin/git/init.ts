@@ -2,9 +2,8 @@ import { PathSpec, FileType } from '../../../../types.ts'
 
 import { IOResult } from '../../../../io/types.ts'
 import { isEexist, isErofs } from '../../../../errors/fs.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { discover } from './discover.ts'
 import {
   CannotMkdirError,
@@ -62,21 +61,25 @@ function namedGitdir(fl: FlagView, texts: readonly string[]): PathSpec {
  * existing directory stops at `objects` where git stops at its first template
  * directory.
  */
-export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const view = inv.view ?? {}
+export async function init(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    if (view.vfs === undefined) throw new NoWorkspaceError()
-    const vfs = view.vfs
+    if (ctx.vfs === undefined) throw new NoWorkspaceError()
+    const vfs = ctx.vfs
     const start = startPoint(fl)
     const here = await statOf(vfs, start)
     if (here?.type !== FileType.DIRECTORY)
       throw new NoWorkingDirectoryError(start.rawPath, here === null ? 'ENOENT' : 'ENOTDIR')
-    const target = PathSpec.fromStrPath(inv.texts[0] ?? '.', undefined, start)
+    const target = PathSpec.fromStrPath(texts[0] ?? '.', undefined, start)
     if (target.walkError === 'ENOENT')
       throw new CannotMkdirError(target.rawPath, 'No such file or directory')
     const bare = fl.asBool('bare')
-    let gitdir = namedGitdir(fl, inv.texts)
+    let gitdir = namedGitdir(fl, texts)
     const branch = fl.asStr('initial_branch') ?? 'master'
     if (!validRefName(`refs/heads/${branch}`) || branch.startsWith('-'))
       throw new GitError(`invalid branch name: '${branch}'`)
@@ -89,7 +92,7 @@ export async function init(inv: CLIInvocation): Promise<CommandFnResult> {
       gitdir = location.commondir
     }
     const existing = (await readOptional(vfs, gitdir.join('HEAD'))) !== null
-    const [typed] = inv.texts
+    const [typed] = texts
     const made = typed !== undefined && (await statOf(vfs, target)) === null
     const settings = gitdir.join('config')
     try {

@@ -1,10 +1,10 @@
 import { parseFlags, truncateGeneric } from '../../generic/truncate.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const truncate: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
-  const flags = parseFlags(opts.flags)
+const truncate: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+  const flags = parseFlags(ctx.flags)
   const truncateOp = requireOp(ops.truncate, 'truncate')
-  const index = opts.index ?? undefined
+  const index = ctx.index ?? undefined
   const resolved = await resolveGlobOf(ops)(accessor, paths, index)
   return truncateGeneric(
     resolved,

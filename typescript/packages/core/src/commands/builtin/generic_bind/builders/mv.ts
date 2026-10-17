@@ -21,12 +21,12 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { linksOf, mountsOf } from '../../utils/links.ts'
 
-const mv: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
+const mv: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
   const rename = requireOp(ops.rename, 'rename')
-  const idx = opts.index ?? undefined
-  const parsed = parseFlags(new FlagView(opts.flags, specOf('mv')))
-  const mounts = mountsOf(opts)
-  const links = linksOf(opts)
+  const idx = ctx.index ?? undefined
+  const parsed = parseFlags(new FlagView(ctx.flags, specOf('mv')))
+  const mounts = mountsOf(ctx)
+  const links = linksOf(ctx)
   return mvGeneric(
     await resolveGlobOf(ops)(accessor, paths, idx),
     (p: PathSpec) => ops.stat(accessor, p, idx),
@@ -38,10 +38,10 @@ const mv: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
     (src, dst) => {
       refuseReveal(src, dst, ops.access)
     },
-    links === undefined || opts.dispatch === undefined
+    links === undefined || ctx.dispatch === undefined
       ? undefined
-      : transferLinksOf(links, opts.dispatch, opts.cwd, opts.vfs?.vis() ?? undefined),
-    opts.stdin,
+      : transferLinksOf(links, ctx.dispatch, ctx.cwd.virtual, ctx.vfs?.vis() ?? undefined),
+    ctx.stdin,
     mounts === undefined ? undefined : (p: string) => mounts.isRoot(p),
   )
 }

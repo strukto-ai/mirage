@@ -16,14 +16,19 @@ import { getIssue, issueUpdate } from '../../../../../core/linear/client.ts'
 import { normalizeIssue, toJsonBytes } from '../../../../../core/linear/normalize.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { IOResult } from '../../../../../io/types.ts'
-import type { CommandFnResult } from '../../../../config.ts'
-import type { CLIInvocation } from '../../../types.ts'
+import type { CommandFnResult, Context } from '../../../../config.ts'
+import type { PathSpec } from '../../../../../types.ts'
 import { firstText, linearTransport, resolveIssue, resolveProjectId } from '../util.ts'
 
-export async function setProject(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const transport = linearTransport(inv.config)
-  const issueId = await resolveIssue(transport, firstText(inv.texts, 'issue key'))
+export async function setProject(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const transport = linearTransport(config)
+  const issueId = await resolveIssue(transport, firstText(texts, 'issue key'))
   let projectId = fl.asStr('project')
   if (projectId === undefined || projectId === '') {
     const issue = await getIssue(transport, issueId)

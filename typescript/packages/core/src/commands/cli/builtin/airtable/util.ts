@@ -17,23 +17,20 @@ import type { AirtableConfig } from '../../../../core/airtable/config.ts'
 import type { Row } from '../../../../core/airtable/normalize.ts'
 import { materialize, type ByteSource } from '../../../../io/types.ts'
 import { eacces } from '../../../../errors/fs.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { UsageError } from '../../../errors.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation, CLIVerbFn } from '../../types.ts'
+import type { CLIVerbFn } from '../../types.ts'
 
 const DEC = new TextDecoder()
 
 export type Verb = (
+  config: AirtableConfig,
+  texts: string[],
+  ctx: Context,
   accessor: AirtableAccessor,
-  inv: CLIInvocation,
   fl: FlagView,
 ) => Promise<CommandFnResult>
-
-/** The line's install, validated against the program's config model. */
-export function config(inv: CLIInvocation): AirtableConfig {
-  return inv.config as AirtableConfig
-}
 
 /** Refuse an operand on a verb that takes none. */
 export function noOperands(texts: readonly string[]): void {
@@ -103,6 +100,8 @@ export async function stdinText(stdin: ByteSource): Promise<string> {
  * which prefixes it with the words the line was typed under.
  */
 export function run(verb: Verb): CLIVerbFn {
-  return (inv: CLIInvocation): Promise<CommandFnResult> =>
-    verb(new AirtableAccessor(config(inv)), inv, new FlagView(inv.flags, inv.spec))
+  return (config, _paths, texts, ctx): Promise<CommandFnResult> => {
+    const cfg = config as AirtableConfig
+    return verb(cfg, texts, ctx, new AirtableAccessor(cfg), new FlagView(ctx.flags, ctx.spec))
+  }
 }

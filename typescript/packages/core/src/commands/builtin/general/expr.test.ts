@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -30,7 +31,7 @@ async function runExpr(texts: string[]): Promise<{ out: string; err: string; exi
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags: {},
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) return { out: '', err: '', exitCode: -1 }
   const [out, ioResult] = result
@@ -72,7 +73,7 @@ async function runExprByteView(texts: string[]): Promise<{ out: string; exitCode
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags: {},
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) throw new Error('expr answered nothing')
   const [out, ioResult] = result

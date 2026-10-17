@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.commands.cli.builtin.gh.search import search_cmd, search_spec
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.core.github.client import GitHubApiError
 from mirage.core.github.config import GhConfig
 
@@ -71,10 +71,11 @@ async def test_search_qualifiers_match_native_gh(
     )
     await search_cmd(
         kind,
-        CLIInvocation(
-            config=GhConfig(token="t"),
+        GhConfig(token="t"),
+        [],
+        ["two words"],
+        Context(
             argv=("search", kind, "two words"),
-            texts=("two words",),
             flags={**flags, "limit": "30", "json": "url"},
             spec=leaf,
         ),
@@ -125,10 +126,11 @@ async def test_search_failure_reads_as_gh_words_it(
     )
     out, io = await search_cmd(
         "issues",
-        CLIInvocation(
-            config=GhConfig(token="t"),
+        GhConfig(token="t"),
+        [],
+        ["needle"],
+        Context(
             argv=("search", "issues", "needle"),
-            texts=("needle",),
             flags={"limit": "30"},
             spec=leaf,
         ),

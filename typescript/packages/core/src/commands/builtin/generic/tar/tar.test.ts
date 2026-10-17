@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { tarGeneric } from './tar.ts'
-import type { CommandOpts } from '../../../../commands/config.ts'
+import type { Context } from '../../../../commands/config.ts'
 import { ensureStream } from '../../../../io/stream.ts'
 import { materialize } from '../../../../io/types.ts'
 import { readTar } from '../../tar_helper.ts'
@@ -99,10 +99,10 @@ it('emits a known-size archive header before draining its source', async () => {
     [],
     {
       flags: { create: true },
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
       stdin: null,
       mountPrefix: '',
-    } as CommandOpts,
+    } as Context,
     {
       async *stream() {
         try {

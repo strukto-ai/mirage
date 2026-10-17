@@ -32,8 +32,9 @@ from mirage.commands.cli.refusal import (
     directory_refusal,
     leaf_refusal,
 )
-from mirage.commands.cli.types import CLI, CLIInvocation, CLIView
+from mirage.commands.cli.types import CLI
 from mirage.commands.cli.walk import listed_node, node_help, owns_argv, walk
+from mirage.commands.config import Context
 from mirage.commands.errors import PartialOutputError, UsageError
 from mirage.commands.spec import flag_kwarg_name
 from mirage.commands.spec.flag_view import FlagBag
@@ -55,7 +56,7 @@ from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.routing import RouteDecision, runtime_for_language
-from mirage.runtime.types import CodeExecution, ScriptSource
+from mirage.runtime.types import CodeExecution, ScriptSource, ShellFn
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, Limit, PathSpec, Producer, word_text
@@ -81,7 +82,13 @@ from mirage.workspace.types import ExecutionNode
 PASSTHROUGH_REST = Argument("args", nargs="*", metavar="")
 
 
-async def call_leaf(fn: Callable[..., Any], inv: CLIInvocation[Any]) -> Any:
+async def call_leaf(
+    fn: Callable[..., Any],
+    config: Any,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
+) -> Any:
     """Run a leaf handler, whether it was written ``async def`` or not.
 
     Async handlers run on the workspace loop. Synchronous Python handlers
@@ -90,13 +97,17 @@ async def call_leaf(fn: Callable[..., Any], inv: CLIInvocation[Any]) -> Any:
 
     Args:
         fn (Callable[..., Any]): the leaf's handler.
-        inv (CLIInvocation): the one record every leaf receives.
+        config (Any): the install's validated config, None without a
+            model.
+        paths (list[PathSpec]): the cwd-resolved path operands.
+        texts (list[str]): the text operands.
+        ctx (Context): the leaf's context, the one a command gets.
     """
     result = (
-        fn(inv)
+        fn(config, paths, texts, ctx)
         if inspect.iscoroutinefunction(fn)
         or inspect.iscoroutinefunction(getattr(fn, "__call__", None))
-        else await run_blocking(fn, inv)
+        else await run_blocking(fn, config, paths, texts, ctx)
     )
     if inspect.isawaitable(result):
         return await result
@@ -224,7 +235,8 @@ def _leaf_message(exc: BaseException) -> str:
 
 
 async def _script_output(
-    inv: CLIInvocation[Any],
+    config: Any,
+    ctx: Context,
     script: ScriptSource,
     runtime: LanguageRuntime,
     prog: str,
@@ -240,15 +252,17 @@ async def _script_output(
     commands' one mapping (run_output).
 
     Args:
-        inv (CLIInvocation): the line's one invocation record.
+        config (Any): the install's validated config, None without a
+            model.
+        ctx (Context): the line's context.
         script (ScriptSource): the install's embedded program.
         runtime (Runtime): the selected interpreter entry.
         prog (str): the installed head word, the program's own name.
     """
-    env = dict(inv.env)
-    if inv.config is not None:
-        env[CLI_CONFIG_ENV] = json.dumps(inv.config)
-    stdin = await materialize(inv.stdin) if inv.stdin is not None else None
+    env = dict(ctx.env or {})
+    if config is not None:
+        env[CLI_CONFIG_ENV] = json.dumps(config)
+    stdin = await materialize(ctx.stdin) if ctx.stdin is not None else None
     # A .mjs source needs the engine's module mode, the same bit the
     # js command derives from the operand's extension.
     flags = {"module": True} if script.module else {}
@@ -256,10 +270,10 @@ async def _script_output(
         CodeExecution(
             language=runtime.language,
             code=script.source,
-            args=list(inv.argv),
+            args=list(ctx.argv),
             prog=prog,
             script_cli=True,
-            cwd=inv.cwd,
+            cwd=ctx.cwd,
             env=env,
             stdin=stdin,
             flags=flags,
@@ -279,25 +293,25 @@ class CLIContext:
     (workspace/executor/command/cli.ts).
 
     Args:
-        shell (Callable[[str], Awaitable[IOResult]] | None): the nested
-            evaluator bound to this invocation's session.
+        shell (ShellFn | None): the nested evaluator bound to this
+            invocation's session.
         entries (list[Runtime] | None): the workspace's ordered
             runtime world, which a script leaf selects its interpreter
             from; None (outside a workspace) refuses script installs.
         vfs (Files | None): the session's files, run as the line's
             session with the command's gate, for a CLI whose subject is
             files rather than an API.
-        session_view (SessionView | None): the session plane's live,
-            gated handle; ``inv.env`` stays the frozen process view.
+        session (SessionView | None): the session plane's live, gated
+            handle; ``ctx.env`` stays the frozen process view.
         routing (RouteDecision[Runtime] | None): the line's placement, which a
             script leaf runs its program under.
     """
 
-    shell: Callable[[str], Awaitable[IOResult]] | None = None
+    shell: ShellFn | None = None
     command_limits: Mapping[str, Limit] | None = None
     entries: list[Runtime] | None = None
     vfs: Files | None = None
-    session_view: SessionView | None = None
+    session: SessionView | None = None
     processes: ProcessView | None = None
     routing: RouteDecision[Runtime] | None = None
 
@@ -334,9 +348,9 @@ async def handle_cli(
     validated config; no mount is consulted and no operand path picks a
     backend (the one executor divergence from mount commands). The walk
     consumes subcommand words and group options; the leaf's own argv
-    uses the shared CommandSpec parser. The leaf handler renders the line's
-    one CLIInvocation,
-    built here and nowhere else: an fn leaf runs as ``fn(inv)``, a
+    uses the shared CommandSpec parser. The leaf gets the line's one
+    Context, built here and nowhere else: an fn leaf runs as
+    ``fn(config, paths, texts, ctx)``, a
     script leaf runs its embedded program on a workspace runtime
     (_script_output), so usage refusals, limits, and classification all
     happen in front of either tier. Help too, for every node that
@@ -349,14 +363,12 @@ async def handle_cli(
             the head; CLI words are shell-expanded strings.
         session (SessionState): shell session (cwd for path resolution, env
             for the invocation record).
-        stdin (ByteSource | None): stdin data, carried on the
-            invocation record.
+        stdin (ByteSource | None): stdin data, carried on the context.
         context (CLIContext): the workspace context on offer, one bag
             (the fifth argument TS's ``handleCli`` has always taken).
-            The four entry point facts ride ``inv.view`` as one CLIView,
-            one entry point per state plane; a verb that never reads it
-            cannot touch a mount, and outside a workspace the field
-            is None.
+            Its files, session and processes ride the leaf's ``ctx``; a
+            verb that never reads ``ctx.vfs`` cannot touch a mount, and
+            outside a workspace it is None.
         drop_caches (Callable | None): drop cached listings and bodies
             for the mounts this CLI's service serves. Called after a
             write verb succeeds, because an account CLI mutates its
@@ -365,7 +377,6 @@ async def handle_cli(
     """
     entries = context.entries
     vfs = context.vfs
-    session_view = context.session_view
     # Words re-enter string space as typed (word_text): the walk owns
     # interpretation, so a quoted "Lunch?" must not arrive as the
     # glob-classified absolute /Lunch?. Leaf path operands are resolved
@@ -508,42 +519,32 @@ async def handle_cli(
         # --help itself is handed the value it asked for.
         kw.pop("help", None)
 
-    # One entry point per state plane, riding the record as one field. Most
-    # CLIs never read it: an API client has no filesystem, while `git`
-    # is nothing but one. None outside a workspace, so a verb that needs
-    # a plane refuses there on its own.
-    opened = (vfs, session_view, context.processes)
-    view = (
-        CLIView(
-            vfs=vfs,
-            session_view=session_view,
-            processes=context.processes,
-        )
-        if any(part is not None for part in opened)
-        else None
-    )
     active = True
 
-    async def shell(command: str) -> IOResult:
+    async def shell(line: str, data: ByteSource | None = None) -> IOResult:
         if not active:
             raise RuntimeError("CLI shell is no longer active")
         if context.shell is None:
             raise RuntimeError("CLI shell is unavailable")
-        return await context.shell(command)
+        return await context.shell(line, data)
 
-    inv = CLIInvocation(
-        install.config,
-        argv=tuple(argv),
-        paths=tuple(parsed.paths),
-        texts=tuple(parsed.texts),
-        cwd=PathSpec.from_str_path(session.cwd),
-        flags=kw,
+    # Most CLIs never read the files: an API client has no filesystem,
+    # while `git` is nothing but one. None outside a workspace, so a verb
+    # that needs them refuses there on its own.
+    ctx = Context(
         stdin=stdin,
+        flags=kw,
+        cwd=PathSpec.from_str_path(session.cwd),
         env=env_snapshot(session),
-        view=view,
+        argv=tuple(argv),
         spec=leaf,
+        vfs=vfs,
+        session=context.session,
+        processes=context.processes,
         shell=shell if context.shell is not None else None,
     )
+    paths = list(parsed.paths)
+    texts = list(parsed.texts)
 
     # asyncio's timeout cancels the runtime task as well as the caller;
     # TypeScript forwards an explicit deadline and abort signal instead.
@@ -575,7 +576,8 @@ async def handle_cli(
                 ),
             )
         body = _script_output(
-            inv,
+            install.config,
+            ctx,
             install.cli.script,
             runtime,
             prog,
@@ -589,7 +591,7 @@ async def handle_cli(
             raise RuntimeError(
                 f"walk returned a leaf without a handler for {prog!r}"
             )
-        body = call_leaf(fn, inv)
+        body = call_leaf(fn, install.config, paths, texts, ctx)
     # The leaf's declared limit bounds the handler body and its
     # streams, exactly like mount dispatch: without the wrap a blocking
     # leaf hangs forever and an unbounded-output leaf ignores its own

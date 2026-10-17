@@ -21,7 +21,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { delimited } from '../../../io/record_spool.ts'
 import { ByteSpool, MEMORY_LIMIT } from '../../../io/spool.ts'
@@ -487,12 +487,12 @@ async function sampleRecords(
 export async function shufGeneric(
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: ByteSource) => Promise<void>,
 ): Promise<CommandFnResult> {
-  stream = stdinStream(stream, opts.stdin)
-  const parsed = parseFlags(opts.flags)
+  stream = stdinStream(stream, ctx.stdin)
+  const parsed = parseFlags(ctx.flags)
   if (typeof parsed === 'string') {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
   }
@@ -504,7 +504,7 @@ export async function shufGeneric(
       : new PathSpec({
           virtual: parsed.output.virtual,
           directory: parsed.output.virtual,
-          vfsPath: mountKey(parsed.output.virtual, opts.mountPrefix ?? ''),
+          vfsPath: mountKey(parsed.output.virtual, ctx.mountPrefix ?? ''),
           resolved: true,
           rawPath: parsed.output.rawPath,
         })
@@ -553,7 +553,7 @@ export async function shufGeneric(
   } else {
     try {
       result = await sampleRecords(
-        paths.length > 0 ? paths.map((p) => stream(p)) : [opts.stdin ?? new Uint8Array()],
+        paths.length > 0 ? paths.map((p) => stream(p)) : [ctx.stdin ?? new Uint8Array()],
         sep,
         nFlag,
         repeat,

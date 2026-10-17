@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.commands.builtin.generic_bind.builders.find import find
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -75,7 +75,7 @@ def _root() -> PathSpec:
 
 
 async def _lines(ops: CommandIO) -> list[str]:
-    stdout, _io = await find(ops, None, [_root()], [], CommandOpts())
+    stdout, _io = await find(ops, None, [_root()], [], Context())
     data = await materialize(stdout)
     return data.decode().splitlines()
 
@@ -110,7 +110,7 @@ async def test_walk_honors_multiple_start_points():
             vfs_path="notes.txt",
         ),
     ]
-    stdout, _io = await find(ops, None, roots, [], CommandOpts())
+    stdout, _io = await find(ops, None, roots, [], Context())
     data = await materialize(stdout)
     lines = data.decode().splitlines()
     # GNU find walks every start point in operand order
@@ -157,7 +157,7 @@ async def test_find_reads_the_tree_in_one_call(texts, trees):
         return _tree()
 
     async def run(ops: CommandIO) -> list[str]:
-        stdout, _io = await find(ops, None, [_root()], texts, CommandOpts())
+        stdout, _io = await find(ops, None, [_root()], texts, Context())
         return (await materialize(stdout)).decode().splitlines()
 
     assert await run(_ops([], read_tree)) == await run(_ops([]))

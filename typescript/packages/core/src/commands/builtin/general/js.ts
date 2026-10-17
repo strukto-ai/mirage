@@ -14,7 +14,7 @@
 
 import type { Accessor } from '../../../accessor/base.ts'
 import type { PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -24,19 +24,19 @@ async function js(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): Promise<CommandFnResult> {
-  const label = opts.command ?? 'js'
-  if (!(opts.runtime instanceof LanguageRuntime)) return notBound(label)
-  const fl = new FlagView(opts.flags, specOf('js'))
+  const label = ctx.command ?? 'js'
+  if (!(ctx.runtime instanceof LanguageRuntime)) return notBound(label)
+  const fl = new FlagView(ctx.flags, specOf('js'))
   if (fl.asBool('version')) {
-    return runtimeVersion(label, opts.runtime, opts.env ?? {}, opts.signal, opts.timeoutSeconds)
+    return runtimeVersion(label, ctx.runtime, ctx.env ?? {}, ctx.signal, ctx.timeoutSeconds)
   }
-  const prepared = await resolveSource(label, paths, texts, fl.asStr('e') ?? null, opts)
+  const prepared = await resolveSource(label, paths, texts, fl.asStr('e') ?? null, ctx)
   if (Array.isArray(prepared) || prepared === null) return prepared
   // A .mjs script is a module whatever the flag said.
   const module = fl.asBool('module') || (prepared.scriptPath?.virtual.endsWith('.mjs') ?? false)
-  return runCode(label, prepared, opts.runtime, { module }, opts)
+  return runCode(label, prepared, ctx.runtime, { module }, ctx)
 }
 
 export const GENERAL_JS = command({

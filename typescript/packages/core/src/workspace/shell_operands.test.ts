@@ -117,9 +117,9 @@ it('keeps the stdin operand on an installed CLI before an fd redirect', async ()
         }),
         handlers: {
           '': new CLIHandler({
-            fn: async (inv) => {
-              seen.push(...inv.texts)
-              return [await materialize(inv.stdin), new IOResult()]
+            fn: async (_config, _paths, texts, ctx) => {
+              seen.push(...texts)
+              return [await materialize(ctx.stdin), new IOResult()]
             },
           }),
         },

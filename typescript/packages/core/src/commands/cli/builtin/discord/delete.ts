@@ -15,19 +15,20 @@
 import { FlagView } from '../../../spec/flag_view.ts'
 import { deleteMessage } from '../../../../core/discord/post.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 import { discordAccessor } from '../../../../accessor/discord.ts'
 
 const ENC = new TextEncoder()
 
-export async function deleteVerb(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  await deleteMessage(
-    discordAccessor(inv.config),
-    fl.asStr('channel') ?? '',
-    fl.asStr('message') ?? '',
-  )
+export async function deleteVerb(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  await deleteMessage(discordAccessor(config), fl.asStr('channel') ?? '', fl.asStr('message') ?? '')
   const out: ByteSource = ENC.encode(JSON.stringify({ ok: true }))
   return [out, new IOResult()]
 }

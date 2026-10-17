@@ -41,6 +41,7 @@ from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import NULL_INDEX, IndexConfig
 from mirage.commands.cli import CLI
 from mirage.commands.cli.specs import cli_spec_for
+from mirage.commands.config import Context
 from mirage.concurrency.limiter import run_blocking
 from mirage.context import (
     Caller,
@@ -1111,16 +1112,18 @@ class Workspace:
         try:
             return capture_binding(
                 self._runtime_binding,
-                vfs=Files(
-                    self._registry.mount_rows(),
-                    self.dispatch,
-                    links=self._namespace,
-                    visibility=lambda _session: session.visibility,
+                ctx=Context(
+                    vfs=Files(
+                        self._registry.mount_rows(),
+                        self.dispatch,
+                        links=self._namespace,
+                        visibility=lambda _session: session.visibility,
+                    ),
+                    session=session_view(session, self.policies),
+                    processes=self._process_view(session),
+                    cwd=PathSpec.from_str_path(session.cwd),
+                    env=env_snapshot(session),
                 ),
-                session_view=session_view(session, self.policies),
-                processes=self._process_view(session),
-                cwd=PathSpec.from_str_path(session.cwd),
-                env=env_snapshot(session),
                 restricted_mounts=restricted_mounts_for(
                     session, self._sandbox_mounts()
                 ),

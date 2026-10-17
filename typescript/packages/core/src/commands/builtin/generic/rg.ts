@@ -21,7 +21,7 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { MountView } from '../../../view/types.ts'
 import { FileStat, FileType, type PathSpec } from '../../../types.ts'
 import { enoent, isFsError, isWalkError, walkRefusal } from '../../../errors/fs.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
@@ -879,7 +879,7 @@ function usage(message: string, exitCode = 2): CommandFnResult {
 export async function rgGeneric(
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
   stat: Stat,
   readdir: Readdir,
   stream: Stream,
@@ -888,24 +888,17 @@ export async function rgGeneric(
   // Every `-` operand reads stdin through one cursor, as grep's do. With no
   // operand typed, the implicit one below is stdin's sole reader, so a search
   // that stops early closes the input.
-  stream = stdinStream(stream, opts.stdin, paths.length === 0)
-  const fl = new FlagView(opts.flags, specOf('rg'))
+  stream = stdinStream(stream, ctx.stdin, paths.length === 0)
+  const fl = new FlagView(ctx.flags, specOf('rg'))
   const f = parseFlags(fl)
   if (unbounded !== undefined && f.maxDepth === null) [readdir, stat] = unbounded
   const types = new FileTypes(f.typeChanges, f.typeSelections)
   if (f.typeList) return [formatRecords(typeListing(types.definitions)), new IOResult()]
   const notes: string[] = []
-  const walk = walkFilter(f, types, await ignoreRules(fl, opts.dispatch, notes))
+  const walk = walkFilter(f, types, await ignoreRules(fl, ctx.dispatch, notes))
   let pat: RegExp | null = null
   if (!f.listFiles) {
-    const resolution = await resolvePattern(
-      'rg',
-      texts,
-      opts.flags,
-      paths,
-      opts.mountPrefix,
-      stream,
-    )
+    const resolution = await resolvePattern('rg', texts, ctx.flags, paths, ctx.mountPrefix, stream)
     if (resolution.error !== null) {
       return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(resolution.error) })]
     }
@@ -916,11 +909,11 @@ export async function rgGeneric(
   // operand, so -l, -H, -c and context answer as they do for a typed one
   // (ripgrep's Paths::from_low_args, 14.1.1).
   if (paths.length === 0) {
-    if (opts.stdin === null) return usage(RG_NO_PATTERN)
+    if (ctx.stdin === null) return usage(RG_NO_PATTERN)
     paths = [STDIN_OPERAND]
   }
   const [first = STDIN_OPERAND] = paths
-  const mounts = mountsOf(opts)
+  const mounts = mountsOf(ctx)
   const home = mountPrefixOf(first.virtual, first.vfsPath)
   const rd = mountParentReaddir((p: string) => readdir(sameMountSpec(p, first)), mounts, home)
   const st = mountParentStat((p: string) => stat(sameMountSpec(p, first)), mounts)
@@ -932,7 +925,7 @@ export async function rgGeneric(
     f.searchZip !== true &&
     (f.pre ?? null) === null
   ) {
-    const single = await searchSingle(first, pat, f, st, rd, stream, opts.signal)
+    const single = await searchSingle(first, pat, f, st, rd, stream, ctx.signal)
     if (single !== null) return noted(single, notes, f)
   }
   const warnings: string[] = []
@@ -949,7 +942,17 @@ export async function rgGeneric(
   // A mount below the operand shadows whatever the backend holds there; the
   // fan-out that would search the mount itself is off too.
   const boundary = f.oneFileSystem ? (mounts ?? null) : null
-  let found = haystacks(paths, rd, st, opts.cwd, walk, f, warnings, boundary, linkResolver(opts))
+  let found = haystacks(
+    paths,
+    rd,
+    st,
+    ctx.cwd.virtual,
+    walk,
+    f,
+    warnings,
+    boundary,
+    linkResolver(ctx),
+  )
   if (f.sort !== null && f.sort !== 'none' && !(f.sort === 'path' && !f.sortReverse)) {
     const listed: Haystack[] = []
     for await (const h of found) listed.push(h)
@@ -968,10 +971,10 @@ export async function rgGeneric(
           first,
           warnings,
           implicit,
-          opts.cwd,
+          ctx.cwd.virtual,
           io,
-          opts.signal,
-          opts.shell,
+          ctx.signal,
+          ctx.shell,
         )
   return noted([out, io], notes, f)
 }
@@ -1487,7 +1490,7 @@ export function labelFlags(bag: Record<string, FlagValue>): Record<string, FlagV
  * -H is requested here; an -I the line set after any -H still wins, since
  * forcing -H under it would defeat the suppression in the delegated scan.
  */
-export function labelled(opts: CommandOpts): CommandOpts {
-  if (filenameFlag(new FlagView(opts.flags, specOf('rg'))) === 'no_filename') return opts
-  return { ...opts, flags: labelFlags(opts.flags) }
+export function labelled(ctx: Context): Context {
+  if (filenameFlag(new FlagView(ctx.flags, specOf('rg'))) === 'no_filename') return ctx
+  return { ...ctx, flags: labelFlags(ctx.flags) }
 }

@@ -14,13 +14,7 @@
 import { generic } from '../../commands/builtin/generic_bind/factory.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import {
-  command,
-  type Command,
-  type CommandFn,
-  type CommandOpts,
-  type ExecContext,
-} from '../../commands/config.ts'
+import { command, type Command, type CommandFn } from '../../commands/config.ts'
 import { CommandSpec, Argument } from '../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
@@ -435,7 +429,7 @@ describe('Mount.runCommand', () => {
     if (cmd === undefined) throw new Error('missing')
     m.register(cmd)
     await expect(
-      m.runCommand('cat', [PathSpec.fromStrPath('/x.txt')], [], {}, { limitOverride: null }),
+      m.runCommand('cat', [PathSpec.fromStrPath('/x.txt')], [], {}, {}, null),
     ).rejects.toThrow(/cat: timed out after 0.05s/)
   })
 })
@@ -488,21 +482,6 @@ describe('Mount.revisions', () => {
     m.revisions.set('/ram/x.txt', 'rev-1')
     await m.call('read', '/ram/x.txt')
     expect(revisionFor('/ram/x.txt')).toBeNull()
-  })
-})
-
-describe('ExecContext parity with CommandOpts', () => {
-  it('every line fact is spelled as CommandOpts spells it', () => {
-    // runCommand re-boxes the bag onto CommandOpts, so a fact spelled
-    // two ways across that seam is two vocabularies for one plane.
-    // Checked at compile time because a TS interface has no fields to
-    // enumerate at runtime. `limitOverride` is the one execution
-    // control runCommand consumes itself rather than forwards, so it
-    // is the one exemption. The Python twin is
-    // tests/commands/test_exec_context_parity.py.
-    type Shared = { [K in keyof Omit<ExecContext, 'limitOverride'>]: CommandOpts[K] }
-    const parity: Shared = {} as ExecContext
-    expect(parity).toBeDefined()
   })
 })
 

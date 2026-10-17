@@ -18,10 +18,9 @@ import { visibleEntries, matched, repoRelative } from './pathspec.ts'
 
 import { fsStrerror, isEacces } from '../../../../errors/fs.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { FileType, type FileStat } from '../../../../types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import { FileType, type FileStat, type PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import {
   GitError,
   IgnoredPathsError,
@@ -264,19 +263,22 @@ export async function stageTracked(
  * what they will stage: `-A` takes untracked files too, `-u` only what the index
  * already holds.
  */
-export async function add(inv: CLIInvocation): Promise<CommandFnResult> {
-  const view = inv.view ?? {}
-  const texts = [...inv.texts]
-  const fl = new FlagView(inv.flags)
+export async function add(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    const vfs = view.vfs
+    const vfs = ctx.vfs
     if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
-    checkSwitches(inv, texts)
+    checkSwitches(ctx, texts)
     const parsed = parseFlags(fl)
     if (texts.length === 0 && !parsed.every && !parsed.update) throw new NothingSpecifiedError()
-    const repo: Repo = await opened(fl, view, true)
+    const repo: Repo = await opened(ctx, fl, true)
     const state = await readIndex(repo, vfs)
     const tracked = new Set(visibleEntries(repo.location, state.entries).keys())
     const found = await scan(vfs, repo.location, tracked, UNTRACKED_ALL)

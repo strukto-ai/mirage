@@ -14,7 +14,7 @@
 
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { readStdinAsync, stdinStream } from '../utils/stream.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
@@ -123,10 +123,10 @@ function topologicalSort(pairs: readonly (readonly [string, string])[]): [string
 
 export async function tsortGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  stream = stdinStream(stream, opts.stdin)
+  stream = stdinStream(stream, ctx.stdin)
   if (paths.length > 1) throw extraOperandError(CommandName.TSORT, paths[1]?.rawPath ?? '')
   let raw: Uint8Array
   if (paths.length > 0) {
@@ -134,7 +134,7 @@ export async function tsortGeneric(
     if (first === undefined) return [null, new IOResult()]
     raw = await materialize(stream(first))
   } else {
-    const stdinData = await readStdinAsync(opts.stdin)
+    const stdinData = await readStdinAsync(ctx.stdin)
     raw = stdinData ?? new Uint8Array(0)
   }
   const text = DEC.decode(raw)

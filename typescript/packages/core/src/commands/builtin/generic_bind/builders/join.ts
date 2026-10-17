@@ -15,12 +15,12 @@
 import { joinGeneric } from '../../generic/join.ts'
 import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const join: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
-  const idx = opts.index ?? undefined
+const join: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const resolveGlob = resolveGlobOf(ops)
   return joinGeneric(
     paths,
-    opts,
+    ctx,
     (targets) => resolveGlob(accessor, targets, idx),
     (p) => ops.readStream(accessor, p, idx),
   )

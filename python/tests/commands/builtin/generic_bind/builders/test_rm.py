@@ -20,7 +20,7 @@ import pytest
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.builtin.generic_bind.builders.rm import rm
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.errors.fs import walk_declined, walk_refusal
 from mirage.io.stream import materialize
 from mirage.types import FileStat, FileType, MountMode, PathSpec
@@ -87,7 +87,7 @@ async def _rm(
         object(),
         [_spec(p) for p in paths],
         [],
-        CommandOpts(flags=flags, index=INDEX),
+        Context(flags=flags, index=INDEX),
     )
     stdout = (await materialize(out)).decode() if out is not None else ""
     stderr = io.stderr.decode() if io.stderr else ""
@@ -168,7 +168,7 @@ async def test_rm_refused_operand_keeps_spelling_and_continues(
     )
     valid = PathSpec.from_str_path("/data/ok")
     _, result = await generic("rm").fn(
-        None, [refused, valid], [], CommandOpts(flags={"f": force}, io=io)
+        None, [refused, valid], [], Context(flags={"f": force}, io=io)
     )
     assert (result.exit_code, result.stderr) == (code, stderr)
     assert stat.await_count == 2
@@ -215,7 +215,7 @@ async def test_rm_r_names_a_mount_below_and_fails():
         None,
         [PathSpec.from_str_path("/data")],
         [],
-        CommandOpts(flags={"r": True}, io=io, vfs=files),
+        Context(flags={"r": True}, io=io, vfs=files),
     )
     assert result.exit_code == 1
     assert result.stderr == (

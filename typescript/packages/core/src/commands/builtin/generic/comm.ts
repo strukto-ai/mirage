@@ -17,7 +17,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 import { isStdin } from '../utils/stream.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
@@ -59,16 +59,16 @@ function parseFlags(bag: Record<string, FlagValue>): CommFlags {
 
 export function commGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   read: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): CommandFnResult {
-  const parsed = parseFlags(opts.flags)
+  const parsed = parseFlags(ctx.flags)
   if (paths.length > 2) throw extraOperandError(CommandName.COMM, paths[2]?.rawPath ?? '')
   if (paths.length < 2) throw missingOperandError(CommandName.COMM, paths[0]?.rawPath ?? null)
   const p1 = paths[0]
   const p2 = paths[1]
   if (p1 === undefined || p2 === undefined) return [null, new IOResult()]
-  const shared = new AsyncLineIterator(opts.stdin ?? new Uint8Array())
+  const shared = new AsyncLineIterator(ctx.stdin ?? new Uint8Array())
   const reader = (p: PathSpec): AsyncLineIterator =>
     isStdin(p) ? shared : new AsyncLineIterator(read(p))
   const io = new IOResult()

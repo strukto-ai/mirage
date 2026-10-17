@@ -7,9 +7,9 @@ from mirage import (
     Argument,
     BaseVFS,
     CLIHandler,
-    CLIInvocation,
     CommandSpec,
     ContentType,
+    Context,
     FileStat,
     FileType,
     IOResult,
@@ -111,12 +111,13 @@ class NotesVFS(BaseVFS):
         return b"".join(line for line in lines if text.encode() in line)
 
 
-async def note_info(inv: CLIInvocation[None]) -> tuple[bytes, IOResult]:
-    view = inv.view
-    if view is None or view.vfs is None or view.session_view is None:
+async def note_info(
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+) -> tuple[bytes, IOResult]:
+    vfs, session = ctx.vfs, ctx.session
+    if vfs is None or session is None:
         raise RuntimeError("note-info needs workspace entry points")
-    vfs = view.vfs
-    path = inv.paths[0]
+    path = paths[0]
     data = await vfs.read(path)
     target, rest = "/", path.virtual.split("/")
     while rest:
@@ -128,7 +129,7 @@ async def note_info(inv: CLIInvocation[None]) -> tuple[bytes, IOResult]:
         rest[:0] = link.split("/")
         target = "/" if link.startswith("/") else target
     mount = vfs.mount_of(target)
-    reader = view.session_view.get("READER") or "anonymous"
+    reader = session.get("READER") or "anonymous"
     header = f"mount={mount} reader={reader} bytes={len(data)}\n"
     return header.encode() + data, IOResult()
 

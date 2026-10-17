@@ -43,8 +43,8 @@ import {
 import { FlagView } from '../../../spec/flag_view.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { enoent } from '../../../../errors/fs.ts'
-import type { CommandFnResult } from '../../../config.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 import { firstText, linearTransport, resolveIssue } from './util.ts'
 
 function requireTeam(fl: FlagView): string {
@@ -91,9 +91,14 @@ async function allUsers(transport: LinearTransport): Promise<Record<string, unkn
   return users
 }
 
-export async function teamList(inv: CLIInvocation): Promise<CommandFnResult> {
-  const cfg = inv.config as LinearConfig
-  let teams = await listTeams(linearTransport(inv.config))
+export async function teamList(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  _ctx: Context,
+): Promise<CommandFnResult> {
+  const cfg = config as LinearConfig
+  let teams = await listTeams(linearTransport(config))
   if (cfg.teamIds !== undefined && cfg.teamIds.length > 0) {
     const keep = new Set(cfg.teamIds)
     teams = teams.filter((team) => typeof team.id === 'string' && keep.has(team.id))
@@ -101,37 +106,62 @@ export async function teamList(inv: CLIInvocation): Promise<CommandFnResult> {
   return [toJsonBytes(teams.map((team) => normalizeTeam(team))), new IOResult()]
 }
 
-export async function teamGet(inv: CLIInvocation): Promise<CommandFnResult> {
-  const team = await resolveTeam(linearTransport(inv.config), firstText(inv.texts, 'team key'))
+export async function teamGet(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  _ctx: Context,
+): Promise<CommandFnResult> {
+  const team = await resolveTeam(linearTransport(config), firstText(texts, 'team key'))
   return [toJsonBytes(normalizeTeam(team)), new IOResult()]
 }
 
-export async function teamMembers(inv: CLIInvocation): Promise<CommandFnResult> {
-  const transport = linearTransport(inv.config)
-  const team = await resolveTeam(transport, firstText(inv.texts, 'team key'))
+export async function teamMembers(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  _ctx: Context,
+): Promise<CommandFnResult> {
+  const transport = linearTransport(config)
+  const team = await resolveTeam(transport, firstText(texts, 'team key'))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const users = await listTeamMembers(transport, teamId)
   return [toJsonBytes(users.map((user) => normalizeUser(user))), new IOResult()]
 }
 
-export async function issueList(inv: CLIInvocation): Promise<CommandFnResult> {
-  const transport = linearTransport(inv.config)
-  const team = await resolveTeam(transport, requireTeam(new FlagView(inv.flags)))
+export async function issueList(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const transport = linearTransport(config)
+  const team = await resolveTeam(transport, requireTeam(new FlagView(ctx.flags)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const issues = await listTeamIssues(transport, teamId)
   return [toJsonBytes(issues.map((issue) => normalizeIssue(issue))), new IOResult()]
 }
 
-export async function issueGet(inv: CLIInvocation): Promise<CommandFnResult> {
-  const transport = linearTransport(inv.config)
-  const issueId = await resolveIssue(transport, firstText(inv.texts, 'issue key'))
+export async function issueGet(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  _ctx: Context,
+): Promise<CommandFnResult> {
+  const transport = linearTransport(config)
+  const issueId = await resolveIssue(transport, firstText(texts, 'issue key'))
   const issue = await getIssue(transport, issueId)
   return [toJsonBytes(normalizeIssue(issue)), new IOResult()]
 }
 
-export async function projectList(inv: CLIInvocation): Promise<CommandFnResult> {
-  const transport = linearTransport(inv.config)
-  const team = await resolveTeam(transport, requireTeam(new FlagView(inv.flags)))
+export async function projectList(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const transport = linearTransport(config)
+  const team = await resolveTeam(transport, requireTeam(new FlagView(ctx.flags)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const projects = await listTeamProjects(transport, teamId)
   const payload = []
@@ -150,11 +180,16 @@ export async function projectList(inv: CLIInvocation): Promise<CommandFnResult> 
   return [toJsonBytes(payload), new IOResult()]
 }
 
-export async function projectGet(inv: CLIInvocation): Promise<CommandFnResult> {
-  const transport = linearTransport(inv.config)
-  const team = await resolveTeam(transport, requireTeam(new FlagView(inv.flags)))
+export async function projectGet(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const transport = linearTransport(config)
+  const team = await resolveTeam(transport, requireTeam(new FlagView(ctx.flags)))
   const teamId = typeof team.id === 'string' ? team.id : ''
-  const projectId = firstText(inv.texts, 'project id')
+  const projectId = firstText(texts, 'project id')
   const projects = await listTeamProjects(transport, teamId)
   for (const project of projects) {
     if (project.id === projectId) {
@@ -175,17 +210,27 @@ export async function projectGet(inv: CLIInvocation): Promise<CommandFnResult> {
   throw enoent(projectId)
 }
 
-export async function cycleList(inv: CLIInvocation): Promise<CommandFnResult> {
-  const transport = linearTransport(inv.config)
-  const team = await resolveTeam(transport, requireTeam(new FlagView(inv.flags)))
+export async function cycleList(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const transport = linearTransport(config)
+  const team = await resolveTeam(transport, requireTeam(new FlagView(ctx.flags)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const cycles = await listTeamCycles(transport, teamId)
   return [toJsonBytes(cycles.map((cycle) => normalizeCycle(cycle, teamId))), new IOResult()]
 }
 
-export async function cycleCurrent(inv: CLIInvocation): Promise<CommandFnResult> {
-  const transport = linearTransport(inv.config)
-  const team = await resolveTeam(transport, requireTeam(new FlagView(inv.flags)))
+export async function cycleCurrent(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const transport = linearTransport(config)
+  const team = await resolveTeam(transport, requireTeam(new FlagView(ctx.flags)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const cycles = await listTeamCycles(transport, teamId)
   let current: Record<string, unknown> | undefined
@@ -202,11 +247,16 @@ export async function cycleCurrent(inv: CLIInvocation): Promise<CommandFnResult>
   return [toJsonBytes(normalizeCycle(current, teamId)), new IOResult()]
 }
 
-export async function cycleGet(inv: CLIInvocation): Promise<CommandFnResult> {
-  const transport = linearTransport(inv.config)
-  const team = await resolveTeam(transport, requireTeam(new FlagView(inv.flags)))
+export async function cycleGet(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const transport = linearTransport(config)
+  const team = await resolveTeam(transport, requireTeam(new FlagView(ctx.flags)))
   const teamId = typeof team.id === 'string' ? team.id : ''
-  const cycleId = firstText(inv.texts, 'cycle id')
+  const cycleId = firstText(texts, 'cycle id')
   const cycles = await listTeamCycles(transport, teamId)
   for (const cycle of cycles) {
     if (cycle.id === cycleId) return [toJsonBytes(normalizeCycle(cycle, teamId)), new IOResult()]
@@ -214,17 +264,27 @@ export async function cycleGet(inv: CLIInvocation): Promise<CommandFnResult> {
   throw enoent(cycleId)
 }
 
-export async function labelList(inv: CLIInvocation): Promise<CommandFnResult> {
-  const transport = linearTransport(inv.config)
-  const team = await resolveTeam(transport, requireTeam(new FlagView(inv.flags)))
+export async function labelList(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const transport = linearTransport(config)
+  const team = await resolveTeam(transport, requireTeam(new FlagView(ctx.flags)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const labels = await listTeamLabels(transport, teamId)
   return [toJsonBytes(labels.map((label) => normalizeLabel(label))), new IOResult()]
 }
 
-export async function commentList(inv: CLIInvocation): Promise<CommandFnResult> {
-  const transport = linearTransport(inv.config)
-  const issueId = await resolveIssue(transport, firstText(inv.texts, 'issue key'))
+export async function commentList(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  _ctx: Context,
+): Promise<CommandFnResult> {
+  const transport = linearTransport(config)
+  const issueId = await resolveIssue(transport, firstText(texts, 'issue key'))
   const issue = await getIssue(transport, issueId)
   const issueKey = typeof issue.identifier === 'string' ? issue.identifier : null
   const comments = await listIssueComments(transport, issueId)
@@ -234,32 +294,52 @@ export async function commentList(inv: CLIInvocation): Promise<CommandFnResult> 
   ]
 }
 
-export async function userList(inv: CLIInvocation): Promise<CommandFnResult> {
-  const users = await allUsers(linearTransport(inv.config))
+export async function userList(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  _ctx: Context,
+): Promise<CommandFnResult> {
+  const users = await allUsers(linearTransport(config))
   return [toJsonBytes(users.map((user) => normalizeUser(user))), new IOResult()]
 }
 
-export async function userGet(inv: CLIInvocation): Promise<CommandFnResult> {
-  const email = firstText(inv.texts, 'user email')
-  for (const user of await allUsers(linearTransport(inv.config))) {
+export async function userGet(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  _ctx: Context,
+): Promise<CommandFnResult> {
+  const email = firstText(texts, 'user email')
+  for (const user of await allUsers(linearTransport(config))) {
     if (user.email === email) return [toJsonBytes(normalizeUser(user)), new IOResult()]
   }
   throw enoent(email)
 }
 
-export async function documentList(inv: CLIInvocation): Promise<CommandFnResult> {
-  const transport = linearTransport(inv.config)
-  const team = await resolveTeam(transport, requireTeam(new FlagView(inv.flags)))
+export async function documentList(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const transport = linearTransport(config)
+  const team = await resolveTeam(transport, requireTeam(new FlagView(ctx.flags)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const documents = await listTeamDocuments(transport, teamId)
   return [toJsonBytes(documents.map((document) => normalizeDocument(document))), new IOResult()]
 }
 
-export async function documentGet(inv: CLIInvocation): Promise<CommandFnResult> {
-  const transport = linearTransport(inv.config)
-  const team = await resolveTeam(transport, requireTeam(new FlagView(inv.flags)))
+export async function documentGet(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const transport = linearTransport(config)
+  const team = await resolveTeam(transport, requireTeam(new FlagView(ctx.flags)))
   const teamId = typeof team.id === 'string' ? team.id : ''
-  const documentId = firstText(inv.texts, 'document id')
+  const documentId = firstText(texts, 'document id')
   const documents = await listTeamDocuments(transport, teamId)
   for (const document of documents) {
     if (document.id === documentId)
@@ -268,11 +348,16 @@ export async function documentGet(inv: CLIInvocation): Promise<CommandFnResult> 
   throw enoent(documentId)
 }
 
-export async function search(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function search(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const flagQuery = fl.asStr('query')
-  const query = flagQuery !== undefined && flagQuery !== '' ? flagQuery : (inv.texts[0] ?? null)
+  const query = flagQuery !== undefined && flagQuery !== '' ? flagQuery : (texts[0] ?? null)
   if (query === null || query === '') throw new Error('a search query is required')
-  const results = await searchIssues(linearTransport(inv.config), query)
+  const results = await searchIssues(linearTransport(config), query)
   return [toJsonBytes(results), new IOResult()]
 }

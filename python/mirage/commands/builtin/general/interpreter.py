@@ -236,7 +236,7 @@ async def resolve_source(
         dispatch (DispatchFn | None): workspace dispatch for
             reading the script operand.
         cwd (PathSpec | str | None): the session cwd for script
-            resolution, as ``CommandOpts.cwd`` carries it.
+            resolution, as ``Context.cwd`` carries it.
         exec_allowed (bool): whether any mount region is in EXEC mode.
         module (str | None): the -m module name, if given.
         argv0_rules (Argv0Rules): what this interpreter calls itself in

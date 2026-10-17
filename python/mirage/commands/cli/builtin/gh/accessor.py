@@ -25,7 +25,7 @@ from mirage.commands.cli.builtin.gh.constants import (
     GITHUB_HOST,
     GOJQ_RAISED,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.errors import PartialOutputError, UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -150,9 +150,9 @@ def gh_bool(fl: FlagView, name: str) -> bool:
     return fl.as_bool(name) or fl.as_str(name) == "true"
 
 
-def repo_for(inv: CLIInvocation[GhConfig], fl: FlagView) -> RepoRef:
+def repo_for(config: GhConfig, fl: FlagView) -> RepoRef:
     """Resolve a typed verb's shared `-R/--repo` target."""
-    return gh_repo(inv.config, fl.as_str("repo"))
+    return gh_repo(config, fl.as_str("repo"))
 
 
 def list_limit(fl: FlagView, default: int) -> int:
@@ -162,7 +162,7 @@ def list_limit(fl: FlagView, default: int) -> int:
 
 
 def repo_number(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig,
     fl: FlagView,
     value: str | None,
     label: str,
@@ -171,13 +171,13 @@ def repo_number(
     """Resolve a numeric subject or a full GitHub subject URL atomically."""
     raw = value or ""
     if raw.isdigit():
-        return repo_for(inv, fl), int(raw)
+        return repo_for(config, fl), int(raw)
     match = re.fullmatch(
         r"https?://[^/]+/([^/]+)/([^/]+)/(issues|pull)/(\d+)/?", raw
     )
     if match is None or match.group(3) != url_kind:
         raise ValueError(f"a {label} number is required")
-    check_host(inv.config, urlsplit(raw).hostname)
+    check_host(config, urlsplit(raw).hostname)
     return parse_repo(f"{match.group(1)}/{match.group(2)}"), int(
         match.group(4)
     )
@@ -193,28 +193,26 @@ def csv_values(values: Iterable[str]) -> list[str]:
     ]
 
 
-async def read_cli_file(
-    inv: CLIInvocation[GhConfig], raw: FlagValue, option: str
-) -> bytes:
+async def read_cli_file(ctx: Context, raw: FlagValue, option: str) -> bytes:
     """Read a path-valued CLI option from the VFS, or `-` from stdin."""
     if not isinstance(raw, (str, PathSpec)):
         raise ValueError(f"{option} expects a file")
     path = raw.raw_path if isinstance(raw, PathSpec) else raw
     if path == "-":
-        if inv.stdin is None:
+        if ctx.stdin is None:
             raise ValueError(f"{option} needs standard input")
-        return await materialize(inv.stdin)
-    spec = PathSpec.from_str_path(raw, cwd=inv.cwd)
-    if inv.view is None or inv.view.vfs is None:
+        return await materialize(ctx.stdin)
+    spec = PathSpec.from_str_path(raw, cwd=ctx.cwd)
+    if ctx.vfs is None:
         raise ValueError(f"{option} needs a workspace to read files from")
     try:
-        return await inv.view.vfs.read(spec)
+        return await ctx.vfs.read(spec)
     except (FileNotFoundError, NotADirectoryError) as exc:
         raise ValueError(f"read {path}: {fs_strerror(exc)}") from None
 
 
 async def body_value(
-    inv: CLIInvocation[GhConfig],
+    ctx: Context,
     fl: FlagView,
     *,
     value: str = "body",
@@ -233,7 +231,7 @@ async def body_value(
         return inline
     if source is not None:
         return (
-            await read_cli_file(inv, source, f"--{file.replace('_', '-')}")
+            await read_cli_file(ctx, source, f"--{file.replace('_', '-')}")
         ).decode()
     if required:
         raise ValueError(

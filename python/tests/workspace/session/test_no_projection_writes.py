@@ -50,7 +50,7 @@ TS_PATTERNS = (
     re.compile(r"(?<!process)\.env\[[^\]]+\]\s*=[^=]"),
 )
 
-# `CommandOpts.env` is a plain dict copy handed to one command
+# `Context.env` is a plain dict copy handed to one command
 # invocation (`env_snapshot` returns a fresh dict), so writing into it is
 # writing into a throwaway and is exactly what these two tests assert.
 ALLOWED = {

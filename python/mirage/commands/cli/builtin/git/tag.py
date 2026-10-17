@@ -79,10 +79,11 @@ from mirage.commands.cli.builtin.git.util import (
     fatal,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 # git's own formats for a tag listing: the name, or under -n<num> the
 # name padded to 15 columns and that many lines of the message.
@@ -203,7 +204,9 @@ def build_tag(
     return tag
 
 
-async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
+async def tag(
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+) -> tuple[ByteSource | None, IOResult]:
     """List, create or delete tags.
 
     No operand lists them, a name creates one, ``-d`` deletes. A bare
@@ -217,20 +220,21 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     operands are patterns.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model; it reads its repository
-            through ``inv.view.vfs``.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context; git reads its repository
+            through ``ctx.vfs``.
     """
-    view = inv.view or CLIView()
-    vfs = view.vfs
-    words = filter_words(inv)
-    texts = without_filter_values(inv.texts, words)
+    vfs = ctx.vfs
+    words = filter_words(ctx)
+    operands = without_filter_values(texts, words)
     filtered = bool(words)
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     try:
         if vfs is None:
             raise NoWorkspaceError()
-        check_switches(inv, texts)
+        check_switches(ctx, operands)
         flags = parse_flags(fl)
         if flags.listing and flags.delete:
             raise IncompatibleOptionsError("-l", "-d")
@@ -245,10 +249,10 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             or flags.delete
             or flags.lines is not None
             or filtered
-            or not texts
+            or not operands
         )
         if creating and reading:
-            raise UsageError("", verb_usage(inv))
+            raise UsageError("", verb_usage(ctx))
         # After the two usage refusals above, which git reaches first:
         # ``-l -d -n1`` is the incompatible pair and ``-d -f -n1`` the
         # usage, both exiting 129, where ``-d -n1`` alone dies here.
@@ -257,7 +261,7 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         list_only = list_mode_option(words) if flags.delete else None
         if list_only is not None:
             raise ListModeOnlyError(list_only)
-        repo, location = await opened(fl, view)
+        repo, location = await opened(ctx, fl)
         cfg = await read_config(vfs, location)
         keys = sort_keys(fl, configured_sort(cfg, b"tag"))
         filt = await asyncio.to_thread(ref_filter, repo, words)
@@ -266,7 +270,7 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             out: list[str] = []
             err: list[str] = []
             doomed: list[tuple[str, Ref]] = []
-            for name in texts:
+            for name in operands:
                 ref = Ref(f"{TAG_PREFIX}{name}".encode())
                 if ref not in known:
                     err.append(f"error: {TagNotFoundError(name)}\n")
@@ -296,7 +300,12 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             return yield_bytes("".join(out).encode()), IOResult(
                 exit_code=1 if err else 0, stderr="".join(err).encode()
             )
-        if flags.listing or flags.lines is not None or filtered or not texts:
+        if (
+            flags.listing
+            or flags.lines is not None
+            or filtered
+            or not operands
+        ):
             # git reads a -n count while building the format it lists
             # with, so a count below -1 is refused as the format's own
             # (after both usage refusals above, and in a repository
@@ -311,10 +320,10 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
 
             def wanted(name: str) -> bool:
                 return name.startswith(TAG_PREFIX) and match_short(
-                    name, texts, icase
+                    name, operands, icase
                 )
 
-            items, ctx, errors = await ref_listing(
+            items, ref_ctx, errors = await ref_listing(
                 vfs,
                 repo,
                 location,
@@ -322,12 +331,12 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 used_fields(fmt, keys or ()),
                 wanted,
                 filt,
-                date_clock(inv.env),
+                date_clock(ctx.env),
             )
             rows, stopped = format_refs(
                 fmt,
                 items,
-                ctx,
+                ref_ctx,
                 keys,
                 omit_empty=fl.as_bool("omit_empty"),
                 icase=icase,
@@ -335,9 +344,9 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 or (filt.merged is None and filt.no_merged is None),
             )
             return listing_result(rows, errors, stopped)
-        if len(texts) > 2:
+        if len(operands) > 2:
             raise TooManyArgumentsError()
-        name = texts[0]
+        name = operands[0]
         if not valid_ref_name(name):
             raise InvalidTagNameError(name)
         ref = Ref(f"{TAG_PREFIX}{name}".encode())
@@ -345,7 +354,9 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             raise TagExistsError(name)
         if flags.annotate and flags.message is None:
             raise MissingTagMessageError()
-        target = resolve_target(repo, texts[1] if len(texts) > 1 else HEAD)
+        target = resolve_target(
+            repo, operands[1] if len(operands) > 1 else HEAD
+        )
         if flags.annotate:
             written = await asyncio.to_thread(
                 build_tag,
@@ -353,7 +364,7 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 name,
                 target,
                 flags.message or "",
-                identity(fl, view.session_view),
+                identity(fl, ctx.session),
                 int(time.time()),
             )
             pointed = written.id
@@ -377,18 +388,19 @@ async def tag(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
 
 
 def tag_read_only(
-    inv: CLIInvocation[None], location: RepoLocation | None
+    texts: list[str], ctx: Context, location: RepoLocation | None
 ) -> GitError:
     """tag's refusal by a read-only mount: the lock on the ref it creates
     or deletes, and for an annotated tag the object it could not write
     first.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
+        texts (list[str]): the line's operands.
+        ctx (Context): the line's context.
         location (RepoLocation | None): the repository it opened.
     """
-    fl = FlagView(inv.flags)
-    ref = f"{TAG_PREFIX}{inv.texts[0] if inv.texts else ''}"
+    fl = FlagView(ctx.flags)
+    ref = f"{TAG_PREFIX}{texts[0] if texts else ''}"
     root = location.commondir.virtual if location is not None else ".git"
     path = posixpath.join(root, ref)
     if fl.as_bool("delete"):

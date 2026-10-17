@@ -203,7 +203,7 @@ that deletes or moves defines those functions.
 | --- | --- |
 | Shell and coreutils | The mount builds the generic commands over the VFS's functions; the shell supplies expansion, pipes, redirects and session policy. |
 | Filesystem calls | `ws.vfs` and `ws.dispatch` reach the same functions through the dispatcher. |
-| CLIs | The host registers a `CLI` using `registerCli`. File-oriented handlers use `inv.view.vfs`; mounting a driver does not install an account CLI. |
+| CLIs | The host registers a `CLI` using `registerCli`. File-oriented handlers use `ctx.vfs`; mounting a driver does not install an account CLI. |
 | Runtimes | Runtimes wired to `RuntimeFiles` reach the same dispatcher. A process or remote runtime needs its configured mount bridge. |
 | Namespace | The workspace owns symlinks, nested mounts and metadata overlays; the backend implements its own tree. |
 
@@ -451,10 +451,10 @@ marks already.
 
 ## 4. Commands
 
-The generic commands are registered once per workspace, and every mount falls back to them after its VFS's own. Each runs over the functions of the mount it runs on (`opts.io`), and the generic command owns flag interpretation, so a backend wrapper is wiring only. A command of the same name replaces the generic on that backend; `generic('<name>')` hands the replacement the default command for what it does not support, and `generic('<name>', { vfs, table })` registers the default over a changed table (`/dev`'s endless `cat`). Export a backend's own commands as `<NAME>_COMMANDS` from `commands/builtin/<name>/index.ts`, and register it for the VFS class in the package's `commands/builtin/backends.ts` with `registerBackendCommands(MyVFS, () => MY_VFS_COMMANDS)`. The registry is keyed by the class itself, so a minified bundle still finds it, and a subclass serves its base's commands.
+The generic commands are registered once per workspace, and every mount falls back to them after its VFS's own. Each runs over the functions of the mount it runs on (`ctx.io`), and the generic command owns flag interpretation, so a backend wrapper is wiring only. A command of the same name replaces the generic on that backend; `generic('<name>')` hands the replacement the default command for what it does not support, and `generic('<name>', { vfs, table })` registers the default over a changed table (`/dev`'s endless `cat`). Export a backend's own commands as `<NAME>_COMMANDS` from `commands/builtin/<name>/index.ts`, and register it for the VFS class in the package's `commands/builtin/backends.ts` with `registerBackendCommands(MyVFS, () => MY_VFS_COMMANDS)`. The registry is keyed by the class itself, so a minified bundle still finds it, and a subclass serves its base's commands.
 
 - Let grep and rg skip files by defining `filesContaining` (and `linesContaining` for row stores) on the VFS; `search` serves the `search` command.
-- A verb (`trello card create`) declares its own `new CommandSpec({...})` with every id as a flag, reads flags through `new FlagView(opts.flags, SPEC)` (never `flags.get(...)`), registers `write: true` for a mutation, and calls `requireMountWritable(...)` before the client. Specs declared inline are dumped to `.cache/spec/typescript/<node|browser>/vfs_commands/` and compared with Python's, and a prompt that teaches the verbs is pinned against their specs (`vfs/trello/prompt.test.ts`).
+- A verb (`trello card create`) declares its own `new CommandSpec({...})` with every id as a flag, reads flags through `new FlagView(ctx.flags, SPEC)` (never `flags.get(...)`), registers `write: true` for a mutation, and calls `requireMountWritable(...)` before the client. Specs declared inline are dumped to `.cache/spec/typescript/<node|browser>/vfs_commands/` and compared with Python's, and a prompt that teaches the verbs is pinned against their specs (`vfs/trello/prompt.test.ts`).
 - A handler that reads its `accessor` directly is trusted host code. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands. A command handed through `commands` does not run where the session restricts its mount.
 
 ## 5. VFS Class

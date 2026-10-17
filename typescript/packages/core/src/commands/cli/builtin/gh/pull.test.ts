@@ -15,8 +15,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as AccessorModule from './accessor.ts'
 import type * as PullModule from '../../../../core/github/pull.ts'
-import type { CLIInvocation } from '../../types.ts'
-import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
+import type { Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import { context } from '../../../../workspace/fixtures/context.ts'
 
 let ROWS: Record<string, unknown>[] = []
 // What real gh 2.85 printed for `gh pr diff --name-only` over this diff: the
@@ -60,13 +61,13 @@ function json(result: Awaited<ReturnType<typeof viewCmd>>): Record<string, unkno
   return JSON.parse(new TextDecoder().decode(result[0] as Uint8Array)) as Record<string, unknown>
 }
 
-function inv(flags: CLIInvocation['flags'] = {}): CLIInvocation {
-  return cliInvocation({ config: { token: 't' }, texts: ['5'], flags: { repo: 'o/r', ...flags } })
+function args(flags: Context['flags'] = {}): [unknown, PathSpec[], string[], Context] {
+  return [{ token: 't' }, [], ['5'], context({ flags: { repo: 'o/r', ...flags } })]
 }
 
 async function bucketOf(row: Record<string, unknown>): Promise<unknown> {
   ROWS = [{ name: 't', ...row }]
-  const result = await checksCmd(inv({ json: 'name,bucket' }))
+  const result = await checksCmd(...args({ json: 'name,bucket' }))
   if (result === null) throw new Error('expected a result tuple')
   const parsed = JSON.parse(new TextDecoder().decode(result[0] as Uint8Array)) as {
     bucket: unknown
@@ -102,13 +103,13 @@ describe('gh pr checks buckets', () => {
 
   it('does not fail the command for a cancelled check', async () => {
     ROWS = [{ name: 't', conclusion: 'cancelled' }]
-    const result = await checksCmd(inv())
+    const result = await checksCmd(...args())
     expect(result?.[1].exitCode ?? 0).toBe(0)
   })
 
   it('still exits one for a failing check', async () => {
     ROWS = [{ name: 't', conclusion: 'failure' }]
-    const result = await checksCmd(inv())
+    const result = await checksCmd(...args())
     expect(result?.[1].exitCode).toBe(1)
   })
 })
@@ -175,7 +176,7 @@ describe('gh pr view --json', () => {
 
   it('asks one query for the fields named, plus the id and number gh adds', async () => {
     FIELDS.mockResolvedValueOnce({ title: 'DOC', changedFiles: 8, id: 'PR_1', number: 5 })
-    expect(json(await viewCmd(inv({ json: 'title,changedFiles' })))).toEqual({
+    expect(json(await viewCmd(...args({ json: 'title,changedFiles' })))).toEqual({
       changedFiles: 8,
       title: 'DOC',
     })
@@ -184,7 +185,7 @@ describe('gh pr view --json', () => {
   })
 
   it('answers number alone from the line, as gh does', async () => {
-    expect(json(await viewCmd(inv({ json: 'number' })))).toEqual({ number: 5 })
+    expect(json(await viewCmd(...args({ json: 'number' })))).toEqual({ number: 5 })
     expect(FIELDS).not.toHaveBeenCalled()
   })
 
@@ -221,7 +222,7 @@ describe('gh pr view --json', () => {
         pageInfo: { hasNextPage: false, endCursor: 'c' },
       },
     })
-    const out = json(await viewCmd(inv({ json: 'files,commits,reviews' })))
+    const out = json(await viewCmd(...args({ json: 'files,commits,reviews' })))
     expect(out.files).toEqual([{ path: 'README.md', additions: 6, deletions: 6 }])
     expect(Object.keys((out.files as Record<string, unknown>[])[0] ?? {})).toEqual([
       'path',
@@ -259,7 +260,7 @@ describe('gh pr view --json', () => {
     }).mockResolvedValueOnce({
       reviews: { nodes: [{ id: 'R2' }], pageInfo: { hasNextPage: false, endCursor: 'c2' } },
     })
-    const out = json(await viewCmd(inv({ json: 'reviews' })))
+    const out = json(await viewCmd(...args({ json: 'reviews' })))
     expect((out.reviews as { id: string }[]).map((review) => review.id)).toEqual(['R1', 'R2'])
     expect(FIELDS.mock.calls[1]?.[3]).toContain('reviews(first: 100, after: $endCursor)')
     expect(FIELDS.mock.calls[1]?.[4]).toBe('c1')
@@ -290,7 +291,7 @@ describe('gh pr view --json', () => {
         null,
       ),
     )
-    const out = json(await viewCmd(inv({ json: 'statusCheckRollup' })))
+    const out = json(await viewCmd(...args({ json: 'statusCheckRollup' })))
     expect(out.statusCheckRollup).toEqual([
       {
         __typename: 'CheckRun',
@@ -315,14 +316,14 @@ describe('gh pr view --json', () => {
 
   it('prints no status checks as null when no commit carries them', async () => {
     FIELDS.mockResolvedValueOnce({ statusCheckRollup: { nodes: [] } })
-    expect(json(await viewCmd(inv({ json: 'statusCheckRollup' })))).toEqual({
+    expect(json(await viewCmd(...args({ json: 'statusCheckRollup' })))).toEqual({
       statusCheckRollup: null,
     })
   })
 
   it('never asks for project cards, which print null', async () => {
     FIELDS.mockResolvedValueOnce({ id: 'PR_1', number: 5 })
-    expect(json(await viewCmd(inv({ json: 'projectCards' })))).toEqual({ projectCards: null })
+    expect(json(await viewCmd(...args({ json: 'projectCards' })))).toEqual({ projectCards: null })
     expect(FIELDS.mock.calls[0]?.[3]).toBe('id,number')
   })
 
@@ -332,7 +333,7 @@ describe('gh pr view --json', () => {
         "GraphQL: Your token has not been granted the required scopes to execute this query. The 'id' field requires one of the following scopes: ['read:project'], but your token has only been granted the: ['repo'] scopes.",
       ),
     )
-    expect(json(await viewCmd(inv({ json: 'projectItems' })))).toEqual({ projectItems: [] })
+    expect(json(await viewCmd(...args({ json: 'projectItems' })))).toEqual({ projectItems: [] })
     expect(FIELDS.mock.calls[1]?.[3]).toMatch(/^projectItems\(first: 100\)/)
   })
 
@@ -340,11 +341,13 @@ describe('gh pr view --json', () => {
     FIELDS.mockResolvedValueOnce({ id: 'PR_1', number: 5 }).mockRejectedValueOnce(
       new Error('GraphQL: something else'),
     )
-    await expect(viewCmd(inv({ json: 'projectItems' }))).rejects.toThrow('something else')
+    await expect(viewCmd(...args({ json: 'projectItems' }))).rejects.toThrow('something else')
   })
 
   it('refuses a field gh does not export before asking anything', async () => {
-    await expect(viewCmd(inv({ json: 'nosuch' }))).rejects.toThrow('Unknown JSON field: "nosuch"')
+    await expect(viewCmd(...args({ json: 'nosuch' }))).rejects.toThrow(
+      'Unknown JSON field: "nosuch"',
+    )
     expect(FIELDS).not.toHaveBeenCalled()
   })
 })
@@ -356,7 +359,7 @@ describe('gh pr list --json', () => {
 
   it('lists over GraphQL with the states gh sends for --state', async () => {
     LIST.mockResolvedValueOnce([{ number: 3, files: { nodes: [] } }])
-    const out = json(await listCmd(inv({ json: 'number,files', state: 'closed' })))
+    const out = json(await listCmd(...args({ json: 'number,files', state: 'closed' })))
     expect(out).toEqual([{ files: [], number: 3 }])
     expect(LIST.mock.calls[0]?.[2]).toEqual({
       states: ['CLOSED', 'MERGED'],
@@ -371,7 +374,7 @@ describe('gh pr list --json', () => {
 
   it('asks for project cards and items inline, as gh pr list does', async () => {
     LIST.mockResolvedValueOnce([])
-    await listCmd(inv({ json: 'projectCards,projectItems', state: 'all' }))
+    await listCmd(...args({ json: 'projectCards,projectItems', state: 'all' }))
     expect(LIST.mock.calls[0]?.[4]).toMatch(
       /^projectCards\(first:100\).*,projectItems\(first:100\)/,
     )
@@ -380,7 +383,7 @@ describe('gh pr list --json', () => {
 
 describe('gh pr diff --name-only', () => {
   it('prints the b side of each header, as gh does', async () => {
-    const result = await diffCmd(inv({ name_only: true }))
+    const result = await diffCmd(...args({ name_only: true }))
     if (result === null) throw new Error('expected a result tuple')
     expect(new TextDecoder().decode(result[0] as Uint8Array)).toBe(
       'README.md\n"caf\\303\\251.txt"\nmoved/contributing.md\n"q\\"t.txt"\nsub dir/x y.txt\n',

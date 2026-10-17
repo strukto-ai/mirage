@@ -35,7 +35,7 @@ from mirage.commands.cli.builtin.git.util import (
     switches,
     without_section,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.types import PathSpec
@@ -164,7 +164,9 @@ def test_offending_names_the_word_parse_options_would(
     assert offending(texts, frozenset(marked), known_set) == word
 
 
-async def _verb(inv: CLIInvocation) -> None:
+async def _verb(
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+) -> None:
     return None
 
 
@@ -177,8 +179,8 @@ def test_switches_reads_the_leaf_the_line_was_parsed_against():
             Argument("--sparse", action="store_true"),
         ),
     )
-    assert switches(CLIInvocation(None, spec=leaf)) == {"f", "k"}
-    assert switches(CLIInvocation(None)) == frozenset()
+    assert switches(Context(spec=leaf)) == {"f", "k"}
+    assert switches(Context()) == frozenset()
 
 
 @pytest.mark.parametrize(

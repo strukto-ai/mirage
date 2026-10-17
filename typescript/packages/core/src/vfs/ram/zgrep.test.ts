@@ -41,7 +41,7 @@ async function runZgrep(
     stdin,
     flags,
     io: commandIo(vfs),
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) return { out: '', exitCode: -1 }
   const [out, ioResult] = result
@@ -289,7 +289,7 @@ it.each([
   const result = await zgrepGeneric(
     [PathSpec.fromStrPath('/bad'), PathSpec.fromStrPath('/good.gz')],
     ['hello'],
-    { flags, stdin: null, cwd: '/' },
+    { flags, stdin: null, cwd: PathSpec.fromStrPath('/') },
     read,
   )
   if (result === null) throw new Error('zgrep returned no result')
@@ -313,7 +313,7 @@ it('under a UTF-8 locale leaves out a line no character owns', async () => {
     stdin: null,
     flags: {},
     io: commandIo(vfs),
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     env: { LC_ALL: 'C.UTF-8' },
   })
   if (result === null) throw new Error('zgrep answered nothing')

@@ -28,11 +28,13 @@ from mirage.commands.cli.builtin.gh.constants import (
 from mirage.commands.cli.builtin.gh.search import search_handlers, search_spec
 from mirage.commands.cli.builtin.gh.types import RepoEditField
 from mirage.commands.cli.builtin.gh.version import version
-from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
+from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.cli.walk import find_child, node_help
+from mirage.commands.config import Context
 from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 from mirage.core.github.config import GhConfig
 from mirage.io.types import IOResult
+from mirage.types import PathSpec
 
 REPO = Argument(
     "-R",
@@ -612,7 +614,7 @@ def _workflow() -> CommandSpec:
 
 
 async def _help_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[bytes | None, IOResult]:
     """``gh help [<command>...]``, as cobra answers it.
 
@@ -622,18 +624,21 @@ async def _help_cmd(
     commands and still exits 0.
 
     Args:
-        inv (CLIInvocation[GhConfig]): the words after ``help``.
+        config (GhConfig): the install's account config.
+        paths (list[PathSpec]): the path operands.
+        texts (list[str]): the words after ``help``.
+        ctx (Context): the invocation's context.
     """
     node = GH.spec
     path: list[str] = []
-    for word in inv.texts:
+    for word in texts:
         child = find_child(node, word)
         if child is None:
             break
         node = child
         path.append(child.name)
-    if inv.texts and not path:
-        topic = HELP_TOPICS.get(inv.texts[0])
+    if texts and not path:
+        topic = HELP_TOPICS.get(texts[0])
         if topic is not None:
             return topic.encode(), IOResult()
         names = sorted(
@@ -641,7 +646,7 @@ async def _help_cmd(
             for child in GH.spec.subcommands
             if child.name != "help"
         )
-        asked = " ".join(f"`{word}`" for word in inv.texts)
+        asked = " ".join(f"`{word}`" for word in texts)
         usage = (
             "Usage:  gh <command> <subcommand> [flags]\n\n"
             f"Available commands:\n{''.join(names)}"

@@ -25,7 +25,7 @@ from mirage.commands.builtin.utils.stream import (
     resolve_source,
     stdin_stream,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -681,18 +681,18 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> IconvFlags:
 async def iconv_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     read_stream: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
 ) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     if parsed.list_charsets:
         return list_text(), IOResult()
     return await iconv(
         paths,
         read_stream=read_stream,
         write_bytes=write_bytes,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         from_enc=parsed.from_enc,
         to_enc=parsed.to_enc,
         ignore_errors=parsed.ignore_errors,

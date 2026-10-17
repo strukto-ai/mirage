@@ -18,7 +18,7 @@ from mirage.commands.cli.builtin.hf.accessor import (
     require_token,
     text_out,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.hf_hub.admin import create_repo, create_tag, list_tags
@@ -27,16 +27,17 @@ from mirage.core.hf_hub.client import repo_url
 from mirage.core.hf_hub.config import HfConfig
 from mirage.core.hf_hub.constants import DEFAULT_REVISION
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.types import PathSpec
 
 
 async def create_cmd(
-    inv: CLIInvocation[HfConfig],
+    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Create a repository on the Hub."""
-    require_operands(inv, ["repo_id"])
-    require_token(inv, "repo create")
-    fl = FlagView(inv.flags)
-    repo_id = inv.texts[0]
+    require_operands(texts, ["repo_id"])
+    require_token(config, "repo create")
+    fl = FlagView(ctx.flags)
+    repo_id = texts[0]
     repo_type = repo_type_of(fl)
     sdk = fl.as_str("space_sdk")
     if repo_type == "space" and not sdk:
@@ -45,7 +46,7 @@ async def create_cmd(
             "docker or static)"
         )
     result = await create_repo(
-        inv.config,
+        config,
         repo_id,
         repo_type,
         private=bool(fl.as_bool("private")),
@@ -57,20 +58,20 @@ async def create_cmd(
     return text_out(
         f"{url}\n"
         if isinstance(url, str)
-        else f"{repo_url(inv.config.endpoint, repo_type, repo_id)}\n"
+        else f"{repo_url(config.endpoint, repo_type, repo_id)}\n"
     )
 
 
 async def tag_create_cmd(
-    inv: CLIInvocation[HfConfig],
+    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Tag a revision of a repository."""
-    require_operands(inv, ["repo_id", "tag"])
-    require_token(inv, "repo tag create")
-    fl = FlagView(inv.flags)
-    repo_id, tag = inv.texts[0], inv.texts[1]
+    require_operands(texts, ["repo_id", "tag"])
+    require_token(config, "repo tag create")
+    fl = FlagView(ctx.flags)
+    repo_id, tag = texts[0], texts[1]
     await create_tag(
-        inv.config,
+        config,
         repo_id,
         tag,
         repo_type_of(fl),
@@ -81,17 +82,17 @@ async def tag_create_cmd(
 
 
 async def tag_list_cmd(
-    inv: CLIInvocation[HfConfig],
+    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """List a repository's tags."""
-    require_operands(inv, ["repo_id"])
-    fl = FlagView(inv.flags)
-    repo_id = inv.texts[0]
-    tags = await list_tags(inv.config, repo_id, repo_type_of(fl))
+    require_operands(texts, ["repo_id"])
+    fl = FlagView(ctx.flags)
+    repo_id = texts[0]
+    tags = await list_tags(config, repo_id, repo_type_of(fl))
     return text_out("".join(f"{name}\n" for name in tags))
 
 
-async def confirmed(inv: CLIInvocation[HfConfig]) -> bool:
+async def confirmed(ctx: Context) -> bool:
     """Whether the line agreed to a destructive action.
 
     Upstream asks on stdin and takes ``-y`` to skip the question, so
@@ -102,35 +103,35 @@ async def confirmed(inv: CLIInvocation[HfConfig]) -> bool:
     assuming yes.
 
     Args:
-        inv (CLIInvocation[HfConfig]): the invocation.
+        ctx (Context): the invocation's context.
 
     Returns:
         bool: whether to go ahead.
     """
-    if FlagView(inv.flags).as_bool("yes"):
+    if FlagView(ctx.flags).as_bool("yes"):
         return True
-    if inv.stdin is None:
+    if ctx.stdin is None:
         return False
-    answer = (await materialize(inv.stdin)).decode(errors="replace")
+    answer = (await materialize(ctx.stdin)).decode(errors="replace")
     return answer.strip().lower() in {"y", "yes"}
 
 
 async def tag_delete_cmd(
-    inv: CLIInvocation[HfConfig],
+    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Delete a tag from a repository.
 
     Upstream asks for confirmation before deleting; a workspace has no
     terminal, so the answer arrives either as ``-y`` or on stdin.
     """
-    require_operands(inv, ["repo_id", "tag"])
-    require_token(inv, "repo tag delete")
-    fl = FlagView(inv.flags)
-    repo_id, tag = inv.texts[0], inv.texts[1]
-    if not await confirmed(inv):
+    require_operands(texts, ["repo_id", "tag"])
+    require_token(config, "repo tag delete")
+    fl = FlagView(ctx.flags)
+    repo_id, tag = texts[0], texts[1]
+    if not await confirmed(ctx):
         raise UsageError(
             f"deleting tag {tag} needs -y, or y on stdin: there is no "
             "terminal to confirm on"
         )
-    await delete_tag_api(inv.config, repo_id, tag, repo_type_of(fl))
+    await delete_tag_api(config, repo_id, tag, repo_type_of(fl))
     return text_out(f"Tag {tag} deleted on {repo_id}\n")

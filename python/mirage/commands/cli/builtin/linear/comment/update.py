@@ -13,24 +13,25 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli.builtin.linear.util import text_or_stdin
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.linear.client import comment_update
 from mirage.core.linear.config import LinearConfig
 from mirage.core.linear.normalize import normalize_comment, to_json_bytes
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 
 async def update(
-    inv: CLIInvocation[LinearConfig],
+    config: LinearConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     body = await text_or_stdin(
-        fl.as_str("body"), inv.stdin, "comment body is required"
+        fl.as_str("body"), ctx.stdin, "comment body is required"
     )
     comment = await comment_update(
-        inv.config, comment_id=fl.as_str("comment") or "", body=body
+        config, comment_id=fl.as_str("comment") or "", body=body
     )
     issue = comment.get("issue") if isinstance(comment, dict) else None
     if isinstance(issue, dict) and issue.get("id"):

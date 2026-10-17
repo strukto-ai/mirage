@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import type { SessionView } from '../../../view/types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 
 // What an owner or group column prints when nothing names one: no uid or
 // gid on the entry and no profile.
@@ -37,9 +37,9 @@ export function identityFrom(sessionView: SessionView | undefined): Identity {
   return { profile: sessionView?.profile() ?? null }
 }
 
-/** The identity a command invocation runs as, read off its opts. */
-export function identityOf(opts: CommandOpts): Identity {
-  return identityFrom(opts.sessionView)
+/** The identity a command invocation runs as, read off its ctx. */
+export function identityOf(ctx: Context): Identity {
+  return identityFrom(ctx.session)
 }
 
 /** The owner column: the entry's own uid, else the session's profile, else `-`. */

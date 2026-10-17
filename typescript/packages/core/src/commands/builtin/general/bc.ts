@@ -15,7 +15,7 @@
 import type { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import type { ByteSource } from '../../../io/types.ts'
@@ -1751,9 +1751,9 @@ function bc(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('bc'))
+  const fl = new FlagView(ctx.flags, specOf('bc'))
   // -l is short-only, so it lands on the disambiguated `args_l` dest
   // (`AMBIGUOUS_NAMES`); a plain `l` key is one the parser never emits.
   const useMath = fl.asBool('args_l')
@@ -1766,9 +1766,9 @@ function bc(
     variables: new Map<string, BcNumber>(),
     warnings: [],
   }
-  const folder = new OutputColumn(outputLineSize(opts.env))
+  const folder = new OutputColumn(outputLineSize(ctx.env))
   const errors: string[] = []
-  const lines = parseInput(opts.stdin ?? new Uint8Array(), opts.signal)
+  const lines = parseInput(ctx.stdin ?? new Uint8Array(), ctx.signal)
   const io = new IOResult()
   async function* output(): AsyncGenerator<Uint8Array> {
     try {

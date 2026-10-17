@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from mirage import CLI, CLIInvocation, Workspace
+from mirage import CLI, Context, Workspace
 from mirage.commands.cli.specs import register_cli_spec, unregister_cli_spec
 from mirage.commands.cli.types import CLIHandler
 from mirage.commands.spec.types import Argument, CommandSpec, WordKind
@@ -37,10 +37,10 @@ class TokenConfig(BaseModel):
     token: str
 
 
-async def send(inv: CLIInvocation[TokenConfig]):
-    body = " ".join(inv.texts)
-    to = inv.flags.get("to")
-    return f"sent[{inv.config.token}] to={to}: {body}\n".encode(), IOResult()
+async def send(config: TokenConfig, paths, texts, ctx: Context):
+    body = " ".join(texts)
+    to = ctx.flags.get("to")
+    return f"sent[{config.token}] to={to}: {body}\n".encode(), IOResult()
 
 
 def make_tree() -> CLI:
@@ -225,13 +225,13 @@ async def test_yaml_cli_reference_form_installs(tmp_path):
     # reference loads the CLI straight from the script.
     script = tmp_path / "slackish.py"
     script.write_text(
-        "from mirage import CLIInvocation, CLI, CLIHandler, CommandSpec\n"
+        "from mirage import Context, CLI, CLIHandler, CommandSpec\n"
         "from mirage.io import IOResult\n"
         "from pydantic import BaseModel\n\n\n"
         "class TokenConfig(BaseModel):\n"
         "    token: str\n\n\n"
-        "async def send(inv: CLIInvocation[TokenConfig]):\n"
-        "    return f'sent[{inv.config.token}]\\n'.encode(), IOResult()\n\n\n"
+        "async def send(config: TokenConfig, paths, texts, ctx: Context):\n"
+        "    return f'sent[{config.token}]\\n'.encode(), IOResult()\n\n\n"
         "TREE = CLI(\n"
         "    spec=CommandSpec(name='slackish',\n"
         "                     subcommands=(CommandSpec(name='send'),)),\n"
@@ -304,10 +304,10 @@ async def test_policy_sees_the_cli_verbs():
     assert denied[-1] is None
 
 
-async def put(inv: CLIInvocation[None]):
-    assert inv.view is not None and inv.view.vfs is not None
-    path = PathSpec.from_str_path(inv.texts[0])
-    await inv.view.vfs.write(path, b"hi\n")
+async def put(config: None, paths, texts, ctx: Context):
+    assert ctx.vfs is not None
+    path = PathSpec.from_str_path(texts[0])
+    await ctx.vfs.write(path, b"hi\n")
     return None, IOResult()
 
 
@@ -346,18 +346,18 @@ async def test_a_cli_write_into_a_read_only_mount_is_refused():
         await workspace.close()
 
 
-async def peek(inv: CLIInvocation[None]):
-    assert inv.view is not None and inv.view.vfs is not None
-    data = await inv.view.vfs.read(PathSpec.from_str_path("/data/secret.txt"))
+async def peek(config: None, paths, texts, ctx: Context):
+    assert ctx.vfs is not None
+    data = await ctx.vfs.read(PathSpec.from_str_path("/data/secret.txt"))
     return data, IOResult()
 
 
 PEEK = CLI(spec=CommandSpec(name="peek"), handlers={"": CLIHandler(fn=peek)})
 
 
-async def later(inv: CLIInvocation[None]):
-    assert inv.view is not None and inv.view.vfs is not None
-    vfs = inv.view.vfs
+async def later(config: None, paths, texts, ctx: Context):
+    assert ctx.vfs is not None
+    vfs = ctx.vfs
 
     async def pulled():
         yield await vfs.read(PathSpec.from_str_path("/data/secret.txt"))

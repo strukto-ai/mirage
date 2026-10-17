@@ -17,14 +17,14 @@ from mirage.commands.cli.builtin.ntn.util import (
     notion_config,
     pretty_json,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.pages import create_page
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import JsonValue
+from mirage.types import JsonValue, PathSpec
 
 PARENT_KEYS = {
     "page": "page_id",
@@ -52,17 +52,17 @@ def parse_parent(spec: str) -> dict[str, JsonValue]:
 
 
 async def create(
-    inv: CLIInvocation[NotionConfig],
+    config: NotionConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    markdown = await content_or_stdin(fl.as_str("content"), inv.stdin)
+    fl = FlagView(ctx.flags)
+    markdown = await content_or_stdin(fl.as_str("content"), ctx.stdin)
     body: dict[str, JsonValue] = {"markdown": markdown}
     # The parent really is optional upstream: omitted, the request goes
     # out without one and the API decides whether to refuse it.
     parent = fl.as_str("parent")
     if parent:
         body["parent"] = parse_parent(parent)
-    page = await create_page(notion_config(inv), body)
+    page = await create_page(notion_config(config, ctx), body)
     if fl.as_bool("json"):
         return yield_bytes(pretty_json(page)), IOResult()
     return yield_bytes(f"{page.get('id', '')}\n".encode()), IOResult()

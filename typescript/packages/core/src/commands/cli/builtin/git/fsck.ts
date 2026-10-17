@@ -6,9 +6,8 @@ import { compareCodePoints } from '../../../../utils/sort.ts'
 import { sha1Hex } from '../../../../utils/hash.ts'
 import { isWalkError, fsStrerror } from '../../../../errors/fs.ts'
 import { toHex } from '../../../../utils/hex.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { GitError, NoWorkspaceError } from './errors.ts'
 import { readIndex } from './index_file.ts'
 import { readFile, readNames, readOptional, readRange, statOf } from './io.ts'
@@ -124,13 +123,17 @@ function reachable(
 }
 
 /** Hash and decode every object, including unreachable objects and packed objects. */
-export async function fsck(inv: CLIInvocation): Promise<CommandFnResult> {
+export async function fsck(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
   try {
-    const fl = new FlagView(inv.flags)
-    const view = inv.view ?? {}
-    const vfs = view.vfs
+    const fl = new FlagView(ctx.flags)
+    const vfs = ctx.vfs
     if (vfs === undefined) throw new NoWorkspaceError()
-    const repo = await opened(fl, view)
+    const repo = await opened(ctx, fl)
     const args = repoArgs(repo)
     const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
     const roots = new Set([...refs.values()].filter((oid) => !oid.startsWith('ref: ')))

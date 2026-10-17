@@ -14,9 +14,9 @@
 
 import { loadMailmap, useMailmap } from './mailmap.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { GitError } from './errors.ts'
 import {
   joinOutput,
@@ -209,14 +209,17 @@ async function startingPoints(
 }
 
 /** Show commit logs. */
-export async function log(inv: CLIInvocation): Promise<CommandFnResult> {
-  const view = inv.view ?? {}
-  const texts = [...inv.texts]
-  const fl = new FlagView(inv.flags)
+export async function log(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    checkOperands(inv, texts)
-    const flags = parseFlags(fl, inv.env)
-    const repo = await opened(fl, view)
+    checkOperands(ctx, texts)
+    const flags = parseFlags(fl, ctx.env)
+    const repo = await opened(ctx, fl)
     const parsed = {
       ...flags,
       mailmap: await loadMailmap(repo.vfs, repo.location),

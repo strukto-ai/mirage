@@ -17,7 +17,7 @@ import { expect, it, vi } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { materialize } from '../../../io/types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { ByteCursor } from '../rg_search.ts'
 import { rgGeneric } from './rg.ts'
 
@@ -41,12 +41,12 @@ function spec(path: string): PathSpec {
   })
 }
 
-function opts(flags: Record<string, string | boolean | number | string[]>): CommandOpts {
+function ctx(flags: Record<string, string | boolean | number | string[]>): Context {
   return {
     stdin: null,
     flags,
-    cwd: '/',
-  } as unknown as CommandOpts
+    cwd: PathSpec.fromStrPath('/'),
+  } as unknown as Context
 }
 
 const stat = (p: PathSpec): Promise<FileStat> => {
@@ -93,7 +93,7 @@ it.each([
       paths.map(spec),
       ['hello'],
       {
-        ...opts({ only_matching: true, byte_offset: true, with_filename: withFilename }),
+        ...ctx({ only_matching: true, byte_offset: true, with_filename: withFilename }),
         stdin: paths.length === 0 ? source() : null,
         signal: controller.signal,
       },

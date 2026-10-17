@@ -67,7 +67,7 @@ from mirage.commands.builtin.utils.wrap import (
     mount_parent_stat,
     to_pathspec,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
@@ -1168,7 +1168,7 @@ def sort_haystacks(found: list[Haystack], f: RgFlags) -> list[Haystack]:
 async def rg_generic(
     paths: list[PathSpec],
     texts: Sequence[str],
-    opts: CommandOpts,
+    ctx: Context,
     *,
     readdir: Callable[..., Awaitable[list[str]]],
     stat: Callable[..., Awaitable[FileStat]],
@@ -1191,14 +1191,14 @@ async def rg_generic(
             stdin as an implicit ``-``.
         texts (Sequence[str]): positional TEXT operands (the pattern unless
             -e/-f supplied it).
-        opts (CommandOpts): the invocation bag, read for the raw flag
+        ctx (Context): the invocation bag, read for the raw flag
             kwargs and for the mount boundaries. The whole bag rather
             than the two facts, so a wrapper cannot pass one and
             forget the other: sixteen of this generic's nineteen call
             sites omitted the boundaries when they were a keyword of
             their own, which turned the mount-parent wrappers off on
             every bespoke backend. Mirrors TS, whose generic has
-            always taken ``opts`` and read the boundaries off it.
+            always taken ``ctx`` and read the boundaries off it.
         readdir (Callable[..., Awaitable[list[str]]]): Directory reader.
         stat (Callable[[PathSpec], Awaitable[FileStat]]): Backend stat reader.
         read_bytes (Callable[..., Awaitable[bytes]]): Whole-file reader.
@@ -1221,7 +1221,7 @@ async def rg_generic(
         stdin,
         sole=not paths,
     )
-    fl = FlagView(opts.flags, spec=SPECS["rg"])
+    fl = FlagView(ctx.flags, spec=SPECS["rg"])
     f = parse_flags(fl)
     if unbounded is not None and f.max_depth is None:
         readdir, stat = unbounded
@@ -1229,7 +1229,7 @@ async def rg_generic(
     if f.type_list:
         return format_records(type_listing(types.definitions)), IOResult()
     notes: list[str] = []
-    walk = walk_filter(f, types, await ignore_rules(fl, opts.dispatch, notes))
+    walk = walk_filter(f, types, await ignore_rules(fl, ctx.dispatch, notes))
     pat: re.Pattern[str] | None = None
     if not f.list_files:
         pattern, never_match = await resolve_pattern(
@@ -1248,7 +1248,7 @@ async def rg_generic(
             raise UsageError(RG_NO_PATTERN)
         paths = [STDIN_OPERAND]
 
-    mounts = mounts_of(opts)
+    mounts = mounts_of(ctx)
     mount_prefix = mount_prefix_of(paths[0].virtual, paths[0].vfs_path)
     rd = mount_parent_readdir(
         partial(call_readdir, readdir, prefix=mount_prefix),
@@ -1269,7 +1269,7 @@ async def rg_generic(
             return await _noted(single, notes, f)
 
     warnings: list[str] = []
-    cwd = opts.cwd.virtual
+    cwd = ctx.cwd.virtual
     # ripgrep's "nothing searched" speaks for the whole walk, so it waits
     # while a fan-out searches the mounts below the cwd in runs of its own.
     # A typed '' shares the synthetic operand's spelling; the walk's
@@ -1287,7 +1287,7 @@ async def rg_generic(
     # the fan-out that would search the mount itself is off too.
     boundary = mounts if f.one_file_system else None
     found = haystacks(
-        paths, rd, st, cwd, walk, f, warnings, boundary, link_resolver(opts)
+        paths, rd, st, cwd, walk, f, warnings, boundary, link_resolver(ctx)
     )
     if f.sort not in (None, "none") and not (
         f.sort == "path" and not f.sort_reverse
@@ -1309,7 +1309,7 @@ async def rg_generic(
             implicit,
             cwd,
             io,
-            opts.shell,
+            ctx.shell,
         )
     )
     return await _noted((out, io), notes, f)
@@ -1947,7 +1947,7 @@ def label_flags(flags: Mapping[str, FlagValue]) -> dict[str, FlagValue]:
     return labelled_flags
 
 
-def labelled(opts: CommandOpts) -> CommandOpts:
+def labelled(ctx: Context) -> Context:
     """Ask for the filename a walk would have printed on its own.
 
     A content search hands the generic explicit files where the user
@@ -1957,9 +1957,9 @@ def labelled(opts: CommandOpts) -> CommandOpts:
     defeat the suppression in the delegated scan.
 
     Args:
-        opts (CommandOpts): the narrowing wrapper's options.
+        ctx (Context): the narrowing wrapper's options.
     """
-    flags = opts.flags or {}
+    flags = ctx.flags or {}
     if filename_flag(FlagView(flags, spec=SPECS["rg"])) == "no_filename":
-        return opts
-    return replace(opts, flags=label_flags(flags))
+        return ctx
+    return replace(ctx, flags=label_flags(flags))

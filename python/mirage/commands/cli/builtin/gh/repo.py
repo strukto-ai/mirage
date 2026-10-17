@@ -39,8 +39,8 @@ from mirage.commands.cli.builtin.gh.shape import (
 from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.clone import clone as git_clone
 from mirage.commands.cli.builtin.git.util import split_marked
-from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.cli.walk import find_node
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.constants import flag_kwarg_name
 from mirage.commands.spec.flag_view import FlagView
@@ -66,7 +66,7 @@ from mirage.core.github.repo import (
     view_repo,
 )
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import JsonValue
+from mirage.types import JsonValue, PathSpec
 
 _OWNER = struct(("id", "string"), ("login", "string"))
 _USER = struct(
@@ -443,7 +443,7 @@ def summary(repo: JsonValue, readme: str | None) -> str:
 
 
 async def view(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """``gh repo view``.
 
@@ -452,43 +452,47 @@ async def view(
     shape; the text view reads the REST object and the README.
 
     Args:
-        inv (CLIInvocation[GhConfig]): the line's invocation record.
+        config (GhConfig): the install's account config.
+        paths (list[PathSpec]): the path operands.
+        texts (list[str]): the text operands.
+        ctx (Context): the line's flags and context.
     """
-    fl = FlagView(inv.flags)
-    operand = inv.texts[0] if inv.texts else None
-    ref = gh_repo(inv.config, operand or fl.as_str("repo"))
+    fl = FlagView(ctx.flags)
+    operand = texts[0] if texts else None
+    ref = gh_repo(config, operand or fl.as_str("repo"))
     fields = json_fields(fl, REPO_FIELDS)
     if fields is not None:
-        node = await repository_fields(
-            inv.config, ref, _repo_selection(fields)
-        )
+        node = await repository_fields(config, ref, _repo_selection(fields))
         return await typed_out(
             _exported_repo(node, fields), fl, "", REPO_FIELDS
         )
-    repo = await view_repo(inv.config, ref)
+    repo = await view_repo(config, ref)
     return await typed_out(
         repo,
         fl,
-        summary(repo, await read_readme(inv.config, ref)),
+        summary(repo, await read_readme(config, ref)),
         REPO_FIELDS,
     )
 
 
 async def list_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """``gh repo list``, over GraphQL for ``--json`` as ``view`` is.
 
     Args:
-        inv (CLIInvocation[GhConfig]): the line's invocation record.
+        config (GhConfig): the install's account config.
+        paths (list[PathSpec]): the path operands.
+        texts (list[str]): the text operands.
+        ctx (Context): the line's flags and context.
     """
-    fl = FlagView(inv.flags)
-    owner = inv.texts[0] if inv.texts else None
+    fl = FlagView(ctx.flags)
+    owner = texts[0] if texts else None
     limit = list_limit(fl, 30)
     fields = json_fields(fl, REPO_FIELDS)
     if fields is not None:
         nodes = await list_repository_fields(
-            inv.config, owner, limit, _repo_selection(fields)
+            config, owner, limit, _repo_selection(fields)
         )
         return await typed_out(
             [_exported_repo(node, fields) for node in nodes],
@@ -496,9 +500,7 @@ async def list_cmd(
             "",
             REPO_FIELDS,
         )
-    rows = [
-        _repo(value) for value in await list_repos(inv.config, owner, limit)
-    ]
+    rows = [_repo(value) for value in await list_repos(config, owner, limit)]
     human = "".join(
         f"{row.get('nameWithOwner', '')}\t"
         f"{row.get('description', '')}\t"
@@ -510,10 +512,10 @@ async def list_cmd(
 
 
 async def create_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    spec = inv.texts[0] if inv.texts else ""
+    fl = FlagView(ctx.flags)
+    spec = texts[0] if texts else ""
     if not spec:
         raise ValueError(
             "a repository name is required in noninteractive mode"
@@ -537,12 +539,12 @@ async def create_cmd(
         value = fl.as_str(flag)
         if value is not None:
             body[key] = value
-    created = _repo(await create_repo(inv.config, owner, body))
+    created = _repo(await create_repo(config, owner, body))
     return text_out(f"{created.get('url', '')}\n")
 
 
 async def fork(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """``gh repo fork``.
 
@@ -553,10 +555,13 @@ async def fork(
     ``--remote=false`` asks for what this fork does anyway.
 
     Args:
-        inv (CLIInvocation[GhConfig]): the repository and the flags.
+        config (GhConfig): the install's account config.
+        paths (list[PathSpec]): the path operands.
+        texts (list[str]): the repository.
+        ctx (Context): the flags and context.
     """
-    fl = FlagView(inv.flags)
-    operand = inv.texts[0] if inv.texts else None
+    fl = FlagView(ctx.flags)
+    operand = texts[0] if texts else None
     org = fl.as_str("org")
     if org == "":
         raise ValueError("--org cannot be blank")
@@ -574,7 +579,7 @@ async def fork(
         )
     source: RepoRef
     try:
-        source = gh_repo(inv.config, operand)
+        source = gh_repo(config, operand)
     except ValueError as exc:
         if operand is None:
             raise
@@ -587,12 +592,12 @@ async def fork(
         body["organization"] = org
     if gh_bool(fl, "default_branch_only"):
         body["default_branch_only"] = True
-    forked = await fork_repo(inv.config, source, body)
+    forked = await fork_repo(config, source, body)
     landed = forked.get("full_name") if isinstance(forked, dict) else None
     full = (
         landed
         if isinstance(landed, str)
-        else (f"{await login(inv.config)}/{name or source.repo}")
+        else (f"{await login(config)}/{name or source.repo}")
     )
     return text_out(f"✓ Created fork {full}\n")
 
@@ -611,7 +616,7 @@ def token_header(config: GhConfig) -> dict[str, str]:
 
 
 async def clone_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """``gh repo clone``: mirage's ``git clone`` of the repository, the words
     after ``--`` as git's options. The token rides only as the request's
@@ -619,64 +624,72 @@ async def clone_cmd(
     ``upstream`` remote is not added.
 
     Args:
-        inv (CLIInvocation[GhConfig]): the repository, the directory and
-            git's options.
+        config (GhConfig): the install's account config.
+        paths (list[PathSpec]): the path operands.
+        texts (list[str]): the repository, the directory and git's options.
+        ctx (Context): the original argv and context.
     """
-    names, gitflags = split_marked(tuple(inv.texts), inv.argv)
+    names, gitflags = split_marked(tuple(texts), ctx.argv)
     if not names:
         raise ValueError("cannot clone: repository argument required")
     spec = names[0]
-    check_host(inv.config, repo_host(spec))
+    check_host(config, repo_host(spec))
     if "/" not in spec and ":" not in spec:
-        ref = RepoRef(owner=await login(inv.config), repo=spec)
+        ref = RepoRef(owner=await login(config), repo=spec)
     else:
         ref = parse_repo(spec)
-    url = f"{web_origin(inv.config)}/{ref.owner}/{ref.repo}.git"
+    url = f"{web_origin(config)}/{ref.owner}/{ref.repo}.git"
     target = names[1] if len(names) > 1 else ref.repo
     leaf, _ = find_node(GIT.spec, ["clone"]) or (GIT.spec, ())
     words = [*gitflags, url, target]
     parsed = parse_command(
         leaf,
         words,
-        inv.cwd.virtual,
+        ctx.cwd.virtual,
         "git clone",
-        inv.env,
+        ctx.env,
         unknown_is_operand=True,
     )
     flags: dict[str, FlagValue] = dict(parse_to_kwargs(parsed))
-    flags["C"] = inv.cwd
-    git = CLIInvocation[None](
-        None,
+    flags["C"] = ctx.cwd
+    git = Context(
         argv=("clone", *words),
-        texts=tuple(word for word, _ in parsed.args),
-        cwd=inv.cwd,
+        cwd=ctx.cwd,
         flags=flags,
-        stdin=inv.stdin,
-        env=inv.env,
-        view=inv.view,
+        stdin=ctx.stdin,
+        env=ctx.env,
+        vfs=ctx.vfs,
+        session=ctx.session,
+        processes=ctx.processes,
         spec=leaf,
     )
-    return await git_clone(git, token_header(inv.config))
+    return await git_clone(
+        None,
+        [],
+        [word for word, _ in parsed.args],
+        git,
+        token_header(config),
+    )
 
 
 async def rename(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     # gh takes the *new name* as the operand and the repository to rename as
     # -R, which is the reverse of what the shape of the line suggests.
-    target = gh_repo(inv.config, fl.as_str("repo"))
-    name = inv.texts[0] if inv.texts else ""
+    target = gh_repo(config, fl.as_str("repo"))
+    name = texts[0] if texts else ""
     if not name:
         raise ValueError("a new repository name is required")
-    renamed = await rename_repo(inv.config, target, name)
+    renamed = await rename_repo(config, target, name)
     landed = renamed.get("full_name") if isinstance(renamed, dict) else None
     full = landed if isinstance(landed, str) else name
     return text_out(f"✓ Renamed repository {full}\n")
 
 
 async def edit_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """``gh repo edit``.
 
@@ -687,10 +700,13 @@ async def edit_cmd(
     Like gh writing to anything but a terminal, success prints nothing.
 
     Args:
-        inv (CLIInvocation[GhConfig]): the invocation.
+        config (GhConfig): the install's account config.
+        paths (list[PathSpec]): the path operands.
+        texts (list[str]): the text operands.
+        ctx (Context): the invocation's context.
     """
-    fl = FlagView(inv.flags, inv.spec)
-    ref = gh_repo(inv.config, inv.texts[0] if inv.texts else None)
+    fl = FlagView(ctx.flags, ctx.spec)
+    ref = gh_repo(config, texts[0] if texts else None)
     body: dict[str, JsonValue] = {}
     security: dict[str, JsonValue] = {}
     for field in REPO_EDIT_FIELDS:
@@ -721,7 +737,7 @@ async def edit_cmd(
             1,
         )
     if security:
-        node = await repository_fields(inv.config, ref, "viewerCanAdminister")
+        node = await repository_fields(config, ref, "viewerCanAdminister")
         if node.get("viewerCanAdminister") is not True:
             raise ValueError(
                 "you do not have sufficient permissions to edit "
@@ -729,18 +745,18 @@ async def edit_cmd(
             )
         body["security_and_analysis"] = security
     if body:
-        await edit_repo(inv.config, ref, body)
+        await edit_repo(config, ref, body)
     if adds or removes:
-        old = await repo_topics(inv.config, ref)
+        old = await repo_topics(config, ref)
         wanted = list(dict.fromkeys([*old, *adds]))
         new = [topic for topic in wanted if topic not in removes]
         if len(new) != len(old) or any(topic not in old for topic in new):
-            await set_repo_topics(inv.config, ref, new)
+            await set_repo_topics(config, ref, new)
     return b"", IOResult()
 
 
 async def delete_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """``gh repo delete REPO --yes``.
 
@@ -750,11 +766,14 @@ async def delete_cmd(
     deprecated spelling of ``--yes``, and it warns the way cobra does.
 
     Args:
-        inv (CLIInvocation[GhConfig]): the invocation.
+        config (GhConfig): the install's account config.
+        paths (list[PathSpec]): the path operands.
+        texts (list[str]): the text operands.
+        ctx (Context): the invocation's context.
     """
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     confirmed = gh_bool(fl, "yes") or gh_bool(fl, "confirm")
-    spec = inv.texts[0] if inv.texts else None
+    spec = texts[0] if texts else None
     if spec is None and confirmed:
         raise UsageError(
             "cannot non-interactively delete current repository. Please "
@@ -765,8 +784,8 @@ async def delete_cmd(
         raise UsageError("--yes required when not running interactively", 1)
     named = spec or ""
     if "/" not in named:
-        named = f"{await login(inv.config)}/{named}"
-    await delete_repo(inv.config, gh_repo(inv.config, named))
+        named = f"{await login(config)}/{named}"
+    await delete_repo(config, gh_repo(config, named))
     warning = (
         b"Flag --confirm has been deprecated, use `--yes` instead\n"
         if gh_bool(fl, "confirm")

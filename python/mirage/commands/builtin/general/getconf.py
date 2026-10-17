@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -402,17 +402,17 @@ def variable(name: str) -> tuple[str, str | None] | None:
     return None
 
 
-async def path_exists(opts: CommandOpts, word: str) -> bool:
+async def path_exists(ctx: Context, word: str) -> bool:
     """Whether the PATH operand names something pathconf could open.
 
     Args:
-        opts (CommandOpts): the invocation, for its cwd and stat function.
+        ctx (Context): the invocation, for its cwd and stat function.
         word (str): the operand as typed.
     """
-    if opts.stat_path is None:
+    if ctx.stat_path is None:
         return True
-    spec = PathSpec.from_str_path(word, cwd=opts.cwd)
-    return await opts.stat_path(spec) is not None
+    spec = PathSpec.from_str_path(word, cwd=ctx.cwd)
+    return await ctx.stat_path(spec) is not None
 
 
 @command("getconf", vfs=None, spec=SPECS["getconf"])
@@ -420,18 +420,18 @@ async def getconf(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """glibc ``getconf``: one variable's value, or ``-a`` for all of them. A
     pathconf variable takes exactly one PATH and the rest none (else the usage
     block, exit 2); an unknown name is exit 2, a missing PATH exit 3, and
     ``-v`` is set aside as Debian's build does.
     """
-    fl = FlagView(opts.flags, spec=SPECS["getconf"])
+    fl = FlagView(ctx.flags, spec=SPECS["getconf"])
     if fl.as_bool("a"):
         if len(texts) > 1:
             return None, IOResult(exit_code=2, stderr=USAGE)
-        found = await path_exists(opts, texts[0] if texts else "/")
+        found = await path_exists(ctx, texts[0] if texts else "/")
         lines = [
             f"{name:<35}"
             + ((value or "") if found or name not in PATH_VARIABLES else "")
@@ -448,7 +448,7 @@ async def getconf(
     name, value = row
     if (name in PATH_VARIABLES) != (len(texts) == 2):
         return None, IOResult(exit_code=2, stderr=USAGE)
-    if len(texts) == 2 and not await path_exists(opts, texts[1]):
+    if len(texts) == 2 and not await path_exists(ctx, texts[1]):
         err = f"getconf: pathconf: {texts[1]}: No such file or directory\n"
         return None, IOResult(exit_code=3, stderr=err.encode())
     return f"{UNDEFINED if value is None else value}\n".encode(), IOResult()

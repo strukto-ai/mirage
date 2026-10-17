@@ -24,7 +24,7 @@ from mirage.commands.cli.builtin.hf.repo import (
 )
 from mirage.commands.errors import UsageError
 from mirage.io.types import materialize
-from tests.commands.cli.builtin.hf.conftest import ANON, inv
+from tests.commands.cli.builtin.hf.conftest import ANON, leaf_args
 
 
 async def _text(result) -> str:
@@ -36,7 +36,7 @@ async def _text(result) -> str:
 @patch("mirage.commands.cli.builtin.hf.repo.create_repo")
 async def test_create_prints_the_url_the_hub_answered(mock_create):
     mock_create.return_value = {"url": "https://hf.co/acme/widget"}
-    text = await _text(await create_cmd(inv(texts=("acme/widget",))))
+    text = await _text(await create_cmd(*leaf_args(texts=("acme/widget",))))
     assert text == "https://hf.co/acme/widget\n"
 
 
@@ -47,14 +47,14 @@ async def test_create_refuses_a_space_without_an_sdk():
     would."""
     with pytest.raises(UsageError, match="--space_sdk"):
         await create_cmd(
-            inv(texts=("acme/demo",), flags={"repo_type": "space"})
+            *leaf_args(texts=("acme/demo",), flags={"repo_type": "space"})
         )
 
 
 @pytest.mark.asyncio
 async def test_create_refuses_without_a_token():
     with pytest.raises(UsageError):
-        await create_cmd(inv(texts=("acme/widget",), config=ANON))
+        await create_cmd(*leaf_args(texts=("acme/widget",), config=ANON))
 
 
 @pytest.mark.asyncio
@@ -62,7 +62,7 @@ async def test_create_refuses_without_a_token():
 async def test_tag_create_tags_the_named_revision(mock_tag):
     text = await _text(
         await tag_create_cmd(
-            inv(
+            *leaf_args(
                 texts=("acme/widget", "v1"),
                 flags={"revision": "dev", "message": "cut"},
             )
@@ -76,7 +76,7 @@ async def test_tag_create_tags_the_named_revision(mock_tag):
 @pytest.mark.asyncio
 @patch("mirage.commands.cli.builtin.hf.repo.create_tag")
 async def test_tag_create_defaults_to_the_default_revision(mock_tag):
-    await tag_create_cmd(inv(texts=("acme/widget", "v1")))
+    await tag_create_cmd(*leaf_args(texts=("acme/widget", "v1")))
     assert mock_tag.await_args.kwargs["revision"] == "main"
 
 
@@ -85,7 +85,7 @@ async def test_tag_create_defaults_to_the_default_revision(mock_tag):
 async def test_tag_list_prints_one_tag_per_line(mock_list):
     mock_list.return_value = ["v1", "v2"]
     assert (
-        await _text(await tag_list_cmd(inv(texts=("acme/widget",))))
+        await _text(await tag_list_cmd(*leaf_args(texts=("acme/widget",))))
         == "v1\nv2\n"
     )
 
@@ -97,7 +97,7 @@ async def test_tag_delete_needs_the_yes_flag(mock_delete):
     workspace verb has no terminal to ask on, so deleting because
     nobody could answer is the wrong default."""
     with pytest.raises(UsageError, match="-y"):
-        await tag_delete_cmd(inv(texts=("acme/widget", "v1")))
+        await tag_delete_cmd(*leaf_args(texts=("acme/widget", "v1")))
     mock_delete.assert_not_awaited()
 
 
@@ -106,7 +106,7 @@ async def test_tag_delete_needs_the_yes_flag(mock_delete):
 async def test_tag_delete_removes_the_tag_with_yes(mock_delete):
     text = await _text(
         await tag_delete_cmd(
-            inv(texts=("acme/widget", "v1"), flags={"yes": True})
+            *leaf_args(texts=("acme/widget", "v1"), flags={"yes": True})
         )
     )
     assert text == "Tag v1 deleted on acme/widget\n"
@@ -118,7 +118,7 @@ async def test_tag_delete_removes_the_tag_with_yes(mock_delete):
 async def test_tag_delete_takes_yes_on_stdin(mock_delete):
     """Upstream reads the answer with input(); a piped y is the same
     answer arriving the only way a workspace can send it."""
-    await tag_delete_cmd(inv(texts=("acme/widget", "v1"), stdin=b"y\n"))
+    await tag_delete_cmd(*leaf_args(texts=("acme/widget", "v1"), stdin=b"y\n"))
     assert mock_delete.await_count == 1
 
 
@@ -126,7 +126,9 @@ async def test_tag_delete_takes_yes_on_stdin(mock_delete):
 @patch("mirage.commands.cli.builtin.hf.repo.delete_tag_api")
 async def test_tag_delete_declines_anything_but_yes(mock_delete):
     with pytest.raises(UsageError):
-        await tag_delete_cmd(inv(texts=("acme/widget", "v1"), stdin=b"n\n"))
+        await tag_delete_cmd(
+            *leaf_args(texts=("acme/widget", "v1"), stdin=b"n\n")
+        )
     mock_delete.assert_not_awaited()
 
 
@@ -134,7 +136,9 @@ async def test_tag_delete_declines_anything_but_yes(mock_delete):
 @patch("mirage.commands.cli.builtin.hf.repo.create_repo")
 async def test_create_passes_exist_ok_through(mock_create):
     mock_create.return_value = {}
-    await create_cmd(inv(texts=("acme/widget",), flags={"exist_ok": True}))
+    await create_cmd(
+        *leaf_args(texts=("acme/widget",), flags={"exist_ok": True})
+    )
     assert mock_create.await_args.kwargs["exist_ok"] is True
 
 
@@ -146,7 +150,7 @@ async def test_create_falls_back_to_the_repo_url_it_can_derive(mock_create):
     mock_create.return_value = {}
     text = await _text(
         await create_cmd(
-            inv(texts=("acme/rows",), flags={"repo_type": "dataset"})
+            *leaf_args(texts=("acme/rows",), flags={"repo_type": "dataset"})
         )
     )
     assert text == "https://huggingface.co/datasets/acme/rows\n"
@@ -159,7 +163,7 @@ async def test_tag_create_refuses_a_missing_tag_before_calling_out(mock_tag):
     with pytest.raises(
         UsageError, match="the following arguments are required: tag"
     ):
-        await tag_create_cmd(inv(texts=("acme/widget",)))
+        await tag_create_cmd(*leaf_args(texts=("acme/widget",)))
     mock_tag.assert_not_awaited()
 
 
@@ -167,7 +171,9 @@ async def test_tag_create_refuses_a_missing_tag_before_calling_out(mock_tag):
 @patch("mirage.commands.cli.builtin.hf.repo.delete_tag_api")
 async def test_tag_delete_refuses_a_missing_tag(mock_delete):
     with pytest.raises(UsageError, match="required: tag"):
-        await tag_delete_cmd(inv(texts=("acme/widget",), flags={"yes": True}))
+        await tag_delete_cmd(
+            *leaf_args(texts=("acme/widget",), flags={"yes": True})
+        )
     mock_delete.assert_not_awaited()
 
 
@@ -175,7 +181,7 @@ async def test_tag_delete_refuses_a_missing_tag(mock_delete):
 @patch("mirage.commands.cli.builtin.hf.repo.list_tags")
 async def test_tag_list_refuses_a_missing_repo(mock_list):
     with pytest.raises(UsageError, match="required: repo_id"):
-        await tag_list_cmd(inv())
+        await tag_list_cmd(*leaf_args())
     mock_list.assert_not_awaited()
 
 
@@ -183,5 +189,5 @@ async def test_tag_list_refuses_a_missing_repo(mock_list):
 @patch("mirage.commands.cli.builtin.hf.repo.create_tag")
 async def test_tag_create_names_every_empty_slot(mock_tag):
     with pytest.raises(UsageError, match="required: repo_id, tag"):
-        await tag_create_cmd(inv())
+        await tag_create_cmd(*leaf_args())
     mock_tag.assert_not_awaited()

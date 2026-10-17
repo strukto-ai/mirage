@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
-import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
+import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
+import type { PathSpec } from '@struktoai/mirage-core/types'
 import { whoami } from '../../../../core/hf_hub/account.ts'
 import { API_BASE } from '../../../../core/hf_hub/constants.ts'
 import { hfEndpoint, type HfConfig } from '../../../../core/hf_hub/config.ts'
@@ -21,9 +21,15 @@ import { requireToken, textOut } from './accessor.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 
 /** Print the account the configured token belongs to. */
-export async function whoamiCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  requireToken(inv, 'auth whoami')
-  const account = await whoami(inv.config as HfConfig)
+export async function whoamiCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  _ctx: Context,
+): Promise<CommandFnResult> {
+  const cfg = config as HfConfig
+  requireToken(cfg, 'auth whoami')
+  const account = await whoami(cfg)
   const lines = [typeof account.name === 'string' ? account.name : '']
   const orgs = account.orgs
   const members: string[] = []
@@ -53,7 +59,7 @@ export async function whoamiCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   // REQUEST used: an empty endpoint means the public Hub there, and comparing
   // the raw value would announce a private endpoint with no origin after it
   // for a request that went to huggingface.co.
-  const endpoint = rstripSlash(hfEndpoint(inv.config as HfConfig))
+  const endpoint = rstripSlash(hfEndpoint(cfg))
   if (endpoint !== API_BASE) {
     lines.push(`Authenticated through private endpoint: ${endpoint}`)
   }
@@ -68,11 +74,16 @@ export async function whoamiCmd(inv: CLIInvocation): Promise<CommandFnResult> {
  * upstream's own two-column shape rather than pretending to a set it cannot
  * hold, and reports nothing when there is none.
  */
-export async function listCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const config = inv.config as HfConfig
+export async function listCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  _ctx: Context,
+): Promise<CommandFnResult> {
+  const cfg = config as HfConfig
   const rows = ['NAME'.padEnd(20) + ' ' + 'TOKEN']
-  if (config.token !== undefined && config.token !== '') {
-    const account = await whoami(config)
+  if (cfg.token !== undefined && cfg.token !== '') {
+    const account = await whoami(cfg)
     const name = typeof account.name === 'string' ? account.name : 'install'
     rows.push(name.padEnd(20) + ' ' + '*'.repeat(8))
   }

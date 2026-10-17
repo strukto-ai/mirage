@@ -162,7 +162,7 @@ class RuntimeFiles:
         """
         if context is None:
             return None
-        links = link_view(context.vfs)
+        links = link_view(context.ctx.vfs)
         return cls(
             context.dispatch,
             asyncio.get_running_loop(),

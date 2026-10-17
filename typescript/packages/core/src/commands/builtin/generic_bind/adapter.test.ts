@@ -27,7 +27,7 @@ import { IOResult } from '../../../io/types.ts'
 import { Files } from '../../../workspace/files.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { SessionState } from '../../../workspace/session/session.ts'
-import type { CommandOpts, CommandIO } from '../../config.ts'
+import type { Context, CommandIO } from '../../config.ts'
 import {
   commandIo,
   dirAwareStat,
@@ -47,14 +47,14 @@ import { Workspace } from '../../../workspace/workspace/workspace.ts'
 const accessor = {} as never
 // No namespace facts, which is what a command bound outside a workspace
 // gets: the two probes below the backend are the only ones that can fire.
-const NO_NS = {} as CommandOpts
+const NO_NS = {} as Context
 // The one a mount parent needs: no backend row, a name plane that owes the
 // path a child name: a mount below it.
-function nsDir(dir: string): CommandOpts {
+function nsDir(dir: string): Context {
   const nothing: DispatchFn = () => Promise.resolve([null, new IOResult()])
   return {
     vfs: new Files(nothing, null, null, () => null, { prefixes: () => [`${dir}/alpha/`] }),
-  } as CommandOpts
+  } as Context
 }
 
 function glob(dir: string, pattern: string): PathSpec {
@@ -330,16 +330,16 @@ async function* throwingStream(err: Error): AsyncIterable<Uint8Array> {
   throw err
 }
 
-function keyedReadOps(opts: {
+function keyedReadOps(ctx: {
   implicitDirs?: readonly string[]
   explicitDirs?: readonly string[]
   files?: Record<string, string>
   readError?: (p: PathSpec) => Error
 }): CommandIO {
-  const implicitDirs = opts.implicitDirs ?? []
-  const explicitDirs = opts.explicitDirs ?? []
-  const files = opts.files ?? {}
-  const readError = opts.readError ?? ((p: PathSpec) => enoent(p))
+  const implicitDirs = ctx.implicitDirs ?? []
+  const explicitDirs = ctx.explicitDirs ?? []
+  const files = ctx.files ?? {}
+  const readError = ctx.readError ?? ((p: PathSpec) => enoent(p))
   const encode = (t: string) => new TextEncoder().encode(t)
   return {
     readdir: (_a, p) => {

@@ -19,7 +19,7 @@ import pytest
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.context import (
     reset_current_session,
     reset_mount_gate,
@@ -109,7 +109,7 @@ async def test_tee_writes_inside_the_granted_region():
             cast(Accessor, object()),
             [PathSpec.from_str_path("/s3/build/out.txt")],
             [],
-            CommandOpts(index=NULL_INDEX, io=_io(writes)),
+            Context(index=NULL_INDEX, io=_io(writes)),
         )
     finally:
         reset_mount_gate(gate_token)

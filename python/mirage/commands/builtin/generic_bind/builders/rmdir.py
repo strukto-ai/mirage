@@ -27,7 +27,7 @@ from mirage.commands.builtin.utils.links import (
     links_of,
 )
 from mirage.commands.builtin.utils.output import format_optional_records
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -103,9 +103,9 @@ async def rmdir(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(opts.flags, spec=SPECS["rmdir"])
+    fl = FlagView(ctx.flags, spec=SPECS["rmdir"])
     v = fl.as_bool("verbose")
     ignore = fl.as_bool("ignore_fail_on_non_empty")
     if not ops.is_mounted(accessor) or not paths:
@@ -114,8 +114,8 @@ async def rmdir(
             1,
         )
     rmdir_fn = require_op(ops, Operation.RMDIR)
-    paths = await ops.resolve_glob(accessor, paths, opts.index)
-    links = links_of(opts)
+    paths = await ops.resolve_glob(accessor, paths, ctx.index)
+    links = links_of(ctx)
     verbose_parts: list[str] = []
     errors: list[str] = []
 
@@ -131,15 +131,15 @@ async def rmdir(
                 return "Symbolic link not followed"
             return posix_phrase(FsCondition.ENOTDIR)
         try:
-            s = await ops.stat(accessor, p, index=opts.index)
+            s = await ops.stat(accessor, p, index=ctx.index)
         except FS_ERRORS as exc:
             return fs_strerror(exc)
         if s.type != FileType.DIRECTORY:
             return posix_phrase(FsCondition.ENOTDIR)
-        if await ops.readdir(accessor, p, index=opts.index):
+        if await ops.readdir(accessor, p, index=ctx.index):
             return posix_phrase(FsCondition.ENOTEMPTY)
         try:
-            await rmdir_fn(accessor, p, index=opts.index)
+            await rmdir_fn(accessor, p, index=ctx.index)
         except OSError as exc:
             # The listing above showed the session an empty directory,
             # but the slot may still refuse not-empty: the hidden-
@@ -169,7 +169,7 @@ async def rmdir(
             continue
         if not fl.as_bool("parents"):
             continue
-        for ancestor, typed in ancestors(p, opts.cwd.virtual, links):
+        for ancestor, typed in ancestors(p, ctx.cwd.virtual, links):
             if v:
                 verbose_parts.append(f"rmdir: removing directory, '{typed}'")
             # The walk up meets the mount root, which rmdir(2) answers

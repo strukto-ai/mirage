@@ -17,8 +17,8 @@ import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts
 import { describe, expect, it } from 'vitest'
 import { materialize, type IOResult } from '../../io/types.ts'
 import { RAMVFS } from './ram.ts'
-import { MountMode, type PathSpec } from '../../types.ts'
-import type { CommandOpts } from '../../commands/config.ts'
+import { MountMode, PathSpec } from '../../types.ts'
+import type { Context } from '../../commands/config.ts'
 import { mktempGeneric } from '../../commands/builtin/generic/mktemp.ts'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -39,7 +39,7 @@ async function runMktemp(
     stdin: null,
     flags,
     io: commandIo(vfs),
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) return { out: '', vfs }
   const [out] = result
@@ -216,14 +216,14 @@ describe('mktemp names and routing', () => {
 // GNU creates exclusively and tries another name, so a taken name is never
 // written over. Mirrors test_phase_r_paths.py.
 describe('mktemp never reuses a taken name', () => {
-  const opts = { stdin: null, flags: {}, cwd: '/data' } as CommandOpts
+  const ctx = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/data') } as Context
 
   it('draws again when a name is taken', async () => {
     const probed: string[] = []
     const written: string[] = []
     const result = await mktempGeneric(
       ['x.XXX'],
-      opts,
+      ctx,
       () => Promise.reject(new Error('a file create makes no directory')),
       (p) => {
         written.push(p.virtual)
@@ -248,7 +248,7 @@ describe('mktemp never reuses a taken name', () => {
       written.push(p.virtual)
       return Promise.resolve()
     }
-    const result = await mktempGeneric(['x.XXX'], opts, record, record, () => Promise.resolve(true))
+    const result = await mktempGeneric(['x.XXX'], ctx, record, record, () => Promise.resolve(true))
     const [out, io] = result as [Uint8Array | null, IOResult]
     expect([out, io.exitCode, written]).toEqual([null, 1, []])
     expect(DEC.decode(io.stderr as Uint8Array)).toBe(

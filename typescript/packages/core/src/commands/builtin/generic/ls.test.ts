@@ -19,7 +19,7 @@ import type { DispatchFn } from '../../../runtime/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import { Files } from '../../../workspace/files.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import {
   LS_FAILURE,
   LS_MINOR_PROBLEM,
@@ -56,12 +56,12 @@ function spec(path: string): PathSpec {
   })
 }
 
-function opts(flags: Record<string, string | boolean | number | string[]>): CommandOpts {
+function ctx(flags: Record<string, string | boolean | number | string[]>): Context {
   return {
     stdin: null,
     flags,
-    cwd: '/',
-  } as unknown as CommandOpts
+    cwd: PathSpec.fromStrPath('/'),
+  } as unknown as Context
 }
 
 const stat = (p: PathSpec): Promise<FileStat> => {
@@ -94,7 +94,7 @@ describe('lsGeneric', () => {
       inFlight -= 1
       return new FileStat({ name: key(p).split('/').pop() ?? '', type: FileType.FILE })
     }
-    const result = await lsGeneric([spec('/')], opts({}), () => Promise.resolve(names), slowStat)
+    const result = await lsGeneric([spec('/')], ctx({}), () => Promise.resolve(names), slowStat)
     expect(DEC.decode((result?.[0] ?? new Uint8Array()) as Uint8Array).split('\n')).toHaveLength(41)
     expect(peak).toBe(1)
   })
@@ -137,7 +137,7 @@ async function status(
   paths: string[],
   flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<[number, string]> {
-  const result = await lsGeneric(paths.map(spec), opts(flags), codeReaddir, codeStat)
+  const result = await lsGeneric(paths.map(spec), ctx(flags), codeReaddir, codeStat)
   if (result === null) return [-1, '']
   const [out, io] = result
   return [io.exitCode, DEC.decode((out ?? new Uint8Array()) as Uint8Array)]
@@ -186,7 +186,7 @@ describe('structure-only directories', () => {
       [PathSpec.fromStrPath('/ghost')],
       {
         flags: { recursive: true },
-        cwd: '/',
+        cwd: PathSpec.fromStrPath('/'),
         vfs: owing('/ghost/deep/lnk/'),
       } as never,
       missing,
@@ -203,7 +203,7 @@ describe('structure-only directories', () => {
       [PathSpec.fromStrPath('/ghost')],
       {
         flags: { classify: true },
-        cwd: '/',
+        cwd: PathSpec.fromStrPath('/'),
         vfs: owing('/ghost/deep/'),
       } as never,
       missing,
@@ -227,7 +227,7 @@ describe('honest per-entry errors', () => {
   }
 
   async function run(flags: Record<string, boolean>, err: Error) {
-    const result = await lsGeneric([spec('/')], opts(flags), readdir, statFailingEntries(err))
+    const result = await lsGeneric([spec('/')], ctx(flags), readdir, statFailingEntries(err))
     return {
       code: result?.[1].exitCode,
       stdout: DEC.decode(result?.[0] as Uint8Array),
@@ -284,7 +284,7 @@ describe('honest per-entry errors', () => {
       Promise.resolve(key(p) === '/' ? ['/afile', '/zdir/'] : [])
     const denying = (p: PathSpec): Promise<FileStat> =>
       key(p) === '/' ? stat(p) : Promise.reject(stamped(key(p), 'EACCES'))
-    const result = await lsGeneric([spec('/')], opts({ S: true }), marking, denying)
+    const result = await lsGeneric([spec('/')], ctx({ S: true }), marking, denying)
     expect(result?.[1].exitCode).toBe(LS_MINOR_PROBLEM)
     expect(DEC.decode(result?.[0] as Uint8Array)).toBe('afile\nzdir\n')
   })
@@ -298,14 +298,14 @@ describe('honest per-entry errors', () => {
 
   it("still propagates the operand's own unstamped failure", async () => {
     const failing = (): Promise<string[]> => Promise.reject(new Error('socket hang up'))
-    await expect(lsGeneric([spec('/')], opts({}), failing, stat)).rejects.toThrow('socket hang up')
+    await expect(lsGeneric([spec('/')], ctx({}), failing, stat)).rejects.toThrow('socket hang up')
   })
 
   it('-d propagates an unstamped stat error', async () => {
     const raw = new Error('rate limited')
     const failing = (): Promise<FileStat> => Promise.reject(raw)
     await expect(
-      lsGeneric([spec('/x')], opts({ directory: true }), readdir, failing),
+      lsGeneric([spec('/x')], ctx({ directory: true }), readdir, failing),
     ).rejects.toThrow('rate limited')
   })
 })
@@ -429,7 +429,7 @@ describe('dot entries respect mount boundaries', () => {
                 }),
             ),
           )
-          const options = opts({ all: true, args_l: true })
+          const options = ctx({ all: true, args_l: true })
           if (namespace) options.statPath = statPath
           const result = await lsGeneric(
             [new PathSpec({ virtual: directory, directory, vfsPath: subdir ? 'sub' : '' })],

@@ -13,21 +13,22 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli.builtin.hf.accessor import require_token, text_out
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.core.hf_hub.account import whoami
 from mirage.core.hf_hub.config import HfConfig
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 # The origin upstream treats as "not a private endpoint".
 PUBLIC_HUB = "https://huggingface.co"
 
 
 async def whoami_cmd(
-    inv: CLIInvocation[HfConfig],
+    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Print the account the configured token belongs to."""
-    require_token(inv, "auth whoami")
-    account = await whoami(inv.config)
+    require_token(config, "auth whoami")
+    account = await whoami(config)
     name = account.get("name")
     orgs = account.get("orgs")
     lines = [str(name) if isinstance(name, str) else ""]
@@ -52,14 +53,14 @@ async def whoami_cmd(
         lines.append(f"orgs:  {','.join(members)}")
     # Upstream prints this whenever the endpoint is not huggingface.co, which
     # for every mirage install is always: the endpoint is the deployment's.
-    endpoint = inv.config.endpoint.rstrip("/")
+    endpoint = config.endpoint.rstrip("/")
     if endpoint != PUBLIC_HUB:
         lines.append(f"Authenticated through private endpoint: {endpoint}")
     return text_out("\n".join(lines) + "\n")
 
 
 async def list_cmd(
-    inv: CLIInvocation[HfConfig],
+    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """List the stored access tokens.
 
@@ -69,8 +70,8 @@ async def list_cmd(
     to a set it cannot hold, and reports nothing when there is none.
     """
     rows = ["{:<20} {}".format("NAME", "TOKEN")]
-    if inv.config.token is not None:
-        account = await whoami(inv.config)
+    if config.token is not None:
+        account = await whoami(config)
         name = account.get("name")
         rows.append(
             "{:<20} {}".format(

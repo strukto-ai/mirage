@@ -33,12 +33,11 @@ import {
 } from '../../../../core/airtable/normalize.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { AirtableConfig } from '../../../../core/airtable/config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { UsageError } from '../../../errors.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import {
-  config,
   findTable,
   jsonObject,
   noOperands,
@@ -133,25 +132,27 @@ async function landed(
 }
 
 async function recordCreateBody(
+  config: AirtableConfig,
+  texts: string[],
+  ctx: Context,
   accessor: AirtableAccessor,
-  inv: CLIInvocation,
   fl: FlagView,
 ): Promise<CommandFnResult> {
-  noOperands(inv.texts)
+  noOperands(texts)
   const fields = fl.asStr('fields')
   const table = fl.asStr('table') ?? ''
   let cells: Row[]
   let piped = false
   if (fields !== undefined) {
     cells = [jsonObject('--fields', fields)]
-  } else if (inv.stdin !== null) {
-    const rows = recordLines(await stdinText(inv.stdin), { id: false, fields: true })
+  } else if (ctx.stdin !== null) {
+    const rows = recordLines(await stdinText(ctx.stdin), { id: false, fields: true })
     cells = rows.map((row) => row.fields as Row)
     piped = rows.length > 0
   } else {
     throw new UsageError('--fields or records on stdin are required')
   }
-  const baseId = scopedBase(config(inv), fl.asStr('base') ?? '')
+  const baseId = scopedBase(config, fl.asStr('base') ?? '')
   if (piped) cells = await writable(accessor, baseId, table, cells)
   const batches = createRecords(accessor, baseId, table, cells, {
     typecast: fl.asBool('typecast'),
@@ -160,11 +161,13 @@ async function recordCreateBody(
 }
 
 async function recordUpdateBody(
+  config: AirtableConfig,
+  texts: string[],
+  ctx: Context,
   accessor: AirtableAccessor,
-  inv: CLIInvocation,
   fl: FlagView,
 ): Promise<CommandFnResult> {
-  const recordId = optionalOperand(inv.texts)
+  const recordId = optionalOperand(texts)
   const fields = fl.asStr('fields')
   const table = fl.asStr('table') ?? ''
   if (recordId !== null && fields === undefined) {
@@ -179,15 +182,15 @@ async function recordUpdateBody(
   if (recordId !== null && fields !== undefined) {
     ids = [recordId]
     cells = [jsonObject('--fields', fields)]
-  } else if (inv.stdin !== null) {
-    const rows = recordLines(await stdinText(inv.stdin), { id: true, fields: true })
+  } else if (ctx.stdin !== null) {
+    const rows = recordLines(await stdinText(ctx.stdin), { id: true, fields: true })
     ids = rows.map((row) => String(row.record_id))
     cells = rows.map((row) => row.fields as Row)
     piped = rows.length > 0
   } else {
     throw new UsageError('RECORD --fields or records on stdin are required')
   }
-  const baseId = scopedBase(config(inv), fl.asStr('base') ?? '')
+  const baseId = scopedBase(config, fl.asStr('base') ?? '')
   if (piped) cells = await writable(accessor, baseId, table, cells)
   const updates = ids.map((id, i): [string, Row] => [id, cells[i] ?? {}])
   const batches = updateRecords(accessor, baseId, table, updates, {
@@ -197,38 +200,42 @@ async function recordUpdateBody(
 }
 
 async function recordDeleteBody(
+  config: AirtableConfig,
+  texts: string[],
+  ctx: Context,
   accessor: AirtableAccessor,
-  inv: CLIInvocation,
   fl: FlagView,
 ): Promise<CommandFnResult> {
   let recordIds: string[]
-  if (inv.texts.length > 0) {
-    recordIds = [...inv.texts]
-  } else if (inv.stdin !== null) {
-    const rows = recordLines(await stdinText(inv.stdin), { id: true, fields: false })
+  if (texts.length > 0) {
+    recordIds = [...texts]
+  } else if (ctx.stdin !== null) {
+    const rows = recordLines(await stdinText(ctx.stdin), { id: true, fields: false })
     recordIds = rows.map((row) => String(row.record_id))
   } else {
     throw new UsageError('RECORD or records on stdin are required')
   }
-  const baseId = scopedBase(config(inv), fl.asStr('base') ?? '')
+  const baseId = scopedBase(config, fl.asStr('base') ?? '')
   const batches = deleteRecords(accessor, baseId, fl.asStr('table') ?? '', recordIds)
   return landed(batches, deletionsJsonl)
 }
 
 async function commentAddBody(
+  config: AirtableConfig,
+  texts: string[],
+  ctx: Context,
   accessor: AirtableAccessor,
-  inv: CLIInvocation,
   fl: FlagView,
 ): Promise<CommandFnResult> {
-  const recordId = oneOperand(inv.texts, 'RECORD')
+  const recordId = oneOperand(texts, 'RECORD')
   let text = fl.asStr('text')
   if (text === undefined) {
-    if (inv.stdin === null) throw new UsageError('--text or text on stdin is required')
-    const piped = await stdinText(inv.stdin)
+    if (ctx.stdin === null) throw new UsageError('--text or text on stdin is required')
+    const piped = await stdinText(ctx.stdin)
     text = piped.endsWith('\n') ? piped.slice(0, -1) : piped
   }
   if (text === '') throw new UsageError('the comment text is empty')
-  const baseId = scopedBase(config(inv), fl.asStr('base') ?? '')
+  const baseId = scopedBase(config, fl.asStr('base') ?? '')
   const comment = await createComment(accessor, baseId, fl.asStr('table') ?? '', recordId, text)
   return [toJsonBytes(normalizeComment(comment)), new IOResult()]
 }

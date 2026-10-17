@@ -17,7 +17,7 @@
 import { describe, expect, it } from 'vitest'
 import { cEscape, diffGeneric, switchWords } from './diff.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 
 const ENC = new TextEncoder()
 
@@ -43,8 +43,8 @@ describe('diffGeneric with stdin', () => {
     const unread = (p: PathSpec): AsyncIterable<Uint8Array> => {
       throw new Error(`read ${p.virtual}`)
     }
-    const opts = { flags: {}, stdin: ENC.encode('abc') } as unknown as CommandOpts
-    const [out, io] = await diffGeneric([DASH, DEV_STDIN], opts, unread, readdir, stat)
+    const ctx = { flags: {}, stdin: ENC.encode('abc') } as unknown as Context
+    const [out, io] = await diffGeneric([DASH, DEV_STDIN], ctx, unread, readdir, stat)
     expect([out, io.exitCode]).toEqual([null, 0])
   })
 
@@ -85,10 +85,10 @@ describe('diff headers', () => {
       Promise.resolve(
         new FileStat({ name: virtual, type: FileType.FILE, modified: '2021-06-15T12:00:00Z' }),
       )
-    const opts = { flags: { u: true }, stdin: new Uint8Array(), statPath } as unknown as CommandOpts
+    const ctx = { flags: { u: true }, stdin: new Uint8Array(), statPath } as unknown as Context
     const [out] = await diffGeneric(
       [operand('a', '/d/a'), operand('b', '/d/b')],
-      opts,
+      ctx,
       read,
       readdir,
       backend,
@@ -115,15 +115,15 @@ describe('diff headers', () => {
           modified: '2026-03-04T05:06:07.123456789Z',
         }),
       )
-    const opts = {
+    const ctx = {
       flags: { u: true, new_file: true },
       stdin: new Uint8Array(),
       statPath,
       env: { TZ: 'Asia/Hong_Kong' },
-    } as unknown as CommandOpts
+    } as unknown as Context
     const [out] = await diffGeneric(
       [operand('a', '/d/a'), operand('gone', '/d/gone')],
-      opts,
+      ctx,
       read,
       readdir,
       backend,
@@ -153,8 +153,8 @@ describe('diff headers', () => {
       )
     }
     const pair = [operand('a b', '/d/a b'), operand('c', '/d/c')]
-    const opts = { flags: { u: true }, stdin: new Uint8Array() } as unknown as CommandOpts
-    const [out, io] = await diffGeneric(pair, opts, read, readdir, statOf)
+    const ctx = { flags: { u: true }, stdin: new Uint8Array() } as unknown as Context
+    const [out, io] = await diffGeneric(pair, ctx, read, readdir, statOf)
     expect(io.exitCode).toBe(1)
     expect(
       new TextDecoder()
@@ -168,7 +168,7 @@ describe('diff headers', () => {
     const gone = {
       flags: { u: true, new_file: true },
       stdin: new Uint8Array(),
-    } as unknown as CommandOpts
+    } as unknown as Context
     const [absent] = await diffGeneric(
       [operand('c', '/d/c'), operand('gone', '/d/gone')],
       gone,

@@ -25,7 +25,7 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, PathSpec } from '../../../types.ts'
 import { gnuBasename } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import type { StatPath } from '../../../view/types.ts'
 import { formatFsError } from '../../../errors/render.ts'
 import { fsStrerror, isEnoent, isFsError } from '../../../errors/fs.ts'
@@ -469,32 +469,32 @@ async function excludedPatterns(
 
 export async function diffGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   read: (p: PathSpec) => AsyncIterable<Uint8Array>,
   readdir: Readdir,
   backendStat: Stat,
 ): Promise<[ByteSource | null, IOResult]> {
-  const flags = parseFlags(opts.flags)
+  const flags = parseFlags(ctx.flags)
   if (paths.length > 2) throw extraOperandError(CommandName.DIFF, paths[2]?.rawPath ?? '')
   if (paths.length < 2)
-    throw missingOperandError(CommandName.DIFF, paths[0]?.rawPath ?? null, opts.argv ?? [])
+    throw missingOperandError(CommandName.DIFF, paths[0]?.rawPath ?? null, ctx.argv ?? [])
   const p0 = paths[0]
   const p1 = paths[1]
   if (p0 === undefined || p1 === undefined) return [null, new IOResult()]
   // Both name the one stdin, which GNU sees as the same file.
   if (isStdin(p0) && isStdin(p1)) return [null, new IOResult()]
-  const stream = stdinStream(read, opts.stdin)
+  const stream = stdinStream(read, ctx.stdin)
   const stat = stdinStat(backendStat)
   const dash0 = p0.rawPath === '-'
   const dash1 = p1.rawPath === '-'
   const errorPaths = [...paths, ...flags.excludeFrom]
-  const links = linksOf(opts)
+  const links = linksOf(ctx)
   const trouble: Uint8Array[] = []
   let output: Uint8Array | undefined
   let differ = false
   try {
     const walk: Walk = {
-      signal: opts.signal,
+      signal: ctx.signal,
       stream,
       readdir,
       // diff compares what each link leads to (its default --dereference),
@@ -502,11 +502,11 @@ export async function diffGeneric(
       stat: (p: PathSpec) => followedStat(stat, links, p),
       flags,
       excluded: await excludedPatterns(flags, stream),
-      switches: switchWords(opts.argv ?? [])
+      switches: switchWords(ctx.argv ?? [])
         .map((word) => ` ${shellQuote(word)}`)
         .join(''),
-      statPath: opts.statPath ?? null,
-      zone: zoneFromEnv(opts.env) ?? UTC_ZONE,
+      statPath: ctx.statPath ?? null,
+      zone: zoneFromEnv(ctx.env) ?? UTC_ZONE,
       trouble,
       real: links === undefined ? null : (virtual: string) => links.resolve(virtual),
     }
@@ -543,7 +543,7 @@ export async function diffGeneric(
       const bothDirs =
         (await stat(p0)).type === FileType.DIRECTORY && (await stat(p1)).type === FileType.DIRECTORY
       if (bothDirs) {
-        for (const path of [p0, p1]) await beforeFullScan(opts.dispatch, path, 'diff')
+        for (const path of [p0, p1]) await beforeFullScan(ctx.dispatch, path, 'diff')
         ;[output, differ] = await diffDirs(walk, p0, p1)
       }
     }

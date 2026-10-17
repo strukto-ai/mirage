@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.lines import join_file_lines, split_lines
 from mirage.commands.builtin.utils.stream import read_stdin_async
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -139,16 +139,16 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> ColumnFlags:
 async def column_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     read_bytes: Callable[..., Awaitable[bytes]],
 ) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     return await column(
         paths,
         read_bytes=read_bytes,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         table=parsed.table,
         separator=parsed.separator,
         output_separator=parsed.output_separator,
-        env=opts.env,
+        env=ctx.env,
     )

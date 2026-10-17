@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from dulwich.index import IndexEntry
@@ -60,12 +61,12 @@ from mirage.commands.cli.builtin.git.worktree import (
     UNTRACKED_NO,
     scan,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.fs import fs_strerror
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileStat, FileType
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.workspace.files import Files
 
 
@@ -166,7 +167,7 @@ def _update_scope(
     start: str,
     tracked: set[str],
     present: set[str],
-    operands: tuple[str, ...],
+    operands: Sequence[str],
 ) -> set[str]:
     """Which tracked paths ``-u`` operands select.
 
@@ -182,7 +183,7 @@ def _update_scope(
         start (str): absolute virtual path git is running in.
         tracked (set[str]): repository-relative paths the index holds.
         present (set[str]): repository-relative paths the walk found.
-        operands (tuple[str, ...]): the pathspecs as typed.
+        operands (Sequence[str]): the pathspecs as typed.
     """
     selected: set[str] = set()
     for operand in operands:
@@ -200,7 +201,7 @@ async def _resolve(
     vfs: Files,
     location: RepoLocation,
     start: str,
-    operands: tuple[str, ...],
+    operands: Sequence[str],
     found: WorkTree,
     tracked: set[str],
     ignores: IgnoreStack,
@@ -218,7 +219,7 @@ async def _resolve(
         vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         start (str): absolute virtual path git is running in.
-        operands (tuple[str, ...]): the pathspecs as typed.
+        operands (Sequence[str]): the pathspecs as typed.
         found (WorkTree): what the walk of the working tree found.
         tracked (set[str]): repository-relative paths the index holds.
         ignores (IgnoreStack): the repository's ignore rules.
@@ -331,7 +332,9 @@ async def stage_tracked(
     )
 
 
-async def add(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
+async def add(
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+) -> tuple[ByteSource | None, IOResult]:
     """Stage working-tree content into the index.
 
     Every path is hashed and written as a loose object, then recorded in
@@ -344,23 +347,23 @@ async def add(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     too, ``-u`` only what the index already holds.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model; it reads its repository
-            through ``inv.view.vfs``.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context; git reads its repository
+            through ``ctx.vfs``.
     """
-    view = inv.view or CLIView()
-    vfs = view.vfs
-    texts = inv.texts
-    flags = inv.flags
+    vfs = ctx.vfs
+    flags = ctx.flags
     fl = FlagView(flags)
     try:
         if vfs is None:
             raise NoWorkspaceError()
-        check_switches(inv, texts)
+        check_switches(ctx, texts)
         parsed = parse_flags(fl)
         if not texts and not parsed.every and not parsed.update:
             raise NothingSpecifiedError()
-        _repo, location = await opened(fl, view, work_tree=True)
+        _repo, location = await opened(ctx, fl, work_tree=True)
         state = await read_index(vfs, location.gitdir)
         tracked = {
             path.decode("utf-8", errors="replace")

@@ -18,7 +18,7 @@ import { mktempGeneric } from '../../generic/mktemp.ts'
 import { pathExists } from '../../utils/copy.ts'
 import { requireOp, type GenericCommand, type GenericCommandFn } from '../adapter.ts'
 
-const mktemp: GenericCommandFn = (ops, accessor, _paths, texts, opts) => {
+const mktemp: GenericCommandFn = (ops, accessor, _paths, texts, ctx) => {
   // The name a pathless mktemp creates is under $TMPDIR or /tmp, which the
   // working directory's mount rarely owns, so the create goes through the
   // dispatcher to whichever mount does. Only a generic run outside a
@@ -27,20 +27,20 @@ const mktemp: GenericCommandFn = (ops, accessor, _paths, texts, opts) => {
   const mkdir = requireOp(ops.mkdir, 'mkdir')
   const write = requireOp(ops.write, 'write')
   const local = (p: PathSpec): PathSpec =>
-    PathSpec.fromStrPath(p.virtual, mountKey(p.virtual, opts.mountPrefix ?? ''))
+    PathSpec.fromStrPath(p.virtual, mountKey(p.virtual, ctx.mountPrefix ?? ''))
   return mktempGeneric(
     texts,
-    opts,
+    ctx,
     async (p) => {
-      if (opts.dispatch !== undefined) await opts.dispatch('mkdir', p, [], { parents: false })
+      if (ctx.dispatch !== undefined) await ctx.dispatch('mkdir', p, [], { parents: false })
       else await mkdir(accessor, local(p))
     },
     async (p, d) => {
-      if (opts.dispatch !== undefined) await opts.dispatch('write', p, [d])
+      if (ctx.dispatch !== undefined) await ctx.dispatch('write', p, [d])
       else await write(accessor, local(p), d)
     },
     async (p) => {
-      if (opts.statPath !== undefined) return (await opts.statPath(p)) !== null
+      if (ctx.statPath !== undefined) return (await ctx.statPath(p)) !== null
       return pathExists((at) => ops.stat(accessor, at), local(p))
     },
   )

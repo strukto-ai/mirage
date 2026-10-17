@@ -15,9 +15,9 @@
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { DWIM_RULES } from './constants.ts'
 import { isBare } from './discover.ts'
 import {
@@ -425,12 +425,12 @@ function plan(
 
 /** `http.extraHeader` from the user's config, then the repository's. */
 export async function configuredHeaders(
-  inv: CLIInvocation,
+  ctx: Context,
   repo: Repo | null,
 ): Promise<Record<string, string>> {
   const values: string[] = []
-  if (inv.env.HOME || inv.env.GIT_CONFIG_GLOBAL !== undefined) {
-    for (const { data } of await globalSources(inv, false))
+  if (ctx.env?.HOME || ctx.env?.GIT_CONFIG_GLOBAL !== undefined) {
+    for (const { data } of await globalSources(ctx, false))
       for (const line of await configLines(new TextDecoder().decode(data)))
         if (line.path === 'http.extraheader') values.push(line.value ?? '')
   }
@@ -475,17 +475,20 @@ async function prune(repo: Repo, adv: Advertisement, specs: readonly Refspec[]):
  * remote's refspecs name, follows the tags that point into what arrived, writes
  * FETCH_HEAD, and prints git's summary to stderr.
  */
-export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function fetch(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    checkSwitches(inv, inv.texts)
-    const view = inv.view ?? {}
-    if (view.vfs === undefined) throw new NoWorkspaceError()
-    const repo = await opened(fl, view)
+    checkSwitches(ctx, texts)
+    if (ctx.vfs === undefined) throw new NoWorkspaceError()
+    const repo = await opened(ctx, fl)
     const { location } = repo
     const values = (path: string): Promise<string[]> => configValues(repo.vfs, location, path)
     const head = await readHead(repo.vfs, location.gitdir)
-    const texts = [...inv.texts]
     let name = texts[0] ?? null
     if (name === null) {
       name =
@@ -508,7 +511,7 @@ export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
     const start = bare ? location.gitdir : location.worktree
     let transport: Transport
     try {
-      transport = await openTransport(url, start, view, await configuredHeaders(inv, repo))
+      transport = await openTransport(ctx, url, start, await configuredHeaders(ctx, repo))
     } catch (err) {
       if (err instanceof MissingRepositoryError)
         throw new GitError(`'${url}' does not appear to be a git repository\n${UNREACHABLE}`)
@@ -527,7 +530,7 @@ export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
     const follow = !fl.asBool('no_tags') && tagOpt.at(-1) !== '--no-tags'
     const [fetched, taken] = await fetchObjects(repo, transport, adv, wants, follow)
     const pruned = fl.asBool('prune') && !typed.length ? await prune(fetched, adv, configured) : []
-    const reason = ['fetch', ...leafArgs(inv.argv, 'fetch')].join(' ')
+    const reason = ['fetch', ...leafArgs(ctx.argv ?? [], 'fetch')].join(' ')
     const [rows, rejected] = await updateRefs(fetched, taken, reason, !bare)
     await writeFile(repo.vfs, location.gitdir.join(FETCH_HEAD), ENC.encode(fetchHead(url, taken)))
     const shown = [...pruned, ...rows.filter((line) => line.code !== '=' || fl.asBool('verbose'))]
@@ -543,7 +546,7 @@ export async function fetch(inv: CLIInvocation): Promise<CommandFnResult> {
  * fetch's refusal by a read-only mount, at FETCH_HEAD, named the way git names
  * it from the top of the work tree.
  */
-export const fetchReadOnly: ReadOnlyRefusal = (_inv, location) =>
+export const fetchReadOnly: ReadOnlyRefusal = (_texts, _ctx, location) =>
   new FetchHeadReadOnlyError(
     location === null || location.gitdir.virtual === location.worktree.join('.git').virtual
       ? `.git/${FETCH_HEAD}`

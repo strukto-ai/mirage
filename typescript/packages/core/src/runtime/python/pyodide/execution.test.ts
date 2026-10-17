@@ -746,7 +746,8 @@ describe('Pyodide command cwd', { timeout: 120_000 }, () => {
         new WorkspaceBinding(
           () => Promise.reject(new Error('root mount must not be read')),
           new PrefixResolver(() => ['/']),
-          (binding) => captureBinding(binding, { cwd: PathSpec.fromStrPath('/unservable/nested') }),
+          (binding) =>
+            captureBinding(binding, { ctx: { cwd: PathSpec.fromStrPath('/unservable/nested') } }),
         ),
       )
       const before = await defaultCwd(rt)

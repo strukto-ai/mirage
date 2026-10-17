@@ -15,7 +15,7 @@
 import type { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { quoteText } from '../../quote.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -36,9 +36,9 @@ function idCmd(
   _accessor: Accessor,
   _paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): CommandFnResult {
-  const fl = new FlagView(opts.flags, specOf('id'))
+  const fl = new FlagView(ctx.flags, specOf('id'))
   if (fl.asBool('context'))
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(CONTEXT) })]
   const only = ['user', 'group', 'groups'].filter((dest) => fl.asBool(dest))
@@ -49,7 +49,7 @@ function idCmd(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(NAMES_NEED) })]
   if (only.length === 0 && zero)
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(ZERO_DEFAULT) })]
-  const identity = identityOf(opts)
+  const identity = identityOf(ctx)
   const user = identity.profile ?? UNKNOWN_NAME
   const group = user
   const end = zero ? '\0' : '\n'

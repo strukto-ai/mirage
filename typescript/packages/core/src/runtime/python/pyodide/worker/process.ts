@@ -166,7 +166,7 @@ export class GuestProcessTable {
       return {}
     }
     if (request.op === 'resolve' || request.op === 'spawn') {
-      if (request.op === 'spawn') this.context.processes?.checkSpawn()
+      if (request.op === 'spawn') this.context.ctx.processes?.checkSpawn()
       const files = RuntimeFiles.of(this.context)
       const head = request.argv?.[0]
       if (typeof head !== 'string' || !head)
@@ -203,7 +203,7 @@ export class GuestProcessTable {
         throw Object.assign(new Error(`not a directory: ${cwd}`), { code: 'ENOTDIR' })
       request.argv = [found, ...(request.argv ?? []).slice(1)]
 
-      if (this.context.processes?.spawn === undefined)
+      if (this.context.ctx.processes?.spawn === undefined)
         throw new Error('runtime has no process spawn entry point')
       if (
         !Array.isArray(request.argv) ||
@@ -214,7 +214,7 @@ export class GuestProcessTable {
       if (typeof request.cwd !== 'string' || !request.cwd.startsWith('/'))
         throw new Error('invalid cwd')
       if (this.closed) throw new Error('guest invocation has ended')
-      const child = this.context.processes.spawn({
+      const child = this.context.ctx.processes.spawn({
         argv: request.argv,
         cwd: PathSpec.fromStrPath(request.cwd),
         env: request.env ?? {},

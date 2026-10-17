@@ -288,23 +288,23 @@ export async function guardOutput(
  * Undefined without a timeout. A lazy output's own timeout leaves the
  * command's signal alone, so a scan inside one pull checks this as well.
  */
-export function deadlineCheck(opts: {
+export function deadlineCheck(ctx: {
   timeoutSeconds?: number
   command?: string
 }): (() => void) | undefined {
-  const seconds = opts.timeoutSeconds
+  const seconds = ctx.timeoutSeconds
   if (seconds === undefined || seconds <= 0) return undefined
   const deadline = performance.now() + seconds * 1000
   return () => {
-    if (performance.now() >= deadline) throw new CommandTimeoutError(opts.command ?? '?', seconds)
+    if (performance.now() >= deadline) throw new CommandTimeoutError(ctx.command ?? '?', seconds)
   }
 }
 
 /** An invocation's input under its abort and its deadline; `split` as in chunks. */
 export function guardInput(
   source: ByteSource,
-  opts: { signal?: AbortSignal; timeoutSeconds?: number; command?: string },
+  ctx: { signal?: AbortSignal; timeoutSeconds?: number; command?: string },
   split = true,
 ): AsyncIterable<Uint8Array> {
-  return chunks(source, opts.signal, split, deadlineCheck(opts))
+  return chunks(source, ctx.signal, split, deadlineCheck(ctx))
 }

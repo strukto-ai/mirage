@@ -18,7 +18,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import {
   NEVER_MATCH,
   compilePattern,
@@ -98,19 +98,12 @@ function parseFlags(fl: FlagView, neverMatch: boolean): ZgrepFlags {
 export async function zgrepGeneric(
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   stat?: StatFn,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('zgrep'))
-  const resolution = await resolvePattern(
-    'zgrep',
-    texts,
-    opts.flags,
-    paths,
-    opts.mountPrefix,
-    stream,
-  )
+  const fl = new FlagView(ctx.flags, specOf('zgrep'))
+  const resolution = await resolvePattern('zgrep', texts, ctx.flags, paths, ctx.mountPrefix, stream)
   if (resolution.error !== null) {
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(resolution.error) })]
   }
@@ -133,7 +126,7 @@ export async function zgrepGeneric(
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(err.message + '\n') })]
   }
   const { syntax, fixed: fixedString, filesOnly, filesWithoutMatch, quiet, maxCount } = parsed
-  const utf8 = utf8Locale(opts.env)
+  const utf8 = utf8Locale(ctx.env)
   // GNU grep 3.11 skips regex validation and selection under -m0.
   const pattern =
     maxCount === 0
@@ -152,7 +145,7 @@ export async function zgrepGeneric(
 
   const multi = paths.length > 1
   const showFilename = parsed.forceFilename || (multi && !parsed.suppressFilename)
-  const resolver = linkResolver(opts)
+  const resolver = linkResolver(ctx)
   const warnings =
     pattern === null || neverMatch || fixedString ? '' : patternWarnings(rawPattern, syntax)
   const result = new IOResult({
@@ -171,7 +164,7 @@ export async function zgrepGeneric(
     let failed = false
     for (const p of paths.length > 0 ? paths : [STDIN_OPERAND]) {
       const [body, io] = await decompressInputs([p], stream, {
-        stdin: opts.stdin,
+        stdin: ctx.stdin,
         toStdout: true,
         force: true,
         quiet: true,
@@ -244,5 +237,5 @@ export async function zgrepGeneric(
       }
     }
   }
-  return [new OutputStream(run(), () => closeQuietly(opts.stdin)), result]
+  return [new OutputStream(run(), () => closeQuietly(ctx.stdin)), result]
 }

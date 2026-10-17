@@ -8,7 +8,7 @@ from mirage.commands.builtin.generic.du import (
     rollup,
     to_virtual,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.io.types import SizedRun
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -76,7 +76,7 @@ async def test_backend_error_on_the_content_probe_reads_as_missing():
     out, io = await du_generic(
         [_spec("/data/nosuch", "nosuch")],
         [],
-        CommandOpts(flags={"c": True}),
+        Context(flags={"c": True}),
         lambda targets: _ok(list(targets)),
         stat,
         compute_size,

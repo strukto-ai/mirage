@@ -15,13 +15,13 @@
 import { zgrepGeneric } from '../../generic/zgrep.ts'
 import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const zgrep: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
-  const idx = opts.index ?? undefined
+const zgrep: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   return zgrepGeneric(
     resolved,
     texts,
-    opts,
+    ctx,
     (p) => ops.readStream(accessor, p, idx),
     (p) => ops.stat(accessor, p),
   )

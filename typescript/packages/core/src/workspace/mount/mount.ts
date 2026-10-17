@@ -38,13 +38,7 @@ import { buildIndex } from '../../cache/index/factory.ts'
 import { withIndexLock } from '../../cache/index/lock.ts'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type {
-  CommandFnResult,
-  CommandOpts,
-  ExecContext,
-  Command,
-  CommandIO,
-} from '../../commands/config.ts'
+import type { CommandFnResult, Context, Command, CommandIO } from '../../commands/config.ts'
 import { STDIN_DASH_COMMANDS, STDIN_DASH_LEADING } from '../../commands/spec/constants.ts'
 import { hasInjectedVersion } from '../../commands/spec/standard.ts'
 import { ROOT_CWD } from '../../commands/constants.ts'
@@ -274,10 +268,10 @@ export interface MountInit {
 // follow are bound around it, and handed to the handler's table as well. No
 // dispatcher (a mount driven directly) binds nothing. Mirrors the Python
 // set_walk_probe binding in Mount.run_command.
-function walkProbeOf(context: ExecContext): WalkProbe | null {
-  const dispatch = context.dispatch
+function walkProbeOf(ctx: Partial<Context>): WalkProbe | null {
+  const dispatch = ctx.dispatch
   if (dispatch === undefined) return null
-  return { stat: dispatchStat(dispatch), follow: linkFollow(linkView(context.vfs)) }
+  return { stat: dispatchStat(dispatch), follow: linkFollow(linkView(ctx.vfs)) }
 }
 
 export class MountEntry {
@@ -1476,10 +1470,11 @@ export class MountEntry {
     paths: PathSpec[],
     texts: string[],
     flags: Record<string, FlagValue>,
-    context: ExecContext = {},
+    ctx: Partial<Context> = {},
+    limitOverride: Limit | null = null,
   ): Promise<[ByteSource | null, IOResult]> {
     return this.use(async (): Promise<[ByteSource | null, IOResult]> => {
-      const handlers = await this.pickHandlers(cmdName, paths, context)
+      const handlers = await this.pickHandlers(cmdName, paths, ctx)
       if (handlers.length === 0) {
         return [
           null,
@@ -1490,15 +1485,22 @@ export class MountEntry {
         ]
       }
       const keyedPaths = this.keyedPaths(cmdName, paths)
-      const probe = walkProbeOf(context)
-      const cmdOpts = this.commandOpts(cmdName, this.keyedFlags(flags), context, probe, keyedPaths)
+      const probe = walkProbeOf(ctx)
+      const runCtx = this.commandCtx(cmdName, this.keyedFlags(flags), ctx, probe, keyedPaths)
       return this.inCommandScope(probe, async (): Promise<[ByteSource | null, IOResult]> => {
         for (const cmd of handlers) {
           const refusal =
-            this.readOnlyRefusal(cmdName, cmd, flags, context.access) ??
+            this.readOnlyRefusal(cmdName, cmd, flags, ctx.access) ??
             this.unenforcedRefusal(cmdName, cmd)
           if (refusal !== null) return [null, refusal]
-          const result = await this.runHandler(cmdName, cmd, keyedPaths, texts, cmdOpts, context)
+          const result = await this.runHandler(
+            cmdName,
+            cmd,
+            keyedPaths,
+            texts,
+            runCtx,
+            limitOverride,
+          )
           if (result !== null) return this.wrapOutput(cmdName, cmd, keyedPaths, result)
         }
         return [null, new IOResult()]
@@ -1523,7 +1525,7 @@ export class MountEntry {
   private async pickHandlers(
     cmdName: string,
     paths: PathSpec[],
-    context: ExecContext,
+    ctx: Partial<Context>,
   ): Promise<Command[]> {
     let extension =
       paths.length > 0 && paths[0] !== undefined ? getExtension(paths[0].virtual) : null
@@ -1532,10 +1534,10 @@ export class MountEntry {
       extension !== null &&
       extension !== '' &&
       first !== undefined &&
-      context.statPath !== undefined &&
+      ctx.statPath !== undefined &&
       this.cmds.has(cmdKey(cmdName, extension))
     ) {
-      const entry = await context.statPath(first)
+      const entry = await ctx.statPath(first)
       if (entry !== null && entry.type === FileType.DIRECTORY) extension = null
     }
     return this.resolveCascade(cmdName, extension, this.cmds, this.generalCmds)
@@ -1607,47 +1609,37 @@ export class MountEntry {
    * (links, nested mount roots, a trailing slash) are in view; the VFS's
    * glob hook serves the shell tier and cannot see them, so expanding here
    * would lose what the handler needs. Python's dispatcher never expands
-   * either. Mirrors Python's MountEntry._command_opts.
+   * either. Mirrors Python's MountEntry._command_ctx.
    */
-  private commandOpts(
+  private commandCtx(
     cmdName: string,
     flags: Record<string, FlagValue>,
-    context: ExecContext,
+    ctx: Partial<Context>,
     probe: WalkProbe | null,
     paths: readonly PathSpec[],
-  ): CommandOpts {
-    const io = this.ioFor(context.access)
+  ): Context {
+    const io = this.ioFor(ctx.access)
+    const prefix = rstripSlash(this.prefix)
+    const cwd = (ctx.cwd ?? ROOT_CWD).virtual
     return {
-      ...(context.admission === undefined ? {} : { admission: context.admission }),
-      ...(context.access === undefined ? {} : { access: context.access }),
-      stdin: context.stdin ?? null,
+      ...ctx,
+      stdin: ctx.stdin ?? null,
       flags,
-      mountPrefix: rstripSlash(this.prefix),
+      mountPrefix: prefix,
       command: cmdName,
-      cwd: context.cwd ?? ROOT_CWD,
+      cwd: new PathSpec({
+        virtual: cwd,
+        directory: cwd,
+        vfsPath: mountKey(cwd, prefix),
+        resolved: false,
+      }),
       index: this.index,
       io: {
-        ...dispatchedIo(io, context.dispatch, paths),
-        ...(context.admission === undefined ? {} : { admission: context.admission }),
-        ...(context.access === undefined ? {} : { access: context.access }),
+        ...dispatchedIo(io, ctx.dispatch, paths),
+        ...(ctx.admission === undefined ? {} : { admission: ctx.admission }),
+        ...(ctx.access === undefined ? {} : { access: ctx.access }),
         ...(probe === null ? {} : { walkProbe: probe }),
       },
-      ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
-      ...(context.vfs !== undefined ? { vfs: context.vfs } : {}),
-      ...(context.sessionId !== undefined ? { sessionId: context.sessionId } : {}),
-      ...(context.env !== undefined ? { env: context.env } : {}),
-      ...(context.sessionView !== undefined ? { sessionView: context.sessionView } : {}),
-      ...(context.processes !== undefined ? { processes: context.processes } : {}),
-      ...(context.execAllowed !== undefined ? { execAllowed: context.execAllowed } : {}),
-      ...(context.execPathAllowed !== undefined
-        ? { execPathAllowed: context.execPathAllowed }
-        : {}),
-      ...(context.runtime !== undefined ? { runtime: context.runtime } : {}),
-      ...(context.followOperands !== undefined ? { followOperands: context.followOperands } : {}),
-      ...(context.statPath !== undefined ? { statPath: context.statPath } : {}),
-      ...(context.readdirPath !== undefined ? { readdirPath: context.readdirPath } : {}),
-      ...(context.shell !== undefined ? { shell: context.shell } : {}),
-      ...(context.argv !== undefined ? { argv: context.argv } : {}),
     }
   }
 
@@ -1766,29 +1758,27 @@ export class MountEntry {
     cmd: Command,
     paths: PathSpec[],
     texts: string[],
-    cmdOpts: CommandOpts,
-    context: ExecContext,
+    ctx: Context,
+    limitOverride: Limit | null,
   ): Promise<CommandFnResult> {
     const resolvedLimit = resolveLimit(
       cmdName,
       [],
       cmd.limit,
-      context.limitOverride ?? this.commandLimits.get(cmdName) ?? null,
+      limitOverride ?? this.commandLimits.get(cmdName) ?? null,
     )
     const cmdTimeout = resolvedLimit !== null ? resolvedLimit.timeoutSeconds : null
     const guard = cmdTimeout !== null && cmdTimeout > 0 ? new AbortController() : null
-    const runSignal = mergeSignals(guard?.signal, context.signal)
-    const runOpts =
+    const runSignal = mergeSignals(guard?.signal, ctx.signal)
+    const runCtx =
       runSignal !== undefined
         ? {
-            ...cmdOpts,
+            ...ctx,
             signal: runSignal,
             ...(cmdTimeout !== null && cmdTimeout > 0 ? { timeoutSeconds: cmdTimeout } : {}),
           }
-        : cmdOpts
-    const running = Promise.resolve(
-      cmd.fn(this.viewFor(context.access).accessor, paths, texts, runOpts),
-    )
+        : ctx
+    const running = Promise.resolve(cmd.fn(this.viewFor(ctx.access).accessor, paths, texts, runCtx))
     try {
       return await runWithTimeout(joinOrAbort(running, runSignal), cmdTimeout, cmdName)
     } catch (err) {

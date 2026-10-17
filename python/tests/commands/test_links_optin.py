@@ -20,7 +20,7 @@ import mirage.commands.builtin as builtin
 from mirage.commands.config import Command
 
 # The families whose generics read the command's links (ls/stat/find/
-# file). Since CommandOpts carries the files into every handler, link
+# file). Since Context carries the files into every handler, link
 # awareness is inherited by delegating to the family generic — so the invariant
 # worth pinning is the delegation itself: a bespoke wrapper that walks
 # its own tree cannot see a link, still runs, still exits 0, and nothing
@@ -70,9 +70,9 @@ def _registered() -> tuple[list[Command], list[str]]:
 def test_every_link_aware_shadow_delegates_to_the_generic():
     """A bespoke command in a link-aware family must route through it.
 
-    ``CommandOpts`` hands every handler the namespace facts, but only
+    ``Context`` hands every handler the namespace facts, but only
     the family generic interprets them; a wrapper that walks its own
-    tree opts the whole backend out of symlinks without failing
+    tree ctx the whole backend out of symlinks without failing
     anything. Mirrors the TS state, where every bespoke find/ls routes
     through the generic (``findGeneric``/``walkFind``).
     """

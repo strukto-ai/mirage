@@ -66,10 +66,11 @@ from mirage.commands.cli.builtin.git.util import (
     check_switches,
     fatal,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 REMOTES_PREFIX = "refs/remotes/"
 COMMIT = "commit"
@@ -118,7 +119,7 @@ def expected_kind(known: set[Ref], name: str) -> str:
 
 
 async def switch(
-    inv: CLIInvocation[None],
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Switch to a branch, creating it under ``-c``.
 
@@ -130,18 +131,18 @@ async def switch(
     agent loses commits in.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model; it reads its repository
-            through ``inv.view.vfs``.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context; git reads its repository
+            through ``ctx.vfs``.
     """
-    view = inv.view or CLIView()
-    vfs = view.vfs
-    texts = inv.texts
-    fl = FlagView(inv.flags)
+    vfs = ctx.vfs
+    fl = FlagView(ctx.flags)
     try:
         if vfs is None:
             raise NoWorkspaceError()
-        check_switches(inv, texts)
+        check_switches(ctx, texts)
         flags = parse_flags(fl)
         creating = flags.create is not None
         if creating and flags.detach:
@@ -152,7 +153,7 @@ async def switch(
         # own default; only an attaching switch needs a branch to name.
         if not creating and not texts and not flags.detach:
             raise MissingBranchArgumentError()
-        repo, location = await opened(fl, view, work_tree=True)
+        repo, location = await opened(ctx, fl, work_tree=True)
         mode = await track_mode(vfs, location)
         head = await read_head(vfs, location.gitdir)
         known = repo.refs.allkeys()
@@ -294,18 +295,19 @@ async def switch(
 
 
 def switch_read_only(
-    inv: CLIInvocation[None], location: RepoLocation | None
+    texts: list[str], ctx: Context, location: RepoLocation | None
 ) -> GitError:
     """switch's refusal by a read-only mount: the new branch's ref under
     ``-c``, whose lock git takes first, and the index's otherwise.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
+        texts (list[str]): the line's operands.
+        ctx (Context): the line's context.
         location (RepoLocation | None): the repository it opened.
     """
-    name = FlagView(inv.flags).as_str("create")
+    name = FlagView(ctx.flags).as_str("create")
     if name is None:
-        return index_locked(inv, location)
+        return index_locked(texts, ctx, location)
     ref = f"{BRANCH_PREFIX}{name}"
     root = location.commondir.virtual if location is not None else ".git"
     return RefReadOnlyError(ref, posixpath.join(root, ref))

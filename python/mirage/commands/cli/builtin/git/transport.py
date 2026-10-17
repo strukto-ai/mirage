@@ -39,7 +39,7 @@ from mirage.commands.cli.builtin.git.io import (
 )
 from mirage.commands.cli.builtin.git.refs import read_head
 from mirage.commands.cli.builtin.git.repo import open_repo
-from mirage.commands.cli.types import CLIView
+from mirage.commands.config import Context
 from mirage.types import PathSpec
 
 FLUSH = b"0000"
@@ -460,9 +460,9 @@ def extra_headers(values: list[bytes]) -> dict[str, str]:
 
 
 async def open_transport(
+    ctx: Context,
     url: str,
     start: PathSpec,
-    view: CLIView,
     headers: dict[str, str],
     credentials: Mapping[str, str] | None = None,
 ) -> LocalTransport | HttpTransport:
@@ -474,9 +474,10 @@ async def open_transport(
     have, which git words the same way.
 
     Args:
+        ctx (Context): the line's context, whose files hold a workspace
+            repository.
         url (str): the remote as typed or configured.
         start (PathSpec): the directory a relative path resolves against.
-        view (CLIView): the invocation's view.
         headers (dict[str, str]): extra HTTP headers from config.
         credentials (Mapping[str, str] | None): an Authorization for the
             URL's origin when it carries no userinfo, dropped with it on a
@@ -490,7 +491,7 @@ async def open_transport(
         raise GitError(f"Unable to find remote helper for '{scheme.group(1)}'")
     if scheme is None and SCP_LIKE.match(url):
         raise GitError("Unable to find remote helper for 'ssh'")
-    vfs = view.vfs
+    vfs = ctx.vfs
     if vfs is None:
         raise NoWorkspaceError()
     path = urlsplit(url).path if scheme is not None else url

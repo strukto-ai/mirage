@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../../types.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -49,7 +50,7 @@ async function runWget(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     dispatch: (_op, path, args) => {
       writes[path.virtual] = args?.[0] as Uint8Array
       return Promise.resolve([null, new IOResult()])

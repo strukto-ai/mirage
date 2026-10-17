@@ -19,10 +19,10 @@ import { searchHandlers, searchSpec } from './search.ts'
 import { GhConfigSchema } from '../../../../core/github/config.ts'
 import { BOOLEAN, HELP_TOPICS, REPO_EDIT_FIELDS } from './constants.ts'
 import type { RepoEditField } from './types.ts'
-import { type CLIInvocation } from '../../types.ts'
 import { findChild, nodeHelp } from '../../walk.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { Argument, UsageStyle } from '../../../spec/types.ts'
 import { api } from './api.ts'
@@ -513,16 +513,21 @@ const ENC = new TextEncoder()
  * first word names one, and otherwise gh's unknown-topic answer, which goes to
  * stderr with the list of commands and still exits 0.
  */
-function helpCmd(inv: CLIInvocation): CommandFnResult {
+function helpCmd(
+  _config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  _ctx: Context,
+): CommandFnResult {
   let node: CommandSpec = GH.spec
   const path: string[] = []
-  for (const word of inv.texts) {
+  for (const word of texts) {
     const child = findChild(node, word)
     if (child === null) break
     node = child
     path.push(child.name)
   }
-  const first = inv.texts[0]
+  const first = texts[0]
   if (first !== undefined && path.length === 0) {
     const topic = HELP_TOPICS[first]
     if (topic !== undefined) return [ENC.encode(topic), new IOResult()]
@@ -530,7 +535,7 @@ function helpCmd(inv: CLIInvocation): CommandFnResult {
       .filter((child) => child.name !== 'help')
       .map((child) => `  ${child.name}\n`)
       .sort(compareCodePoints)
-    const asked = inv.texts.map((word) => `\`${word}\``).join(' ')
+    const asked = texts.map((word) => `\`${word}\``).join(' ')
     const usage = `Usage:  gh <command> <subcommand> [flags]\n\nAvailable commands:\n${names.join('')}`
     return [null, new IOResult({ stderr: ENC.encode(`Unknown help topic [${asked}]\n${usage}`) })]
   }

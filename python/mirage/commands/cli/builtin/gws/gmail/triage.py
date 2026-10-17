@@ -14,7 +14,7 @@
 
 import json
 
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.gmail.messages import (
     _extract_header,
@@ -25,16 +25,17 @@ from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 
 async def triage(
-    inv: CLIInvocation[GoogleConfig],
+    config: GoogleConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     query = fl.as_str("query") or "is:unread"
     max_results = fl.as_int("max") or 20
     summaries = []
-    async with TokenManager(inv.config) as token_manager:
+    async with TokenManager(config) as token_manager:
         msgs = await list_messages(
             token_manager, query=query, max_results=max_results
         )

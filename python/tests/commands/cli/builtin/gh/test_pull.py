@@ -24,22 +24,23 @@ from mirage.commands.cli.builtin.gh.pull import (
     list_cmd,
     view_cmd,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.core.github.config import GhConfig
 from mirage.io.types import materialize
+from mirage.types import PathSpec
 
 CONFIG = GhConfig(token="t")
 
 
-def _inv(texts=(), flags=None) -> CLIInvocation:
-    return CLIInvocation(
+def _args(
+    texts=(), flags=None
+) -> tuple[GhConfig, list[PathSpec], list[str], Context]:
+    return (
         CONFIG,
-        argv=(),
-        texts=tuple(texts),
-        flags=flags or {},
-        stdin=None,
-        view=None,
+        [],
+        list(texts),
+        Context(argv=(), flags=flags or {}, stdin=None, vfs=None),
     )
 
 
@@ -81,7 +82,7 @@ async def test_a_cancelled_check_does_not_fail_the_command(monkeypatch):
 
     monkeypatch.setitem(checks_cmd.__globals__, "pull_checks", checks)
 
-    _, io = await checks_cmd(_inv(texts=["5"], flags={"repo": "o/r"}))
+    _, io = await checks_cmd(*_args(texts=["5"], flags={"repo": "o/r"}))
 
     assert io.exit_code == 0
 
@@ -93,7 +94,7 @@ async def test_a_failing_check_still_exits_one(monkeypatch):
 
     monkeypatch.setitem(checks_cmd.__globals__, "pull_checks", checks)
 
-    _, io = await checks_cmd(_inv(texts=["5"], flags={"repo": "o/r"}))
+    _, io = await checks_cmd(*_args(texts=["5"], flags={"repo": "o/r"}))
 
     assert io.exit_code == 1
 
@@ -123,7 +124,7 @@ async def test_name_only_prints_the_b_side_of_each_header(monkeypatch):
     monkeypatch.setitem(diff_cmd.__globals__, "diff_pull", diff)
 
     out, io = await diff_cmd(
-        _inv(texts=["5"], flags={"repo": "o/r", "name_only": True})
+        *_args(texts=["5"], flags={"repo": "o/r", "name_only": True})
     )
 
     assert io.exit_code == 0
@@ -205,7 +206,7 @@ async def _json(result) -> object:
 
 
 def _view(fields: str):
-    return view_cmd(_inv(texts=["5"], flags={"repo": "o/r", "json": fields}))
+    return view_cmd(*_args(texts=["5"], flags={"repo": "o/r", "json": fields}))
 
 
 def test_every_field_gh_offers_is_offered():
@@ -494,7 +495,7 @@ async def test_pr_list_json_lists_over_graphql_with_ghs_states(monkeypatch):
 
     out = await _json(
         await list_cmd(
-            _inv(
+            *_args(
                 flags={
                     "repo": "o/r",
                     "json": "number,files",

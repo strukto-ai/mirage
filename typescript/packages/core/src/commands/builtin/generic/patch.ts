@@ -17,7 +17,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 import { lstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { extraOperandError } from '../../spec/usage.ts'
@@ -542,10 +542,10 @@ async function patchFile(
  */
 async function loadPatchData(
   source: PathSpec | null,
-  opts: CommandOpts,
+  ctx: Context,
   read: (p: PathSpec) => Promise<Uint8Array>,
 ): Promise<Uint8Array | string | null> {
-  if (source === null) return readStdinAsync(opts.stdin)
+  if (source === null) return readStdinAsync(ctx.stdin)
   try {
     return await read(source)
   } catch (err) {
@@ -579,14 +579,14 @@ function parseFlags(bag: Record<string, FlagValue>): PatchFlags {
 
 export async function patchGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   read: (p: PathSpec) => Promise<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
-  const parsed = parseFlags(opts.flags)
+  const parsed = parseFlags(ctx.flags)
   if (paths.length > 2) throw extraOperandError(CommandName.PATCH, paths[2]?.rawPath ?? '')
   const { strip: stripCount, reverse: reverseMode, forward: forwardOnly, inputPath } = parsed
-  const mountPrefix = opts.mountPrefix ?? ''
+  const mountPrefix = ctx.mountPrefix ?? ''
   // `patch [ORIGFILE [PATCHFILE]]`: the second operand is the patch file,
   // ahead of -i, and the first is the one file every hunk goes to in place
   // of the names the patch's headers carry. A `-i` classified as a path
@@ -599,7 +599,7 @@ export async function patchGeneric(
       : inputPath !== null
         ? PathSpec.fromStrPath(inputPath, mountKey(inputPath, mountPrefix))
         : null)
-  const loaded = await loadPatchData(source, opts, read)
+  const loaded = await loadPatchData(source, ctx, read)
   if (typeof loaded === 'string') {
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(loaded) })]
   }

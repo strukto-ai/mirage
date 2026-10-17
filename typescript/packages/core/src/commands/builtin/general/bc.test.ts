@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -31,7 +32,7 @@ async function runBc(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
     stdin: ENC.encode(stdin),
     flags,
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     ...(env === undefined ? {} : { env }),
   })
   if (result === null) return { out: '', err: '', exitCode: -1 }

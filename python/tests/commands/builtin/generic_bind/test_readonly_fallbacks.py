@@ -24,7 +24,7 @@ from mirage.commands.builtin.generic_bind.builders.shuf import (
     shuf as shuf_builder,
 )
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import materialize
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 
@@ -87,7 +87,7 @@ def _spec(original: str) -> PathSpec:
 @pytest.mark.asyncio
 async def test_find_walks_tree_without_native_find_op():
     out, io = await find_builder(
-        _ops(), object(), [_spec("/g")], [], CommandOpts(flags={"type": "f"})
+        _ops(), object(), [_spec("/g")], [], Context(flags={"type": "f"})
     )
     text = (await materialize(out)).decode()
     assert "/g/a.txt" in text
@@ -98,7 +98,7 @@ async def test_find_walks_tree_without_native_find_op():
 @pytest.mark.asyncio
 async def test_du_walks_tree_without_native_du_op():
     out, _ = await du_builder(
-        _ops(), object(), [_spec("/g")], [], CommandOpts(flags={"s": True})
+        _ops(), object(), [_spec("/g")], [], Context(flags={"s": True})
     )
     text = (await materialize(out)).decode()
     # alpha\n (6) + bravo\n (6) = 12 bytes summed by the readdir walk.
@@ -109,7 +109,7 @@ async def test_du_walks_tree_without_native_du_op():
 @pytest.mark.asyncio
 async def test_shuf_reads_without_a_write_op():
     out, io = await shuf_builder(
-        _ops(), object(), [_spec("/g/a.txt")], [], CommandOpts()
+        _ops(), object(), [_spec("/g/a.txt")], [], Context()
     )
     assert (await materialize(out)).decode() == "alpha\n"
     assert io.exit_code == 0
@@ -123,5 +123,5 @@ async def test_shuf_output_flag_names_the_missing_write_op():
             object(),
             [_spec("/g/a.txt")],
             [],
-            CommandOpts(flags={"output": _spec("/g/out.txt")}),
+            Context(flags={"output": _spec("/g/out.txt")}),
         )

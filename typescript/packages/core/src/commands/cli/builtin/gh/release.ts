@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CommandFnResult } from '../../../config.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 import {
   createRelease,
   getLatestRelease,
@@ -76,22 +76,32 @@ function listText(rows: Record<string, unknown>[]): string {
     .join('')
 }
 
-export async function listCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function listCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const rows = (
-    await listReleases(ghTransport(inv.config), repoFor(inv, fl), fl.asInt('limit') ?? 30)
+    await listReleases(ghTransport(config), repoFor(config, fl), fl.asInt('limit') ?? 30)
   ).map(release)
   const latest = rows.find((row) => !row.isDraft && !row.isPrerelease)
   if (latest !== undefined) latest.isLatest = true
   return typedOut(rows, fl, listText(rows), RELEASE_FIELDS)
 }
 
-export async function viewCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const tag = inv.texts[0] ?? ''
+export async function viewCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const tag = texts[0] ?? ''
   if (tag === '') throw new Error('a release tag is required')
-  const transport = ghTransport(inv.config)
-  const ref = repoFor(inv, fl)
+  const transport = ghTransport(config)
+  const ref = repoFor(config, fl)
   const row = release(await getRelease(transport, ref, tag))
   if (csvValues([fl.asStr('json') ?? '']).includes('isLatest')) {
     const latest = await getLatestRelease(transport, ref)
@@ -102,20 +112,25 @@ export async function viewCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   return typedOut(row, fl, human, RELEASE_FIELDS)
 }
 
-export async function createCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const tag = inv.texts[0] ?? ''
+export async function createCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const tag = texts[0] ?? ''
   if (tag === '') throw new Error('a release tag is required in noninteractive mode')
   const body: Record<string, unknown> = {
     tag_name: tag,
     name: fl.asStr('title') ?? tag,
-    body: (await bodyValue(inv, fl, { value: 'notes', file: 'notes_file' })) ?? '',
+    body: (await bodyValue(ctx, fl, { value: 'notes', file: 'notes_file' })) ?? '',
     draft: ghBool(fl, 'draft'),
     prerelease: ghBool(fl, 'prerelease'),
     generate_release_notes: ghBool(fl, 'generate_notes'),
   }
   const target = fl.asStr('target')
   if (target !== undefined) body.target_commitish = target
-  const created = release(await createRelease(ghTransport(inv.config), repoFor(inv, fl), body))
+  const created = release(await createRelease(ghTransport(config), repoFor(config, fl), body))
   return textOut(`${textValue(created.url)}\n`)
 }

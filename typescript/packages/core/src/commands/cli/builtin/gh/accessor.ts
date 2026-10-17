@@ -27,8 +27,7 @@ import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
 import { PathSpec } from '../../../../types.ts'
 import { fsStrerror, isEnoent, isEnotdir } from '../../../../errors/fs.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import type { CommandFnResult } from '../../../config.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { CONNECT_HINT, GITHUB_HOST, GOJQ_RAISED } from './constants.ts'
 
 const ENC = new TextEncoder()
@@ -119,22 +118,22 @@ export function ghBool(fl: FlagView, name: string): boolean {
   return fl.asBool(name) || fl.asStr(name) === 'true'
 }
 
-export function repoFor(inv: CLIInvocation, fl: FlagView): RepoRef {
-  return ghRepo(inv.config, fl.asStr('repo') ?? undefined)
+export function repoFor(config: unknown, fl: FlagView): RepoRef {
+  return ghRepo(config, fl.asStr('repo') ?? undefined)
 }
 
 export function repoNumber(
-  inv: CLIInvocation,
+  config: unknown,
   fl: FlagView,
   value: string | undefined,
   label: string,
   urlKind: 'issues' | 'pull',
 ): [RepoRef, number] {
   const raw = value ?? ''
-  if (/^\d+$/.test(raw)) return [repoFor(inv, fl), Number(raw)]
+  if (/^\d+$/.test(raw)) return [repoFor(config, fl), Number(raw)]
   const match = /^https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)\/?$/.exec(raw)
   if (match?.[3] !== urlKind) throw new Error(`a ${label} number is required`)
-  checkHost(inv.config, new URL(raw).hostname)
+  checkHost(config, new URL(raw).hostname)
   return [parseRepo(`${match[1] ?? ''}/${match[2] ?? ''}`), Number(match[4])]
 }
 
@@ -148,7 +147,7 @@ export function csvValues(values: readonly string[]): string[] {
 }
 
 export async function readCliFile(
-  inv: CLIInvocation,
+  ctx: Context,
   raw: FlagValue,
   option: string,
 ): Promise<Uint8Array> {
@@ -157,12 +156,12 @@ export async function readCliFile(
   }
   const path = raw instanceof PathSpec ? raw.rawPath : raw
   if (path === '-') {
-    if (inv.stdin === null) throw new Error(`${option} needs standard input`)
-    return materialize(inv.stdin)
+    if (ctx.stdin === null) throw new Error(`${option} needs standard input`)
+    return materialize(ctx.stdin)
   }
-  const vfs = inv.view?.vfs
+  const vfs = ctx.vfs
   if (vfs === undefined) throw new Error(`${option} needs a workspace to read files from`)
-  const spec = PathSpec.fromStrPath(raw, undefined, inv.cwd)
+  const spec = PathSpec.fromStrPath(raw, undefined, ctx.cwd)
   try {
     return await vfs.read(spec)
   } catch (err) {
@@ -173,7 +172,7 @@ export async function readCliFile(
 }
 
 export async function bodyValue(
-  inv: CLIInvocation,
+  ctx: Context,
   fl: FlagView,
   opts: { value?: string; file?: string; required?: boolean } = {},
 ): Promise<string | undefined> {
@@ -188,7 +187,7 @@ export async function bodyValue(
   }
   if (inline !== undefined) return inline
   if (source !== undefined)
-    return new TextDecoder().decode(await readCliFile(inv, source, fileFlag))
+    return new TextDecoder().decode(await readCliFile(ctx, source, fileFlag))
   if (opts.required === true) throw new Error(`${valueFlag} or ${fileFlag} is required`)
   return undefined
 }

@@ -15,8 +15,8 @@
 import { materialize } from '../../../io/types.ts'
 import { describe, expect, it } from 'vitest'
 
-import type { PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import { PathSpec } from '../../../types.ts'
+import type { Context } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { parseChunksValue, splitGeneric } from './split.ts'
 
@@ -25,20 +25,20 @@ const DEC = new TextDecoder()
 const TRY = "\nTry 'split --help' for more information."
 
 async function runSplit(
-  flags: CommandOpts['flags'],
+  flags: Context['flags'],
   input = 'l1\nl2\nl3\nl4\n',
   sink?: Record<string, string>,
 ): Promise<Record<string, string>> {
   const written: Record<string, string> = sink ?? {}
-  const opts = {
+  const ctx = {
     stdin: ENC.encode(input),
     flags,
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     vfs: { kind: 'ram' } as never,
-  } as CommandOpts
+  } as Context
   await splitGeneric(
     [],
-    opts,
+    ctx,
     () => {
       throw new Error('paths are empty; the source is stdin')
     },
@@ -130,7 +130,7 @@ describe('split flag values', () => {
   it.each([
     [{ bytes: '+3' }, 'signed bytes'],
     [{ suffix_length: '+3', lines: '1' }, 'signed suffix length'],
-  ] as [CommandOpts['flags'], string][])('accepts %j (%s)', async (flags) => {
+  ] as [Context['flags'], string][])('accepts %j (%s)', async (flags) => {
     const written = await runSplit(flags, 'ab\ncd\n')
     expect(Object.keys(written).length).toBeGreaterThan(0)
   })
@@ -154,7 +154,7 @@ describe('split flag values', () => {
       { numeric_suffixes: '100', lines: '1' },
       `split: numerical suffix start value is too large for the suffix length${TRY}`,
     ],
-  ] as [CommandOpts['flags'], string][])(
+  ] as [Context['flags'], string][])(
     'rejects %j without writing anything',
     async (flags, message) => {
       let written: Record<string, string> = {}
@@ -217,15 +217,15 @@ describe('split -n cuts the way GNU cuts', () => {
     ['l/5/1000000000', 'def\n'],
     ['r/2/1000000000', 'def\n'],
   ])('reads chunk %j alone however large N is', async (value, expected) => {
-    const opts = {
+    const ctx = {
       stdin: ENC.encode('abc\ndef\n'),
       flags: { number: value },
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
       vfs: { kind: 'ram' } as never,
-    } as CommandOpts
+    } as Context
     const result = await splitGeneric(
       [],
-      opts,
+      ctx,
       () => {
         throw new Error('paths are empty; the source is stdin')
       },
@@ -253,7 +253,7 @@ const QUOTED_VALUES: [string, string][] = [
 
 describe('split quotes the word it names', () => {
   // `-n l/<w>` names the component, so the escaping travels with it.
-  const CLAUSES: [CommandOpts['flags'], string, string][] = [
+  const CLAUSES: [Context['flags'], string, string][] = [
     [{}, 'bytes', 'invalid number of bytes'],
     [{}, 'lines', 'invalid number of lines'],
     [{}, 'number', 'invalid number of chunks'],
@@ -310,15 +310,15 @@ describe('split names stdin outputs in the working directory', () => {
     'addresses each output under %s',
     async (cwd, named) => {
       const specs: PathSpec[] = []
-      const opts = {
+      const ctx = {
         stdin: ENC.encode('a\nb\n'),
         flags: { lines: '1' },
-        cwd,
+        cwd: PathSpec.fromStrPath(cwd),
         mountPrefix: '/data',
-      } as CommandOpts
+      } as Context
       await splitGeneric(
         [],
-        opts,
+        ctx,
         () => {
           throw new Error('paths are empty; the source is stdin')
         },

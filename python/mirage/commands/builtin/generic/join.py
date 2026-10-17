@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from mirage.commands.builtin.utils.stream import never_opened, stdin_stream
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
@@ -760,7 +760,7 @@ async def _join_stream(
 async def join_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     resolve_glob: Callable[[list[PathSpec]], Awaitable[list[PathSpec]]],
     read_stream: PolymorphicReadFn,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -772,22 +772,22 @@ async def join_generic(
     Args:
         paths (list[PathSpec]): the operands, unresolved.
         texts (list[str]): unused; join takes no text operands.
-        opts (CommandOpts): the line's flags, stdin and words.
+        ctx (Context): the line's flags, stdin and words.
         resolve_glob (Callable): expands globs against the backend.
         read_stream (PolymorphicReadFn): reads one operand's bytes.
     """
     groups = [await resolve_glob([path]) for path in paths]
     resolved = [path for group in groups for path in group]
     flags = spread_operands(
-        opts.flags,
+        ctx.flags,
         [[_operand_word(path) for path in group] for group in groups],
     )
     return await join(
         resolved,
         read_stream=read_stream,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         flags=parse_flags(
-            flags, [_operand_word(path) for path in resolved], opts.argv
+            flags, [_operand_word(path) for path in resolved], ctx.argv
         ),
     )
 

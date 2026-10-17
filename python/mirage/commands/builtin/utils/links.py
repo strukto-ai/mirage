@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.paths import resolve_path_stat
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.errors.fs import eloop
 from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource
@@ -425,17 +425,17 @@ def owed_names(files: Files | None, directory: str) -> list[str]:
     )
 
 
-def links_of(opts: CommandOpts) -> LinkView | None:
+def links_of(ctx: Context) -> LinkView | None:
     """The workspace's links as the command's session sees them, read off
     its files; None outside a workspace.
 
     Args:
-        opts (CommandOpts): the invocation's context.
+        ctx (Context): the invocation's context.
     """
-    return link_view(opts.vfs)
+    return link_view(ctx.vfs)
 
 
-def mounts_of(opts: CommandOpts) -> MountView | None:
+def mounts_of(ctx: Context) -> MountView | None:
     """Where the mount boundaries are for the command's walk, read off
     its files; None outside a workspace.
 
@@ -444,24 +444,24 @@ def mounts_of(opts: CommandOpts) -> MountView | None:
     every mount, so it has no boundary to stop at.
 
     Args:
-        opts (CommandOpts): the invocation's context.
+        ctx (Context): the invocation's context.
     """
     return mount_view(
-        opts.vfs, crossing=opts.io is None and opts.dispatch is not None
+        ctx.vfs, crossing=ctx.io is None and ctx.dispatch is not None
     )
 
 
-def link_resolver(opts: CommandOpts) -> LinkResolver | None:
+def link_resolver(ctx: Context) -> LinkResolver | None:
     """The link resolver an invocation carries: None outside a workspace.
 
     Args:
-        opts (CommandOpts): the invocation's context.
+        ctx (Context): the invocation's context.
     """
-    links = links_of(opts)
-    if links is None or opts.dispatch is None:
+    links = links_of(ctx)
+    if links is None or ctx.dispatch is None:
         return None
     return LinkResolver(
-        links=links, dispatch=opts.dispatch, cwd=opts.cwd.virtual
+        links=links, dispatch=ctx.dispatch, cwd=ctx.cwd.virtual
     )
 
 

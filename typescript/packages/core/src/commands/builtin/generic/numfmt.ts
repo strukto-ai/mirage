@@ -1,7 +1,7 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { quoteText } from '../../quote.ts'
@@ -212,8 +212,8 @@ function convertLine(line: string, toMode: string, fromMode: string, suffix: str
   return lead + convertField(field, toMode, fromMode, suffix) + rest
 }
 
-export function numfmtGeneric(texts: readonly string[], opts: CommandOpts): CommandFnResult {
-  const fl = new FlagView(opts.flags, specOf('numfmt'))
+export function numfmtGeneric(texts: readonly string[], ctx: Context): CommandFnResult {
+  const fl = new FlagView(ctx.flags, specOf('numfmt'))
   const toMode = fl.asStr('to') ?? 'none'
   const fromMode = fl.asStr('from') ?? 'none'
   const suffix = fl.asStr('suffix') ?? ''
@@ -230,7 +230,7 @@ export function numfmtGeneric(texts: readonly string[], opts: CommandOpts): Comm
   }
   const io = new IOResult()
   async function* output(): AsyncIterable<Uint8Array> {
-    const reader = texts.length > 0 ? null : new AsyncLineIterator(opts.stdin ?? new Uint8Array())
+    const reader = texts.length > 0 ? null : new AsyncLineIterator(ctx.stdin ?? new Uint8Array())
     try {
       if (reader === null) {
         for (const value of texts)

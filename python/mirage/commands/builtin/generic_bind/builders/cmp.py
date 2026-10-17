@@ -19,7 +19,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
     file_size,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -29,17 +29,17 @@ async def cmp_cmd(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("cmp: no VFS")
-    resolved = await ops.resolve_glob(accessor, paths, opts.index)
+    resolved = await ops.resolve_glob(accessor, paths, ctx.index)
     return await cmp_generic(
         resolved,
         list(texts),
-        opts,
-        bound_op(ops.read_stream, accessor, opts.index),
-        file_size(ops, accessor, opts),
+        ctx,
+        bound_op(ops.read_stream, accessor, ctx.index),
+        file_size(ops, accessor, ctx),
     )
 
 

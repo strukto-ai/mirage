@@ -20,15 +20,11 @@ from mirage.commands.cli.specs import (
 from mirage.commands.cli.types import (
     CLI,
     CLIHandler,
-    CLIInvocation,
-    CLIView,
     WalkResult,
 )
 from mirage.commands.cli.walk import node_help, walk
 
 __all__ = [
-    "CLIView",
-    "CLIInvocation",
     "CLI",
     "CLIHandler",
     "WalkResult",

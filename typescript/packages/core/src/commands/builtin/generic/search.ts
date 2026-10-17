@@ -16,7 +16,7 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { JsonValue, PathSpec, VFSName } from '../../../types.ts'
 import { searchResources } from '../../../vfs/search.ts'
-import { command, type CommandFnResult, type CommandOpts, type Command } from '../../config.ts'
+import { command, type CommandFnResult, type Context, type Command } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -54,16 +54,16 @@ export function makeSearch(
     accessor: Accessor,
     paths: PathSpec[],
     texts: string[],
-    opts: CommandOpts,
+    ctx: Context,
   ): Promise<CommandFnResult> {
     const query = texts[0]
     if (query === undefined || query === '') throw new UsageError('search: query is required')
-    const fl = new FlagView(opts.flags, specOf('search'))
+    const fl = new FlagView(ctx.flags, specOf('search'))
     try {
       const out = await searchResources(
-        opts.io?.search,
+        ctx.io?.search,
         accessor,
-        defaultPaths(paths, opts.cwd, opts.mountPrefix ?? ''),
+        defaultPaths(paths, ctx.cwd.virtual, ctx.mountPrefix ?? ''),
         { query, options: options(fl) },
       )
       return [out, new IOResult()]

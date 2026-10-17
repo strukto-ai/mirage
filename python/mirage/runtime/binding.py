@@ -14,17 +14,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass, replace
-from types import MappingProxyType
 
-from mirage.process.view import ProcessView
+from mirage.commands.config import Context
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn
-from mirage.types import MountMode, PathSpec
+from mirage.types import MountMode
 from mirage.utils.context_scope import ContextScope
 from mirage.utils.hidden import is_glob, show_head
-from mirage.view.types import SessionView
 from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
 
@@ -35,19 +33,16 @@ class RuntimeContext:
 
     The scoped entry points retain session, policy, and observation context
     even when called later from a worker callback. No workspace stores are
-    exposed. ``vfs`` is the session's files, whose links a guest's path
-    resolves through; None outside a workspace.
+    exposed. ``ctx`` is the same ``Context`` a command or CLI gets: its
+    ``vfs`` is the session's files, whose links a guest's path resolves
+    through, None outside a workspace.
     """
 
     binding: WorkspaceBinding
     dispatch: DispatchFn
     resolver: MountResolver
-    vfs: Files | None
-    session_view: SessionView | None
-    cwd: PathSpec
-    env: Mapping[str, str]
     scope: ContextScope
-    processes: ProcessView | None = None
+    ctx: Context
     restricted_mounts: tuple[str, ...] = ()
 
 
@@ -136,38 +131,43 @@ def restricted_mounts_for(
 def capture_binding(
     binding: WorkspaceBinding,
     *,
-    vfs: Files | None = None,
-    session_view: SessionView | None = None,
-    processes: ProcessView | None = None,
-    cwd: PathSpec | None = None,
-    env: dict[str, str] | None = None,
+    ctx: Context | None = None,
     restricted_mounts: tuple[str, ...] | None = None,
 ) -> RuntimeContext:
-    """Capture callback context while reading live workspace state."""
+    """Capture callback context while reading live workspace state.
+
+    Args:
+        binding (WorkspaceBinding): the workspace connection.
+        ctx (Context | None): the session's files, session, processes,
+            cwd and env, as a command gets them; None outside a session.
+        restricted_mounts (tuple[str, ...] | None): the mounts the
+            session restricts.
+    """
     scope = ContextScope()
-    if session_view is not None:
-        session_view = replace(
-            session_view,
-            get=scope.wrap(session_view.get),
-            snapshot=scope.wrap(session_view.snapshot),
-            set=scope.wrap_async(session_view.set),
-            unset=scope.wrap_async(session_view.unset),
-            mark=scope.wrap_async(session_view.mark),
-            is_readonly=scope.wrap(session_view.is_readonly),
-            profile=scope.wrap(session_view.profile),
-            cwd=scope.wrap(session_view.cwd),
+    ctx = ctx if ctx is not None else Context()
+    session = ctx.session
+    if session is not None:
+        ctx = replace(
+            ctx,
+            session=replace(
+                session,
+                get=scope.wrap(session.get),
+                snapshot=scope.wrap(session.snapshot),
+                set=scope.wrap_async(session.set),
+                unset=scope.wrap_async(session.unset),
+                mark=scope.wrap_async(session.mark),
+                is_readonly=scope.wrap(session.is_readonly),
+                profile=scope.wrap(session.profile),
+                cwd=scope.wrap(session.cwd),
+            ),
         )
     resolver = ScopedResolver(binding.resolver, scope)
     return RuntimeContext(
         binding=binding,
         dispatch=scope.wrap_async(binding.dispatch),
         resolver=resolver,
-        vfs=vfs,
-        session_view=session_view,
-        cwd=cwd or PathSpec.from_str_path("/"),
-        env=MappingProxyType(dict(env or {})),
         scope=scope,
-        processes=processes,
+        ctx=ctx,
         restricted_mounts=restricted_mounts or (),
     )
 

@@ -16,12 +16,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseCommand } from '@struktoai/mirage-core/commands/spec/parser'
 import { cliSpecFor } from '@struktoai/mirage-core/commands/cli/specs'
 import type * as CommitModule from '../../../../core/hf_hub/commit.ts'
-import type { CLIView, CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
 import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import { Files } from '@struktoai/mirage-core/workspace/files'
 import { materialize } from '@struktoai/mirage-core/io/types'
 import { yieldBytes } from '@struktoai/mirage-core/io/stream'
-import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
+import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
 import type { CommandSpec, FlagValue } from '@struktoai/mirage-core/commands/spec/types'
 import type { HfConfig } from '../../../../core/hf_hub/config.ts'
 import { HfHubError } from '../../../../core/hf_hub/client.ts'
@@ -73,24 +72,26 @@ vi.mock('../../../../core/hf_hub/admin.ts', () => ({
 const CONFIG: HfConfig = { token: 'hf_test', endpoint: 'https://huggingface.co' }
 const ANON: HfConfig = { endpoint: 'https://huggingface.co' }
 
-function inv(
-  texts: readonly string[] = [],
+function args(
+  texts: string[] = [],
   flags: Record<string, FlagValue> = {},
   config: HfConfig = CONFIG,
-  view?: CLIView,
+  vfs?: Files,
   stdin?: string,
-): CLIInvocation {
-  return {
+): [HfConfig, PathSpec[], string[], Context] {
+  return [
     config,
-    argv: texts,
-    paths: [],
+    [],
     texts,
-    flags,
-    stdin: stdin === undefined ? null : yieldBytes(new TextEncoder().encode(stdin)),
-    cwd: PathSpec.fromStrPath('/'),
-    env: {},
-    ...(view !== undefined ? { view } : {}),
-  }
+    {
+      argv: texts,
+      flags,
+      stdin: stdin === undefined ? null : yieldBytes(new TextEncoder().encode(stdin)),
+      cwd: PathSpec.fromStrPath('/'),
+      env: {},
+      ...(vfs !== undefined ? { vfs } : {}),
+    },
+  ]
 }
 
 async function text(result: CommandFnResult): Promise<string> {
@@ -124,18 +125,18 @@ describe('hf auth whoami', () => {
       name: 'zoe',
       orgs: [{ name: 'acme' }, { name: 'widgets' }],
     })
-    expect(await text(await whoamiCmd(inv()))).toBe('zoe\norgs:  acme,widgets\n')
+    expect(await text(await whoamiCmd(...args()))).toBe('zoe\norgs:  acme,widgets\n')
   })
 
   it('says nothing of orgs when there are none', async () => {
     whoamiMock.mockResolvedValue({ name: 'zoe', orgs: [] })
-    expect(await text(await whoamiCmd(inv()))).toBe('zoe\n')
+    expect(await text(await whoamiCmd(...args()))).toBe('zoe\n')
   })
 
   it('names a private endpoint, which every mirage install has', async () => {
     whoamiMock.mockResolvedValue({ name: 'zoe' })
     const config: HfConfig = { token: 'hf_test', endpoint: 'http://127.0.0.1:5199' }
-    expect(await text(await whoamiCmd(inv([], {}, config)))).toBe(
+    expect(await text(await whoamiCmd(...args([], {}, config)))).toBe(
       'zoe\nAuthenticated through private endpoint: http://127.0.0.1:5199\n',
     )
   })
@@ -147,7 +148,7 @@ describe('hf auth whoami', () => {
     // went to huggingface.co.
     whoamiMock.mockResolvedValue({ name: 'zoe' })
     const config: HfConfig = { token: 'hf_test', endpoint: '' }
-    expect(await text(await whoamiCmd(inv([], {}, config)))).toBe('zoe\n')
+    expect(await text(await whoamiCmd(...args([], {}, config)))).toBe('zoe\n')
   })
 })
 
@@ -205,22 +206,24 @@ describe('the hf program tree', () => {
 describe('repo create', () => {
   it('prints the url the Hub answered', async () => {
     createRepoMock.mockResolvedValue({ url: 'https://hf.co/acme/widget' })
-    expect(await text(await createCmd(inv(['acme/widget'])))).toBe('https://hf.co/acme/widget\n')
+    expect(await text(await createCmd(...args(['acme/widget'])))).toBe(
+      'https://hf.co/acme/widget\n',
+    )
   })
 
   it('refuses a space without an sdk, naming the flag as typed', async () => {
-    await expect(createCmd(inv(['acme/demo'], { repo_type: 'space' }))).rejects.toThrow(
+    await expect(createCmd(...args(['acme/demo'], { repo_type: 'space' }))).rejects.toThrow(
       '--space_sdk',
     )
   })
 
   it('refuses without a token', async () => {
-    await expect(createCmd(inv(['acme/widget'], {}, ANON))).rejects.toThrow(UsageError)
+    await expect(createCmd(...args(['acme/widget'], {}, ANON))).rejects.toThrow(UsageError)
   })
 
   it('passes exist-ok through', async () => {
     createRepoMock.mockResolvedValue({})
-    await createCmd(inv(['acme/widget'], { exist_ok: true }))
+    await createCmd(...args(['acme/widget'], { exist_ok: true }))
     const options = createRepoMock.mock.calls[0]?.[2] as { existOk?: boolean }
     expect(options.existOk).toBe(true)
   })
@@ -229,7 +232,7 @@ describe('repo create', () => {
     // The kind decides the path segment: a model sits at the origin root,
     // a dataset and a space under a plural one.
     createRepoMock.mockResolvedValue({})
-    const out = await text(await createCmd(inv(['acme/rows'], { repo_type: 'dataset' })))
+    const out = await text(await createCmd(...args(['acme/rows'], { repo_type: 'dataset' })))
     expect(out).toBe('https://huggingface.co/datasets/acme/rows\n')
   })
 })
@@ -252,7 +255,7 @@ describe('upstream variadic option lines', () => {
 describe('repo tag', () => {
   it('tags the named revision', async () => {
     const out = await text(
-      await tagCreateCmd(inv(['acme/widget', 'v1'], { revision: 'dev', message: 'cut' })),
+      await tagCreateCmd(...args(['acme/widget', 'v1'], { revision: 'dev', message: 'cut' })),
     )
     expect(out).toBe('Tag v1 created on acme/widget\n')
     expect(createTagMock.mock.calls[0]?.[4]).toBe('dev')
@@ -260,34 +263,34 @@ describe('repo tag', () => {
   })
 
   it('defaults to the default revision', async () => {
-    await tagCreateCmd(inv(['acme/widget', 'v1']))
+    await tagCreateCmd(...args(['acme/widget', 'v1']))
     expect(createTagMock.mock.calls[0]?.[4]).toBe('main')
   })
 
   it('prints one tag per line', async () => {
     listTagsMock.mockResolvedValue(['v1', 'v2'])
-    expect(await text(await tagListCmd(inv(['acme/widget'])))).toBe('v1\nv2\n')
+    expect(await text(await tagListCmd(...args(['acme/widget'])))).toBe('v1\nv2\n')
   })
 
   it('needs -y to delete, having no terminal to ask on', async () => {
-    await expect(tagDeleteCmd(inv(['acme/widget', 'v1']))).rejects.toThrow('-y')
+    await expect(tagDeleteCmd(...args(['acme/widget', 'v1']))).rejects.toThrow('-y')
     expect(deleteTagMock).not.toHaveBeenCalled()
   })
 
   it('takes yes on stdin, which is where upstream reads it', async () => {
-    await tagDeleteCmd(inv(['acme/widget', 'v1'], {}, CONFIG, undefined, 'y\n'))
+    await tagDeleteCmd(...args(['acme/widget', 'v1'], {}, CONFIG, undefined, 'y\n'))
     expect(deleteTagMock).toHaveBeenCalledTimes(1)
   })
 
   it('declines anything but yes', async () => {
     await expect(
-      tagDeleteCmd(inv(['acme/widget', 'v1'], {}, CONFIG, undefined, 'n\n')),
+      tagDeleteCmd(...args(['acme/widget', 'v1'], {}, CONFIG, undefined, 'n\n')),
     ).rejects.toThrow(UsageError)
     expect(deleteTagMock).not.toHaveBeenCalled()
   })
 
   it('deletes the tag with -y', async () => {
-    const out = await text(await tagDeleteCmd(inv(['acme/widget', 'v1'], { yes: true })))
+    const out = await text(await tagDeleteCmd(...args(['acme/widget', 'v1'], { yes: true })))
     expect(out).toBe('Tag v1 deleted on acme/widget\n')
     expect(deleteTagMock.mock.calls[0]?.slice(1, 3)).toEqual(['acme/widget', 'v1'])
   })
@@ -320,7 +323,7 @@ describe('why nothing was selected', () => {
   // download folds a refused tree walk (401/403/404) into an empty listing
   // itself. Three different failures would then all read as "no files
   // matched", so the CLI asks the Hub which one it was.
-  const view: CLIView = { vfs: new Files(vi.fn()) }
+  const vfs = new Files(vi.fn())
 
   it.each([
     [Absence.REPO, [] as string[], 'Repository Not Found'],
@@ -332,11 +335,11 @@ describe('why nothing was selected', () => {
     classifyAbsenceMock.mockResolvedValue(absence)
     await expect(
       downloadCmd(
-        inv(
+        ...args(
           ['acme/widget', ...names],
           { local_dir: PathSpec.fromStrPath('/work/out') },
           CONFIG,
-          view,
+          vfs,
         ),
       ),
     ).rejects.toThrow(expected)
@@ -346,7 +349,7 @@ describe('why nothing was selected', () => {
 describe('a tree the Hub refuses', () => {
   // The tree walk raises for a repo it cannot see; download reads that as
   // nothing listed, so the message upstream prints is unchanged.
-  const view: CLIView = { vfs: new Files(vi.fn()) }
+  const vfs = new Files(vi.fn())
 
   it.each([
     [401, ''],
@@ -358,7 +361,7 @@ describe('a tree the Hub refuses', () => {
     classifyAbsenceMock.mockResolvedValue(Absence.REPO)
     await expect(
       downloadCmd(
-        inv(['acme/widget'], { local_dir: PathSpec.fromStrPath('/work/out') }, CONFIG, view),
+        ...args(['acme/widget'], { local_dir: PathSpec.fromStrPath('/work/out') }, CONFIG, vfs),
       ),
     ).rejects.toThrow('Repository Not Found')
   })
@@ -367,7 +370,7 @@ describe('a tree the Hub refuses', () => {
     fetchTreeMock.mockRejectedValue(new HfHubError('boom', 500))
     await expect(
       downloadCmd(
-        inv(['acme/widget'], { local_dir: PathSpec.fromStrPath('/work/out') }, CONFIG, view),
+        ...args(['acme/widget'], { local_dir: PathSpec.fromStrPath('/work/out') }, CONFIG, vfs),
       ),
     ).rejects.toThrow('boom')
     expect(classifyAbsenceMock).not.toHaveBeenCalled()
@@ -379,23 +382,25 @@ describe('required operands', () => {
   // argparse, so each leaf owns the check. Without it the line reached the
   // Hub and came back as an authentication error instead of naming the slot.
   it('names the one empty slot', async () => {
-    await expect(tagCreateCmd(inv(['acme/widget']))).rejects.toThrow(
+    await expect(tagCreateCmd(...args(['acme/widget']))).rejects.toThrow(
       'the following arguments are required: tag',
     )
     expect(createTagMock).not.toHaveBeenCalled()
   })
 
   it('names every empty slot', async () => {
-    await expect(tagCreateCmd(inv([]))).rejects.toThrow('required: repo_id, tag')
+    await expect(tagCreateCmd(...args([]))).rejects.toThrow('required: repo_id, tag')
   })
 
   it('refuses a delete with no tag', async () => {
-    await expect(tagDeleteCmd(inv(['acme/widget'], { yes: true }))).rejects.toThrow('required: tag')
+    await expect(tagDeleteCmd(...args(['acme/widget'], { yes: true }))).rejects.toThrow(
+      'required: tag',
+    )
     expect(deleteTagMock).not.toHaveBeenCalled()
   })
 
   it('refuses a list with no repo', async () => {
-    await expect(tagListCmd(inv([]))).rejects.toThrow('required: repo_id')
+    await expect(tagListCmd(...args([]))).rejects.toThrow('required: repo_id')
     expect(listTagsMock).not.toHaveBeenCalled()
   })
 })
@@ -432,25 +437,21 @@ describe('where an upload lands', () => {
     '/work/a.txt': { dir: false, data: 'alpha', kids: [] },
     '/work/sub/b.txt': { dir: false, data: 'beta', kids: [] },
   }
-  const view: CLIView = {
-    vfs: new Files(((op: string, spec: { virtual: string }) => {
-      const node = tree[spec.virtual]
-      if (node === undefined) {
-        return Promise.reject(Object.assign(new Error('nope'), { code: 'ENOENT' }))
-      }
-      if (op === 'stat') {
-        return Promise.resolve([{ type: node.dir ? FileType.DIRECTORY : FileType.FILE }, null])
-      }
-      if (op === 'readdir') return Promise.resolve([node.kids, null])
-      return Promise.resolve([new TextEncoder().encode(node.data), null])
-    }) as never),
-  }
+  const vfs = new Files(((op: string, spec: { virtual: string }) => {
+    const node = tree[spec.virtual]
+    if (node === undefined) {
+      return Promise.reject(Object.assign(new Error('nope'), { code: 'ENOENT' }))
+    }
+    if (op === 'stat') {
+      return Promise.resolve([{ type: node.dir ? FileType.DIRECTORY : FileType.FILE }, null])
+    }
+    if (op === 'readdir') return Promise.resolve([node.kids, null])
+    return Promise.resolve([new TextEncoder().encode(node.data), null])
+  }) as never)
 
   const additions = async (local: string, ...inRepo: string[]): Promise<string[]> => {
-    await uploadCmd({
-      ...inv(['acme/widget', ...inRepo], {}, CONFIG, view),
-      paths: [PathSpec.fromStrPath(local)],
-    })
+    const [config, , texts, ctx] = args(['acme/widget', ...inRepo], {}, CONFIG, vfs)
+    await uploadCmd(config, [PathSpec.fromStrPath(local)], texts, ctx)
     const call = commitMock.mock.calls[0]?.[1] as { additions: { path: string }[] }
     return call.additions.map((add) => add.path)
   }

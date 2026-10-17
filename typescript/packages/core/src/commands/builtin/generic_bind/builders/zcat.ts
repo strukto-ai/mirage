@@ -20,10 +20,10 @@ import {
   type GenericCommandFn,
 } from '../adapter.ts'
 
-const zcat: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
-  const idx = opts.index ?? undefined
+const zcat: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return zcatGeneric(resolved, opts, dirAwareStream(ops, accessor, opts))
+  return zcatGeneric(resolved, ctx, dirAwareStream(ops, accessor, ctx))
 }
 
 export const BUILDER: GenericCommand = {

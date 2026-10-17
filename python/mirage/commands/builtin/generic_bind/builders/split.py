@@ -36,7 +36,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     require_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -48,10 +48,10 @@ async def split(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(opts.flags, spec=SPECS["split"])
-    paths = await resolve_or_empty(ops, accessor, paths, opts.index)
+    fl = FlagView(ctx.flags, spec=SPECS["split"])
+    paths = await resolve_or_empty(ops, accessor, paths, ctx.index)
     # as_str, not `x or y`: the latter would swallow an explicitly empty
     # value, which GNU rejects loudly (`split -b ''` is an invalid number,
     # not an absent flag).
@@ -84,15 +84,15 @@ async def split(
     # need not be this mount, so a dispatcher routes each write to the
     # mount that owns it.
     write_bytes = (
-        transfer_primitives(opts.dispatch)["write"]
-        if opts.dispatch is not None
+        transfer_primitives(ctx.dispatch)["write"]
+        if ctx.dispatch is not None
         else partial(require_op(ops, Operation.WRITE), accessor)
     )
     return await generic_split(
         paths,
-        read_stream=bound_op(ops.read_stream, accessor, opts.index),
+        read_stream=bound_op(ops.read_stream, accessor, ctx.index),
         write_bytes=write_bytes,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         lines_per_file=(
             parse_lines_value(lines_value) if lines_value is not None else 0
         ),
@@ -111,8 +111,8 @@ async def split(
         suffix_start=suffix_start,
         additional_suffix=fl.as_str("additional_suffix") or "",
         separator=parse_separator(fl.as_str("separator")),
-        mount_prefix=opts.mount_prefix,
-        cwd=opts.cwd.virtual,
+        mount_prefix=ctx.mount_prefix,
+        cwd=ctx.cwd.virtual,
     )
 
 

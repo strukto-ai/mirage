@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.hf_hub import HfHubAccessor
-from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.hf_hub.config import HfConfig
@@ -44,7 +43,7 @@ def repo_type_of(fl: FlagView) -> str:
 
 
 def hub_for(
-    inv: CLIInvocation[HfConfig],
+    config: HfConfig,
     repo_id: str,
     repo_type: str,
     revision: str | None = None,
@@ -60,7 +59,7 @@ def hub_for(
     the walk lists bare.
 
     Args:
-        inv (CLIInvocation[HfConfig]): the invocation.
+        config (HfConfig): the install's account config.
         repo_id (str): "namespace/name".
         repo_type (str): "model", "dataset" or "space".
         revision (str | None): the revision to read or write.
@@ -68,17 +67,17 @@ def hub_for(
     Returns:
         HfHubAccessor: the handle.
     """
-    config = HfRepoConfig(
+    repo = HfRepoConfig(
         repo_id=repo_id,
-        token=inv.config.token,
-        endpoint=inv.config.endpoint,
+        token=config.token,
+        endpoint=config.endpoint,
         revision=revision or DEFAULT_REVISION,
         expand_commits=False,
     )
-    return HfHubAccessor(config, repo_type=repo_type)
+    return HfHubAccessor(repo, repo_type=repo_type)
 
 
-def require_operands(inv: CLIInvocation[HfConfig], names: list[str]) -> None:
+def require_operands(texts: list[str], names: list[str]) -> None:
     """Refuse a line that left a required operand empty.
 
     Installed CLI invocations validate required arguments before calling
@@ -86,13 +85,13 @@ def require_operands(inv: CLIInvocation[HfConfig], names: list[str]) -> None:
     directly from reaching the Hub with missing operands.
 
     Args:
-        inv (CLIInvocation[HfConfig]): the invocation.
+        texts (list[str]): the line's text operands.
         names (list[str]): the operand names, in declaration order.
 
     Raises:
         UsageError: the line supplied fewer operands than that.
     """
-    missing = names[len(inv.texts) :]
+    missing = names[len(texts) :]
     if missing:
         raise UsageError(
             "the following arguments are required: " + ", ".join(missing)
@@ -105,7 +104,7 @@ def text_out(
     return yield_bytes(text.encode()), IOResult(stderr=stderr.encode() or None)
 
 
-def require_token(inv: CLIInvocation[HfConfig], what: str) -> None:
+def require_token(config: HfConfig, what: str) -> None:
     """Refuse a verb that cannot work anonymously, before it is tried.
 
     The Hub answers 401 "Invalid username or password." for an
@@ -113,13 +112,13 @@ def require_token(inv: CLIInvocation[HfConfig], what: str) -> None:
     as a missing one.
 
     Args:
-        inv (CLIInvocation[HfConfig]): the invocation.
+        config (HfConfig): the install's account config.
         what (str): what was being attempted, for the message.
 
     Raises:
         UsageError: the install carries no token.
     """
-    if inv.config.token is None:
+    if config.token is None:
         raise UsageError(
             f"{what} requires a token; set `token` on the `hf` install"
         )

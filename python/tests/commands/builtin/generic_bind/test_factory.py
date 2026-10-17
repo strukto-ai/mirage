@@ -24,7 +24,7 @@ from mirage.commands.builtin.generic_bind.factory import (
     with_slash_guard,
     with_stat_cache,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.workspace.files import Files
@@ -122,10 +122,10 @@ async def test_namespace_globs_stamp_the_link_target_stat():
     # invocation. The listing already names the namespace's children.
     seen: list[CommandIO] = []
 
-    async def capture(ops, accessor, paths, texts, opts):
+    async def capture(ops, accessor, paths, texts, ctx):
         seen.append(ops)
 
-    opts = CommandOpts(vfs=Files([], _nothing, links=_NoLinks()))
+    ctx = Context(vfs=Files([], _nothing, links=_NoLinks()))
     await _run_builder(
         lambda ops: ops,
         capture,
@@ -133,7 +133,7 @@ async def test_namespace_globs_stamp_the_link_target_stat():
         None,
         [],
         [],
-        replace(opts, io=_ops(_CountingBackend(b""))),
+        replace(ctx, io=_ops(_CountingBackend(b""))),
     )
     assert seen[0].glob_target_stat is not None
 
@@ -142,10 +142,10 @@ async def test_namespace_globs_stamp_the_link_target_stat():
 async def test_namespace_globs_stamp_nothing_without_links():
     seen: list[CommandIO] = []
 
-    async def capture(ops, accessor, paths, texts, opts):
+    async def capture(ops, accessor, paths, texts, ctx):
         seen.append(ops)
 
-    opts = CommandOpts(vfs=Files([], _nothing))
+    ctx = Context(vfs=Files([], _nothing))
     await _run_builder(
         lambda ops: ops,
         capture,
@@ -153,7 +153,7 @@ async def test_namespace_globs_stamp_nothing_without_links():
         None,
         [],
         [],
-        replace(opts, io=_ops(_CountingBackend(b""))),
+        replace(ctx, io=_ops(_CountingBackend(b""))),
     )
     assert seen[0].glob_target_stat is None
 

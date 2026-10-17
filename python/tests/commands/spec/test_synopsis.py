@@ -1,6 +1,6 @@
 import pytest
 
-from mirage.commands.config import CommandOpts, _answer_standard_options
+from mirage.commands.config import Context, _answer_standard_options
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.help import render_help
 from mirage.commands.spec.synopsis import SYNOPSES
@@ -8,13 +8,13 @@ from mirage.commands.spec.types import CommandSpec
 from mirage.io.types import materialize
 
 
-async def _noop(accessor, paths, texts, opts):
+async def _noop(accessor, paths, texts, ctx):
     return None
 
 
 async def _help_of(name, spec) -> str:
     _, wrapped = _answer_standard_options(name, spec, _noop)
-    result = await wrapped(None, [], [], CommandOpts(flags={"help": True}))
+    result = await wrapped(None, [], [], Context(flags={"help": True}))
     assert result is not None
     return (await materialize(result[0])).decode()
 

@@ -22,7 +22,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     dir_aware_stat,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -32,16 +32,16 @@ async def head(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
+    resolved = await resolve_or_empty(ops, accessor, paths, ctx.index)
     return await head_generic(
         resolved,
         list(texts),
-        opts,
-        dir_aware_stat(ops, accessor, opts),
-        bound_op(ops.read_stream, accessor, opts.index),
-        bound_uncached(ops.first_lines, accessor, opts.index),
+        ctx,
+        dir_aware_stat(ops, accessor, ctx),
+        bound_op(ops.read_stream, accessor, ctx.index),
+        bound_uncached(ops.first_lines, accessor, ctx.index),
     )
 
 

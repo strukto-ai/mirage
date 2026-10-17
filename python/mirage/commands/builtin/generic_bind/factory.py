@@ -30,7 +30,7 @@ from mirage.commands.config import (
     Command,
     CommandCatalog,
     CommandIO,
-    CommandOpts,
+    Context,
     command,
     registered_commands,
 )
@@ -147,14 +147,14 @@ async def _run_builder(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     *,
     split: bool = True,
 ) -> Any:
     """Run a builder over the mount's table, with the invocation's glob
     facts stamped on below the dir guard.
 
-    The table is the mount's (``opts.io``), read per invocation, so one
+    The table is the mount's (``ctx.io``), read per invocation, so one
     registration serves every mount. Its stat and readdir are the
     dispatcher's, which answer for links and nested mounts, so what is
     stamped is only what a glob needs beside them: where a link it
@@ -170,17 +170,17 @@ async def _run_builder(
         accessor (Accessor): backend handle.
         paths (list[PathSpec]): the command's path operands.
         texts (list[str]): the command's text arguments.
-        opts (CommandOpts): the per-invocation option bag.
+        ctx (Context): the per-invocation option bag.
         split (bool): whether its input is cut into pieces; a
             pass-through builder keeps the producer's chunks.
     """
-    io = mount_io(opts)
+    io = mount_io(ctx)
     raw = table(io) if table is not None else io
-    links = links_of(opts)
+    links = links_of(ctx)
     stamped = replace(
         raw,
         glob_target_stat=(links.target_stat if links is not None else None),
-        glob_follow=opts.follow_operands,
+        glob_follow=ctx.follow_operands,
     )
     # The command's path checks speak outside the stat and slash wraps
     # (`finish`), for the slots that still reach the backend past the
@@ -205,9 +205,9 @@ async def _run_builder(
                 read(acc, path, *args, **kwargs)
             ),
         )
-        if opts.stdin is not None:
-            opts = replace(opts, stdin=chunks(opts.stdin))
-    return await fn(bound, accessor, paths, texts, opts)
+        if ctx.stdin is not None:
+            ctx = replace(ctx, stdin=chunks(ctx.stdin))
+    return await fn(bound, accessor, paths, texts, ctx)
 
 
 _BY_NAME = {b.name: b for b in BUILDERS}
@@ -244,7 +244,7 @@ def _bind(
 
 
 # Every mount falls back to these after its VFS's own commands. Each runs
-# over the table of the mount it runs on (``opts.io``), so one set serves
+# over the table of the mount it runs on (``ctx.io``), so one set serves
 # the whole workspace.
 GENERIC_COMMANDS = CommandCatalog(_bind(b, None, None) for b in BUILDERS)
 
@@ -260,7 +260,7 @@ def generic(
 
     A VFS that replaces a command hands what the replacement does not
     support to this one: ``generic("grep").fn(accessor, paths, texts,
-    opts)``. With ``vfs``, the same command registered for that backend,
+    ctx)``. With ``vfs``, the same command registered for that backend,
     over the mount's table changed by ``table`` (``/dev``'s endless
     ``cat``).
 

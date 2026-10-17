@@ -29,7 +29,7 @@ it.each(['', 'first,x\n'])('reports late read errors and continues (%j)', async 
   }
   const result = await cutGeneric(
     ['/missing', '/denied', '/good'].map((p) => PathSpec.fromStrPath(p)),
-    { stdin: null, flags: { fields: '1', delimiter: ',' }, cwd: '/' },
+    { stdin: null, flags: { fields: '1', delimiter: ',' }, cwd: PathSpec.fromStrPath('/') },
     source,
     stat,
   )
@@ -54,7 +54,7 @@ it.each([new Error('backend failed'), new DOMException('cancelled', 'AbortError'
     }
     const result = await cutGeneric(
       ['/failed', '/untouched'].map((p) => PathSpec.fromStrPath(p)),
-      { stdin: null, flags: { fields: '1' }, cwd: '/' },
+      { stdin: null, flags: { fields: '1' }, cwd: PathSpec.fromStrPath('/') },
       source,
       stat,
     )

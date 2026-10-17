@@ -21,9 +21,8 @@ import {
   type GitHubTransport,
 } from '../../../../core/github/client.ts'
 import { cliSpecFor } from '../../specs.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { issueComments } from '../../../../core/github/issue.ts'
 import { commentsFor, commentsText } from './issue.ts'
 import { GH } from './index.ts'
@@ -33,7 +32,7 @@ import { PartialOutputError } from '../../../errors.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import { api } from './api.ts'
 import { deleteCmd, editCmd, fork, listCmd, rename, summary, view } from './repo.ts'
-import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
+import { context } from '../../../../workspace/fixtures/context.ts'
 
 const DEC = new TextDecoder()
 
@@ -88,13 +87,13 @@ vi.mock('./accessor.ts', async (importOriginal) => {
   return { ...actual, ghTransport: () => new FakeTransport() }
 })
 
-function inv(
+function args(
   texts: string[],
-  flags: CLIInvocation['flags'] = {},
+  flags: Context['flags'] = {},
   config: unknown = { token: 't' },
-  extra: Partial<Pick<CLIInvocation, 'stdin' | 'view' | 'argv'>> = {},
-): CLIInvocation {
-  return cliInvocation({ config, texts, flags, ...extra })
+  extra: Partial<Pick<Context, 'stdin' | 'vfs' | 'argv'>> = {},
+): [unknown, PathSpec[], string[], Context] {
+  return [config, [], texts, context({ flags, ...extra })]
 }
 
 function text(result: CommandFnResult): string {
@@ -162,7 +161,7 @@ describe('gh tree', () => {
 describe('gh repo', () => {
   it('views the repository the operand names', async () => {
     reset({ full_name: 'o/r' })
-    await view(inv(['o/r']))
+    await view(...args(['o/r']))
     expect(CALLS).toEqual([
       { method: 'GET', path: '/repos/o/r' },
       { method: 'GET', path: '/repos/o/r/readme' },
@@ -171,7 +170,7 @@ describe('gh repo', () => {
 
   it('asks GraphQL for exactly the JSON fields named, and no README', async () => {
     reset({ data: { repository: { parent: null, name: 'r' } } })
-    const out = text(await view(inv(['o/r'], { json: 'parent,name' })))
+    const out = text(await view(...args(['o/r'], { json: 'parent,name' })))
     expect(CALLS).toEqual([
       {
         method: 'POST',
@@ -191,7 +190,7 @@ describe('gh repo', () => {
   // separators; with HTML escaping off, `<`, `>` and `&` stay raw.
   it("prints JSON as gh does: compact, in Go's escaping", async () => {
     reset({ data: { repository: { description: 'a<b>&c\u{2028}d\u{2029}\b\u{e9}' } } })
-    const out = text(await view(inv(['o/r'], { json: 'description' })))
+    const out = text(await view(...args(['o/r'], { json: 'description' })))
     expect(out).toBe('{"description":"a<b>&c\\u2028d\\u2029\\b\u{e9}"}\n')
   })
 
@@ -215,7 +214,7 @@ describe('gh repo', () => {
     })
     const fields =
       'watchers,parent,owner,latestRelease,projectsV2,repositoryTopics,assignableUsers,description'
-    const out = text(await view(inv(['o/r'], { json: fields })))
+    const out = text(await view(...args(['o/r'], { json: fields })))
     expect(JSON.parse(out)).toStrictEqual({
       assignableUsers: [{ id: 'U1', login: 'ada', name: '', databaseId: 0 }],
       description: '',
@@ -240,7 +239,7 @@ describe('gh repo', () => {
 
   it('refuses an unknown field before asking, listing every field gh exports', async () => {
     reset()
-    const refusal = view(inv(['o/r'], { json: 'isFork,bogus' }))
+    const refusal = view(...args(['o/r'], { json: 'isFork,bogus' }))
     await expect(refusal).rejects.toMatchObject({
       exitCode: 1,
       message: expect.stringMatching(
@@ -257,7 +256,7 @@ describe('gh repo', () => {
         { message: "Could not resolve to a Repository with the name 'o/r'.", path: ['repository'] },
       ],
     })
-    await expect(view(inv(['o/r'], { json: 'name' }))).rejects.toThrow(
+    await expect(view(...args(['o/r'], { json: 'name' }))).rejects.toThrow(
       "GraphQL: Could not resolve to a Repository with the name 'o/r'. (repository)",
     )
   })
@@ -273,7 +272,7 @@ describe('gh repo', () => {
         },
       },
     })
-    const out = text(await listCmd(inv(['acme'], { json: 'name,isFork', limit: 5 })))
+    const out = text(await listCmd(...args(['acme'], { json: 'name,isFork', limit: 5 })))
     expect(CALLS).toHaveLength(1)
     const body = CALLS[0]?.body as { query: string; variables: unknown }
     expect(body.query).toContain('repositoryOwner(login: $owner)')
@@ -284,18 +283,18 @@ describe('gh repo', () => {
 
   it('falls back to the install repo when no operand is given', async () => {
     reset({ full_name: 'cfg/repo' })
-    await view(inv([], {}, { token: 't', repo: 'cfg/repo' }))
+    await view(...args([], {}, { token: 't', repo: 'cfg/repo' }))
     expect(CALLS[0]?.path).toBe('/repos/cfg/repo')
   })
 
   it('refuses a line with no repository anywhere', async () => {
     reset()
-    await expect(view(inv([]))).rejects.toThrow(/no repository given/)
+    await expect(view(...args([]))).rejects.toThrow(/no repository given/)
   })
 
   it('refuses a repository that is not OWNER/REPO', async () => {
     reset()
-    await expect(view(inv(['justaname']))).rejects.toThrow(/OWNER\/REPO/)
+    await expect(view(...args(['justaname']))).rejects.toThrow(/OWNER\/REPO/)
   })
 
   // gh's format is [HOST/]OWNER/REPO, so the owner and repo are the *last*
@@ -304,32 +303,32 @@ describe('gh repo', () => {
   // success rather than as an error.
   it('drops the optional host segment rather than shifting the repo', async () => {
     reset({ full_name: 'acme/tools' })
-    await view(inv(['github.com/acme/tools']))
+    await view(...args(['github.com/acme/tools']))
     expect(CALLS[0]?.path).toBe('/repos/acme/tools')
   })
 
   it('refuses a spec with more segments than a host and a repository', async () => {
     reset()
-    await expect(view(inv(['a/b/c/d']))).rejects.toThrow(/OWNER\/REPO/)
+    await expect(view(...args(['a/b/c/d']))).rejects.toThrow(/OWNER\/REPO/)
   })
 
   it('names the fork at creation time when --fork-name is given', async () => {
     reset({ full_name: 'me/renamed' })
-    const out = await fork(inv(['o/r'], { fork_name: 'renamed' }))
+    const out = await fork(...args(['o/r'], { fork_name: 'renamed' }))
     expect(CALLS).toEqual([{ method: 'POST', path: '/repos/o/r/forks', body: { name: 'renamed' } }])
     expect(out === null ? '' : text(out)).toContain('me/renamed')
   })
 
   it('forks under the source name when it is not', async () => {
     reset({ full_name: 'me/r' })
-    await fork(inv(['o/r']))
+    await fork(...args(['o/r']))
     expect(CALLS[0]?.body).toEqual({})
   })
 
   it('refuses a remote for the current repository', async () => {
-    await expect(fork(inv([], { remote: 'true' }, { token: 't', repo: 'o/r' }))).rejects.toThrow(
-      '--remote is not supported',
-    )
+    await expect(
+      fork(...args([], { remote: 'true' }, { token: 't', repo: 'o/r' })),
+    ).rejects.toThrow('--remote is not supported')
   })
 
   // gh takes the new name as the operand and the repository to rename as
@@ -337,7 +336,7 @@ describe('gh repo', () => {
   it('edits the settings named in one PATCH and prints nothing', async () => {
     reset({ names: ['old', 'keep'], data: { repository: { viewerCanAdminister: true } } })
     const out = await editCmd(
-      inv(['o/r'], {
+      ...args(['o/r'], {
         description: 'd',
         enable_wiki: 'false',
         template: true,
@@ -366,7 +365,7 @@ describe('gh repo', () => {
 
   it('refuses a security edit the viewer cannot administer', async () => {
     reset({ data: { repository: { viewerCanAdminister: false } } })
-    await expect(editCmd(inv(['o/r'], { enable_secret_scanning: true }))).rejects.toThrow(
+    await expect(editCmd(...args(['o/r'], { enable_secret_scanning: true }))).rejects.toThrow(
       'you do not have sufficient permissions to edit repository security and analysis features',
     )
     expect(CALLS.map((call) => call.method)).toEqual(['POST'])
@@ -374,7 +373,7 @@ describe('gh repo', () => {
 
   it('leaves the topics alone when the edit changes none', async () => {
     reset({ names: ['keep'] })
-    await editCmd(inv(['o/r'], { add_topic: ['keep'], remove_topic: ['gone'] }))
+    await editCmd(...args(['o/r'], { add_topic: ['keep'], remove_topic: ['gone'] }))
     expect(CALLS.map((call) => `${call.method} ${call.path}`)).toEqual(['GET /repos/o/r/topics'])
   })
 
@@ -386,13 +385,13 @@ describe('gh repo', () => {
     ],
   ])('refuses %o as gh does without a terminal', async (flags, message) => {
     reset()
-    await expect(editCmd(inv(['o/r'], flags))).rejects.toThrow(message)
+    await expect(editCmd(...args(['o/r'], flags))).rejects.toThrow(message)
     expect(CALLS).toEqual([])
   })
 
   it('deletes a named repository, reading a bare name as the viewer', async () => {
     reset({ login: 'me' })
-    const out = await deleteCmd(inv(['tools'], { yes: true }))
+    const out = await deleteCmd(...args(['tools'], { yes: true }))
     expect(out === null ? '' : text(out)).toBe('')
     expect(CALLS.map((call) => `${call.method} ${call.path}`)).toEqual([
       'GET /user',
@@ -402,7 +401,7 @@ describe('gh repo', () => {
 
   it('warns that --confirm is --yes under its deprecated name', async () => {
     reset()
-    const out = await deleteCmd(inv(['o/r'], { confirm: true }))
+    const out = await deleteCmd(...args(['o/r'], { confirm: true }))
     expect(DEC.decode(out?.[1].stderr as Uint8Array)).toBe(
       'Flag --confirm has been deprecated, use `--yes` instead\n',
     )
@@ -413,13 +412,13 @@ describe('gh repo', () => {
     [['o/r'], {}, '--yes required when not running interactively'],
   ])('refuses to delete %o %o without a terminal', async (texts, flags, message) => {
     reset()
-    await expect(deleteCmd(inv(texts, flags))).rejects.toThrow(message)
+    await expect(deleteCmd(...args(texts, flags))).rejects.toThrow(message)
     expect(CALLS).toEqual([])
   })
 
   it('renames the -R repository to the operand', async () => {
     reset({ full_name: 'me/after' })
-    await rename(inv(['after'], { repo: 'me/before' }))
+    await rename(...args(['after'], { repo: 'me/before' }))
     expect(CALLS).toEqual([{ method: 'PATCH', path: '/repos/me/before', body: { name: 'after' } }])
   })
 })
@@ -438,8 +437,8 @@ describe('gh file input', () => {
         IOResult,
       ]),
     )
-    const call = inv([], {}, { token: 't' }, { view: { vfs: new Files(read) } })
-    expect(DEC.decode(await readCliFile(call, path, '--body-file'))).toBe('first second')
+    const ctx = context({ vfs: new Files(read) })
+    expect(DEC.decode(await readCliFile(ctx, path, '--body-file'))).toBe('first second')
     expect(read.mock.calls[0]?.[0]).toBe('read')
     expect(read.mock.calls[0]?.[1]).toBe(path)
   })
@@ -453,7 +452,7 @@ describe('gh file input', () => {
       ['issue', 'create', '-F-'],
     ]) {
       const value = await bodyValue(
-        inv([], flags, { token: 't' }, { stdin: new TextEncoder().encode('short body'), argv }),
+        context({ flags, stdin: new TextEncoder().encode('short body'), argv }),
         new FlagView(flags),
       )
       expect(value).toBe('short body')
@@ -465,7 +464,7 @@ describe('gh issue and pull request subjects', () => {
   it('lets a full URL override the configured repository', () => {
     const flags = { repo: 'wrong/repo' }
     const [ref, number] = repoNumber(
-      inv([], flags),
+      { token: 't' },
       new FlagView(flags),
       'https://github.com/acme/tools/issues/42',
       'issue',
@@ -477,7 +476,7 @@ describe('gh issue and pull request subjects', () => {
   it('requires the URL kind to match the verb', () => {
     expect(() =>
       repoNumber(
-        inv([]),
+        { token: 't' },
         new FlagView({}),
         'https://github.com/acme/tools/issues/42',
         'pull request',
@@ -490,7 +489,7 @@ describe('gh issue and pull request subjects', () => {
 describe('gh api', () => {
   it('is a GET with no fields, and sends them as query parameters', async () => {
     reset({ ok: true })
-    await api(inv(['repos/o/r/contents/x'], { raw_field: ['ref=master'], method: 'GET' }))
+    await api(...args(['repos/o/r/contents/x'], { raw_field: ['ref=master'], method: 'GET' }))
     expect(CALLS[0]).toEqual({
       method: 'GET',
       path: '/repos/o/r/contents/x',
@@ -500,14 +499,14 @@ describe('gh api', () => {
 
   it('is a POST once a field is given', async () => {
     reset({})
-    await api(inv(['repos/o/r/issues'], { raw_field: ['title=hi'] }))
+    await api(...args(['repos/o/r/issues'], { raw_field: ['title=hi'] }))
     expect(CALLS[0]?.method).toBe('POST')
   })
 
   it('sends -f verbatim and reads -F as JSON types', async () => {
     reset({})
     await api(
-      inv(['x'], {
+      ...args(['x'], {
         method: 'PUT',
         raw_field: ['a=1'],
         field: ['b=2', 'c=true', 'd=null', 'e=text'],
@@ -518,13 +517,13 @@ describe('gh api', () => {
 
   it('keeps everything after the first = in the value', async () => {
     reset({})
-    await api(inv(['x'], { raw_field: ['content=YQ==\n'] }))
+    await api(...args(['x'], { raw_field: ['content=YQ==\n'] }))
     expect(CALLS[0]?.body).toEqual({ content: 'YQ==\n' })
   })
 
   it('takes an endpoint with or without a leading slash', async () => {
     reset({})
-    await api(inv(['/user']))
+    await api(...args(['/user']))
     expect(CALLS[0]?.path).toBe('/user')
   })
 
@@ -532,21 +531,21 @@ describe('gh api', () => {
   // any other spelling, `/graphql` included, under the REST base.
   it('names GraphQL by the bare graphql endpoint alone', async () => {
     reset({})
-    await api(inv(['graphql'], { raw_field: ['query={ viewer { login } }'] }))
-    await api(inv(['/graphql']))
+    await api(...args(['graphql'], { raw_field: ['query={ viewer { login } }'] }))
+    await api(...args(['/graphql']))
     expect(CALLS.map((call) => call.path)).toEqual(['graphql', '/graphql'])
   })
 
   it('refuses a field that is not key=value', async () => {
     reset({})
-    await expect(api(inv(['x'], { raw_field: ['nope'] }))).rejects.toThrow(/key=value/)
+    await expect(api(...args(['x'], { raw_field: ['nope'] }))).rejects.toThrow(/key=value/)
   })
 
   // Real gh sends no body for a call carrying no fields, so a bare DELETE
   // is a bare DELETE rather than an empty JSON object with a content type.
   it('sends no body at all when no field was given', async () => {
     reset({})
-    await api(inv(['repos/o/r'], { method: 'DELETE' }))
+    await api(...args(['repos/o/r'], { method: 'DELETE' }))
     expect(CALLS[0]).toEqual({ method: 'DELETE', path: '/repos/o/r' })
   })
 
@@ -554,7 +553,7 @@ describe('gh api', () => {
   // the query string, where everything is a string.
   it('stringifies a typed field when the method puts it in the query', async () => {
     reset({})
-    await api(inv(['search/code'], { method: 'GET', field: ['per_page=5', 'draft=true'] }))
+    await api(...args(['search/code'], { method: 'GET', field: ['per_page=5', 'draft=true'] }))
     expect(CALLS[0]?.params).toEqual({ per_page: '5', draft: 'true' })
     expect(CALLS[0]?.body).toBeUndefined()
   })
@@ -562,7 +561,7 @@ describe('gh api', () => {
   it('builds nested objects and arrays', async () => {
     reset({})
     await api(
-      inv(['x'], {
+      ...args(['x'], {
         field: ['config[enabled]=true', 'labels[]=bug', 'labels[]=agent', 'empty[]'],
       }),
     )
@@ -576,7 +575,7 @@ describe('gh api', () => {
   it('reads typed @- values from stdin', async () => {
     reset({})
     await api(
-      inv(
+      ...args(
         ['x'],
         { field: ['body=@-'] },
         { token: 't' },
@@ -589,7 +588,7 @@ describe('gh api', () => {
   it('uses --input as the body and moves fields to the query', async () => {
     reset({})
     await api(
-      inv(
+      ...args(
         ['x'],
         { method: 'PATCH', input: '-', raw_field: ['mode=strict'] },
         { token: 't' },
@@ -607,7 +606,7 @@ describe('gh api', () => {
   it('preserves an explicit JSON null from --input', async () => {
     reset({})
     await api(
-      inv(
+      ...args(
         ['x'],
         { input: '-' },
         { token: 't' },
@@ -619,7 +618,7 @@ describe('gh api', () => {
 
   it('passes custom headers without replacing defaults', async () => {
     reset({})
-    await api(inv(['x'], { header: ['Accept: text/plain', 'X-Probe: yes'] }))
+    await api(...args(['x'], { header: ['Accept: text/plain', 'X-Probe: yes'] }))
     expect((CALLS[0] as Call & { headers?: Record<string, string> }).headers).toEqual({
       Accept: 'text/plain',
       'X-Probe': 'yes',
@@ -636,7 +635,7 @@ describe('gh api', () => {
       },
       { data: [{ id: 2 }], status: 200, headers: {} },
     ]
-    const out = await api(inv(['items'], { paginate: true, slurp: true }))
+    const out = await api(...args(['items'], { paginate: true, slurp: true }))
     expect(CALLS.map((call) => call.path)).toEqual(['/items', '/items?page=2'])
     expect(out === null ? '' : text(out)).toBe('[[{"id":1}],[{"id":2}]]')
   })
@@ -659,7 +658,7 @@ describe('gh api', () => {
           ? { link: `<http://fake/items?page=${String(index + 2)}>; rel="next"` }
           : {},
     }))
-    const out = await api(inv(['items'], paginate ? { paginate: true } : {}))
+    const out = await api(...args(['items'], paginate ? { paginate: true } : {}))
     expect(out === null ? '' : text(out)).toBe(stdout)
   })
 
@@ -674,21 +673,21 @@ describe('gh api', () => {
       { data: [{ id: 2 }], status: 200, headers: {} },
     ]
     await api(
-      inv(['items'], { paginate: true }, { token: 't', baseUrl: 'https://git.example/api/v3' }),
+      ...args(['items'], { paginate: true }, { token: 't', baseUrl: 'https://git.example/api/v3' }),
     )
     expect(CALLS.map((call) => call.path)).toEqual(['/items', '/items?page=2'])
   })
 
   it('suppresses --silent output', async () => {
     reset({ ok: true })
-    const out = await api(inv(['x'], { method: 'POST', silent: true }))
+    const out = await api(...args(['x'], { method: 'POST', silent: true }))
     expect(out === null ? '' : text(out)).toBe('')
   })
 
   it('copies a body that is not text out as its bytes', async () => {
     reset()
     RESPONSES = [{ data: new Uint8Array([0x50, 0x4b, 0xff, 0x00]), status: 200, headers: {} }]
-    const out = await api(inv(['repos/o/r/actions/runs/1/logs']))
+    const out = await api(...args(['repos/o/r/actions/runs/1/logs']))
     expect(out?.[0]).toEqual(new Uint8Array([0x50, 0x4b, 0xff, 0x00]))
   })
 })
@@ -708,7 +707,7 @@ describe('gh api --include', () => {
   it('prints the status line and headers before the body', async () => {
     reset()
     RESPONSES = [{ data: { a: 1 }, status: 200, headers: HEADERS }]
-    const out = await api(inv(['x'], { include: true }))
+    const out = await api(...args(['x'], { include: true }))
     expect(out === null ? '' : text(out)).toBe(`${HEAD}{"a":1}`)
   })
 
@@ -721,7 +720,7 @@ describe('gh api --include', () => {
         headers: { 'content-encoding': 'gzip', 'content-length': '20', etag: 'W/"1"' },
       },
     ]
-    const out = await api(inv(['x'], { include: true, method: 'DELETE' }))
+    const out = await api(...args(['x'], { include: true, method: 'DELETE' }))
     expect(out === null ? '' : text(out)).toBe('HTTP/1.1 204 No Content\nEtag: W/"1"\r\n\r\n')
   })
 
@@ -731,7 +730,7 @@ describe('gh api --include', () => {
       { data: [1], status: 200, headers: { link: '<http://fake/x?page=2>; rel="next"' } },
       { data: [2], status: 200, headers: {} },
     ]
-    const out = await api(inv(['x'], { include: true, paginate: true }))
+    const out = await api(...args(['x'], { include: true, paginate: true }))
     expect(out === null ? '' : text(out)).toBe(
       'HTTP/1.1 200 OK\nLink: <http://fake/x?page=2>; rel="next"\r\n\r\n[1]\nHTTP/1.1 200 OK\n\r\n[2]',
     )
@@ -743,7 +742,7 @@ describe('gh api --include', () => {
       { data: [1], status: 200, headers: { link: '<http://fake/x?page=2>; rel="next"' } },
       { data: [2], status: 200, headers: {} },
     ]
-    const out = await api(inv(['x'], { include: true, paginate: true, slurp: true }))
+    const out = await api(...args(['x'], { include: true, paginate: true, slurp: true }))
     expect(out === null ? '' : text(out)).toBe(
       '[HTTP/1.1 200 OK\nLink: <http://fake/x?page=2>; rel="next"\r\n\r\n[1]\n,HTTP/1.1 200 OK\n\r\n[2]]',
     )
@@ -752,10 +751,10 @@ describe('gh api --include', () => {
   it('keeps the heads under --silent and puts them before --jq output', async () => {
     reset()
     RESPONSES = [{ data: { a: 1 }, status: 200, headers: HEADERS }]
-    const silent = await api(inv(['x'], { include: true, silent: true }))
+    const silent = await api(...args(['x'], { include: true, silent: true }))
     expect(silent === null ? '' : text(silent)).toBe(HEAD)
     RESPONSES = [{ data: { a: 1 }, status: 200, headers: HEADERS }]
-    const filtered = await api(inv(['x'], { include: true, jq: '.a' }))
+    const filtered = await api(...args(['x'], { include: true, jq: '.a' }))
     expect(filtered === null ? '' : text(filtered)).toBe(`${HEAD}1\n`)
   })
 
@@ -766,7 +765,7 @@ describe('gh api --include', () => {
         'content-type': 'application/json',
       }),
     ]
-    const out = await api(inv(['x'], { include: true }))
+    const out = await api(...args(['x'], { include: true }))
     expect(out === null ? '' : text(out)).toBe(
       'HTTP/1.1 404 Not Found\nContent-Type: application/json\r\n\r\n{"message":"Not Found"}',
     )
@@ -780,13 +779,13 @@ describe('gh api --include', () => {
 describe('gh api --jq', () => {
   it('prints a string raw', async () => {
     reset({ full_name: 'o/r' })
-    const out = await api(inv(['repos/o/r'], { jq: '.full_name' }))
+    const out = await api(...args(['repos/o/r'], { jq: '.full_name' }))
     expect(out === null ? '' : text(out)).toBe('o/r\n')
   })
 
   it('prints non-strings as compact JSON', async () => {
     reset({ name: 'r', count: 2, ok: true })
-    const out = await api(inv(['repos/o/r'], { jq: '{name: .name, count: .count}, .ok' }))
+    const out = await api(...args(['repos/o/r'], { jq: '{name: .name, count: .count}, .ok' }))
     expect(out === null ? '' : text(out)).toBe('{"count":2,"name":"r"}\ntrue\n')
   })
 
@@ -817,7 +816,7 @@ describe('gh api --jq', () => {
     ['[true, null, "x"]', '[true,null,"x"]'],
   ])('prints %s as go-gh does', async (program, line) => {
     reset({ n: 5000 })
-    const out = await api(inv(['repos/o/r'], { jq: program }))
+    const out = await api(...args(['repos/o/r'], { jq: program }))
     expect(out === null ? '' : text(out)).toBe(`${line}\n`)
   })
 
@@ -828,19 +827,19 @@ describe('gh api --jq', () => {
     ['[.n * 0 * -1]', '[0]'],
   ])('prints the negative zero of %s as 0', async (program, line) => {
     reset({ n: 5000 })
-    const out = await api(inv(['repos/o/r'], { jq: program }))
+    const out = await api(...args(['repos/o/r'], { jq: program }))
     expect(out === null ? '' : text(out)).toBe(`${line}\n`)
   })
 
   it('prints null as an empty line', async () => {
     reset({ name: 'r' })
-    const out = await api(inv(['repos/o/r'], { jq: '.nope' }))
+    const out = await api(...args(['repos/o/r'], { jq: '.nope' }))
     expect(out === null ? '' : text(out)).toBe('\n')
   })
 
   it('emits one line per output', async () => {
     reset({ a: 'x', b: 'y' })
-    const out = await api(inv(['repos/o/r'], { jq: '.a, .b' }))
+    const out = await api(...args(['repos/o/r'], { jq: '.a, .b' }))
     expect(out === null ? '' : text(out)).toBe('x\ny\n')
   })
 
@@ -848,7 +847,7 @@ describe('gh api --jq', () => {
   // against gh: `halt error: <message>`, exit 1 whatever the code.
   it('ends the output at halt', async () => {
     reset({ a: 'x' })
-    const out = await api(inv(['repos/o/r'], { jq: '.a, halt, .a' }))
+    const out = await api(...args(['repos/o/r'], { jq: '.a, halt, .a' }))
     expect(out === null ? '' : text(out)).toBe('x\n')
   })
 
@@ -858,7 +857,7 @@ describe('gh api --jq', () => {
     ['[.a] | map({v: .} | halt_error(0))', 'halt error: {"v":"x"}'],
   ])('fails at %s', async (program, message) => {
     reset({ a: 'x' })
-    await expect(api(inv(['repos/o/r'], { jq: program }))).rejects.toThrow(message)
+    await expect(api(...args(['repos/o/r'], { jq: program }))).rejects.toThrow(message)
   })
 
   // gojq reports what the program raised with `error` as `error: <value>`,
@@ -888,7 +887,9 @@ describe('gh api --jq', () => {
     ['{"b": 1, "a": 2} | halt_error(1)', 'halt error: {"a":2,"b":1}'],
   ])('fails %s the way gojq reports it', async (program, message) => {
     reset({ a: 'x' })
-    const failure = await api(inv(['repos/o/r'], { jq: program })).catch((error: unknown) => error)
+    const failure = await api(...args(['repos/o/r'], { jq: program })).catch(
+      (error: unknown) => error,
+    )
     expect(failure).toBeInstanceOf(PartialOutputError)
     const partial = failure as PartialOutputError
     expect([partial.message, new TextDecoder().decode(partial.stdout)]).toEqual([message, ''])
@@ -900,7 +901,9 @@ describe('gh api --jq', () => {
     ['(try error(.a) catch .), error("y")', 'error: y'],
   ])('keeps what it printed before %s failed', async (program, message) => {
     reset({ a: 'x' })
-    const failure = await api(inv(['repos/o/r'], { jq: program })).catch((error: unknown) => error)
+    const failure = await api(...args(['repos/o/r'], { jq: program })).catch(
+      (error: unknown) => error,
+    )
     expect(failure).toBeInstanceOf(PartialOutputError)
     const partial = failure as PartialOutputError
     expect([partial.message, new TextDecoder().decode(partial.stdout)]).toEqual([message, 'x\n'])
@@ -976,7 +979,7 @@ it('formats deleted authors, edited/minimized comments and nonzero reactions lik
     },
   })
   const rows = await commentsFor(
-    inv([], { comments: true }),
+    { token: 't' },
     new FlagView({ comments: true }),
     { owner: 'o', repo: 'r' },
     1,
@@ -1003,7 +1006,7 @@ it.each([
     .spyOn(FakeTransport.prototype, 'requestWithResponse')
     .mockRejectedValue(new GitHubApiError('Not Found', 404, body))
   try {
-    const result = await api(inv(['repos/o/missing'], flags))
+    const result = await api(...args(['repos/o/missing'], flags))
     if (result === null) throw new Error('missing API result')
     expect(DEC.decode(await materialize(result[0]))).toBe(stdout)
     expect(DEC.decode(await materialize(result[1].stderr))).toBe(stderr)
@@ -1030,7 +1033,7 @@ it.each([
     .spyOn(FakeTransport.prototype, 'requestWithResponse')
     .mockRejectedValue(new GitHubApiError('Validation Failed', 422, body))
   try {
-    const result = await api(inv(['repos/o/r']))
+    const result = await api(...args(['repos/o/r']))
     if (result === null) throw new Error('missing API result')
     expect(DEC.decode(await materialize(result[0]))).toBe(body)
     expect(DEC.decode(await materialize(result[1].stderr))).toBe(stderr)
@@ -1079,7 +1082,7 @@ it.each([
       })
       .mockRejectedValueOnce(new GitHubApiError('Validation Failed', 422, body))
     try {
-      const result = await api(inv(['page1'], { paginate: true, ...flags }))
+      const result = await api(...args(['page1'], { paginate: true, ...flags }))
       if (result === null) throw new Error('missing API result')
       expect(DEC.decode(await materialize(result[0]))).toBe(stdout)
       expect(DEC.decode(await materialize(result[1].stderr))).toBe(stderr)
@@ -1106,7 +1109,7 @@ it.each([
     })
     .mockResolvedValueOnce({ data: { value: 'second' }, status: 200, headers: {} })
   try {
-    const failure = await api(inv(['page1'], { paginate: true, jq: program })).catch(
+    const failure = await api(...args(['page1'], { paginate: true, jq: program })).catch(
       (error: unknown) => error,
     )
     expect(failure).toBeInstanceOf(PartialOutputError)
@@ -1127,7 +1130,7 @@ it('leaves an array page open when a failing page follows it', async () => {
       new GitHubApiError('Validation Failed', 422, '{"message":"Validation Failed"}'),
     )
   try {
-    const result = await api(inv(['page1'], { paginate: true }))
+    const result = await api(...args(['page1'], { paginate: true }))
     if (result === null) throw new Error('missing API result')
     expect(DEC.decode(await materialize(result[0]))).toBe('[1{"message":"Validation Failed"}')
     expect(result[1].exitCode).toBe(1)
@@ -1150,7 +1153,7 @@ it.each([
     },
   ]
   const result = await api(
-    inv(['graphql'], { raw_field: ['query={ viewer { login } }'], ...flags }),
+    ...args(['graphql'], { raw_field: ['query={ viewer { login } }'], ...flags }),
   )
   if (result === null) throw new Error('missing API result')
   expect(DEC.decode(await materialize(result[0]))).toBe(stdout)
@@ -1162,7 +1165,7 @@ it('reads graphql errors only off the graphql endpoint', async () => {
   const data = { errors: [{ message: 'one' }] }
   reset()
   RESPONSES = [{ data, status: 200, headers: {} }]
-  const result = await api(inv(['repos/o/r']))
+  const result = await api(...args(['repos/o/r']))
   if (result === null) throw new Error('missing API result')
   expect(JSON.parse(DEC.decode(await materialize(result[0])))).toEqual(data)
   expect(result[1].exitCode).toBe(0)

@@ -15,13 +15,13 @@
 import { iconvGeneric } from '../../generic/iconv.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const iconv: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
-  const idx = opts.index ?? undefined
+const iconv: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const write = requireOp(ops.write, 'write')
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   return iconvGeneric(
     resolved,
-    opts,
+    ctx,
     (p) => ops.readStream(accessor, p, idx),
     (p, d) => write(accessor, p, d),
   )

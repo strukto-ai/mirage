@@ -7,7 +7,7 @@ from mirage.commands.builtin.generic.nl import (
     nl_generic,
     parse_flags,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.parser import parse_command, parse_to_kwargs
 from mirage.commands.spec.types import ParsedFlagValue
@@ -690,7 +690,7 @@ async def test_nl_generic_returns_a_refusal_rather_than_raising():
     output, io = await nl_generic(
         [],
         [],
-        CommandOpts(stdin=b"x\n", flags={"number_width": "abc"}),
+        Context(stdin=b"x\n", flags={"number_width": "abc"}),
         never_stat,
         never_stream,
     )

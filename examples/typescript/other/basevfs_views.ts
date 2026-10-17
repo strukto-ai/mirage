@@ -1,11 +1,11 @@
 import {
   Accessor,
   BaseVFS,
-  type CLIInvocation,
   CLI,
   CLIHandler,
   CommandSpec,
   ContentType,
+  type Context,
   eisdir,
   enoent,
   enotdir,
@@ -108,13 +108,17 @@ class NotesVFS extends BaseVFS<NotesAccessor> {
   }
 }
 
-async function noteInfo(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
-  const view = inv.view
-  if (view?.vfs === undefined || view.sessionView === undefined) {
+async function noteInfo(
+  _config: unknown,
+  paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<[Uint8Array, IOResult]> {
+  const { vfs, session } = ctx
+  if (vfs === undefined || session === undefined) {
     throw new Error('note-info needs workspace entry points')
   }
-  const vfs = view.vfs
-  const path = inv.paths[0]
+  const path = paths[0]
   const data = await vfs.read(path)
   let target = '/'
   const rest = path.virtual.split('/')
@@ -129,7 +133,7 @@ async function noteInfo(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
     if (link.startsWith('/')) target = '/'
   }
   const mount = vfs.mountOf(target)
-  const reader = view.sessionView.get('READER') || 'anonymous'
+  const reader = session.get('READER') || 'anonymous'
   const header = ENC.encode(`mount=${mount} reader=${reader} bytes=${data.length}\n`)
   const output = new Uint8Array(header.length + data.length)
   output.set(header)

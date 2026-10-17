@@ -15,7 +15,7 @@
 import type { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { byteView, fromByteView, utf8Locale } from '../../../shell/bytes.ts'
 import { BreError, compileBre } from '../utils/bre.ts'
@@ -476,12 +476,12 @@ function expr(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): CommandFnResult {
   if (texts.length === 0) {
     return [null, new IOResult({ exitCode: 2, stderr: fromByteView(MISSING_OPERAND) })]
   }
-  const utf8 = utf8Locale(opts.env)
+  const utf8 = utf8Locale(ctx.env)
   try {
     const [result, exitCode] = exprEval(
       texts.map((text) => byteView(text, utf8)),

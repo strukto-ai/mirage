@@ -16,7 +16,7 @@ import type { EntryGate } from '../../../policy/types.ts'
 import { sessionAccess } from '../../../context/session_context.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
 import type { FollowOperands, ReaddirPath, StatPath } from '../../../view/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
@@ -62,12 +62,12 @@ export interface RunOnMountCtx {
  * the line runs in the calling command's own session, under its signal,
  * reading the input it is handed.
  */
-function nestedShell(
+export function nestedShell(
   executeFn: ExecuteFn,
   session: SessionState,
   signal: AbortSignal | undefined,
 ): ShellFn {
-  return (line: string, stdin: ByteSource | null) =>
+  return (line: string, stdin: ByteSource | null = null) =>
     executeFn(line, {
       sessionId: session.sessionId,
       session,
@@ -256,33 +256,39 @@ export async function runOnMount(
   if (signal?.aborted === true) throw makeAbortError(signal)
   const access = sessionAccess(session)
   try {
-    return await mount.runCommand(cmdName, paths, texts, flags, {
-      admission: ctx.admission,
-      access,
-      stdin: opts.stdin ?? null,
-      cwd: session.cwd,
-      dispatch,
-      vfs: new Files(dispatch, null, namespace ?? null, (path) => registry.mountOwner(path), {
-        prefixes: () => registry.mountPrefixes(),
-        visibility: () => session.visibility,
-      }),
-      sessionId: session.sessionId,
-      env: envSnapshot(session),
-      sessionView: sessionView(session, registry.policies, context.frame.diagnostics),
-      ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
-      execAllowed: registry.isExecAllowed(access),
-      execPathAllowed: (virtual) => registry.execAllowedAt(virtual, access),
-      ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
-      ...(ctx.follow !== undefined ? { followOperands: ctx.follow } : {}),
-      statPath,
-      readdirPath,
-      ...(signal !== undefined ? { signal } : {}),
-      ...(ctx.executeFn !== undefined
-        ? { shell: nestedShell(ctx.executeFn, session, signal) }
-        : {}),
+    return await mount.runCommand(
+      cmdName,
+      paths,
+      texts,
+      flags,
+      {
+        admission: ctx.admission,
+        access,
+        stdin: opts.stdin ?? null,
+        cwd: PathSpec.fromStrPath(session.cwd),
+        dispatch,
+        vfs: new Files(dispatch, null, namespace ?? null, (path) => registry.mountOwner(path), {
+          prefixes: () => registry.mountPrefixes(),
+          visibility: () => session.visibility,
+        }),
+        sessionId: session.sessionId,
+        env: envSnapshot(session),
+        session: sessionView(session, registry.policies, context.frame.diagnostics),
+        ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
+        execAllowed: registry.isExecAllowed(access),
+        execPathAllowed: (virtual) => registry.execAllowedAt(virtual, access),
+        ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
+        ...(ctx.follow !== undefined ? { followOperands: ctx.follow } : {}),
+        statPath,
+        readdirPath,
+        ...(signal !== undefined ? { signal } : {}),
+        ...(ctx.executeFn !== undefined
+          ? { shell: nestedShell(ctx.executeFn, session, signal) }
+          : {}),
+        ...(opts.argv !== undefined ? { argv: opts.argv } : {}),
+      },
       limitOverride,
-      ...(opts.argv !== undefined ? { argv: opts.argv } : {}),
-    })
+    )
   } catch (err) {
     // Command-owned usage errors (extra operands, missing patterns) become
     // this command's IOResult so the rest of the line keeps running, like a

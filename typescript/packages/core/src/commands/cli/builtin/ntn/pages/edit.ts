@@ -15,26 +15,31 @@
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { replacePageMarkdown } from '../../../../../core/notion/pages.ts'
 import { IOResult } from '../../../../../io/types.ts'
-import type { CommandFnResult } from '../../../../config.ts'
-import type { CLIInvocation } from '../../../types.ts'
+import type { CommandFnResult, Context } from '../../../../config.ts'
+import type { PathSpec } from '../../../../../types.ts'
 import { contentOrStdin, firstText, notionTransport, prettyJson, usageError } from '../util.ts'
 
 const ENC = new TextEncoder()
 
-export async function edit(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function edit(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   let pageId: string
   let markdown: string
   try {
-    pageId = firstText(inv.texts, 'page id')
-    markdown = await contentOrStdin(fl.asStr('content'), inv.stdin)
+    pageId = firstText(texts, 'page id')
+    markdown = await contentOrStdin(fl.asStr('content'), ctx.stdin)
   } catch (err) {
     return usageError(err)
   }
   // The PATCH answers with the page's new markdown, which is what `--json` is
   // for; printing the id under it would throw the response away on the one
   // flag that asks for it.
-  const edited = await replacePageMarkdown(notionTransport(inv.config, inv.flags), pageId, markdown)
+  const edited = await replacePageMarkdown(notionTransport(config, ctx.flags), pageId, markdown)
   if (fl.asBool('json')) return [prettyJson(edited), new IOResult()]
   return [ENC.encode(`${pageId}\n`), new IOResult()]
 }

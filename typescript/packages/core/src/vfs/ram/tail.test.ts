@@ -36,7 +36,7 @@ async function runTail(
     stdin: null,
     flags,
     io: commandIo(vfs),
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) return ''
   const [out] = result

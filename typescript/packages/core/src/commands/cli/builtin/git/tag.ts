@@ -16,9 +16,8 @@ import { PathSpec } from '../../../../types.ts'
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { identity } from './commit.ts'
 import { HEAD } from './constants.ts'
 import { dateClock } from './dates.ts'
@@ -166,19 +165,23 @@ export async function buildTag(
  * The ref filters (`--contains`, `--merged`, `--points-at` and their negations)
  * imply a listing the way `-n` does, so their operands are patterns.
  */
-export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
-  const view = inv.view ?? {}
-  const words = filterWords(inv)
-  const texts = withoutFilterValues(inv.texts, words)
+export async function tag(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const words = filterWords(ctx)
+  const operands = withoutFilterValues(texts, words)
   const filtered = words.length > 0
-  const fl = new FlagView(inv.flags)
+  const fl = new FlagView(ctx.flags)
   let name: string
   let was: string | undefined
   let abbrev: number
   try {
-    const vfs = view.vfs
+    const vfs = ctx.vfs
     if (vfs === undefined) throw new NoWorkspaceError()
-    checkSwitches(inv, texts)
+    checkSwitches(ctx, operands)
     const flags = parseFlags(fl)
     if (flags.listing && flags.remove) throw new IncompatibleOptionsError('-l', '-d')
     // -a, -m and -f create a tag, so a line that lists or deletes instead has
@@ -187,9 +190,13 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
     // a listing, which is why it counts here too.
     if (
       (flags.annotate || flags.force) &&
-      (flags.listing || flags.remove || flags.lines !== undefined || filtered || texts.length === 0)
+      (flags.listing ||
+        flags.remove ||
+        flags.lines !== undefined ||
+        filtered ||
+        operands.length === 0)
     ) {
-      throw new UsageError('', verbUsage(inv))
+      throw new UsageError('', verbUsage(ctx))
     }
     // After the two usage refusals above, which git reaches first: `-l -d -n1`
     // is the incompatible pair and `-d -f -n1` the usage, both exiting 129,
@@ -197,7 +204,7 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
     if (flags.remove && flags.lines !== undefined) throw new ListModeOnlyError()
     const listOnly = flags.remove ? listModeOption(words) : null
     if (listOnly !== null) throw new ListModeOnlyError(listOnly)
-    const repo = await opened(fl, view)
+    const repo = await opened(ctx, fl)
     abbrev = repo.abbrev
     const keys = sortKeys(fl, await configuredSort(repo, 'tag'))
     const filter = await refFilter(repo, words)
@@ -206,7 +213,7 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
       const out: string[] = []
       const err: string[] = []
       const doomed: { name: string; ref: string; sha: string }[] = []
-      for (const each of texts) {
+      for (const each of operands) {
         const ref = `${TAG_PREFIX}${each}`
         const sha = known.get(ref)
         if (sha === undefined) {
@@ -240,7 +247,7 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
         new IOResult({ exitCode: err.length > 0 ? 1 : 0, stderr: ENC.encode(err.join('')) }),
       ]
     }
-    if (flags.listing || flags.lines !== undefined || filtered || texts.length === 0) {
+    if (flags.listing || flags.lines !== undefined || filtered || operands.length === 0) {
       // git reads a -n count while building the format it lists with, so a
       // count below -1 is refused as the format's own (after both usage
       // refusals above, and in a repository holding no tags), and --format
@@ -250,29 +257,29 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
       )
       const icase = fl.asBool('ignore_case')
       const wanted = (each: string): boolean =>
-        each.startsWith(TAG_PREFIX) && matchShort(each, texts, icase)
-      const [items, ctx, errors] = await refListing(
+        each.startsWith(TAG_PREFIX) && matchShort(each, operands, icase)
+      const [items, refCtx, errors] = await refListing(
         repo,
         usedFields(fmt, keys ?? []),
         wanted,
         filter,
-        dateClock(inv.env),
+        dateClock(ctx.env),
       )
-      const [rows, stopped] = formatRefs(fmt, items, ctx, keys, {
+      const [rows, stopped] = formatRefs(fmt, items, refCtx, keys, {
         omitEmpty: fl.asBool('omit_empty'),
         icase,
         stream: filter === null || (filter.merged === null && filter.noMerged === null),
       })
       return listingResult(rows, errors, stopped)
     }
-    if (texts.length > 2) throw new TooManyArgumentsError()
-    name = texts[0] ?? ''
+    if (operands.length > 2) throw new TooManyArgumentsError()
+    name = operands[0] ?? ''
     if (!validRefName(name)) throw new InvalidTagNameError(name)
     const ref = `${TAG_PREFIX}${name}`
     was = known.get(ref)
     if (was !== undefined && !flags.force) throw new TagExistsError(name)
     if (flags.annotate && flags.message === undefined) throw new MissingTagMessageError()
-    const target = await resolveTarget(repo, texts[1] ?? HEAD)
+    const target = await resolveTarget(repo, operands[1] ?? HEAD)
     let pointed = target.oid
     if (flags.annotate) {
       pointed = await buildTag(
@@ -280,7 +287,7 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
         name,
         target,
         flags.message ?? '',
-        identity(fl, view.sessionView).line,
+        identity(fl, ctx.session).line,
         Math.floor(Date.now() / 1000),
       )
     }
@@ -302,9 +309,9 @@ export async function tag(inv: CLIInvocation): Promise<CommandFnResult> {
  * tag's refusal by a read-only mount: the lock on the ref it creates or
  * deletes, and for an annotated tag the object it could not write first.
  */
-export const tagReadOnly: ReadOnlyRefusal = (inv, location) => {
-  const fl = new FlagView(inv.flags)
-  const ref = `${TAG_PREFIX}${inv.texts[0] ?? ''}`
+export const tagReadOnly: ReadOnlyRefusal = (texts, ctx, location) => {
+  const fl = new FlagView(ctx.flags)
+  const ref = `${TAG_PREFIX}${texts[0] ?? ''}`
   const path = (location?.commondir ?? PathSpec.fromStrPath('/.git')).join(ref)
   if (fl.asBool('delete')) return new RefDeleteReadOnlyError(ref, path.virtual)
   if (fl.asBool('annotate') || fl.raw('message') !== undefined) return new TagWriteReadOnlyError()

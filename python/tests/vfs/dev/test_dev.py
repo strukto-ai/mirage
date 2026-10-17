@@ -32,7 +32,7 @@ from mirage.workspace.session.session import SessionState
 async def test_process_substitution_is_private_to_its_session():
     ready, release = asyncio.Event(), asyncio.Event()
 
-    async def hold(inv):
+    async def hold(config, paths, texts, ctx):
         ready.set()
         await release.wait()
         return None, IOResult()
@@ -84,12 +84,12 @@ async def test_process_substitution_cleanup_preserves_reused_descriptor():
     old_ready, old_release = asyncio.Event(), asyncio.Event()
     new_ready, new_release = asyncio.Event(), asyncio.Event()
 
-    async def hold_old(inv):
+    async def hold_old(config, paths, texts, ctx):
         old_ready.set()
         await old_release.wait()
         return None, IOResult()
 
-    async def hold_new(inv):
+    async def hold_new(config, paths, texts, ctx):
         new_ready.set()
         await new_release.wait()
         return None, IOResult()

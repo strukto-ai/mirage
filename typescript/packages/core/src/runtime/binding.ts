@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ProcessView } from '../process/view.ts'
+import type { Context } from '../commands/config.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import { captureSessionContext } from '../context/session_context.ts'
 import { captureExecutionContext } from '../execution/context.ts'
-import type { OpKwargs, SessionView } from '../view/types.ts'
+import type { OpKwargs } from '../view/types.ts'
 import { isGlob, showHead } from '../utils/hidden.ts'
 import { PathSpec } from '../types.ts'
 import { ContextScope } from '../utils/context_scope.ts'
@@ -26,18 +26,15 @@ import type { Files } from '../workspace/files.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 
 /** Local workspace entry points captured for one execution, never guest
- * globals. `vfs` is the session's files, whose links a guest's path resolves
- * through; null outside a workspace. */
+ * globals. `ctx` is the same `Context` a command or CLI gets: its `vfs` is
+ * the session's files, whose links a guest's path resolves through, absent
+ * outside a workspace. */
 export interface RuntimeContext {
   readonly binding: WorkspaceBinding
   readonly dispatch: BridgeDispatchFn
   readonly resolver: MountResolver
-  readonly vfs: Files | null
-  readonly sessionView: SessionView | null
-  readonly cwd: PathSpec
-  readonly env: Readonly<Record<string, string>>
   readonly scope: ContextScope
-  readonly processes: ProcessView | null
+  readonly ctx: Context
   readonly restrictedMounts?: readonly string[]
 }
 
@@ -99,11 +96,7 @@ export function restrictedMountsFor(session: SessionState, prefixes: readonly st
 export function captureBinding(
   binding: WorkspaceBinding,
   views: {
-    vfs?: Files
-    sessionView?: SessionView
-    processes?: ProcessView
-    cwd?: PathSpec
-    env?: Readonly<Record<string, string>>
+    ctx?: Partial<Context>
     restrictedMounts?: readonly string[]
     // The bridge bound to the session the views describe; the binding's
     // own serves a context captured with no session named.
@@ -111,10 +104,10 @@ export function captureBinding(
   } = {},
   scope = new ContextScope([...captureSessionContext(), captureExecutionContext()]),
 ): RuntimeContext {
-  const session = views.sessionView
-  const sessionView =
+  const session = views.ctx?.session
+  const wrapped =
     session === undefined
-      ? null
+      ? undefined
       : {
           get: scope.wrap(session.get.bind(session)),
           snapshot: scope.wrap(session.snapshot.bind(session)),
@@ -133,12 +126,15 @@ export function captureBinding(
       ownerOf: scope.wrap((path: string) => binding.resolver.ownerOf(path)),
       linkChildren: scope.wrap((path: string) => binding.resolver.linkChildren(path)),
     },
-    vfs: views.vfs ?? null,
-    sessionView,
-    processes: views.processes ?? null,
     restrictedMounts: Object.freeze(views.restrictedMounts ?? []),
-    cwd: views.cwd ?? PathSpec.fromStrPath('/'),
-    env: Object.freeze({ ...views.env }),
+    ctx: Object.freeze({
+      stdin: null,
+      flags: {},
+      ...views.ctx,
+      cwd: views.ctx?.cwd ?? PathSpec.fromStrPath('/'),
+      env: Object.freeze({ ...views.ctx?.env }),
+      ...(wrapped === undefined ? {} : { session: wrapped }),
+    }),
     scope,
   })
 }

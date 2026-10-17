@@ -21,13 +21,11 @@ from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.cli.types import (
     CLI as CLIProgram,
 )
-from mirage.commands.cli.types import (
-    CLIHandler,
-    CLIInvocation,
-)
+from mirage.commands.cli.types import CLIHandler
 from mirage.commands.config import (
     Command,
     CommandIO,
+    Context,
     command,
     registered_commands,
 )
@@ -80,7 +78,7 @@ class CommandService(RAMVFS):
             )
 
         @command("calls", vfs="ram", spec=SPECS["cat"])
-        async def show_calls(accessor, paths, texts, opts):
+        async def show_calls(accessor, paths, texts, ctx):
             body = "".join(line + "\n" for line in calls).encode()
             calls.clear()
             return body, IOResult()
@@ -88,13 +86,13 @@ class CommandService(RAMVFS):
         @command(
             "meter", vfs="ram", spec=SPECS["cat"], aggregate=concat_aggregate
         )
-        async def meter(accessor, paths, texts, opts):
+        async def meter(accessor, paths, texts, ctx):
             return "".join(
                 p.raw_path + "\n" for p in paths
             ).encode(), IOResult()
 
         @command("gate-status", vfs="ram", spec=SPECS["cat"])
-        async def gate_status(accessor, paths, texts, opts):
+        async def gate_status(accessor, paths, texts, ctx):
             return (
                 (
                     f"started={GATE.started} peak={GATE.peak} "
@@ -111,7 +109,7 @@ class CommandService(RAMVFS):
         self, original: Command, calls: list[str], own: CommandIO
     ) -> list[Command]:
         @command(original.name, vfs="ram", spec=SPECS[original.name])
-        async def search(accessor, paths, texts, opts):
+        async def search(accessor, paths, texts, ctx):
             calls.extend(original.name + " " + p.virtual for p in paths)
             if original.name == "rev" and paths[0].virtual.endswith(".gated"):
                 if GATE.ready is None:
@@ -150,7 +148,7 @@ class CommandService(RAMVFS):
 
                 return stream(), IOResult()
             return await original.fn(
-                accessor, paths, texts, replace(opts, io=own)
+                accessor, paths, texts, replace(ctx, io=own)
             )
 
         return registered_commands([search])
@@ -169,12 +167,15 @@ class CommandService(RAMVFS):
         return await super().readdir(path)
 
 
-async def scope_probe(inv: CLIInvocation):
+async def scope_probe(
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+):
+    assert ctx.vfs is not None
     size = 0
-    for path in inv.paths:
-        size += (await inv.view.vfs.stat(path)).size or 0
+    for path in paths:
+        size += (await ctx.vfs.stat(path)).size or 0
     return (
-        str(size) + ":" + ",".join(p.virtual for p in inv.paths) + "\n"
+        str(size) + ":" + ",".join(p.virtual for p in paths) + "\n"
     ).encode(), IOResult()
 
 

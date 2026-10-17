@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
-import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
+import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
+import type { PathSpec } from '@struktoai/mirage-core/types'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
@@ -23,11 +23,16 @@ import type { EmailConfig } from '../../../../core/email/config.ts'
 import { messageJsonBytes } from '../../../../core/email/render.ts'
 import { firstText } from './util.ts'
 
-export async function read(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const uid = firstText(inv.texts, 'message id')
+export async function read(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const uid = firstText(texts, 'message id')
   const mailbox = fl.asStr('mailbox') ?? 'INBOX'
-  const accessor = new EmailAccessor(inv.config as EmailConfig)
+  const accessor = new EmailAccessor(config as EmailConfig)
   try {
     if (fl.asBool('raw')) {
       const raw: ByteSource = await fetchRawMessage(accessor, mailbox, uid)

@@ -17,7 +17,7 @@ import pytest
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.generic.grep import grep_generic
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.io.types import materialize
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -115,7 +115,7 @@ async def test_generic_grep_reads_bytes_once_when_drained():
     out, io = await grep_generic(
         [_spec()],
         ("alpha",),
-        CommandOpts(),
+        Context(),
         readdir=_readdir,
         stat=_stat,
         read_bytes=reader,

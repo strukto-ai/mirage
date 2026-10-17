@@ -17,7 +17,7 @@ from mirage.commands.builtin.utils.identity import (
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.operands import operand_stat
 from mirage.commands.builtin.utils.output import format_records
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -760,13 +760,13 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> StatFlags:
 async def stat_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     stat_fn: StatFn,
 ) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     statfs = (
-        partial(_dispatched_statfs, opts.dispatch)
-        if opts.dispatch is not None
+        partial(_dispatched_statfs, ctx.dispatch)
+        if ctx.dispatch is not None
         else None
     )
     return await stat(
@@ -775,9 +775,9 @@ async def stat_generic(
         c=parsed.format,
         f=parsed.file_system,
         L=parsed.deref,
-        links=links_of(opts),
-        stat_path=opts.stat_path,
-        mounts=mounts_of(opts),
-        identity=identity_of(opts),
+        links=links_of(ctx),
+        stat_path=ctx.stat_path,
+        mounts=mounts_of(ctx),
+        identity=identity_of(ctx),
         statfs=statfs,
     )

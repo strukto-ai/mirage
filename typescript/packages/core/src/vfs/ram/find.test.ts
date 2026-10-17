@@ -35,7 +35,7 @@ async function runFind(
     stdin: null,
     flags,
     io: commandIo(vfs),
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) return { lines: [], exitCode: -1, runs: null }
   const [out, ioResult] = result

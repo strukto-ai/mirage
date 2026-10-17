@@ -37,7 +37,7 @@ from mirage.commands.builtin.trello.trello_card_move import trello_card_move
 from mirage.commands.builtin.trello.trello_card_update import (
     trello_card_update,
 )
-from mirage.commands.config import CommandFn, CommandOpts
+from mirage.commands.config import CommandFn, Context
 from mirage.context import reset_mount_gate, set_mount_gate
 from mirage.errors.types import ReadOnlyError
 from mirage.types import MountMode
@@ -111,7 +111,7 @@ async def test_a_read_mount_refuses_an_id_addressed_write(
     token = set_mount_gate("/trello", MountMode.READ)
     try:
         with pytest.raises(ReadOnlyError):
-            await cmd(_ACCESSOR, [], [], CommandOpts(flags=flags))
+            await cmd(_ACCESSOR, [], [], Context(flags=flags))
     finally:
         reset_mount_gate(token)
 
@@ -154,6 +154,6 @@ async def test_a_card_write_refuses_an_id_outside_the_scope(
         with pytest.raises(
             ValueError, match=" is outside this mount's scope$"
         ):
-            await cmd(_SCOPED, [], [], CommandOpts(flags=flags))
+            await cmd(_SCOPED, [], [], Context(flags=flags))
     finally:
         reset_mount_gate(token)

@@ -21,7 +21,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,17 +31,17 @@ async def sort(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_or_empty(ops, accessor, paths, opts.index)
+    paths = await resolve_or_empty(ops, accessor, paths, ctx.index)
     return await generic_sort(
         paths,
-        read_bytes=bound_op(ops.read_stream, accessor, opts.index),
+        read_bytes=bound_op(ops.read_stream, accessor, ctx.index),
         write_bytes=(
             partial(ops.write, accessor) if ops.write is not None else None
         ),
-        stdin=opts.stdin,
-        flags=opts.flags,
+        stdin=ctx.stdin,
+        flags=ctx.flags,
     )
 
 

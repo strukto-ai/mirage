@@ -54,11 +54,11 @@ def test_json_is_strict_about_non_finite_numbers():
 
 
 def test_one_operand_words_its_refusals_like_argparse():
-    assert one_operand(("x",), "BASE") == "x"
+    assert one_operand(["x"], "BASE") == "x"
     with pytest.raises(UsageError, match="are required: BASE"):
-        one_operand((), "BASE")
+        one_operand([], "BASE")
     with pytest.raises(UsageError, match="unrecognized arguments: y z"):
-        one_operand(("x", "y", "z"), "BASE")
+        one_operand(["x", "y", "z"], "BASE")
 
 
 @pytest.mark.asyncio

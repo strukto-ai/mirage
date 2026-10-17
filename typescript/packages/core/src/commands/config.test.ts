@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../types.ts'
 import { materialize } from '../io/types.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { command, Command } from './config.ts'
@@ -50,7 +51,7 @@ describe('command()', () => {
     await rc.fn({} as never, [], [], {
       stdin: null,
       flags: { version: true },
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
     })
     expect(fn).toHaveBeenCalledOnce()
   })
@@ -67,7 +68,7 @@ describe('command()', () => {
     await rc.fn({} as never, [], [], {
       stdin: null,
       flags: { help: true },
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
     })
     expect(fn).toHaveBeenCalledTimes(calls)
   })
@@ -119,7 +120,7 @@ describe('command()', () => {
     const result = await rc.fn({} as never, [], [], {
       stdin: null,
       flags: { help: true },
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
     })
     if (result === null) throw new Error('expected result')
     expect(new TextDecoder().decode(await materialize(result[0]))).toContain('Services:\n  drive\n')

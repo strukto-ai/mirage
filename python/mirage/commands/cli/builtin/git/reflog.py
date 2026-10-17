@@ -29,7 +29,7 @@ from mirage.commands.cli.builtin.git.util import (
     fatal,
     maybe_bool,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -199,23 +199,25 @@ async def _named_log(
 
 
 async def reflog(
-    inv: CLIInvocation[None],
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Read a ref's log newest first through the dispatcher.
 
     Args:
-        inv (CLIInvocation[None]): optional show verb, ref and entry limit.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the optional show verb and ref.
+        ctx (Context): the line's context, with the entry limit.
     """
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     try:
-        texts = inv.texts[1:] if inv.texts[:1] == ("show",) else inv.texts
-        check_operands(inv, texts)
-        view = inv.view or CLIView()
-        repo, location = await opened(fl, view)
-        assert view.vfs is not None
+        texts = texts[1:] if texts[:1] == ["show"] else texts
+        check_operands(ctx, texts)
+        repo, location = await opened(ctx, fl)
+        assert ctx.vfs is not None
         revision = texts[0] if texts else HEAD
         await asyncio.to_thread(resolve_commit, repo, revision)
-        name, data = await _named_log(view.vfs, location, revision)
+        name, data = await _named_log(ctx.vfs, location, revision)
         rows = list(reversed((data or b"").splitlines()))
         limit = fl.as_int("max_count")
         if limit is not None and limit >= 0:

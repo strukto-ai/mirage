@@ -15,7 +15,7 @@ from mirage.commands.builtin.utils.stream import (
     stdin_stat,
 )
 from mirage.commands.builtin.utils.tree import before_full_scan
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.compile import compile_spec
@@ -603,7 +603,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> DiffFlags:
 async def diff_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     read_bytes: Callable[..., Awaitable[bytes]],
     readdir_fn: Callable[..., Awaitable[list[str]]],
     stat_fn: Callable[..., Awaitable[FileStat]],
@@ -613,11 +613,11 @@ async def diff_generic(
         read_bytes=read_bytes,
         readdir_fn=readdir_fn,
         stat_fn=stat_fn,
-        flags=parse_flags(opts.flags),
-        stdin=opts.stdin,
-        argv=opts.argv,
-        stat_path=opts.stat_path,
-        zone=zone_from_env(opts.env),
-        dispatch=opts.dispatch,
-        links=links_of(opts),
+        flags=parse_flags(ctx.flags),
+        stdin=ctx.stdin,
+        argv=ctx.argv,
+        stat_path=ctx.stat_path,
+        zone=zone_from_env(ctx.env),
+        dispatch=ctx.dispatch,
+        links=links_of(ctx),
     )

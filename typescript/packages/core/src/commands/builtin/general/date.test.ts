@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { MountMode } from '../../../types.ts'
@@ -32,7 +33,7 @@ async function runDate(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) return ''
   const [out] = result
@@ -51,7 +52,7 @@ async function runDateIo(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) return ['', '', 0]
   const [out, io] = result
@@ -114,7 +115,7 @@ async function runDateEnv(
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     env,
   })
   if (result === null) return ['', '', 0]
@@ -132,7 +133,7 @@ async function runDateEnv(
 // Pinned against GNU date 9.x on debian:stable-slim with tzdata: the zone
 // is the command environment's TZ, `-u` outranks it, and an instant
 // renders on the calendar day the zone shows (issue #1070). The zone comes
-// from `opts.env` alone: process.env.TZ is never read or written.
+// from `ctx.env` alone: process.env.TZ is never read or written.
 describe('date honors the command environment TZ', () => {
   it.each([
     [{ TZ: 'UTC' }, ['+%a %Z'], { date: '@0' }, 'Thu UTC\n'],
@@ -181,7 +182,7 @@ async function runDateStderr(d: string): Promise<[string, number]> {
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
     stdin: null,
     flags: { date: d },
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) throw new Error('date returned no result')
   await materialize(result[0])

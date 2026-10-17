@@ -201,7 +201,7 @@ The driver never sees the mount it runs under. The index store and the `vfs:` re
 | --- | --- |
 | Shell and coreutils | The mount builds the generic commands over the VFS's functions; the shell supplies expansion, pipes, redirects and session policy. |
 | Filesystem calls | `ws.vfs` and `ws.dispatch` reach the same functions through the dispatcher. |
-| CLIs | The host registers a `CLI` using `register_cli`. File-oriented handlers use `inv.view.vfs`; mounting a driver does not install an account CLI. |
+| CLIs | The host registers a `CLI` using `register_cli`. File-oriented handlers use `ctx.vfs`; mounting a driver does not install an account CLI. |
 | Runtimes | Runtimes wired to `RuntimeFiles` reach the same dispatcher. A process or remote runtime needs its configured mount bridge. |
 | Namespace | The workspace owns symlinks, nested mounts and metadata overlays; the backend implements its own tree. |
 
@@ -472,10 +472,10 @@ already.
 
 ## 4. Commands
 
-The generic commands are registered once per workspace, and every mount falls back to them after its VFS's own. Each runs over the functions of the mount it runs on (`opts.io`), and the generic command owns flag interpretation, so a backend wrapper is wiring only. A command of the same name in the backend's `COMMANDS` replaces the generic on that backend; `generic("<name>")` hands the replacement the default command for what it does not support, and `generic("<name>", vfs=..., table=...)` registers the default over a changed table (`/dev`'s endless `cat`).
+The generic commands are registered once per workspace, and every mount falls back to them after its VFS's own. Each runs over the functions of the mount it runs on (`ctx.io`), and the generic command owns flag interpretation, so a backend wrapper is wiring only. A command of the same name in the backend's `COMMANDS` replaces the generic on that backend; `generic("<name>")` hands the replacement the default command for what it does not support, and `generic("<name>", vfs=..., table=...)` registers the default over a changed table (`/dev`'s endless `cat`).
 
 - Let grep and rg skip files by defining `files_containing` (and `lines_containing` for row stores) on the VFS; `search` serves the `search` command.
-- A verb (`trello card create`) declares its own `CommandSpec` with every id as a flag, reads flags through `FlagView(opts.flags, spec=SPEC)` (never `flags.get(...)`), registers `write=True` for a mutation, and calls `require_mount_writable()` before the client. Specs declared inline are dumped to `.cache/spec/python/vfs_commands/` and compared with TypeScript's, and a prompt that teaches the verbs is pinned against their specs (`tests/vfs/trello/test_prompt.py`).
+- A verb (`trello card create`) declares its own `CommandSpec` with every id as a flag, reads flags through `FlagView(ctx.flags, spec=SPEC)` (never `flags.get(...)`), registers `write=True` for a mutation, and calls `require_mount_writable()` before the client. Specs declared inline are dumped to `.cache/spec/python/vfs_commands/` and compared with TypeScript's, and a prompt that teaches the verbs is pinned against their specs (`tests/vfs/trello/test_prompt.py`).
 - Handlers take `(accessor, paths, texts, opts)`. Read `stdin`, `index`, `prefix`, and namespace facts from `opts`; do not add injected parameters or a second handler convention.
 - A handler that reads its `accessor` directly is trusted host code. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands. A command handed through `commands=[...]` does not run where the session restricts its mount.
 

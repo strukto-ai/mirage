@@ -20,7 +20,7 @@ from mirage.commands.builtin.trello._input import (
     resolve_text_input,
 )
 from mirage.commands.builtin.trello._scope import require_card
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.context import require_mount_writable
@@ -47,9 +47,9 @@ async def trello_card_update(
     accessor: TrelloAccessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(opts.flags, spec=SPEC)
+    fl = FlagView(ctx.flags, spec=SPEC)
     config = accessor.config
     card_id = fl.as_str("card_id")
     if not card_id:
@@ -59,11 +59,11 @@ async def trello_card_update(
     if (
         fl.as_str("desc") is not None
         or file_operand(fl, "desc_file") is not None
-        or opts.stdin is not None
+        or ctx.stdin is not None
     ):
         desc = await resolve_text_input(
             accessor,
-            opts,
+            ctx,
             inline_text=fl.as_str("desc"),
             file_path=file_operand(fl, "desc_file"),
             error_message="desc is required",

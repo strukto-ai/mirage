@@ -19,9 +19,9 @@ import { compare, limited, renderChanges, parseDiffFlags, renamesEnabled } from 
 import { HEAD } from './constants.ts'
 
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import {
   GitError,
   InvalidOptionError,
@@ -86,21 +86,24 @@ async function sides(
  * pathspecs, read once the revisions have resolved, as git reads them, and
  * every format shows only the paths they name.
  */
-export async function diff(inv: CLIInvocation): Promise<CommandFnResult> {
-  const view = inv.view ?? {}
-  const texts = [...inv.texts]
-  const fl = new FlagView(inv.flags)
+export async function diff(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const cached = fl.asBool('cached') || fl.asBool('staged')
-  const [revisions, paths] = splitMarked(texts, inv.argv)
+  const [revisions, marked] = splitMarked(texts, ctx.argv ?? [])
   try {
-    const vfs = view.vfs
-    if (vfs === undefined || view.vfs === undefined) throw new NoWorkspaceError()
-    const word = optionOperand(inv, texts, STDERR)
+    const vfs = ctx.vfs
+    if (vfs === undefined) throw new NoWorkspaceError()
+    const word = optionOperand(ctx, texts, STDERR)
     if (word !== null && (cached || revisions.some((text) => !text.startsWith('-')))) {
-      throw new UsageError('', verbUsage(inv))
+      throw new UsageError('', verbUsage(ctx))
     }
-    if (word !== null) throw new InvalidOptionError(word, verbUsage(inv))
-    const repo = await opened(fl, view)
+    if (word !== null) throw new InvalidOptionError(word, verbUsage(ctx))
+    const repo = await opened(ctx, fl)
     const parsed = parseDiffFlags(
       fl,
       true,
@@ -134,7 +137,7 @@ export async function diff(inv: CLIInvocation): Promise<CommandFnResult> {
     }
     before = visibleEntries(repo.location, before)
     after = visibleEntries(repo.location, after)
-    const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, paths)
+    const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, marked)
     const flags = { ...parsed, pathspecs }
     const body = await renderChanges(
       repo,

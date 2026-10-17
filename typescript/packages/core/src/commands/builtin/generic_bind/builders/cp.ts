@@ -30,13 +30,13 @@ import { specOf } from '../../../spec/builtins.ts'
 export const BUILDER: GenericCommand = {
   name: 'cp',
   write: true,
-  fn: async (raw, accessor, paths, _texts, opts) => {
+  fn: async (raw, accessor, paths, _texts, ctx) => {
     // A native copy or find answers for a whole tree in one call, so the
     // dispatcher declines one whose tree the caller's view restricts; cp
     // takes the entry-by-entry walk up front there, which is where GNU's
     // per-entry refusals are worded.
     const ops: CommandIO = { ...raw }
-    if (pathsScoped(paths, opts.mountPrefix ?? '')) {
+    if (pathsScoped(paths, ctx.mountPrefix ?? '')) {
       delete ops.copy
       delete ops.dirCopy
     }
@@ -48,7 +48,7 @@ export const BUILDER: GenericCommand = {
         ? requireOp<NonNullable<CommandIO['mkdir']>>(undefined, 'mkdir')
         : ops.mkdir
     const copy = requireOp(ops.copy, 'copy')
-    const idx = opts.index ?? undefined
+    const idx = ctx.index ?? undefined
     const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
     // The tree to copy, walked from the mount's readTree where it answers
     // (mirrors Python's _make_find). Passing the index lets stat classify
@@ -71,7 +71,7 @@ export const BUILDER: GenericCommand = {
       )
       return found
     }
-    const parsed = parseFlags(new FlagView(opts.flags, specOf('cp')))
+    const parsed = parseFlags(new FlagView(ctx.flags, specOf('cp')))
     // A native copy moves a tree in one backend call and readTree lists
     // it, neither of which passes an entry through the guard the way a
     // read does; while a path rule scopes cp, or a hide could cover an
@@ -99,8 +99,8 @@ export const BUILDER: GenericCommand = {
               : { dirCopy: (src: PathSpec, target: PathSpec) => dirCopy(accessor, src, target) }),
             ...(mkdir === undefined ? {} : { mkdir: (p: PathSpec) => mkdir(accessor, p) }),
           }
-    const links = linksOf(opts) ?? null
-    const cwd = opts.cwd
+    const links = linksOf(ctx) ?? null
+    const cwd = ctx.cwd.virtual
     return cpGeneric(
       resolved,
       (p: PathSpec) => ops.stat(accessor, p, idx),
@@ -110,13 +110,13 @@ export const BUILDER: GenericCommand = {
       undefined,
       (p: PathSpec) => ops.readdir(accessor, p, idx),
       links === null ? undefined : (p: PathSpec) => typedLink(links, p, cwd),
-      links === null || opts.dispatch === undefined
+      links === null || ctx.dispatch === undefined
         ? undefined
-        : transferLinksOf(links, opts.dispatch, cwd, opts.vfs?.vis() ?? undefined, (virtual) =>
-            serves(mountsOf(opts), opts.mountPrefix ?? '', virtual),
+        : transferLinksOf(links, ctx.dispatch, cwd, ctx.vfs?.vis() ?? undefined, (virtual) =>
+            serves(mountsOf(ctx), ctx.mountPrefix ?? '', virtual),
           ),
-      opts.stdin,
-      opts.dispatch,
+      ctx.stdin,
+      ctx.dispatch,
     )
   },
 }

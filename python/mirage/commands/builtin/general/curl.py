@@ -26,7 +26,7 @@ from mirage.commands.builtin.utils.http import (
     http_form_request,
     http_request,
 )
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -175,7 +175,7 @@ def url_encoded(data: bytes) -> str:
 
 
 async def _read_at(
-    option: str, name: str, opts: CommandOpts, silent: bool
+    option: str, name: str, ctx: Context, silent: bool
 ) -> bytes:
     """Read the file an ``@NAME`` value names, ``-`` being stdin.
 
@@ -185,17 +185,15 @@ async def _read_at(
     Args:
         option (str): the option's spelling, for the refusal.
         name (str): the file as the line named it.
-        opts (CommandOpts): the invocation, for stdin and the dispatcher.
+        ctx (Context): the invocation, for stdin and the dispatcher.
         silent (bool): whether -s mutes the file's own line.
     """
     try:
         if name == "-":
-            return await materialize(opts.stdin)
-        if opts.dispatch is None:
+            return await materialize(ctx.stdin)
+        if ctx.dispatch is None:
             raise OperationNotSupportedError("no filesystem dispatcher")
-        content, _ = await opts.dispatch(
-            "read", resolve_target(name, opts.cwd)
-        )
+        content, _ = await ctx.dispatch("read", resolve_target(name, ctx.cwd))
         return await materialize(content)
     except WALK_ERRORS as exc:
         detail = "" if silent else f"curl: Failed to open {name}\n"
@@ -207,14 +205,14 @@ async def _read_at(
 
 
 async def _data_piece(
-    kind: str, value: str, opts: CommandOpts, silent: bool
+    kind: str, value: str, ctx: Context, silent: bool
 ) -> bytes:
     """One data option's contribution to the body.
 
     Args:
         kind (str): which data option it is.
         value (str): its value as typed.
-        opts (CommandOpts): the invocation, for files and stdin.
+        ctx (Context): the invocation, for files and stdin.
         silent (bool): whether -s is on.
     """
     if kind == "data_raw":
@@ -228,7 +226,7 @@ async def _data_piece(
         name = value[:sep] if sep > 0 else ""
         content = value[sep + 1 :] if sep >= 0 else value
         raw = (
-            await _read_at(DATA_SPELLING[kind], content, opts, silent)
+            await _read_at(DATA_SPELLING[kind], content, ctx, silent)
             if sep >= 0 and value[sep] == "@"
             else content.encode()
         )
@@ -236,14 +234,14 @@ async def _data_piece(
         return (f"{name}={encoded}" if name else encoded).encode()
     if not value.startswith("@"):
         return value.encode()
-    raw = await _read_at(DATA_SPELLING[kind], value[1:], opts, silent)
+    raw = await _read_at(DATA_SPELLING[kind], value[1:], ctx, silent)
     if kind == "data":
         return raw.translate(None, DATA_STRIPPED)
     return raw
 
 
 async def request_body(
-    fl: FlagView, opts: CommandOpts
+    fl: FlagView, ctx: Context
 ) -> tuple[bytes | None, bool]:
     """The body the data options build, and whether --json was among them.
 
@@ -253,7 +251,7 @@ async def request_body(
 
     Args:
         fl (FlagView): the line's flags.
-        opts (CommandOpts): the invocation, for files and stdin.
+        ctx (Context): the invocation, for files and stdin.
     """
     silent = fl.as_bool("silent")
     occurrences = fl.occurrences(*DATA_OPTIONS)
@@ -262,7 +260,7 @@ async def request_body(
     body = b""
     json = False
     for kind, value in occurrences:
-        piece = await _data_piece(kind, str(value), opts, silent)
+        piece = await _data_piece(kind, str(value), ctx, silent)
         if body and kind != "json":
             body += b"&"
         body += piece
@@ -368,9 +366,9 @@ async def curl(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(opts.flags, spec=SPECS["curl"])
+    fl = FlagView(ctx.flags, spec=SPECS["curl"])
     user_agent = fl.as_str("user_agent")
     request = fl.as_str("request")
     has_data = bool(fl.occurrences(*DATA_OPTIONS))
@@ -429,9 +427,9 @@ async def curl(
     # restore it. The option error is always printed. The parsed flags no
     # longer retain the spelling, so each option names its usual one.
     if template.startswith("@"):
-        raw = await _read_at("-w", template[1:], opts, fl.as_bool("silent"))
+        raw = await _read_at("-w", template[1:], ctx, fl.as_bool("silent"))
         template = raw.decode(errors="replace")
-    body, json = await request_body(fl, opts)
+    body, json = await request_body(fl, ctx)
     # A custom header of a name curl would add itself takes its place,
     # so curl's own goes only where the line names none. The trace lists
     # them in curl's order; the wire leaves User-Agent and Accept to the
@@ -440,7 +438,7 @@ async def curl(
     prompt = b""
     user = fl.as_str("user")
     if user is not None and "authorization" not in named:
-        stdin = b"" if ":" in user else await materialize(opts.stdin)
+        stdin = b"" if ":" in user else await materialize(ctx.stdin)
         token, prompt = basic_auth(user, stdin)
         auth.append(("Authorization", token))
     agent = (
@@ -595,10 +593,10 @@ async def curl(
     # status and before -o writes the body: a file both name ends up
     # holding the body.
     if dump_file is not None:
-        if opts.dispatch is not None:
+        if ctx.dispatch is not None:
             try:
-                await opts.dispatch(
-                    "write", resolve_target(dump_file, opts.cwd), data=blocks
+                await ctx.dispatch(
+                    "write", resolve_target(dump_file, ctx.cwd), data=blocks
                 )
             except WALK_ERRORS as exc:
                 err = (
@@ -640,10 +638,10 @@ async def curl(
         != "-"
     ):
         o_str = _path_str(output)
-        if opts.dispatch is not None:
-            scope = resolve_target(output, opts.cwd)
+        if ctx.dispatch is not None:
+            scope = resolve_target(output, ctx.cwd)
             try:
-                await opts.dispatch("write", scope, data=result)
+                await ctx.dispatch("write", scope, data=result)
             # WALK_ERRORS is the shared recoverable set (every filesystem error
             # plus the ValueError store backends raise for "not a directory"),
             # so a missing parent cannot escape the way it did when this caught

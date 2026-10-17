@@ -16,7 +16,7 @@ import re
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.bre import BreError, compile_bre
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.quote import quote_word
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
@@ -776,13 +776,13 @@ async def expr(
     accessor: Accessor,
     paths: list[PathSpec] | None,
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
         return None, IOResult(
             exit_code=2, stderr=from_byte_view(MISSING_OPERAND)
         )
-    utf8 = utf8_locale(opts.env)
+    utf8 = utf8_locale(ctx.env)
     try:
         result, exit_code = _expr_eval(
             [byte_view(t, utf8) for t in texts], utf8

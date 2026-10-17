@@ -17,7 +17,7 @@ from mirage.commands.builtin.generic.crossmount.utils import (
     transfer_primitives,
 )
 from mirage.commands.builtin.generic.unzip import unzip_generic
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec.types import FlagValue
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
@@ -47,7 +47,7 @@ async def run_unzip(
     return await unzip_generic(
         scopes,
         list(text_args),
-        CommandOpts(flags=flag_kwargs),
+        Context(flags=flag_kwargs),
         read_bytes=prim["read_bytes"],
         write_bytes=prim["write"],
         mkdir_fn=prim["mkdir"],

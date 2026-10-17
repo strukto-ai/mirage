@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { BaseVFS } from '../../../vfs/base.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { type CommandOpts } from '../../config.ts'
+import { type Context } from '../../config.ts'
 import {
   CapacityState,
   ContentType,
@@ -54,16 +54,16 @@ function fs(overrides: Partial<FileStatInit> = {}): FileStat {
   })
 }
 
-function opts(fmt: string): CommandOpts {
+function ctx(fmt: string): Context {
   return {
     stdin: null,
     flags: { format: fmt },
-    cwd: '/',
-  } as unknown as CommandOpts
+    cwd: PathSpec.fromStrPath('/'),
+  } as unknown as Context
 }
 
 async function render(fmt: string, s: FileStat): Promise<string> {
-  const result = await statGeneric([PathSpec.fromStrPath('/data/f.txt')], opts(fmt), () =>
+  const result = await statGeneric([PathSpec.fromStrPath('/data/f.txt')], ctx(fmt), () =>
     Promise.resolve(s),
   )
   if (result === null) throw new Error('statGeneric returned null')
@@ -75,7 +75,7 @@ async function render(fmt: string, s: FileStat): Promise<string> {
 // Like render, but for a custom operand path and keeping the trailing newline
 // (used to assert %N quoting byte-for-byte).
 async function renderNamed(fmt: string, name: string): Promise<string> {
-  const result = await statGeneric([PathSpec.fromStrPath(name)], opts(fmt), () =>
+  const result = await statGeneric([PathSpec.fromStrPath(name)], ctx(fmt), () =>
     Promise.resolve(fs()),
   )
   if (result === null) throw new Error('statGeneric returned null')
@@ -123,7 +123,7 @@ describe('stat -c directive formatting', () => {
   // synthetic one, a subtree total for a Graph folder. A file keeps its own
   // size, None when unknown.
   it('sizes a directory in the default record as %s does', async () => {
-    const plain = { ...opts(''), flags: {} } as CommandOpts
+    const plain = { ...ctx(''), flags: {} } as Context
     const cases: [FileStat, string][] = [
       [fs({ type: FileType.DIRECTORY, size: null }), `  Size: ${String(DIR_SIZE)} `],
       [fs({ type: FileType.DIRECTORY, size: 123456 }), `  Size: ${String(DIR_SIZE)} `],
@@ -233,7 +233,7 @@ describe('stat -c directive formatting', () => {
 
   it('counts a quota in 1K blocks under -f', async () => {
     const quota = {
-      ...opts('%T %S %b %f %a %c %d %i %5l|'),
+      ...ctx('%T %S %b %f %a %c %d %i %5l|'),
       flags: { format: '%T %S %b %f %a %c %d %i %5l|', file_system: true },
       dispatch: () =>
         Promise.resolve([
@@ -251,7 +251,7 @@ describe('stat -c directive formatting', () => {
           ],
           new IOResult(),
         ]),
-    } as unknown as CommandOpts
+    } as unknown as Context
     const result = await statGeneric([PathSpec.fromStrPath('/data/f.txt')], quota, () =>
       Promise.resolve(fs()),
     )
@@ -262,9 +262,9 @@ describe('stat -c directive formatting', () => {
 
   it('knows no file system under -f without a workspace', async () => {
     const bare = {
-      ...opts(''),
+      ...ctx(''),
       flags: { format: '%n %T %b %05c', file_system: true },
-    } as unknown as CommandOpts
+    } as unknown as Context
     const result = await statGeneric([PathSpec.fromStrPath('/data/f.txt')], bare, () =>
       Promise.resolve(fs()),
     )
@@ -273,7 +273,7 @@ describe('stat -c directive formatting', () => {
   })
 
   it('reports missing operand', async () => {
-    await expect(statGeneric([], opts('%n'), () => Promise.resolve(fs()))).rejects.toThrow(
+    await expect(statGeneric([], ctx('%n'), () => Promise.resolve(fs()))).rejects.toThrow(
       "stat: missing operand\nTry 'stat --help' for more information.",
     )
   })
@@ -326,7 +326,7 @@ it('renders GNU default layout with explicit unknown metadata', async () => {
   const info = fs({ size: null, modified: null, ctime: null })
   const result = await statGeneric(
     [PathSpec.fromStrPath('/data/f.txt')],
-    { ...opts(''), flags: {} },
+    { ...ctx(''), flags: {} },
     () => Promise.resolve(info),
   )
   if (result === null) throw new Error('missing result')
@@ -346,7 +346,7 @@ it('renders GNU default layout with explicit unknown metadata', async () => {
 async function defaultLines(s: FileStat): Promise<string[]> {
   const result = await statGeneric(
     [PathSpec.fromStrPath('/data/f.txt')],
-    { ...opts(''), flags: {} },
+    { ...ctx(''), flags: {} },
     () => Promise.resolve(s),
   )
   if (result === null) throw new Error('missing result')

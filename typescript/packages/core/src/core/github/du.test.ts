@@ -67,7 +67,7 @@ async function runDu(
   const result = await BUILDER.fn(table, accessor, [PathSpec.fromStrPath(operand)], [], {
     stdin: null,
     flags,
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) throw new Error('du returned nothing')
   const [out, io] = result

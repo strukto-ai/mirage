@@ -19,7 +19,7 @@ import { chunks } from '../../../io/cooperative.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, Limit, type FileStat, type PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { reportedStream, splitReadable } from '../utils/operands.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -155,13 +155,13 @@ async function* displayLines(
 export async function catGeneric(
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
   stat: Stat,
   stream: Stream,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
-  stream = stdinStream(stream, opts.stdin)
-  const display = parseFlags(opts.flags)
+  stream = stdinStream(stream, ctx.stdin)
+  const display = parseFlags(ctx.flags)
   const wantsDisplay = Object.values(display).some(Boolean)
   if (paths.length > 0) {
     const stats = new Map<string, FileStat>()
@@ -188,14 +188,14 @@ export async function catGeneric(
     const merged = outputs.length === 1 ? outputs[0] : asyncChain(outputs)
     if (merged === undefined) throw new Error('cat: missing readable stream')
     const out: ByteSource = wantsDisplay
-      ? displayLines(merged, display, opts.signal, deadlineCheck(opts))
+      ? displayLines(merged, display, ctx.signal, deadlineCheck(ctx))
       : merged
     return [out, io]
   }
   try {
-    const source = resolveSource(opts.stdin)
+    const source = resolveSource(ctx.stdin)
     const out: ByteSource = wantsDisplay
-      ? displayLines(source, display, opts.signal, deadlineCheck(opts))
+      ? displayLines(source, display, ctx.signal, deadlineCheck(ctx))
       : source
     return [out, new IOResult()]
   } catch (err) {

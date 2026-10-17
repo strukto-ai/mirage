@@ -19,8 +19,8 @@ import type { FileStat, PathSpec } from '../../../../types.ts'
 import { rgGeneric } from '../../generic/rg.ts'
 import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const rg: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
-  const idx = opts.index ?? undefined
+const rg: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   const { readTree } = ops
   const readdir = (p: PathSpec): Promise<string[]> => ops.readdir(accessor, p, idx)
@@ -28,10 +28,10 @@ const rg: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
   return rgGeneric(
     resolved,
     texts,
-    opts,
+    ctx,
     stat,
     readdir,
-    await searchReads(ops, 'rg', accessor, resolved, texts, opts),
+    await searchReads(ops, 'rg', accessor, resolved, texts, ctx),
     treeWalk<string[], FileStat>(
       readTree === undefined ? undefined : (p) => readTree(accessor, p, idx),
       readdir,

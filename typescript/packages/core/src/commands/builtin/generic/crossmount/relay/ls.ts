@@ -17,7 +17,7 @@ import type { SessionView } from '../../../../../view/types.ts'
 import type { Files } from '../../../../../workspace/files.ts'
 import type { FileStat, PathSpec } from '../../../../../types.ts'
 import { gnuBasename } from '../../../../../utils/path.ts'
-import type { CommandOpts } from '../../../../config.ts'
+import type { Context } from '../../../../config.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { dispatchedCall } from '../../../generic_bind/adapter.ts'
 import { lsGeneric } from '../../ls.ts'
@@ -63,7 +63,7 @@ export async function runLs(
   // The session view, for the profile the group column renders.
   sessionView?: SessionView,
 ): Promise<CrossResult> {
-  const opts: CommandOpts = {
+  const ctx: Context = {
     ...crossOpts(flagKwargs),
     dispatch,
     ...(vfs !== undefined ? { vfs } : {}),
@@ -71,6 +71,6 @@ export async function runLs(
   }
   // The dispatcher's listing names the links among the entries. Mirrors
   // Python's relayed_readdir.
-  const result = await lsGeneric(flatten(scopes), opts, readdirOp(dispatch), relayedStat(dispatch))
+  const result = await lsGeneric(flatten(scopes), ctx, readdirOp(dispatch), relayedStat(dispatch))
   return result ?? [null, new IOResult()]
 }

@@ -16,10 +16,9 @@ import { visibleEntries, matched, repoRelative, under as inside } from './pathsp
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
-import { FileType } from '../../../../types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import { FileType, type PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIView, CLIInvocation } from '../../types.ts'
 import { headEntries } from './changes.ts'
 import { GITLINK_MODE, HEAD } from './constants.ts'
 import {
@@ -138,20 +137,23 @@ export async function sourceTree(
  * hold is removed from whichever target is being restored, since that is what
  * "make it match the source" means for it. Pinned against git 2.50.1.
  */
-export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
-  const view = inv.view ?? {}
-  const texts = [...inv.texts]
-  const fl = new FlagView(inv.flags)
+export async function restore(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   let notes: string[] = []
   try {
-    const vfs = view.vfs
+    const vfs = ctx.vfs
     if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
-    checkSwitches(inv, texts)
+    checkSwitches(ctx, texts)
     if (texts.length === 0) throw new NoRestorePathsError()
     const flags = parseFlags(fl)
-    const repo = await opened(fl, view, true)
+    const repo = await opened(ctx, fl, true)
     let source: Map<string, TreeEntry> | null
     if (flags.source !== undefined) {
       ;[, source] = await sourceTree(repo, flags.source)
@@ -169,8 +171,8 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
       source = null
     }
     ;[notes] = await restorePaths(
+      ctx,
       repo,
-      view,
       texts,
       startPoint(fl).virtual,
       source,
@@ -194,8 +196,8 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
  * source and a path the index holds that the source does not is left as it
  * is; without it, restore's own reading, such a path is removed.
  *
+ * @param ctx the line's context, whose files git writes
  * @param repo the opened repository
- * @param view the invocation's view
  * @param operands the pathspecs as typed
  * @param start the directory the line runs in
  * @param source the tree to restore from, null for the index
@@ -205,8 +207,8 @@ export async function restore(inv: CLIInvocation): Promise<CommandFnResult> {
  * @returns the warnings git prints, and how many working-tree files changed
  */
 export async function restorePaths(
+  ctx: Context,
   repo: Repo,
-  view: CLIView,
   operands: readonly string[],
   start: string,
   source: Map<string, TreeEntry> | null,
@@ -214,7 +216,7 @@ export async function restorePaths(
   worktree: boolean,
   overlay: boolean,
 ): Promise<[string[], number]> {
-  const vfs = view.vfs
+  const vfs = ctx.vfs
   if (vfs === undefined) throw new NoWorkspaceError()
   const notes: string[] = []
   let updated = 0

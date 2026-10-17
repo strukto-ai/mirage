@@ -19,7 +19,7 @@ import { fsStrerror, isFsError, isEnoent, isEisdir } from '../../../errors/fs.ts
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { crc32, deflateRawStream } from '../../../utils/compress.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { lstripSlash, rstripSlash } from '../../../utils/slash.ts'
 import { respellOne } from '../../../utils/path.ts'
@@ -178,7 +178,7 @@ async function planZip(
   paths: readonly PathSpec[],
   archive: PathSpec,
   deps: ZipDeps,
-  opts: CommandOpts,
+  ctx: Context,
   parsed: ZipFlags,
 ): Promise<ZipPlan> {
   const { recursive: recurse, junkPaths: junk, exclude } = parsed
@@ -201,8 +201,8 @@ async function planZip(
     const scan = await scanOperand(path, {
       stat: deps.stat,
       walk: deps.walk,
-      links: linksOf(opts) ?? null,
-      mounts: mountsOf(opts) ?? null,
+      links: linksOf(ctx) ?? null,
+      mounts: mountsOf(ctx) ?? null,
       dereference: !parsed.storeLinks,
       recurse,
     })
@@ -270,10 +270,10 @@ function createError(path: PathSpec, reason: string, warnings = ''): CommandFnRe
 
 export async function zipGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   deps: ZipDeps,
 ): Promise<CommandFnResult> {
-  const parsed = parseFlags(opts.flags)
+  const parsed = parseFlags(ctx.flags)
   if (paths.length === 0) {
     return [
       null,
@@ -301,7 +301,7 @@ export async function zipGeneric(
       }
     }
     const quiet = parsed.quiet
-    const plan = await planZip(paths.slice(1), archivePath, deps, opts, parsed)
+    const plan = await planZip(paths.slice(1), archivePath, deps, ctx, parsed)
     if (plan.repeated !== '') {
       const message = warningText([...plan.warnings, plan.repeated], quiet) + REPEATED_ERROR
       return [null, new IOResult({ exitCode: REPEATED_EXIT, stderr: ENC.encode(message) })]

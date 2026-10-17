@@ -9,7 +9,7 @@ from mirage.commands.builtin.generic.tail import (
     tail_generic,
     tail_multi,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.errors.fs import eacces, efbig, enoent
 from mirage.io.stream import close_quietly
@@ -237,7 +237,7 @@ async def test_tail_heads_no_operand_whose_open_is_refused():
     stream, io = await tail_generic(
         _paths("/locked", "/small"),
         [],
-        CommandOpts(flags={"lines": "1"}),
+        Context(flags={"lines": "1"}),
         fs.stat,
         read,
     )
@@ -264,7 +264,7 @@ async def test_tail_reports_a_failed_operand_and_prints_the_next(
     stream, io = await tail_generic(
         _paths("/big", "/gone", "/small"),
         [],
-        CommandOpts(flags={"lines": "1"}),
+        Context(flags={"lines": "1"}),
         fs.stat,
         fs.read,
         last_lines=last_lines,
@@ -356,10 +356,8 @@ async def _drain_for(gen, seconds: float) -> list[bytes]:
     return chunks
 
 
-def _follow_opts(**flags) -> CommandOpts:
-    return CommandOpts(
-        flags={"follow": True, "sleep_interval": "0.02", **flags}
-    )
+def _follow_opts(**flags) -> Context:
+    return Context(flags={"follow": True, "sleep_interval": "0.02", **flags})
 
 
 @pytest.mark.asyncio
@@ -582,7 +580,7 @@ async def test_retry_without_follow_warns_and_tails_anyway():
     stream, io = await tail_generic(
         _paths("/d/f"),
         [],
-        CommandOpts(flags={"retry": True, "n": "1"}),
+        Context(flags={"retry": True, "n": "1"}),
         fs.stat,
         fs.read,
         fs.read_range,
@@ -597,7 +595,7 @@ async def test_retry_without_follow_warns_and_tails_anyway():
     stream, io = await tail_generic(
         _paths("/d/nope"),
         [],
-        CommandOpts(flags={"retry": True}),
+        Context(flags={"retry": True}),
         fs.stat,
         fs.read,
         fs.read_range,
@@ -645,7 +643,7 @@ async def test_retry_waits_for_a_file_to_appear():
     stream, io = await tail_generic(
         _paths("/d/later"),
         [],
-        CommandOpts(flags={"F": True, "sleep_interval": "0.02"}),
+        Context(flags={"F": True, "sleep_interval": "0.02"}),
         fs.stat,
         fs.read,
         fs.read_range,
@@ -669,7 +667,7 @@ async def test_retry_under_a_descriptor_covers_the_initial_open_only():
     stream, io = await tail_generic(
         _paths("/d/later"),
         [],
-        CommandOpts(
+        Context(
             flags={"F": True, "follow": "descriptor", "sleep_interval": "0.02"}
         ),
         fs.stat,
@@ -973,7 +971,7 @@ async def test_tail_asks_last_lines_for_a_count_from_the_end(flags, asked):
     stream, _ = await tail_generic(
         _paths("/d/log"),
         [],
-        CommandOpts(flags=flags),
+        Context(flags=flags),
         fs.stat,
         fs.read,
         None,

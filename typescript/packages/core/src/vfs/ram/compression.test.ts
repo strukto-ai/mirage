@@ -43,7 +43,7 @@ async function runCmd(
     stdin,
     flags,
     io: commandIo(vfs),
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) return { out: new Uint8Array(), writes: {}, exitCode: 0 }
   const [output, io] = result as [unknown, { exitCode: number }]

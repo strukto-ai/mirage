@@ -16,7 +16,7 @@ import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.generic_bind.builders.unlink import unlink
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.types import FileStat, FileType, PathSpec
 
 INDEX = RAMIndexCacheStore()
@@ -65,7 +65,7 @@ def _spec(virtual: str) -> PathSpec:
 
 async def _unlink(ops: CommandIO, path: str) -> tuple[int, str]:
     _, io = await unlink(
-        ops, object(), [_spec(path)], [], CommandOpts(index=INDEX)
+        ops, object(), [_spec(path)], [], Context(index=INDEX)
     )
     return io.exit_code, io.stderr.decode() if io.stderr else ""
 

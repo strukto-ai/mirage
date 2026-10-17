@@ -15,8 +15,8 @@
 import { DIFF_HEADER } from './constants.ts'
 import { commentsFor, commentsText } from './issue.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CommandFnResult } from '../../../config.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 import type { GitHubTransport } from '../../../../core/github/client.ts'
 import {
   commentPull,
@@ -337,8 +337,8 @@ function viewText(row: Record<string, unknown>): string {
   return `title:\t${textValue(row.title)}\nstate:\t${textValue(row.state).toUpperCase()}\nauthor:\t${textValue(author?.login)}\nbase:\t${textValue(row.baseRefName)}\nhead:\t${textValue(row.headRefName)}\n--\n${textValue(row.body)}\n`
 }
 
-function target(inv: CLIInvocation, fl: FlagView) {
-  return repoNumber(inv, fl, inv.texts[0], 'pull request', 'pull')
+function target(config: unknown, texts: string[], fl: FlagView) {
+  return repoNumber(config, fl, texts[0], 'pull request', 'pull')
 }
 
 /**
@@ -346,16 +346,21 @@ function target(inv: CLIInvocation, fl: FlagView) {
  * the way gh's PullRequestList does, so every field gh accepts is answered
  * in gh's own shape; the text view reads the REST listing.
  */
-export async function listCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function listCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const wanted = fl.asStr('state') ?? 'open'
   const base = fl.asStr('base')
   const head = fl.asStr('head')
   const fields = jsonFields(fl, PR_FIELDS)
   if (fields !== null) {
     const rows = await listPullRequestFields(
-      ghTransport(inv.config),
-      repoFor(inv, fl),
+      ghTransport(config),
+      repoFor(config, fl),
       { states: STATES[wanted] ?? ['OPEN'], base, head },
       fl.asInt('limit') ?? 30,
       selection(PULL_FIELD_TABLE, fields, false),
@@ -371,8 +376,8 @@ export async function listCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   if (base !== undefined) params.base = base
   if (head !== undefined) params.head = head
   const values = await listPulls(
-    ghTransport(inv.config),
-    repoFor(inv, fl),
+    ghTransport(config),
+    repoFor(config, fl),
     params,
     fl.asInt('limit') ?? 30,
     wanted === 'merged'
@@ -388,16 +393,21 @@ export async function listCmd(inv: CLIInvocation): Promise<CommandFnResult> {
  * does (see viewedPull); the text view reads the REST object, and `-c` its
  * comments.
  */
-export async function viewCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const [ref, number] = target(inv, fl)
+export async function viewCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const [ref, number] = target(config, texts, fl)
   const fields = jsonFields(fl, PR_FIELDS)
   if (fields !== null) {
-    const node = await viewedPull(ghTransport(inv.config), ref, number, fields)
+    const node = await viewedPull(ghTransport(config), ref, number, fields)
     return typedOut(exportedNode(PULL_FIELD_TABLE, node, fields), fl, '', PR_FIELDS)
   }
-  const row = pull(await getPull(ghTransport(inv.config), ref, number))
-  const comments = await commentsFor(inv, fl, ref, number)
+  const row = pull(await getPull(ghTransport(config), ref, number))
+  const comments = await commentsFor(config, fl, ref, number)
   return typedOut(
     row,
     fl,
@@ -406,8 +416,13 @@ export async function viewCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   )
 }
 
-export async function createCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function createCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const title = fl.asStr('title')
   const head = fl.asStr('head')
   const base = fl.asStr('base')
@@ -422,72 +437,97 @@ export async function createCmd(inv: CLIInvocation): Promise<CommandFnResult> {
     title: title ?? '',
     head: head ?? '',
     base: base ?? '',
-    body: (await bodyValue(inv, fl, { required: true })) ?? '',
+    body: (await bodyValue(ctx, fl, { required: true })) ?? '',
     draft: ghBool(fl, 'draft'),
     maintainer_can_modify: !ghBool(fl, 'no_maintainer_edit'),
   }
-  const created = pull(await createPull(ghTransport(inv.config), repoFor(inv, fl), body))
+  const created = pull(await createPull(ghTransport(config), repoFor(config, fl), body))
   return textOut(`${textValue(created.url)}\n`)
 }
 
-export async function editCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function editCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const body: Record<string, unknown> = {}
   const title = fl.asStr('title')
   const base = fl.asStr('base')
-  const text = await bodyValue(inv, fl)
+  const text = await bodyValue(ctx, fl)
   if (title !== undefined) body.title = title
   if (base !== undefined) body.base = base
   if (text !== undefined) body.body = text
   if (Object.keys(body).length === 0) throw new Error('no pull request fields to edit')
-  const [ref, number] = target(inv, fl)
-  const edited = pull(await editPull(ghTransport(inv.config), ref, number, body))
+  const [ref, number] = target(config, texts, fl)
+  const edited = pull(await editPull(ghTransport(config), ref, number, body))
   return textOut(`${textValue(edited.url)}\n`)
 }
 
-export async function mergeCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function mergeCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const methods = ['merge', 'rebase', 'squash'].filter((name) => ghBool(fl, name))
   if (methods.length > 1) throw new Error('choose only one merge strategy')
   const body: Record<string, unknown> = { merge_method: methods[0] ?? 'merge' }
   const subject = fl.asStr('subject')
-  const message = await bodyValue(inv, fl)
+  const message = await bodyValue(ctx, fl)
   const sha = fl.asStr('match_head_commit')
   if (subject !== undefined) body.commit_title = subject
   if (message !== undefined) body.commit_message = message
   if (sha !== undefined) body.sha = sha
-  const [ref, number] = target(inv, fl)
-  await mergePull(ghTransport(inv.config), ref, number, body)
+  const [ref, number] = target(config, texts, fl)
+  await mergePull(ghTransport(config), ref, number, body)
   return textOut(`✓ Merged pull request ${ref.owner}/${ref.repo}#${String(number)}\n`)
 }
 
-export async function closeCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const [ref, number] = target(inv, fl)
-  const edited = pull(await editPull(ghTransport(inv.config), ref, number, { state: 'closed' }))
+export async function closeCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const [ref, number] = target(config, texts, fl)
+  const edited = pull(await editPull(ghTransport(config), ref, number, { state: 'closed' }))
   return textOut(
     `✓ Closed pull request ${ref.owner}/${ref.repo}#${String(number)} (${textValue(edited.title)})\n`,
   )
 }
 
-export async function commentCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const [ref, number] = target(inv, fl)
+export async function commentCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const [ref, number] = target(config, texts, fl)
   const comment = pull(
     await commentPull(
-      ghTransport(inv.config),
+      ghTransport(config),
       ref,
       number,
-      (await bodyValue(inv, fl, { required: true })) ?? '',
+      (await bodyValue(ctx, fl, { required: true })) ?? '',
     ),
   )
   return textOut(`${textValue(comment.url)}\n`)
 }
 
-export async function diffCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const [ref, number] = target(inv, fl)
-  const value = await diffPull(ghTransport(inv.config), ref, number)
+export async function diffCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const [ref, number] = target(config, texts, fl)
+  const value = await diffPull(ghTransport(config), ref, number)
   if (ghBool(fl, 'name_only')) {
     return textOut(
       changedNames(value)
@@ -520,10 +560,15 @@ function check(value: Record<string, unknown>): Record<string, unknown> {
   return row
 }
 
-export async function checksCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const [ref, number] = target(inv, fl)
-  const rows = (await pullChecks(ghTransport(inv.config), ref, number)).map(check)
+export async function checksCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const [ref, number] = target(config, texts, fl)
+  const rows = (await pullChecks(ghTransport(config), ref, number)).map(check)
   const human = rows
     .map((row) => `${textValue(row.name)}\t${textValue(row.state)}\t${textValue(row.link)}\n`)
     .join('')

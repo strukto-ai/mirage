@@ -61,7 +61,7 @@ from mirage.commands.builtin.generic.tar.types import (
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.stream import stdin_stream
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -994,7 +994,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TarFlags:
 async def tar_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     read_bytes: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
     mkdir_fn: Callable[..., Awaitable[None]],
@@ -1003,7 +1003,7 @@ async def tar_generic(
     is_dir: DirProbe,
     relay: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     return await tar(
         paths,
         read_bytes=read_bytes,
@@ -1027,9 +1027,9 @@ async def tar_generic(
         strip_components=parsed.strip_components,
         exclude=parsed.exclude,
         one_file_system=parsed.one_file_system,
-        links=links_of(opts),
-        mounts=mounts_of(opts),
-        cwd=opts.cwd,
+        links=links_of(ctx),
+        mounts=mounts_of(ctx),
+        cwd=ctx.cwd,
         relay=relay,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
     )

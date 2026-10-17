@@ -21,10 +21,10 @@ import {
   type GenericCommandFn,
 } from '../adapter.ts'
 
-const cat: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
-  const idx = opts.index ?? undefined
+const cat: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return catGeneric(resolved, texts, opts, dirAwareStat(ops, accessor, opts), (p) =>
+  return catGeneric(resolved, texts, ctx, dirAwareStat(ops, accessor, ctx), (p) =>
     ops.readStream(accessor, p, idx),
   )
 }

@@ -19,7 +19,7 @@ import { fsErrorLine } from '../../../errors/render.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
 import { FileType, Limit, type FileStat, type PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { numberFlagError, parseByteCount } from '../tail_counts.ts'
 import { CHAR_DEVICE_MAX_BYTES, STDIN_HEADER_NAME } from '../utils/constants.ts'
 import { asyncChain, closeQuietly } from '../../../io/stream.ts'
@@ -223,14 +223,14 @@ async function* headMulti(
 export async function headGeneric(
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
   stat: Stat,
   stream: Stream,
   firstLines?: (p: PathSpec, n: number) => Promise<Uint8Array | null>,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
-  stream = stdinStream(stream, opts.stdin)
-  const parsed = parseFlags(opts.flags)
+  stream = stdinStream(stream, ctx.stdin)
+  const parsed = parseFlags(ctx.flags)
   if (typeof parsed === 'string') {
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]
   }
@@ -273,8 +273,7 @@ export async function headGeneric(
     }
     return [
       headMulti(
-        (path) =>
-          isStdin(path) && opts.stdin instanceof SharedInput ? opts.stdin : sourceFor(path),
+        (path) => (isStdin(path) && ctx.stdin instanceof SharedInput ? ctx.stdin : sourceFor(path)),
         opened,
         parsed.lines,
         parsed.bytesMode,
@@ -282,21 +281,21 @@ export async function headGeneric(
         parsed.zeroTerminated,
         unread,
         refused,
-        opts.signal,
-        deadlineCheck(opts),
+        ctx.signal,
+        deadlineCheck(ctx),
       ),
       io,
     ]
   }
   try {
-    const source = resolveSource(opts.stdin)
+    const source = resolveSource(ctx.stdin)
     const body = headStream(
       source,
       parsed.lines,
       parsed.bytesMode,
       parsed.zeroTerminated,
-      opts.signal,
-      deadlineCheck(opts),
+      ctx.signal,
+      deadlineCheck(ctx),
     )
     // -v heads a stdin nobody named with the name it gives `-`.
     const header = encodeText(`==> ${STDIN_HEADER_NAME} <==\n`)

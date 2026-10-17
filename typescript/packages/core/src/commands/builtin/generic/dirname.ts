@@ -21,10 +21,10 @@ import { gnuDirname } from '../../../utils/path.ts'
 
 const ENC = new TextEncoder()
 
-export const dirnameFn: CommandFn = (_accessor, _paths, texts, opts) => {
+export const dirnameFn: CommandFn = (_accessor, _paths, texts, ctx) => {
   if (texts.length === 0) throw missingOperandError('dirname', null)
   const lines = texts.map((t) => gnuDirname(t))
-  const fl = new FlagView(opts.flags, specOf('dirname'))
+  const fl = new FlagView(ctx.flags, specOf('dirname'))
   const separator = fl.asBool('zero') ? '\0' : '\n'
   return [ENC.encode(lines.join(separator) + separator), new IOResult()]
 }

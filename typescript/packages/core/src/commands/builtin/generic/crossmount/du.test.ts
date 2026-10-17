@@ -26,10 +26,10 @@ import { getTestParser } from '../../../../workspace/fixtures/workspace_fixture.
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
 
-const measured: CommandFn = (_accessor, paths, _texts, opts) =>
+const measured: CommandFn = (_accessor, paths, _texts, ctx) =>
   duGeneric(
     paths,
-    opts,
+    ctx,
     (targets) => Promise.resolve(targets),
     (p) => Promise.resolve(new FileStat({ name: p.virtual, type: FileType.DIRECTORY })),
     () => Promise.resolve(1000),

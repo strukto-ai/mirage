@@ -25,7 +25,7 @@ import {
   CommandCatalog,
   command,
   type CommandIO,
-  type CommandOpts,
+  type Context,
 } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { linksOf } from '../utils/links.ts'
@@ -101,14 +101,14 @@ function writeWraps<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
 // `undefined` values, because exactOptionalPropertyTypes refuses an
 // explicit undefined on an optional field; Python's fields are `| None` and
 // take the uniform path.
-function stampNamespace(raw: CommandIO, opts: CommandOpts): CommandIO {
-  const links = linksOf(opts)
+function stampNamespace(raw: CommandIO, ctx: Context): CommandIO {
+  const links = linksOf(ctx)
   return {
     ...raw,
     ...(links === undefined
       ? {}
       : { globTargetStat: (virtual: string) => links.targetStat(virtual) }),
-    ...(opts.followOperands === undefined ? {} : { globFollow: opts.followOperands }),
+    ...(ctx.followOperands === undefined ? {} : { globFollow: ctx.followOperands }),
   }
 }
 
@@ -131,27 +131,27 @@ function bind(
   // guard sits outermost: once the invocation's signal has fired no slot
   // starts, so a handler the caller was released from begins no further
   // read or write between its operands.
-  const fn: CommandFn = (accessor, paths, texts, opts) => {
-    const io = mountIo(opts)
+  const fn: CommandFn = (accessor, paths, texts, ctx) => {
+    const io = mountIo(ctx)
     const raw = table === undefined ? io : table(io)
-    const guarded = withAbortGuard(withDirGuard(finish(stampNamespace(raw, opts))), opts.signal)
+    const guarded = withAbortGuard(withDirGuard(finish(stampNamespace(raw, ctx))), ctx.signal)
     const split = b.passThrough !== true
     return b.fn(
       {
         ...guarded,
         readStream: (acc, path, index) =>
-          guardInput(guarded.readStream(acc, path, index), opts, split),
+          guardInput(guarded.readStream(acc, path, index), ctx, split),
       },
       accessor,
       paths,
       texts,
       {
-        ...opts,
+        ...ctx,
         // head guards its own pulls and needs the descriptor cursor to return lookahead.
         stdin:
-          opts.stdin === null || (b.name === 'head' && opts.stdin instanceof SharedInput)
-            ? opts.stdin
-            : guardInput(opts.stdin, opts, split),
+          ctx.stdin === null || (b.name === 'head' && ctx.stdin instanceof SharedInput)
+            ? ctx.stdin
+            : guardInput(ctx.stdin, ctx, split),
       },
     )
   }
@@ -170,7 +170,7 @@ const BY_NAME = new Map(BUILDERS.map((b) => [b.name, b]))
 
 /**
  * Every mount falls back to these after its VFS's own commands. Each runs
- * over the table of the mount it runs on (`opts.io`), so one set serves the
+ * over the table of the mount it runs on (`ctx.io`), so one set serves the
  * whole workspace. Mirrors Python's `GENERIC_COMMANDS`.
  */
 export const GENERIC_COMMANDS = new CommandCatalog(
@@ -180,7 +180,7 @@ export const GENERIC_COMMANDS = new CommandCatalog(
 /**
  * The default command `name`, which a mount runs when its VFS has no command
  * of that name. A VFS that replaces a command hands what the replacement does
- * not support to this one: `generic('grep').fn(accessor, paths, texts, opts)`.
+ * not support to this one: `generic('grep').fn(accessor, paths, texts, ctx)`.
  * With `vfs`, the same command registered for that backend, over the mount's
  * table changed by `table` (`/dev`'s endless `cat`). Mirrors Python's
  * `generic`.

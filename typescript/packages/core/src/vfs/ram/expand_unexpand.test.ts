@@ -17,7 +17,7 @@ import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../io/types.ts'
 import { RAMVFS } from './ram.ts'
-import type { PathSpec } from '../../types.ts'
+import { PathSpec } from '../../types.ts'
 const RAM_EXPAND = GENERIC_COMMANDS.filter((c) => c.name === 'expand' && c.filetype == null)
 const RAM_UNEXPAND = GENERIC_COMMANDS.filter((c) => c.name === 'unexpand' && c.filetype == null)
 
@@ -37,7 +37,7 @@ async function runCmd(
     stdin,
     flags,
     io: commandIo(vfs),
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) return { out: '', exitCode: -1 }
   const [out, ioResult] = result

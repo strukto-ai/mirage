@@ -15,8 +15,8 @@
 import { dirnameFn } from '../../generic/dirname.ts'
 import type { GenericCommand, GenericCommandFn } from '../adapter.ts'
 
-const dirname: GenericCommandFn = (_ops, accessor, paths, texts, opts) =>
-  dirnameFn(accessor, paths, texts, opts)
+const dirname: GenericCommandFn = (_ops, accessor, paths, texts, ctx) =>
+  dirnameFn(accessor, paths, texts, ctx)
 
 export const BUILDER: GenericCommand = {
   name: 'dirname',

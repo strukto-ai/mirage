@@ -18,7 +18,7 @@ import pytest
 
 from mirage.commands.cli.builtin.gws.gmail.read import read
 from mirage.commands.cli.builtin.gws.gmail.send import send
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.core.google.config import GoogleConfig
 from mirage.io.stream import materialize
 
@@ -35,14 +35,16 @@ async def test_send_builds_a_token_manager_from_the_config(monkeypatch):
 
     monkeypatch.setitem(send.__globals__, "send_message", fake_send)
     out, io = await send(
-        CLIInvocation(
-            CONFIG,
+        CONFIG,
+        [],
+        [],
+        Context(
             flags={
                 "to": "bob@example.com",
                 "subject": "Hello",
                 "body": "Hi Bob!",
-            },
-        )
+            }
+        ),
     )
     assert io.exit_code == 0
     assert json.loads(await materialize(out)) == {"id": "sent1"}
@@ -55,6 +57,6 @@ async def test_read_fetches_processed_message(monkeypatch):
         return {"id": message_id, "subject": "S"}
 
     monkeypatch.setitem(read.__globals__, "get_message_processed", fake_get)
-    out, io = await read(CLIInvocation(CONFIG, flags={"id": "m1"}))
+    out, io = await read(CONFIG, [], [], Context(flags={"id": "m1"}))
     assert io.exit_code == 0
     assert json.loads(await materialize(out)) == {"id": "m1", "subject": "S"}

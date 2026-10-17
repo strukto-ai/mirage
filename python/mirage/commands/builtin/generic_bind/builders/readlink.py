@@ -15,7 +15,7 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.readlink import readlink_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -26,12 +26,12 @@ async def readlink(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise missing_operand_error("readlink", None)
-    resolved = await ops.resolve_glob(accessor, paths, opts.index)
-    return await readlink_generic(resolved, list(texts), opts)
+    resolved = await ops.resolve_glob(accessor, paths, ctx.index)
+    return await readlink_generic(resolved, list(texts), ctx)
 
 
 BUILDER = GenericCommand("readlink", readlink)

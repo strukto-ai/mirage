@@ -62,7 +62,8 @@ import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { answered as answeredCall, checked } from '@struktoai/mirage-server/io_serde'
 import { VFS_CALL_BY_NAME } from '@struktoai/mirage-server/vfs_calls'
-import { CLI, CLIHandler, type CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
+import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
+import type { Context } from '@struktoai/mirage-core/commands/config'
 import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { chunks } from '@struktoai/mirage-core/io/cooperative'
 import { IOResult } from '@struktoai/mirage-core/io/types'
@@ -300,14 +301,14 @@ class TrackedStreamCLI {
     readonly stderr: string,
   ) {}
 
-  invoke(inv: CLIInvocation): CommandFnResult {
+  invoke(_config: unknown, _paths: unknown, _texts: unknown, ctx: Context): CommandFnResult {
     const result = new IOResult({ stderr: ENC.encode(this.stderr) })
-    return [this.output(inv, result), result]
+    return [this.output(ctx, result), result]
   }
 
-  async *output(inv: CLIInvocation, result: IOResult): AsyncIterableIterator<Uint8Array> {
+  async *output(ctx: Context, result: IOResult): AsyncIterableIterator<Uint8Array> {
     try {
-      for await (const chunk of chunks(inv.stdin ?? new Uint8Array())) {
+      for await (const chunk of chunks(ctx.stdin ?? new Uint8Array())) {
         this.pulls++
         yield chunk
       }
@@ -431,7 +432,11 @@ async function action(
         step.name,
         new CLI({
           spec: new CommandSpec({ name: step.name }),
-          handlers: { '': new CLIHandler({ fn: (inv) => cli.invoke(inv) }) },
+          handlers: {
+            '': new CLIHandler({
+              fn: (config, paths, texts, ctx) => cli.invoke(config, paths, texts, ctx),
+            }),
+          },
         }),
       )
       break

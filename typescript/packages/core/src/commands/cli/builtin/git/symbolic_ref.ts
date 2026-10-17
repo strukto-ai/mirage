@@ -14,9 +14,8 @@
 
 import { PathSpec } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { identity } from './commit.ts'
 import { HEAD } from './constants.ts'
 import {
@@ -75,8 +74,8 @@ function ownerOf(location: RepoLocation, name: string): PathSpec {
 }
 
 /** symbolic-ref's refusal by a read-only mount, at the lock on the ref it names. */
-export const symbolicRefReadOnly: ReadOnlyRefusal = (inv, location) => {
-  const name = inv.texts[0] ?? ''
+export const symbolicRefReadOnly: ReadOnlyRefusal = (texts, _ctx, location) => {
+  const name = texts[0] ?? ''
   return new SymbolicRefReadOnlyError(
     name,
     (location === null ? PathSpec.fromStrPath('/.git') : ownerOf(location, name)).join(name)
@@ -138,18 +137,23 @@ async function setSymbolic(
  * second, which HEAD may only do inside `refs/`. `-d` removes a symbolic ref
  * and its log, never HEAD, and `-q` does not quiet its refusal.
  */
-export async function symbolicRef(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function symbolicRef(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    checkSwitches(inv, inv.texts)
-    const repo = await opened(fl, inv.view ?? {})
+    checkSwitches(ctx, texts)
+    const repo = await opened(ctx, fl)
     const message = fl.asStr('m')
     if (message === '') throw new EmptyUpdateMessageError()
     const quiet = switched(fl, 'quiet', false)
     const table = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
-    const [name = '', target] = inv.texts
+    const [name = '', target] = texts
     if (switched(fl, 'delete', false)) {
-      if (inv.texts.length !== 1) throw new UsageError('', verbUsage(inv))
+      if (texts.length !== 1) throw new UsageError('', verbUsage(ctx))
       const found = await resolveSymbolic(repo.vfs, repo.location.gitdir, table, name, false)
       if (found === null) throw new NoSuchRefError(name)
       if (!found.symbolic) throw new NotSymbolicDeleteError(name)
@@ -159,14 +163,14 @@ export async function symbolicRef(inv: CLIInvocation): Promise<CommandFnResult> 
       await removeFile(repo.vfs, owner.join(LOGS_DIR, name))
       return [null, new IOResult()]
     }
-    if (inv.texts.length === 2 && target !== undefined) {
+    if (texts.length === 2 && target !== undefined) {
       if (name === HEAD && !target.startsWith(REFS_PREFIX)) throw new HeadOutsideRefsError()
       if (!wholeRefName(target)) throw new InvalidSymbolicTargetError(name, target)
-      const who = identity(fl, inv.view?.sessionView).line
+      const who = identity(fl, ctx.session).line
       await setSymbolic(repo, table, name, target, who, message ?? '')
       return [null, new IOResult()]
     }
-    if (inv.texts.length !== 1) throw new UsageError('', verbUsage(inv))
+    if (texts.length !== 1) throw new UsageError('', verbUsage(ctx))
     const found = await resolveSymbolic(
       repo.vfs,
       repo.location.gitdir,

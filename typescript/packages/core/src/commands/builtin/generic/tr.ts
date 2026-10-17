@@ -16,7 +16,7 @@ import { byteView, fromByteView } from '../../../shell/bytes.ts'
 import { classCharacters } from '../../../utils/posix.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { interpretEscapes } from '../utils/escapes.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { extraOperandError, usageHint } from '../../spec/usage.ts'
@@ -195,12 +195,12 @@ function buildOptions(texts: readonly string[], bag: Record<string, FlagValue>):
 export async function trGeneric(
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   let trOpts: TrOptions
   try {
-    trOpts = buildOptions(texts, opts.flags)
+    trOpts = buildOptions(texts, ctx.flags)
   } catch (err) {
     if (err instanceof UsageError) throw err
     const msg = err instanceof Error ? err.message : String(err)
@@ -212,7 +212,7 @@ export async function trGeneric(
     if (first === undefined) return [null, new IOResult()]
     source = stream(first)
   } else {
-    source = resolveSource(opts.stdin)
+    source = resolveSource(ctx.stdin)
   }
   return [trStream(source, trOpts), new IOResult()]
 }

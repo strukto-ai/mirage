@@ -18,7 +18,7 @@ import pytest
 
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya import read
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import materialize
 
@@ -47,7 +47,7 @@ async def test_read_takes_the_id_positionally_and_closes_the_accessor(
     monkeypatch.setitem(read.__globals__, "fetch_message", fake_fetch)
     monkeypatch.setattr(EmailAccessor, "close", fake_close)
     out, io = await read(
-        CLIInvocation(CONFIG, texts=("7",), flags={"mailbox": "INBOX"})
+        CONFIG, [], ["7"], Context(flags={"mailbox": "INBOX"})
     )
     assert io.exit_code == 0
     # Rendered through the mount's own renderer, so INTERNALDATE (which
@@ -69,7 +69,7 @@ async def test_read_defaults_the_mailbox_to_inbox(monkeypatch):
 
     monkeypatch.setitem(read.__globals__, "fetch_message", fake_fetch)
     monkeypatch.setattr(EmailAccessor, "close", lambda self: _noop())
-    await read(CLIInvocation(CONFIG, texts=("7",)))
+    await read(CONFIG, [], ["7"], Context())
     assert seen["folder"] == "INBOX"
 
 
@@ -80,7 +80,7 @@ async def _noop():
 @pytest.mark.asyncio
 async def test_read_without_an_id_is_a_usage_error():
     with pytest.raises(ValueError, match="message id is required"):
-        await read(CLIInvocation(CONFIG))
+        await read(CONFIG, [], [], Context())
 
 
 @pytest.mark.asyncio
@@ -94,9 +94,7 @@ async def test_raw_writes_the_rfc5322_bytes_verbatim(monkeypatch):
     monkeypatch.setitem(read.__globals__, "fetch_raw_message", fake_raw)
     monkeypatch.setitem(read.__globals__, "fetch_message", boom)
     monkeypatch.setattr(EmailAccessor, "close", lambda self: _noop())
-    out, io = await read(
-        CLIInvocation(CONFIG, texts=("7",), flags={"raw": True})
-    )
+    out, io = await read(CONFIG, [], ["7"], Context(flags={"raw": True}))
     assert io.exit_code == 0
     assert await materialize(out) == b"From: a@x\r\n\r\nbody"
 
@@ -114,5 +112,5 @@ async def test_read_closes_the_accessor_on_error(monkeypatch):
     monkeypatch.setitem(read.__globals__, "fetch_message", fake_fetch)
     monkeypatch.setattr(EmailAccessor, "close", fake_close)
     with pytest.raises(FileNotFoundError):
-        await read(CLIInvocation(CONFIG, texts=("9",)))
+        await read(CONFIG, [], ["9"], Context())
     assert len(closed) == 1

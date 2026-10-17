@@ -21,6 +21,7 @@ import { ExecutionNode } from '../../../types.ts'
 import type { FlagValue } from '../../../../commands/spec/types.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { PathSpec } from '../../../../types.ts'
 
 const USAGE =
   'history: usage: history [-c] [-d offset] [n] or ' +
@@ -116,7 +117,7 @@ export async function handleHistory(
     ]
   }
   const [stream, io] = await mount.runCommand('history', [], texts, flags, {
-    cwd: session.cwd,
+    cwd: PathSpec.fromStrPath(session.cwd),
     sessionId: session.sessionId,
   })
   // The view command always returns byte stderr, but io.stderr is typed

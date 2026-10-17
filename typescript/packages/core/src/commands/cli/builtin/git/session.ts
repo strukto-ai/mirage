@@ -15,7 +15,7 @@
 import { materialize } from '../../../../io/types.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIView, CLIInvocation, CLIVerbFn } from '../../types.ts'
+import type { CLIVerbFn } from '../../types.ts'
 import { discover, requireWorkTree } from './discover.ts'
 import { IndexLockError, NoWorkspaceError } from './errors.ts'
 import { configValues } from './fs.ts'
@@ -24,19 +24,20 @@ import type { ReadOnlyRefusal, RepoLocation } from './types.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { fatal, gitBool, startPoint } from './util.ts'
 import { isErofs } from '../../../../errors/fs.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 
 const ENC = new TextEncoder()
 
-// The ambiguity warnings each invocation collects, keyed by the view `verb`
-// handed it, which are its own.
-const AMBIGUOUS = new WeakMap<CLIView, string[]>()
+// The ambiguity warnings each invocation collects, keyed by the argv array
+// `verb` handed it, which is its own and which a context derived from it
+// (`{ ...ctx, flags }`) keeps.
+const AMBIGUOUS = new WeakMap<readonly string[], string[]>()
 // The repository each invocation opened, for the refusal a read-only mount
 // gets in git's words.
-const LOCATIONS = new WeakMap<CLIView, RepoLocation>()
+const LOCATIONS = new WeakMap<readonly string[], RepoLocation>()
 
 /** The refusal of every verb whose first write is the index's. */
-export const indexLocked: ReadOnlyRefusal = (_inv, location) =>
+export const indexLocked: ReadOnlyRefusal = (_texts, _ctx, location) =>
   new IndexLockError(location?.gitdir.virtual ?? '.git')
 
 /**
@@ -44,7 +45,7 @@ export const indexLocked: ReadOnlyRefusal = (_inv, location) =>
  * refusal by a read-only mount is in git's words.
  *
  * git prints the warning where it resolves the name, ahead of anything the verb
- * says after; each invocation gets a view of its own here, `opened` hands the
+ * says after; each invocation gets a context of its own here, `opened` hands the
  * repository the list kept for them, and the lines it gathered go in front of
  * the verb's own stderr. A write a read-only mount turns down fails before
  * anything is written, so the verb's own refusal stands in for it: git's lock
@@ -63,31 +64,30 @@ export const indexLocked: ReadOnlyRefusal = (_inv, location) =>
  * own, is not, and keeps its own error.
  */
 function gitWouldRefuse(
-  inv: CLIInvocation,
+  ctx: Context,
   location: RepoLocation | null,
   path: string | undefined,
 ): boolean {
   if (location === null || path === undefined || path === '') return true
-  const root = inv.view?.vfs?.mountOf(location.commondir) ?? '/'
+  const root = ctx.vfs?.mountOf(location.commondir) ?? '/'
   return [root, location.gitdir.virtual].some(
     (base) => path === base || path.startsWith(`${rstripSlash(base)}/`),
   )
 }
 
 export function verb(fn: CLIVerbFn, refused: ReadOnlyRefusal | null = null): CLIVerbFn {
-  return async (inv) => {
-    if (inv.view === undefined) return await fn(inv)
-    const view = { ...inv.view }
+  return async (config, paths, texts, ctx) => {
+    const own = { ...ctx, argv: [...(ctx.argv ?? [])] }
     const lines: string[] = []
-    AMBIGUOUS.set(view, lines)
+    AMBIGUOUS.set(own.argv, lines)
     let result: CommandFnResult
     try {
-      result = await fn({ ...inv, view })
+      result = await fn(config, paths, texts, own)
     } catch (err) {
-      const location = LOCATIONS.get(view) ?? null
+      const location = LOCATIONS.get(own.argv) ?? null
       const path = (err as { virtualPath?: string }).virtualPath
-      if (refused === null || !isErofs(err) || !gitWouldRefuse(inv, location, path)) throw err
-      result = fatal(refused(inv, location))
+      if (refused === null || !isErofs(err) || !gitWouldRefuse(ctx, location, path)) throw err
+      result = fatal(refused(texts, ctx, location))
     }
     if (result === null || lines.length === 0) return result
     const [out, io] = result
@@ -103,25 +103,26 @@ export function verb(fn: CLIVerbFn, refused: ReadOnlyRefusal | null = null): CLI
  * for a `.git`, then open the object database across the dispatcher. Kept in one
  * place so a new verb inherits the discovery rules rather than restating them.
  *
+ * @param ctx the line's context, one field per state plane
  * @param fl the leaf's flag bag, read for `-C`, `--git-dir` and `--work-tree`
- * @param view the invocation's view, one per state plane
  * @param workTree the verb reads or writes working files, so there must be a
  *   work tree to enter, as git's `NEED_WORK_TREE` asks
  */
-export async function opened(fl: FlagView, view: CLIView, workTree = false): Promise<Repo> {
+export async function opened(ctx: Context, fl: FlagView, workTree = false): Promise<Repo> {
   // The mount root is the session's files' `mountOf`, the same answer a
   // runtime's guest gets.
-  const vfs = view.vfs
+  const vfs = ctx.vfs
   if (vfs === undefined) throw new NoWorkspaceError()
   const chosen = fl.asPath('work_tree')
   const found = await discover(vfs, startPoint(fl), fl.asPath('git_dir'), chosen)
   const location = { ...found, vfs }
-  LOCATIONS.set(view, location)
+  if (ctx.argv !== undefined) LOCATIONS.set(ctx.argv, location)
   if (workTree) await requireWorkTree(vfs, location, chosen !== undefined)
   const warn = gitBool(
     await configValues(vfs, location, 'core.warnAmbiguousRefs'),
     'core.warnambiguousrefs',
     true,
   )
-  return openRepo(vfs, location, warn ? (AMBIGUOUS.get(view) ?? null) : null)
+  const lines = ctx.argv === undefined ? undefined : AMBIGUOUS.get(ctx.argv)
+  return openRepo(vfs, location, warn ? (lines ?? null) : null)
 }

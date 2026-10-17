@@ -5,7 +5,7 @@ from enum import Enum
 
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import read_stdin_async
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
@@ -756,21 +756,21 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> PatchFlags:
 async def patch_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     has_vfs: bool,
 ) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     return await patch(
         paths,
         read_bytes=read_bytes,
         write_bytes=write_bytes,
         has_vfs=has_vfs,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         p=parsed.strip,
         R=parsed.reverse,
         i=parsed.input_path,
         N=parsed.forward,
-        mount_prefix=opts.mount_prefix or "",
+        mount_prefix=ctx.mount_prefix or "",
     )

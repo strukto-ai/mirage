@@ -17,7 +17,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { resolveSource, stdinStream } from '../utils/stream.ts'
 import { reportedStream } from '../utils/operands.ts'
 import { asyncChain, rechunk } from '../../../io/stream.ts'
@@ -133,11 +133,11 @@ function parseFlags(bag: Record<string, FlagValue>): TacFlags {
 
 export function tacGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<[ByteSource | null, IOResult]> {
-  stream = stdinStream(stream, opts.stdin)
-  const { separator, before, regex } = parseFlags(opts.flags)
+  stream = stdinStream(stream, ctx.stdin)
+  const { separator, before, regex } = parseFlags(ctx.flags)
   const io = new IOResult()
   if (paths.length > 0) {
     return Promise.resolve([
@@ -149,5 +149,5 @@ export function tacGeneric(
       io,
     ])
   }
-  return Promise.resolve([reverseSource(resolveSource(opts.stdin), separator, before, regex), io])
+  return Promise.resolve([reverseSource(resolveSource(ctx.stdin), separator, before, regex), io])
 }

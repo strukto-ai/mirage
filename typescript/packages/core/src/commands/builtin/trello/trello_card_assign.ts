@@ -17,7 +17,7 @@ import { cardAssign } from '../../../core/trello/client.ts'
 import { normalizeCard } from '../../../core/trello/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { CommandSpec, Argument } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { requireCard } from './_scope.ts'
@@ -32,16 +32,16 @@ async function trelloCardAssign(
   accessor: TrelloAccessor,
   _paths: PathSpec[],
   _texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, SPEC)
+  const fl = new FlagView(ctx.flags, SPEC)
   const cardId = fl.asStr('card_id')
   if (cardId === undefined || cardId === '') throw new Error('--card_id is required')
   const memberId = fl.asStr('member_id')
   if (memberId === undefined || memberId === '') throw new Error('--member_id is required')
   // A card write is addressed by id, not path, so only the mount-wide
   // grant can admit it (a write-granting carve-out names no card).
-  requireMountWritable(opts.mountPrefix ?? '', opts.access)
+  requireMountWritable(ctx.mountPrefix ?? '', ctx.access)
   await requireCard(accessor, cardId)
   const card = await cardAssign(accessor.transport, cardId, memberId)
   return [ENC.encode(JSON.stringify(normalizeCard(card))), new IOResult()]

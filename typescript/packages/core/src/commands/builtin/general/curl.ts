@@ -15,7 +15,7 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
 import {
@@ -174,13 +174,13 @@ export function urlEncoded(data: Uint8Array): string {
 async function readAt(
   option: string,
   name: string,
-  opts: CommandOpts,
+  ctx: Context,
   silent: boolean,
 ): Promise<Uint8Array> {
   try {
-    if (name === '-') return await materialize(opts.stdin ?? null)
-    if (opts.dispatch === undefined) throw enotsup('unavailable', 'read', name)
-    const [content] = await opts.dispatch('read', resolveTarget(name, opts.cwd), [])
+    if (name === '-') return await materialize(ctx.stdin ?? null)
+    if (ctx.dispatch === undefined) throw enotsup('unavailable', 'read', name)
+    const [content] = await ctx.dispatch('read', resolveTarget(name, ctx.cwd.virtual), [])
     return await materialize(content as ByteSource)
   } catch (err) {
     if (!isWalkError(err)) throw err
@@ -198,7 +198,7 @@ async function readAt(
 async function dataPiece(
   kind: string,
   value: string,
-  opts: CommandOpts,
+  ctx: Context,
   silent: boolean,
 ): Promise<Uint8Array> {
   if (kind === 'data_raw') return ENC.encode(value)
@@ -212,13 +212,13 @@ async function dataPiece(
     const content = sep >= 0 ? value.slice(sep + 1) : value
     const raw =
       sep >= 0 && value[sep] === '@'
-        ? await readAt(option, content, opts, silent)
+        ? await readAt(option, content, ctx, silent)
         : ENC.encode(content)
     const encoded = urlEncoded(raw)
     return ENC.encode(name !== '' ? `${name}=${encoded}` : encoded)
   }
   if (!value.startsWith('@')) return ENC.encode(value)
-  const raw = await readAt(option, value.slice(1), opts, silent)
+  const raw = await readAt(option, value.slice(1), ctx, silent)
   return kind === 'data' ? raw.filter((byte) => !DATA_STRIPPED.has(byte)) : raw
 }
 
@@ -228,14 +228,14 @@ async function dataPiece(
  * --json piece, and only once the body so far is not empty (curl 8.14.1:
  * `-d '' -d b` sends `b`).
  */
-async function requestBody(fl: FlagView, opts: CommandOpts): Promise<[Uint8Array | null, boolean]> {
+async function requestBody(fl: FlagView, ctx: Context): Promise<[Uint8Array | null, boolean]> {
   const silent = fl.asBool('silent')
   const occurrences = fl.occurrences(...DATA_OPTIONS)
   if (occurrences.length === 0) return [null, false]
   let body: Uint8Array = new Uint8Array()
   let json = false
   for (const [kind, value] of occurrences) {
-    const piece = await dataPiece(kind, String(value), opts, silent)
+    const piece = await dataPiece(kind, String(value), ctx, silent)
     if (body.length > 0 && kind !== 'json') body = concat([body, ENC.encode('&')])
     body = concat([body, piece])
     json ||= kind === 'json'
@@ -318,9 +318,9 @@ async function curl(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('curl'))
+  const fl = new FlagView(ctx.flags, specOf('curl'))
   const userAgent = fl.asStr('user_agent') ?? null
   const request = fl.asStr('request') ?? null
   const hasData = fl.occurrences(...DATA_OPTIONS).length > 0
@@ -374,10 +374,10 @@ async function curl(
   // restore it. The option error is always printed. Parsed flags lose their
   // spelling, so each option names its usual one.
   if (template.startsWith('@')) {
-    const raw = await readAt('-w', template.slice(1), opts, fl.asBool('silent'))
+    const raw = await readAt('-w', template.slice(1), ctx, fl.asBool('silent'))
     template = new TextDecoder().decode(raw)
   }
-  const [body, json] = await requestBody(fl, opts)
+  const [body, json] = await requestBody(fl, ctx)
   // A custom header of a name curl would add itself takes its place, so
   // curl's own goes only where the line names none. The trace lists them in
   // curl's order; the wire leaves User-Agent and Accept to the client's
@@ -386,7 +386,7 @@ async function curl(
   let prompt: Uint8Array = new Uint8Array()
   const user = fl.asStr('user') ?? null
   if (user !== null && !named.has('authorization')) {
-    const stdin = user.includes(':') ? new Uint8Array() : await materialize(opts.stdin ?? null)
+    const stdin = user.includes(':') ? new Uint8Array() : await materialize(ctx.stdin ?? null)
     const [token, asked] = basicAuth(user, stdin)
     prompt = asked
     auth.push(['Authorization', token])
@@ -445,7 +445,7 @@ async function curl(
         formData: { [key]: value },
         headers,
         timeoutMs,
-        ...(opts.signal === undefined ? {} : { signal: opts.signal }),
+        ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
         followRedirects: location,
         verify,
       })
@@ -461,7 +461,7 @@ async function curl(
         headers: wire,
         ...(body !== null ? { body } : {}),
         timeoutMs,
-        ...(opts.signal === undefined ? {} : { signal: opts.signal }),
+        ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
         followRedirects: location,
         verify,
       })
@@ -527,9 +527,9 @@ async function curl(
   // -D writes the headers as they arrive, so before -f judges the status and
   // before -o writes the body: a file both name ends up holding the body.
   if (dumpFile !== null) {
-    if (opts.dispatch !== undefined) {
+    if (ctx.dispatch !== undefined) {
       try {
-        await opts.dispatch('write', resolveTarget(dumpFile, opts.cwd), [blocks])
+        await ctx.dispatch('write', resolveTarget(dumpFile, ctx.cwd.virtual), [blocks])
       } catch (err) {
         const line = writeFailure(dumpFile instanceof PathSpec ? dumpFile.virtual : dumpFile, err)
         return await finish(
@@ -565,10 +565,10 @@ async function curl(
     result = concat([blocks, result])
   }
   if (output !== null && !outputIsStdout) {
-    if (opts.dispatch !== undefined) {
-      const scope = resolveTarget(output, opts.cwd)
+    if (ctx.dispatch !== undefined) {
+      const scope = resolveTarget(output, ctx.cwd.virtual)
       try {
-        await opts.dispatch('write', scope, [result])
+        await ctx.dispatch('write', scope, [result])
       } catch (err) {
         const line = writeFailure(output instanceof PathSpec ? output.virtual : output, err)
         return await finish(

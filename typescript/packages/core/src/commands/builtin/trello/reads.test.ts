@@ -12,20 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { TrelloAccessor } from '../../../accessor/trello.ts'
 import type { TrelloTransport } from '../../../core/trello/client.ts'
-import type { CommandOpts, Command } from '../../config.ts'
+import type { Context, Command } from '../../config.ts'
 import { makeTrelloReadCommands } from './reads.ts'
 
 import { materialize } from '../../../io/types.ts'
 
 const DEC = new TextDecoder()
 
-const OPTS: CommandOpts = {
+const OPTS: Context = {
   stdin: null,
   flags: {},
-  cwd: '/',
+  cwd: PathSpec.fromStrPath('/'),
   mountPrefix: '/trello',
 }
 

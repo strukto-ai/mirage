@@ -34,7 +34,7 @@ async function runPatch(
     stdin,
     flags,
     io: commandIo(vfs),
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
 }
 
@@ -119,7 +119,7 @@ it.each(['', '/data', '/nested/data'])(
         source === 'operand' ? [orig, input] : [],
         {
           mountPrefix: prefix,
-          cwd: prefix || '/',
+          cwd: PathSpec.fromStrPath(prefix || '/'),
           flags: { p: '1', ...(source === 'input' ? { i: input.virtual } : {}) },
           stdin: source === 'stdin' ? diff : null,
         },

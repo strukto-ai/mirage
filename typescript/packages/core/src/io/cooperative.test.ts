@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/require-await -- Immediately ready producers reproduce event-loop starvation. */
+import { PathSpec } from '../types.ts'
 import { describe, expect, it } from 'vitest'
 import { AsyncLineIterator } from './async_line_iterator.ts'
 import { chunks } from './cooperative.ts'
@@ -46,7 +47,7 @@ describe('cooperative processing', () => {
           {
             stdin: source(),
             flags: {},
-            cwd: '/',
+            cwd: PathSpec.fromStrPath('/'),
             signal: controller.signal,
           },
           source,
@@ -66,7 +67,7 @@ it('preserves UTF-8 and words across bounded chunks', async () => {
     [],
     {
       stdin: ENC.encode(text),
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
       flags: { lines: true, words: true, bytes: true, chars: true, max_line_length: true },
     },
     async function* () {

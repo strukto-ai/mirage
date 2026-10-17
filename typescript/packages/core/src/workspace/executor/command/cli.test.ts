@@ -17,7 +17,8 @@ import { CLIHandler } from '../../../commands/cli/types.ts'
 import { varsFromEnv } from '../../../workspace/session/session.ts'
 import { describe, expect, it, vi } from 'vitest'
 
-import { CLI, type CLIInvocation, type CLIVerbFn } from '../../../commands/cli/types.ts'
+import { CLI, type CLIVerbFn } from '../../../commands/cli/types.ts'
+import type { Context } from '../../../commands/config.ts'
 import { PartialOutputError } from '../../../commands/errors.ts'
 import { Argument, UsageStyle } from '../../../commands/spec/types.ts'
 import { FlagView } from '../../../commands/spec/flag_view.ts'
@@ -36,12 +37,17 @@ import { dropsMountCaches, handleCli } from './cli.ts'
 
 // Mirrors python/tests/workspace/executor/command/test_cli.py.
 
-const calls: CLIInvocation[] = []
+const calls: { config: unknown; paths: PathSpec[]; texts: string[]; ctx: Context }[] = []
 const dec = new TextDecoder()
 
-function send(inv: CLIInvocation): [Uint8Array, IOResult] {
-  calls.push(inv)
-  const token = (inv.config as { token: string }).token
+function send(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): [Uint8Array, IOResult] {
+  calls.push({ config, paths, texts, ctx })
+  const token = (config as { token: string }).token
   return [new TextEncoder().encode(`sent[${token}]\n`), new IOResult()]
 }
 
@@ -83,11 +89,11 @@ describe('handleCli', () => {
     const inv = calls.pop()
     expect((inv?.config as { token: string }).token).toBe('tok')
     expect(inv?.texts).toEqual(['hello', 'world'])
-    expect(inv?.flags.to).toBe('#eng')
-    expect(inv?.flags.verbose).toBe(2)
-    expect(inv?.argv).toEqual(['-vv', 'message', 'send', '-t', '#eng', 'hello', 'world'])
+    expect(inv?.ctx.flags.to).toBe('#eng')
+    expect(inv?.ctx.flags.verbose).toBe(2)
+    expect(inv?.ctx.argv).toEqual(['-vv', 'message', 'send', '-t', '#eng', 'hello', 'world'])
     // $PWD is exported, so a CLI subprocess inherits it as bash's would.
-    expect(inv?.env).toEqual({ EDITOR: 'vi', PWD: '/' })
+    expect(inv?.ctx.env).toEqual({ EDITOR: 'vi', PWD: '/' })
     expect(node.command).toBe('prog -vv message send -t #eng hello world')
     const pathsInstall: CLIInstall = {
       name: 'paths',
@@ -122,8 +128,8 @@ describe('handleCli', () => {
       const received = calls.pop()
       expect(received?.texts).toEqual(words.slice(0, -1))
       expect(received?.paths.map((path) => path.virtual)).toEqual(['/work/report.txt'])
-      expect(received?.flags.output).toBeInstanceOf(PathSpec)
-      const output = new FlagView(received?.flags ?? {}, received?.spec).asPaths('output')
+      expect(received?.ctx.flags.output).toBeInstanceOf(PathSpec)
+      const output = new FlagView(received?.ctx.flags ?? {}, received?.ctx.spec).asPaths('output')
       expect(output.map((path) => [path.virtual, path.rawPath])).toEqual([
         [`/work/${expectedOutput}`, `./${expectedOutput}`],
       ])
@@ -174,8 +180,8 @@ describe('handleCli', () => {
     // Injection is skipped for a leaf that declares --help, so the
     // answer is the leaf's too: intercepting it anyway would make the
     // declaration unreachable.
-    const ownHelp: CLIVerbFn = (inv) => [
-      new TextEncoder().encode(`help=${String(inv.flags.help as boolean | undefined)}\n`),
+    const ownHelp: CLIVerbFn = (_config, _paths, _texts, ctx) => [
+      new TextEncoder().encode(`help=${String(ctx.flags.help as boolean | undefined)}\n`),
       new IOResult(),
     ]
     const spec = new CLI({
@@ -319,8 +325,8 @@ describe('handleCli', () => {
       stdin,
     )
     const inv = calls.pop()
-    expect(inv?.stdin).toBe(stdin)
-    expect(inv?.flags).not.toHaveProperty('stdin')
+    expect(inv?.ctx.stdin).toBe(stdin)
+    expect(inv?.ctx.flags).not.toHaveProperty('stdin')
   })
 
   it('carries the session cwd on the invocation record', async () => {
@@ -330,7 +336,7 @@ describe('handleCli', () => {
       ['prog', 'message', 'send', '-t', 'x'],
       new SessionState({ sessionId: 't', cwd: '/data' }),
     )
-    expect(calls.pop()?.cwd.virtual).toBe('/data')
+    expect(calls.pop()?.ctx.cwd.virtual).toBe('/data')
   })
 })
 
@@ -953,19 +959,19 @@ it.each(['success', 'error', 'abort'] as const)(
   async (outcome) => {
     const abort = new AbortController()
     const evaluate = vi.fn(() => Promise.resolve(new IOResult()))
-    let saved: CLIInvocation['shell']
+    let saved: Context['shell']
     const spec = new CLI({
       spec: new CommandSpec({ name: 'probe' }),
       handlers: {
         '': new CLIHandler({
-          fn: async (inv) => {
-            saved = inv.shell
-            if (inv.shell === undefined) throw new Error('missing invocation shell')
+          fn: async (_config, _paths, _texts, ctx) => {
+            saved = ctx.shell
+            if (ctx.shell === undefined) throw new Error('missing invocation shell')
             if (outcome === 'abort') {
               abort.abort()
-              await expect(inv.shell('echo denied')).rejects.toThrow('no longer active')
+              await expect(ctx.shell('echo denied')).rejects.toThrow('no longer active')
             } else {
-              await inv.shell('echo allowed')
+              await ctx.shell('echo allowed')
             }
             if (outcome === 'error') throw new Error('handler failed')
             return [null, new IOResult()]

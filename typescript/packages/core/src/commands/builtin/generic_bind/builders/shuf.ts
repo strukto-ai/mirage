@@ -18,14 +18,14 @@ import { type GenericCommand, resolveGlobOf } from '../adapter.ts'
 export const BUILDER: GenericCommand = {
   name: 'shuf',
   read: true,
-  fn: async (ops, accessor, paths, texts, opts) => {
-    const idx = opts.index ?? undefined
+  fn: async (ops, accessor, paths, texts, ctx) => {
+    const idx = ctx.index ?? undefined
     const { write } = ops
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
     return shufGeneric(
       resolved,
       texts,
-      opts,
+      ctx,
       (p) => ops.readStream(accessor, p, idx),
       // Only `-o` writes, so a read-only backend still serves plain shuf.
       // Requiring the write op up front would break every read-only backend.

@@ -14,9 +14,8 @@
 
 import type { PathSpec } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { GitError } from './errors.ts'
 import { resolveCommit } from './revparse.ts'
 import { opened } from './session.ts'
@@ -181,12 +180,17 @@ async function namedLog(
 }
 
 /** Read a ref's log newest first through the dispatcher. */
-export async function reflog(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function reflog(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    const texts = inv.texts[0] === 'show' ? inv.texts.slice(1) : inv.texts
-    checkOperands(inv, texts)
-    const repo = await opened(fl, inv.view ?? {})
+    texts = texts[0] === 'show' ? texts.slice(1) : texts
+    checkOperands(ctx, texts)
+    const repo = await opened(ctx, fl)
     const revision = texts[0] ?? HEAD
     await resolveCommit(repo, revision)
     const [name, data] = await namedLog(repo.vfs, repo.location, revision)

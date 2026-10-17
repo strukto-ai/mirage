@@ -40,7 +40,7 @@ from mirage.commands.builtin.utils.operands import (
     normalized_read,
 )
 from mirage.commands.builtin.utils.stream import is_stdin, stdin_stream
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -677,7 +677,7 @@ def _positional_as_paths(
 async def sed_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     resolve_glob: Callable[..., Awaitable[list[PathSpec]]],
     read_stream: PolymorphicReadFn,
     write_bytes: WriteBytes | None,
@@ -693,7 +693,7 @@ async def sed_generic(
     Args:
         paths (list[PathSpec]): The path operands, unresolved.
         texts (list[str]): Positional words (script, or files under -e/-f).
-        opts (CommandOpts): Flags, stdin and cwd from the dispatcher.
+        ctx (Context): Flags, stdin and cwd from the dispatcher.
         resolve_glob (Callable[..., Awaitable[list[PathSpec]]]):
             Expands globs against the backend.
         read_stream (PolymorphicReadFn): Bound input reader.
@@ -701,8 +701,8 @@ async def sed_generic(
             backend is read-only.
     """
     read_bytes = materialized_read(read_stream)
-    parsed = parse_flags(opts.flags)
-    origins = _script_origins(opts.argv, len(parsed.scripts))
+    parsed = parse_flags(ctx.flags)
+    origins = _script_origins(ctx.argv, len(parsed.scripts))
     pieces: list[SedScriptPiece] = []
     for index, part in enumerate(parsed.scripts):
         shown = origins[index] if origins is not None else None
@@ -735,27 +735,25 @@ async def sed_generic(
     operands = list(paths)
     if flag_script:
         # With -e/-f the positional operand is a file, not the script.
-        operands = _positional_as_paths(list(texts), opts.cwd) + operands
+        operands = _positional_as_paths(list(texts), ctx.cwd) + operands
     if operands:
         operands = await resolve_glob(operands)
     cwd = (
-        opts.cwd.virtual
-        if isinstance(opts.cwd, PathSpec)
-        else (opts.cwd or "/")
+        ctx.cwd.virtual if isinstance(ctx.cwd, PathSpec) else (ctx.cwd or "/")
     )
     return await sed(
         operands,
         pieces,
         read_stream=read_stream,
         write_bytes=write_bytes,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         in_place=parsed.in_place,
         suppress=parsed.suppress,
         extended=parsed.extended,
         separate=parsed.separate,
         line_length=parsed.line_length,
-        dispatch=opts.dispatch,
+        dispatch=ctx.dispatch,
         cwd=cwd,
-        prefix=opts.mount_prefix.rstrip("/"),
-        utf8=utf8_locale(opts.env),
+        prefix=ctx.mount_prefix.rstrip("/"),
+        utf8=utf8_locale(ctx.env),
     )

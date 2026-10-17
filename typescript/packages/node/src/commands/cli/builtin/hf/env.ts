@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
-import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
+import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
+import type { PathSpec } from '@struktoai/mirage-core/types'
 import { VERSION } from '@struktoai/mirage-core/version'
 import { hfEndpoint, type HfConfig } from '../../../../core/hf_hub/config.ts'
 import { textOut } from './accessor.ts'
@@ -25,19 +25,29 @@ import { textOut } from './accessor.ts'
  * of those describe what an agent is talking to, and two of them do not exist
  * in a workspace, so this reports the facts that do.
  */
-export function envCmd(inv: CLIInvocation): CommandFnResult {
-  const config = inv.config as HfConfig
-  const token = config.token !== undefined && config.token !== '' ? 'set' : 'not set'
+export function envCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  _ctx: Context,
+): CommandFnResult {
+  const cfg = config as HfConfig
+  const token = cfg.token !== undefined && cfg.token !== '' ? 'set' : 'not set'
   return textOut(
     [
       '- huggingface_hub version: mirage',
       `- mirage version: ${VERSION}`,
-      `- endpoint: ${hfEndpoint(config)}`,
+      `- endpoint: ${hfEndpoint(cfg)}`,
       `- token: ${token}`,
     ].join('\n') + '\n',
   )
 }
 
-export function versionCmd(_inv: CLIInvocation): CommandFnResult {
+export function versionCmd(
+  _config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  _ctx: Context,
+): CommandFnResult {
   return textOut(`hf version ${VERSION} (mirage)\n`)
 }

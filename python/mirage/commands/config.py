@@ -15,7 +15,7 @@
 import functools
 from collections.abc import Awaitable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, Callable, Protocol, TypeAlias, overload
+from typing import Any, Callable, Protocol, TypeAlias, overload
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -29,8 +29,12 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, CommandOutput, IOResult
 from mirage.process.view import ProcessView
-from mirage.runtime.base import Runtime
-from mirage.runtime.types import DispatchFn, ExecPathFn, ShellFn
+from mirage.runtime.types import (
+    DispatchFn,
+    ExecPathFn,
+    RuntimeIdentity,
+    ShellFn,
+)
 from mirage.types import Limit, PathSpec
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 from mirage.vfs.constants import DEFAULT_MAX_DU_ENTRIES
@@ -70,47 +74,7 @@ from mirage.view.types import (
     SessionView,
     StatPath,
 )
-
-if TYPE_CHECKING:
-    from mirage.workspace.files import Files
-
-
-@dataclass(frozen=True, slots=True)
-class ExecContext:
-    """What the workspace hands ``Mount.run_command`` for one command.
-
-    ``run_command`` copies these fields onto ``CommandOpts``, next to
-    the facts only the mount knows (``mount_prefix``, ``index``). Each
-    field is named as on ``CommandOpts`` and
-    means the same; ``tests/commands/test_exec_context_parity.py``
-    pins that.
-
-    Args:
-        limit_override (Limit | None): The caller's output limit, which
-            ``run_command`` applies itself instead of forwarding.
-        cwd (str): The working directory as a virtual path;
-            ``run_command`` turns it into a PathSpec.
-    """
-
-    limit_override: Limit | None = None
-    access: SessionAccess | None = None
-    stdin: ByteSource | None = None
-    cwd: str = "/"
-    dispatch: DispatchFn | None = None
-    vfs: "Files | None" = None
-    session_id: str | None = None
-    env: dict[str, str] | None = None
-    exec_allowed: bool = True
-    exec_path_allowed: ExecPathFn | None = None
-    runtime: Runtime | None = None
-    runtime_unavailable: str | None = None
-    follow_operands: FollowOperands | None = None
-    stat_path: StatPath | None = None
-    readdir_path: ReaddirPath | None = None
-    session_view: SessionView | None = None
-    processes: ProcessView | None = None
-    shell: ShellFn | None = None
-    argv: tuple[str, ...] = ()
+from mirage.workspace.files import Files
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -184,35 +148,53 @@ class CommandIO:
 
 
 @dataclass(frozen=True, slots=True)
-class CommandOpts:
-    """Everything a command handler gets besides its operands.
+class Context:
+    """Everything a handler gets besides its handle and its operands.
 
-    ``Mount.run_command`` builds one per invocation and passes it as
-    the handler's fourth argument. A handler reads the fields it needs
-    and ignores the rest.
+    A command handler is ``fn(accessor, paths, texts, ctx)`` and a CLI
+    leaf ``fn(config, paths, texts, ctx)``: the same ``ctx``, the facts a
+    runtime execution takes too. Files are reached through ``vfs``, the
+    session's files, which judge every call at the workspace dispatcher,
+    as ``session.vfs`` and a policy's ``ctx.vfs`` do. A handler reads the
+    fields it needs and ignores the rest; the workspace builds one per
+    command or CLI, and ``Mount.run_command`` adds what only the mount
+    knows (``mount_prefix``, ``index``, ``io``).
 
     Args:
         stdin (ByteSource | None): Piped standard input, if any.
         flags (Mapping[str, FlagValue]): The parsed flags. Read them
             through a spec-bound ``FlagView``.
         cwd (PathSpec): The working directory.
+        env (dict[str, str] | None): A snapshot of the session
+            environment; live access uses ``session``.
+        argv (tuple[str, ...]): The words after the head as typed, for a
+            diagnostic that quotes one (``cmp: missing operand after
+            '-s'``). Empty when a line runs split per operand or per
+            mount.
+        spec (CommandSpec | None): The resolved grammar.
+        vfs (Files | None): The session's files, run as the line's
+            session: reads, writes, links, and where the mounts are.
+        session (SessionView | None): The live session, with policy
+            applied to writes; ``env`` stays the snapshot.
+        processes (ProcessView | None): The session's processes.
+        shell (ShellFn | None): Run a nested line in the calling
+            session, as ``sh -c`` would (awk's pipes and ``system()``).
+        access (SessionAccess | None): The calling session's access and
+            shell settings.
         mount_prefix (str): The prefix of the mount running the command.
         command (str | None): The command name the mount runs.
         index (IndexCacheStore): The mount's index cache.
         io (CommandIO | None): The mount's backend table, built from its
             VFS; None outside a mount.
         dispatch (DispatchFn | None): The workspace op dispatcher.
-        vfs (Files | None): The session's files, made by the command:
-            the API a CLI gets as ``inv.view.vfs``.
         session_id (str | None): The calling session.
-        env (dict[str, str] | None): A snapshot of the session
-            environment.
         exec_allowed (bool): Whether policy lets the command start an
             interpreter.
         exec_path_allowed (ExecPathFn | None): Whether policy lets an
             interpreter load code from a path; None outside a
             workspace, where ``exec_allowed`` decides.
-        runtime (Runtime | None): The runtime an interpreter runs in.
+        runtime (RuntimeIdentity | None): The runtime an interpreter runs
+            in.
         runtime_unavailable (str | None): Why the requested runtime is
             missing. Python only; TypeScript refuses earlier.
         follow_operands (FollowOperands | None): The line's pathname
@@ -222,40 +204,32 @@ class CommandOpts:
             dispatcher, which may land on another mount.
         readdir_path (ReaddirPath | None): List one directory through
             the dispatcher, for a walk that crosses a mount.
-        session_view (SessionView | None): The live session, with policy
-            applied to writes; ``env`` stays the snapshot.
-        processes (ProcessView | None): The session's processes.
-        shell (ShellFn | None): Run a nested line in the calling
-            session, as ``sh -c`` would (awk's pipes and ``system()``).
-        argv (tuple[str, ...]): The words after the command name as
-            typed, for a GNU diagnostic that quotes one
-            (``cmp: missing operand after '-s'``). Empty when a line
-            runs split per operand or per mount.
     """
 
-    access: SessionAccess | None = None
     stdin: ByteSource | None = None
     flags: Mapping[str, FlagValue] = field(default_factory=dict)
     cwd: PathSpec = ROOT_CWD
+    env: dict[str, str] | None = None
+    argv: tuple[str, ...] = ()
+    spec: CommandSpec | None = None
+    vfs: Files | None = None
+    session: SessionView | None = None
+    processes: ProcessView | None = None
+    shell: ShellFn | None = None
+    access: SessionAccess | None = None
     mount_prefix: str = ""
     command: str | None = None
     index: IndexCacheStore = NULL_INDEX
     io: CommandIO | None = None
     dispatch: DispatchFn | None = None
-    vfs: "Files | None" = None
     session_id: str | None = None
-    env: dict[str, str] | None = None
     exec_allowed: bool = True
     exec_path_allowed: ExecPathFn | None = None
-    runtime: Runtime | None = None
+    runtime: RuntimeIdentity | None = None
     runtime_unavailable: str | None = None
     follow_operands: FollowOperands | None = None
     stat_path: StatPath | None = None
     readdir_path: ReaddirPath | None = None
-    session_view: SessionView | None = None
-    processes: ProcessView | None = None
-    shell: ShellFn | None = None
-    argv: tuple[str, ...] = ()
 
 
 CommandFnResult = CommandOutput | None
@@ -263,7 +237,7 @@ AggregateFn = Callable[[list[tuple[str, bytes]]], Awaitable[bytes]]
 
 
 class CommandFn(Protocol):
-    """A command handler: ``(accessor, paths, texts, opts)``.
+    """A command handler: ``(accessor, paths, texts, ctx)``.
 
     A handler typed for one backend's accessor is cast to this when it
     is registered.
@@ -274,7 +248,7 @@ class CommandFn(Protocol):
         accessor: Accessor,
         paths: list[PathSpec],
         texts: list[str],
-        opts: CommandOpts,
+        ctx: Context,
     ) -> Awaitable[CommandFnResult]: ...
 
 
@@ -349,13 +323,13 @@ def _answer_standard_options(
         accessor: Accessor,
         paths: list[PathSpec],
         texts: list[str],
-        opts: CommandOpts,
+        ctx: Context,
     ) -> CommandFnResult:
-        if not own_help and opts.flags.get("help") is True:
+        if not own_help and ctx.flags.get("help") is True:
             return yield_bytes(help_text), IOResult()
-        if not own_version and opts.flags.get("version") is True:
+        if not own_version and ctx.flags.get("version") is True:
             return yield_bytes(version_text), IOResult()
-        return await fn(accessor, paths, texts, opts)
+        return await fn(accessor, paths, texts, ctx)
 
     return registered_spec(name, spec), wrapper
 

@@ -97,7 +97,7 @@ lookup; host and remote runtimes use their own executable paths.
 | --- | --- |
 | `cat`, `find`, `grep`, `jq` on mounted files | The selected VFS through workspace operations |
 | Account commands such as `slack send-message` | The service configured for that CLI installation |
-| File arguments such as `gh --body-file`, `ntn --filter-file`, `himalaya --attach` and `hf upload` paths | Workspace files through `CLIView` |
+| File arguments such as `gh --body-file`, `ntn --filter-file`, `himalaya --attach` and `hf upload` paths | Workspace files through `ctx.vfs` |
 | `git -C /repo ...` | The repository and working tree on workspace mounts |
 
 Credentials may be shared between a CLI and a VFS, but neither registers or

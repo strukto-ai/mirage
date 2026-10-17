@@ -26,7 +26,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     require_op,
 )
 from mirage.commands.builtin.utils.links import links_of, mounts_of
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.context import session_visibility
@@ -39,35 +39,35 @@ async def mv(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("mv: no VFS")
-    fl = FlagView(opts.flags, spec=SPECS["mv"])
+    fl = FlagView(ctx.flags, spec=SPECS["mv"])
     parsed = parse_flags(fl)
-    paths = await ops.resolve_glob(accessor, paths, opts.index)
-    links = links_of(opts)
-    mounts = mounts_of(opts)
+    paths = await ops.resolve_glob(accessor, paths, ctx.index)
+    links = links_of(ctx)
+    mounts = mounts_of(ctx)
     return await generic_mv(
         paths,
         strategy=NativeMove(
             rename=partial(require_op(ops, Operation.RENAME), accessor)
         ),
-        stat=bound_op(ops.stat, accessor, opts.index),
+        stat=bound_op(ops.stat, accessor, ctx.index),
         flags=parsed,
-        readdir=bound_op(ops.readdir, accessor, opts.index),
+        readdir=bound_op(ops.readdir, accessor, ctx.index),
         guard=refuse_reveal,
         copies=(
             transfer_links_of(
                 links,
-                opts.dispatch,
-                opts.cwd.virtual if opts.cwd is not None else "/",
+                ctx.dispatch,
+                ctx.cwd.virtual if ctx.cwd is not None else "/",
                 session_visibility(),
             )
-            if links is not None and opts.dispatch is not None
+            if links is not None and ctx.dispatch is not None
             else None
         ),
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         mount_root=mounts.is_root if mounts is not None else None,
     )
 

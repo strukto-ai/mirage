@@ -19,7 +19,7 @@ from contextlib import aclosing
 from dataclasses import dataclass, field
 
 from mirage.accessor.base import Accessor
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.cooperative import chunks
@@ -2336,16 +2336,16 @@ async def bc(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(opts.flags, spec=SPECS["bc"])
+    fl = FlagView(ctx.flags, spec=SPECS["bc"])
     use_math = fl.as_bool("args_l")
     state = BcState(
         scale=MATH_LIBRARY_SCALE if use_math else 0, math_mode=use_math
     )
-    folder = OutputColumn(output_line_size(opts.env))
+    folder = OutputColumn(output_line_size(ctx.env))
     errors: list[str] = []
-    lines = parse_input(opts.stdin if opts.stdin is not None else b"")
+    lines = parse_input(ctx.stdin if ctx.stdin is not None else b"")
     io = IOResult()
 
     async def output() -> AsyncIterator[bytes]:

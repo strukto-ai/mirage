@@ -30,7 +30,7 @@ import { readFailExitCode } from '../../spec/usage.ts'
 import { closeQuietly, ensureStream, primeStream } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { SED_MISSING_SCRIPT, SED_NO_INPUT_EXIT, SED_NO_INPUT_FILES } from '../constants.ts'
 import {
   SED_STDERR,
@@ -60,11 +60,11 @@ interface ScriptFiles {
   write(name: string, data: ByteSource, atomic?: boolean, append?: boolean): Promise<void>
 }
 
-function scriptFiles(opts: CommandOpts, stream: Stream, write: Write): ScriptFiles {
-  const prefix = opts.mountPrefix !== undefined ? rstripSlash(opts.mountPrefix) : ''
+function scriptFiles(ctx: Context, stream: Stream, write: Write): ScriptFiles {
+  const prefix = ctx.mountPrefix !== undefined ? rstripSlash(ctx.mountPrefix) : ''
   const spec = (name: string): PathSpec => {
-    const resolved = resolvePath(name, opts.cwd)
-    if (opts.dispatch !== undefined) return PathSpec.fromStrPath(name, undefined, opts.cwd)
+    const resolved = resolvePath(name, ctx.cwd.virtual)
+    if (ctx.dispatch !== undefined) return PathSpec.fromStrPath(name, undefined, ctx.cwd)
     const slash = resolved.lastIndexOf('/')
     return new PathSpec({
       virtual: resolved,
@@ -73,12 +73,12 @@ function scriptFiles(opts: CommandOpts, stream: Stream, write: Write): ScriptFil
       vfsPath: mountKey(resolved, prefix),
     })
   }
-  const dispatch = opts.dispatch
+  const dispatch = ctx.dispatch
   const caller = currentCaller()
   const open = (name: string): AsyncIterable<Uint8Array> =>
     dispatch === undefined ? stream(spec(name)) : callerStream(dispatch, caller, spec(name))
   const access: ScriptFiles = {
-    virtual: (name) => resolvePath(name, opts.cwd),
+    virtual: (name) => resolvePath(name, ctx.cwd.virtual),
     read: (name) => materialize(open(name)),
     stream: open,
     async write(name, data, atomic = false, append = false) {
@@ -354,20 +354,20 @@ function parseFlags(bag: Record<string, FlagValue>): SedFlags {
 export async function sedGeneric(
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: Stream,
   write: Write,
 ): Promise<CommandFnResult> {
-  const parsed = parseFlags(opts.flags)
+  const parsed = parseFlags(ctx.flags)
   const inPlace = parsed.inPlace
-  if (!inPlace) stream = stdinStream(stream, opts.stdin)
+  if (!inPlace) stream = stdinStream(stream, ctx.stdin)
   const pieces: SedScriptPiece[] = []
   const firstPath = paths[0]
   const scriptPrefix =
     (firstPath === undefined ? undefined : mountPrefixOf(firstPath.virtual, firstPath.vfsPath)) ??
-    opts.mountPrefix ??
+    ctx.mountPrefix ??
     ''
-  const origins = scriptOrigins(opts.argv, parsed.scripts.length)
+  const origins = scriptOrigins(ctx.argv, parsed.scripts.length)
   for (const [index, [name, text]] of parsed.scripts.entries()) {
     const shown = origins?.[index] ?? null
     if (name === 'e') {
@@ -387,8 +387,8 @@ export async function sedGeneric(
   if (pieces.length === 0 && texts[0] !== undefined) pieces.push({ kind: 'expr', text: texts[0] })
   if (pieces.length === 0) return failed(`${SED_MISSING_SCRIPT}\n`, 1)
 
-  const access = scriptFiles(opts, stream, write)
-  const utf8 = utf8Locale(opts.env)
+  const access = scriptFiles(ctx, stream, write)
+  const utf8 = utf8Locale(ctx.env)
   let program: SedProgram
   try {
     // -E / -r select Extended Regular Expressions; without them sed is BRE.
@@ -422,13 +422,13 @@ export async function sedGeneric(
   )
   if (inPlace) {
     try {
-      return await runInPlace(paths, program, machine, access, stream, utf8, writes, opts.signal)
+      return await runInPlace(paths, program, machine, access, stream, utf8, writes, ctx.signal)
     } finally {
       await writes.abort()
     }
   }
 
-  const stdinSource = ensureStream(opts.stdin ?? new Uint8Array())
+  const stdinSource = ensureStream(ctx.stdin ?? new Uint8Array())
   const inputs: SedInput[] = paths.map((p) =>
     isStdin(p) ? { name: '-', source: stdinSource } : { name: p.rawPath, source: stream(p) },
   )
@@ -436,7 +436,7 @@ export async function sedGeneric(
   const io = new IOResult()
   async function* output(): AsyncGenerator<Uint8Array> {
     try {
-      for await (const chunk of machine.process(inputs, true, opts.signal, () => writes.flush()))
+      for await (const chunk of machine.process(inputs, true, ctx.signal, () => writes.flush()))
         yield fromByteView(chunk, utf8)
     } finally {
       try {
@@ -522,10 +522,10 @@ async function runInPlace(
  * a file. The arg parser instead routes the first bare arg into the positional
  * `text` (script) slot, so recover it as a path operand here.
  */
-export function positionalAsPaths(texts: string[], opts: CommandOpts): PathSpec[] {
-  const prefix = opts.mountPrefix !== undefined ? rstripSlash(opts.mountPrefix) : ''
+export function positionalAsPaths(texts: string[], ctx: Context): PathSpec[] {
+  const prefix = ctx.mountPrefix !== undefined ? rstripSlash(ctx.mountPrefix) : ''
   return texts.map((t) => {
-    const resolved = resolvePath(t, opts.cwd)
+    const resolved = resolvePath(t, ctx.cwd.virtual)
     const slash = resolved.lastIndexOf('/')
     return new PathSpec({
       virtual: resolved,

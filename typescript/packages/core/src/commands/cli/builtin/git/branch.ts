@@ -19,9 +19,8 @@ import { dateClock } from './dates.ts'
 import { configValues } from './fs.ts'
 
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import {
   AmbiguousArgumentError,
   AmbiguousObjectNameError,
@@ -408,7 +407,7 @@ function listWidth(items: readonly RefItem[], bonus: number, description: string
  * or the format `buildFormat` makes.
  */
 async function listBranches(
-  inv: CLIInvocation,
+  ctx: Context,
   fl: FlagView,
   repo: Repo,
   head: HeadRef,
@@ -434,16 +433,16 @@ async function listBranches(
     usedFields(fmt, keys ?? []),
     wanted,
     filter,
-    dateClock(inv.env),
+    dateClock(ctx.env),
   )
-  let ctx = found
+  let refCtx = found
   if (items.some((item) => item.kind === RefKind.DETACHED))
-    ctx = { ...ctx, headDescription: await headDescription(repo, head) }
+    refCtx = { ...refCtx, headDescription: await headDescription(repo, head) }
   if (template === undefined && verbose)
     fmt = listingFormat(
-      buildFormat(verbose, listWidth(items, prefix.length, ctx.headDescription), prefix),
+      buildFormat(verbose, listWidth(items, prefix.length, refCtx.headDescription), prefix),
     )
-  const [out, stopped] = formatRefs(fmt, items, ctx, keys, {
+  const [out, stopped] = formatRefs(fmt, items, refCtx, keys, {
     omitEmpty: fl.asBool('omit_empty'),
     icase,
     detachedFirst: true,
@@ -468,19 +467,23 @@ async function listBranches(
  * than creating anything, and a line that also deletes names two modes, which
  * git answers with its usage.
  */
-export async function branch(inv: CLIInvocation): Promise<CommandFnResult> {
-  const view = inv.view ?? {}
-  const words = filterWords(inv)
-  const texts = withoutFilterValues(inv.texts, words)
-  const fl = new FlagView(inv.flags)
+export async function branch(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const words = filterWords(ctx)
+  const operands = withoutFilterValues(texts, words)
+  const fl = new FlagView(ctx.flags)
   const remotesOnly = fl.asBool('r')
   const includeRemotes = remotesOnly || fl.asBool('a')
   const listing = words.length > 0 || fl.asBool('list')
   try {
-    const vfs = view.vfs
+    const vfs = ctx.vfs
     if (vfs === undefined) throw new NoWorkspaceError()
-    checkSwitches(inv, texts)
-    const repo = await opened(fl, view)
+    checkSwitches(ctx, operands)
+    const repo = await opened(ctx, fl)
     const mode = await trackMode(repo)
     const filter = await refFilter(repo, words)
     const refs = await loadRefs(vfs, repo.location.gitdir, repo.location.commondir)
@@ -489,27 +492,27 @@ export async function branch(inv: CLIInvocation): Promise<CommandFnResult> {
       return [ENC.encode(head.branch ? head.branch + '\n' : ''), new IOResult()]
     const force = fl.asBool('D')
     if (fl.asBool('delete') || force) {
-      if (listing) throw new UsageError('', verbUsage(inv))
-      if (texts.length === 0) throw new BranchNameRequiredError()
+      if (listing) throw new UsageError('', verbUsage(ctx))
+      if (operands.length === 0) throw new BranchNameRequiredError()
       const parts: string[] = []
-      for (const name of texts) parts.push(await remove(vfs, repo, refs, head, name, force))
+      for (const name of operands) parts.push(await remove(vfs, repo, refs, head, name, force))
       if (fl.asBool('quiet')) return [null, new IOResult()]
       return [ENC.encode(parts.join('')), new IOResult()]
     }
-    const first = texts[0]
+    const first = operands[0]
     if (first !== undefined && !listing) {
-      const [tracking, warning] = await create(vfs, repo, refs, first, texts[1], mode, head)
+      const [tracking, warning] = await create(vfs, repo, refs, first, operands[1], mode, head)
       return [
         tracking && !fl.asBool('quiet') ? ENC.encode(tracking) : null,
         new IOResult({ stderr: ENC.encode(warning) }),
       ]
     }
     return await listBranches(
-      inv,
+      ctx,
       fl,
       repo,
       head,
-      listing ? texts : [],
+      listing ? operands : [],
       filter,
       remotesOnly,
       includeRemotes,
@@ -565,9 +568,9 @@ export async function branchUpstream(
 }
 
 /** branch's refusal by a read-only mount: the lock on the ref it creates or deletes. */
-export const branchReadOnly: ReadOnlyRefusal = (inv, location) => {
-  const fl = new FlagView(inv.flags)
-  const ref = `${HEADS_PREFIX}${inv.texts[0] ?? ''}`
+export const branchReadOnly: ReadOnlyRefusal = (texts, ctx, location) => {
+  const fl = new FlagView(ctx.flags)
+  const ref = `${HEADS_PREFIX}${texts[0] ?? ''}`
   const path = (location?.commondir ?? PathSpec.fromStrPath('/.git')).join(ref)
   if (fl.asBool('delete') || fl.asBool('D')) return new RefDeleteReadOnlyError(ref, path.virtual)
   return new RefReadOnlyError(ref, path.virtual)

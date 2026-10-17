@@ -18,7 +18,7 @@ from mirage.commands.builtin.utils.output import (
     format_optional_records,
     format_records,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.argmatch import ArgmatchKind, ArgmatchMatch, argmatch
@@ -1901,7 +1901,7 @@ async def ls(
 async def ls_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     readdir: Readdir,
     stat: Stat,
 ) -> tuple[bytes, IOResult]:
@@ -1910,12 +1910,12 @@ async def ls_generic(
     The wiring resolves globs, defaults the operands from the cwd, and
     binds the backend ops (including the stat overlay); flag semantics
     live here, and the namespace facts (links, child mounts), the
-    identity the owner columns render, and the index ride ``opts``.
+    identity the owner columns render, and the index ride ``ctx``.
 
     Args:
         paths (list[PathSpec]): Glob-resolved operands, cwd-defaulted.
         texts (list[str]): Non-path words, unused by ls.
-        opts (CommandOpts): Flags and namespace facts from the
+        ctx (Context): Flags and namespace facts from the
             dispatcher.
         readdir (Readdir): Bound readdir called as ``readdir(p, index)``.
         stat (Stat): Bound (overlaid) stat called as ``stat(p, index)``.
@@ -1924,17 +1924,17 @@ async def ls_generic(
         paths,
         readdir=readdir,
         stat=stat,
-        index=opts.index,
-        links=links_of(opts),
+        index=ctx.index,
+        links=links_of(ctx),
         child_mounts=(
-            functools.partial(owed_names, opts.vfs)
-            if opts.vfs is not None
+            functools.partial(owed_names, ctx.vfs)
+            if ctx.vfs is not None
             else None
         ),
-        mounts=mounts_of(opts),
-        stat_path=opts.stat_path,
-        identity=identity_of(opts),
-        **ls_options(opts.flags),
+        mounts=mounts_of(ctx),
+        stat_path=ctx.stat_path,
+        identity=identity_of(ctx),
+        **ls_options(ctx.flags),
     )
 
 

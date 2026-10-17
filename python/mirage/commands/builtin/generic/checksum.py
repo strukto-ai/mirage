@@ -22,7 +22,7 @@ from mirage.commands.builtin.utils.stream import (
     stdin_stat,
     stdin_stream,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -557,7 +557,7 @@ async def checksum(
 async def checksum_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     stat: StatFn,
     stream: PolymorphicReadFn,
     *,
@@ -569,12 +569,12 @@ async def checksum_generic(
     The wiring resolves globs and binds one backend reader; everything
     else lives here: flag parsing, the per-operand report-and-continue
     split, the ``--check`` verification pass (which resolves recorded
-    names against ``opts.cwd``), and the stdin fallback.
+    names against ``ctx.cwd``), and the stdin fallback.
 
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
         texts (list[str]): Non-path words, unused by checksums.
-        opts (CommandOpts): Flags, stdin and cwd from the dispatcher.
+        ctx (Context): Flags, stdin and cwd from the dispatcher.
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
@@ -583,10 +583,10 @@ async def checksum_generic(
         stored (StoredDigest | None): the mount's ``checksum``, the
             digest it keeps, asked before an operand is read.
     """
-    parsed = parse_flags(opts.flags, name)
+    parsed = parse_flags(ctx.flags, name)
     algorithm = name.removesuffix("sum")
     stat = stdin_stat(stat)
-    stream = stdin_stream(stream, opts.stdin)
+    stream = stdin_stream(stream, ctx.stdin)
     if parsed.check:
         # With no operand the checksum list is stdin.
         return await checksum(
@@ -594,8 +594,8 @@ async def checksum_generic(
             algorithm=algorithm,
             read_bytes=materialized_read(stream),
             read_stream=(
-                dispatched_reader(opts.dispatch, normalized_read(stream))
-                if opts.dispatch is not None
+                dispatched_reader(ctx.dispatch, normalized_read(stream))
+                if ctx.dispatch is not None
                 else normalized_read(stream)
             ),
             check=True,
@@ -604,7 +604,7 @@ async def checksum_generic(
             status=parsed.status,
             quiet=parsed.quiet,
             warn=parsed.warn,
-            cwd=opts.cwd,
+            cwd=ctx.cwd,
         )
     readable, err = await split_readable(paths, stat, name)
     if err and not readable:
@@ -618,7 +618,7 @@ async def checksum_generic(
             binary=parsed.binary,
             tag=parsed.tag,
             zero=parsed.zero,
-            cwd=opts.cwd,
+            cwd=ctx.cwd,
             stored=stored,
         ),
         err,

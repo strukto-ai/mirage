@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
-import type { CommandOpts } from '../config.ts'
+import type { Context } from '../config.ts'
 import { specOf } from '../spec/builtins.ts'
 import { FlagView } from '../spec/flag_view.ts'
 import type { FlagValue } from '../spec/types.ts'
@@ -102,12 +102,12 @@ async function rgFull(
   if (options.fileType !== null) flags.type = [options.fileType]
   if (options.globPattern !== null) flags.glob = [options.globPattern]
   if (label !== null) flags.with_filename = true
-  const opts = { stdin: null, flags, cwd: '/' } as unknown as CommandOpts
+  const ctx = { stdin: null, flags, cwd: PathSpec.fromStrPath('/') } as unknown as Context
   const operand = new PathSpec({ virtual: path, directory: path, vfsPath: path.slice(1) })
   const [out, result] = (await rgGeneric(
     [operand],
     [pattern],
-    opts,
+    ctx,
     (p) => statFn(p.virtual),
     (p) => readdirFn(p.virtual),
     async function* (p) {
@@ -159,7 +159,7 @@ function readBytesFn(path: string): Promise<Uint8Array> {
 
 // The overrides go last and in the order given, which is line order to a
 // last-wins option (`--files-without-match -c` prints counts).
-function opts(overrides: Partial<RgFullOptions> = {}): RgFullOptions {
+function ctx(overrides: Partial<RgFullOptions> = {}): RgFullOptions {
   const base: Record<string, unknown> = {
     ignoreCase: false,
     invert: false,
@@ -188,7 +188,7 @@ describe('rgFull countOnly', () => {
       readBytesFn,
       '/db',
       'Graph',
-      opts({ countOnly: true }),
+      ctx({ countOnly: true }),
       null,
     )
     expect(out).toEqual(['/db/a.txt:2'])
@@ -201,7 +201,7 @@ describe('rgFull countOnly', () => {
       readBytesFn,
       '/db/a.txt',
       'Graph',
-      opts({ countOnly: true }),
+      ctx({ countOnly: true }),
       null,
     )
     expect(out).toEqual(['2'])
@@ -214,14 +214,14 @@ describe('rgFull countOnly', () => {
       readBytesFn,
       '/db/b.txt',
       'Graph',
-      opts({ countOnly: true }),
+      ctx({ countOnly: true }),
       null,
     )
     expect(out).toEqual([])
   })
 
   it('still prefixes content matches with the file path in directory walks', async () => {
-    const out = await rgFull(readdirFn, statFn, readBytesFn, '/db', 'Graph', opts(), null)
+    const out = await rgFull(readdirFn, statFn, readBytesFn, '/db', 'Graph', ctx(), null)
     expect(out).toEqual(['/db/a.txt:Graph', '/db/a.txt:Graph again'])
   })
 })
@@ -263,7 +263,7 @@ describe('rgFull single-file context', () => {
       logReadBytesFn,
       '/log/app.log',
       'warning',
-      opts({ contextAfter: 1 }),
+      ctx({ contextAfter: 1 }),
       null,
     )
     expect(out).toEqual(['warning: low memory', 'info: all good'])
@@ -276,7 +276,7 @@ describe('rgFull single-file context', () => {
       logReadBytesFn,
       '/log/app.log',
       'error',
-      opts({ contextBefore: 1, contextAfter: 1 }),
+      ctx({ contextBefore: 1, contextAfter: 1 }),
       null,
     )
     expect(out).toEqual([
@@ -295,7 +295,7 @@ describe('rgFull single-file context', () => {
       logReadBytesFn,
       '/log/app.log',
       'warning',
-      opts({ lineNumbers: true, contextAfter: 1 }),
+      ctx({ lineNumbers: true, contextAfter: 1 }),
       null,
     )
     expect(out).toEqual(['2:warning: low memory', '3-info: all good'])
@@ -308,7 +308,7 @@ describe('rgFull single-file context', () => {
       logReadBytesFn,
       '/log/far.txt',
       'hit',
-      opts({ contextAfter: 1 }),
+      ctx({ contextAfter: 1 }),
       null,
     )
     expect(out).toEqual(['hit', 'a', '--', 'hit'])
@@ -321,7 +321,7 @@ describe('rgFull single-file context', () => {
       logReadBytesFn,
       '/log/app.log',
       'error',
-      opts({ maxCount: 1, contextBefore: 1, contextAfter: 1 }),
+      ctx({ maxCount: 1, contextBefore: 1, contextAfter: 1 }),
       null,
     )
     expect(out).toEqual(['error: disk full', 'warning: low memory'])
@@ -336,7 +336,7 @@ describe('rgFull single-file context', () => {
       logReadBytesFn,
       '/log',
       'warning',
-      opts({ contextAfter: 1 }),
+      ctx({ contextAfter: 1 }),
       null,
     )
     expect(out).toEqual(['/log/app.log:warning: low memory', '/log/app.log-info: all good'])
@@ -351,7 +351,7 @@ describe('rgFull -I in directory walks', () => {
       logReadBytesFn,
       '/log',
       'warning',
-      opts({ noFilename: true }),
+      ctx({ noFilename: true }),
       null,
     )
     expect(out).toEqual(['warning: low memory'])
@@ -364,7 +364,7 @@ describe('rgFull -I in directory walks', () => {
       logReadBytesFn,
       '/log',
       'warning',
-      opts({ noFilename: true, filesOnly: true }),
+      ctx({ noFilename: true, filesOnly: true }),
       null,
     )
     expect(out).toEqual(['/log/app.log'])
@@ -406,7 +406,7 @@ describe('rgFull -o ripgrep semantics', () => {
       digitReadBytesFn,
       '/num/one.txt',
       '[0-9]*',
-      opts({ onlyMatching: true }),
+      ctx({ onlyMatching: true }),
       null,
     )
     expect(printed).toEqual(['', '', ''])
@@ -416,7 +416,7 @@ describe('rgFull -o ripgrep semantics', () => {
       digitReadBytesFn,
       '/num/one.txt',
       '[0-9]*',
-      opts({ onlyMatching: true, countOnly: true }),
+      ctx({ onlyMatching: true, countOnly: true }),
       null,
     )
     expect(counted).toEqual(['3'])
@@ -429,7 +429,7 @@ describe('rgFull -o ripgrep semantics', () => {
       digitReadBytesFn,
       '/num/two.txt',
       '[0-9]',
-      opts({ onlyMatching: true }),
+      ctx({ onlyMatching: true }),
       null,
     )
     expect(out).toEqual(['1', '2'])
@@ -442,7 +442,7 @@ describe('rgFull -o ripgrep semantics', () => {
       digitReadBytesFn,
       '/num/three.txt',
       '[0-9]*',
-      opts({ onlyMatching: true }),
+      ctx({ onlyMatching: true }),
       null,
     )
     expect(out).toEqual(['', '1', ''])
@@ -488,7 +488,7 @@ describe('rg -b / --byte-offset', () => {
       offsetReadBytesFn,
       '/off/f1.txt',
       'abc',
-      opts({ byteOffsets: true }),
+      ctx({ byteOffsets: true }),
       null,
     )
     expect(out).toEqual(['0:abc', '4:defabc', '11:abc abc'])
@@ -501,7 +501,7 @@ describe('rg -b / --byte-offset', () => {
       offsetReadBytesFn,
       '/off/f1.txt',
       'abc',
-      opts({ onlyMatching: true, byteOffsets: true }),
+      ctx({ onlyMatching: true, byteOffsets: true }),
       null,
     )
     expect(out).toEqual(['0:abc', '7:abc', '11:abc', '15:abc'])
@@ -514,7 +514,7 @@ describe('rg -b / --byte-offset', () => {
       offsetReadBytesFn,
       '/off/f1.txt',
       'abc',
-      opts({ lineNumbers: true, byteOffsets: true }),
+      ctx({ lineNumbers: true, byteOffsets: true }),
       null,
     )
     expect(out).toEqual(['1:0:abc', '2:4:defabc', '3:11:abc abc'])
@@ -527,7 +527,7 @@ describe('rg -b / --byte-offset', () => {
       offsetReadBytesFn,
       '/off/f5.txt',
       'abc',
-      opts({ onlyMatching: true, byteOffsets: true }),
+      ctx({ onlyMatching: true, byteOffsets: true }),
       null,
     )
     expect(out).toEqual(['6:abc', '15:abc'])
@@ -540,7 +540,7 @@ describe('rg -b / --byte-offset', () => {
       offsetReadBytesFn,
       '/off',
       'abc',
-      opts({ lineNumbers: true, byteOffsets: true }),
+      ctx({ lineNumbers: true, byteOffsets: true }),
       null,
     )
     expect(out).toEqual([
@@ -557,7 +557,7 @@ describe('rg -b / --byte-offset', () => {
       offsetReadBytesFn,
       '/off',
       'abc',
-      opts({ countOnly: true, byteOffsets: true }),
+      ctx({ countOnly: true, byteOffsets: true }),
       null,
     )
     expect(out).toEqual(['/off/f1.txt:3'])
@@ -580,7 +580,7 @@ describe('rgFull reports selection on the IOResult it is given', () => {
       offsetReadBytesFn,
       '/off',
       '[0-9]*',
-      opts({ onlyMatching: true }),
+      ctx({ onlyMatching: true }),
       null,
       null,
       io,
@@ -597,7 +597,7 @@ describe('rgFull reports selection on the IOResult it is given', () => {
       offsetReadBytesFn,
       '/off',
       '[0-9]',
-      opts({ onlyMatching: true }),
+      ctx({ onlyMatching: true }),
       null,
       null,
       io,
@@ -614,7 +614,7 @@ describe('rgFull reports selection on the IOResult it is given', () => {
       offsetReadBytesFn,
       '/off/empty.txt',
       '[0-9]*',
-      opts({ onlyMatching: true }),
+      ctx({ onlyMatching: true }),
       null,
       null,
       io,
@@ -681,7 +681,7 @@ function raw(
     rawReadBytesFn,
     path,
     pattern,
-    opts(overrides),
+    ctx(overrides),
     null,
     null,
     io,
@@ -871,7 +871,7 @@ describe('rgFull walk context', () => {
       readBytesFn,
       '/w',
       'hit',
-      opts({ contextAfter: 1, lineNumbers: true }),
+      ctx({ contextAfter: 1, lineNumbers: true }),
       null,
     )
     expect(out).toEqual(['/w/a.txt:2:hit', '/w/a.txt-3-y', '--', '/w/c.txt:1:hit', '/w/c.txt-2-z'])
@@ -884,7 +884,7 @@ describe('rgFull walk context', () => {
       readBytesFn,
       '/w',
       'hit',
-      opts({ contextAfter: 1, countOnly: true }),
+      ctx({ contextAfter: 1, countOnly: true }),
       null,
     )
     expect(out).toEqual(['/w/a.txt:1', '/w/c.txt:1'])
@@ -972,7 +972,7 @@ describe('rgFull named operands', () => {
         readBytesFn,
         '/t/.in',
         'b',
-        opts({ lineNumbers: true, ...filters }),
+        ctx({ lineNumbers: true, ...filters }),
         null,
       )
       expect(out).toEqual(['1:b'])
@@ -988,7 +988,7 @@ describe('rgFull named operands', () => {
       readBytesFn,
       '/t/w',
       'b',
-      opts({ fileType: 'rust' }),
+      ctx({ fileType: 'rust' }),
       null,
     )
     expect(out).toEqual(['/t/w/.h.rs:b'])
@@ -1000,7 +1000,7 @@ describe('rgFull warnings', () => {
     const warnings: string[] = []
     const readSome = (p: string): Promise<Uint8Array> =>
       p === '/db/b.txt' ? Promise.reject(enoent(p)) : readBytesFn(p)
-    const out = await rgFull(readdirFn, statFn, readSome, '/db', 'Graph', opts(), warnings)
+    const out = await rgFull(readdirFn, statFn, readSome, '/db', 'Graph', ctx(), warnings)
     expect(out).toEqual(['/db/a.txt:Graph', '/db/a.txt:Graph again'])
     expect(warnings).toEqual(['rg: /db/b.txt: No such file or directory (os error 2)'])
   })

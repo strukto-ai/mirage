@@ -22,13 +22,14 @@ from mirage.commands.cli.builtin.gh.actions import (
     run_view_cmd,
     workflow_view_cmd,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.errors import PartialOutputError, UsageError
 from mirage.core.github.actions import list_jobs, run_log_archive
 from mirage.core.github.client import GitHubApiError
 from mirage.core.github.config import GhConfig
 from mirage.core.github.paginate import github_pages
 from mirage.io.types import materialize
+from mirage.types import PathSpec
 
 CONFIG = GhConfig(token="t", repo="o/r")
 RUN = "/repos/o/r/actions/runs/7"
@@ -77,8 +78,10 @@ def _patch(monkeypatch):
     assert list_jobs.__globals__ is run_log_archive.__globals__
 
 
-def _inv(texts, flags=None) -> CLIInvocation:
-    return CLIInvocation(CONFIG, texts=tuple(texts), flags=flags or {})
+def _args(
+    texts, flags=None
+) -> tuple[GhConfig, list[PathSpec], list[str], Context]:
+    return CONFIG, [], list(texts), Context(flags=flags or {})
 
 
 def _zip(entries: list[tuple[str, str]]) -> bytes:
@@ -126,7 +129,7 @@ async def test_run_log_prints_each_line_behind_its_job_and_step():
             ("build  test unit/2_Run tests.txt", "one\n\ntwo"),
         ]
     )
-    out, _io = await run_view_cmd(_inv(["7"], {"log": True}))
+    out, _io = await run_view_cmd(*_args(["7"], {"log": True}))
     assert await materialize(out) == (
         b"build / test: unit\tSet up job\tready\n"
         b"build / test: unit\tRun tests\tone\n"
@@ -168,7 +171,7 @@ async def test_run_log_failed_keeps_failed_jobs_and_their_failed_steps():
             ("test/2_Run tests.txt", "boom\n"),
         ]
     )
-    out, _io = await run_view_cmd(_inv(["7"], {"log_failed": True}))
+    out, _io = await run_view_cmd(*_args(["7"], {"log_failed": True}))
     assert await materialize(out) == b"test\tRun tests\tboom\n"
 
 
@@ -186,7 +189,7 @@ async def test_run_log_reads_a_jobs_whole_log_when_no_step_has_one():
         ]
     }
     ROUTES[f"GET {RUN}/logs"] = _zip([("-2147483648_test.txt", "legacy\n")])
-    out, _io = await run_view_cmd(_inv(["7"], {"log": True}))
+    out, _io = await run_view_cmd(*_args(["7"], {"log": True}))
     assert await materialize(out) == b"test\tUNKNOWN STEP\tlegacy\n"
 
 
@@ -201,7 +204,7 @@ async def test_run_log_fetches_a_missing_job_and_names_one_with_no_log():
     ROUTES[f"GET {RUN}/logs"] = _zip([])
     ROUTES["GET /repos/o/r/actions/jobs/1/logs"] = "from the api\n"
     with pytest.raises(PartialOutputError) as caught:
-        await run_view_cmd(_inv(["7"], {"log": True}))
+        await run_view_cmd(*_args(["7"], {"log": True}))
     assert str(caught.value) == "log not found: 2"
     assert caught.value.stdout == b"a\tUNKNOWN STEP\tfrom the api\n"
 
@@ -215,7 +218,7 @@ async def test_run_log_refuses_a_run_still_going_before_asking_for_a_log():
         match="run 7 is still in progress; logs will be "
         "available when it is complete",
     ):
-        await run_view_cmd(_inv(["7"], {"log": True}))
+        await run_view_cmd(*_args(["7"], {"log": True}))
     assert f"GET {RUN}/logs" not in CALLS
 
 
@@ -225,20 +228,22 @@ async def test_run_log_names_an_archive_missing_or_not_a_zip():
     with pytest.raises(
         ValueError, match="failed to get run log: log not found"
     ):
-        await run_view_cmd(_inv(["7"], {"log": True}))
+        await run_view_cmd(*_args(["7"], {"log": True}))
     ROUTES[f"GET {RUN}/logs"] = b"not a zip"
     with pytest.raises(
         ValueError, match="failed to get run log: zip: not a valid zip"
     ):
-        await run_view_cmd(_inv(["7"], {"log": True}))
+        await run_view_cmd(*_args(["7"], {"log": True}))
 
 
 @pytest.mark.asyncio
 async def test_run_log_takes_one_flag_and_answers_json_first():
     with pytest.raises(UsageError):
-        await run_view_cmd(_inv(["7"], {"log": True, "log_failed": True}))
+        await run_view_cmd(*_args(["7"], {"log": True, "log_failed": True}))
     assert CALLS == []
-    out, _io = await run_view_cmd(_inv(["7"], {"log": True, "json": "status"}))
+    out, _io = await run_view_cmd(
+        *_args(["7"], {"log": True, "json": "status"})
+    )
     assert await materialize(out) == b'{"status":"completed"}\n'
 
 
@@ -259,7 +264,7 @@ async def test_workflow_yaml_prints_the_file_at_the_ref(monkeypatch):
         "content": "bmFtZTogQ0kKb246IHB1c2g=\n"
     }
     out, _io = await workflow_view_cmd(
-        _inv(["ci.yml"], {"yaml": True, "ref": "dev"})
+        *_args(["ci.yml"], {"yaml": True, "ref": "dev"})
     )
     assert await materialize(out) == b"name: CI\non: push\n"
     assert CALLS == [
@@ -272,7 +277,7 @@ async def test_workflow_ref_without_yaml_is_refused_before_asking():
     with pytest.raises(
         UsageError, match="`--yaml` required when specifying `--ref`"
     ):
-        await workflow_view_cmd(_inv(["ci.yml"], {"ref": "dev"}))
+        await workflow_view_cmd(*_args(["ci.yml"], {"ref": "dev"}))
     assert CALLS == []
 
 
@@ -299,7 +304,7 @@ async def test_workflow_yaml_names_a_file_the_ref_lacks(
         workflow_view_cmd.__globals__, "get_workflow", _fake_workflow
     )
     with pytest.raises(ValueError) as caught:
-        await workflow_view_cmd(_inv(["ci.yml"], {"yaml": True, **flags}))
+        await workflow_view_cmd(*_args(["ci.yml"], {"yaml": True, **flags}))
     assert str(caught.value) == message
 
 

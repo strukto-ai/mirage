@@ -84,7 +84,7 @@ export type DispatchFn = (
  * and system() do. Defined beside DispatchFn for the same reason: the
  * consumer receives it, the workspace provides it.
  */
-export type ShellFn = (line: string, stdin: ByteSource | null) => Promise<IOResult>
+export type ShellFn = (line: string, stdin?: ByteSource | null) => Promise<IOResult>
 
 /**
  * Per-op modifiers riding the bridge's attrs slot: setattr's fields,

@@ -757,10 +757,10 @@ describe('overlapping shell calls beside xargs', () => {
           spec: new CommandSpec({ name: 'again' }),
           handlers: {
             '': new CLIHandler({
-              fn: async (inv) => {
+              fn: async (_config, _paths, _texts, ctx) => {
                 await Promise.resolve()
-                if (inv.shell === undefined) throw new Error('missing invocation shell')
-                const inner = await inv.shell('Z=inner; echo inner')
+                if (ctx.shell === undefined) throw new Error('missing invocation shell')
+                const inner = await ctx.shell('Z=inner; echo inner')
                 return [inner.stdout, inner]
               },
             }),
@@ -793,12 +793,12 @@ describe('overlapping shell calls beside xargs', () => {
           spec: new CommandSpec({ name: 'again' }),
           handlers: {
             '': new CLIHandler({
-              fn: async (inv) => {
-                expired = inv.shell
+              fn: async (_config, _paths, _texts, ctx) => {
+                expired = ctx.shell
                 enter()
                 await held
-                if (inv.shell === undefined) throw new Error('missing invocation shell')
-                const inner = await inv.shell('X=inner; echo "$X"')
+                if (ctx.shell === undefined) throw new Error('missing invocation shell')
+                const inner = await ctx.shell('X=inner; echo "$X"')
                 return [inner.stdout, inner]
               },
             }),
@@ -974,10 +974,10 @@ it('keeps each browser session’s permissions, umask and glob settings across s
       spec: new CommandSpec({ name: 'pause' }),
       handlers: {
         '': new CLIHandler({
-          fn: async (inv) => {
+          fn: async (_config, _paths, _texts, ctx) => {
             entered += 1
             if (entered === 2) enterBoth()
-            await (inv.env.LABEL === 'loose' ? looseHeld : tightHeld)
+            await (ctx.env?.LABEL === 'loose' ? looseHeld : tightHeld)
             return [null, new IOResult()]
           },
         }),
@@ -1205,8 +1205,8 @@ function registerPauses(ws: Workspace): Map<string, [Promise<void>, () => void, 
       spec: new CommandSpec({ name: 'pause' }),
       handlers: {
         '': new CLIHandler({
-          fn: async (inv) => {
-            const who = inv.env.WHO ?? 'b'
+          fn: async (_config, _paths, _texts, ctx) => {
+            const who = ctx.env?.WHO ?? 'b'
             entries.get(who)?.()
             await holds.get(who)?.[0]
             return [null, new IOResult()]

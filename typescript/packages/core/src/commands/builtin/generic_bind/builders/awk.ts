@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { awkGeneric, servedHere } from '../../generic/awk.ts'
-import type { CommandOpts } from '../../../config.ts'
+import type { Context } from '../../../config.ts'
 import { splitAssignment } from '../../../../core/awk/index.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
@@ -28,12 +28,12 @@ import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../ad
 async function resolveOperands(
   resolve: (paths: PathSpec[]) => Promise<PathSpec[]>,
   paths: readonly PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
 ): Promise<PathSpec[]> {
   const out: PathSpec[] = []
   let run: PathSpec[] = []
   for (const path of paths) {
-    if (splitAssignment(path.rawPath) === null && servedHere(opts, path)) {
+    if (splitAssignment(path.rawPath) === null && servedHere(ctx, path)) {
       run.push(path)
       continue
     }
@@ -45,11 +45,11 @@ async function resolveOperands(
   return out
 }
 
-const awk: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
-  const idx = opts.index ?? undefined
+const awk: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const resolve = (run: PathSpec[]): Promise<PathSpec[]> => resolveGlobOf(ops)(accessor, run, idx)
-  const resolved = await resolveOperands(resolve, paths, opts)
-  return awkGeneric(resolved, texts, opts, (p) => ops.readStream(accessor, p, idx))
+  const resolved = await resolveOperands(resolve, paths, ctx)
+  return awkGeneric(resolved, texts, ctx, (p) => ops.readStream(accessor, p, idx))
 }
 
 export const BUILDER: GenericCommand = {

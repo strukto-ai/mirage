@@ -20,7 +20,8 @@ from functools import partial
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.config import Context
 from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.policy import resolve_producer
@@ -335,7 +336,7 @@ async def test_job_table_reports_completed_bg_without_wait(restore_defaults):
 
 
 async def _record(
-    seen: list[str], name: str, inv: CLIInvocation
+    seen: list[str], name: str, config, paths, texts, ctx: Context
 ) -> tuple[None, IOResult]:
     seen.append(name)
     return None, IOResult()

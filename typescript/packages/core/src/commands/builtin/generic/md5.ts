@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { hashOperands, type StoredDigest } from './checksum.ts'
@@ -29,14 +29,14 @@ function md5Line(digest: string, label: string): string {
  */
 export async function md5Generic(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   stat?: (p: PathSpec) => Promise<unknown>,
   stored?: StoredDigest,
 ): Promise<CommandFnResult> {
   return hashOperands(
     paths.length > 0 ? paths : [STDIN_OPERAND],
-    paths.length > 0 ? stream : stdinStream(stream, opts.stdin),
+    paths.length > 0 ? stream : stdinStream(stream, ctx.stdin),
     'md5',
     'md5',
     md5Line,

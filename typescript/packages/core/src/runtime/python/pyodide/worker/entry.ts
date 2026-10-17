@@ -74,7 +74,7 @@ async function execute(request: ExecuteRequest): Promise<void> {
       runtime = new PyodideRuntime({ config: request.config }, sync, request.interruptBuffer)
       runtime.bind(
         new WorkspaceBinding(dispatch, new PrefixResolver(() => prefixes), (binding) =>
-          captureBinding(binding, { cwd }),
+          captureBinding(binding, { ctx: { cwd } }),
         ),
       )
     }

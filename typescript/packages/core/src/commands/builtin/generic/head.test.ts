@@ -17,7 +17,7 @@ import { eacces, efbig } from '../../../errors/fs.ts'
 import { ensureStream } from '../../../io/stream.ts'
 import { materialize } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { headGeneric } from './head.ts'
 
@@ -44,11 +44,16 @@ describe('headGeneric line counts', () => {
       }
     }
     const abort = new AbortController()
-    const opts = { stdin: ready(), flags: { lines }, cwd: '/', signal: abort.signal }
+    const ctx = {
+      stdin: ready(),
+      flags: { lines },
+      cwd: PathSpec.fromStrPath('/'),
+      signal: abort.signal,
+    }
     const result = await headGeneric(
       [],
       [],
-      opts as CommandOpts,
+      ctx as Context,
       () => Promise.reject(new Error('stdin only')),
       () => resolveSource(null),
     )
@@ -66,17 +71,17 @@ describe('headGeneric line counts', () => {
   // A lazy output's timeout leaves the signal alone, so a count inside one
   // whole read checks the invocation's deadline itself.
   it('-n -K stops at the command deadline', async () => {
-    const opts = {
+    const ctx = {
       stdin: new TextEncoder().encode('\n'.repeat(20_000_000)),
       flags: { lines: '-20000000' },
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
       timeoutSeconds: 0.02,
       command: 'head',
     }
     const result = await headGeneric(
       [],
       [],
-      opts as CommandOpts,
+      ctx as Context,
       () => Promise.reject(new Error('stdin only')),
       () => resolveSource(null),
     )
@@ -92,11 +97,11 @@ describe('headGeneric line counts', () => {
     '%o ends a stalled pull at the abort',
     async (flags) => {
       const abort = new AbortController()
-      const opts = { stdin: stalled(), flags, cwd: '/', signal: abort.signal }
+      const ctx = { stdin: stalled(), flags, cwd: PathSpec.fromStrPath('/'), signal: abort.signal }
       const result = await headGeneric(
         [],
         [],
-        opts as CommandOpts,
+        ctx as Context,
         () => Promise.reject(new Error('stdin only')),
         () => resolveSource(null),
       )
@@ -118,8 +123,8 @@ describe('headGeneric line counts', () => {
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-function opts(flags: Record<string, string | boolean>): CommandOpts {
-  return { stdin: null, flags, cwd: '/' } as unknown as CommandOpts
+function ctx(flags: Record<string, string | boolean>): Context {
+  return { stdin: null, flags, cwd: PathSpec.fromStrPath('/') } as Context
 }
 
 const fileStat = (p: PathSpec): Promise<FileStat> =>
@@ -146,7 +151,7 @@ describe('head asks the mount for the first lines', () => {
     const result = await headGeneric(
       [PathSpec.fromStrPath('/t')],
       [],
-      opts(flags),
+      ctx(flags),
       fileStat,
       async function* (p) {
         reads.push(p.virtual)
@@ -168,7 +173,7 @@ describe('head asks the mount for the first lines', () => {
     const result = await headGeneric(
       [PathSpec.fromStrPath('/t')],
       [],
-      opts({ lines: '2' }),
+      ctx({ lines: '2' }),
       fileStat,
       async function* (p) {
         reads.push(p.virtual)
@@ -185,7 +190,7 @@ describe('head asks the mount for the first lines', () => {
     const result = await headGeneric(
       [PathSpec.fromStrPath('-')],
       [],
-      { ...opts({ lines: '1' }), stdin: ENC.encode('in\nmore\n') } as unknown as CommandOpts,
+      { ...ctx({ lines: '1' }), stdin: ENC.encode('in\nmore\n') } as unknown as Context,
       fileStat,
       // eslint-disable-next-line require-yield
       async function* () {
@@ -202,7 +207,7 @@ describe('head asks the mount for the first lines', () => {
     const result = await headGeneric(
       [PathSpec.fromStrPath('/big'), PathSpec.fromStrPath('/small')],
       [],
-      opts({ lines: '1' }),
+      ctx({ lines: '1' }),
       fileStat,
       // eslint-disable-next-line require-yield
       async function* () {
@@ -227,7 +232,7 @@ describe('head asks the mount for the first lines', () => {
     const result = await headGeneric(
       names.map((name) => PathSpec.fromStrPath(name)),
       [],
-      opts({ lines: '1' }),
+      ctx({ lines: '1' }),
       fileStat,
       // eslint-disable-next-line require-yield
       async function* () {
@@ -252,7 +257,7 @@ describe('head asks the mount for the first lines', () => {
       const result = await headGeneric(
         [PathSpec.fromStrPath(name)],
         [],
-        opts({ lines: '1', verbose: true }),
+        ctx({ lines: '1', verbose: true }),
         fileStat,
         // eslint-disable-next-line require-yield
         async function* () {

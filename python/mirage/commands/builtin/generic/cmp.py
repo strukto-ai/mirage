@@ -17,7 +17,7 @@ from mirage.commands.builtin.utils.constants import STDIN_OPERAND
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.size_suffix import parse_base0
 from mirage.commands.builtin.utils.stream import is_stdin, stdin_stream
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -616,21 +616,21 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> CmpFlags:
 async def cmp_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     stream: PolymorphicReadFn,
     size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     return await cmp_cmd(
         paths,
         texts,
         stream=stream,
         size_of=size_of,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         silent=parsed.silent,
         verbose=parsed.verbose,
         limit=parsed.limit,
         print_bytes=parsed.print_bytes,
         skip=parsed.skip,
-        argv=opts.argv,
+        argv=ctx.argv,
     )

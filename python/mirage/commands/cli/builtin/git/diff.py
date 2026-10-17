@@ -61,10 +61,11 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 # Deliberate divergence, verified against git 2.47.3 on a real
 # repository. The patch is correct and applies cleanly, and file
@@ -174,7 +175,9 @@ def _output(
     )
 
 
-async def diff(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
+async def diff(
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+) -> tuple[ByteSource | None, IOResult]:
     """Diff the working tree, staged content or commits.
 
     No revision compares the index with the working tree, and one
@@ -186,27 +189,27 @@ async def diff(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     they name.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model; it reads its repository
-            through ``inv.view.vfs``.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context; git reads its repository
+            through ``ctx.vfs``.
     """
-    view = inv.view or CLIView()
-    vfs = view.vfs
-    texts = inv.texts
-    fl = FlagView(inv.flags)
+    vfs = ctx.vfs
+    fl = FlagView(ctx.flags)
     cached = fl.as_bool("cached") or fl.as_bool("staged")
-    revisions, paths = split_marked(tuple(texts), inv.argv)
+    revisions, pathspecs = split_marked(tuple(texts), ctx.argv)
     try:
         if vfs is None:
             raise NoWorkspaceError()
-        word = option_operand(inv, texts, STDERR)
+        word = option_operand(ctx, texts, STDERR)
         if word is not None and (
             cached or any(not text.startswith("-") for text in revisions)
         ):
-            raise UsageError("", verb_usage(inv))
+            raise UsageError("", verb_usage(ctx))
         if word is not None:
-            raise InvalidOptionError(word, verb_usage(inv))
-        repo, location = await opened(fl, view)
+            raise InvalidOptionError(word, verb_usage(ctx))
+        repo, location = await opened(ctx, fl)
         parsed = parse_diff_flags(
             fl,
             default_renames=await renames_enabled(vfs, location),
@@ -238,7 +241,7 @@ async def diff(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
         parsed = replace(
             parsed,
             pathspecs=pathspec_patterns(
-                location, start_point(fl).virtual, paths
+                location, start_point(fl).virtual, pathspecs
             ),
         )
         body = await asyncio.to_thread(_output, repo, before, after, parsed)

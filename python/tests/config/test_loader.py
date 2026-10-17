@@ -686,7 +686,8 @@ async def test_clis_path_form_reference_rebases_on_the_config_dir(
         "    spec=CommandSpec(name='tool',\n"
         "        subcommands=(CommandSpec(name='run'),)),\n"
         "    handlers={'run': CLIHandler(\n"
-        "        fn=lambda inv: (b'loaded\\n', IOResult()))},\n"
+        "        fn=lambda config, paths, texts, ctx: (b'loaded\\n', IOResult())\n"
+        "    )},\n"
         ")\n"
     )
     cfg_file = tmp_path / "ws.yaml"

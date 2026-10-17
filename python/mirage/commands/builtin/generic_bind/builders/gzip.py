@@ -22,7 +22,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
     require_op,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -32,16 +32,16 @@ async def gzip(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     resolved = (
-        await ops.resolve_glob(accessor, paths, opts.index) if paths else []
+        await ops.resolve_glob(accessor, paths, ctx.index) if paths else []
     )
     return await gzip_generic(
         resolved,
         list(texts),
-        opts,
-        bound_op(ops.read_stream, accessor, opts.index),
+        ctx,
+        bound_op(ops.read_stream, accessor, ctx.index),
         partial(require_op(ops, Operation.WRITE), accessor),
         partial(require_op(ops, Operation.UNLINK), accessor),
         partial(ops.stat, accessor),

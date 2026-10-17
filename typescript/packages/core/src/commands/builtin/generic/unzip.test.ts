@@ -45,7 +45,7 @@ it('a refused probe still reports the entry and goes on', async () => {
     {
       flags: { d: PathSpec.fromStrPath('/out'), q: true },
       stdin: null,
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
     },
     read,
     async (path, bytes) => {

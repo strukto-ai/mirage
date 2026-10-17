@@ -13,14 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli.builtin.hf.accessor import text_out
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.core.hf_hub.config import HfConfig
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 from mirage.version import __version__
 
 
 async def env_cmd(
-    inv: CLIInvocation[HfConfig],
+    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Print what this install is pointed at.
 
@@ -29,19 +30,18 @@ async def env_cmd(
     of them do not exist in a workspace, so this reports the facts that
     do: the endpoint, whether a token is set, and the version.
     """
-    token = "set" if inv.config.token is not None else "not set"
+    token = "set" if config.token is not None else "not set"
     lines = [
         "- huggingface_hub version: mirage",
         f"- mirage version: {__version__}",
-        f"- endpoint: {inv.config.endpoint}",
+        f"- endpoint: {config.endpoint}",
         f"- token: {token}",
     ]
     return text_out("\n".join(lines) + "\n")
 
 
 async def version_cmd(
-    inv: CLIInvocation[HfConfig],
+    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Print the version."""
-    del inv
     return text_out(f"hf version {__version__} (mirage)\n")

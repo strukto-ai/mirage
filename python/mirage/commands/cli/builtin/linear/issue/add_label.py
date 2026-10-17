@@ -17,33 +17,32 @@ from mirage.commands.cli.builtin.linear.util import (
     resolve_issue,
     resolve_label_id,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.linear.client import get_issue, issue_update
 from mirage.core.linear.config import LinearConfig
 from mirage.core.linear.normalize import normalize_issue, to_json_bytes
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 
 async def add_label(
-    inv: CLIInvocation[LinearConfig],
+    config: LinearConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    issue_id = await resolve_issue(
-        inv.config, first_text(inv.texts, "issue key")
-    )
-    issue = await get_issue(inv.config, issue_id)
+    fl = FlagView(ctx.flags)
+    issue_id = await resolve_issue(config, first_text(texts, "issue key"))
+    issue = await get_issue(config, issue_id)
     team_id = (issue.get("team") or {}).get("id") or ""
     label_id = await resolve_label_id(
-        inv.config, team_id, fl.as_str("label"), fl.as_str("label_name")
+        config, team_id, fl.as_str("label"), fl.as_str("label_name")
     )
     nodes = issue.get("labels", {}).get("nodes", [])
     existing = [n["id"] for n in nodes]
     if label_id not in existing:
         existing.append(label_id)
     updated = await issue_update(
-        inv.config,
+        config,
         issue_id=issue_id,
         title=None,
         description=None,

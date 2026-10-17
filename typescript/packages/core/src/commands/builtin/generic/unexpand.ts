@@ -17,7 +17,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { reportedStream } from '../utils/operands.ts'
 import { asyncChain } from '../../../io/stream.ts'
@@ -80,18 +80,18 @@ function unexpandRecord(line: Uint8Array, tabsize: number, allSpaces: boolean): 
 
 export function unexpandGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): CommandFnResult {
-  stream = stdinStream(stream, opts.stdin)
-  const parsed = parseFlags(opts.flags)
+  stream = stdinStream(stream, ctx.stdin)
+  const parsed = parseFlags(ctx.flags)
   const tabsize = parsed.tabsize
   const allSpaces = parsed.allSpaces && !parsed.firstOnly
   const io = new IOResult()
   const sources = paths.map((p) => reportedStream(stream(p), io, p, 'unexpand'))
   const transform = (line: Uint8Array): Uint8Array => unexpandRecord(line, tabsize, allSpaces)
   const output = mapStream(
-    paths.length > 0 ? asyncChain(sources) : (opts.stdin ?? new Uint8Array()),
+    paths.length > 0 ? asyncChain(sources) : (ctx.stdin ?? new Uint8Array()),
     transform,
   )
   return [output, io]

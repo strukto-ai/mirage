@@ -21,7 +21,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     dir_aware_stream,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,16 +31,16 @@ async def sha256sum(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
+    resolved = await resolve_or_empty(ops, accessor, paths, ctx.index)
     return await sha256sum_generic(
         resolved,
         list(texts),
-        opts,
-        dir_aware_stat(ops, accessor, opts),
-        dir_aware_stream(ops, accessor, opts),
-        bound_uncached(ops.checksum, accessor, opts.index),
+        ctx,
+        dir_aware_stat(ops, accessor, ctx),
+        dir_aware_stream(ops, accessor, ctx),
+        bound_uncached(ops.checksum, accessor, ctx.index),
     )
 
 

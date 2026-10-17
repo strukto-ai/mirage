@@ -15,16 +15,21 @@
 import { FlagView } from '../../../spec/flag_view.ts'
 import { getReactions } from '../../../../core/slack/react.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 import { slackAccessor } from '../../../../accessor/slack.ts'
 
 const ENC = new TextEncoder()
 
-export async function reactions(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function reactions(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const message = await getReactions(
-    slackAccessor(inv.config),
+    slackAccessor(config),
     fl.asStr('channel') ?? '',
     fl.asStr('ts') ?? '',
   )

@@ -15,7 +15,7 @@
 import { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 
@@ -395,9 +395,9 @@ function variable(name: string): readonly [string, string | null] | undefined {
 }
 
 /** Whether the PATH operand names something pathconf could open. */
-async function pathExists(opts: CommandOpts, word: string): Promise<boolean> {
-  if (opts.statPath === undefined) return true
-  return (await opts.statPath(PathSpec.fromStrPath(word, undefined, opts.cwd))) !== null
+async function pathExists(ctx: Context, word: string): Promise<boolean> {
+  if (ctx.statPath === undefined) return true
+  return (await ctx.statPath(PathSpec.fromStrPath(word, undefined, ctx.cwd))) !== null
 }
 
 // glibc `getconf`: one variable's value, or `-a` for all of them. A pathconf
@@ -408,13 +408,13 @@ async function getconf(
   _accessor: Accessor,
   _paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('getconf'))
+  const fl = new FlagView(ctx.flags, specOf('getconf'))
   const usage: CommandFnResult = [null, new IOResult({ exitCode: 2, stderr: ENC.encode(USAGE) })]
   if (fl.asBool('a')) {
     if (texts.length > 1) return usage
-    const found = await pathExists(opts, texts[0] ?? '/')
+    const found = await pathExists(ctx, texts[0] ?? '/')
     const lines = GETCONF_VARIABLES.map(
       ([name, value]) =>
         name.padEnd(35) + (found || !PATH_VARIABLES.has(name) ? (value ?? '') : '') + '\n',
@@ -431,7 +431,7 @@ async function getconf(
   const [name, value] = row
   const path = texts[1]
   if (PATH_VARIABLES.has(name) !== (path !== undefined)) return usage
-  if (path !== undefined && !(await pathExists(opts, path))) {
+  if (path !== undefined && !(await pathExists(ctx, path))) {
     const err = `getconf: pathconf: ${path}: No such file or directory\n`
     return [null, new IOResult({ exitCode: 3, stderr: ENC.encode(err) })]
   }

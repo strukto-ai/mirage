@@ -23,12 +23,13 @@ from mirage.commands.cli.specs import (
     register_cli_spec,
     unregister_cli_spec,
 )
-from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.config import Context
 from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 
 
-async def noop(inv: CLIInvocation):
+async def noop(config, paths, texts, ctx: Context):
     return None, IOResult()
 
 
@@ -117,12 +118,13 @@ def test_reference_form_loads_a_script_file(tmp_path):
     script = tmp_path / "pager.py"
     script.write_text(
         textwrap.dedent("""\
-            from mirage.commands.cli.types import CLIInvocation, CLI, CLIHandler
+            from mirage.commands.cli.types import CLI, CLIHandler
+            from mirage.commands.config import Context
             from mirage.commands.spec.types import CommandSpec
             from mirage.io import IOResult
 
 
-            async def page(inv: CLIInvocation):
+            async def page(config, paths, texts, ctx: Context):
                 return None, IOResult()
 
 

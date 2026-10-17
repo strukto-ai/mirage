@@ -16,9 +16,8 @@ import { PathSpec } from '../../../../types.ts'
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { refuseAmbiguous, remoteBranch, setUpTracking, trackMode } from './branch.ts'
 import { moveHead, previousPosition, trackingReport } from './checkout.ts'
 import { HEAD } from './constants.ts'
@@ -94,19 +93,22 @@ export function expectedKind(known: ReadonlyMap<string, string>, name: string): 
  * reason git split the verb off, and it holds here for the same reason: a
  * detached HEAD is the state an agent loses commits in.
  */
-export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult> {
-  const view = inv.view ?? {}
-  const texts = [...inv.texts]
-  const fl = new FlagView(inv.flags)
+export async function switchBranch(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   let carried: string
   let note: string
   let warnings = ''
   try {
-    const vfs = view.vfs
+    const vfs = ctx.vfs
     if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
-    checkSwitches(inv, texts)
+    checkSwitches(ctx, texts)
     const flags = parseFlags(fl)
     let creating = flags.create !== undefined
     if (creating && flags.detach) throw new DetachWithCreateError()
@@ -117,7 +119,7 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
     if (!creating && first === undefined && !flags.detach) {
       throw new MissingBranchArgumentError()
     }
-    const repo = await opened(fl, view, true)
+    const repo = await opened(ctx, fl, true)
     const mode = await trackMode(repo)
     const head = await readHead(vfs, repo.location.gitdir)
     const known = await loadRefs(vfs, repo.location.gitdir, repo.location.commondir)
@@ -260,9 +262,9 @@ export async function switchBranch(inv: CLIInvocation): Promise<CommandFnResult>
  * switch's refusal by a read-only mount: the new branch's ref under `-c`, whose
  * lock git takes first, and the index's otherwise.
  */
-export const switchReadOnly: ReadOnlyRefusal = (inv, location) => {
-  const name = new FlagView(inv.flags).asStr('create')
-  if (name === undefined) return indexLocked(inv, location)
+export const switchReadOnly: ReadOnlyRefusal = (texts, ctx, location) => {
+  const name = new FlagView(ctx.flags).asStr('create')
+  if (name === undefined) return indexLocked(texts, ctx, location)
   const ref = `${BRANCH_PREFIX}${name}`
   return new RefReadOnlyError(
     ref,

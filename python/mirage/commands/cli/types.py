@@ -12,91 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Callable, Generic, Literal, TypeVar
+from typing import Any, Callable, Literal
 
 from pydantic import BaseModel
 
-from mirage.commands.constants import ROOT_CWD
 from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import CommandSpec, FlagValue
-from mirage.io.types import ByteSource, IOResult
-from mirage.process.view import ProcessView
 from mirage.runtime.types import ScriptSource
 from mirage.types import Limit, PathSpec
-from mirage.view.types import SessionView
-
-if TYPE_CHECKING:
-    from mirage.workspace.files import Files
 
 # The group-level flag bag the walk accumulates, keyed by canonical
 # dashed spelling like ParsedArgs.flags.
 WalkFlagBag = FlagBag[FlagValue]
-
-ConfigT = TypeVar("ConfigT")
-
-
-@dataclass(frozen=True)
-class CLIView:
-    """Workspace capabilities available to a CLI handler.
-
-    Account CLIs use their own config for services and this view for files.
-    Direct callers may omit unused capabilities.
-
-    Args:
-        vfs (Files | None): the session's files, the API ``session.vfs``
-            and a policy's ``ctx.vfs`` are, run as the line's session:
-            reads, writes, links, and where the mounts are.
-        session_view (SessionView | None): live, gated session access;
-            CLIInvocation.env is a frozen snapshot.
-        processes (ProcessView | None): workspace process access.
-    """
-
-    vfs: "Files | None" = None
-    session_view: SessionView | None = None
-    processes: ProcessView | None = None
-
-
-@dataclass(frozen=True)
-class CLIInvocation(Generic[ConfigT]):
-    """One handler invocation with original argv and parsed arguments.
-
-    File operations use view; account services use config. Script execution
-    maps argv, stdin, env and cwd onto its runtime.
-
-    Args:
-        config (ConfigT): validated installation config, None without a model.
-        argv (tuple[str, ...]): original words after the installed head,
-            including subcommands.
-        paths (tuple[PathSpec, ...]): cwd-resolved path operands.
-        texts (tuple[str, ...]): text operands.
-        cwd (PathSpec): session working directory.
-        flags (Mapping[str, FlagValue]): merged group and leaf flags keyed
-            by kwarg name; read through FlagView. Path values are PathSpec.
-        stdin (ByteSource | None): piped input.
-        env (Mapping[str, str]): frozen process environment; live access uses
-            view.session_view.
-        view (CLIView | None): workspace capabilities, absent for direct calls.
-        spec (CommandSpec | None): resolved leaf grammar, absent for direct calls.
-        shell (Callable[[str], Awaitable[IOResult]] | None): evaluate in this
-            invocation's session, including after awaits or in forks. Await
-            calls before returning; the handle expires when the handler settles.
-    """
-
-    config: ConfigT
-    argv: tuple[str, ...] = ()
-    paths: tuple[PathSpec, ...] = ()
-    texts: tuple[str, ...] = ()
-    cwd: PathSpec = ROOT_CWD
-    flags: Mapping[str, FlagValue] = field(default_factory=dict)
-    stdin: ByteSource | None = None
-    env: Mapping[str, str] = field(default_factory=dict)
-    view: CLIView | None = None
-    spec: "CommandSpec | None" = None
-    shell: Callable[[str], Awaitable[IOResult]] | None = None
 
 
 @dataclass(frozen=True)
@@ -104,8 +35,9 @@ class CLIHandler:
     """Execution and policy for one command path.
 
     Args:
-        fn (Callable | None): callback receiving one CLIInvocation; None
-            only for a script installation.
+        fn (Callable | None): callback receiving ``(config, paths, texts,
+            ctx)``, the same ``Context`` a command gets; None only for a
+            script installation.
         write (bool): whether invoking the command may mutate state.
         limit (Limit | None): default execution and output limits.
     """

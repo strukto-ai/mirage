@@ -144,7 +144,7 @@ export async function runDispatch(
       stdin,
       flags: rebased,
       mountPrefix: '',
-      cwd,
+      cwd: PathSpec.fromStrPath(cwd),
       dispatch,
       argv,
       ...(signal === undefined ? {} : { signal }),

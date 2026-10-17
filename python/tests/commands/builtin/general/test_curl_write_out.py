@@ -6,7 +6,7 @@ from mirage.accessor.base import NOOPAccessor
 from mirage.commands.builtin.errors import HttpTimeoutError
 from mirage.commands.builtin.general.curl import curl
 from mirage.commands.builtin.general.wget import wget
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.workspace import Workspace
 
@@ -42,7 +42,7 @@ async def test_template_failure_refuses_transfer(
     request = AsyncMock()
     monkeypatch.setitem(curl.__wrapped__.__globals__, "http_request", request)
     dispatch = AsyncMock(side_effect=failure) if failure is not None else None
-    opts = CommandOpts(
+    ctx = Context(
         dispatch=dispatch,
         flags={
             "write_out": "@/format",
@@ -51,7 +51,7 @@ async def test_template_failure_refuses_transfer(
         },
     )
     with pytest.raises(UsageError) as caught:
-        await curl(NOOPAccessor(), [], ["https://example.test/hello"], opts)
+        await curl(NOOPAccessor(), [], ["https://example.test/hello"], ctx)
     assert caught.value.exit_code == 26
     detail = "" if silent else "curl: Failed to open /format\n"
     assert str(caught.value) == (

@@ -30,7 +30,7 @@ from mirage.commands.builtin.generic_bind.archive_io import (
     relay_is_dir_of,
     walk_of,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -42,46 +42,46 @@ async def tar(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("tar: missing operand")
-    resolved = await ops.resolve_glob(accessor, paths, opts.index)
-    fl = FlagView(opts.flags, spec=SPECS["tar"])
-    if opts.dispatch is not None and not fl.as_bool("create"):
+    resolved = await ops.resolve_glob(accessor, paths, ctx.index)
+    fl = FlagView(ctx.flags, spec=SPECS["tar"])
+    if ctx.dispatch is not None and not fl.as_bool("create"):
         # -t reads and -x writes wherever cwd or -C says, which needs
         # not be this mount, so both run on dispatch-relayed calls and
         # each path routes to the mount that owns it. Only -c stays on
         # the accessor: its planner walks this mount's tree.
-        prim = transfer_primitives(opts.dispatch)
+        prim = transfer_primitives(ctx.dispatch)
         return await tar_generic(
             resolved,
             list(texts),
-            opts,
+            ctx,
             prim["read_stream"],
             prim["write"],
             prim["mkdir"],
             prim["stat"],
-            walk_of(ops, accessor, opts.index, opts.dispatch, "tar"),
-            relay_is_dir_of(opts.dispatch),
+            walk_of(ops, accessor, ctx.index, ctx.dispatch, "tar"),
+            relay_is_dir_of(ctx.dispatch),
             relay=True,
         )
     # Archive output follows links even when the member scan preserves them.
     archive_write = (
-        transfer_primitives(opts.dispatch)["write"]
-        if opts.dispatch is not None
+        transfer_primitives(ctx.dispatch)["write"]
+        if ctx.dispatch is not None
         else partial(require_op(ops, Operation.WRITE), accessor)
     )
     return await tar_generic(
         resolved,
         list(texts),
-        opts,
-        bound_op(ops.read_stream, accessor, opts.index),
+        ctx,
+        bound_op(ops.read_stream, accessor, ctx.index),
         archive_write,
         partial(require_op(ops, Operation.MKDIR), accessor),
-        bound_op(ops.stat, accessor, opts.index),
-        walk_of(ops, accessor, opts.index, opts.dispatch, "tar"),
-        is_dir_of(ops, accessor, opts.index),
+        bound_op(ops.stat, accessor, ctx.index),
+        walk_of(ops, accessor, ctx.index, ctx.dispatch, "tar"),
+        is_dir_of(ops, accessor, ctx.index),
     )
 
 

@@ -218,7 +218,7 @@ def test_a_rule_naming_a_verb_its_cli_does_not_have_is_refused():
     check_cli_verbs(None, verbs)
 
 
-def _noop(inv):
+def _noop(config, paths, texts, ctx):
     return 0
 
 

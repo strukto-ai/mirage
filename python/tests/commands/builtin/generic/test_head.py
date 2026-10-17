@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from mirage.commands.builtin.generic.head import head, head_generic, head_multi
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.errors.fs import eacces, efbig
 from mirage.io.stream import close_quietly
 from mirage.io.types import materialize
@@ -164,7 +164,7 @@ async def test_head_asks_first_lines_for_a_line_count(flags, asked):
     out, io = await head_generic(
         [PathSpec.from_str_path("/t")],
         [],
-        CommandOpts(flags=flags),
+        Context(flags=flags),
         _file_stat,
         _counted_reads(b"x\ny\nz\n", reads),
         first_lines,
@@ -185,7 +185,7 @@ async def test_head_reads_a_file_first_lines_leaves_to_the_read():
     out, _ = await head_generic(
         [PathSpec.from_str_path("/t")],
         [],
-        CommandOpts(flags={"lines": "2"}),
+        Context(flags={"lines": "2"}),
         _file_stat,
         _counted_reads(b"x\ny\nz\n", reads),
         first_lines,
@@ -202,7 +202,7 @@ async def test_head_reads_standard_input_without_first_lines():
     out, io = await head_generic(
         [PathSpec.from_str_path("-")],
         [],
-        CommandOpts(flags={"lines": "1"}, stdin=b"in\nmore\n"),
+        Context(flags={"lines": "1"}, stdin=b"in\nmore\n"),
         _file_stat,
         _counted_reads(b"", []),
         first_lines,
@@ -216,7 +216,7 @@ async def test_head_reports_a_failed_operand_and_prints_the_next():
     out, io = await head_generic(
         [PathSpec.from_str_path("/big"), PathSpec.from_str_path("/small")],
         [],
-        CommandOpts(flags={"lines": "1"}),
+        Context(flags={"lines": "1"}),
         _file_stat,
         _counted_reads(b"", []),
         _first_lines_or_fail,
@@ -245,7 +245,7 @@ async def test_head_prints_no_header_for_an_operand_it_may_not_open(
     out, io = await head_generic(
         [PathSpec.from_str_path(name) for name in names],
         [],
-        CommandOpts(flags={"lines": "1"}),
+        Context(flags={"lines": "1"}),
         _file_stat,
         _counted_reads(b"", []),
         _first_lines_or_fail,
@@ -279,7 +279,7 @@ async def test_head_v_keeps_one_failure_when_the_reader_stops_at_the_header(
     out, io = await head_generic(
         [PathSpec.from_str_path(name)],
         [],
-        CommandOpts(flags={"lines": "1", "verbose": True}),
+        Context(flags={"lines": "1", "verbose": True}),
         _file_stat,
         _counted_reads(b"", []),
         _first_lines_or_fail,

@@ -1,8 +1,8 @@
 import git from 'isomorphic-git'
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { diff } from './diff.ts'
 import { GitError } from './errors.ts'
 import { readOptional } from './io.ts'
@@ -13,9 +13,14 @@ import { resolveCommit } from './revparse.ts'
 import { fatal } from './util.ts'
 
 /** Read the same newest-first stash reflog that real Git writes. */
-export async function stashList(inv: CLIInvocation): Promise<CommandFnResult> {
+export async function stashList(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
   try {
-    const repo = await opened(new FlagView(inv.flags), inv.view ?? {})
+    const repo = await opened(ctx, new FlagView(ctx.flags))
     const data = await readOptional(repo.vfs, repo.location.commondir.join('logs/refs/stash'))
     const rows = new TextDecoder()
       .decode(data ?? new Uint8Array())
@@ -33,10 +38,15 @@ export async function stashList(inv: CLIInvocation): Promise<CommandFnResult> {
 }
 
 /** Compare the saved working tree with the stash's first parent, never current HEAD. */
-export async function stashShow(inv: CLIInvocation): Promise<CommandFnResult> {
+export async function stashShow(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
   try {
-    const repo = await opened(new FlagView(inv.flags), inv.view ?? {})
-    let selector = inv.texts[0] ?? 'stash@{0}'
+    const repo = await opened(ctx, new FlagView(ctx.flags))
+    let selector = texts[0] ?? 'stash@{0}'
     const match = /^(?:stash@\{(\d+)\}|(\d+))$/.exec(selector)
     if (match !== null) {
       const data = await readOptional(repo.vfs, repo.location.commondir.join('logs/refs/stash'))
@@ -65,7 +75,7 @@ export async function stashShow(inv: CLIInvocation): Promise<CommandFnResult> {
     const parent = commit.parent[0]
     if (parent === undefined || commit.parent.length < 2)
       throw new GitError(`'${selector}' is not a stash-like commit`)
-    const flags = { ...inv.flags }
+    const flags = { ...ctx.flags }
     const view = new FlagView(flags)
     if (
       !['patch', 'name_only', 'name_status', 'stat', 'numstat', 'shortstat', 'summary', 'raw'].some(
@@ -73,7 +83,7 @@ export async function stashShow(inv: CLIInvocation): Promise<CommandFnResult> {
       )
     )
       flags.stat = true
-    return await diff({ ...inv, texts: [parent, oid], flags })
+    return await diff(config, paths, [parent, oid], { ...ctx, flags })
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
     throw err

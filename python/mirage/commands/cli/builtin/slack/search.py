@@ -12,19 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.search import search_messages
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 
 async def search(
-    inv: CLIInvocation[SlackConfig],
+    config: SlackConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     result = await search_messages(
-        inv.config,
+        config,
         fl.as_str("query") or "",
         count=fl.as_int("count") or 20,
         page=fl.as_int("page") or 1,

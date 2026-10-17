@@ -21,10 +21,11 @@ from mirage.commands.cli.builtin.gh.issue import (
     list_cmd,
     view_cmd,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.core.github.config import GhConfig
 from mirage.core.github.issue import IssueListFilter, IssueSelections
 from mirage.io.types import materialize
+from mirage.types import PathSpec
 
 CONFIG = GhConfig(token="t")
 
@@ -55,14 +56,12 @@ GH_FIELDS = [
 ]
 
 
-def _inv(flags) -> CLIInvocation:
-    return CLIInvocation(
+def _args(flags) -> tuple[GhConfig, list[PathSpec], list[str], Context]:
+    return (
         CONFIG,
-        argv=(),
-        texts=("4",),
-        flags={"repo": "o/r", **flags},
-        stdin=None,
-        view=None,
+        [],
+        ["4"],
+        Context(argv=(), flags={"repo": "o/r", **flags}, stdin=None, vfs=None),
     )
 
 
@@ -94,7 +93,7 @@ async def test_the_number_is_asked_for_as_an_issue_or_a_pull(monkeypatch):
     )
     monkeypatch.setitem(view_cmd.__globals__, "issue_fields", answers)
 
-    assert await _json(await view_cmd(_inv({"json": "title,isPinned"}))) == {
+    assert await _json(await view_cmd(*_args({"json": "title,isPinned"}))) == {
         "isPinned": True,
         "title": "bug",
     }
@@ -112,7 +111,7 @@ async def test_a_pull_prints_the_fields_only_an_issue_has_at_their_zero(
 
     out = await _json(
         await view_cmd(
-            _inv(
+            *_args(
                 {
                     "json": "title,isPinned,stateReason,closedByPullRequestsReferences"
                 }
@@ -147,7 +146,7 @@ async def test_comments_page_through_the_half_the_number_turned_out_to_be(
     answers = Answers(page("first", "c1"), page("second", None))
     monkeypatch.setitem(view_cmd.__globals__, "issue_fields", answers)
 
-    out = await _json(await view_cmd(_inv({"json": "comments"})))
+    out = await _json(await view_cmd(*_args({"json": "comments"})))
 
     assert [comment["body"] for comment in out["comments"]] == [
         "first",
@@ -173,7 +172,7 @@ async def test_project_items_add_the_number_and_are_read_apart(monkeypatch):
     )
     monkeypatch.setitem(view_cmd.__globals__, "issue_fields", answers)
 
-    assert await _json(await view_cmd(_inv({"json": "projectItems"}))) == {
+    assert await _json(await view_cmd(*_args({"json": "projectItems"}))) == {
         "projectItems": []
     }
     assert answers.calls[0][1] == IssueSelections("id,number", "id,number")
@@ -192,7 +191,7 @@ async def test_list_asks_graphql_with_the_narrowing_gh_sends(monkeypatch):
 
     out = await _json(
         await list_cmd(
-            _inv(
+            *_args(
                 {
                     "json": "number,stateReason",
                     "state": "all",

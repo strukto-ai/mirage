@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import type { CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
 import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import type { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import { IOResult } from '@struktoai/mirage-core/io/types'
@@ -41,12 +40,11 @@ export function repoTypeOf(fl: FlagView): string {
  * mount's mtimes come from, so the walk lists bare.
  */
 export function hubFor(
-  inv: CLIInvocation,
+  config: HfConfig,
   repoId: string,
   repoType: string,
   revision?: string,
 ): HfHubAccessor {
-  const config = inv.config as HfConfig
   return new HfHubAccessor(
     {
       repoId,
@@ -66,8 +64,8 @@ export function hubFor(
  * the handler. This guard also protects direct handler calls from reaching
  * the Hub with an incomplete request.
  */
-export function requireOperands(inv: CLIInvocation, names: readonly string[]): void {
-  const missing = names.slice(inv.texts.length)
+export function requireOperands(texts: readonly string[], names: readonly string[]): void {
+  const missing = names.slice(texts.length)
   if (missing.length > 0) {
     throw new UsageError(`the following arguments are required: ${missing.join(', ')}`)
   }
@@ -87,8 +85,7 @@ export function textOut(text: string, stderr = ''): [ByteSource, IOResult] {
  * The Hub answers 401 "Invalid username or password." for an unauthenticated
  * write, which reads as a wrong credential rather than as a missing one.
  */
-export function requireToken(inv: CLIInvocation, what: string): void {
-  const config = inv.config as HfConfig
+export function requireToken(config: HfConfig, what: string): void {
   if (config.token === undefined || config.token === '') {
     throw new UsageError(`${what} requires a token; set \`token\` on the \`hf\` install`)
   }

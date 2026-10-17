@@ -17,29 +17,28 @@ from mirage.commands.cli.builtin.linear.util import (
     resolve_issue,
     text_or_stdin,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.linear.client import issue_update
 from mirage.core.linear.config import LinearConfig
 from mirage.core.linear.normalize import normalize_issue, to_json_bytes
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 
 async def update(
-    inv: CLIInvocation[LinearConfig],
+    config: LinearConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    issue_id = await resolve_issue(
-        inv.config, first_text(inv.texts, "issue key")
-    )
+    fl = FlagView(ctx.flags)
+    issue_id = await resolve_issue(config, first_text(texts, "issue key"))
     description = None
-    if fl.as_str("description") is not None or inv.stdin is not None:
+    if fl.as_str("description") is not None or ctx.stdin is not None:
         description = await text_or_stdin(
-            fl.as_str("description"), inv.stdin, "description is required"
+            fl.as_str("description"), ctx.stdin, "description is required"
         )
     issue = await issue_update(
-        inv.config,
+        config,
         issue_id=issue_id,
         title=fl.as_str("title"),
         description=description,

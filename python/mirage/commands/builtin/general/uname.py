@@ -14,7 +14,7 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.general.hostname import HOSTNAME
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName
@@ -46,7 +46,7 @@ async def uname(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """GNU ``uname``: one field per option, in GNU's order, never the
     order typed.
@@ -55,7 +55,7 @@ async def uname(
     processor or hardware platform, which only ``-p`` and ``-i`` without
     ``-a`` print, as GNU does. Pinned against coreutils 9.7.
     """
-    fl = FlagView(opts.flags, spec=SPECS["uname"])
+    fl = FlagView(ctx.flags, spec=SPECS["uname"])
     if texts:
         raise extra_operand_error(CommandName.UNAME, texts[0])
     if fl.as_bool("all"):

@@ -16,13 +16,13 @@ import { describe, expect, it } from 'vitest'
 
 import { materialize } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { fileGeneric } from './file.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 const X = PathSpec.fromStrPath('/x')
-const OPTS = { flags: {}, stdin: null } as unknown as CommandOpts
+const OPTS = { flags: {}, stdin: null } as unknown as Context
 const stat = (): Promise<FileStat> =>
   Promise.resolve(new FileStat({ name: 'x', size: 10 ** 6, type: FileType.FILE }))
 

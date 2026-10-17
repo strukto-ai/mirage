@@ -15,15 +15,20 @@
 import { FlagView } from '../../../spec/flag_view.ts'
 import { postMessage, replyToThread } from '../../../../core/slack/post.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 import { slackAccessor } from '../../../../accessor/slack.ts'
 
 const ENC = new TextEncoder()
 
-export async function sendMessage(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const accessor = slackAccessor(inv.config)
+export async function sendMessage(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const accessor = slackAccessor(config)
   const channel = fl.asStr('channel') ?? ''
   const text = fl.asStr('text') ?? ''
   const threadTs = fl.asStr('thread_ts')

@@ -17,15 +17,15 @@ import { treeWalk } from '../../utils/tree.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
 import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const tree: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
-  const idx = opts.index ?? undefined
+const tree: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   const { readTree } = ops
   const readdir = (p: PathSpec): Promise<string[]> => ops.readdir(accessor, p, idx)
   const stat = (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, idx)
   return treeGeneric(
     resolved,
-    opts,
+    ctx,
     readdir,
     stat,
     treeWalk<string[], FileStat>(

@@ -58,7 +58,7 @@ describe('mongodb cat error surfacing', () => {
         stdin: null,
         flags: {},
         io: ioFor(MongoDBVFSBase, accessor),
-        cwd: '/',
+        cwd: PathSpec.fromStrPath('/'),
       }),
     ).rejects.toThrow(message)
   })

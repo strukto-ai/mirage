@@ -1,7 +1,7 @@
 import pytest
 
 from mirage.commands.cli.builtin.gh import GH, repo
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.core.github.config import GhConfig
 from mirage.io.types import IOResult
 from mirage.types import MountMode, PathSpec
@@ -12,13 +12,17 @@ WORK = PathSpec.from_str_path("/w")
 
 
 @pytest.fixture
-def clones(monkeypatch) -> list[CLIInvocation[None]]:
-    calls: list[CLIInvocation[None]] = []
+def clones(monkeypatch) -> list[tuple[list[str], Context]]:
+    calls: list[tuple[list[str], Context]] = []
 
     async def clone(
-        inv: CLIInvocation[None], headers: dict[str, str]
+        config: None,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+        headers: dict[str, str],
     ) -> tuple[None, IOResult]:
-        calls.append(inv)
+        calls.append((texts, ctx))
         return None, IOResult()
 
     async def login(config: GhConfig) -> str:
@@ -44,25 +48,25 @@ async def _run(line: str, base: str | None = None) -> IOResult:
         (
             "cd /w && gh repo clone o/r",
             None,
-            ("https://github.com/o/r.git", "r"),
+            ["https://github.com/o/r.git", "r"],
             {"C": WORK},
         ),
         (
             "cd /w && gh repo clone https://github.com/o/r.git dest",
             None,
-            ("https://github.com/o/r.git", "dest"),
+            ["https://github.com/o/r.git", "dest"],
             {"C": WORK},
         ),
         (
             "cd /w && gh repo clone mine -- -q --branch dev",
             None,
-            ("https://github.com/alice/mine.git", "mine"),
+            ["https://github.com/alice/mine.git", "mine"],
             {"quiet": True, "branch": "dev", "C": WORK},
         ),
         (
             "cd /w && gh repo clone ghe.test/o/r",
             "https://ghe.test/api/v3",
-            ("https://ghe.test/o/r.git", "r"),
+            ["https://ghe.test/o/r.git", "r"],
             {"C": WORK},
         ),
     ],
@@ -72,4 +76,5 @@ async def test_clone_hands_git_clone_the_url_and_its_flags(
 ):
     result = await _run(line, base)
     assert (result.exit_code, result.stderr) == (0, None)
-    assert (clones[0].texts, clones[0].flags) == (texts, flags)
+    seen, ctx = clones[0]
+    assert (seen, ctx.flags) == (texts, flags)

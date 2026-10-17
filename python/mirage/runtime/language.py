@@ -68,7 +68,7 @@ class LanguageRuntime(Runtime):
         self, args: RunArgs, context: RuntimeContext | None
     ) -> RunResult:
         if args.cwd is None and context is not None:
-            args = replace(args, cwd=context.cwd)
+            args = replace(args, cwd=context.ctx.cwd)
         return await self.run(args, context)
 
     async def version(self, env: dict[str, str]) -> RunResult:

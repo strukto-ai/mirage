@@ -17,7 +17,7 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { encodeText } from '../../../shell/bytes.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import {
   extraOperandError,
@@ -613,11 +613,11 @@ function seq(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): CommandFnResult {
   if (texts.length === 0) throw missingOperandError(CommandName.SEQ, null)
   if (texts.length > 3) throw extraOperandError(CommandName.SEQ, texts[3] ?? '')
-  const fl = new FlagView(opts.flags, specOf('seq'))
+  const fl = new FlagView(ctx.flags, specOf('seq'))
   const typed = fl.asStr('format') ?? null
   const equalWidth = fl.asBool('equal_width')
   let spec = typed === null ? null : parseFormat(typed)

@@ -4,7 +4,7 @@ from mirage.commands.builtin.constants import GZIP_SUFFIX
 from mirage.commands.builtin.generic.decompress import decompress_inputs
 from mirage.commands.builtin.utils.links import link_resolver
 from mirage.commands.builtin.utils.operands import normalized_read
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.fs import eisdir
@@ -26,7 +26,7 @@ async def zcat(
 async def zcat_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     stat: StatFn,
     stream: PolymorphicReadFn,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -38,12 +38,12 @@ async def zcat_generic(
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
         texts (list[str]): Non-path words, unused by zcat.
-        opts (CommandOpts): Flags and stdin from the dispatcher.
+        ctx (Context): Flags and stdin from the dispatcher.
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
     """
-    fl = FlagView(opts.flags, spec=SPECS["zcat"])
+    fl = FlagView(ctx.flags, spec=SPECS["zcat"])
     suffix = fl.as_str("S")
     read_stream = normalized_read(stream)
 
@@ -56,12 +56,12 @@ async def zcat_generic(
     return await decompress_inputs(
         paths,
         read=read,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         to_stdout=True,
         force=fl.as_bool("f"),
         quiet=fl.as_bool("q"),
         suffix=GZIP_SUFFIX if suffix is None else suffix,
-        resolver=link_resolver(opts),
+        resolver=link_resolver(ctx),
     )
 
 

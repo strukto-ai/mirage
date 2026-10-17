@@ -6,7 +6,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -18,10 +18,10 @@ async def od(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(opts.flags, spec=SPECS["od"])
-    paths = await resolve_or_empty(ops, accessor, paths, opts.index)
+    fl = FlagView(ctx.flags, spec=SPECS["od"])
+    paths = await resolve_or_empty(ops, accessor, paths, ctx.index)
     formats = [
         "c" if name == "c" else str(value)
         for name, value in fl.occurrences("format", "c")
@@ -33,8 +33,8 @@ async def od(
     limit_value = fl.as_str("read_bytes")
     return await generic_od(
         paths,
-        read_stream=bound_op(ops.read_stream, accessor, opts.index),
-        stdin=opts.stdin,
+        read_stream=bound_op(ops.read_stream, accessor, ctx.index),
+        stdin=ctx.stdin,
         address_radix=fl.as_str("address_radix") or "o",
         skip=(parse_count(skip_value, "-j") if skip_value is not None else 0),
         limit=(

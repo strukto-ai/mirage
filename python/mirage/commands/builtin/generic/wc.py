@@ -11,7 +11,7 @@ from mirage.commands.builtin.utils.stream import (
     resolve_source,
     stdin_stream,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
@@ -490,7 +490,7 @@ async def format_multi(
 async def wc_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     stream: PolymorphicReadFn,
     line_count: Callable[[PathSpec], Awaitable[int | None]] | None = None,
     size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
@@ -507,7 +507,7 @@ async def wc_generic(
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
         texts (list[str]): Non-path words, unused by wc.
-        opts (CommandOpts): Flags and stdin from the dispatcher.
+        ctx (Context): Flags and stdin from the dispatcher.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
         line_count (Callable[[PathSpec], Awaitable[int | None]] | None):
@@ -517,14 +517,14 @@ async def wc_generic(
             a regular file's size, asked for ``-c`` alone.
     """
     try:
-        parsed = parse_flags(opts.flags)
+        parsed = parse_flags(ctx.flags)
     except UsageError as exc:
         return None, IOResult(
             exit_code=exc.exit_code, stderr=encode_text(str(exc) + "\n")
         )
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=encode_text(str(exc) + "\n"))
-    stream = stdin_stream(stream, opts.stdin)
+    stream = stdin_stream(stream, ctx.stdin)
     if paths:
         body, err, runs = await format_multi(
             paths,
@@ -541,7 +541,7 @@ async def wc_generic(
         io = operands_io(err)
         io.counted_runs = runs
         return body, io
-    source = resolve_source(opts.stdin)
+    source = resolve_source(ctx.stdin)
     counts = await wc(source, flags=parsed)
     return format_stdin(counts, parsed), IOResult()
 

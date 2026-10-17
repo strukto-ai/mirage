@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
 import { Argument, type FlagValue } from '../../commands/spec/types.ts'
-import { CLI, type CLIInvocation, type CLIVerbFn } from '../../commands/cli/types.ts'
+import { CLI, type CLIVerbFn } from '../../commands/cli/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Runtime } from '../../runtime/base.ts'
@@ -149,8 +149,8 @@ class NiceBox extends Runtime implements LineExecutor {
   }
 }
 
-function printToken(inv: CLIInvocation): [Uint8Array, IOResult] {
-  const token = inv.flags.token as string | undefined
+const printToken: CLIVerbFn = (_config, _paths, _texts, ctx) => {
+  const token = ctx.flags.token as string | undefined
   return [new TextEncoder().encode(`${String(token)}\n`), new IOResult()]
 }
 
@@ -1616,8 +1616,8 @@ describe('fillEnv through execute', () => {
 
   it('a group env option reaches the leaf', async () => {
     const seen: Record<string, FlagValue>[] = []
-    const probe: CLIVerbFn = (inv) => {
-      seen.push({ ...inv.flags })
+    const probe: CLIVerbFn = (_config, _paths, _texts, ctx) => {
+      seen.push({ ...ctx.flags })
       return null
     }
     const { calls, fetch } = countingSource({ CLI_ROOT: 'r0' })
@@ -1648,8 +1648,8 @@ describe('fillEnv through execute', () => {
 
   it('a shared env with an unsupplied reader still fetches', async () => {
     const seen: Record<string, FlagValue>[] = []
-    const probe: CLIVerbFn = (inv) => {
-      seen.push({ ...inv.flags })
+    const probe: CLIVerbFn = (_config, _paths, _texts, ctx) => {
+      seen.push({ ...ctx.flags })
       return null
     }
     const { calls, fetch } = countingSource({ CLI_SHARED: 's0' })
@@ -1670,8 +1670,8 @@ describe('fillEnv through execute', () => {
 
   it('a shared env with every reader supplied skips the fetch', async () => {
     const seen: Record<string, FlagValue>[] = []
-    const probe: CLIVerbFn = (inv) => {
-      seen.push({ ...inv.flags })
+    const probe: CLIVerbFn = (_config, _paths, _texts, ctx) => {
+      seen.push({ ...ctx.flags })
       return null
     }
     const { calls, fetch } = countingSource({ CLI_SHARED: 's0' })

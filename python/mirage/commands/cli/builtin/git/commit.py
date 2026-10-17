@@ -53,10 +53,11 @@ from mirage.commands.cli.builtin.git.util import (
     fatal,
     start_point,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 from mirage.view.types import SessionView
 
 # git tags the first commit on a branch so the reflog reads
@@ -89,7 +90,7 @@ def identity(fl: FlagView, session: SessionView | None = None) -> bytes:
     ``GIT_COMMITTER_*`` separately.
 
     Read through the session view rather than the frozen
-    ``inv.env`` snapshot, so a hidden name reads as unset exactly as it
+    ``ctx.env`` snapshot, so a hidden name reads as unset exactly as it
     does in the shell.
 
     Args:
@@ -157,7 +158,7 @@ def build_commit(
 
 
 async def commit(
-    inv: CLIInvocation[None],
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Record the index as a new commit on the current branch.
 
@@ -172,27 +173,28 @@ async def commit(
     unmerged index is refused with or without ``-a``.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model; it reads its repository
-            through ``inv.view.vfs``.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context; git reads its repository
+            through ``ctx.vfs``.
     """
-    view = inv.view or CLIView()
-    vfs = view.vfs
-    flags = inv.flags
+    vfs = ctx.vfs
+    flags = ctx.flags
     fl = FlagView(flags)
     try:
         if vfs is None:
             raise NoWorkspaceError()
-        check_switches(inv, inv.texts)
+        check_switches(ctx, texts)
         staging = fl.as_bool("all")
-        if inv.texts:
+        if texts:
             raise (AllWithPathsError if staging else PartialCommitError)(
-                inv.texts[0]
+                texts[0]
             )
         message = fl.as_str("message")
         if not message:
             raise MissingMessageError()
-        repo, location = await opened(fl, view, work_tree=True)
+        repo, location = await opened(ctx, fl, work_tree=True)
         # git takes the index's lock before it looks for anything to
         # commit, so a read-only repository refuses an empty commit too.
         try:
@@ -225,7 +227,7 @@ async def commit(
                 )
             )
         parents = [] if before is None else [repo.refs[HEAD_REF]]
-        who = identity(fl, view.session_view)
+        who = identity(fl, ctx.session)
         when = int(time.time())
         written, tree = await asyncio.to_thread(
             build_commit, repo, state, message, who, parents, when

@@ -3131,12 +3131,12 @@ async def test_xargs_overlapping_shell_sessions(procs, named, child_first):
     other_entered = asyncio.Event()
     other_held = asyncio.Event()
 
-    async def hold_child(_inv):
+    async def hold_child(config, paths, texts, ctx):
         child_entered.set()
         await child_held.wait()
         return None, IOResult()
 
-    async def hold_other(_inv):
+    async def hold_other(config, paths, texts, ctx):
         other_entered.set()
         await other_held.wait()
         return None, IOResult()
@@ -3200,7 +3200,7 @@ async def test_xargs_keeps_foreground_call_queued_until_cancelled():
     entered = asyncio.Event()
     held = asyncio.Event()
 
-    async def hold(_inv):
+    async def hold(config, paths, texts, ctx):
         entered.set()
         await held.wait()
         return None, IOResult()

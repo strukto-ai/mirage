@@ -108,8 +108,8 @@ describe('execution bindings', () => {
     try {
       expect(runtime.prefixes).toEqual(['/data/', '/dev/'])
       expect(runtime.links).toEqual([])
-      expect(required(runtime.context).cwd.virtual).toBe('/')
-      expect(required(runtime.context).sessionView).not.toBeNull()
+      expect(required(runtime.context).ctx.cwd.virtual).toBe('/')
+      expect(required(runtime.context).ctx.session).not.toBeNull()
       expect(dec.decode((await runtime.read) as Uint8Array)).toBe('ready')
     } finally {
       await ws.close()
@@ -168,28 +168,26 @@ describe('execution bindings', () => {
       ws.createSession('agent', { profile: { paths: { hide: ['/secret'] } } })
       const context = ws.runtimeContext('agent'),
         other = ws.runtimeContext()
-      expect(required(mountView(context.vfs ?? undefined)).visibleDescendants('/')).not.toContain(
-        '/secret',
-      )
+      expect(required(mountView(context.ctx.vfs)).visibleDescendants('/')).not.toContain('/secret')
       await expect(context.dispatch('read', '/secret/a')).rejects.toThrow()
       expect(dec.decode((await other.dispatch('read', '/secret/a')) as Uint8Array)).toBe(
         'private\n',
       )
-      await required(context.sessionView).set('PUBLIC', 'agent')
-      expect(required(context.sessionView).get('PUBLIC')).toBe('agent')
-      expect(required(other.sessionView).get('PUBLIC')).toBeNull()
-      expect(context.env.PUBLIC).toBeUndefined()
-      await expect(required(context.sessionView).set('SECRET', 'no')).rejects.toMatchObject({
+      await required(context.ctx.session).set('PUBLIC', 'agent')
+      expect(required(context.ctx.session).get('PUBLIC')).toBe('agent')
+      expect(required(other.ctx.session).get('PUBLIC')).toBeNull()
+      expect(context.ctx.env?.PUBLIC).toBeUndefined()
+      await expect(required(context.ctx.session).set('SECRET', 'no')).rejects.toMatchObject({
         refusal: { reason: 'protected' },
       })
       const reads = await Promise.all([
         context.scope.run(async () => {
           await Promise.resolve()
-          return required(context.sessionView).get('PUBLIC')
+          return required(context.ctx.session).get('PUBLIC')
         }),
         other.scope.run(async () => {
           await Promise.resolve()
-          return required(other.sessionView).get('PUBLIC')
+          return required(other.ctx.session).get('PUBLIC')
         }),
       ])
       expect(reads).toEqual(['agent', null])
@@ -204,7 +202,7 @@ describe('execution bindings', () => {
       await ws.shell('echo shared > /data/a; chmod 600 /data/a')
       const context = ws.runtimeContext()
       await ws.shell('ln -s /data/a /data/link')
-      expect(required(linkView(context.vfs ?? undefined)).resolve('/data/link')).toBe('/data/a')
+      expect(required(linkView(context.ctx.vfs)).resolve('/data/link')).toBe('/data/a')
       ws.addMount('/data/nested', new RAMVFS(), MountMode.EXEC)
       expect(context.resolver.ownerOf('/data/nested/a')).toBe('/data/nested/')
       const vfs = new RuntimeFiles(context.dispatch, context.resolver)
@@ -310,12 +308,12 @@ it('command execution supplies its active workspace context', async () => {
     const result = await ws.shell('python3 -c hello', { sessionId: 'agent' })
     expect(dec.decode(result.stdout)).toBe('hello')
     const captured = required(runtime.contexts.at(-1))
-    expect(captured.cwd.virtual).toBe('/data')
-    expect(captured.env.PUBLIC).toBe('agent')
-    expect(required(captured.sessionView).get('PUBLIC')).toBe('agent')
+    expect(captured.ctx.cwd.virtual).toBe('/data')
+    expect(captured.ctx.env?.PUBLIC).toBe('agent')
+    expect(required(captured.ctx.session).get('PUBLIC')).toBe('agent')
     await ws.shell('python3 -c other')
-    expect(required(runtime.contexts.at(-1)).env.PUBLIC).toBeUndefined()
-    expect(required(captured.sessionView).get('PUBLIC')).toBe('agent')
+    expect(required(runtime.contexts.at(-1)).ctx.env?.PUBLIC).toBeUndefined()
+    expect(required(captured.ctx.session).get('PUBLIC')).toBe('agent')
   } finally {
     await ws.close()
   }
@@ -326,8 +324,8 @@ it('does not share process views by profile or follow reused session IDs', async
   try {
     ws.createSession('one', { profile: 'agent' })
     ws.createSession('two', { profile: 'agent' })
-    const one = required(ws.runtimeContext('one').processes)
-    const two = required(ws.runtimeContext('two').processes)
+    const one = required(ws.runtimeContext('one').ctx.processes)
+    const two = required(ws.runtimeContext('two').ctx.processes)
     let release: () => void = () => undefined
     const gate = new Promise<void>((resolve) => {
       release = resolve
@@ -347,7 +345,7 @@ it('does not share process views by profile or follow reused session IDs', async
     await ws.closeSession('one')
     ws.createSession('one', { profile: 'agent' })
     expect(one.list()).toEqual([])
-    expect(required(ws.runtimeContext('one').processes).list()).toEqual([])
+    expect(required(ws.runtimeContext('one').ctx.processes).list()).toEqual([])
     release()
     await process.join()
   } finally {

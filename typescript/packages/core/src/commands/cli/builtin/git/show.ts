@@ -20,9 +20,9 @@ import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
 import { concat } from '../../../../utils/bytes.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { GitError, UsageError } from './errors.ts'
 import {
   FULL_SHA,
@@ -222,19 +222,22 @@ async function commitEntry(
  * git reads them; they limit the diff to the paths they name, and a commit
  * that changes nothing they name prints nothing at all.
  */
-export async function show(inv: CLIInvocation): Promise<CommandFnResult> {
-  const view = inv.view ?? {}
-  const texts = [...inv.texts]
-  const fl = new FlagView(inv.flags)
+export async function show(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    checkOperands(inv, texts)
-    const [revisions, paths] = splitMarked(texts, inv.argv)
-    const repo = await opened(fl, view)
+    checkOperands(ctx, texts)
+    const [revisions, paths] = splitMarked(texts, ctx.argv ?? [])
+    const repo = await opened(ctx, fl)
     const base = parseShowFlags(
       fl,
       await renamesEnabled(repo),
       await configBool(repo, 'core.quotepath', true),
-      inv.env,
+      ctx.env,
     )
     const mailmap = await loadMailmap(repo.vfs, repo.location)
     const mapped = useMailmap(fl, await configBool(repo, 'log.mailmap', true))
@@ -298,11 +301,16 @@ export async function show(inv: CLIInvocation): Promise<CommandFnResult> {
  * `--` are pathspecs, read once the commit has resolved; they limit every block
  * to the paths they name.
  */
-export async function diffTree(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function diffTree(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    if (optionOperand(inv, inv.texts) !== null) throw new UsageError('', verbUsage(inv))
-    const repo = await opened(fl, inv.view ?? {})
+    if (optionOperand(ctx, texts) !== null) throw new UsageError('', verbUsage(ctx))
+    const repo = await opened(ctx, fl)
     const parsed = parseDiffFlags(
       fl,
       false,
@@ -311,7 +319,7 @@ export async function diffTree(inv: CLIInvocation): Promise<CommandFnResult> {
       true,
       await configBool(repo, 'core.quotepath', true),
     )
-    const [revisions, paths] = splitMarked(inv.texts, inv.argv)
+    const [revisions, paths] = splitMarked(texts, ctx.argv ?? [])
     const commit = await commitFacts(repo, await resolveCommit(repo, revisionArg(revisions)))
     const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, paths)
     const bodies = await commitOutput(repo, commit, { ...parsed, pathspecs }, fl.asBool('r'), false)

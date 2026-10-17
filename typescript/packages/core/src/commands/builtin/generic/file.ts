@@ -24,7 +24,7 @@ import {
   type PathSpec,
   type ReadRangeFn,
 } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { detectFileType, formatFileResult } from '../file_sniff.ts'
 import { FILE_HEADER_BYTES, MIME_SYMLINK } from '../constants.ts'
 import { readPrefix } from '../../../io/cooperative.ts'
@@ -99,7 +99,7 @@ async function header(
 
 export async function fileGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stat: (p: PathSpec) => Promise<FileStat>,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   readRange: ReadRangeFn | null = null,
@@ -107,13 +107,13 @@ export async function fileGeneric(
   if (paths.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('file: missing operand\n') })]
   }
-  const { brief, mime } = parseFlags(opts.flags)
+  const { brief, mime } = parseFlags(ctx.flags)
   // GNU always names the operand exactly as typed, never a resolved or
   // absolutised form, so every row is labelled with rawPath.
   const lines: string[] = []
   // Without -L the operand arrives unfollowed, so a link is described
   // as a link rather than sniffed as its target.
-  const links = linksOf(opts) ?? null
+  const links = linksOf(ctx) ?? null
   for (const p of paths) {
     if (links !== null) {
       const described = await linkDescription(p, links)
@@ -122,7 +122,7 @@ export async function fileGeneric(
         continue
       }
     }
-    const s = await operandStat(p, stat, opts.statPath, mountsOf(opts), linksOf(opts))
+    const s = await operandStat(p, stat, ctx.statPath, mountsOf(ctx), linksOf(ctx))
     if (s.type === FileType.DIRECTORY) {
       lines.push(formatFileResult(p.rawPath, FileType.DIRECTORY, brief, mime))
       continue
@@ -134,7 +134,7 @@ export async function fileGeneric(
     }
     let head: Uint8Array
     try {
-      head = await header(stream, readRange, p, opts.signal)
+      head = await header(stream, readRange, p, ctx.signal)
     } catch {
       head = new Uint8Array(0)
     }

@@ -16,12 +16,12 @@ import { fileStreamOp, statOp } from '../../generic/crossmount/utils.ts'
 import { unzipGeneric } from '../../generic/unzip.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const unzip: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
-  const idx = opts.index ?? undefined
+const unzip: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const write = requireOp(ops.write, 'write')
   const mkdir = requireOp(ops.mkdir, 'mkdir')
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  const dispatch = opts.dispatch
+  const dispatch = ctx.dispatch
   if (dispatch !== undefined) {
     // Extraction writes wherever cwd or -d says, which need not be
     // this mount, so the functions are dispatch-relayed and each path
@@ -29,7 +29,7 @@ const unzip: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
     return unzipGeneric(
       resolved,
       texts,
-      opts,
+      ctx,
       fileStreamOp(dispatch),
       async (p, data) => {
         await dispatch('write', p, [data])
@@ -44,7 +44,7 @@ const unzip: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
   return unzipGeneric(
     resolved,
     texts,
-    opts,
+    ctx,
     (p) => ops.readStream(accessor, p, idx),
     (p, d) => write(accessor, p, d),
     (p, parents) => mkdir(accessor, p, parents),

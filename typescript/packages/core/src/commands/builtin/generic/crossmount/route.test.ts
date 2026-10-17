@@ -191,13 +191,13 @@ describe('handleCrossMount — stream/fanout via runSingle', () => {
       perOperand: Record<string, [string, number, string?]>,
       calls: Record<string, unknown>[],
     ): RunSingle =>
-    (cmdName, paths, texts, flagKwargs, opts) => {
+    (cmdName, paths, texts, flagKwargs, ctx) => {
       calls.push({
         cmd: cmdName,
         paths: paths.map((p) => p.virtual),
         texts: [...texts],
         flags: { ...flagKwargs },
-        resolveHint: opts?.resolveHint?.virtual ?? null,
+        resolveHint: ctx?.resolveHint?.virtual ?? null,
       })
       const key = paths[0]?.virtual ?? ''
       const entry = perOperand[key] ?? ['', 0]

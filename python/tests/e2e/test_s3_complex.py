@@ -23,7 +23,7 @@ import pytest
 from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.builtin.generic_bind.adapter import command_io
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.types import MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.ram import RAMVFS
@@ -331,7 +331,7 @@ async def test_cat_multifile_prints_each_file_in_order():
             backend.accessor,
             [a, b],
             [],
-            CommandOpts(io=command_io(backend), index=NULL_INDEX),
+            Context(io=command_io(backend), index=NULL_INDEX),
         )
 
         combined = b"".join([chunk async for chunk in source])
@@ -350,6 +350,6 @@ async def test_cat_single_file_streams():
             backend.accessor,
             [a],
             [],
-            CommandOpts(io=command_io(backend), index=NULL_INDEX),
+            Context(io=command_io(backend), index=NULL_INDEX),
         )
         assert not isinstance(source, bytes)

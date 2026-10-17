@@ -19,13 +19,12 @@ import type { LinearTransport } from '../../../../core/linear/client.ts'
 import { cliSpecFor } from '../../specs.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { LINEAR } from './index.ts'
 import { addLabel } from './issue/add_label.ts'
 import { create } from './issue/create.ts'
 import { setProject } from './issue/set_project.ts'
 import * as reads from './reads.ts'
-import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
+import { context } from '../../../../workspace/fixtures/context.ts'
 
 const DEC = new TextDecoder()
 
@@ -53,10 +52,6 @@ vi.mock('./util.ts', async (importOriginal) => {
 function unwrap(result: CommandFnResult): [ByteSource | null, IOResult] {
   if (result === null) throw new Error('expected a result tuple')
   return result
-}
-
-function makeInv(config: unknown, flags: CLIInvocation['flags']): CLIInvocation {
-  return cliInvocation({ config, flags })
 }
 
 function leaf(...path: string[]) {
@@ -123,7 +118,9 @@ describe('linear verbs', () => {
     RESPONDER = () => ({
       teams: { nodes: [TEAM, { id: 'team-2', key: 'OPS' }], pageInfo: NO_MORE },
     })
-    const [out] = unwrap(await reads.teamList(makeInv({ apiKey: 'k', teamIds: ['team-2'] }, {})))
+    const [out] = unwrap(
+      await reads.teamList({ apiKey: 'k', teamIds: ['team-2'] }, [], [], context()),
+    )
     const rows = JSON.parse(DEC.decode(out as Uint8Array)) as { team_id: string }[]
     expect(rows.map((r) => r.team_id)).toEqual(['team-2'])
   })
@@ -135,11 +132,17 @@ describe('linear verbs', () => {
       if (query.includes('teams')) return { teams: { nodes: [TEAM], pageInfo: NO_MORE } }
       return { issue: { id: 'i-1', identifier: 'ENG-9', title: 'Title' } }
     }
-    const inv: CLIInvocation = {
-      ...makeInv({ apiKey: 'k' }, { team: 'ENG', title: 'Title' }),
-      stdin: new TextEncoder().encode('body from stdin'),
-    }
-    const [out] = unwrap(await create(inv))
+    const [out] = unwrap(
+      await create(
+        { apiKey: 'k' },
+        [],
+        [],
+        context({
+          flags: { team: 'ENG', title: 'Title' },
+          stdin: new TextEncoder().encode('body from stdin'),
+        }),
+      ),
+    )
     const created = GRAPHQL.find((c) => c.query.includes('issueCreate'))
     expect(created?.variables).toEqual({
       input: { title: 'Title', teamId: 'team-1', description: 'body from stdin' },
@@ -166,7 +169,7 @@ describe('linear verbs', () => {
         },
       }
     }
-    await addLabel({ ...makeInv({ apiKey: 'k' }, { label_name: 'bug' }), texts: ['ENG-42'] })
+    await addLabel({ apiKey: 'k' }, [], ['ENG-42'], context({ flags: { label_name: 'bug' } }))
     const update = GRAPHQL.find((c) => c.query.includes('issueUpdate'))
     expect(update?.variables).toEqual({
       id: 'i-1',
@@ -190,7 +193,12 @@ describe('linear verbs', () => {
       }
       return { issue: { id: 'i-1', identifier: 'ENG-42', team: { id: 'team-1' } } }
     }
-    await setProject({ ...makeInv({ apiKey: 'k' }, { project_name: 'Search' }), texts: ['ENG-42'] })
+    await setProject(
+      { apiKey: 'k' },
+      [],
+      ['ENG-42'],
+      context({ flags: { project_name: 'Search' } }),
+    )
     const update = GRAPHQL.find((c) => c.query.includes('issueUpdate'))
     expect(update?.variables).toEqual({
       id: 'i-1',
@@ -201,11 +209,11 @@ describe('linear verbs', () => {
   it('search takes the flag or the operand', async () => {
     GRAPHQL.length = 0
     RESPONDER = () => ({ searchIssues: { nodes: [{ id: 'i-1', identifier: 'ENG-1' }] } })
-    await reads.search({ ...makeInv({ apiKey: 'k' }, {}), texts: ['login bug'] })
-    await reads.search(makeInv({ apiKey: 'k' }, { query: 'crash' }))
+    await reads.search({ apiKey: 'k' }, [], ['login bug'], context())
+    await reads.search({ apiKey: 'k' }, [], [], context({ flags: { query: 'crash' } }))
     expect(GRAPHQL[0]?.variables).toMatchObject({ term: 'login bug' })
     expect(GRAPHQL[1]?.variables).toMatchObject({ term: 'crash' })
-    await expect(reads.search(makeInv({ apiKey: 'k' }, {}))).rejects.toThrow(
+    await expect(reads.search({ apiKey: 'k' }, [], [], context())).rejects.toThrow(
       'a search query is required',
     )
   })

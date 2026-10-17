@@ -20,7 +20,7 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.config import ExecContext, command
+from mirage.commands.config import Context, command
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.types import Argument
 from mirage.errors.types import OperationNotSupportedError
@@ -270,7 +270,7 @@ async def test_a_directory_does_not_route_to_a_filetype_handler():
         return b"rendered\n", IOResult()
 
     mount.register_commands([plain, typed])
-    context = ExecContext(stat_path=_stat_tally)
+    context = Context(stat_path=_stat_tally)
     await mount.run_command(
         "cat", [PathSpec.from_str_path("/dir.tally")], [], {}, context
     )
@@ -300,7 +300,7 @@ async def test_a_write_with_no_dispatcher_is_refused():
     mount = reg.mount_for("/rw/f")
     scope = PathSpec.from_str_path("/rw/f")
     stdout, io = await mount.run_command(
-        "tee", [scope], [], {}, ExecContext(stdin=b"x")
+        "tee", [scope], [], {}, Context(stdin=b"x")
     )
     await materialize(stdout)
     assert io.exit_code == 1

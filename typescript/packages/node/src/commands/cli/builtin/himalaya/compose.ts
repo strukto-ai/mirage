@@ -12,12 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
-import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
+import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
+import type { PathSpec } from '@struktoai/mirage-core/types'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import type { EmailConfig } from '../../../../core/email/config.ts'
 import { route } from './util.ts'
 
-export async function compose(inv: CLIInvocation): Promise<CommandFnResult> {
-  return route(inv.config as EmailConfig, new FlagView(inv.flags), inv.stdin, null, inv.view)
+export async function compose(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  return route(config as EmailConfig, new FlagView(ctx.flags), ctx.stdin, null, ctx.vfs)
 }

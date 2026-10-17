@@ -14,7 +14,7 @@
 
 import asyncio
 
-from mirage.commands.config import Command, CommandOpts, command
+from mirage.commands.config import Command, Context, command
 from mirage.commands.spec import SPECS, Argument, CommandSpec
 from mirage.commands.spec.compile import compile_spec
 from mirage.version import __version__
@@ -22,11 +22,11 @@ from mirage.version import __version__
 _HANDLER_CALLS: list[str] = []
 
 
-async def _noop_handler(backend, paths, texts, opts):
+async def _noop_handler(backend, paths, texts, ctx):
     return None, None
 
 
-async def _recording_handler(backend, paths, texts, opts):
+async def _recording_handler(backend, paths, texts, ctx):
     _HANDLER_CALLS.append("called")
     return None, None
 
@@ -165,7 +165,7 @@ class TestVersionSupport:
         )
         stdout, result = asyncio.run(
             registered._registered_commands[0].fn(
-                None, [], [], CommandOpts(flags={"version": True})
+                None, [], [], Context(flags={"version": True})
             )
         )
         assert _HANDLER_CALLS == []
@@ -182,7 +182,7 @@ class TestVersionSupport:
         rc = registered._registered_commands[0]
         assert rc.spec.epilog == "Services:\n  drive"
         stdout, result = asyncio.run(
-            rc.fn(None, [], [], CommandOpts(flags={"help": True}))
+            rc.fn(None, [], [], Context(flags={"help": True}))
         )
         assert b"Services:\n  drive\n" in asyncio.run(_collect(stdout))
         assert result.exit_code == 0
@@ -198,7 +198,7 @@ class TestVersionSupport:
         )(_recording_handler)
         asyncio.run(
             registered._registered_commands[0].fn(
-                None, [], [], CommandOpts(flags={"version": True})
+                None, [], [], Context(flags={"version": True})
             )
         )
         assert _HANDLER_CALLS == ["called"]
@@ -211,7 +211,7 @@ class TestVersionSupport:
         )
         asyncio.run(
             registered._registered_commands[0].fn(
-                None, [], [], CommandOpts(flags={"help": True})
+                None, [], [], Context(flags={"help": True})
             )
         )
         assert _HANDLER_CALLS == ["called"]
@@ -223,7 +223,7 @@ class TestVersionSupport:
         )
         asyncio.run(
             registered._registered_commands[0].fn(
-                None, [], [], CommandOpts(flags={"help": True})
+                None, [], [], Context(flags={"help": True})
             )
         )
         assert _HANDLER_CALLS == []

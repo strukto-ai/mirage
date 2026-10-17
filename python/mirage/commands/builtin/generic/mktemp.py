@@ -3,7 +3,7 @@ import string
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
@@ -253,12 +253,12 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> MktempFlags:
 async def mktemp_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     mkdir_fn: Callable[..., Awaitable[None]],
     write_bytes_fn: Callable[..., Awaitable[None]],
     exists_fn: Callable[[PathSpec], Awaitable[bool]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     return await mktemp(
         *texts,
         mkdir_fn=mkdir_fn,
@@ -270,7 +270,7 @@ async def mktemp_generic(
         dry_run=parsed.dry_run,
         suffix=parsed.suffix,
         quiet=parsed.quiet,
-        env_tmpdir=(opts.env or {}).get("TMPDIR", ""),
-        cwd=opts.cwd.virtual,
+        env_tmpdir=(ctx.env or {}).get("TMPDIR", ""),
+        cwd=ctx.cwd.virtual,
         exists_fn=exists_fn,
     )

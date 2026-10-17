@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { readStdinAsync } from '../../../builtin/utils/stream.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { dateClock } from './dates.ts'
 import { FormatUsageError, GitError } from './errors.ts'
 import { filterWords, refFilter, withoutFilterValues } from './ref_filter.ts'
@@ -50,13 +50,18 @@ function quoteStyle(fl: FlagView): QuoteStyle {
  * the `--sort` keys (refname when none), and each is printed through
  * `--format`.
  */
-export async function forEachRef(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const words = filterWords(inv)
-  const texts = withoutFilterValues(inv.texts, words)
+export async function forEachRef(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const words = filterWords(ctx)
+  const operands = withoutFilterValues(texts, words)
   try {
-    checkSwitches(inv, texts)
-    const repo = await opened(fl, inv.view ?? {})
+    checkSwitches(ctx, operands)
+    const repo = await opened(ctx, fl)
     const filter = await refFilter(repo, words)
     const count = fl.asInt('count') ?? 0
     if (count < 0) throw new FormatUsageError(`invalid --count argument: \`${String(count)}'`)
@@ -64,10 +69,10 @@ export async function forEachRef(inv: CLIInvocation): Promise<CommandFnResult> {
     const fmt = parseFormat(template ?? DEFAULT_FORMAT, quoteStyle(fl))
     const keys = sortKeys(fl, ['refname'])
     const icase = fl.asBool('ignore_case')
-    let patterns: readonly string[] = texts
+    let patterns: readonly string[] = operands
     if (fl.asBool('stdin')) {
-      if (texts.length) throw new GitError('unknown arguments supplied with --stdin')
-      const data = await readStdinAsync(inv.stdin ?? null)
+      if (operands.length) throw new GitError('unknown arguments supplied with --stdin')
+      const data = await readStdinAsync(ctx.stdin)
       const lines = new TextDecoder().decode(data ?? new Uint8Array()).split('\n')
       if (lines.at(-1) === '') lines.pop()
       patterns = lines.map((line) => line.replace(/\r$/, ''))
@@ -78,12 +83,12 @@ export async function forEachRef(inv: CLIInvocation): Promise<CommandFnResult> {
       (name.startsWith('refs/') || (roots && isRootRef(name))) &&
       matchAsPath(name, patterns, icase) &&
       !(excludes.length && matchAsPath(name, excludes, icase))
-    const [listed, ctx, errors] = await refListing(
+    const [listed, refCtx, errors] = await refListing(
       repo,
       usedFields(fmt, keys ?? []),
       wanted,
       filter,
-      dateClock(inv.env),
+      dateClock(ctx.env),
       roots,
     )
     const items = roots
@@ -91,7 +96,7 @@ export async function forEachRef(inv: CLIInvocation): Promise<CommandFnResult> {
           item.kind === RefKind.DETACHED ? { ...item, kind: RefKind.ROOT } : item,
         )
       : listed
-    const [out, stopped] = formatRefs(fmt, items, ctx, keys, {
+    const [out, stopped] = formatRefs(fmt, items, refCtx, keys, {
       count,
       omitEmpty: fl.asBool('omit_empty'),
       icase,

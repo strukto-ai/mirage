@@ -17,25 +17,24 @@ from mirage.commands.cli.builtin.linear.util import (
     resolve_issue,
     text_or_stdin,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.linear.client import comment_create
 from mirage.core.linear.config import LinearConfig
 from mirage.core.linear.normalize import normalize_comment, to_json_bytes
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 
 async def add(
-    inv: CLIInvocation[LinearConfig],
+    config: LinearConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    issue_id = await resolve_issue(
-        inv.config, first_text(inv.texts, "issue key")
-    )
+    fl = FlagView(ctx.flags)
+    issue_id = await resolve_issue(config, first_text(texts, "issue key"))
     body = await text_or_stdin(
-        fl.as_str("body"), inv.stdin, "comment body is required"
+        fl.as_str("body"), ctx.stdin, "comment body is required"
     )
-    comment = await comment_create(inv.config, issue_id=issue_id, body=body)
+    comment = await comment_create(config, issue_id=issue_id, body=body)
     payload = normalize_comment(comment, issue_id=issue_id, issue_key=None)
     return yield_bytes(to_json_bytes(payload)), IOResult()

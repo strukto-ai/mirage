@@ -1,7 +1,7 @@
 import pytest
 
 from mirage.commands.builtin.generic.sha256sum import sha256sum_generic
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 
 
@@ -49,7 +49,7 @@ async def test_sha256sum_check_failing():
     output, io = await sha256sum_generic(
         [_spec("/manifest.sha256")],
         [],
-        CommandOpts(flags={"check": True}),
+        Context(flags={"check": True}),
         stat,
         read_stream,
     )

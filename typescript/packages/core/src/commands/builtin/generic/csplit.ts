@@ -22,7 +22,7 @@ import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { ignoreBOM: true })
@@ -140,7 +140,7 @@ function formatSuffix(index: number, digits: number, format: string | null): str
 export async function csplitGeneric(
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: ByteSource) => Promise<void>,
   unlink: (p: PathSpec) => Promise<void>,
@@ -149,13 +149,13 @@ export async function csplitGeneric(
   if (texts.length === 0) {
     throw missingOperandError(CommandName.CSPLIT, paths[paths.length - 1]?.rawPath ?? null)
   }
-  const fl = new FlagView(opts.flags, specOf('csplit'))
+  const fl = new FlagView(ctx.flags, specOf('csplit'))
   // An output is the -f prefix, or `xx` in the working directory, plus its
   // suffix, wherever the input lives: GNU writes `xx00` to the cwd, names it
   // as it formed it (`csplit: xx00`), and stops at the first one it cannot
   // create, -k or not. Mirrors csplit.py.
   const typedPrefix = fl.asPath('prefix')?.rawPath ?? 'xx'
-  const mountPrefix = opts.mountPrefix ?? ''
+  const mountPrefix = ctx.mountPrefix ?? ''
   const digitsValue = fl.asStr('digits')
   const suffixValue = fl.asStr('suffix_format')
   const digits = typeof digitsValue === 'string' ? Number.parseInt(digitsValue, 10) : 2
@@ -166,7 +166,7 @@ export async function csplitGeneric(
   const elideEmpty = fl.asBool('elide_empty_files')
   const first = paths[0]
   const source =
-    first !== undefined && first.rawPath !== '-' ? stream(first) : (opts.stdin ?? new Uint8Array())
+    first !== undefined && first.rawPath !== '-' ? stream(first) : (ctx.stdin ?? new Uint8Array())
   const records = await delimited([source], 0x0a)
   try {
     const checked = checkLineNumbers(texts)
@@ -185,7 +185,7 @@ export async function csplitGeneric(
       const end = last < records.count ? (await records.window(last))[0] : records.data.size
       const size = end - start
       const data = records.data.stream(start, size)
-      const scope = PathSpec.fromStrPath(name, undefined, opts.cwd)
+      const scope = PathSpec.fromStrPath(name, undefined, ctx.cwd)
       const spec = new PathSpec({
         virtual: scope.virtual,
         directory: scope.directory,

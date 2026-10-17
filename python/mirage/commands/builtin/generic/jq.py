@@ -14,7 +14,7 @@ from mirage.commands.builtin.generic.program import (
     read_program_file,
 )
 from mirage.commands.builtin.utils.stream import is_stdin, stdin_stream
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.constants import OPERAND, REFUSED
@@ -662,11 +662,11 @@ class MainLoop:
 async def jq_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],
 ) -> tuple[ByteSource | None, IOResult]:
-    """Full-command jq entry; mirrors jqGeneric's (paths, texts, opts).
+    """Full-command jq entry; mirrors jqGeneric's (paths, texts, ctx).
 
     The dispatcher-facing seam, so the builder stays wiring. It hands the
     flag bag on whole: the bag records the order the flags were typed in,
@@ -675,11 +675,11 @@ async def jq_generic(
     return await _jq(
         paths,
         texts,
-        opts.flags,
+        ctx.flags,
         read_bytes,
         read_stream,
-        opts.stdin,
-        opts.dispatch,
+        ctx.stdin,
+        ctx.dispatch,
     )
 
 

@@ -4,7 +4,7 @@ from pydantic import SecretStr
 from mirage.commands.builtin.backends import commands_for
 from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.builtin.generic_bind.adapter import command_io
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.types import PathSpec
 from mirage.vfs.mem0 import Mem0Config
 from mirage.vfs.mem0.mem0 import Mem0VFS
@@ -70,7 +70,7 @@ async def test_grep_bare_directory_is_a_directory():
         res.accessor,
         [p],
         ["bananas"],
-        CommandOpts(io=command_io(res), index=ops(res).index),
+        Context(io=command_io(res), index=ops(res).index),
     )
     assert await _bytes(source) == b""
     assert io.exit_code == 2

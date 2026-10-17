@@ -352,15 +352,15 @@ describe('session-state writes go through the view', () => {
   })
 
   it('a command can opt into the session view', async () => {
-    // The LinkView pattern for the session plane: reading `sessionView`
-    // off the opts is the whole opt-in, and reads answer through it.
+    // The LinkView pattern for the session plane: reading `session`
+    // off the context is the whole opt-in, and reads answer through it.
     const ws = await makeWs()
     const rc = new Command({
       name: 'envread',
       spec: CMD_SPEC,
       vfs: VFSName.RAM,
       fn: (_accessor, _paths, _texts, opts) => {
-        const value = opts.sessionView?.get('MARKER') ?? 'none'
+        const value = opts.session?.get('MARKER') ?? 'none'
         return [ENC.encode(value), new IOResult()]
       },
     })

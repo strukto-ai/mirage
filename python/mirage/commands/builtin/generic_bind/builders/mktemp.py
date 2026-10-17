@@ -22,7 +22,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     require_op,
 )
 from mirage.commands.builtin.utils.copy import path_exists
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -33,18 +33,18 @@ async def mktemp(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     # The name a pathless mktemp creates is under $TMPDIR or /tmp, which
     # the working directory's mount rarely owns, so the create goes
     # through the dispatcher to whichever mount does. Only a generic run
     # outside a workspace, with no dispatcher and no other mount, writes
     # through this mount's own ops.
-    dispatch = opts.dispatch
+    dispatch = ctx.dispatch
 
     def local(path: PathSpec) -> PathSpec:
         return PathSpec.from_str_path(
-            path.virtual, mount_key(path.virtual, opts.mount_prefix or "")
+            path.virtual, mount_key(path.virtual, ctx.mount_prefix or "")
         )
 
     async def mkdir(path: PathSpec) -> None:
@@ -60,11 +60,11 @@ async def mktemp(
             await require_op(ops, Operation.WRITE)(accessor, local(path), data)
 
     async def exists(path: PathSpec) -> bool:
-        if opts.stat_path is not None:
-            return await opts.stat_path(path) is not None
+        if ctx.stat_path is not None:
+            return await ctx.stat_path(path) is not None
         return await path_exists(partial(ops.stat, accessor), local(path))
 
-    return await mktemp_generic(paths, list(texts), opts, mkdir, write, exists)
+    return await mktemp_generic(paths, list(texts), ctx, mkdir, write, exists)
 
 
 BUILDER = GenericCommand("mktemp", mktemp, write=True)

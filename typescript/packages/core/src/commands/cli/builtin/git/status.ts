@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { branchUpstream } from './branch.ts'
 import { collect } from './changes.ts'
 import { GitError, NoWorkspaceError } from './errors.ts'
@@ -113,16 +113,20 @@ export async function renderReport(
  * leave behind. Everything the report prints is one of those two answers, or a
  * path neither side knows about.
  */
-export async function status(inv: CLIInvocation): Promise<CommandFnResult> {
-  const view = inv.view ?? {}
-  const fl = new FlagView(inv.flags)
+export async function status(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    const vfs = view.vfs
+    const vfs = ctx.vfs
     if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
     const parsed = parseFlags(fl)
-    const repo = await opened(fl, view, true)
+    const repo = await opened(ctx, fl, true)
     const head = await readHead(vfs, repo.location.gitdir)
     const [rows, state, noCommits] = await collect(repo, vfs, parsed.untracked, parsed.ignored)
     const fully = await configBool(repo, 'core.quotepath', true)

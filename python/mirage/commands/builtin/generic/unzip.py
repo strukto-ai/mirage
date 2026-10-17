@@ -20,7 +20,7 @@ from mirage.commands.builtin.generic.archive.zipinfo import (
 )
 from mirage.commands.builtin.utils.copy import is_directory, path_exists
 from mirage.commands.builtin.utils.operands import normalized_read
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.constants import OPERAND
@@ -1086,15 +1086,15 @@ def _patterns(
 async def unzip_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     read_bytes: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
     mkdir_fn: Callable[..., Awaitable[None]],
     stat: StatFn | None = None,
     relay: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(opts.flags)
-    members, excludes = _patterns(opts.flags, texts, parsed.excludes)
+    parsed = parse_flags(ctx.flags)
+    members, excludes = _patterns(ctx.flags, texts, parsed.excludes)
     return await unzip(
         paths,
         read_bytes=read_bytes,
@@ -1116,8 +1116,8 @@ async def unzip_generic(
         s=parsed.short,
         m=parsed.medium,
         h=parsed.header,
-        cwd=opts.cwd,
+        cwd=ctx.cwd,
         relay=relay,
         n=parsed.never_overwrite,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
     )

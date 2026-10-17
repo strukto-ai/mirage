@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLIView } from '@struktoai/mirage-core/commands/cli/types'
 import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
 import type { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import { IOResult, type ByteSource } from '@struktoai/mirage-core/io/types'
@@ -25,6 +24,7 @@ import { build, readBody, splitAddresses, type Attachment, type Source } from '.
 import { deliver, saveSentCopy } from './deliver.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { posixPhrase } from '@struktoai/mirage-core/errors/posix'
+import type { Files } from '@struktoai/mirage-core/workspace/files'
 
 const ENC = new TextEncoder()
 
@@ -51,11 +51,10 @@ export function firstText(texts: readonly string[], label: string): string {
  * flag bag carries typed paths with their original directory walks.
  */
 async function loadAttachments(
-  view: CLIView | undefined,
+  vfs: Files | undefined,
   paths: readonly PathSpec[],
 ): Promise<Attachment[]> {
   if (paths.length === 0) return []
-  const vfs = view?.vfs
   if (vfs === undefined) {
     throw new Error('--attach needs a workspace to read files from')
   }
@@ -94,7 +93,7 @@ export async function route(
   fl: FlagView,
   stdin: ByteSource | null,
   source: Source | null,
-  view: CLIView | undefined,
+  vfs: Files | undefined,
 ): Promise<CommandFnResult> {
   const raw = build(
     {
@@ -105,7 +104,7 @@ export async function route(
       subject: fl.asStr('subject') ?? null,
       body: await readBody(fl, stdin),
       signature: fl.asStr('signature') ?? null,
-      attachments: await loadAttachments(view, fl.asPaths('attach')),
+      attachments: await loadAttachments(vfs, fl.asPaths('attach')),
     },
     source,
   )

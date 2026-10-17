@@ -17,9 +17,9 @@ import git from 'isomorphic-git'
 import { IOResult } from '../../../../io/types.ts'
 import { isEexist } from '../../../../errors/fs.ts'
 import type { SessionView } from '../../../../view/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { headEntries } from './changes.ts'
 import {
   AllWithPathsError,
@@ -83,7 +83,7 @@ export interface Identity {
  * at the operator's name. The committer is the author here, where git tracks
  * `GIT_COMMITTER_*` separately.
  *
- * Read through the session view rather than the frozen `inv.env`
+ * Read through the session view rather than the frozen `ctx.env`
  * snapshot, so a hidden name reads as unset exactly as it does in the shell.
  */
 export function identity(fl: FlagView, session: SessionView | undefined): Identity {
@@ -203,23 +203,26 @@ async function buildCommit(
  * conflicted paths and records a merge commit from `MERGE_HEAD`; this build
  * writes no merge commits, so an unmerged index is refused with or without `-a`.
  */
-export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
-  const view = inv.view ?? {}
-  const fl = new FlagView(inv.flags)
+export async function commit(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    const vfs = view.vfs
+    const vfs = ctx.vfs
     if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
-    const texts = [...inv.texts]
-    checkSwitches(inv, texts)
+    checkSwitches(ctx, texts)
     const staging = fl.asBool('all')
     const named = texts[0]
     if (named !== undefined)
       throw staging ? new AllWithPathsError(named) : new PartialCommitError(named)
     const message = fl.asStr('message')
     if (message === undefined || message === '') throw new MissingMessageError()
-    const repo = await opened(fl, view, true)
+    const repo = await opened(ctx, fl, true)
     // git takes the index's lock before it looks for anything to commit, so a
     // read-only repository refuses an empty commit too.
     const index = repo.location.gitdir.join('index')
@@ -247,7 +250,7 @@ export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
     }
     const parents =
       before === null ? [] : [await git.resolveRef({ ...repoArgs(repo), ref: 'HEAD' })]
-    const who = identity(fl, view.sessionView)
+    const who = identity(fl, ctx.session)
     const when = Math.floor(Date.now() / 1000)
     const oid = await buildCommit(repo, state, message, who, parents, when)
     if (head.ref !== null) await writeRef(vfs, repo.location.commondir, head.ref, oid)

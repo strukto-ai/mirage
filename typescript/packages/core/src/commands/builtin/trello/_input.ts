@@ -15,7 +15,7 @@
 import type { TrelloAccessor } from '../../../accessor/trello.ts'
 import { mountIo } from '../generic_bind/adapter.ts'
 import { readStdinAsync } from '../utils/stream.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import type { PathSpec } from '../../../types.ts'
 
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -34,7 +34,7 @@ export interface ResolveTextInputOptions {
  */
 export async function resolveTextInput(
   accessor: TrelloAccessor,
-  command: CommandOpts,
+  command: Context,
   opts: ResolveTextInputOptions,
 ): Promise<string> {
   if (opts.inlineText !== null && opts.inlineText !== '') return opts.inlineText

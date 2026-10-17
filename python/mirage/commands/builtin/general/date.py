@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.strftime import gnu_strftime
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
@@ -116,7 +116,7 @@ async def date(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """GNU ``date``: the current moment, or the one ``-d`` names,
     rendered in the zone the command runs in.
@@ -124,7 +124,7 @@ async def date(
     The zone is ``-u``'s UTC, else the ``TZ`` of the command's own
     environment (``TZ=Asia/Hong_Kong date`` and an exported ``TZ``
     alike, as GNU reads it), else the host's local zone. It is read
-    from ``opts.env``, never from process state, so concurrent
+    from ``ctx.env``, never from process state, so concurrent
     workspaces cannot move each other's clock. ``%Z`` is tzdata's
     abbreviation (``HKT``), as GNU prints it; the TypeScript twin reads
     the same names from a table generated off zoneinfo, since Intl has
@@ -135,7 +135,7 @@ async def date(
     the date it names and refuses the setting, as GNU does for a user
     without the privilege. Beside ``-d`` it is a usage error.
     """
-    fl = FlagView(opts.flags, spec=SPECS["date"])
+    fl = FlagView(ctx.flags, spec=SPECS["date"])
     u = fl.as_bool("utc") or fl.as_bool("universal")
     d = fl.as_str("date")
     formats = option_formats(fl)
@@ -151,7 +151,7 @@ async def date(
         setting = None
     elif setting is not None and d is not None:
         raise lacks_plus_error(setting)
-    zone = timezone.utc if u else zone_from_env(opts.env)
+    zone = timezone.utc if u else zone_from_env(ctx.env)
     if setting is not None:
         placed = parse_posix_time(setting, tz=zone)
         if placed is None:

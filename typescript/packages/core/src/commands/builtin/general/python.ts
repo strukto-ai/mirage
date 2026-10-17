@@ -14,7 +14,7 @@
 
 import type { Accessor } from '../../../accessor/base.ts'
 import type { PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -49,26 +49,26 @@ async function pythonCommand(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): Promise<CommandFnResult> {
-  const label = opts.command ?? 'python3'
-  if (!(opts.runtime instanceof LanguageRuntime)) return notBound(label)
-  const fl = new FlagView(opts.flags, specOf('python3'))
+  const label = ctx.command ?? 'python3'
+  if (!(ctx.runtime instanceof LanguageRuntime)) return notBound(label)
+  const fl = new FlagView(ctx.flags, specOf('python3'))
   if (fl.asBool('version')) {
-    return runtimeVersion(label, opts.runtime, opts.env ?? {}, opts.signal, opts.timeoutSeconds)
+    return runtimeVersion(label, ctx.runtime, ctx.env ?? {}, ctx.signal, ctx.timeoutSeconds)
   }
   const prepared = await resolveSource(
     label,
     paths,
     texts,
     fl.asStr('c') ?? null,
-    opts,
+    ctx,
     fl.asStr('m') ?? null,
     CPYTHON_ARGV0,
     fl.asBool('x'),
   )
   if (Array.isArray(prepared) || prepared === null) return prepared
-  return runCode(label, prepared, opts.runtime, { ...initFlags(fl) }, opts)
+  return runCode(label, prepared, ctx.runtime, { ...initFlags(fl) }, ctx)
 }
 
 export const GENERAL_PYTHON3 = command({

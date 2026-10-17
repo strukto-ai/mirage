@@ -33,7 +33,7 @@ from mirage.commands.cli.builtin.git.util import (
     fatal,
     start_point,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
@@ -142,7 +142,7 @@ async def _content(vfs: Files, base: PathSpec, name: str) -> bytes:
 
 
 async def hash_object(
-    inv: CLIInvocation[None],
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """``git hash-object``: the id content would be stored under, read from
     each FILE, ``--stdin`` or ``--stdin-paths``. Another type than blob is
@@ -150,16 +150,17 @@ async def hash_object(
     ``-w`` writes the object. Pinned against git 2.50.1.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context.
     """
-    fl = FlagView(inv.flags)
-    view = inv.view or CLIView()
-    vfs = view.vfs
-    texts = tuple(inv.texts)
+    fl = FlagView(ctx.flags)
+    vfs = ctx.vfs
     try:
         if vfs is None:
             raise NoWorkspaceError()
-        check_switches(inv, texts)
+        check_switches(ctx, texts)
         kind = fl.as_str("t") or "blob"
         if kind not in OBJECT_TYPES:
             raise GitError(f'invalid object type "{kind}"')
@@ -167,10 +168,10 @@ async def hash_object(
         base = start_point(fl)
         contents: list[bytes] = []
         if fl.as_bool("stdin"):
-            contents.append(await read_stdin_async(inv.stdin) or b"")
+            contents.append(await read_stdin_async(ctx.stdin) or b"")
         names = list(texts)
         if fl.as_bool("stdin_paths"):
-            listed = (await read_stdin_async(inv.stdin) or b"").decode(
+            listed = (await read_stdin_async(ctx.stdin) or b"").decode(
                 "utf-8", "replace"
             )
             names += [line for line in listed.split("\n") if line]
@@ -179,7 +180,7 @@ async def hash_object(
         if not literally and not all(well_formed(kind, d) for d in contents):
             raise GitError("refusing to create malformed object")
         if fl.as_bool("w") and contents:
-            repo, _ = await opened(fl, view)
+            repo, _ = await opened(ctx, fl)
             cls = OBJECT_CLASSES[kind]
             for data in contents:
                 obj = cls.from_raw_string(cls.type_num, data)
@@ -191,16 +192,16 @@ async def hash_object(
 
 
 def hash_object_read_only(
-    inv: CLIInvocation[None], location: RepoLocation | None
+    texts: list[str], ctx: Context, location: RepoLocation | None
 ) -> GitError:
     """hash-object's refusal by a read-only mount: the first object it
     could not add, named as typed, ``(null)`` for stdin's.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
+        texts (list[str]): the line's operands.
+        ctx (Context): the line's context.
         location (RepoLocation | None): the repository it opened.
     """
-    fl = FlagView(inv.flags)
-    texts = tuple(inv.texts)
+    fl = FlagView(ctx.flags)
     stdin = fl.as_bool("stdin") or not texts
     return ObjectWriteReadOnlyError("(null)" if stdin else texts[0])

@@ -15,9 +15,8 @@
 import { visibleEntries, matched, repoRelative } from './pathspec.ts'
 import { type PathSpec, FileType } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { DELETED, headEntries, MODIFIED, TYPE_CHANGED, workChanges } from './changes.ts'
 import {
   GitError,
@@ -235,21 +234,24 @@ export async function clearWorktree(
  * the one check that makes the verb safe to hand an agent: there is no reflog
  * here to recover a file from.
  */
-export async function rm(inv: CLIInvocation): Promise<CommandFnResult> {
-  const view = inv.view ?? {}
-  const texts = [...inv.texts]
-  const fl = new FlagView(inv.flags)
+export async function rm(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   let flags: RmFlags
   let selected: string[]
   try {
-    const vfs = view.vfs
+    const vfs = ctx.vfs
     if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
-    checkSwitches(inv, texts)
+    checkSwitches(ctx, texts)
     flags = parseFlags(fl)
     if (texts.length === 0) throw new NoPathspecRemoveError()
-    const repo = await opened(fl, view, !flags.cached)
+    const repo = await opened(ctx, fl, !flags.cached)
     const state = await readIndex(repo, vfs)
     const tracked = new Set([
       ...visibleEntries(repo.location, state.entries).keys(),

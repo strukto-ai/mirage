@@ -20,7 +20,7 @@ import { cmpGeneric, parseCount, parseSkip, visible } from './cmp.ts'
 import { UsageError } from '../../errors.ts'
 import { PathSpec } from '../../../types.ts'
 import { materialize } from '../../../io/types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -148,8 +148,8 @@ describe('cmpGeneric with stdin', () => {
     const stream = (p: PathSpec): AsyncIterable<Uint8Array> => {
       throw new Error(`read ${p.virtual}`)
     }
-    const opts = { flags, stdin: ENC.encode('abc') } as unknown as CommandOpts
-    const [src, io] = await cmpGeneric(paths, texts, opts, stream)
+    const ctx = { flags, stdin: ENC.encode('abc') } as unknown as Context
+    const [src, io] = await cmpGeneric(paths, texts, ctx, stream)
     expect([src, io.exitCode, io.stderr]).toEqual([null, 0, null])
   })
 })
@@ -183,8 +183,8 @@ async function runSkips(
       await Promise.resolve()
       yield ENC.encode(p.virtual === P1.virtual ? 'xhello\n' : 'hello\n')
     })()
-  const opts = { flags, stdin: null } as unknown as CommandOpts
-  const [src, io] = await cmpGeneric([P1, P2], texts, opts, stream)
+  const ctx = { flags, stdin: null } as unknown as Context
+  const [src, io] = await cmpGeneric([P1, P2], texts, ctx, stream)
   return [DEC.decode(await materialize(src)), io.exitCode]
 }
 
@@ -240,8 +240,8 @@ describe('the streamed compare', () => {
   it('stops the reads at a difference', async () => {
     const pulled: string[] = []
     const files = { [P1.virtual]: ['ab\nc', 'd', 'never'], [P2.virtual]: ['ab', '\ncX', 'never'] }
-    const opts = { flags: {}, stdin: null } as unknown as CommandOpts
-    const [src, io] = await cmpGeneric([P1, P2], [], opts, chunked(files, pulled))
+    const ctx = { flags: {}, stdin: null } as unknown as Context
+    const [src, io] = await cmpGeneric([P1, P2], [], ctx, chunked(files, pulled))
     expect([DEC.decode(await materialize(src)), io.exitCode]).toEqual([
       '/F/one /F/two differ: char 5, line 2\n',
       1,
@@ -257,8 +257,8 @@ describe('the streamed compare', () => {
     [[], ['x'], 'which is empty'],
   ])('ends at the shorter file: %#', async (first, second, err) => {
     const files = { [P1.virtual]: first, [P2.virtual]: second }
-    const opts = { flags: {}, stdin: null } as unknown as CommandOpts
-    const [src, io] = await cmpGeneric([P1, P2], [], opts, chunked(files, []))
+    const ctx = { flags: {}, stdin: null } as unknown as Context
+    const [src, io] = await cmpGeneric([P1, P2], [], ctx, chunked(files, []))
     expect(src).toBeNull()
     expect([DEC.decode(await materialize(io.stderr)), io.exitCode]).toEqual([
       `cmp: EOF on /F/one ${err}\n`,
@@ -276,10 +276,10 @@ describe('the streamed compare', () => {
     const pulled: string[] = []
     const files = { [P1.virtual]: ['abc'], [P2.virtual]: ['abc'] }
     const flags = limit === undefined ? { silent: true } : { silent: true, bytes: limit }
-    const opts = { flags, stdin: null } as unknown as CommandOpts
+    const ctx = { flags, stdin: null } as unknown as Context
     const sizeOf = (p: PathSpec): Promise<number | null> =>
       Promise.resolve(p.virtual === P1.virtual ? sizes[0] : sizes[1])
-    const [src, io] = await cmpGeneric([P1, P2], [], opts, chunked(files, pulled), sizeOf)
+    const [src, io] = await cmpGeneric([P1, P2], [], ctx, chunked(files, pulled), sizeOf)
     expect([src, io.exitCode, pulled.length > 0]).toEqual([null, code, read])
   })
 })

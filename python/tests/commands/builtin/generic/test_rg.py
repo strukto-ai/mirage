@@ -12,7 +12,7 @@ from mirage.commands.builtin.generic.rg import (
     rg_generic,
 )
 from mirage.commands.builtin.rg_search import RgFlags
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.types import (
@@ -125,7 +125,7 @@ async def test_rg_count_stdin_zero_exits_1_without_output():
     output, io = await rg_generic(
         [],
         ["foo"],
-        CommandOpts(flags={"count": True}),
+        Context(flags={"count": True}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -214,7 +214,7 @@ async def test_rg_refuses_an_operand_the_walk_refused(operand, message):
         output, io = await rg_generic(
             paths,
             ["o"],
-            CommandOpts(),
+            Context(),
             readdir=readdir,
             stat=stat,
             read_bytes=rb,
@@ -239,7 +239,7 @@ async def test_rg_lone_operand_it_may_not_read_is_the_searchers_refusal():
     output, io = await rg_generic(
         [_typed("/locked.txt", "locked.txt")],
         ["hit"],
-        CommandOpts(),
+        Context(),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -271,7 +271,7 @@ async def test_rg_not_a_directory_operand_keeps_the_others():
     output, io = await rg_generic(
         [_spec("/a.txt/x"), _spec("/real")],
         ["foo"],
-        CommandOpts(flags={"files_with_matches": True}),
+        Context(flags={"files_with_matches": True}),
         readdir=readdir_enotdir,
         stat=stat,
         read_bytes=rb,
@@ -313,7 +313,7 @@ async def _run(
     output, io = await rg_generic(
         paths,
         texts,
-        CommandOpts(flags=flags),
+        Context(flags=flags),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -516,7 +516,7 @@ async def _run_locked(paths: list[PathSpec], flags: dict):
     output, io = await rg_generic(
         paths,
         ["hit"],
-        CommandOpts(flags=flags),
+        Context(flags=flags),
         readdir=readdir,
         stat=stat,
         read_bytes=read_bytes,
@@ -534,12 +534,12 @@ async def test_rg_walk_names_a_file_it_could_not_read_as_typed():
 
 
 def test_labelled_asks_for_the_filename_a_walk_would_have_printed():
-    assert labelled(CommandOpts(flags={})).flags == {"with_filename": True}
+    assert labelled(Context(flags={})).flags == {"with_filename": True}
 
 
 def test_labelled_lets_dash_upper_i_win():
-    opts = CommandOpts(flags={"no_filename": True})
-    assert labelled(opts) is opts
+    ctx = Context(flags={"no_filename": True})
+    assert labelled(ctx) is ctx
 
 
 async def _walked(line: str) -> tuple[str, str, int]:

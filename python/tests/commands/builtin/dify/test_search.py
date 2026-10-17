@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.io.types import materialize
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -67,9 +67,7 @@ async def test_search_command_resolves_globs_and_passes_multiple_documents(
             )
         ],
         ["login"],
-        CommandOpts(
-            io=io_for(DifyVFS, accessor()), index=RAMIndexCacheStore()
-        ),
+        Context(io=io_for(DifyVFS, accessor()), index=RAMIndexCacheStore()),
     )
 
     assert await materialize(stdout) == b"api\nauth\n"
@@ -102,9 +100,7 @@ async def test_search_command_root_searches_whole_dataset(monkeypatch):
         accessor(),
         [root],
         ["anything"],
-        CommandOpts(
-            io=io_for(DifyVFS, accessor()), index=RAMIndexCacheStore()
-        ),
+        Context(io=io_for(DifyVFS, accessor()), index=RAMIndexCacheStore()),
     )
 
     assert await materialize(stdout) == b"dataset\n"

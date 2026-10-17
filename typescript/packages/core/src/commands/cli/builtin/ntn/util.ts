@@ -35,7 +35,7 @@ export function notionTransport(
   // override would work on whichever verbs remembered it.
   const flagVersion = bag === undefined ? undefined : new FlagView(bag).asStr('notion_version')
   // An empty flag falls back to the config's own pin, exactly as python's
-  // `notion_config` returns `inv.config` untouched for an empty --notion-version.
+  // `notion_config` returns `config` untouched for an empty --notion-version.
   const version = flagVersion !== undefined && flagVersion !== '' ? flagVersion : cfg.apiVersion
   return new HttpNotionTransport({
     apiKey: cfg.apiKey,

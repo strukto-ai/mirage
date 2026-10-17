@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { TrelloAccessor } from '../../../accessor/trello.ts'
 import { runWithMountGate } from '../../../context/session_context.ts'
 import type { TrelloTransport } from '../../../core/trello/client.ts'
 import { MountMode } from '../../../types.ts'
-import type { CommandOpts, Command } from '../../config.ts'
+import type { Context, Command } from '../../config.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { TRELLO_CARD_ASSIGN } from './trello_card_assign.ts'
 import { TRELLO_CARD_COMMENT_ADD } from './trello_card_comment_add.ts'
@@ -59,14 +60,14 @@ describe('trello card writes hold the mount-wide write grant', () => {
       // per-path check cannot judge. Nothing pinned the per-command
       // wiring before, which is how the Python side drifted to 3 of 8.
       expect(rc.write).toBe(true)
-      const opts: CommandOpts = {
+      const ctx: Context = {
         stdin: null,
         flags,
-        cwd: '/',
+        cwd: PathSpec.fromStrPath('/'),
         mountPrefix: '/trello',
       }
       await runWithMountGate('/trello', MountMode.READ, async () => {
-        await expect(Promise.resolve(rc.fn(accessor, [], [], opts))).rejects.toThrow(/read-only/)
+        await expect(Promise.resolve(rc.fn(accessor, [], [], ctx))).rejects.toThrow(/read-only/)
       })
     })
   }
@@ -93,14 +94,14 @@ describe('trello card writes hold the mount scope', () => {
     const rc = cmds[0]
     if (rc === undefined) throw new Error('command registered nothing')
     it(`${rc.name} refuses an id outside the scope`, async () => {
-      const opts: CommandOpts = {
+      const ctx: Context = {
         stdin: null,
         flags,
-        cwd: '/',
+        cwd: PathSpec.fromStrPath('/'),
         mountPrefix: '/trello',
       }
       await runWithMountGate('/trello', MountMode.WRITE, async () => {
-        await expect(Promise.resolve(rc.fn(scoped, [], [], opts))).rejects.toThrow(
+        await expect(Promise.resolve(rc.fn(scoped, [], [], ctx))).rejects.toThrow(
           / is outside this mount's scope$/,
         )
       })

@@ -29,7 +29,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     require_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -41,31 +41,31 @@ async def csplit(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(opts.flags, spec=SPECS["csplit"])
-    paths = await resolve_or_empty(ops, accessor, paths, opts.index)
+    fl = FlagView(ctx.flags, spec=SPECS["csplit"])
+    paths = await resolve_or_empty(ops, accessor, paths, ctx.index)
     prefix_flag = fl.raw("prefix")
     prefix = prefix_flag if isinstance(prefix_flag, (str, PathSpec)) else "xx"
     # The pieces go to the prefix, or `xx` in the working directory, which
     # need not be this mount, so a dispatcher routes each write, and the
     # removal of a failed run's pieces, to the mount that owns it.
-    if opts.dispatch is not None:
-        write_bytes = transfer_primitives(opts.dispatch)["write"]
-        unlink = partial(dispatched_call, opts.dispatch, "unlink")
+    if ctx.dispatch is not None:
+        write_bytes = transfer_primitives(ctx.dispatch)["write"]
+        unlink = partial(dispatched_call, ctx.dispatch, "unlink")
     else:
         write_bytes = partial(require_op(ops, Operation.WRITE), accessor)
         unlink = partial(require_op(ops, Operation.UNLINK), accessor)
     return await generic_csplit(
         paths,
         texts,
-        read_bytes=bound_op(ops.read_stream, accessor, opts.index),
+        read_bytes=bound_op(ops.read_stream, accessor, ctx.index),
         write_bytes=write_bytes,
         unlink=unlink,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         prefix=prefix,
-        mount_prefix=opts.mount_prefix,
-        cwd=opts.cwd.virtual,
+        mount_prefix=ctx.mount_prefix,
+        cwd=ctx.cwd.virtual,
         digits=int(fl.as_str("digits") or "2"),
         suffix_format=fl.as_str("suffix_format"),
         keep_on_error=fl.as_bool("keep_files"),

@@ -25,7 +25,8 @@ from mirage.commands.cli.builtin.gws.methods import (
     GwsMethod,
     gws_method_description,
 )
-from mirage.commands.cli.types import CLIHandler, CLIInvocation
+from mirage.commands.cli.types import CLIHandler
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import Argument, CommandSpec, FlagValue
@@ -41,7 +42,7 @@ from mirage.core.google.client import (
 from mirage.core.google.config import GoogleConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import JsonValue
+from mirage.types import JsonValue, PathSpec
 
 _PARAMS_HELP = (
     'JSON object of path and query parameters, e.g. \'{"fileId":"abc"}\''
@@ -243,15 +244,19 @@ async def place_in_scope(
 
 
 async def run_gws_method(
-    method: GwsMethod, inv: CLIInvocation[GoogleConfig]
+    method: GwsMethod,
+    config: GoogleConfig,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     params = _parse_json_flag(fl.as_str("params") or "", "--params")
     body = _parse_json_flag(fl.as_str("json") or "", "--json")
     if method.needs_body and not body:
         raise UsageError("--json is required")
-    body, params = scope_request(method, inv.config, body, params)
-    async with TokenManager(inv.config) as token_manager:
+    body, params = scope_request(method, config, body, params)
+    async with TokenManager(config) as token_manager:
         path, query = fill_path(method.path, params)
         url = SERVICE_BASES[method.service](token_manager) + path
         query_params = _query_str(query)

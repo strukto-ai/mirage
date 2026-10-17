@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
-import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
+import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
+import type { PathSpec } from '@struktoai/mirage-core/types'
 import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import { materialize } from '@struktoai/mirage-core/io/types'
@@ -24,12 +24,17 @@ import { DEFAULT_REVISION } from '../../../../core/hf_hub/constants.ts'
 import { repoTypeOf, requireOperands, requireToken, textOut } from './accessor.ts'
 
 /** Create a repository on the Hub. */
-export async function createCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  requireOperands(inv, ['repo_id'])
-  requireToken(inv, 'repo create')
-  const fl = new FlagView(inv.flags)
-  const config = inv.config as HfConfig
-  const repoId = inv.texts[0] ?? ''
+export async function createCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const cfg = config as HfConfig
+  requireOperands(texts, ['repo_id'])
+  requireToken(cfg, 'repo create')
+  const fl = new FlagView(ctx.flags)
+  const repoId = texts[0] ?? ''
   const repoType = repoTypeOf(fl)
   const sdk = fl.asStr('space_sdk')
   if (repoType === 'space' && (sdk === undefined || sdk === '')) {
@@ -37,7 +42,7 @@ export async function createCmd(inv: CLIInvocation): Promise<CommandFnResult> {
       'creating a space requires --space_sdk (gradio, streamlit, docker or static)',
     )
   }
-  const result = await createRepo(config, repoId, {
+  const result = await createRepo(cfg, repoId, {
     repoType,
     private: fl.asBool('private'),
     spaceSdk: sdk,
@@ -46,19 +51,25 @@ export async function createCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   })
   const url = result.url
   return textOut(
-    typeof url === 'string' ? `${url}\n` : `${repoUrl(hfEndpoint(config), repoType, repoId)}\n`,
+    typeof url === 'string' ? `${url}\n` : `${repoUrl(hfEndpoint(cfg), repoType, repoId)}\n`,
   )
 }
 
 /** Tag a revision of a repository. */
-export async function tagCreateCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  requireOperands(inv, ['repo_id', 'tag'])
-  requireToken(inv, 'repo tag create')
-  const fl = new FlagView(inv.flags)
-  const repoId = inv.texts[0] ?? ''
-  const tag = inv.texts[1] ?? ''
+export async function tagCreateCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const cfg = config as HfConfig
+  requireOperands(texts, ['repo_id', 'tag'])
+  requireToken(cfg, 'repo tag create')
+  const fl = new FlagView(ctx.flags)
+  const repoId = texts[0] ?? ''
+  const tag = texts[1] ?? ''
   await createTag(
-    inv.config as HfConfig,
+    cfg,
     repoId,
     tag,
     repoTypeOf(fl),
@@ -69,10 +80,15 @@ export async function tagCreateCmd(inv: CLIInvocation): Promise<CommandFnResult>
 }
 
 /** List a repository's tags. */
-export async function tagListCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  requireOperands(inv, ['repo_id'])
-  const fl = new FlagView(inv.flags)
-  const tags = await listTags(inv.config as HfConfig, inv.texts[0] ?? '', repoTypeOf(fl))
+export async function tagListCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  requireOperands(texts, ['repo_id'])
+  const fl = new FlagView(ctx.flags)
+  const tags = await listTags(config as HfConfig, texts[0] ?? '', repoTypeOf(fl))
   return textOut(tags.map((name) => `${name}\n`).join(''))
 }
 
@@ -85,10 +101,10 @@ export async function tagListCmd(inv: CLIInvocation): Promise<CommandFnResult> {
  * cannot reach, since a workspace has no terminal to fall back to, and it
  * declines rather than assuming yes.
  */
-async function confirmed(inv: CLIInvocation): Promise<boolean> {
-  if (new FlagView(inv.flags).asBool('yes')) return true
-  if (inv.stdin === null) return false
-  const answer = new TextDecoder().decode(await materialize(inv.stdin))
+async function confirmed(ctx: Context): Promise<boolean> {
+  if (new FlagView(ctx.flags).asBool('yes')) return true
+  if (ctx.stdin === null) return false
+  const answer = new TextDecoder().decode(await materialize(ctx.stdin))
   const trimmed = answer.trim().toLowerCase()
   return trimmed === 'y' || trimmed === 'yes'
 }
@@ -99,17 +115,23 @@ async function confirmed(inv: CLIInvocation): Promise<boolean> {
  * Upstream asks for confirmation before deleting; a workspace has no terminal,
  * so the answer arrives either as `-y` or on stdin.
  */
-export async function tagDeleteCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  requireOperands(inv, ['repo_id', 'tag'])
-  requireToken(inv, 'repo tag delete')
-  const fl = new FlagView(inv.flags)
-  const repoId = inv.texts[0] ?? ''
-  const tag = inv.texts[1] ?? ''
-  if (!(await confirmed(inv))) {
+export async function tagDeleteCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const cfg = config as HfConfig
+  requireOperands(texts, ['repo_id', 'tag'])
+  requireToken(cfg, 'repo tag delete')
+  const fl = new FlagView(ctx.flags)
+  const repoId = texts[0] ?? ''
+  const tag = texts[1] ?? ''
+  if (!(await confirmed(ctx))) {
     throw new UsageError(
       `deleting tag ${tag} needs -y, or y on stdin: there is no terminal to confirm on`,
     )
   }
-  await deleteTag(inv.config as HfConfig, repoId, tag, repoTypeOf(fl))
+  await deleteTag(cfg, repoId, tag, repoTypeOf(fl))
   return textOut(`Tag ${tag} deleted on ${repoId}\n`)
 }

@@ -21,7 +21,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
 )
 from mirage.commands.builtin.generic_bind.search import search_reads
 from mirage.commands.builtin.utils.tree import tree_walk
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,26 +31,26 @@ async def rg(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths and ops.is_mounted(accessor):
-        paths = await ops.resolve_glob(accessor, paths, opts.index)
+        paths = await ops.resolve_glob(accessor, paths, ctx.index)
     read_bytes, read_stream = await search_reads(
-        ops, "rg", accessor, paths, texts, opts
+        ops, "rg", accessor, paths, texts, ctx
     )
-    readdir = bound_op(ops.readdir, accessor, opts.index)
-    stat = bound_op(ops.stat, accessor, opts.index)
+    readdir = bound_op(ops.readdir, accessor, ctx.index)
+    stat = bound_op(ops.stat, accessor, ctx.index)
     return await rg_generic(
         paths,
         texts,
-        opts,
+        ctx,
         readdir=readdir,
         stat=stat,
         read_bytes=read_bytes,
         read_stream=read_stream,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         unbounded=tree_walk(
-            bound_op(ops.read_tree, accessor, opts.index), readdir, stat
+            bound_op(ops.read_tree, accessor, ctx.index), readdir, stat
         ),
     )
 

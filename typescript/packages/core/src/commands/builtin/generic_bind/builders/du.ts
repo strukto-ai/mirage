@@ -343,24 +343,24 @@ export async function walkEntries<A extends Accessor>(
   return [entries, total]
 }
 
-const du: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
-  const idx = opts.index ?? undefined
+const du: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const budget = new WalkBudget(
     ops.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : ops.maxDuEntries,
-    mountsOf(opts),
+    mountsOf(ctx),
   )
-  const flags = new FlagView(opts.flags, specOf('du'))
-  const links = linksOf(opts)
+  const flags = new FlagView(ctx.flags, specOf('du'))
+  const links = linksOf(ctx)
   const follow =
     links !== undefined && flags.typedOrder('L', 'P').at(-1) === 'L'
-      ? new Dereference(links, flags.asBool('one_file_system') ? (mountsOf(opts) ?? null) : null)
+      ? new Dereference(links, flags.asBool('one_file_system') ? (mountsOf(ctx) ?? null) : null)
       : null
   const computeSize: ComputeSize = (p) => walkSize(ops, accessor, idx, budget, follow, p)
   const computeEntries: ComputeEntries = (p) => walkEntries(ops, accessor, idx, budget, follow, p)
 
   return duGeneric(
     paths,
-    opts,
+    ctx,
     (targets) => resolveGlobOf(ops)(accessor, targets, idx),
     (p) => ops.stat(accessor, p, idx),
     computeSize,

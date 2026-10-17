@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { parseCommand, parseToKwargs } from '../../spec/parser.ts'
 import { expandGeneric, nextTabStop, parseTabStops, type TabStops } from './expand.ts'
@@ -36,16 +37,16 @@ async function run(
   line: Line,
   stdin: AsyncIterable<Uint8Array> | null = null,
 ): Promise<{ exit: number; stdout: string; stderr: string }> {
-  const opts = {
+  const ctx = {
     stdin,
     ...line,
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     vfs: { kind: 'ram' } as never,
-  } as CommandOpts
+  } as Context
   // `CommandFnResult` is nullable — null is how a handler says it does not
   // apply — and expand never answers that way, so say so rather than
   // destructure a union.
-  const result = expandGeneric([], opts, stubStream)
+  const result = expandGeneric([], ctx, stubStream)
   if (result === null) throw new Error('expand declined to handle its own operands')
   const [out, io] = result
   return {
@@ -103,7 +104,7 @@ describe('expand --tabs refuses a value it cannot read whole', () => {
 // ACCUMULATES across occurrences, so a hand-written record cannot express
 // `-t 2,4 -t 6` at all; these cases go through the spec parser so the bag
 // carries whatever occurrence record the parser actually preserves.
-type Line = Pick<CommandOpts, 'flags'>
+type Line = Pick<Context, 'flags'>
 
 function expandBag(...argv: string[]): Line {
   return { flags: parseToKwargs(parseCommand(specOf('expand'), argv, '/')) }

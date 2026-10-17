@@ -55,7 +55,7 @@ async def owned_workspace(monkeypatch):
 def install_stall(ws):
     entered, gate = asyncio.Event(), asyncio.Event()
 
-    async def stall(inv):
+    async def stall(config, paths, texts, ctx):
         entered.set()
         await gate.wait()
         return None, IOResult()
@@ -102,7 +102,7 @@ async def test_alias_expansions_release_when_each_ends(owned_workspace):
     ws, programs = owned_workspace
     live = []
 
-    async def probe(inv):
+    async def probe(config, paths, texts, ctx):
         live.append(sum(program.references > 0 for program in programs))
         return None, IOResult()
 

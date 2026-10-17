@@ -37,7 +37,7 @@ async function runXxd(
     stdin,
     flags,
     io: commandIo(vfs),
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) return { out: '', outBytes: new Uint8Array(), exitCode: -1 }
   const [out, ioResult] = result

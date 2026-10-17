@@ -14,13 +14,14 @@
 
 from collections.abc import Awaitable, Callable
 
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.core.notion.client import NotionAPIError
 from mirage.core.notion.config import NotionConfig
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 VerbFn = Callable[
-    [CLIInvocation[NotionConfig]],
+    [NotionConfig, list[PathSpec], list[str], Context],
     Awaitable[tuple[ByteSource | None, IOResult]],
 ]
 
@@ -113,7 +114,11 @@ def api_failure(exc: NotionAPIError) -> tuple[str, int]:
 
 
 async def guarded(
-    fn: VerbFn, inv: CLIInvocation[NotionConfig]
+    fn: VerbFn,
+    config: NotionConfig,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run one ntn verb, answering an API failure in upstream's voice.
 
@@ -126,14 +131,17 @@ async def guarded(
 
     Args:
         fn (VerbFn): the leaf handler being guarded.
-        inv (CLIInvocation): the line's one invocation record.
+        config (NotionConfig): the install's config.
+        paths (list[PathSpec]): the leaf's path operands.
+        texts (list[str]): the leaf's text operands.
+        ctx (Context): the leaf's context.
 
     Returns:
         tuple[ByteSource | None, IOResult]: the verb's own output, or the
             rendered failure.
     """
     try:
-        return await fn(inv)
+        return await fn(config, paths, texts, ctx)
     except NotionAPIError as failed:
         stderr, code = api_failure(failed)
         return None, IOResult(stderr=stderr.encode(), exit_code=code)

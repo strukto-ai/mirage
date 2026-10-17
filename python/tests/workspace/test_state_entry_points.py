@@ -16,7 +16,7 @@ import asyncio
 
 import pytest
 
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.spec import CommandSpec
 from mirage.io.types import IOResult
 from mirage.mount.core import MountCore
@@ -447,10 +447,10 @@ def test_command_env_is_a_snapshot_not_the_live_dict():
 
     @command("envpoke", vfs="ram", spec=CommandSpec())
     async def envpoke(
-        store, paths: list[PathSpec], texts: list[str], opts: CommandOpts
+        store, paths: list[PathSpec], texts: list[str], ctx: Context
     ):
-        assert opts.env is not None
-        opts.env["INJECTED"] = "1"
+        assert ctx.env is not None
+        ctx.env["INJECTED"] = "1"
         return b"", IOResult()
 
     ws = _two_mounts()
@@ -468,14 +468,14 @@ def test_command_env_is_a_snapshot_not_the_live_dict():
 
 def test_a_command_can_opt_into_the_session_view():
     # The LinkView pattern for the session plane: the live handle rides
-    # CommandOpts, and reads answer through the view.
+    # the command's Context, and reads answer through the view.
 
     @command("envread", vfs="ram", spec=CommandSpec())
     async def envread(
-        store, paths: list[PathSpec], texts: list[str], opts: CommandOpts
+        store, paths: list[PathSpec], texts: list[str], ctx: Context
     ):
-        assert opts.session_view is not None
-        value = opts.session_view.get("MARKER") or "none"
+        assert ctx.session is not None
+        value = ctx.session.get("MARKER") or "none"
         return value.encode(), IOResult()
 
     ws = _two_mounts()

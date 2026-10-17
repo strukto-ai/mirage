@@ -23,14 +23,13 @@ import type {
 import { cliSpecFor } from '../../specs.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { DISCORD } from './index.ts'
 import { deleteVerb } from './delete.ts'
 import { poll } from './poll.ts'
 import { read } from './read.ts'
 import { send } from './send.ts'
 import { threadCreate } from './thread_create.ts'
-import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
+import { context } from '../../../../workspace/fixtures/context.ts'
 
 const DEC = new TextDecoder()
 
@@ -71,10 +70,6 @@ function unwrap(result: CommandFnResult): [ByteSource | null, IOResult] {
   return result
 }
 
-function makeInv(config: unknown, flags: CLIInvocation['flags']): CLIInvocation {
-  return cliInvocation({ config, flags })
-}
-
 const VERBS = [
   'send',
   'read',
@@ -110,14 +105,14 @@ describe('discord tree', () => {
 describe('discord verbs', () => {
   it('send forwards --reply-to as a message reference', async () => {
     CALLS.length = 0
-    await send(makeInv({}, { channel: 'C1', text: 're', reply_to: 'M0' }))
+    await send({}, [], [], context({ flags: { channel: 'C1', text: 're', reply_to: 'M0' } }))
     expect(CALLS[0]?.body).toEqual({ content: 're', message_reference: { message_id: 'M0' } })
   })
 
   it('read sorts oldest-first', async () => {
     CALLS.length = 0
     RESPONSE = [{ id: '20' }, { id: '10' }]
-    const [out] = unwrap(await read(makeInv({}, { channel: 'C1' })))
+    const [out] = unwrap(await read({}, [], [], context({ flags: { channel: 'C1' } })))
     expect(CALLS[0]?.params).toEqual({ limit: 20 })
     expect(
       (JSON.parse(DEC.decode(out as Uint8Array)) as { id: string }[]).map((m) => m.id),
@@ -128,7 +123,9 @@ describe('discord verbs', () => {
   it('delete DELETEs and reports ok', async () => {
     CALLS.length = 0
     RESPONSE = null
-    const [out] = unwrap(await deleteVerb(makeInv({}, { channel: 'C1', message: 'M1' })))
+    const [out] = unwrap(
+      await deleteVerb({}, [], [], context({ flags: { channel: 'C1', message: 'M1' } })),
+    )
     expect(CALLS[0]?.method).toBe('DELETE')
     expect(JSON.parse(DEC.decode(out as Uint8Array))).toEqual({ ok: true })
     RESPONSE = { id: 'M1' }
@@ -136,13 +133,23 @@ describe('discord verbs', () => {
 
   it('thread-create starts from a message when given', async () => {
     CALLS.length = 0
-    await threadCreate(makeInv({}, { channel: 'C1', name: 'topic', message: 'M1' }))
+    await threadCreate(
+      {},
+      [],
+      [],
+      context({ flags: { channel: 'C1', name: 'topic', message: 'M1' } }),
+    )
     expect(CALLS[0]?.endpoint).toBe('/channels/C1/messages/M1/threads')
   })
 
   it('poll shapes the poll object with defaults', async () => {
     CALLS.length = 0
-    await poll(makeInv({}, { channel: 'C1', question: 'Lunch?', answer: ['A', 'B'] }))
+    await poll(
+      {},
+      [],
+      [],
+      context({ flags: { channel: 'C1', question: 'Lunch?', answer: ['A', 'B'] } }),
+    )
     expect(CALLS[0]?.body).toEqual({
       poll: {
         question: { text: 'Lunch?' },

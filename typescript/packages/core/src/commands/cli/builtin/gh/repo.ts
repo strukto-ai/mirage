@@ -31,10 +31,10 @@ import {
   viewRepo,
   type RepoRef,
 } from '../../../../core/github/repo.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 import { UsageError } from '../../../errors.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { CLIInvocation } from '../../types.ts'
 import {
   camel,
   checkHost,
@@ -364,10 +364,15 @@ export function summary(repo: unknown, readme: string | null): string {
  * the way gh does, so every field gh accepts is answered in gh's own shape;
  * the text view reads the REST object and the README.
  */
-export async function view(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const transport = ghTransport(inv.config)
-  const ref = ghRepo(inv.config, inv.texts[0] ?? fl.asStr('repo'))
+export async function view(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const transport = ghTransport(config)
+  const ref = ghRepo(config, texts[0] ?? fl.asStr('repo'))
   const fields = jsonFields(fl, REPO_FIELDS)
   if (fields !== null) {
     const node = await repositoryFields(transport, ref, repoSelection(fields))
@@ -378,13 +383,18 @@ export async function view(inv: CLIInvocation): Promise<CommandFnResult> {
 }
 
 /** `gh repo list`, over GraphQL for `--json` as `view` is. */
-export async function listCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const transport = ghTransport(inv.config)
+export async function listCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const transport = ghTransport(config)
   const limit = fl.asInt('limit') ?? 30
   const fields = jsonFields(fl, REPO_FIELDS)
   if (fields !== null) {
-    const nodes = await listRepositoryFields(transport, inv.texts[0], limit, repoSelection(fields))
+    const nodes = await listRepositoryFields(transport, texts[0], limit, repoSelection(fields))
     return typedOut(
       nodes.map((node) => exportedRepo(node, fields)),
       fl,
@@ -392,7 +402,7 @@ export async function listCmd(inv: CLIInvocation): Promise<CommandFnResult> {
       REPO_FIELDS,
     )
   }
-  const rows = (await listRepos(transport, inv.texts[0], limit)).map(repo)
+  const rows = (await listRepos(transport, texts[0], limit)).map(repo)
   const human = rows
     .map(
       (row) =>
@@ -402,9 +412,14 @@ export async function listCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   return typedOut(rows, fl, human, REPO_FIELDS)
 }
 
-export async function createCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const spec = inv.texts[0] ?? ''
+export async function createCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const spec = texts[0] ?? ''
   if (spec === '') throw new Error('a repository name is required in noninteractive mode')
   const parts = spec.split('/')
   if (parts.length > 2 || parts.some((part) => part === '')) {
@@ -423,7 +438,7 @@ export async function createCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   const homepage = fl.asStr('homepage')
   if (description !== undefined) body.description = description
   if (homepage !== undefined) body.homepage = homepage
-  const created = repo(await createRepo(ghTransport(inv.config), owner, body))
+  const created = repo(await createRepo(ghTransport(config), owner, body))
   return textOut(`${textValue(created.url)}\n`)
 }
 
@@ -441,9 +456,13 @@ function tokenHeader(config: GhConfig): Record<string, string> {
  * on the line, in the config or in the output; a fork's `upstream` remote is
  * not added.
  */
-export async function cloneCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const config = inv.config as GhConfig
-  const [names, gitflags] = splitMarked(inv.texts, inv.argv)
+export async function cloneCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const [names, gitflags] = splitMarked(texts, ctx.argv ?? [])
   const spec = names[0]
   if (spec === undefined) throw new Error('cannot clone: repository argument required')
   checkHost(config, repoHost(spec))
@@ -451,24 +470,29 @@ export async function cloneCmd(inv: CLIInvocation): Promise<CommandFnResult> {
     !spec.includes('/') && !spec.includes(':')
       ? { owner: await login(ghTransport(config)), repo: spec }
       : parseRepo(spec)
-  const url = `${webOrigin(config)}/${ref.owner}/${ref.repo}.git`
+  const url = `${webOrigin(config as GhConfig)}/${ref.owner}/${ref.repo}.git`
   const target = names[1] ?? ref.repo
   const leaf = findNode(GIT.spec, ['clone'])?.node ?? GIT.spec
   const words = [...gitflags, url, target]
-  const parsed = parseCommand(leaf, words, inv.cwd.virtual, 'git clone', inv.env, true)
-  const git: CLIInvocation = {
-    config: null,
+  const parsed = parseCommand(leaf, words, ctx.cwd.virtual, 'git clone', ctx.env, true)
+  const git: Context = {
     argv: ['clone', ...words],
-    paths: [],
-    texts: parsed.args.map(([word]) => word),
-    cwd: inv.cwd,
-    flags: { ...parseToKwargs(parsed), C: inv.cwd },
-    stdin: inv.stdin,
-    env: inv.env,
-    ...(inv.view !== undefined ? { view: inv.view } : {}),
+    cwd: ctx.cwd,
+    flags: { ...parseToKwargs(parsed), C: ctx.cwd },
+    stdin: ctx.stdin,
+    ...(ctx.env !== undefined ? { env: ctx.env } : {}),
+    ...(ctx.vfs !== undefined ? { vfs: ctx.vfs } : {}),
+    ...(ctx.session !== undefined ? { session: ctx.session } : {}),
+    ...(ctx.processes !== undefined ? { processes: ctx.processes } : {}),
     spec: leaf,
   }
-  return gitClone(git, tokenHeader(config))
+  return gitClone(
+    null,
+    [],
+    parsed.args.map(([word]) => word),
+    git,
+    tokenHeader(config as GhConfig),
+  )
 }
 
 /**
@@ -478,23 +502,28 @@ export async function cloneCmd(inv: CLIInvocation): Promise<CommandFnResult> {
  * ignores `--remote` beside a repository, and `--clone=false` or
  * `--remote=false` asks for what this fork does anyway.
  */
-export async function fork(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function fork(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const org = fl.asStr('org')
   if (org === '') throw new Error('--org cannot be blank')
   if (fl.asStr('remote_name') === '') throw new Error('--remote-name cannot be blank')
   if (ghBool(fl, 'clone')) {
     throw new Error('--clone is not supported: there is no local checkout to clone into')
   }
-  if (ghBool(fl, 'remote') && inv.texts[0] === undefined) {
+  if (ghBool(fl, 'remote') && texts[0] === undefined) {
     throw new Error('--remote is not supported: there is no local checkout to add a remote to')
   }
-  const transport = ghTransport(inv.config)
+  const transport = ghTransport(config)
   let source: RepoRef
   try {
-    source = ghRepo(inv.config, inv.texts[0])
+    source = ghRepo(config, texts[0])
   } catch (err) {
-    if (inv.texts[0] === undefined || !(err instanceof Error)) throw err
+    if (texts[0] === undefined || !(err instanceof Error)) throw err
     throw new Error(`did not understand argument: ${err.message}`)
   }
   const name = fl.asStr('fork_name') ?? undefined
@@ -507,13 +536,18 @@ export async function fork(inv: CLIInvocation): Promise<CommandFnResult> {
   return textOut(`✓ Created fork ${full}\n`)
 }
 
-export async function rename(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const transport = ghTransport(inv.config)
+export async function rename(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const transport = ghTransport(config)
   // gh takes the *new name* as the operand and the repository to rename as
   // -R, which is the reverse of what the shape of the line suggests.
-  const target = ghRepo(inv.config, fl.asStr('repo') ?? undefined)
-  const name = inv.texts[0] ?? ''
+  const target = ghRepo(config, fl.asStr('repo') ?? undefined)
+  const name = texts[0] ?? ''
   if (name === '') throw new Error('a new repository name is required')
   const renamed = (await renameRepo(transport, target, name)) as { full_name?: string }
   return textOut(`✓ Renamed repository ${renamed.full_name ?? name}\n`)
@@ -526,9 +560,14 @@ export async function rename(inv: CLIInvocation): Promise<CommandFnResult> {
  * visibility change needs `--accept-visibility-change-consequences`. Like gh
  * writing to anything but a terminal, success prints nothing.
  */
-export async function editCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags, inv.spec)
-  const ref = ghRepo(inv.config, inv.texts[0])
+export async function editCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags, ctx.spec)
+  const ref = ghRepo(config, texts[0])
   const body: Record<string, unknown> = {}
   const security: Record<string, unknown> = {}
   for (const field of REPO_EDIT_FIELDS) {
@@ -559,7 +598,7 @@ export async function editCmd(inv: CLIInvocation): Promise<CommandFnResult> {
       1,
     )
   }
-  const transport = ghTransport(inv.config)
+  const transport = ghTransport(config)
   if (Object.keys(security).length > 0) {
     const node = await repositoryFields(transport, ref, 'viewerCanAdminister')
     if (node.viewerCanAdminister !== true) {
@@ -585,10 +624,15 @@ export async function editCmd(inv: CLIInvocation): Promise<CommandFnResult> {
  * `--yes` there and prompts, so without a terminal it refuses. `--confirm`
  * is gh's deprecated spelling of `--yes`, and it warns the way cobra does.
  */
-export async function deleteCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function deleteCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const confirmed = ghBool(fl, 'yes') || ghBool(fl, 'confirm')
-  const spec = inv.texts[0]
+  const spec = texts[0]
   if (spec === undefined && confirmed) {
     throw new UsageError(
       'cannot non-interactively delete current repository. Please specify a repository or run interactively',
@@ -596,9 +640,9 @@ export async function deleteCmd(inv: CLIInvocation): Promise<CommandFnResult> {
     )
   }
   if (!confirmed) throw new UsageError('--yes required when not running interactively', 1)
-  const transport = ghTransport(inv.config)
+  const transport = ghTransport(config)
   const named = spec ?? ''
-  const ref = ghRepo(inv.config, named.includes('/') ? named : `${await login(transport)}/${named}`)
+  const ref = ghRepo(config, named.includes('/') ? named : `${await login(transport)}/${named}`)
   await deleteRepo(transport, ref)
   const warning = ghBool(fl, 'confirm')
     ? 'Flag --confirm has been deprecated, use `--yes` instead\n'

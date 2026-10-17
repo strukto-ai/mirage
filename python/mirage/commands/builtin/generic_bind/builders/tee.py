@@ -23,7 +23,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     require_op,
 )
 from mirage.commands.builtin.utils.links import links_of
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -33,24 +33,22 @@ async def tee(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = (
-        await ops.resolve_glob(accessor, paths, opts.index) if paths else []
-    )
+    paths = await ops.resolve_glob(accessor, paths, ctx.index) if paths else []
     # A backend that can append natively does; the rest fall back to the
     # read-modify-write inside the generic.
     append = ops.append
-    links = links_of(opts)
+    links = links_of(ctx)
     return await generic_tee(
         paths,
         texts,
-        read_stream=bound_op(ops.read_stream, accessor, opts.index),
+        read_stream=bound_op(ops.read_stream, accessor, ctx.index),
         write_bytes=partial(require_op(ops, Operation.WRITE), accessor),
         append_bytes=(None if append is None else partial(append, accessor)),
-        stdin=opts.stdin,
-        flags=opts.flags,
-        stat=bound_op(ops.stat, accessor, opts.index),
+        stdin=ctx.stdin,
+        flags=ctx.flags,
+        stat=bound_op(ops.stat, accessor, ctx.index),
         output_key=(lambda p: links.resolve(p.virtual))
         if links is not None
         else None,

@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
-import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
+import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
+import type { PathSpec } from '@struktoai/mirage-core/types'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
@@ -25,12 +25,17 @@ import { pageSlice, sortHeaders, uidBudget } from './query.ts'
 
 export const DEFAULT_PAGE_SIZE = 25
 
-export async function listEnvelopes(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function listEnvelopes(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const mailbox = fl.asStr('mailbox') ?? 'INBOX'
   const page = fl.asInt('page') ?? 1
   const pageSize = fl.asInt('page_size') ?? DEFAULT_PAGE_SIZE
-  const account = inv.config as EmailConfig
+  const account = config as EmailConfig
   const budget = uidBudget(page, pageSize, [], account.maxMessages)
   const accessor = new EmailAccessor(account)
   let headers

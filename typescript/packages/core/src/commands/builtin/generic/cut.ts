@@ -17,7 +17,7 @@ import { quoteText } from '../../quote.ts'
 import { asyncChain } from '../../../io/stream.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { cutStream, parseRanges, type CutOptions } from '../cut_ranges.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { operandsIo, reportedStream, splitReadable } from '../utils/operands.ts'
@@ -89,12 +89,12 @@ function parseFlags(bag: Record<string, FlagValue>): CutOptions | string {
 
 export async function cutGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (path: PathSpec) => AsyncIterable<Uint8Array>,
   stat: (path: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
-  stream = stdinStream(stream, opts.stdin)
-  const parsed = parseFlags(opts.flags)
+  stream = stdinStream(stream, ctx.stdin)
+  const parsed = parseFlags(ctx.flags)
   if (typeof parsed === 'string') {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
   }
@@ -110,7 +110,7 @@ export async function cutGeneric(
   }
   let source: AsyncIterable<Uint8Array>
   try {
-    source = resolveSource(opts.stdin)
+    source = resolveSource(ctx.stdin)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${message}\n`) })]

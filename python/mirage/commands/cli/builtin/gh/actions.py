@@ -29,7 +29,7 @@ from mirage.commands.cli.builtin.gh.accessor import (
     text_out,
     typed_out,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.errors import PartialOutputError, UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.actions import (
@@ -50,7 +50,7 @@ from mirage.core.github.config import GhConfig
 from mirage.core.github.repo import RepoRef, view_repo
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import JsonValue
+from mirage.types import JsonValue, PathSpec
 
 RUN_FIELDS = (
     "attempt",
@@ -106,9 +106,9 @@ def _workflow(value: JsonValue) -> dict[str, Any]:
 
 
 async def run_list_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     params: dict[str, str] = {}
     for flag, key in (
         ("branch", "branch"),
@@ -124,8 +124,8 @@ async def run_list_cmd(
     rows = [
         _run(value)
         for value in await list_runs(
-            inv.config,
-            repo_for(inv, fl),
+            config,
+            repo_for(config, fl),
             params,
             list_limit(fl, 20),
             fl.as_str("workflow"),
@@ -144,21 +144,21 @@ async def run_list_cmd(
 
 
 async def run_view_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    raw = inv.texts[0] if inv.texts else ""
+    fl = FlagView(ctx.flags)
+    raw = texts[0] if texts else ""
     if not raw.isdigit():
         raise ValueError("a run ID is required in noninteractive mode")
     logs = gh_bool(fl, "log")
     failed_only = gh_bool(fl, "log_failed")
     if logs and failed_only:
         raise UsageError("specify only one of --log or --log-failed", 1)
-    ref = repo_for(inv, fl)
-    row = _run(await get_run(inv.config, ref, int(raw)))
+    ref = repo_for(config, fl)
+    row = _run(await get_run(config, ref, int(raw)))
     # `--json` is answered first, as gh's exporter is.
     if (logs or failed_only) and fl.as_str("json") is None:
-        return await _run_log(inv.config, ref, row, failed_only), IOResult()
+        return await _run_log(config, ref, row, failed_only), IOResult()
     human = (
         f"title:\t{row.get('displayTitle', '')}\n"
         f"workflow:\t{row.get('workflowName', '')}\n"
@@ -371,31 +371,31 @@ async def _run_log(
 
 
 async def run_rerun_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    raw = inv.texts[0] if inv.texts else ""
+    fl = FlagView(ctx.flags)
+    raw = texts[0] if texts else ""
     if not raw.isdigit():
         raise ValueError("a run ID is required in noninteractive mode")
-    ref = repo_for(inv, fl)
+    ref = repo_for(config, fl)
     job = fl.as_str("job")
     if job:
         if not job.isdigit():
             raise ValueError("--job expects a numeric job ID")
-        await rerun_job(inv.config, ref, int(job), gh_bool(fl, "debug"))
+        await rerun_job(config, ref, int(job), gh_bool(fl, "debug"))
     else:
         suffix = "rerun-failed-jobs" if gh_bool(fl, "failed") else "rerun"
         body: JsonValue = (
             {"enable_debug_logging": True} if gh_bool(fl, "debug") else None
         )
-        await rerun(inv.config, ref, int(raw), suffix, body)
+        await rerun(config, ref, int(raw), suffix, body)
     return text_out("")
 
 
 async def workflow_list_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     include = (
         None
         if gh_bool(fl, "all")
@@ -404,7 +404,7 @@ async def workflow_list_cmd(
     rows = [
         _workflow(value)
         for value in await list_workflows(
-            inv.config, repo_for(inv, fl), list_limit(fl, 50), include=include
+            config, repo_for(config, fl), list_limit(fl, 50), include=include
         )
     ]
     human = "".join(
@@ -415,18 +415,18 @@ async def workflow_list_cmd(
 
 
 async def workflow_view_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    workflow = inv.texts[0] if inv.texts else ""
+    fl = FlagView(ctx.flags)
+    workflow = texts[0] if texts else ""
     if not workflow:
         raise ValueError("a workflow ID, name, or filename is required")
     yaml = gh_bool(fl, "yaml")
     git_ref = fl.as_str("ref") or ""
     if not yaml and git_ref:
         raise UsageError("`--yaml` required when specifying `--ref`", 1)
-    ref = repo_for(inv, fl)
-    row = _workflow(await get_workflow(inv.config, ref, workflow))
+    ref = repo_for(config, fl)
+    row = _workflow(await get_workflow(config, ref, workflow))
     if not yaml:
         human = (
             f"{row.get('name', '')} - {row.get('state', '')}\n"
@@ -434,7 +434,7 @@ async def workflow_view_cmd(
         )
         return text_out(human)
     return await _workflow_yaml(
-        inv.config, ref, str(row.get("path", "")), git_ref
+        config, ref, str(row.get("path", "")), git_ref
     ), IOResult()
 
 
@@ -473,14 +473,12 @@ async def _workflow_yaml(
     return content if content.endswith(b"\n") else content + b"\n"
 
 
-async def _workflow_inputs(
-    inv: CLIInvocation[GhConfig], fl: FlagView
-) -> dict[str, JsonValue]:
+async def _workflow_inputs(ctx: Context, fl: FlagView) -> dict[str, JsonValue]:
     if gh_bool(fl, "json"):
-        if inv.stdin is None:
+        if ctx.stdin is None:
             raise ValueError("--json needs standard input")
         try:
-            value = json.loads((await materialize(inv.stdin)).decode())
+            value = json.loads((await materialize(ctx.stdin)).decode())
         except json.JSONDecodeError as exc:
             raise ValueError(
                 f"invalid JSON from standard input: {exc.msg}"
@@ -499,7 +497,7 @@ async def _workflow_inputs(
         if not sep:
             raise ValueError(f'expected "key=value", got "{pair}"')
         inputs[key] = (
-            (await read_cli_file(inv, value[1:], "--field")).decode()
+            (await read_cli_file(ctx, value[1:], "--field")).decode()
             if value.startswith("@")
             else value
         )
@@ -507,16 +505,16 @@ async def _workflow_inputs(
 
 
 async def workflow_run_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    workflow = inv.texts[0] if inv.texts else ""
+    fl = FlagView(ctx.flags)
+    workflow = texts[0] if texts else ""
     if not workflow:
         raise ValueError("a workflow ID, name, or filename is required")
-    ref = repo_for(inv, fl)
-    branch = fl.as_str("ref") or inv.config.branch
+    ref = repo_for(config, fl)
+    branch = fl.as_str("ref") or config.branch
     if not branch:
-        repo = await view_repo(inv.config, ref)
+        repo = await view_repo(config, ref)
         candidate = (
             repo.get("default_branch") if isinstance(repo, dict) else None
         )
@@ -525,7 +523,7 @@ async def workflow_run_cmd(
         raise ValueError("a workflow ref is required")
     body: dict[str, JsonValue] = {
         "ref": branch,
-        "inputs": await _workflow_inputs(inv, fl),
+        "inputs": await _workflow_inputs(ctx, fl),
     }
-    await dispatch_workflow(inv.config, ref, workflow, body)
+    await dispatch_workflow(config, ref, workflow, body)
     return text_out("")

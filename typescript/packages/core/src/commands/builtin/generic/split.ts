@@ -25,7 +25,7 @@ import { closeQuietly, OutputStream, rechunk } from '../../../io/stream.ts'
 import { CHUNK_SIZE } from '../../../io/cooperative.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { quoteText } from '../../quote.ts'
 import { extraOperandError } from '../../spec/usage.ts'
@@ -344,11 +344,11 @@ function prefixVirtualOf(prefix: PathSpec): string {
 
 export async function splitGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: ByteSource) => Promise<void>,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('split'))
+  const fl = new FlagView(ctx.flags, specOf('split'))
   if (paths.length > 2) throw extraOperandError(CommandName.SPLIT, paths[2]?.rawPath ?? '')
   // An output is the prefix operand, or `x` in the working directory, plus
   // its suffix, wherever the input lives: GNU writes `xaa` to the cwd, names
@@ -356,9 +356,9 @@ export async function splitGeneric(
   // first one it cannot create. Mirrors split.py.
   const prefixOperand = paths.length >= 2 ? paths[1] : undefined
   const prefixVirtual =
-    prefixOperand !== undefined ? prefixVirtualOf(prefixOperand) : resolvePath('x', opts.cwd)
+    prefixOperand !== undefined ? prefixVirtualOf(prefixOperand) : resolvePath('x', ctx.cwd.virtual)
   const typedPrefix = prefixOperand?.rawPath ?? 'x'
-  const mountPrefix = opts.mountPrefix ?? ''
+  const mountPrefix = ctx.mountPrefix ?? ''
   const linesValue = fl.asStr('lines')
   const bytesValue = fl.asStr('bytes')
   const numberValue = fl.asStr('number')
@@ -406,7 +406,7 @@ export async function splitGeneric(
   if (first !== undefined && first.rawPath !== '-') {
     source = stream(first)
   } else {
-    source = resolveSource(opts.stdin)
+    source = resolveSource(ctx.stdin)
   }
 
   let fileIdx = 0
@@ -470,7 +470,7 @@ export async function splitGeneric(
         const reader = new AsyncLineIterator(source)
         try {
           for (;;) {
-            const [line, terminated] = await reader.readUntil(separator, opts.signal)
+            const [line, terminated] = await reader.readUntil(separator, ctx.signal)
             if (line.byteLength === 0 && !terminated) break
             writer ??= open()
             await writer.write(line)

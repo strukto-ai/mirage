@@ -16,9 +16,8 @@ import { startPoint, checkSwitches, configSection, fatal, verbUsage } from './ut
 import { PathSpec, FileType } from '../../../../types.ts'
 
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIView, CLIInvocation } from '../../types.ts'
 import { DETACHED_ADVICE, switchTo } from './checkout.ts'
 import { CloneReadOnlyError, GitError, NoWorkspaceError, UsageError } from './errors.ts'
 import { configuredHeaders, fetchObjects, HEADS, ignoreFunny, TAGS } from './fetch.ts'
@@ -91,18 +90,20 @@ export function remoteHead(
  * config.
  */
 export async function clone(
-  inv: CLIInvocation,
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
   credentials: Readonly<Record<string, string>> = {},
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const view = inv.view ?? {}
-  const [url, named] = inv.texts
+  const fl = new FlagView(ctx.flags)
+  const [url, named] = texts
   try {
-    checkSwitches(inv, inv.texts)
+    checkSwitches(ctx, texts)
     if (url === undefined) {
       throw new UsageError(
         '',
-        `fatal: You must specify a repository to clone.\n\n${verbUsage(inv)}`,
+        `fatal: You must specify a repository to clone.\n\n${verbUsage(ctx)}`,
       )
     }
   } catch (err) {
@@ -116,7 +117,7 @@ export async function clone(
   let transport: Transport
   let start: PathSpec
   try {
-    const { vfs } = view
+    const vfs = ctx.vfs
     if (vfs === undefined) throw new NoWorkspaceError()
     start = startPoint(fl)
     target = PathSpec.fromStrPath(name, undefined, start)
@@ -128,10 +129,10 @@ export async function clone(
       throw new GitError(`destination path '${name}' already exists and is not an empty directory.`)
     fresh = info === null
     transport = await openTransport(
+      ctx,
       url,
       start,
-      view,
-      await configuredHeaders(inv, null),
+      await configuredHeaders(ctx, null),
       credentials,
     )
   } catch (err) {
@@ -144,10 +145,10 @@ export async function clone(
   const stored = !local || url.startsWith('/') ? url : `${start.virtual.replace(/\/+$/, '')}/${url}`
   let notes = quiet ? '' : `Cloning into '${name}'...\n`
   try {
-    notes += await populate(inv, view, transport, target, stored, local && !quiet)
+    notes += await populate(ctx, transport, target, stored, local && !quiet)
   } catch (err) {
     if (!(err instanceof GitError)) throw err
-    const { vfs } = view
+    const vfs = ctx.vfs
     if (fresh && vfs !== undefined) await removeTree(vfs, target)
     else if (vfs !== undefined)
       for (const entry of await readNames(vfs, target)) {
@@ -162,15 +163,14 @@ export async function clone(
 
 /** Lay the clone out, fetch into it and check it out; returns what it prints after `Cloning into`. */
 async function populate(
-  inv: CLIInvocation,
-  view: CLIView,
+  ctx: Context,
   transport: Transport,
   target: PathSpec,
   url: string,
   local: boolean,
 ): Promise<string> {
-  const fl = new FlagView(inv.flags)
-  const { vfs } = view
+  const fl = new FlagView(ctx.flags)
+  const vfs = ctx.vfs
   if (vfs === undefined) throw new NoWorkspaceError()
   const gitdir = target.join('.git')
   const remote = fl.asStr('origin') ?? 'origin'
@@ -255,5 +255,5 @@ async function populate(
 }
 
 /** clone's refusal by a read-only mount, at the work tree it could not make. */
-export const cloneReadOnly: ReadOnlyRefusal = (inv) =>
-  new CloneReadOnlyError(inv.texts[1] ?? defaultDirectory(inv.texts[0] ?? ''))
+export const cloneReadOnly: ReadOnlyRefusal = (texts) =>
+  new CloneReadOnlyError(texts[1] ?? defaultDirectory(texts[0] ?? ''))

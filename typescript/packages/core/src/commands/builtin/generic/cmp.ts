@@ -18,7 +18,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { formatFsError } from '../../../errors/render.ts'
 import { isEisdir, isFsError } from '../../../errors/fs.ts'
 import { CMP_SIZE_UNITS, INTMAX, XSTRTOUMAX_PATTERN } from '../constants.ts'
@@ -459,17 +459,17 @@ async function oneStdinTwice(
 export async function cmpGeneric(
   paths: PathSpec[],
   texts: readonly string[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   sizeOf?: (p: PathSpec) => Promise<number | null>,
 ): Promise<[ByteSource | null, IOResult]> {
-  const parsed = parseFlags(new FlagView(opts.flags, specOf('cmp')))
+  const parsed = parseFlags(new FlagView(ctx.flags, specOf('cmp')))
   const p0 = paths[0]
-  if (p0 === undefined) throw missingOperandError(CommandName.CMP, null, opts.argv ?? [])
+  if (p0 === undefined) throw missingOperandError(CommandName.CMP, null, ctx.argv ?? [])
   const skip = operandSkips(texts, parsed.skip)
   // A lone FILE1 is compared with stdin, which GNU names `-`.
   const p1 = paths[1] ?? STDIN_OPERAND
-  const read = stdinStream(stream, opts.stdin, true)
+  const read = stdinStream(stream, ctx.stdin, true)
   if (isStdin(p0) && isStdin(p1)) return oneStdinTwice(read, p0, skip, parsed)
   const names = [p0.rawPath, p1.rawPath] as const
   const same = p0.virtual === p1.virtual && skip[0] === skip[1]
@@ -491,7 +491,7 @@ export async function cmpGeneric(
   try {
     let unread: unknown = null
     for (const p of [p0, p1]) {
-      const operand = new Operand(read(p), opts.signal)
+      const operand = new Operand(read(p), ctx.signal)
       operands.push(operand)
       try {
         await operand.pull()

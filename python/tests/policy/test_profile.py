@@ -20,7 +20,7 @@ import pytest
 from pydantic import ValidationError
 
 from mirage.commands.cli.specs import cli_spec_for
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.spec.types import CommandSpec
 from mirage.context import reset_current_session, set_current_session
 from mirage.io.types import IOResult
@@ -2538,19 +2538,17 @@ async def test_a_dispatched_read_through_a_link_meets_the_target_rule():
 
 
 @command("zap", vfs="ram", spec=CommandSpec())
-async def _zap(
-    store, paths: list[PathSpec], texts: list[str], opts: CommandOpts
-):
+async def _zap(store, paths: list[PathSpec], texts: list[str], ctx: Context):
     # A host command that removes or moves a name through the dispatcher
     # it is handed, the way a custom command reaches a mount.
     target = PathSpec.from_str_path("/data/alias/secret")
     try:
         if texts and texts[0] == "rename":
-            await opts.dispatch(
+            await ctx.dispatch(
                 "rename", target, dst=PathSpec.from_str_path("/data/moved")
             )
         else:
-            await opts.dispatch("unlink", target)
+            await ctx.dispatch("unlink", target)
     except OSError as exc:
         return None, IOResult(
             exit_code=1, stderr=f"zap: {exc.strerror}\n".encode()

@@ -14,7 +14,7 @@
 
 import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
-import { type CommandOpts, type Command } from '../../commands/config.ts'
+import { type Context, type Command } from '../../commands/config.ts'
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import { RAMVFS } from './ram.ts'
@@ -99,7 +99,7 @@ async function runCmd(
   reg: readonly Command[],
   vfs: RAMVFS,
   paths: PathSpec[],
-  flags: CommandOpts['flags'],
+  flags: Context['flags'],
   texts: string[] = [],
   mountPrefix = '',
   links: NamespaceLinks | null = null,
@@ -111,7 +111,7 @@ async function runCmd(
     stdin: null,
     flags,
     io: commandIo(vfs),
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     mountPrefix,
     ...(links !== null ? { vfs: filesOver(vfs, links) } : {}),
   })

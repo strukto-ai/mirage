@@ -16,16 +16,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import tzinfo
 from enum import StrEnum
-from typing import TYPE_CHECKING
 
 from dulwich.index import ConflictedIndexEntry, IndexEntry
 
 from mirage.commands.cli.builtin.git.errors import GitError
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.types import FileStat, PathSpec
-
-if TYPE_CHECKING:
-    from mirage.workspace.files import Files
+from mirage.workspace.files import Files
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,9 +81,7 @@ class RepoLocation:
 
 # git's refusal for a verb a read-only mount turned down, built from the
 # line and the repository it opened, None when it opened none.
-ReadOnlyRefusal = Callable[
-    [CLIInvocation[None], RepoLocation | None], GitError
-]
+ReadOnlyRefusal = Callable[[list[str], Context, RepoLocation | None], GitError]
 
 
 @dataclass(frozen=True, slots=True)

@@ -15,14 +15,19 @@
 import { FlagView } from '../../../spec/flag_view.ts'
 import { searchMessages } from '../../../../core/slack/search.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 import { slackAccessor } from '../../../../accessor/slack.ts'
 
-export async function search(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function search(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const out: ByteSource = await searchMessages(
-    slackAccessor(inv.config),
+    slackAccessor(config),
     fl.asStr('query') ?? '',
     fl.asInt('count') ?? 20,
     fl.asInt('page') ?? 1,

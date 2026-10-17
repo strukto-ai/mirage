@@ -26,7 +26,7 @@ import {
   type LsSortBy,
   type LsTimeKind,
 } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import type { ChildMounts, LinkView, MountView, StatPath } from '../../../view/types.ts'
 import {
   LS_TIME_STYLES,
@@ -282,13 +282,13 @@ function appendListing(
         })
   if (render.long) {
     const marked = longNames(stats, names, render.indicator, targets)
-    const opts = {
+    const ctx = {
       human: render.human,
       identity: render.identity,
       columns: render.columns,
       ...(marked !== null ? { names: marked } : {}),
     }
-    for (const line of formatLsLong(stats, opts)) lines.push(line)
+    for (const line of formatLsLong(stats, ctx)) lines.push(line)
     return
   }
   stats.forEach((s, i) => lines.push(formatSimple(s, render.indicator, render.columns, names?.[i])))
@@ -547,11 +547,11 @@ async function listDir(
   readdir: Readdir,
   stat: Stat,
   dir: PathSpec,
-  opts: WalkOpts,
+  ctx: WalkOpts,
   warnings: LsWarning[],
   spell: (virtual: string) => string,
 ): Promise<{ stats: FileStat[]; structureOnly: boolean }> {
-  const { all, links, childMounts } = opts
+  const { all, links, childMounts } = ctx
   let entries: string[]
   let structureOnly = false
   try {
@@ -568,7 +568,7 @@ async function listDir(
     entries = []
     structureOnly = true
   }
-  const entryStat: Stat = (p: PathSpec) => followedStat(stat, opts.deref ? links : null, p)
+  const entryStat: Stat = (p: PathSpec) => followedStat(stat, ctx.deref ? links : null, p)
   const prefix = mountPrefixOf(dir.virtual, dir.vfsPath)
   const stats: FileStat[] = []
   for (const entry of entries) {
@@ -580,7 +580,7 @@ async function listDir(
       const row = statFailedRow(entry)
       stats.push(row)
       if (!all && row.name.startsWith('.')) continue
-      if (!opts.statNeeded) continue
+      if (!ctx.statNeeded) continue
       // An entry below an operand is never a command-line arg.
       warnings.push({
         message: `ls: cannot access '${spell(rstripSlash(entry))}': ${failureText(err)}`,
@@ -590,8 +590,8 @@ async function listDir(
     }
     stats.push(s)
     if (
-      opts.deref &&
-      opts.statNeeded &&
+      ctx.deref &&
+      ctx.statNeeded &&
       s.type === FileType.SYMLINK &&
       (all || !s.name.startsWith('.'))
     ) {
@@ -608,7 +608,7 @@ async function listDir(
   for (const name of childMounts?.(dir.virtual) ?? []) {
     if (seen.has(name)) continue
     seen.add(name)
-    stats.push(await mountRow(dir, name, opts.statPath))
+    stats.push(await mountRow(dir, name, ctx.statPath))
   }
   return {
     stats: all ? stats : stats.filter((s) => !s.name.startsWith('.')),
@@ -635,26 +635,26 @@ async function probeOperand(
   readdir: Readdir,
   stat: Stat,
   path: PathSpec,
-  opts: WalkOpts,
+  ctx: WalkOpts,
   warnings: LsWarning[],
   commandLineArg: boolean,
   chain: readonly string[] = [],
   spell: ((virtual: string) => string) | null = null,
 ): Promise<Operand> {
   const spelled = spell ?? ((virtual: string) => respellOne(virtual, path.virtual, path.rawPath))
-  const links = opts.links
-  const ownStat: Stat = (p: PathSpec) => followedStat(stat, opts.deref ? links : null, p)
-  if (path.walkError === null && (commandLineArg || !opts.deref)) {
+  const links = ctx.links
+  const ownStat: Stat = (p: PathSpec) => followedStat(stat, ctx.deref ? links : null, p)
+  if (path.walkError === null && (commandLineArg || !ctx.deref)) {
     // The table's readdir opens what a link leads to, as opendir(3) does,
     // so a link the line left unresolved is asked first: the router
     // already resolved every one this ls follows.
-    const link = linkRow(path, opts.links)
+    const link = linkRow(path, ctx.links)
     if (link !== null) return { path, row: link, groups: [] }
   }
   let stats: FileStat[]
   let structureOnly = false
   try {
-    const listed = await listDir(readdir, stat, path, opts, warnings, spelled)
+    const listed = await listDir(readdir, stat, path, ctx, warnings, spelled)
     stats = listed.stats
     structureOnly = listed.structureOnly
   } catch (err) {
@@ -677,7 +677,7 @@ async function probeOperand(
       }
     }
     if (row !== null) return { path, row, groups: [] }
-    const link = looped && commandLineArg && !opts.followArgs ? linkRow(path, links) : null
+    const link = looped && commandLineArg && !ctx.followArgs ? linkRow(path, links) : null
     if (link !== null) return { path, row: link, groups: [] }
     // GNU stats an operand before it opens one (ls.c's gobble_file, coreutils
     // 9.7): a stat that fails is what it names, and a directory it may not
@@ -701,20 +701,20 @@ async function probeOperand(
   }
   const entries = sortStats(
     stats,
-    opts.sortBy,
-    opts.reverse,
-    opts.timeKind,
-    opts.groupDirsFirst,
-    opts.escape,
+    ctx.sortBy,
+    ctx.reverse,
+    ctx.timeKind,
+    ctx.groupDirsFirst,
+    ctx.escape,
   )
   const groups: [PathSpec, FileStat[]][] = [[path, entries]]
-  if (opts.recursive) {
-    const real = opts.deref && links !== null ? (virtual: string) => links.resolve(virtual) : null
+  if (ctx.recursive) {
+    const real = ctx.deref && links !== null ? (virtual: string) => links.resolve(virtual) : null
     const open = real !== null && chain.length === 0 ? [real(path.virtual)] : chain
     for (const s of entries) {
       if (s.type !== FileType.DIRECTORY) continue
       const childPath = `${rstripSlash(path.virtual)}/${s.name}`
-      if (opts.mounts?.isRoot(childPath) ?? false) {
+      if (ctx.mounts?.isRoot(childPath) ?? false) {
         // A nested mount's root. Its row belongs here, but its listing
         // is another backend's, which this walk cannot read: the
         // cross-mount fan-out renders that group.
@@ -738,7 +738,7 @@ async function probeOperand(
         readdir,
         stat,
         childSpec(childPath, mountPrefixOf(path.virtual, path.vfsPath)),
-        opts,
+        ctx,
         warnings,
         false,
         below,
@@ -1150,20 +1150,20 @@ function finish(lines: string[], warnings: readonly LsWarning[]): CommandFnResul
 
 export async function lsGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   readdir: Readdir,
   stat: Stat,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('ls'))
+  const fl = new FlagView(ctx.flags, specOf('ls'))
   const targets: PathSpec[] =
     paths.length > 0
       ? paths
       : [
           new PathSpec({
-            virtual: opts.cwd,
-            directory: opts.cwd,
+            virtual: ctx.cwd.virtual,
+            directory: ctx.cwd.virtual,
             resolved: false,
-            vfsPath: mountKey(opts.cwd, opts.mountPrefix ?? ''),
+            vfsPath: mountKey(ctx.cwd.virtual, ctx.mountPrefix ?? ''),
           }),
         ]
   const flags = parseFlags(fl)
@@ -1181,8 +1181,8 @@ export async function lsGeneric(
     followArgs,
   } = flags
   const listDirItself = flags.listDir
-  const links = linksOf(opts) ?? null
-  const identity = identityOf(opts)
+  const links = linksOf(ctx) ?? null
+  const identity = identityOf(ctx)
   const render: RenderOpts = {
     long,
     human,
@@ -1209,7 +1209,7 @@ export async function lsGeneric(
         collected.push({ row: asOperand(await stat(p), p), href: p.virtual })
       } catch (err) {
         if (!isWalkError(err)) throw err
-        if (!isDotWalkError(err) && owedNames(opts.vfs, p.virtual).length > 0) {
+        if (!isDotWalkError(err) && owedNames(ctx.vfs, p.virtual).length > 0) {
           // No backend serves it, but the namespace owes it children,
           // so the dispatcher stats it as a directory and -d must print the
           // same row.
@@ -1259,9 +1259,9 @@ export async function lsGeneric(
     links,
     deref,
     followArgs,
-    childMounts: opts.vfs === undefined ? null : (dir: string) => owedNames(opts.vfs, dir),
-    mounts: mountsOf(opts) ?? null,
-    statPath: opts.statPath ?? null,
+    childMounts: ctx.vfs === undefined ? null : (dir: string) => owedNames(ctx.vfs, dir),
+    mounts: mountsOf(ctx) ?? null,
+    statPath: ctx.statPath ?? null,
     statNeeded: statNeeded(flags),
   }
   const probed: Operand[] = []
@@ -1298,11 +1298,11 @@ export async function lsGeneric(
           let row = new FileStat({ name, type: FileType.DIRECTORY })
           // Only the namespace can stat a parent outside this mount.
           // Without `statPath`, keep the synthetic directory row.
-          if (statNeeded(flags) && (opts.statPath !== undefined || underPath(target, prefix))) {
+          if (statNeeded(flags) && (ctx.statPath !== undefined || underPath(target, prefix))) {
             try {
               const found =
-                opts.statPath !== undefined
-                  ? await opts.statPath(target)
+                ctx.statPath !== undefined
+                  ? await ctx.statPath(target)
                   : await stat(childSpec(target, prefix))
               if (found !== null) row = found.with({ name })
             } catch (err) {

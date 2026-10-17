@@ -65,7 +65,7 @@ export function hasInjectedVersion(spec: CommandSpec | null): boolean {
 }
 
 function parse(name: string, spec: CommandSpec, words: string[]): ParsedArgs {
-  return parseCommand(spec, words, ROOT_CWD, name)
+  return parseCommand(spec, words, ROOT_CWD.virtual, name)
 }
 
 function hasOptionError(parsed: ParsedArgs): boolean {

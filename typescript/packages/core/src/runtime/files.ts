@@ -154,7 +154,7 @@ export class RuntimeFiles {
   static of(context: RuntimeContext | undefined): RuntimeFiles | null
   static of(context: RuntimeContext | undefined): RuntimeFiles | null {
     if (context === undefined) return null
-    const links = linkView(context.vfs ?? undefined)
+    const links = linkView(context.ctx.vfs)
     return new RuntimeFiles(
       context.dispatch,
       context.resolver,

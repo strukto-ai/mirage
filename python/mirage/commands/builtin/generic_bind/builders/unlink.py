@@ -19,7 +19,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     require_op,
 )
 from mirage.commands.builtin.utils.links import links_of
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.errors.constants import FS_ERRORS
@@ -33,7 +33,7 @@ async def unlink(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or not paths:
         raise UsageError(
@@ -41,11 +41,11 @@ async def unlink(
             "Try 'unlink --help' for more information.",
             1,
         )
-    paths = await ops.resolve_glob(accessor, paths, opts.index)
+    paths = await ops.resolve_glob(accessor, paths, ctx.index)
     if len(paths) > 1:
         raise extra_operand_error("unlink", paths[1].raw_path)
     p = paths[0]
-    links = links_of(opts)
+    links = links_of(ctx)
     # unlink(2) never follows, so a trailing slash on a link operand is
     # refused rather than resolved: GNU answers `unlink dlink/` and
     # `unlink flink/` alike with ENOTDIR, where a real directory under a
@@ -63,7 +63,7 @@ async def unlink(
             ).encode(),
         )
     try:
-        s = await ops.stat(accessor, p, index=opts.index)
+        s = await ops.stat(accessor, p, index=ctx.index)
     except FS_ERRORS as exc:
         return None, IOResult(
             exit_code=1,

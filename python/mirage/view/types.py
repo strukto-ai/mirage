@@ -152,11 +152,10 @@ class SessionView:
     needs one, and it is the whole capability: no field reaches the raw
     session behind it.
 
-    Delivered as the ``session_view`` field of ``CommandOpts`` and of
-    ``CLIView``; a command opts in by reading it, and one that never
-    reads it cannot write the session. The name is not ``env`` because
-    the snapshot has that one. ``cwd`` is the session's working
-    directory, the one an operand resolves against.
+    Delivered as the ``session`` field of a handler's ``Context``; a
+    command or CLI opts in by reading it, and one that never reads it
+    cannot write the session. ``env`` stays the snapshot. ``cwd`` is the
+    session's working directory, the one an operand resolves against.
     """
 
     get: EnvGet
@@ -200,7 +199,7 @@ class MountView:
     that needs both (``tar`` prunes by one and warns by the other) reads
     both fields.
 
-    Read off a command's files (``mounts_of(opts)``).
+    Read off a command's files (``mounts_of(ctx)``).
     """
 
     # Every mount root strictly under a path, for a caller avoiding one.
@@ -319,7 +318,7 @@ class LinkView:
     builder in the chain, and the generic; it reads another field off
     the view it already receives.
 
-    Read off a command's files (``links_of(opts)``).
+    Read off a command's files (``links_of(ctx)``).
     """
 
     # lstat one path (a link operand: `ls -l link`, `stat link`).

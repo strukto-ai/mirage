@@ -15,9 +15,9 @@
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import {
   AmbiguousArgumentError,
   EmptyPathspecError,
@@ -41,16 +41,21 @@ import { checkSwitches, fatal, startPoint, verbUsage } from './util.ts'
  * the start directory (`ls-files ..` from a subdirectory prints
  * `../README.md`).
  */
-export async function lsFiles(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function lsFiles(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    checkSwitches(inv, inv.texts)
-    const repo = await opened(fl, inv.view ?? {})
+    checkSwitches(ctx, texts)
+    const repo = await opened(ctx, fl)
     const fully = await configBool(repo, 'core.quotepath', true)
     const state = await readIndex(repo, repo.vfs)
     const start = startPoint(fl).virtual
     const prefix = repoRelative(repo.location, start, '.')
-    const patterns = pathspecPatterns(repo.location, start, inv.texts)
+    const patterns = pathspecPatterns(repo.location, start, texts)
     const rows = [...state.entries.values()]
     for (const conflict of state.conflicts.values()) {
       for (const entry of [conflict.ancestor, conflict.this, conflict.other])
@@ -80,13 +85,18 @@ export async function lsFiles(inv: CLIInvocation): Promise<CommandFnResult> {
 }
 
 /** List tree metadata without reading file contents. */
-export async function lsTree(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function lsTree(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    checkSwitches(inv, inv.texts)
-    const [name, ...paths] = inv.texts
-    if (name === undefined) throw new UsageError('', verbUsage(inv))
-    const repo = await opened(fl, inv.view ?? {})
+    checkSwitches(ctx, texts)
+    const [name, ...paths] = texts
+    if (name === undefined) throw new UsageError('', verbUsage(ctx))
+    const repo = await opened(ctx, fl)
     let tree: string
     try {
       tree = await resolveTree(repo, name)

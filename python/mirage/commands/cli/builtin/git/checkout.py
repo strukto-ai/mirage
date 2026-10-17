@@ -116,11 +116,11 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
 )
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_ALL, scan
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType
+from mirage.types import FileType, PathSpec
 from mirage.workspace.files import Files
 
 # git's word-for-word warning when HEAD leaves a branch, kept verbatim.
@@ -727,9 +727,9 @@ async def _names_path(
 
 
 async def _checkout_paths(
+    ctx: Context,
     repo: BaseRepo,
     location: RepoLocation,
-    view: CLIView,
     fl: FlagView,
     treeish: str | None,
     paths: Sequence[str],
@@ -743,9 +743,9 @@ async def _checkout_paths(
     or from the tree's abbreviated id. Pinned against git 2.50.1.
 
     Args:
+        ctx (Context): the line's context.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
-        view (CLIView): the invocation's view.
         fl (FlagView): the line's flags.
         treeish (str | None): the tree-ish named ahead of the paths,
             None for the index.
@@ -760,9 +760,9 @@ async def _checkout_paths(
         except UnresolvableSourceError as exc:
             raise InvalidReferenceError(treeish) from exc
     notes, updated = await restore_paths(
+        ctx,
         repo,
         location,
-        view,
         paths,
         start_point(fl).virtual,
         source,
@@ -780,7 +780,7 @@ async def _checkout_paths(
 
 
 async def checkout(
-    inv: CLIInvocation[None],
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Switch the working tree to another branch or commit, or put
     paths back.
@@ -792,19 +792,19 @@ async def checkout(
     names, are put back instead; see ``_checkout_paths``.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model; it reads its repository
-            through ``inv.view.vfs``.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context; git reads its repository
+            through ``ctx.vfs``.
     """
-    view = inv.view or CLIView()
-    vfs = view.vfs
-    texts = inv.texts
-    flags = inv.flags
+    vfs = ctx.vfs
+    flags = ctx.flags
     fl = FlagView(flags)
     try:
         if vfs is None:
             raise NoWorkspaceError()
-        check_switches(inv, texts)
+        check_switches(ctx, texts)
         detach = fl.as_bool("detach")
         if detach and fl.as_bool("b"):
             raise DetachWithCreateError()
@@ -813,7 +813,7 @@ async def checkout(
             raise UnknownPathspecError("")
         if detach and len(texts) > 1:
             raise DetachPathError(texts[1])
-        repo, location = await opened(fl, view, work_tree=True)
+        repo, location = await opened(ctx, fl, work_tree=True)
         mode = await track_mode(vfs, location)
         head = await read_head(vfs, location.gitdir)
         creating = fl.as_bool("b")
@@ -822,12 +822,12 @@ async def checkout(
         if creating and len(texts) > 2:
             raise PathsWithBranchError(target)
         if not creating and not detach:
-            leading, marked = split_marked(tuple(texts), inv.argv)
+            leading, marked = split_marked(tuple(texts), ctx.argv)
             if marked:
                 return await _checkout_paths(
+                    ctx,
                     repo,
                     location,
-                    view,
                     fl,
                     leading[0] if leading else None,
                     [*leading[1:], *marked],
@@ -840,9 +840,9 @@ async def checkout(
                     else None
                 )
                 return await _checkout_paths(
+                    ctx,
                     repo,
                     location,
-                    view,
                     fl,
                     treeish,
                     texts if treeish is None else texts[1:],
@@ -867,7 +867,7 @@ async def checkout(
                     vfs, location, start_point(fl).virtual, target
                 ):
                     return await _checkout_paths(
-                        repo, location, view, fl, None, list(texts), True
+                        ctx, repo, location, fl, None, list(texts), True
                     )
                 guessed = remote_branch(repo, target)
                 if guessed is None:
@@ -959,7 +959,7 @@ async def checkout(
 
 
 def checkout_read_only(
-    inv: CLIInvocation[None], location: RepoLocation | None
+    texts: list[str], ctx: Context, location: RepoLocation | None
 ) -> GitError:
     """checkout's refusal by a read-only mount.
 
@@ -967,11 +967,12 @@ def checkout_read_only(
     the index's otherwise.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
+        texts (list[str]): the line's operands.
+        ctx (Context): the line's context.
         location (RepoLocation | None): the repository it opened.
     """
-    if not FlagView(inv.flags).as_bool("b") or not inv.texts:
-        return index_locked(inv, location)
-    ref = f"{BRANCH_PREFIX}{inv.texts[0]}"
+    if not FlagView(ctx.flags).as_bool("b") or not texts:
+        return index_locked(texts, ctx, location)
+    ref = f"{BRANCH_PREFIX}{texts[0]}"
     root = location.commondir.virtual if location is not None else ".git"
     return RefReadOnlyError(ref, posixpath.join(root, ref))

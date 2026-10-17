@@ -15,20 +15,21 @@
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.builder import Source
 from mirage.commands.cli.builtin.himalaya.util import first_text, route
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.email.client import fetch_message
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 
 async def reply(
-    inv: CLIInvocation[EmailConfig],
+    config: EmailConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    uid = first_text(inv.texts, "message id")
+    fl = FlagView(ctx.flags)
+    uid = first_text(texts, "message id")
     mailbox = fl.as_str("mailbox") or "INBOX"
-    accessor = EmailAccessor(inv.config)
+    accessor = EmailAccessor(config)
     try:
         original = await fetch_message(accessor, mailbox, uid)
     finally:
@@ -41,4 +42,4 @@ async def reply(
         ),
         quote_headline=fl.as_str("quote_headline") or "",
     )
-    return await route(inv.config, fl, inv.stdin, source, inv.view)
+    return await route(config, fl, ctx.stdin, source, ctx.vfs)

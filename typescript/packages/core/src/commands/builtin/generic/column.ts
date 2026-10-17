@@ -17,7 +17,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 import { joinFileBytes, splitLines } from '../utils/lines.ts'
 import { advanceColumn, isSpace, textWidth } from '../../../utils/width.ts'
@@ -123,10 +123,10 @@ function parseFlags(bag: Record<string, FlagValue>): ColumnFlags {
 
 export async function columnGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  const parsed = parseFlags(opts.flags)
+  const parsed = parseFlags(ctx.flags)
   let raw: Uint8Array
   if (paths.length > 0) {
     // Every operand is read, as one run of lines in which a file's last line
@@ -135,13 +135,13 @@ export async function columnGeneric(
     for (const path of paths) parts.push(await materialize(stream(path)))
     raw = joinFileBytes(parts, 0x0a)
   } else {
-    const stdinData = await readStdinAsync(opts.stdin)
+    const stdinData = await readStdinAsync(ctx.stdin)
     raw = stdinData ?? new Uint8Array(0)
   }
   const text = DEC.decode(raw)
   const output = parsed.table
     ? tableFormat(text, parsed.separator, parsed.outputSeparator ?? '  ')
-    : fillColumns(text, outputWidth(opts.env))
+    : fillColumns(text, outputWidth(ctx.env))
   const result: ByteSource = ENC.encode(output)
   return [result, new IOResult()]
 }

@@ -24,7 +24,7 @@ from mirage.commands.cli.builtin.gh.accessor import (
     read_cli_file,
 )
 from mirage.commands.cli.builtin.gh.constants import HTTP_REASONS
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.errors import PartialOutputError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.client import GitHubApiError, github_request_response
@@ -149,15 +149,17 @@ def _set_field(fields: dict[str, Any], key: str, value: Any) -> None:
     _put(fields, _key_parts(key), value)
 
 
-async def _field_value(inv: CLIInvocation[GhConfig], value: str) -> JsonValue:
-    expanded = expand(value, inv.config)
+async def _field_value(
+    config: GhConfig, ctx: Context, value: str
+) -> JsonValue:
+    expanded = expand(value, config)
     if expanded.startswith("@"):
-        return (await read_cli_file(inv, expanded[1:], "--field")).decode()
+        return (await read_cli_file(ctx, expanded[1:], "--field")).decode()
     return typed(expanded)
 
 
 async def _fields(
-    inv: CLIInvocation[GhConfig], fl: FlagView
+    config: GhConfig, ctx: Context, fl: FlagView
 ) -> dict[str, Any]:
     fields: dict[str, Any] = {}
     for pair in fl.as_list("raw_field"):
@@ -168,7 +170,7 @@ async def _fields(
         landed = (
             value
             if value is _EMPTY_ARRAY
-            else await _field_value(inv, str(value))
+            else await _field_value(config, ctx, str(value))
         )
         _set_field(fields, key, landed)
     return fields
@@ -184,9 +186,7 @@ def _headers(fl: FlagView) -> dict[str, str]:
     return headers
 
 
-async def _input(
-    inv: CLIInvocation[GhConfig], fl: FlagView
-) -> "JsonValue | None":
+async def _input(ctx: Context, fl: FlagView) -> "JsonValue | None":
     raw = fl.raw("input")
     if raw is None:
         return None
@@ -194,7 +194,7 @@ async def _input(
     try:
         return cast(
             JsonValue,
-            json.loads((await read_cli_file(inv, raw, "--input")).decode()),
+            json.loads((await read_cli_file(ctx, raw, "--input")).decode()),
         )
     except json.JSONDecodeError as exc:
         raise ValueError(f"invalid JSON in {path}: {exc.msg}") from None
@@ -234,19 +234,19 @@ def _next_path(link: str | None, base_url: str | None) -> str | None:
 
 
 async def api(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Execute the supported, noninteractive `gh api` surface."""
-    fl = FlagView(inv.flags)
-    endpoint = inv.texts[0] if inv.texts else ""
+    fl = FlagView(ctx.flags)
+    endpoint = texts[0] if texts else ""
     if not endpoint:
         raise ValueError("an API endpoint is required")
-    fields = await _fields(inv, fl)
-    input_body = await _input(inv, fl)
+    fields = await _fields(config, ctx, fl)
+    input_body = await _input(ctx, fl)
     has_input = fl.raw("input") is not None
     method = fl.as_str("method") or ("POST" if fields or has_input else "GET")
     upper = method.upper()
-    path = expand(endpoint, inv.config)
+    path = expand(endpoint, config)
     if path != GRAPHQL_PATH and not path.startswith("/"):
         path = f"/{path}"
 
@@ -269,21 +269,21 @@ async def api(
         try:
             if has_input or body is not None:
                 response = await github_request_response(
-                    inv.config.token,
+                    config.token,
                     upper,
                     current,
                     body,
                     request_params,
-                    base_url=inv.config.base_url,
+                    base_url=config.base_url,
                     headers=_headers(fl) or None,
                 )
             else:
                 response = await github_request_response(
-                    inv.config.token,
+                    config.token,
                     upper,
                     current,
                     params=request_params,
-                    base_url=inv.config.base_url,
+                    base_url=config.base_url,
                     headers=_headers(fl) or None,
                 )
         except GitHubApiError as exc:
@@ -312,7 +312,7 @@ async def api(
         pages.append(_Printed(response.data, head))
         first = False
         current = (
-            _next_path(response.headers.get("link"), inv.config.base_url)
+            _next_path(response.headers.get("link"), config.base_url)
             if gh_bool(fl, "paginate")
             else None
         )

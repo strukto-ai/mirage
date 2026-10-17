@@ -21,7 +21,7 @@ read, write-gated -i).
 import pytest
 
 from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
 from mirage.vfs.github import GitHubVFS
@@ -56,9 +56,7 @@ async def _run(accessor, index, path, expr, **kwargs):
         accessor,
         [_scope(path)],
         [expr],
-        CommandOpts(
-            io=io_for(GitHubVFS, accessor), index=index, flags={**kwargs}
-        ),
+        Context(io=io_for(GitHubVFS, accessor), index=index, flags={**kwargs}),
     )
     data = await materialize(stdout) if stdout is not None else b""
     return data.decode(errors="replace"), io

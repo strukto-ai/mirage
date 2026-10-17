@@ -16,7 +16,7 @@ import { isStdin, stdinStream } from '../utils/stream.ts'
 import { guardInput } from '../utils/limit.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isEisdir, isFsError } from '../../../errors/fs.ts'
 import { resolveSource } from '../utils/stream.ts'
@@ -89,13 +89,13 @@ export function parseFlags(bag: Record<string, FlagValue>): WcFlags | string {
 // running maximum rather than a per-line one because carriage return and form
 // feed rewind the column without ending the line -- which is why the old
 // `split(/\r?\n/)` could not express it. Mirrors Python's `_scan_text`.
-async function countsOf(source: ByteSource, opts: CommandOpts, flags: WcFlags): Promise<WcCounts> {
+async function countsOf(source: ByteSource, ctx: Context, flags: WcFlags): Promise<WcCounts> {
   const byteCountsOnly =
     (flags.lines || flags.bytes) && !flags.words && !flags.chars && !flags.maxLineLength
   if (byteCountsOnly) {
     let lines = 0
     let bytes = 0
-    for await (const chunk of guardInput(source, opts)) {
+    for await (const chunk of guardInput(source, ctx)) {
       bytes += chunk.byteLength
       if (flags.lines) for (let i = 0; i < chunk.byteLength; i++) if (chunk[i] === 0x0a) lines++
     }
@@ -131,7 +131,7 @@ async function countsOf(source: ByteSource, opts: CommandOpts, flags: WcFlags): 
       if (column > maxLineLength) maxLineLength = column
     }
   }
-  for await (const chunk of guardInput(source, opts)) {
+  for await (const chunk of guardInput(source, ctx)) {
     bytes += chunk.byteLength
     scan(decoder.decode(chunk, { stream: true }))
   }
@@ -254,13 +254,13 @@ export function shownCounts(flags: WcFlags): number {
 export async function wcGeneric(
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: Stream,
   lineCount?: (p: PathSpec) => Promise<number | null>,
   sizeOf?: (p: PathSpec) => Promise<number | null>,
 ): Promise<CommandFnResult> {
-  stream = stdinStream(stream, opts.stdin)
-  const parsed = parseFlags(opts.flags)
+  stream = stdinStream(stream, ctx.stdin)
+  const parsed = parseFlags(ctx.flags)
   if (typeof parsed === 'string') {
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]
   }
@@ -293,7 +293,7 @@ export async function wcGeneric(
         } else if (size !== null) {
           counts = { lines: 0, words: 0, bytes: size, chars: 0, maxLineLength: 0 }
         } else {
-          counts = await countsOf(stream(p), opts, parsed)
+          counts = await countsOf(stream(p), ctx, parsed)
         }
       } catch (e) {
         if (!isFsError(e)) throw e
@@ -324,12 +324,12 @@ export async function wcGeneric(
   }
   let source: AsyncIterable<Uint8Array>
   try {
-    source = resolveSource(opts.stdin)
+    source = resolveSource(ctx.stdin)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(`${msg}\n`) })]
   }
-  const counts = await countsOf(source, opts, parsed)
+  const counts = await countsOf(source, ctx, parsed)
   const values = selectedValues(counts, parsed)
   if (parsed.total === 'only') {
     return [encodeText(`${values.join(' ')}\n`), new IOResult()]

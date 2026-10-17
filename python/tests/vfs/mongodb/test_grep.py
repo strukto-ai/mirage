@@ -20,7 +20,7 @@ from bson import ObjectId
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.types import PathSpec
 from mirage.vfs.mongodb import MongoDBVFS
 from mirage.vfs.mongodb.config import MongoDBConfig
@@ -85,7 +85,7 @@ async def test_grep_m1_short_circuits_after_first_match(accessor, _stat_reads):
             accessor,
             [_path()],
             ["FOUND"],
-            CommandOpts(
+            Context(
                 io=io_for(MongoDBVFS, accessor),
                 index=NULL_INDEX,
                 flags={"max_count": "1"},

@@ -16,16 +16,15 @@ import { describe, expect, it } from 'vitest'
 
 import { GIT } from './index.ts'
 import { filterWords, listModeOption, withoutFilterValues } from './ref_filter.ts'
-import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
+import { context } from '../../../../workspace/fixtures/context.ts'
 
 function words(verb: string, argv: string[]): ReturnType<typeof filterWords> {
   const spec = GIT.spec.subcommands.find((node) => node.name === verb)
-  const inv = cliInvocation({
-    config: null,
+  const ctx = context({
     argv: [verb, ...argv],
     ...(spec === undefined ? {} : { spec }),
   })
-  return filterWords(inv)
+  return filterWords(ctx)
 }
 
 describe('filterWords', () => {

@@ -19,7 +19,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -29,13 +29,13 @@ async def stat(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("stat: no VFS")
-    resolved = await ops.resolve_glob(accessor, paths, opts.index)
-    stat_fn = bound_op(ops.stat, accessor, opts.index)
-    return await stat_generic(resolved, list(texts), opts, stat_fn)
+    resolved = await ops.resolve_glob(accessor, paths, ctx.index)
+    stat_fn = bound_op(ops.stat, accessor, ctx.index)
+    return await stat_generic(resolved, list(texts), ctx, stat_fn)
 
 
 BUILDER = GenericCommand("stat", stat)

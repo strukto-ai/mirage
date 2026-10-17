@@ -20,8 +20,8 @@ import { prefixAggregate } from '../../aggregators.ts'
 import { grepGeneric } from '../../generic/grep.ts'
 import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const grep: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
-  const idx = opts.index ?? undefined
+const grep: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   const { readTree } = ops
   const [readdir, stat] = treeWalk<string[], FileStat>(
@@ -33,10 +33,10 @@ const grep: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
     'grep',
     resolved,
     texts,
-    opts,
+    ctx,
     stat,
     readdir,
-    await searchReads(ops, 'grep', accessor, resolved, texts, opts),
+    await searchReads(ops, 'grep', accessor, resolved, texts, ctx),
   )
 }
 

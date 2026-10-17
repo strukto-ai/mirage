@@ -20,7 +20,7 @@ import pytest
 
 from mirage.commands.cli.builtin.himalaya import compose
 from mirage.commands.cli.builtin.himalaya import util as util_module
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import IOResult, materialize
 from mirage.types import PathSpec
@@ -41,8 +41,8 @@ async def fake_dispatch(op, path, *args, **kwargs):
     return FILES[path.virtual], IOResult()
 
 
-def view_with_files() -> CLIView:
-    return CLIView(vfs=Files([], fake_dispatch))
+def files_with_note() -> Files:
+    return Files([], fake_dispatch)
 
 
 @pytest.fixture
@@ -68,9 +68,10 @@ def sent(monkeypatch):
 @pytest.mark.asyncio
 async def test_compose_writes_mime_to_stdout_without_send(sent):
     out, io = await compose(
-        CLIInvocation(
-            CONFIG, flags={"to": "a@b.com", "subject": "Hi", "body": "yo"}
-        )
+        CONFIG,
+        [],
+        [],
+        Context(flags={"to": "a@b.com", "subject": "Hi", "body": "yo"}),
     )
     assert io.exit_code == 0
     assert "raw" not in sent
@@ -86,15 +87,17 @@ async def test_compose_writes_mime_to_stdout_without_send(sent):
 @pytest.mark.asyncio
 async def test_send_flag_pushes_through_smtp_and_reports_json(sent):
     out, io = await compose(
-        CLIInvocation(
-            CONFIG,
+        CONFIG,
+        [],
+        [],
+        Context(
             flags={
                 "to": "a@b.com",
                 "subject": "Hi",
                 "body": "yo",
                 "send": True,
-            },
-        )
+            }
+        ),
     )
     assert io.exit_code == 0
     assert b"Subject: Hi" in sent["raw"]
@@ -108,15 +111,17 @@ async def test_send_flag_pushes_through_smtp_and_reports_json(sent):
 @pytest.mark.asyncio
 async def test_recipients_accept_repeats_and_comma_lists(sent):
     out, _ = await compose(
-        CLIInvocation(
-            CONFIG,
+        CONFIG,
+        [],
+        [],
+        Context(
             flags={
                 "to": ["a@x, b@x", "c@x"],
                 "cc": "d@x",
                 "subject": "Hi",
                 "body": "yo",
-            },
-        )
+            }
+        ),
     )
     message = BytesParser(policy=default_policy).parsebytes(
         await materialize(out)
@@ -128,9 +133,10 @@ async def test_recipients_accept_repeats_and_comma_lists(sent):
 @pytest.mark.asyncio
 async def test_body_falls_back_to_stdin(sent):
     out, _ = await compose(
-        CLIInvocation(
-            CONFIG, flags={"to": "a@x", "subject": "Hi"}, stdin=b"piped body"
-        )
+        CONFIG,
+        [],
+        [],
+        Context(flags={"to": "a@x", "subject": "Hi"}, stdin=b"piped body"),
     )
     message = BytesParser(policy=default_policy).parsebytes(
         await materialize(out)
@@ -141,7 +147,10 @@ async def test_body_falls_back_to_stdin(sent):
 @pytest.mark.asyncio
 async def test_from_flag_overrides_the_account_username(sent):
     out, _ = await compose(
-        CLIInvocation(CONFIG, flags={"to": "a@x", "body": "yo", "from": "x@y"})
+        CONFIG,
+        [],
+        [],
+        Context(flags={"to": "a@x", "body": "yo", "from": "x@y"}),
     )
     message = BytesParser(policy=default_policy).parsebytes(
         await materialize(out)
@@ -153,23 +162,25 @@ async def test_from_flag_overrides_the_account_username(sent):
 async def test_compose_without_a_recipient_is_refused(sent):
     with pytest.raises(ValueError, match="no recipient"):
         await compose(
-            CLIInvocation(CONFIG, flags={"subject": "Hi", "body": "yo"})
+            CONFIG, [], [], Context(flags={"subject": "Hi", "body": "yo"})
         )
 
 
 @pytest.mark.asyncio
 async def test_attach_reads_through_the_dispatcher_into_multipart(sent):
     out, io = await compose(
-        CLIInvocation(
-            CONFIG,
+        CONFIG,
+        [],
+        [],
+        Context(
             flags={
                 "to": "a@b.com",
                 "subject": "files",
                 "body": "see attached",
                 "attach": [PathSpec.from_str_path("/scratch/note.txt")],
             },
-            view=view_with_files(),
-        )
+            vfs=files_with_note(),
+        ),
     )
     assert io.exit_code == 0
     message = BytesParser(policy=default_policy).parsebytes(
@@ -192,15 +203,17 @@ async def test_attach_of_a_missing_file_names_the_path(sent):
         r"No such file or directory",
     ):
         await compose(
-            CLIInvocation(
-                CONFIG,
+            CONFIG,
+            [],
+            [],
+            Context(
                 flags={
                     "to": "a@b.com",
                     "body": "yo",
                     "attach": [PathSpec.from_str_path("/scratch/gone.txt")],
                 },
-                view=view_with_files(),
-            )
+                vfs=files_with_note(),
+            ),
         )
 
 
@@ -208,29 +221,33 @@ async def test_attach_of_a_missing_file_names_the_path(sent):
 async def test_attach_outside_a_workspace_is_refused(sent):
     with pytest.raises(ValueError, match="needs a workspace"):
         await compose(
-            CLIInvocation(
-                CONFIG,
+            CONFIG,
+            [],
+            [],
+            Context(
                 flags={
                     "to": "a@b.com",
                     "body": "yo",
                     "attach": [PathSpec.from_str_path("/scratch/note.txt")],
-                },
-            )
+                }
+            ),
         )
 
 
 @pytest.mark.asyncio
 async def test_save_rides_along_to_the_delivery(sent):
     await compose(
-        CLIInvocation(
-            CONFIG,
+        CONFIG,
+        [],
+        [],
+        Context(
             flags={
                 "to": "a@b.com",
                 "body": "yo",
                 "send": True,
                 "save": "Drafts",
-            },
-        )
+            }
+        ),
     )
     assert sent["save"] == "Drafts"
 
@@ -238,15 +255,17 @@ async def test_save_rides_along_to_the_delivery(sent):
 @pytest.mark.asyncio
 async def test_save_without_send_files_the_message_and_sends_nothing(sent):
     out, io = await compose(
-        CLIInvocation(
-            CONFIG,
+        CONFIG,
+        [],
+        [],
+        Context(
             flags={
                 "to": "a@b.com",
                 "subject": "Draft it",
                 "body": "yo",
                 "save": "Drafts",
-            },
-        )
+            }
+        ),
     )
     assert io.exit_code == 0
     assert "raw" not in sent
@@ -266,12 +285,14 @@ async def test_a_refused_save_without_send_fails_loudly(sent):
     sent["refuse"] = True
     with pytest.raises(ValueError, match="Drafts: .*TRYCREATE"):
         await compose(
-            CLIInvocation(
-                CONFIG,
+            CONFIG,
+            [],
+            [],
+            Context(
                 flags={
                     "to": "a@b.com",
                     "body": "yo",
                     "save": "Drafts",
-                },
-            )
+                }
+            ),
         )

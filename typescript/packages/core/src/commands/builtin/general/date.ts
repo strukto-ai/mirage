@@ -16,7 +16,7 @@ import type { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
 import { parseDateExpr, parsePosixTime } from '../../../utils/dates.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { gnuStrftime } from '../utils/strftime.ts'
 import { quoteText } from '../../quote.ts'
@@ -95,7 +95,7 @@ function lacksPlusError(operand: string): UsageError {
 // zone the command runs in. The zone is `-u`'s UTC, else the TZ of the
 // command's own environment (`TZ=Asia/Hong_Kong date` and an exported TZ
 // alike, as GNU reads it), else the host's local zone. It is read from
-// `opts.env`, never from process state, so concurrent workspaces cannot
+// `ctx.env`, never from process state, so concurrent workspaces cannot
 // move each other's clock. `%Z` is tzdata's abbreviation (`HKT`), as GNU
 // prints it, read from a table generated off zoneinfo since Intl has
 // none; the Python twin reads zoneinfo itself. An operand without `+` sets
@@ -106,9 +106,9 @@ function date(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): CommandFnResult {
-  const fl = new FlagView(opts.flags, specOf('date'))
+  const fl = new FlagView(ctx.flags, specOf('date'))
   const u = fl.asBool('utc') || fl.asBool('universal')
   const d = fl.asStr('date') ?? null
   const formats = optionFormats(fl)
@@ -122,7 +122,7 @@ function date(
   } else if (setting !== null && d !== null) {
     throw lacksPlusError(setting)
   }
-  const named = u ? UTC_ZONE : zoneFromEnv(opts.env)
+  const named = u ? UTC_ZONE : zoneFromEnv(ctx.env)
   const zone = named ?? LOCAL_ZONE
   let dt: Date
   if (setting !== null) {

@@ -96,7 +96,7 @@ class ScopeMatch:
             None everywhere else. A lister whose listing is a window
             moves that window to the span the glob asks for instead of
             filtering its own; every other consumer ignores the field,
-            the way a command ignores the ``CommandOpts`` facts it does
+            the way a command ignores the ``Context`` facts it does
             not read.
     """
 

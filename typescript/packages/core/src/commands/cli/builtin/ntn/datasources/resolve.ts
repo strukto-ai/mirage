@@ -15,21 +15,26 @@
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { getDatabase } from '../../../../../core/notion/pages.ts'
 import { IOResult } from '../../../../../io/types.ts'
-import type { CommandFnResult } from '../../../../config.ts'
-import type { CLIInvocation } from '../../../types.ts'
+import type { CommandFnResult, Context } from '../../../../config.ts'
+import type { PathSpec } from '../../../../../types.ts'
 import { firstText, notionTransport, prettyJson, usageError } from '../util.ts'
 
 const ENC = new TextEncoder()
 
-export async function resolve(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function resolve(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   let databaseId: string
   try {
-    databaseId = firstText(inv.texts, 'database id')
+    databaseId = firstText(texts, 'database id')
   } catch (err) {
     return usageError(err)
   }
-  const database = await getDatabase(notionTransport(inv.config, inv.flags), databaseId)
+  const database = await getDatabase(notionTransport(config, ctx.flags), databaseId)
   const stubs = Array.isArray(database.data_sources) ? database.data_sources : []
   if (fl.asBool('json')) {
     return [prettyJson({ database_id: databaseId, data_sources: stubs }), new IOResult()]

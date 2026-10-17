@@ -60,10 +60,12 @@ from mirage.commands.cli.builtin.git.symbolic_ref import (
 )
 from mirage.commands.cli.builtin.git.tag import tag, tag_read_only
 from mirage.commands.cli.builtin.git.util import check_switches, fatal
-from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
+from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.cli.walk import find_node, node_help
+from mirage.commands.config import Context
 from mirage.commands.spec.types import Argument, CommandSpec, UsageStyle
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 # `-C` is git's own before-anything-else option, so it sits on the root
 # and every verb inherits it. The "." default is load-bearing: a PATH
@@ -731,23 +733,26 @@ STATUS_OPTIONS = (
 
 
 async def help_cmd(
-    inv: CLIInvocation[None],
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Render the declared command tree, without needing a repository.
 
     Args:
-        inv (CLIInvocation[None]): optional command to describe.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the optional command to describe.
+        ctx (Context): the line's context.
     """
     try:
-        check_switches(inv, inv.texts)
+        check_switches(ctx, texts)
     except GitError as exc:
         return fatal(exc)
-    found = find_node(GIT.spec, inv.texts)
+    found = find_node(GIT.spec, texts)
     if found is None:
         return None, IOResult(
             exit_code=1,
             stderr=(
-                f"git: '{' '.join(inv.texts)}' is not a git command. "
+                f"git: '{' '.join(texts)}' is not a git command. "
                 "See 'git --help'.\n"
             ).encode(),
         )

@@ -61,7 +61,7 @@ def resolve_script(name: str, cwd: PathSpec | str | None) -> PathSpec:
     Args:
         name (str): the script path as typed, absolute or cwd-relative.
         cwd (PathSpec | str | None): the session working directory as
-            ``CommandOpts.cwd`` carries it; None resolves against the
+            ``Context.cwd`` carries it; None resolves against the
             root.
     """
     return PathSpec.from_str_path(name, cwd=cwd or "/")
@@ -76,7 +76,7 @@ def default_paths(
         paths (list[PathSpec]): operands as parsed; returned untouched
             when non-empty.
         cwd (PathSpec | None): the session working directory as
-            ``CommandOpts.cwd`` carries it.
+            ``Context.cwd`` carries it.
     """
     if paths:
         return paths
@@ -153,7 +153,7 @@ async def stat_or_enoent(stat_path: StatPath, path: PathSpec) -> FileStat:
 
     ``StatPath`` answers None for a miss, while :func:`dot_refusal` and
     its kin read a stat that raises, so a command that holds only the
-    lookup (``opts.stat_path``) binds this with ``functools.partial``.
+    lookup (``ctx.stat_path``) binds this with ``functools.partial``.
 
     Args:
         stat_path (StatPath): dispatcher-backed lookup of one path.

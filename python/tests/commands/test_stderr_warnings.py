@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from mirage.commands.builtin.generic.rg import rg_generic
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.io.stream import materialize
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -79,7 +79,7 @@ async def test_rg_scan_collects_warnings_on_unreadable_file():
     out, io = await rg_generic(
         [PathSpec.from_str_path("/")],
         ["hello"],
-        CommandOpts(),
+        Context(),
         readdir=async_readdir,
         stat=async_stat,
         read_bytes=read_bytes,

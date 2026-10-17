@@ -12,23 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../../types.ts'
 import { materialize } from '../../../io/types.ts'
 import { describe, expect, it } from 'vitest'
 
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { numfmtGeneric } from './numfmt.ts'
 
 const DEC = new TextDecoder()
 
-async function run(value: string, flags: CommandOpts['flags'] = {}): Promise<string> {
-  const opts = {
+async function run(value: string, flags: Context['flags'] = {}): Promise<string> {
+  const ctx = {
     stdin: null,
     flags,
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     vfs: { kind: 'ram' } as never,
-  } as CommandOpts
-  const result = numfmtGeneric([value], opts)
+  } as Context
+  const result = numfmtGeneric([value], ctx)
   const io = result?.[1]
   const out = await materialize(result?.[0])
   if (io !== undefined && io.exitCode !== 0) {

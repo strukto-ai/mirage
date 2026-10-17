@@ -20,7 +20,7 @@ import { write } from '../../../../core/ram/write.ts'
 import { PathSpec } from '../../../../types.ts'
 import { decodeBase64 } from '../../../../utils/base64.ts'
 import { RAMStore } from '../../../../vfs/ram/store.ts'
-import type { CommandOpts } from '../../../config.ts'
+import type { Context } from '../../../config.ts'
 import { ioFor } from '../../../../test-utils.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { BUILDER } from './unzip.ts'
@@ -33,8 +33,8 @@ const ARCHIVE = decodeBase64(
   'UEsDBBQAAAAAAAAAIVwqs0rHBgAAAAYAAAAHAAAAYS9iLnR4dGZpcnN0ClBLAwQUAAAAAAAAACFcfsAPBgcAAAAHAAAACgAAAGEvLi4vYi50eHRzZWNvbmQKUEsBAhQDFAAAAAAAAAAhXCqzSscGAAAABgAAAAcAAAAAAAAAAAAAAIABAAAAAGEvYi50eHRQSwECFAMUAAAAAAAAACFcfsAPBgcAAAAHAAAACgAAAAAAAAAAAAAAgAErAAAAYS8uLi9iLnR4dFBLBQYAAAAAAgACAG0AAABaAAAAAAA=',
 )
 
-function opts(flags: Record<string, boolean>): CommandOpts {
-  return { stdin: null, flags, cwd: '/' } as unknown as CommandOpts
+function ctx(flags: Record<string, boolean>): Context {
+  return { stdin: null, flags, cwd: PathSpec.fromStrPath('/') } as unknown as Context
 }
 
 async function run(
@@ -52,7 +52,7 @@ async function run(
     accessor,
     [PathSpec.fromStrPath('/m.zip')],
     [],
-    opts(flags),
+    ctx(flags),
   )
   if (result === null) throw new Error('unzip returned nothing')
   const [, io] = result

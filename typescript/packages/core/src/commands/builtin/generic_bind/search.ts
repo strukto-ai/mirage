@@ -26,7 +26,7 @@ import { CycleError, globPrefixMatch } from '../../../utils/path.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import { revisionFor } from '../../../observe/context.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
-import type { CommandOpts, CommandIO } from '../../config.ts'
+import type { Context, CommandIO } from '../../config.ts'
 import type { LinkView } from '../../../view/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -256,7 +256,7 @@ function linked(links: LinkView | undefined, virtual: string): boolean {
 // Let each walked directory's mount refuse a walk that reads every file; the
 // dispatcher passes over a path that is not a directory.
 async function fullScan(
-  dispatch: CommandOpts['dispatch'],
+  dispatch: Context['dispatch'],
   dirs: PathSpec[],
   name: string,
 ): Promise<void> {
@@ -287,29 +287,27 @@ export async function searchReads<A extends Accessor>(
   accessor: A,
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): Promise<Reads> {
-  const index = opts.index ?? undefined
+  const index = ctx.index ?? undefined
   const stream: Reads = (p) => io.readStream(accessor, p, index)
   const files = io.filesContaining
   const searchable = io.searchable ?? null
   const lines = io.linesContaining
-  const links = linksOf(opts)
-  const fl = new FlagView(opts.flags, specOf(name))
+  const links = linksOf(ctx)
+  const fl = new FlagView(ctx.flags, specOf(name))
   if (paths.length === 0 || (name === 'rg' && (fl.asBool('files') || fl.asBool('type_list')))) {
     return stream
   }
   const walked = name === 'rg' || directoriesAction(fl) === 'recurse'
   if (files === undefined && lines === undefined) {
-    if (walked) await fullScan(opts.dispatch, paths, name)
+    if (walked) await fullScan(ctx.dispatch, paths, name)
     return stream
   }
   let terms: SearchTerms | null
   try {
     terms =
-      name === 'rg'
-        ? rgTerms(opts.flags, texts)
-        : grepTerms(opts.flags, texts, utf8Locale(opts.env))
+      name === 'rg' ? rgTerms(ctx.flags, texts) : grepTerms(ctx.flags, texts, utf8Locale(ctx.env))
   } catch (err) {
     if (!(err instanceof Error)) throw err
     console.debug(`${name} search left to the scan: ${err.message}`)
@@ -317,7 +315,7 @@ export async function searchReads<A extends Accessor>(
   }
   const dirs = walked ? await directories(io, accessor, paths, index) : []
   if (terms === null) {
-    await fullScan(opts.dispatch, dirs, name)
+    await fullScan(ctx.dispatch, dirs, name)
     return stream
   }
   const asked = terms
@@ -342,11 +340,11 @@ export async function searchReads<A extends Accessor>(
     }
   }
   if (hits === null && lines === undefined) {
-    await fullScan(opts.dispatch, dirs, name)
+    await fullScan(ctx.dispatch, dirs, name)
     return stream
   }
   if (hits !== null && asked.readsBinary) {
-    await fullScan(opts.dispatch, dirs, name)
+    await fullScan(ctx.dispatch, dirs, name)
   }
   const dirNames = new Set(dirs.map((p) => p.virtual))
   const named = new Set(paths.map((p) => p.virtual).filter((v) => !dirNames.has(v)))
@@ -355,7 +353,7 @@ export async function searchReads<A extends Accessor>(
   let scan: Promise<void> | null = null
   const readUnanswered = (): Promise<void> => {
     if (found !== null) return Promise.resolve()
-    scan ??= fullScan(opts.dispatch, dirs, name)
+    scan ??= fullScan(ctx.dispatch, dirs, name)
     return scan
   }
   const narrowed = async (path: PathSpec): Promise<ByteSource | null> => {

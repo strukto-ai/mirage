@@ -21,17 +21,17 @@ import {
   type GenericCommandFn,
 } from '../adapter.ts'
 
-const patch: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
-  const idx = opts.index ?? undefined
+const patch: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const write = requireOp(ops.write, 'write')
-  const stat = dirAwareStat(ops, accessor, opts)
+  const stat = dirAwareStat(ops, accessor, ctx)
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   // Stat first, as GNU patch does: a directory is refused before it is
   // read, because a store whose read of a collection answers a page
   // (nextcloud) never raises for one. Mirrors Python's patch builder.
   return patchGeneric(
     resolved,
-    opts,
+    ctx,
     async (p) => {
       await stat(p)
       return ops.readBytes(accessor, p, idx)

@@ -33,7 +33,7 @@ async function runTree(
     stdin: null,
     flags,
     io: commandIo(vfs),
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) return { lines: [], exitCode: -1 }
   const [out, ioResult] = result

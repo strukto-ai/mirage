@@ -22,7 +22,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
 )
 from mirage.commands.builtin.generic_bind.search import search_reads
 from mirage.commands.builtin.utils.tree import tree_walk
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -32,30 +32,30 @@ async def grep(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     resolved = (
-        await ops.resolve_glob(accessor, paths, opts.index)
+        await ops.resolve_glob(accessor, paths, ctx.index)
         if paths and ops.is_mounted(accessor)
         else []
     )
     read_bytes, read_stream = await search_reads(
-        ops, "grep", accessor, resolved, texts, opts
+        ops, "grep", accessor, resolved, texts, ctx
     )
     readdir, stat = tree_walk(
-        bound_op(ops.read_tree, accessor, opts.index),
-        bound_op(ops.readdir, accessor, opts.index),
-        bound_op(ops.stat, accessor, opts.index),
+        bound_op(ops.read_tree, accessor, ctx.index),
+        bound_op(ops.readdir, accessor, ctx.index),
+        bound_op(ops.stat, accessor, ctx.index),
     )
     return await grep_generic(
         resolved,
         texts,
-        opts,
+        ctx,
         readdir=readdir,
         stat=stat,
         read_bytes=read_bytes,
         read_stream=read_stream,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
     )
 
 

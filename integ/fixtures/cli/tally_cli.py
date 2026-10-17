@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 
-from mirage import CLI, CLIHandler, CLIInvocation
+from mirage import CLI, CLIHandler, Context, PathSpec
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io import IOResult
 
@@ -9,9 +9,11 @@ class TallyConfig(BaseModel):
     unit: str
 
 
-async def total(inv: CLIInvocation[TallyConfig]) -> tuple[bytes, IOResult]:
-    values = [int(text) for text in inv.texts]
-    line = f"total {sum(values)} {inv.config.unit}\n"
+async def total(
+    config: TallyConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+) -> tuple[bytes, IOResult]:
+    values = [int(text) for text in texts]
+    line = f"total {sum(values)} {config.unit}\n"
     return line.encode(), IOResult()
 
 

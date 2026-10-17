@@ -28,7 +28,6 @@ from mirage.commands.cli.builtin.himalaya.deliver import (
     deliver,
     save_sent_copy,
 )
-from mirage.commands.cli.types import CLIView
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.email.config import EmailConfig
 from mirage.errors.fs import fs_strerror
@@ -36,13 +35,14 @@ from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.filetype import mime_type_for
+from mirage.workspace.files import Files
 
 
-def first_text(texts: tuple[str, ...], label: str) -> str:
+def first_text(texts: list[str], label: str) -> str:
     """The command's first operand, or a usage error.
 
     Args:
-        texts (tuple[str, ...]): positional operands as typed.
+        texts (list[str]): positional operands as typed.
         label (str): what the operand is, for the message.
 
     Raises:
@@ -54,7 +54,7 @@ def first_text(texts: tuple[str, ...], label: str) -> str:
 
 
 async def load_attachments(
-    view: CLIView | None, paths: list[PathSpec]
+    vfs: Files | None, paths: list[PathSpec]
 ) -> tuple[Attachment, ...]:
     """Read --attach files through the workspace dispatcher.
 
@@ -64,7 +64,7 @@ async def load_attachments(
     through.
 
     Args:
-        view (CLIView | None): the workspace entry points, None outside one.
+        vfs (Files | None): the session's files, None outside a workspace.
         paths (list[PathSpec]): --attach values, cwd-resolved.
 
     Raises:
@@ -73,12 +73,12 @@ async def load_attachments(
     """
     if not paths:
         return ()
-    if view is None or view.vfs is None:
+    if vfs is None:
         raise ValueError("--attach needs a workspace to read files from")
     attachments: list[Attachment] = []
     for spec in paths:
         try:
-            data = await view.vfs.read(spec)
+            data = await vfs.read(spec)
         except (FileNotFoundError, NotADirectoryError) as exc:
             raise ValueError(
                 f"read attachment {spec.virtual}: {fs_strerror(exc)}"
@@ -99,7 +99,7 @@ async def route(
     fl: FlagView,
     stdin: ByteSource | None,
     source: Source | None,
-    view: CLIView | None,
+    vfs: Files | None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Assemble a message, then send it or write its MIME to stdout.
 
@@ -112,8 +112,8 @@ async def route(
         fl (FlagView): the leaf's parsed flags.
         stdin (ByteSource | None): piped body, used when --body is absent.
         source (Source | None): the replied-to or forwarded message.
-        view (CLIView | None): the workspace entry points, read only when
-            --attach names files to load.
+        vfs (Files | None): the session's files, read only when --attach
+            names files to load.
     """
     compose = Compose(
         sender=fl.as_str("from") or config.username,
@@ -123,7 +123,7 @@ async def route(
         subject=fl.as_str("subject"),
         body=await read_body(fl, stdin),
         signature=fl.as_str("signature"),
-        attachments=await load_attachments(view, fl.as_paths("attach")),
+        attachments=await load_attachments(vfs, fl.as_paths("attach")),
     )
     message = build(compose, source)
     # SMTP is a CRLF protocol and these bytes go straight onto the wire

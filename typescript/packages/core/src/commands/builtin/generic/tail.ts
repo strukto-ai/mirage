@@ -24,7 +24,7 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, type PathSpec, type ReadRangeFn } from '../../../types.ts'
 import { argmatchError } from '../../spec/usage.ts'
 import { argmatch } from '../../spec/argmatch.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import {
   normalizeCounts,
   numberFlagError,
@@ -655,7 +655,7 @@ function parseFlags(bag: Record<string, FlagValue>): TailFlags | string {
 export async function tailGeneric(
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: Stream,
   stat: Stat,
   readRange: ReadRangeFn | null = null,
@@ -667,9 +667,9 @@ export async function tailGeneric(
   ) => Promise<AsyncIterable<Uint8Array> | null>,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
-  const parsed = parseFlags(opts.flags)
+  const parsed = parseFlags(ctx.flags)
   const backend = stream
-  stream = stdinStream(stream, opts.stdin)
+  stream = stdinStream(stream, ctx.stdin)
   if (typeof parsed === 'string')
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]
   const { counts, quiet: qFlag, verbose: vFlag, following } = parsed
@@ -729,8 +729,8 @@ export async function tailGeneric(
     // for what the backend holds now, past the file cache and past the
     // stat the command's freshness probe kept: they look for exactly the
     // change neither has yet.
-    const first = stdinStream(backend, opts.stdin)
-    const dispatch = opts.dispatch
+    const first = stdinStream(backend, ctx.stdin)
+    const dispatch = ctx.dispatch
     const polled =
       dispatch === undefined
         ? { stream: first, stat, readRange }
@@ -752,7 +752,7 @@ export async function tailGeneric(
         showHeaders,
         following,
         io,
-        opts.signal,
+        ctx.signal,
         unread,
         paths.every((p) => isStdin(p)),
         fromEnd ? n : null,
@@ -764,7 +764,7 @@ export async function tailGeneric(
 
   async function* output(): AsyncIterable<Uint8Array> {
     if (vFlag && !qFlag) yield encodeText('==> ' + STDIN_HEADER_NAME + ' <==\n')
-    yield* tail(opts.stdin ?? new Uint8Array(), counts)
+    yield* tail(ctx.stdin ?? new Uint8Array(), counts)
   }
   return [output(), new IOResult({ stderr: retryWarning === '' ? null : encodeText(retryWarning) })]
 }

@@ -16,7 +16,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { reportedStream } from '../utils/operands.ts'
 import { extraOperandError } from '../../spec/usage.ts'
@@ -37,7 +37,7 @@ function parseFlags(bag: Record<string, FlagValue>): LookFlags {
 export function lookGeneric(
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): CommandFnResult {
   if (paths.length > 1) throw extraOperandError(CommandName.LOOK, paths[1]?.rawPath ?? '')
@@ -45,10 +45,10 @@ export function lookGeneric(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('look: missing prefix\n') })]
   }
   const prefix = texts[0] ?? ''
-  const caseInsensitive = parseFlags(opts.flags).foldCase
+  const caseInsensitive = parseFlags(ctx.flags).foldCase
   const io = new IOResult({ exitCode: 1 })
   const path = paths[0]
-  const source = path === undefined ? (opts.stdin ?? new Uint8Array()) : stream(path)
+  const source = path === undefined ? (ctx.stdin ?? new Uint8Array()) : stream(path)
   const output = lookStream(source, prefix, caseInsensitive, io)
   return [path === undefined ? output : reportedStream(output, io, path, 'look'), io]
 }

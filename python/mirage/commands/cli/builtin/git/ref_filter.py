@@ -32,7 +32,7 @@ from mirage.commands.cli.builtin.git.revparse import (
     unwrapped,
 )
 from mirage.commands.cli.constants import GIT_LONG_OPTIONS
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.compile import compile_spec, expand_git_long
 
 CONTAINS = "--contains"
@@ -85,7 +85,7 @@ class RefFilter:
     points_at: tuple[bytes, ...]
 
 
-def filter_words(inv: CLIInvocation[None]) -> list[FilterWord]:
+def filter_words(ctx: Context) -> list[FilterWord]:
     """The ref-filter options a line holds, read off its verbatim argv.
 
     The four commit filters take the next word as their commit, whatever
@@ -99,13 +99,13 @@ def filter_words(inv: CLIInvocation[None]) -> list[FilterWord]:
     prefix (``--cont``), as git's parse-options accepts.
 
     Args:
-        inv (CLIInvocation[None]): the invocation, whose ``spec`` is the
-            leaf that parsed it.
+        ctx (Context): the line's context, whose ``spec`` is the leaf
+            that parsed it.
     """
-    if inv.spec is None:
+    if ctx.spec is None:
         return []
-    cs = compile_spec(inv.spec)
-    argv = inv.argv
+    cs = compile_spec(ctx.spec)
+    argv = ctx.argv
     words: list[FilterWord] = []
     i = 0
     while i < len(argv):
@@ -115,7 +115,7 @@ def filter_words(inv: CLIInvocation[None]) -> list[FilterWord]:
         if token.startswith("--"):
             typed, eq, attached = token.partition("=")
             expanded = expand_git_long(
-                GIT_LONG_OPTIONS.get(inv.spec.name, ()), typed
+                GIT_LONG_OPTIONS.get(ctx.spec.name, ()), typed
             )
             spelling = expanded if isinstance(expanded, str) else typed
             if spelling in LIST_MODE_ORDER:
@@ -146,7 +146,7 @@ def filter_words(inv: CLIInvocation[None]) -> list[FilterWord]:
 
 
 def without_filter_values(
-    texts: tuple[str, ...], words: list[FilterWord]
+    texts: Sequence[str], words: list[FilterWord]
 ) -> tuple[str, ...]:
     """The operands left once the filter values the parser kept are out.
 
@@ -155,7 +155,7 @@ def without_filter_values(
     difference.
 
     Args:
-        texts (tuple[str, ...]): the operands as parsed.
+        texts (Sequence[str]): the operands as parsed.
         words (list[FilterWord]): the line's filter options.
     """
     left = list(texts)

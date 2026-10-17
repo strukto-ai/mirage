@@ -18,7 +18,7 @@ import { yieldBytes } from '../../../io/stream.ts'
 import { materialize, type ByteSource, type IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { eisdir, enoent } from '../../../errors/fs.ts'
-import { type CommandOpts } from '../../config.ts'
+import { type Context } from '../../config.ts'
 import { helpPage, versionLine } from '../../spec/standard.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -66,17 +66,17 @@ interface Ran {
 async function ranOver(
   paths: readonly string[],
   program: string,
-  flags: CommandOpts['flags'] = {},
+  flags: Context['flags'] = {},
   stream: typeof read = read,
 ): Promise<Ran> {
-  const opts = {
+  const ctx = {
     stdin: null,
     flags: { compact_output: true, ...flags },
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     vfs: { kind: 'ram' } as never,
-  } as CommandOpts
+  } as Context
   const specs = paths.map((path) => PathSpec.fromStrPath(path))
-  const result = await jqGeneric(specs, [program], opts, stream)
+  const result = await jqGeneric(specs, [program], ctx, stream)
   if (result === null) throw new Error('jq returned no result')
   const [out, io] = result
   return {
@@ -87,7 +87,7 @@ async function ranOver(
 }
 
 /** Run jq over one file and return what it printed and how it exited. */
-async function ran(path: string, program: string, flags: CommandOpts['flags'] = {}): Promise<Ran> {
+async function ran(path: string, program: string, flags: Context['flags'] = {}): Promise<Ran> {
   return ranOver([path], program, flags)
 }
 
@@ -100,7 +100,7 @@ const HINT =
   'or see the jq manpage, or online docs at https://jqlang.org'
 
 /** A jq line's flags as the parser leaves them, with the order they were typed in. */
-function parsedFlags(...words: string[]): CommandOpts['flags'] {
+function parsedFlags(...words: string[]): Context['flags'] {
   return parseToKwargs(parseCommand(specOf('jq'), words, '/', 'jq'))
 }
 
@@ -457,17 +457,17 @@ describe('jq flag-file readers', () => {
     ['slurpfile', '[42]\n'],
   ])('reads a dash %s from the backend without a dispatcher', async (option, expected) => {
     const path = new PathSpec({ virtual: '/d/-', directory: '/d', vfsPath: '-', rawPath: '-' })
-    const opts = {
+    const ctx = {
       stdin: ENC.encode('99\n'),
       flags: {
         null_input: true,
         compact_output: true,
         [option]: option === 'from_file' ? path : ['x', path],
       },
-      cwd: '/d',
+      cwd: PathSpec.fromStrPath('/d'),
       vfs: { kind: 'ram' } as never,
-    } as CommandOpts
-    const result = await jqGeneric([], ['$x'], opts, read)
+    } as Context
+    const result = await jqGeneric([], ['$x'], ctx, read)
     if (result === null) throw new Error('jq returned no result')
     const [out, io] = result
     expect(DEC.decode(await materialize(out))).toBe(expected)
@@ -480,12 +480,12 @@ describe('jq flag-file readers', () => {
       it.each([null, '-', '/dev/stdin'])('does not replay stdin for input %s', async (operand) => {
         const path = PathSpec.fromStrPath('/dev/stdin')
         const stdin = ENC.encode('99\n')
-        const opts = {
+        const ctx = {
           stdin: streamed ? yieldBytes(stdin) : stdin,
           flags: { [option]: option === 'from_file' ? path : ['x', path] },
-          cwd: '/',
+          cwd: PathSpec.fromStrPath('/'),
           vfs: { kind: 'ram' } as never,
-        } as CommandOpts
+        } as Context
         const paths =
           operand === null
             ? []
@@ -497,7 +497,7 @@ describe('jq flag-file readers', () => {
                   rawPath: operand,
                 }),
               ]
-        const result = await jqGeneric(paths, ['.'], opts, read)
+        const result = await jqGeneric(paths, ['.'], ctx, read)
         if (result === null) throw new Error('jq returned no result')
         const [out, io] = result
         expect(await materialize(out)).toEqual(new Uint8Array())
@@ -585,13 +585,13 @@ describe("jq's option loop", () => {
 
   /** Run a jq line whose -f file is read off FILES. */
   async function ranProgramFile(...words: string[]): Promise<Ran> {
-    const opts = {
+    const ctx = {
       stdin: null,
       flags: parsedFlags(...words),
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
       vfs: { kind: 'ram' } as never,
-    } as CommandOpts
-    const result = await jqGeneric([], [], opts, read)
+    } as Context
+    const result = await jqGeneric([], [], ctx, read)
     if (result === null) throw new Error('jq returned no result')
     const [out, io] = result
     return {
@@ -636,15 +636,15 @@ describe('jqGeneric over malformed input', () => {
     async function started(
       program: string,
       text: string,
-      flags: CommandOpts['flags'],
+      flags: Context['flags'],
     ): Promise<[ByteSource | null, IOResult]> {
-      const opts = {
+      const ctx = {
         stdin: null,
         flags,
-        cwd: '/',
+        cwd: PathSpec.fromStrPath('/'),
         vfs: { kind: 'ram' } as never,
-      } as CommandOpts
-      const result = await jqGeneric([PathSpec.fromStrPath('/d/live.json')], [program], opts, () =>
+      } as Context
+      const result = await jqGeneric([PathSpec.fromStrPath('/d/live.json')], [program], ctx, () =>
         live(text),
       )
       if (result === null) throw new Error('jq returned no result')

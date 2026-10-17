@@ -15,7 +15,7 @@
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { BreError, searchBre } from '../utils/bre.ts'
 import { quoteText } from '../../quote.ts'
 import { stdinStream } from '../utils/stream.ts'
@@ -519,11 +519,11 @@ function buildConfig(parsed: NlFlags): NlConfig {
 
 export function nlGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): CommandFnResult {
-  stream = stdinStream(stream, opts.stdin)
-  const parsed = parseFlags(opts.flags)
+  stream = stdinStream(stream, ctx.stdin)
+  const parsed = parseFlags(ctx.flags)
   if (typeof parsed === 'string') {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
   }
@@ -539,5 +539,5 @@ export function nlGeneric(
     aborted: false,
   }
   const each = (source: ByteSource) => nlStream(source, config, state, io)
-  return [perOperand(paths, stream, opts.stdin, io, 'nl', each), io]
+  return [perOperand(paths, stream, ctx.stdin, io, 'nl', each), io]
 }

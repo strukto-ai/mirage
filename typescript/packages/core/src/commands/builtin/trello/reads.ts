@@ -33,7 +33,7 @@ import {
 } from '../../../core/trello/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts, type Command } from '../../config.ts'
+import { command, type CommandFnResult, type Context, type Command } from '../../config.ts'
 import { CommandSpec, Argument } from '../../spec/types.ts'
 import { requireBoard, requireCard, requireList } from './_scope.ts'
 
@@ -139,7 +139,7 @@ export function makeTrelloReadCommands(): Command[] {
           accessor,
           _paths: PathSpec[],
           texts: string[],
-          _opts: CommandOpts,
+          _opts: Context,
         ): Promise<CommandFnResult> => {
           const data = await entry.runner(accessor as TrelloAccessor, texts)
           return [data, new IOResult()]

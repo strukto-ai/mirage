@@ -100,7 +100,7 @@ export class QuickJsRuntime extends JsRuntime {
       }
       boot.value.dispose()
 
-      let result = await ctx.evalCodeAsync(cwdPreamble(args.cwd ?? context?.cwd), 'mirage:cwd')
+      let result = await ctx.evalCodeAsync(cwdPreamble(args.cwd ?? context?.ctx.cwd), 'mirage:cwd')
       if (!result.error) {
         result.value.dispose()
         result = await ctx.evalCodeAsync(

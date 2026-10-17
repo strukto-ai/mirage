@@ -96,7 +96,7 @@ same PR.
   after theirs. The same grammar describes built-ins and CLI trees.
 - **CLIs (`CLI`)** are the agent's tools, dispatched by name. An account
   CLI declares a `config_model` and consults no mount; `git` declares none
-  and reads its repository through `CLIView`. `register_cli` is host-side
+  and reads its repository through `ctx.vfs`. `register_cli` is host-side
   only; there is no install builtin. A CLI that mimics a real program is
   gated against that program (`integ/ntn_conformance.ts`).
 - **Mount configs** are one snake_case block with one config loader per
@@ -104,7 +104,8 @@ same PR.
   are gated by live VFS manifests and `integ/config/`.
 - **YAML keys**, the `mirage` CLI output, the server API and the agent
   adapters are public. A TypeScript API change gets a changeset.
-- **Handlers** take `(accessor, paths, texts, opts)`. Read flags through a
+- **Handlers** take `(accessor, paths, texts, ctx)`; a CLI leaf takes
+  `(config, paths, texts, ctx)`, the same `Context`. Read flags through a
   spec-bound `FlagView`, never raw. Generics own flag interpretation and parse
   once into a frozen struct; backend wrappers are wiring only.
 
@@ -138,8 +139,8 @@ Commands (`commands/builtin/`) are the coreutils: a generic implements a
 family once (`generic/`), `generic_bind/` binds it to a backend,
 `crossmount/` and `executor/fanout.py` handle a line that spans mounts. The
 namespace (`workspace/mount/namespace/`) sits above every backend with the
-mount table, symlinks and the attribute overlay; `MountView` and `LinkView`
-ride `CommandOpts` (`opts.ns`) into every handler. A `filetype` registration
+mount table, symlinks and the attribute overlay; a handler reads links and
+mount boundaries off `ctx.vfs` (`links_of`, `mounts_of`). A `filetype` registration
 on a mount is the only renderer extension point.
 
 Pinned behavior: `find -size` rounds up and the start row is the generic's;
@@ -173,9 +174,10 @@ parser, before classification.
 
 `commands/cli/`: a `CLI` binds a `CommandSpec` tree to `CLIHandler` entries
 keyed by canonical leaf path, plus account config or script/runtime settings.
-A `CLIInstall` supplies the installed name and validated account. One
-`CLIInvocation` per leaf; `inv.view` (`dispatch`, `stat_path`, `ns`,
-`session_view`) is the only way to a mount. `man`, `--help`, `type -t` and
+A `CLIInstall` supplies the installed name and validated account. A leaf is
+`fn(config, paths, texts, ctx)` with the `Context` commands and runtimes get;
+`ctx.vfs` (the session's `Files`) is the only way to a mount, `ctx.session`
+the live session. `man`, `--help`, `type -t` and
 `which` derive from the spec. `ntn` is the worked example (CLAP voice, a
 serde_json-faithful scanner, exit 1 for a bad body and 5 for a bad line).
 
@@ -225,7 +227,7 @@ flowchart TD
     Lookup --> Exec["executor<br/>workspace/executor"]
     Exec --> Policy["policy<br/>pre_command · pre_session"]
     Exec --> Runtime["runtime routing<br/>workspace · process · remote"]
-    Exec --> Handler["command handler<br/>(accessor, paths, texts, opts)"]
+    Exec --> Handler["command handler<br/>(accessor, paths, texts, ctx)"]
     Spec["Argument · CommandSpec · CLI · FlagView"] -.-> Handler
     Handler --> Dispatch["op dispatcher<br/>workspace/dispatcher · ops"]
     Runtime -. RuntimeVFS .-> Dispatch

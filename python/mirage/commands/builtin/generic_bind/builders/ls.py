@@ -21,7 +21,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
 )
 from mirage.commands.builtin.utils.tree import WalkCall, tree_walk
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -33,28 +33,28 @@ async def ls(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("ls: no VFS")
     if not paths:
         paths = [
             PathSpec(
-                virtual=opts.cwd.virtual,
-                directory=opts.cwd.virtual,
+                virtual=ctx.cwd.virtual,
+                directory=ctx.cwd.virtual,
                 resolved=False,
-                vfs_path=opts.cwd.vfs_path,
+                vfs_path=ctx.cwd.vfs_path,
             )
         ]
-    resolved = await ops.resolve_glob(accessor, paths, opts.index)
+    resolved = await ops.resolve_glob(accessor, paths, ctx.index)
     readdir: WalkCall = partial(ops.readdir, accessor)
     stat: WalkCall = partial(ops.stat, accessor)
     # Only -R walks; a plain listing reads one directory.
-    if FlagView(opts.flags, spec=SPECS["ls"]).as_bool("recursive"):
+    if FlagView(ctx.flags, spec=SPECS["ls"]).as_bool("recursive"):
         readdir, stat = tree_walk(
-            bound_op(ops.read_tree, accessor, opts.index), readdir, stat
+            bound_op(ops.read_tree, accessor, ctx.index), readdir, stat
         )
-    return await ls_generic(resolved, list(texts), opts, readdir, stat)
+    return await ls_generic(resolved, list(texts), ctx, readdir, stat)
 
 
 BUILDER = GenericCommand("ls", ls)

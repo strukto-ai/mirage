@@ -22,7 +22,7 @@ import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { shellQuote } from '../../../utils/quote.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { SortKeyError } from '../errors.ts'
 import {
@@ -498,15 +498,15 @@ async function externalRecords(
 // word typed, as GNU echoes it. Mirrors sort in sort.py.
 export async function sortGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (path: PathSpec) => AsyncIterable<Uint8Array>,
   write?: (path: PathSpec, data: ByteSource) => Promise<void>,
 ): Promise<CommandFnResult> {
-  stream = stdinStream(stream, opts.stdin)
+  stream = stdinStream(stream, ctx.stdin)
   let parsed: SortFlags
   let cfg: SortConfig
   try {
-    parsed = parseFlags(opts.flags)
+    parsed = parseFlags(ctx.flags)
     cfg = buildConfig(parsed)
   } catch (error) {
     return [new Uint8Array(), refusalOf(error)]
@@ -518,14 +518,14 @@ export async function sortGeneric(
     return [
       new Uint8Array(),
       await checkStream(
-        path === null ? (opts.stdin ?? new Uint8Array()) : stream(path),
+        path === null ? (ctx.stdin ?? new Uint8Array()) : stream(path),
         path,
         parsed,
         cfg,
       ),
     ]
   }
-  const ordered = await externalRecords(paths, stream, opts.stdin, parsed, cfg, opts.signal)
+  const ordered = await externalRecords(paths, stream, ctx.stdin, parsed, cfg, ctx.signal)
   if (ordered instanceof Uint8Array)
     return [new Uint8Array(), new IOResult({ exitCode: 2, stderr: ordered })]
   if (parsed.output !== null) {
@@ -542,7 +542,7 @@ export async function sortGeneric(
     const outputPath = new PathSpec({
       virtual: parsed.output.virtual,
       directory: parsed.output.directory,
-      vfsPath: mountKey(parsed.output.virtual, opts.mountPrefix ?? ''),
+      vfsPath: mountKey(parsed.output.virtual, ctx.mountPrefix ?? ''),
       rawPath: parsed.output.rawPath,
       dotted: parsed.output.dotted,
       walkError: parsed.output.walkError,

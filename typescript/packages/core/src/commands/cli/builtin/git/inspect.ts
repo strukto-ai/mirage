@@ -8,12 +8,11 @@ import { compilePosixRegex } from '../../../../utils/posix.ts'
 import { BreError, PosixSyntax, translateEre } from '../../../builtin/utils/bre.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { CommandSpec, Argument, type FlagValue } from '../../../spec/types.ts'
 import { parseCommand, parseToKwargs } from '../../../spec/parser.ts'
 import { UsageStyle } from '../../../spec/types.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import {
   AbbrevModeError,
   AmbiguousArgumentError,
@@ -70,14 +69,19 @@ const GET_URL = new CommandSpec({
   ],
 })
 
-export async function remote(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function remote(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    const [word] = inv.texts
-    if (word === 'get-url') return await remoteGetUrl(inv)
-    checkOperands(inv, inv.texts)
-    if (word !== undefined) throw new UnknownSubcommandError(word, verbUsage(inv))
-    const repo = await opened(fl, inv.view ?? {})
+    const [word] = texts
+    if (word === 'get-url') return await remoteGetUrl(texts, ctx)
+    checkOperands(ctx, texts)
+    if (word !== undefined) throw new UnknownSubcommandError(word, verbUsage(ctx))
+    const repo = await opened(ctx, fl)
     const rows = (await git.listRemotes(repoArgs(repo))).sort((a, b) =>
       compareCodePoints(a.remote, b.remote),
     )
@@ -141,12 +145,12 @@ export function remoteUrls(cfg: readonly ConfigLine[], name: string): [string[],
 }
 
 /** Read the get-url remainder through the shared option parser. */
-export async function remoteGetUrl(inv: CLIInvocation): Promise<CommandFnResult> {
+export async function remoteGetUrl(texts: string[], ctx: Context): Promise<CommandFnResult> {
   try {
     const parsed = parseCommand(
       GET_URL,
-      [...inv.texts.slice(1)],
-      inv.cwd.virtual,
+      [...texts.slice(1)],
+      ctx.cwd.virtual,
       '',
       undefined,
       false,
@@ -163,13 +167,13 @@ export async function remoteGetUrl(inv: CLIInvocation): Promise<CommandFnResult>
       return [stdout, new IOResult({ exitCode, stderr })]
     }
     const names = parsed.args.map(([word]) => word)
-    const bad = offending(names, escaped(inv.argv), new Set())
+    const bad = offending(names, escaped(ctx.argv ?? []), new Set())
     if (bad !== null) throw new UsageError(...gitOptionRefusal(bad, 'remote get-url', GET_URL))
     const [name] = names
     if (names.length !== 1 || name === undefined)
       throw new UsageError('', gitUsage('remote get-url', GET_URL))
     const fl = new FlagView(parseToKwargs(parsed), GET_URL)
-    const repo = await opened(new FlagView(inv.flags), inv.view ?? {})
+    const repo = await opened(ctx, new FlagView(ctx.flags))
     const cfg = await configLines(
       new TextDecoder().decode(await readFile(repo.vfs, repo.location.commondir.join('config'))),
     )
@@ -197,16 +201,16 @@ export async function remoteGetUrl(inv: CLIInvocation): Promise<CommandFnResult>
  * exists.
  */
 export async function globalSources(
-  inv: CLIInvocation,
+  ctx: Context,
   listing: boolean,
 ): Promise<{ source: string; data: Uint8Array }[]> {
-  const vfs = inv.view?.vfs
+  const vfs = ctx.vfs
   if (!vfs) throw new NoWorkspaceError()
-  const home = inv.env.HOME ?? ''
-  const override = inv.env.GIT_CONFIG_GLOBAL
+  const home = ctx.env?.HOME ?? ''
+  const override = ctx.env?.GIT_CONFIG_GLOBAL
   if (override === undefined && !home) throw new GitError('$HOME not set')
   const target = override ?? `${home}/.gitconfig`
-  const configured = inv.env.XDG_CONFIG_HOME ?? ''
+  const configured = ctx.env?.XDG_CONFIG_HOME ?? ''
   const xdg = configured === '' ? `${home}/.config` : configured
   const sources: { source: string; data: Uint8Array }[] = []
   for (const source of override === undefined ? [`${xdg}/git/config`, target] : [target]) {
@@ -233,19 +237,24 @@ async function mergeBaseIds(repo: Repo, revisions: readonly string[]): Promise<[
   return [one.oid, (await mergeBases(repo, one, other, rest)).map((c) => c.oid)]
 }
 
-export async function mergeBase(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function mergeBase(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    checkSwitches(inv, inv.texts)
-    const repo = await opened(fl, inv.view ?? {})
+    checkSwitches(ctx, texts)
+    const repo = await opened(ctx, fl)
     const ancestor = fl.asBool('is_ancestor')
     const all = fl.asBool('all')
     if (ancestor && all)
       throw new GitError("options '--is-ancestor' and '--all' cannot be used together")
-    if (ancestor && inv.texts.length !== 2)
+    if (ancestor && texts.length !== 2)
       throw new GitError('--is-ancestor takes exactly two commits')
-    if (inv.texts.length < 2) throw new UsageError('', verbUsage(inv))
-    const [one, bases] = await mergeBaseIds(repo, inv.texts)
+    if (texts.length < 2) throw new UsageError('', verbUsage(ctx))
+    const [one, bases] = await mergeBaseIds(repo, texts)
     if (ancestor)
       return [
         null,
@@ -263,9 +272,14 @@ export async function mergeBase(inv: CLIInvocation): Promise<CommandFnResult> {
   }
 }
 
-export async function config(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  if (inv.texts.length > 1)
+export async function config(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  if (texts.length > 1)
     return [
       null,
       new IOResult({
@@ -279,9 +293,9 @@ export async function config(inv: CLIInvocation): Promise<CommandFnResult> {
     ]
   try {
     let sources: { source: string; data: Uint8Array }[]
-    if (fl.asBool('global')) sources = await globalSources(inv, fl.asBool('list'))
+    if (fl.asBool('global')) sources = await globalSources(ctx, fl.asBool('list'))
     else {
-      const repo = await opened(fl, inv.view ?? {})
+      const repo = await opened(ctx, fl)
       const path = repo.location.commondir.join(`config`)
       const ordinary =
         repo.location.commondir.virtual === repo.location.worktree.virtual + '/.git' &&
@@ -296,12 +310,12 @@ export async function config(inv: CLIInvocation): Promise<CommandFnResult> {
     const listing = fl.asBool('list'),
       regexp = fl.asBool('get_regexp'),
       origin = fl.asBool('show_origin')
-    if (!listing && !inv.texts.length)
+    if (!listing && !texts.length)
       return [
         null,
         new IOResult({ exitCode: 129, stderr: ENC.encode('error: wrong number of arguments\n') }),
       ]
-    const key = inv.texts[0] ?? ''
+    const key = texts[0] ?? ''
     let pattern: RegExp | null
     try {
       pattern = regexp
@@ -338,20 +352,22 @@ export async function config(inv: CLIInvocation): Promise<CommandFnResult> {
   }
 }
 
-export async function showRef(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function showRef(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    checkSwitches(inv, inv.texts)
-    const repo = await opened(fl, inv.view ?? {})
+    checkSwitches(ctx, texts)
+    const repo = await opened(ctx, fl)
     const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
     const lines: string[] = []
     for (const ref of [...refs.keys()]
       .filter((r) => r.startsWith('refs/'))
       .sort(compareCodePoints)) {
-      if (
-        inv.texts.length &&
-        !inv.texts.some((pattern) => ref === pattern || ref.endsWith(`/${pattern}`))
-      )
+      if (texts.length && !texts.some((pattern) => ref === pattern || ref.endsWith(`/${pattern}`)))
         continue
       const oid = await git.resolveRef({ ...repoArgs(repo), ref })
       lines.push(`${oid} ${ref}`)
@@ -366,17 +382,22 @@ export async function showRef(inv: CLIInvocation): Promise<CommandFnResult> {
   }
 }
 
-export async function revList(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function revList(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    const sole = inv.argv.slice(-2).join(' ') === `rev-list ${HELP_SWITCH}`
-    if (optionOperand(inv, inv.texts, sole ? STDOUT : STDERR) !== null) {
-      throw new UsageError('', verbUsage(inv))
+    const sole = (ctx.argv ?? []).slice(-2).join(' ') === `rev-list ${HELP_SWITCH}`
+    if (optionOperand(ctx, texts, sole ? STDOUT : STDERR) !== null) {
+      throw new UsageError('', verbUsage(ctx))
     }
-    const repo = await opened(fl, inv.view ?? {})
+    const repo = await opened(ctx, fl)
     const flags = parseFlags(fl)
-    if (!inv.texts.length && !flags.allRefs) throw new UsageError('', verbUsage(inv))
-    const [shown, hidden] = await splitRevisions(repo, inv.texts)
+    if (!texts.length && !flags.allRefs) throw new UsageError('', verbUsage(ctx))
+    const [shown, hidden] = await splitRevisions(repo, texts)
     const starts = flags.allRefs ? [...(await refCommits(repo)), ...shown] : shown
     const commits = await select(repo, starts, flags, hidden)
     const out = fl.asBool('count')
@@ -389,7 +410,12 @@ export async function revList(inv: CLIInvocation): Promise<CommandFnResult> {
   }
 }
 
-export function version(_inv: CLIInvocation): CommandFnResult {
+export function version(
+  _config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  _ctx: Context,
+): CommandFnResult {
   return [ENC.encode(`git version ${VERSION} (Mirage)\n`), new IOResult()]
 }
 
@@ -503,22 +529,28 @@ function abbrevStrict(mode: FlagValue, warn: boolean): boolean {
  * revision, printed after everything else, and `-q` turns the refusal into a
  * bare exit 1.
  */
-export async function revParse(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function revParse(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const quiet = fl.asBool('quiet')
   let repo: Repo | undefined
   try {
-    const marked = escaped(inv.argv)
-    const revisions = inv.texts.filter((text) => text !== GIT_DIR_OPTION || marked.has(text))
-    checkOperands(inv, revisions)
-    const verb = inv.argv.indexOf('rev-parse')
-    const words = inv.argv.slice(verb + 1)
+    const marked = escaped(ctx.argv ?? [])
+    const revisions = texts.filter((text) => text !== GIT_DIR_OPTION || marked.has(text))
+    checkOperands(ctx, revisions)
+    const argv = ctx.argv ?? []
+    const verb = argv.indexOf('rev-parse')
+    const words = argv.slice(verb + 1)
     const end = words.indexOf('--')
     const named = end === -1 ? words : words.slice(0, end)
     const toplevel = named.includes(SHOW_TOPLEVEL)
     const mode = fl.raw('abbrev_ref')
     if (typeof mode === 'string') abbrevStrict(mode, true)
-    repo = await opened(fl, inv.view ?? {}, toplevel)
+    repo = await opened(ctx, fl, toplevel)
     const start = startPoint(fl).virtual
     if (
       toplevel &&

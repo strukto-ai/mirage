@@ -20,7 +20,7 @@ from mirage.commands.builtin.trello._input import (
     resolve_text_input,
 )
 from mirage.commands.builtin.trello._scope import require_card
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.context import require_mount_writable
@@ -44,16 +44,16 @@ async def trello_card_comment_add(
     accessor: TrelloAccessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(opts.flags, spec=SPEC)
+    fl = FlagView(ctx.flags, spec=SPEC)
     config = accessor.config
     card_id = fl.as_str("card_id")
     if not card_id:
         raise ValueError("--card_id is required")
     text = await resolve_text_input(
         accessor,
-        opts,
+        ctx,
         inline_text=fl.as_str("text"),
         file_path=file_operand(fl, "text_file"),
         error_message="comment text is required",

@@ -35,21 +35,21 @@ import type { WalkDeclinedError } from '../../../../errors/types.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 import { linksOf, mountsOf } from '../../utils/links.ts'
 
-const rm: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
-  const fl = new FlagView(opts.flags, specOf('rm'))
+const rm: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+  const fl = new FlagView(ctx.flags, specOf('rm'))
   const recursive = fl.asBool('r') || fl.asBool('R')
   const dirFlag = fl.asBool('d')
   const force = fl.asBool('f')
   const verbose = fl.asBool('v')
   if (paths.length === 0) return rmWithoutOperands(force)
-  const idx = opts.index ?? undefined
+  const idx = ctx.index ?? undefined
   const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
   const rmR = requireOp(ops.rmR, 'rmR')
   const rmdir = requireOp(ops.rmdir, 'rmdir')
   const unlink = requireOp(ops.unlink, 'unlink')
   const lines: string[] = []
   const errors: string[] = []
-  const links = linksOf(opts) ?? null
+  const links = linksOf(ctx) ?? null
   for (const p of resolved) {
     if (isSlashedLink(p, links)) {
       const refusal = await rmLinkRefusal(p, links, { recursive, force })
@@ -105,7 +105,7 @@ const rm: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
               stat: probe,
               unlink: (spec) => unlink(accessor, spec),
               rmdir: (spec) => rmdir(accessor, spec, idx),
-              mounts: mountsOf(opts),
+              mounts: mountsOf(ctx),
               force,
             }))
             for (const [entry, why] of failures) {
@@ -115,7 +115,7 @@ const rm: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
           entryLines = verbose ? removalLines(listed, p) : []
           // A removal never crosses into a mount below, so it says so as
           // GNU's --one-file-system does.
-          for (const root of mountPoints(mountsOf(opts), p.virtual))
+          for (const root of mountPoints(mountsOf(ctx), p.virtual))
             errors.push(
               `rm: skipping '${operandSpelling(root, p)}', since it's on a different device`,
             )

@@ -19,8 +19,7 @@ import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/index.ts'
 import { IOResult, type ByteSource } from '../io/types.ts'
 import type { Limit, PathSpec, WalkProbe } from '../types.ts'
-import type { Runtime } from '../runtime/base.ts'
-import type { DispatchFn, ShellFn } from '../runtime/types.ts'
+import type { DispatchFn, RuntimeIdentity, ShellFn } from '../runtime/types.ts'
 import type {
   SessionAccess,
   FollowOperands,
@@ -59,38 +58,6 @@ import { OWN_OPTION_LOOP } from './spec/constants.ts'
 import { helpPage, versionLine } from './spec/standard.ts'
 import type { CommandSpec, FlagValue } from './spec/types.ts'
 import type { Files } from '../workspace/files.ts'
-
-/**
- * What the workspace hands `Mount.runCommand` for one command.
- *
- * `runCommand` copies these fields onto `CommandOpts`, next to the facts only
- * the mount knows (`mountPrefix`, `index`). Each field is named
- * as on `CommandOpts` and means the same; a mapped type in
- * workspace/mount/mount.test.ts pins that. `limitOverride` is the caller's
- * output limit, which `runCommand` applies itself instead of forwarding.
- */
-export interface ExecContext {
-  admission?: EntryGate | null
-  access?: SessionAccess
-  stdin?: ByteSource | null
-  cwd?: string
-  dispatch?: DispatchFn
-  vfs?: Files
-  sessionId?: string
-  env?: Record<string, string>
-  sessionView?: SessionView
-  processes?: ProcessView
-  execAllowed?: boolean
-  execPathAllowed?: (virtual: string) => boolean
-  runtime?: Runtime
-  followOperands?: FollowOperands
-  statPath?: StatPath
-  readdirPath?: ReaddirPath
-  signal?: AbortSignal
-  limitOverride?: Limit | null
-  shell?: ShellFn
-  argv?: readonly string[]
-}
 
 /**
  * The command tier's table: the mounted VFS's functions, each taking the
@@ -158,22 +125,46 @@ export interface CommandIO<A extends Accessor = Accessor> {
 }
 
 /**
- * Everything a command handler gets besides its operands.
+ * Everything a handler gets besides its handle and its operands.
  *
- * `Mount.runCommand` builds one per invocation and passes it as the handler's
- * fourth argument. A handler reads the fields it needs and ignores the rest.
+ * A command handler is `fn(accessor, paths, texts, ctx)` and a CLI leaf
+ * `fn(config, paths, texts, ctx)`: the same `ctx`, the facts a runtime
+ * execution takes too. Files are reached through `vfs`, the session's files,
+ * which judge every call at the workspace dispatcher, as `session.vfs` and a
+ * policy's `ctx.vfs` do. A handler reads the fields it needs and ignores the
+ * rest; the workspace builds one per command or CLI, and `Mount.runCommand`
+ * adds what only the mount knows (`mountPrefix`, `index`, `io`). Mirrors
+ * Python's `Context`.
  */
-export interface CommandOpts {
-  admission?: EntryGate | null
-  access?: SessionAccess
+export interface Context {
   /** Piped standard input, if any. */
   stdin: ByteSource | null
   /** The parsed flags. Read them through a spec-bound `FlagView`. */
   flags: Record<string, FlagValue>
+  /** The working directory. */
+  cwd: PathSpec
+  /** A snapshot of the session environment; live access uses `session`. */
+  env?: Record<string, string>
+  /**
+   * The words after the head as typed, for a diagnostic that quotes one
+   * (`cmp: missing operand after '-s'`). Absent when a line runs split per
+   * operand or per mount.
+   */
+  argv?: readonly string[]
+  /** The resolved grammar. */
+  spec?: CommandSpec
+  /** The session's files, run as the line's session. */
+  vfs?: Files
+  /** The live session, with policy applied to writes; `env` stays the snapshot. */
+  session?: SessionView
+  /** The session's processes. */
+  processes?: ProcessView
+  /** Run a nested line in the calling session, as `sh -c` would (awk's pipes and `system()`). */
+  shell?: ShellFn
+  admission?: EntryGate | null
+  access?: SessionAccess
   /** The prefix of the mount running the command. */
   mountPrefix?: string
-  /** The working directory. */
-  cwd: string
   /** The name the command was invoked as. */
   command?: string
   /** The mount's index cache. */
@@ -182,16 +173,8 @@ export interface CommandOpts {
   io?: CommandIO
   /** The workspace op dispatcher. */
   dispatch?: DispatchFn
-  /** The session's files, made by the command: the API a CLI gets as `inv.view.vfs`. */
-  vfs?: Files
   /** The calling session. */
   sessionId?: string
-  /** A snapshot of the session environment. */
-  env?: Record<string, string>
-  /** The live session, with policy applied to writes; `env` stays the snapshot. */
-  sessionView?: SessionView
-  /** The session's processes. */
-  processes?: ProcessView
   /** Whether policy lets the command start an interpreter. */
   execAllowed?: boolean
   /**
@@ -200,7 +183,7 @@ export interface CommandOpts {
    */
   execPathAllowed?: (virtual: string) => boolean
   /** The runtime an interpreter runs in. */
-  runtime?: Runtime
+  runtime?: RuntimeIdentity
   /**
    * The line's pathname resolution of its operands, which a glob's matches
    * take as typed words would.
@@ -212,27 +195,19 @@ export interface CommandOpts {
   readdirPath?: ReaddirPath
   signal?: AbortSignal
   timeoutSeconds?: number
-  /** Run a nested line in the calling session, as `sh -c` would (awk's pipes and `system()`). */
-  shell?: ShellFn
-  /**
-   * The words after the command name as typed, for a GNU diagnostic that
-   * quotes one (`cmp: missing operand after '-s'`). Absent when a line runs
-   * split per operand or per mount.
-   */
-  argv?: readonly string[]
 }
 
 export type CommandFnResult = [ByteSource | null, IOResult] | null
 
 /**
- * A command handler: `(accessor, paths, texts, opts)`. Generic on the
+ * A command handler: `(accessor, paths, texts, ctx)`. Generic on the
  * accessor so a backend's handler can take its own accessor type.
  */
 export type CommandFn<A extends Accessor = Accessor> = (
   accessor: A,
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ) => Promise<CommandFnResult> | CommandFnResult
 
 export type AggregateFn = (results: AggregateResult[]) => Uint8Array
@@ -373,12 +348,12 @@ function answerStandardOptions(
   const ownHelp = isBuiltinGrammar(name, spec) && OWN_OPTION_LOOP.has(name)
   const helpText = helpPage(name, spec)
   const versionText = versionLine(name)
-  const wrapped: CommandFn = async (accessor, paths, texts, opts) => {
-    if (!ownHelp && opts.flags.help === true) return [ENC.encode(helpText), new IOResult()]
-    if (!ownVersion && opts.flags.version === true) {
+  const wrapped: CommandFn = async (accessor, paths, texts, ctx) => {
+    if (!ownHelp && ctx.flags.help === true) return [ENC.encode(helpText), new IOResult()]
+    if (!ownVersion && ctx.flags.version === true) {
       return [ENC.encode(versionText), new IOResult()]
     }
-    return fn(accessor, paths, texts, opts)
+    return fn(accessor, paths, texts, ctx)
   }
   return { spec: registeredSpec(name, spec), fn: wrapped }
 }

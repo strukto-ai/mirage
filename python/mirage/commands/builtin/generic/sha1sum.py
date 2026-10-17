@@ -2,7 +2,7 @@ from mirage.commands.builtin.generic.checksum import (
     StoredDigest,
     checksum_generic,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
@@ -10,7 +10,7 @@ from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 async def sha1sum_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     stat: StatFn,
     stream: PolymorphicReadFn,
     stored: StoredDigest | None = None,
@@ -18,7 +18,7 @@ async def sha1sum_generic(
     return await checksum_generic(
         paths,
         texts,
-        opts,
+        ctx,
         stat,
         stream,
         name="sha1sum",

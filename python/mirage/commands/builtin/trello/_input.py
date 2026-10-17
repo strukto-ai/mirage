@@ -19,7 +19,7 @@ from mirage.commands.builtin.generic_bind.adapter import mount_io
 from mirage.commands.builtin.utils.stream import (
     resolve_text_input as _resolve_text_input,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.types import PathSpec
 
@@ -42,21 +42,21 @@ def file_operand(fl: FlagView, name: str) -> PathSpec | None:
 
 
 async def _read_file(
-    opts: CommandOpts, accessor: TrelloAccessor, path: PathSpec
+    ctx: Context, accessor: TrelloAccessor, path: PathSpec
 ) -> bytes:
     """Read one ``--*_file`` operand through the mount's table.
 
     Args:
-        opts (CommandOpts): the command's options.
+        ctx (Context): the command's options.
         accessor (TrelloAccessor): the mount's accessor.
         path (PathSpec): the operand.
     """
-    return await mount_io(opts).read_bytes(accessor, path)
+    return await mount_io(ctx).read_bytes(accessor, path)
 
 
 async def resolve_text_input(
     accessor: TrelloAccessor,
-    opts: CommandOpts,
+    ctx: Context,
     *,
     inline_text: str | None,
     file_path: PathSpec | None,
@@ -69,16 +69,16 @@ async def resolve_text_input(
 
     Args:
         accessor (TrelloAccessor): the mount's accessor.
-        opts (CommandOpts): the command's options.
+        ctx (Context): the command's options.
         inline_text (str | None): the text given on the command line.
         file_path (PathSpec | None): the operand to read the text from.
         error_message (str): raised when nothing gives the text.
     """
     return await _resolve_text_input(
-        functools.partial(_read_file, opts),
+        functools.partial(_read_file, ctx),
         accessor,
         inline_text=inline_text,
         file_path=file_path,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         error_message=error_message,
     )

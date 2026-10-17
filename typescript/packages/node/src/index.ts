@@ -424,7 +424,7 @@ export { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 export { generic } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 export { FlagView } from '@struktoai/mirage-core/commands/spec/flag_view'
 export { type FlagValue, UsageStyle } from '@struktoai/mirage-core/commands/spec/types'
-export type { CLIView } from '@struktoai/mirage-core/commands/cli/types'
+export type { Context } from '@struktoai/mirage-core/commands/config'
 export { UsageError } from '@struktoai/mirage-core/commands/errors'
 export { PolicyDenied, PolicyError } from '@struktoai/mirage-core/policy/errors'
 export {

@@ -26,7 +26,7 @@ class _Config(BaseModel):
     token: str = ""
 
 
-async def _verb(inv):
+async def _verb(config, paths, texts, ctx):
     return None
 
 
@@ -34,7 +34,7 @@ async def _verb(inv):
 class _StatefulVerb:
     calls: int = 0
 
-    async def __call__(self, invocation):
+    async def __call__(self, config, paths, texts, ctx):
         self.calls += 1
 
 

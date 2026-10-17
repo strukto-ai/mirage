@@ -20,7 +20,7 @@ from mirage.commands.builtin.utils.stream import (
     resolve_source,
     stdin_stream,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.constants import flag_kwarg_name
 from mirage.commands.spec.flag_view import FlagView
@@ -228,20 +228,20 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> GzipFlags:
 async def gzip_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     read_bytes: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
     unlink: Callable[..., Awaitable[None]],
     stat: StatFn | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     return await gzip(
         paths,
         read_bytes=read_bytes,
         write_bytes=write_bytes,
         unlink=unlink,
         stat=stat,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         decompress=parsed.decompress,
         keep=parsed.keep,
         force=parsed.force,
@@ -253,5 +253,5 @@ async def gzip_generic(
             if parsed.level is not None
             else zlib.Z_DEFAULT_COMPRESSION
         ),
-        resolver=link_resolver(opts),
+        resolver=link_resolver(ctx),
     )

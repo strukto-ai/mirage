@@ -12,59 +12,25 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ProcessView } from '../../process/view.ts'
-import type { ByteSource, IOResult } from '../../io/types.ts'
 import type { Limit, PathSpec } from '../../types.ts'
-import type { SessionView } from '../../view/types.ts'
 import { type ScriptSource } from '../../runtime/types.ts'
-import type { Files } from '../../workspace/files.ts'
-import type { CommandFnResult } from '../config.ts'
+import type { CommandFnResult, Context } from '../config.ts'
 import type { ZodObject, ZodRawShape } from 'zod'
 import { compileSpec } from '../spec/compile.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
 import { CommandSpec, type CommandSpecInit, type FlagValue } from '../spec/types.ts'
 
-/** Workspace capabilities, matching CommandOpts; services use installation config. */
-export interface CLIView {
-  /**
-   * The session's files, the API `session.vfs` and a policy's `ctx.vfs` are,
-   * run as the line's session: reads, writes, links, and where the mounts are.
-   */
-  vfs?: Files
-  /** Live, gated session access; CLIInvocation.env is a frozen snapshot. */
-  sessionView?: SessionView
-  processes?: ProcessView
-}
-
-/** Original argv and parsed arguments for one handler; file operations use view. */
-export interface CLIInvocation<ConfigT = unknown> {
-  /** Validated installation config, null without a configModel. */
-  config: ConfigT
-  /** Original words after the installed head, including subcommands. */
-  argv: readonly string[]
-  /** Cwd-resolved path operands. */
-  paths: readonly PathSpec[]
-  texts: readonly string[]
-  cwd: PathSpec
-  /** Merged group and leaf flags keyed by kwarg name; read through FlagView. */
-  flags: Record<string, FlagValue>
-  stdin: ByteSource | null
-  /** Frozen process environment; live access uses view.sessionView. */
-  env: Readonly<Record<string, string>>
-  /** Workspace capabilities, absent for direct calls. */
-  view?: CLIView
-  /** Resolved leaf grammar, absent for direct calls. */
-  spec?: CommandSpec
-  /**
-   * Evaluate in this invocation's session, including after awaits or in forks.
-   * Await calls before returning; the handle expires when the handler settles.
-   */
-  shell?: (command: string) => Promise<IOResult>
-}
-
-/** A leaf callback receiving the parsed invocation and validated account config. */
-export type CLIVerbFn = (inv: CLIInvocation) => Promise<CommandFnResult> | CommandFnResult
+/**
+ * A leaf callback: the validated account config (null without a configModel),
+ * the operands, and the same `Context` a command gets.
+ */
+export type CLIVerbFn = (
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+) => Promise<CommandFnResult> | CommandFnResult
 
 export type CLIConfigModel = ZodObject<ZodRawShape> | ((input: Record<string, unknown>) => unknown)
 

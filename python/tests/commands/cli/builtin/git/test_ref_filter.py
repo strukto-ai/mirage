@@ -18,14 +18,12 @@ from mirage.commands.cli.builtin.git.ref_filter import (
     list_mode_option,
     without_filter_values,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 
 
 def _words(verb: str, *argv: str) -> list[FilterWord]:
     spec = next(node for node in GIT.spec.subcommands if node.name == verb)
-    return filter_words(
-        CLIInvocation(None, argv=(verb, *argv), texts=(), flags={}, spec=spec)
-    )
+    return filter_words(Context(argv=(verb, *argv), flags={}, spec=spec))
 
 
 # parse-options' LASTARG_DEFAULT: the next word, whatever it looks like,

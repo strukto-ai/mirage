@@ -29,11 +29,9 @@ if TYPE_CHECKING:
     from mirage.commands.cli import (
         CLI,
         CLIHandler,
-        CLIInvocation,
-        CLIView,
         register_cli_spec,
     )
-    from mirage.commands.config import command
+    from mirage.commands.config import Context, command
     from mirage.commands.errors import UsageError
     from mirage.commands.spec import (
         SPECS,
@@ -138,13 +136,11 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.workspace.shell_execution": ("ShellExecution",),
     "mirage.vfs.disk": ("DiskVFS",),
     "mirage.vfs.ram": ("RAMVFS",),
-    "mirage.commands.config": ("command",),
+    "mirage.commands.config": ("Context", "command"),
     "mirage.commands.cli": (
-        "CLIInvocation",
         "CLI",
         "CLIHandler",
         "register_cli_spec",
-        "CLIView",
     ),
     "mirage.commands.spec": (
         "Argument",
@@ -271,7 +267,6 @@ __all__ = [
     "ReadPolicy",
     "ReadSpec",
     "WritePolicy",
-    "CLIInvocation",
     "CLI",
     "CLIHandler",
     "Argument",
@@ -284,8 +279,8 @@ __all__ = [
     "Accessor",
     "Ask",
     "BaseVFS",
-    "CLIView",
     "CommandSpec",
+    "Context",
     "ContentType",
     "DEFAULT_MAX_GLOB_MATCHES",
     "Decision",

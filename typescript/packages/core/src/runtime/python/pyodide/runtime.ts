@@ -252,10 +252,10 @@ export class PyodideRuntime extends PythonRuntime {
   }
 
   async run(args: RunArgs, context = this.captureContext()): Promise<RunResult> {
-    if (args.cwd === undefined && context !== undefined) args = { ...args, cwd: context.cwd }
+    if (args.cwd === undefined && context !== undefined) args = { ...args, cwd: context.ctx.cwd }
     const execute = async (runtime: PyodideRuntime): Promise<RunResult> =>
       this.capped(runtime, await runtime.runOne(args, context))
-    if (this.sync === undefined && (context?.processes?.depth ?? 0) > 0)
+    if (this.sync === undefined && (context?.ctx.processes?.depth ?? 0) > 0)
       return this.withFreshRuntime(execute)
     const scope =
       context?.scope ?? new ContextScope([...captureSessionContext(), captureExecutionContext()])

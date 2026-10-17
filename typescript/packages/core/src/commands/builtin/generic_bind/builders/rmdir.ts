@@ -72,19 +72,19 @@ export function ancestors(
   return chain
 }
 
-const rmdir: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
+const rmdir: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
   if (paths.length === 0) {
     throw new UsageError("rmdir: missing operand\nTry 'rmdir --help' for more information.", 1)
   }
-  const idx = opts.index ?? undefined
+  const idx = ctx.index ?? undefined
   const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
-  const fl = new FlagView(opts.flags, specOf('rmdir'))
+  const fl = new FlagView(ctx.flags, specOf('rmdir'))
   const verbose = fl.asBool('verbose')
   const ignore = fl.asBool('ignore_fail_on_non_empty')
   const rmdirOp = requireOp(ops.rmdir, 'rmdir')
   const lines: string[] = []
   const errors: string[] = []
-  const links = linksOf(opts) ?? null
+  const links = linksOf(ctx) ?? null
   const remove = async (p: PathSpec): Promise<string | null> => {
     // rmdir(2) never follows, so a link operand never reaches the
     // directory it points at. GNU words the two spellings apart: a bare
@@ -132,7 +132,7 @@ const rmdir: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
       continue
     }
     if (!fl.asBool('parents')) continue
-    for (const [ancestor, typed] of ancestors(p, opts.cwd, links)) {
+    for (const [ancestor, typed] of ancestors(p, ctx.cwd.virtual, links)) {
       if (verbose) lines.push(`rmdir: removing directory, '${typed}'`)
       // The walk up meets the mount root, which rmdir(2) answers with EBUSY.
       // An ancestor already gone held the entry just removed, so it was a

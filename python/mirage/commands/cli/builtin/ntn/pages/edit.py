@@ -18,24 +18,27 @@ from mirage.commands.cli.builtin.ntn.util import (
     notion_config,
     pretty_json,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.pages import replace_page_markdown
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 
 async def edit(
-    inv: CLIInvocation[NotionConfig],
+    config: NotionConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    page_id = first_text(inv.texts, "page id")
-    markdown = await content_or_stdin(fl.as_str("content"), inv.stdin)
+    fl = FlagView(ctx.flags)
+    page_id = first_text(texts, "page id")
+    markdown = await content_or_stdin(fl.as_str("content"), ctx.stdin)
     # The PATCH answers with the page's new markdown, which is what
     # `--json` is for; printing the id under it would throw the response
     # away on the one flag that asks for it.
-    edited = await replace_page_markdown(notion_config(inv), page_id, markdown)
+    edited = await replace_page_markdown(
+        notion_config(config, ctx), page_id, markdown
+    )
     if fl.as_bool("json"):
         return yield_bytes(pretty_json(edited)), IOResult()
     return yield_bytes(f"{page_id}\n".encode()), IOResult()

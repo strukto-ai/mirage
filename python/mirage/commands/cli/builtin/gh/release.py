@@ -24,7 +24,7 @@ from mirage.commands.cli.builtin.gh.accessor import (
     text_out,
     typed_out,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.config import GhConfig
 from mirage.core.github.release import (
@@ -34,7 +34,7 @@ from mirage.core.github.release import (
     list_releases,
 )
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import JsonValue
+from mirage.types import JsonValue, PathSpec
 
 RELEASE_FIELDS = (
     "body",
@@ -82,13 +82,13 @@ def _list_text(rows: list[dict[str, Any]]) -> str:
 
 
 async def list_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     rows = [
         _release(value)
         for value in await list_releases(
-            inv.config, repo_for(inv, fl), list_limit(fl, 30)
+            config, repo_for(config, fl), list_limit(fl, 30)
         )
     ]
     latest = next(
@@ -105,16 +105,16 @@ async def list_cmd(
 
 
 async def view_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    tag = inv.texts[0] if inv.texts else ""
+    fl = FlagView(ctx.flags)
+    tag = texts[0] if texts else ""
     if not tag:
         raise ValueError("a release tag is required")
-    ref = repo_for(inv, fl)
-    row = _release(await get_release(inv.config, ref, tag))
+    ref = repo_for(config, fl)
+    row = _release(await get_release(config, ref, tag))
     if "isLatest" in csv_values([fl.as_str("json") or ""]):
-        latest = await get_latest_release(inv.config, ref)
+        latest = await get_latest_release(config, ref)
         latest_row = _release(latest) if latest is not None else {}
         row["isLatest"] = latest_row.get("tagName") == row.get("tagName")
     human = (
@@ -128,13 +128,13 @@ async def view_cmd(
 
 
 async def create_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    tag = inv.texts[0] if inv.texts else ""
+    fl = FlagView(ctx.flags)
+    tag = texts[0] if texts else ""
     if not tag:
         raise ValueError("a release tag is required in noninteractive mode")
-    notes = await body_value(inv, fl, value="notes", file="notes_file")
+    notes = await body_value(ctx, fl, value="notes", file="notes_file")
     body: dict[str, JsonValue] = {
         "tag_name": tag,
         "name": fl.as_str("title") or tag,
@@ -146,6 +146,6 @@ async def create_cmd(
     if fl.as_str("target") is not None:
         body["target_commitish"] = fl.as_str("target") or ""
     created = _release(
-        await create_release(inv.config, repo_for(inv, fl), body)
+        await create_release(config, repo_for(config, fl), body)
     )
     return text_out(f"{created.get('url', '')}\n")

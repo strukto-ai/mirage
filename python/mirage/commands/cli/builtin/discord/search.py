@@ -14,20 +14,24 @@
 
 import json
 
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.search import search_guild
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 
 async def search(
-    inv: CLIInvocation[DiscordConfig],
+    config: DiscordConfig,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     results = await search_guild(
-        inv.config,
+        config,
         fl.as_str("guild") or "",
         fl.as_str("query") or "",
         channel_id=fl.as_str("channel"),

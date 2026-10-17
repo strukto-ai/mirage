@@ -66,7 +66,7 @@ describe('du walk fallback (no native du op)', () => {
     const result = await BUILDER.fn(bounded, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
       stdin: null,
       flags: {},
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
     })
     expect(result).not.toBeNull()
     const [, io] = result as [unknown, { exitCode: number; stderr: Uint8Array | null }]
@@ -83,7 +83,7 @@ describe('du walk fallback (no native du op)', () => {
       BUILDER.fn(failing, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
         stdin: null,
         flags: {},
-        cwd: '/',
+        cwd: PathSpec.fromStrPath('/'),
       }),
     ).rejects.toThrow('403 Forbidden')
   })
@@ -120,7 +120,7 @@ async function runScoped(
   const result = await BUILDER.fn(ops, ACCESSOR, paths, [], {
     stdin: null,
     flags: {},
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   return result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]
 }
@@ -268,7 +268,7 @@ describe('du rows for directories no file points at', () => {
     const result = await BUILDER.fn(ops, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
       stdin: null,
       flags,
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
     })
     if (result === null) throw new Error('no result')
     const [out, io] = result
@@ -358,7 +358,7 @@ describe('du -L through a directory it may not list', () => {
     const result = await BUILDER.fn(UNLISTED, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
       stdin: null,
       flags: { a: true, L: true },
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
       vfs: new Files(linked, null, ONE_LINK),
     })
     const [out, io] = result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]

@@ -16,21 +16,21 @@ import { once } from 'node:events'
 import { createServer } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import type { PathSpec } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { GENERAL_CURL } from './curl.ts'
 import { GENERAL_WGET } from './wget.ts'
 
 const DEC = new TextDecoder()
 const HTML = '<html><body><h1>Local Test Page</h1></body></html>'
 
-function opts(overrides: Partial<CommandOpts> = {}): CommandOpts {
+function ctx(overrides: Partial<Context> = {}): Context {
   return {
     stdin: null,
     flags: {},
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     ...overrides,
   }
 }
@@ -42,7 +42,7 @@ async function runCurl(
   const vfs = new RAMVFS()
   const cmd = GENERAL_CURL[0]
   if (cmd === undefined) throw new Error('curl not registered')
-  const result = await cmd.fn(vfs.accessor, [] as PathSpec[], [url], opts({ flags }))
+  const result = await cmd.fn(vfs.accessor, [] as PathSpec[], [url], ctx({ flags }))
   if (result === null) throw new Error('null result')
   const [out, io] = result
   return { out: await materialize(out), io }
@@ -62,7 +62,7 @@ async function runWget(
     return Promise.resolve([null, new IOResult()])
   }
   const result = await cmd.fn(vfs.accessor, [] as PathSpec[], [url], {
-    ...opts({ flags }),
+    ...ctx({ flags }),
     dispatch,
   })
   if (result === null) throw new Error('null result')

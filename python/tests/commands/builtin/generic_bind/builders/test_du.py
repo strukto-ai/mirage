@@ -18,7 +18,7 @@ import errno
 import pytest
 
 from mirage.commands.builtin.generic_bind.builders.du import WalkBudget, du
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.errors.fs import enotsup, walk_declined
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io import IOResult
@@ -69,7 +69,7 @@ def _spec(virtual: str) -> PathSpec:
 
 async def _run(ops: CommandIO, path: str, **flags) -> tuple[str, int, str]:
     stream, io = await du(
-        ops, object(), [_spec(path)], [], CommandOpts(flags={**flags})
+        ops, object(), [_spec(path)], [], Context(flags={**flags})
     )
     return (
         (await materialize(stream)).decode(),
@@ -167,7 +167,7 @@ async def test_exhausted_budget_reports_partial_output_and_exits_one():
 async def test_budget_is_shared_across_operands():
     ops = _ops(max_du_entries=1)
     stream, io = await du(
-        ops, object(), [_spec("/db"), _spec("/db/sub")], [], CommandOpts()
+        ops, object(), [_spec("/db"), _spec("/db/sub")], [], Context()
     )
     assert io.exit_code == 1
     assert len((await materialize(stream)).decode().splitlines()) == 2
@@ -277,7 +277,7 @@ async def test_du_L_counts_a_link_whose_file_only_it_reaches():
         object(),
         [_spec("/db")],
         [],
-        CommandOpts(
+        Context(
             flags={"a": True, "L": True},
             vfs=Files([], _linked, links=_OneLink()),
         ),

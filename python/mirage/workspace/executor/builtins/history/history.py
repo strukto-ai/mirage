@@ -12,11 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.config import ExecContext
+from mirage.commands.config import Context
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ExitSignal
+from mirage.types import PathSpec
 from mirage.vfs.history import HISTORY_PREFIX
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.mount.registry import MountRegistry
@@ -130,7 +131,10 @@ async def handle_history(
         [],
         texts,
         flags,
-        ExecContext(cwd=session.cwd, session_id=session.session_id),
+        Context(
+            cwd=PathSpec.from_str_path(session.cwd),
+            session_id=session.session_id,
+        ),
     )
     # The view command always returns byte stderr, but io.stderr is typed
     # as a ByteSource (a possible lazy stream); resolve it to bytes so the

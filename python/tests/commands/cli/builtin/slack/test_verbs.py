@@ -28,7 +28,7 @@ from mirage.commands.cli.builtin.slack import (
     send_message,
     unpin_message,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.core.slack.config import SlackConfig
 from mirage.io.types import materialize
 
@@ -51,9 +51,10 @@ async def test_send_message_threads_when_thread_ts_given(monkeypatch):
         send_message.__globals__, "reply_to_thread", fake_reply
     )
     out, io = await send_message(
-        CLIInvocation(
-            CONFIG, flags={"channel": "C1", "text": "hi", "thread_ts": "9.9"}
-        )
+        CONFIG,
+        [],
+        [],
+        Context(flags={"channel": "C1", "text": "hi", "thread_ts": "9.9"}),
     )
     assert io.exit_code == 0
     assert calls == [("C1", "9.9", "hi")]
@@ -68,7 +69,7 @@ async def test_read_messages_defaults_limit(monkeypatch):
         read_messages.__globals__, "fetch_recent_messages", fake_fetch
     )
     out, _io = await read_messages(
-        CLIInvocation(CONFIG, flags={"channel": "C1"})
+        CONFIG, [], [], Context(flags={"channel": "C1"})
     )
     assert await _json(out) == [{"ts": "1.0", "text": "C1:20"}]
 
@@ -84,13 +85,14 @@ async def test_react_and_reactions(monkeypatch):
     monkeypatch.setitem(react.__globals__, "add_reaction", fake_add)
     monkeypatch.setitem(reactions.__globals__, "get_reactions", fake_get)
     out, _io = await react(
-        CLIInvocation(
-            CONFIG, flags={"channel": "C1", "ts": "1.2", "emoji": "tada"}
-        )
+        CONFIG,
+        [],
+        [],
+        Context(flags={"channel": "C1", "ts": "1.2", "emoji": "tada"}),
     )
     assert (await _json(out))["emoji"] == "tada"
     out, _io = await reactions(
-        CLIInvocation(CONFIG, flags={"channel": "C1", "ts": "1.2"})
+        CONFIG, [], [], Context(flags={"channel": "C1", "ts": "1.2"})
     )
     assert (await _json(out))["ts"] == "1.2"
 
@@ -112,14 +114,16 @@ async def test_pin_unpin_list(monkeypatch):
     )
     monkeypatch.setitem(list_pins.__globals__, "list_pins_core", fake_list)
     out, _io = await pin_message(
-        CLIInvocation(CONFIG, flags={"channel": "C1", "ts": "1.2"})
+        CONFIG, [], [], Context(flags={"channel": "C1", "ts": "1.2"})
     )
     assert (await _json(out))["ok"] is True
     out, _io = await unpin_message(
-        CLIInvocation(CONFIG, flags={"channel": "C1", "ts": "1.2"})
+        CONFIG, [], [], Context(flags={"channel": "C1", "ts": "1.2"})
     )
     assert (await _json(out))["ok"] is True
-    out, _io = await list_pins(CLIInvocation(CONFIG, flags={"channel": "C1"}))
+    out, _io = await list_pins(
+        CONFIG, [], [], Context(flags={"channel": "C1"})
+    )
     assert await _json(out) == [{"type": "message"}]
 
 
@@ -139,13 +143,13 @@ async def test_member_info_and_list_members(monkeypatch):
     )
     monkeypatch.setitem(list_members.__globals__, "search_users", fake_search)
     monkeypatch.setitem(list_members.__globals__, "list_users", fake_list)
-    out, _io = await member_info(CLIInvocation(CONFIG, flags={"user": "U1"}))
+    out, _io = await member_info(CONFIG, [], [], Context(flags={"user": "U1"}))
     assert (await _json(out))["id"] == "U1"
     out, _io = await list_members(
-        CLIInvocation(CONFIG, flags={"query": "alice"})
+        CONFIG, [], [], Context(flags={"query": "alice"})
     )
     assert await _json(out) == [{"name": "alice"}]
-    out, _io = await list_members(CLIInvocation(CONFIG))
+    out, _io = await list_members(CONFIG, [], [], Context())
     assert await _json(out) == [{"name": "everyone"}]
 
 
@@ -155,5 +159,5 @@ async def test_emoji_list(monkeypatch):
         return {"shipit": "url"}
 
     monkeypatch.setitem(emoji_list.__globals__, "list_emoji", fake_emoji)
-    out, _io = await emoji_list(CLIInvocation(CONFIG))
+    out, _io = await emoji_list(CONFIG, [], [], Context())
     assert await _json(out) == {"shipit": "url"}

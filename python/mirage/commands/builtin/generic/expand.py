@@ -13,7 +13,7 @@ from mirage.commands.builtin.utils.stream import (
     stdin_stat,
     stdin_stream,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -408,7 +408,7 @@ async def expand(
 async def expand_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     stat: StatFn,
     stream: PolymorphicReadFn,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -417,14 +417,14 @@ async def expand_generic(
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
         texts (list[str]): Non-path words, unused by expand.
-        opts (CommandOpts): Flags and stdin from the dispatcher.
+        ctx (Context): Flags and stdin from the dispatcher.
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
     """
     stat = stdin_stat(stat)
     try:
-        parsed = parse_flags(opts.flags)
+        parsed = parse_flags(ctx.flags)
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=f"{exc}\n".encode())
     readable, err = await split_readable(paths, stat, "expand")
@@ -434,7 +434,7 @@ async def expand_generic(
         await expand(
             readable,
             read_stream=stream,
-            stdin=opts.stdin,
+            stdin=ctx.stdin,
             tabs=parsed.tabs,
             initial_only=parsed.initial_only,
         ),

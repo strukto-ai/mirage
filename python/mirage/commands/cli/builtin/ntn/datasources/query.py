@@ -22,7 +22,7 @@ from mirage.commands.cli.builtin.ntn.util import (
     pretty_json,
     property_cell,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.notion.client import NotionAPIError
@@ -34,7 +34,8 @@ from mirage.core.notion.pages import (
 )
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import JsonValue
+from mirage.types import JsonValue, PathSpec
+from mirage.workspace.files import Files
 
 DEFAULT_LIMIT = 25
 DIRECTIONS = {
@@ -110,16 +111,13 @@ async def resolve_source(config: NotionConfig, ref: str) -> dict[str, Any]:
     return await get_data_source(config, str(stubs[0].get("id", "")))
 
 
-async def filter_body(
-    fl: FlagView, view: CLIView | None
-) -> dict[str, JsonValue]:
+async def filter_body(fl: FlagView, vfs: Files | None) -> dict[str, JsonValue]:
     """Read the query filter from `--filter` or `--filter-file`.
 
     Args:
         fl (FlagView): the leaf's parsed flags.
-        view (CLIView | None): the workspace entry points, used to read a
-            filter file the user named, the way himalaya reads
-            ``--attach``.
+        vfs (Files | None): the session's files, used to read a filter
+            file the user named, the way himalaya reads ``--attach``.
 
     Returns:
         dict: the filter object, empty when neither flag is present.
@@ -130,19 +128,19 @@ async def filter_body(
     sources = fl.as_paths("filter_file")
     if not sources:
         return {}
-    if view is None or view.vfs is None:
+    if vfs is None:
         raise UsageError("--filter-file needs a workspace to read files from")
-    raw = await view.vfs.read(sources[0])
+    raw = await vfs.read(sources[0])
     return parse_json_text(raw.decode("utf-8", "replace"), "--filter-file")
 
 
 async def query(
-    inv: CLIInvocation[NotionConfig],
+    config: NotionConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     # The whole request body is built before the first call, so a bad
     # --filter refuses the line without having reached the API.
-    ref = data_source_ref(first_text(inv.texts, "data source id"))
+    ref = data_source_ref(first_text(texts, "data source id"))
     body: dict[str, JsonValue] = {
         "page_size": fl.as_int("limit") or DEFAULT_LIMIT
     }
@@ -152,11 +150,11 @@ async def query(
     sorts: list[JsonValue] = [parse_sort(one) for one in fl.as_list("sort")]
     if sorts:
         body["sorts"] = sorts
-    chosen = await filter_body(fl, inv.view)
+    chosen = await filter_body(fl, ctx.vfs)
     if chosen:
         body["filter"] = chosen
 
-    config = notion_config(inv)
+    config = notion_config(config, ctx)
     data_source = await resolve_source(config, ref)
     source_id = str(data_source.get("id", ""))
     result = await query_data_source_page(config, source_id, body)

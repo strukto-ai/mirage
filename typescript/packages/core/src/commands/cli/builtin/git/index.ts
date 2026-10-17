@@ -21,7 +21,6 @@ import { reflog } from './reflog.ts'
 import { fetch, fetchReadOnly } from './fetch.ts'
 import { clone, cloneReadOnly } from './clone.ts'
 import { Argument, UsageStyle } from '../../../spec/types.ts'
-import { type CLIInvocation } from '../../types.ts'
 import { add } from './add.ts'
 import { init } from './init.ts'
 import { fsck } from './fsck.ts'
@@ -30,7 +29,8 @@ import { hashObject, hashObjectReadOnly } from './hash_object.ts'
 import { stashList, stashShow } from './stash.ts'
 import { nodeHelp, findNode } from '../../walk.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { branch, branchReadOnly } from './branch.ts'
 import { catFile } from './cat_file.ts'
 import { checkout, checkoutReadOnly } from './checkout.ts'
@@ -514,21 +514,26 @@ const BRANCH_OPTIONS = [
  * reaches the object database through the same bridge, so a repository mounted
  * in a browser works exactly as one mounted over disk.
  */
-function helpCmd(inv: CLIInvocation): CommandFnResult {
+function helpCmd(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): CommandFnResult {
   try {
-    checkSwitches(inv, inv.texts)
+    checkSwitches(ctx, texts)
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
     throw err
   }
-  const found = findNode(GIT.spec, inv.texts)
+  const found = findNode(GIT.spec, texts)
   if (found === null)
     return [
       null,
       new IOResult({
         exitCode: 1,
         stderr: new TextEncoder().encode(
-          `git: '${inv.texts.join(' ')}' is not a git command. See 'git --help'.\n`,
+          `git: '${texts.join(' ')}' is not a git command. See 'git --help'.\n`,
         ),
       }),
     ]

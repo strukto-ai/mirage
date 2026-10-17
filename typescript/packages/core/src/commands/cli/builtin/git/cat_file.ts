@@ -15,9 +15,9 @@
 import git from 'isomorphic-git'
 import { IOResult } from '../../../../io/types.ts'
 import { readStdinAsync } from '../../../builtin/utils/stream.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import {
   AmbiguousArgumentError,
   GitError,
@@ -175,13 +175,16 @@ async function* batchLines(
  * `<type> <object>` pair or each stdin line under `--batch`. Pinned against git
  * 2.50.1.
  */
-export async function catFile(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const view = inv.view ?? {}
-  const texts = [...inv.texts]
+export async function catFile(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    if (view.vfs === undefined) throw new NoWorkspaceError()
-    checkSwitches(inv, texts)
+    if (ctx.vfs === undefined) throw new NoWorkspaceError()
+    checkSwitches(ctx, texts)
     const modes = fl.typedOrder(...QUERIES)
     const [first, second] = modes
     if (first !== undefined && second !== undefined) {
@@ -190,7 +193,7 @@ export async function catFile(inv: CLIInvocation): Promise<CommandFnResult> {
     const batch = fl.typedOrder('batch', 'batch_check').at(-1)
     if (batch !== undefined) {
       if (texts.length > 0) {
-        throw new UsageError('', 'fatal: batch modes take no arguments\n\n' + verbUsage(inv))
+        throw new UsageError('', 'fatal: batch modes take no arguments\n\n' + verbUsage(ctx))
       }
       const value = fl.raw(batch)
       const template = typeof value === 'string' ? value : BATCH_FORMAT
@@ -199,24 +202,24 @@ export async function catFile(inv: CLIInvocation): Promise<CommandFnResult> {
           throw new GitError(`bad cat-file format: ${found[0]}`)
         }
       }
-      const repo = await opened(fl, view)
-      const text = DEC.decode((await readStdinAsync(inv.stdin ?? null)) ?? new Uint8Array())
+      const repo = await opened(ctx, fl)
+      const text = DEC.decode((await readStdinAsync(ctx.stdin)) ?? new Uint8Array())
       const lines = text.split('\n')
       if (lines.at(-1) === '') lines.pop()
       const heads: [Uint8Array, string | null][] = []
       for (const line of lines) heads.push(await batchHead(repo, line, template))
       return [batchLines(repo, heads, batch === 'batch'), new IOResult()]
     }
-    if (first === undefined && texts.length === 0) throw new UsageError('', verbUsage(inv))
+    if (first === undefined && texts.length === 0) throw new UsageError('', verbUsage(ctx))
     if (first !== undefined) {
       const name = texts[0]
       if (name === undefined) {
-        throw new UsageError('', `fatal: <object> required with '-${first}'\n\n` + verbUsage(inv))
+        throw new UsageError('', `fatal: <object> required with '-${first}'\n\n` + verbUsage(ctx))
       }
       if (texts.length > 1) {
-        throw new UsageError('', 'fatal: too many arguments\n\n' + verbUsage(inv))
+        throw new UsageError('', 'fatal: too many arguments\n\n' + verbUsage(ctx))
       }
-      const repo = await opened(fl, view)
+      const repo = await opened(ctx, fl)
       const [out, code] = await query(repo, first, name)
       return [out.length > 0 ? out : null, new IOResult({ exitCode: code })]
     }
@@ -226,13 +229,13 @@ export async function catFile(inv: CLIInvocation): Promise<CommandFnResult> {
         '',
         'fatal: only two arguments allowed in <type> <object> mode, ' +
           `not ${String(texts.length)}\n\n` +
-          verbUsage(inv),
+          verbUsage(ctx),
       )
     }
     if (!OBJECT_TYPES.some((type) => type === kind)) {
       throw new GitError(`invalid object type "${kind}"`)
     }
-    const repo = await opened(fl, view)
+    const repo = await opened(ctx, fl)
     const obj = await peeled(repo, await namedObject(repo, name), kind)
     if (obj === null) throw new GitError(`git cat-file ${name}: bad file`)
     return [await raw(repo, obj.oid), new IOResult()]

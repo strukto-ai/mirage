@@ -6,7 +6,7 @@ from mirage.commands.builtin.utils.operands import (
     reported_stream,
 )
 from mirage.commands.builtin.utils.stream import resolve_source
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
@@ -72,16 +72,16 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> LookFlags:
 async def look_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     read_stream: PolymorphicReadFn,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
         raise ValueError("look: missing prefix")
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     return await look(
         paths,
         texts[0],
         read_stream=read_stream,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         fold_case=parsed.fold_case,
     )

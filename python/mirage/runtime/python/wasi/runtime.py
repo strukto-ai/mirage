@@ -158,7 +158,7 @@ class WasiRuntime(PythonRuntime):
         # The guest sees the mounts, so the script's own directory heads
         # sys.path, as it does on CPython.
         source = prepare_source(args, search_path=True)
-        cwd = args.cwd or (context.cwd if context is not None else None)
+        cwd = args.cwd or (context.ctx.cwd if context is not None else None)
         filename = (
             main_filename(args)
             or (args.prog if args.script_cli else None)

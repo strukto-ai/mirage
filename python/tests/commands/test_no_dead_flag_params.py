@@ -24,9 +24,9 @@ from mirage.commands.spec.types import CommandSpec
 
 # The dispatcher calls every handler with exactly four positional
 # arguments (`Mount.run_command`); everything else -- flags, stdin, cwd,
-# the namespace facts -- rides the CommandOpts bag. A handler that names
+# the namespace facts -- rides the Context bag. A handler that names
 # anything else in its signature can never receive it.
-HANDLER_PARAMS = ("accessor", "paths", "texts", "opts")
+HANDLER_PARAMS = ("accessor", "paths", "texts", "ctx")
 BUILDER_PARAMS = ("ops",) + HANDLER_PARAMS
 AGGREGATE_PARAMS = ("results",)
 
@@ -82,7 +82,7 @@ def _param_names(fn: Callable[..., Any]) -> tuple[str, ...] | None:
 def test_handlers_take_accessor_paths_texts_opts():
     """Registered handlers have the one dispatcher shape.
 
-    Flags, stdin, cwd, and the namespace facts all ride ``CommandOpts``;
+    Flags, stdin, cwd, and the namespace facts all ride ``Context``;
     a parameter named after any of them is dead the moment the
     dispatcher stops passing keywords, so the signature itself is
     pinned. Builders carry a leading ``ops`` (the factory binds it);
@@ -102,7 +102,7 @@ def test_handlers_take_accessor_paths_texts_opts():
         if params not in expected:
             offenders.append(f"{label}: {name}({', '.join(params)})")
     assert not offenders, (
-        "handlers are called as fn(accessor, paths, texts, opts) — flags "
-        "and dispatcher facts ride CommandOpts, so any other parameter "
+        "handlers are called as fn(accessor, paths, texts, ctx) — flags "
+        "and dispatcher facts ride Context, so any other parameter "
         "is never filled:\n" + "\n".join(sorted(set(offenders)))
     )

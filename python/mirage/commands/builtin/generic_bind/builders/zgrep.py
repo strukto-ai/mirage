@@ -21,7 +21,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
 )
 from mirage.commands.builtin.utils.links import link_resolver
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import utf8_locale
 from mirage.types import PathSpec
@@ -32,22 +32,22 @@ async def zgrep(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     resolved = (
-        await ops.resolve_glob(accessor, paths, opts.index)
+        await ops.resolve_glob(accessor, paths, ctx.index)
         if paths and ops.is_mounted(accessor)
         else []
     )
     return await zgrep_generic(
         resolved,
         texts,
-        opts.flags,
-        read_bytes=bound_op(ops.read_stream, accessor, opts.index),
-        stdin=opts.stdin,
+        ctx.flags,
+        read_bytes=bound_op(ops.read_stream, accessor, ctx.index),
+        stdin=ctx.stdin,
         stat=partial(ops.stat, accessor),
-        resolver=link_resolver(opts),
-        utf8=utf8_locale(opts.env),
+        resolver=link_resolver(ctx),
+        utf8=utf8_locale(ctx.env),
     )
 
 

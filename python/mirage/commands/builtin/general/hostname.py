@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.synopsis import SYNOPSES
@@ -49,14 +49,14 @@ async def hostname(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """hostname 3.25 (Debian): the name uname -n prints, never the host's. The
     last display option wins, and setting a name is the refusal an unprivileged
     user gets. Misfit operands print the usage line and the ``--help`` hint,
     exit 255, where hostname dumps its whole help.
     """
-    fl = FlagView(opts.flags, spec=SPECS["hostname"])
+    fl = FlagView(ctx.flags, spec=SPECS["hostname"])
     typed = fl.typed_order(*DISPLAY)
     if len(texts) > 1 or (texts and typed):
         return None, IOResult(

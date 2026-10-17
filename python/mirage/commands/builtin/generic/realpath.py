@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from mirage.commands.builtin.utils.links import links_of
 from mirage.commands.builtin.utils.paths import dispatch_stat, link_target
 from mirage.commands.builtin.utils.wrap import to_pathspec
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -271,7 +271,7 @@ async def realpath(
 async def realpath_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     stat_fn: StatFn,
 ) -> tuple[ByteSource | None, IOResult]:
     prefix = (
@@ -284,12 +284,12 @@ async def realpath_generic(
     return await realpath(
         paths,
         stat=(
-            functools.partial(dispatch_stat, opts.dispatch)
-            if opts.dispatch is not None
+            functools.partial(dispatch_stat, ctx.dispatch)
+            if ctx.dispatch is not None
             else stat
         ),
-        cwd=opts.cwd.virtual,
-        readlink=link_target(links_of(opts)),
-        flags=parse_flags(opts.flags),
+        cwd=ctx.cwd.virtual,
+        readlink=link_target(links_of(ctx)),
+        flags=parse_flags(ctx.flags),
         visibility=session_visibility(),
     )

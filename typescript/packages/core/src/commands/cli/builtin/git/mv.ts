@@ -17,9 +17,8 @@ import { type PathSpec, FileType } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 import { isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import {
   GitError,
   MoveOverlapError,
@@ -351,20 +350,23 @@ async function apply(
  * is what lets `status` read the result as a rename rather than a delete beside
  * an add.
  */
-export async function mv(inv: CLIInvocation): Promise<CommandFnResult> {
-  const view = inv.view ?? {}
-  const texts = [...inv.texts]
-  const fl = new FlagView(inv.flags)
+export async function mv(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const lines: string[] = []
   try {
-    const vfs = view.vfs
+    const vfs = ctx.vfs
     if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
-    checkSwitches(inv, texts)
+    checkSwitches(ctx, texts)
     const flags = parseFlags(fl)
-    if (texts.length < 2) throw new UsageError('', verbUsage(inv))
-    const repo = await opened(fl, view, true)
+    if (texts.length < 2) throw new UsageError('', verbUsage(ctx))
+    const repo = await opened(ctx, fl, true)
     const state = await readIndex(repo, vfs)
     const conflicted = new Set(state.conflicts.keys())
     // An unmerged path holds no ordinary entry, so a tracked set built from the

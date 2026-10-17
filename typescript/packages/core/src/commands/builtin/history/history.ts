@@ -17,7 +17,7 @@ import { renderHistoryListing } from '../../../core/history/render.ts'
 import { IOResult } from '../../../io/types.ts'
 import { type PathSpec } from '../../../types.ts'
 import { command } from '../../config.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { VFSName } from '../../../types.ts'
@@ -53,14 +53,14 @@ async function historyFn(
   accessor: HistoryAccessor,
   _paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): Promise<CommandFnResult> {
   const observer = accessor.observer
-  if (opts.sessionId === undefined) {
+  if (ctx.sessionId === undefined) {
     throw new Error("history requires the caller's session id")
   }
-  const session = opts.sessionId
-  const fl = new FlagView(opts.flags, specOf('history'))
+  const session = ctx.sessionId
+  const fl = new FlagView(ctx.flags, specOf('history'))
   const c = fl.asBool('c')
   const s = fl.asBool('s')
   const p = fl.asBool('p')
@@ -76,7 +76,7 @@ async function historyFn(
     await observer.logDelete(session, offset)
   }
   if (s && texts.length > 0) {
-    await observer.logCommandText(texts.join(' '), session, opts.cwd)
+    await observer.logCommandText(texts.join(' '), session, ctx.cwd.virtual)
   }
   if (p && !s) {
     const out = texts.length > 0 ? texts.join('\n') + '\n' : ''

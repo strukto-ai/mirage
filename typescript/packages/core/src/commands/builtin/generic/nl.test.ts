@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { parseCommand, parseToKwargs } from '../../spec/parser.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { nlGeneric, parseFlags } from './nl.ts'
 
 const ENC = new TextEncoder()
@@ -32,16 +33,16 @@ async function* stdinOf(text: string): AsyncIterable<Uint8Array> {
 }
 
 async function run(line: Line): Promise<{ exit: number; stdout: string; stderr: string }> {
-  const opts = {
+  const ctx = {
     stdin: stdinOf('x\n'),
     ...line,
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     vfs: { kind: 'ram' } as never,
-  } as CommandOpts
+  } as Context
   // `CommandFnResult` is nullable — null is how a handler says it does not
   // apply — and nl never answers that way, so say so rather than destructure
   // a union.
-  const result = nlGeneric([], opts, stubStream)
+  const result = nlGeneric([], ctx, stubStream)
   if (result === null) throw new Error('nl declined to handle its own operands')
   const [out, io] = result
   return {
@@ -56,7 +57,7 @@ async function run(line: Line): Promise<{ exit: number; stdout: string; stderr: 
 // hand-written record would be assuming the very thing under test; these
 // cases go through the spec parser so the bag carries whatever order the
 // parser actually preserves.
-type Line = Pick<CommandOpts, 'flags'>
+type Line = Pick<Context, 'flags'>
 
 function parseLine(line: Line): ReturnType<typeof parseFlags> {
   return parseFlags(line.flags)
@@ -303,13 +304,13 @@ describe('nl -b p<re> compiles a POSIX BRE, not this engine s dialect', () => {
     ['*', '*a'],
     ['a\\{32767\\}', 'a'.repeat(32767)],
   ])('numbers the line glibc numbers for %j', async (pattern, subject) => {
-    const opts = {
+    const ctx = {
       stdin: stdinOf(`${subject}\n`),
       ...nlBag('-b', 'p' + pattern),
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
       vfs: { kind: 'ram' } as never,
-    } as CommandOpts
-    const result = nlGeneric([], opts, stubStream)
+    } as Context
+    const result = nlGeneric([], ctx, stubStream)
     if (result === null) throw new Error('nl declined to handle its own operands')
     const [out, io] = result
     expect(io.exitCode).toBe(0)
@@ -515,13 +516,13 @@ describe('nl reads an empty -d as disabling delimiters', () => {
 // while `é:é:é:` does not.
 describe('nl pads a delimiter only when it is one byte', () => {
   async function render(delimiter: string, text: string): Promise<string> {
-    const opts = {
+    const ctx = {
       stdin: stdinOf(text),
       ...nlBag('-d', delimiter),
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
       vfs: { kind: 'ram' } as never,
-    } as CommandOpts
-    const result = nlGeneric([], opts, stubStream)
+    } as Context
+    const result = nlGeneric([], ctx, stubStream)
     if (result === null) throw new Error('nl declined to handle its own operands')
     const [out] = result
     return out === null ? '' : DEC.decode(await materialize(out))
@@ -596,13 +597,13 @@ const INTMAX_MAX_TXT = '9223372036854775807'
 describe('nl line number overflow is deferred', () => {
   async function numbered(start: string, count: number, flags = {}) {
     const stdin = Array.from({ length: count }, (_, i) => `l${String(i)}\n`).join('')
-    const opts = {
+    const ctx = {
       stdin: stdinOf(stdin),
       flags: { starting_line_number: start, ...flags },
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
       vfs: { kind: 'ram' } as never,
-    } as CommandOpts
-    const result = nlGeneric([], opts, stubStream)
+    } as Context
+    const result = nlGeneric([], ctx, stubStream)
     if (result === null) throw new Error('nl declined to handle its own operands')
     const [out, io] = result
     const text = out === null ? '' : DEC.decode(await materialize(out))
@@ -639,13 +640,13 @@ describe('nl line number overflow is deferred', () => {
   // abort is "this line needs a number and cannot have one", not "stop
   // reading".
   it('still prints unnumbered lines first', async () => {
-    const opts = {
+    const ctx = {
       stdin: stdinOf('a\n\nb\n'),
       flags: { starting_line_number: INTMAX_MAX_TXT },
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
       vfs: { kind: 'ram' } as never,
-    } as CommandOpts
-    const result = nlGeneric([], opts, stubStream)
+    } as Context
+    const result = nlGeneric([], ctx, stubStream)
     if (result === null) throw new Error('nl declined to handle its own operands')
     const [out, io] = result
     const text = out === null ? '' : DEC.decode(await materialize(out))

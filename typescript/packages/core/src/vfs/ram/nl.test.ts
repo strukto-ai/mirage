@@ -35,7 +35,7 @@ async function runNl(
     stdin,
     flags,
     io: commandIo(vfs),
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) return { out: '', exitCode: -1 }
   const [out, ioResult] = result
@@ -127,7 +127,7 @@ describe('nl', () => {
       stdin: null,
       flags: {},
       io: commandIo(vfs),
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
     })
     if (result === null) throw new Error('result null')
     const [out, ioResult] = result

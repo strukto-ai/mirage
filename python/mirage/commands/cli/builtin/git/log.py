@@ -53,11 +53,12 @@ from mirage.commands.cli.builtin.git.revparse import split_revisions
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import Decoration
 from mirage.commands.cli.builtin.git.util import check_operands, fatal
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
+from mirage.types import PathSpec
 
 
 def _collect(
@@ -282,25 +283,27 @@ def _graphed(
     return encode_text(out)
 
 
-async def log(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
+async def log(
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+) -> tuple[ByteSource | None, IOResult]:
     """Show commit logs.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model; it reads its repository
-            through ``inv.view.vfs``.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context; git reads its repository
+            through ``ctx.vfs``.
     """
-    view = inv.view or CLIView()
-    vfs = view.vfs
-    texts = inv.texts
-    flags = inv.flags
+    vfs = ctx.vfs
+    flags = ctx.flags
     fl = FlagView(flags)
     try:
         if vfs is None:
             raise NoWorkspaceError()
-        check_operands(inv, texts)
-        parsed = parse_flags(fl, inv.env)
-        repo, location = await opened(fl, view)
+        check_operands(ctx, texts)
+        parsed = parse_flags(fl, ctx.env)
+        repo, location = await opened(ctx, fl)
         parsed = replace(
             parsed,
             mailmap=await load_mailmap(vfs, location),

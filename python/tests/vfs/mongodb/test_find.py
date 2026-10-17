@@ -19,7 +19,7 @@ import pytest
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.core.mongodb.types import EntityKind
 from mirage.io.types import materialize
 from mirage.types import PathSpec
@@ -93,7 +93,7 @@ async def _run(paths: list[PathSpec], *texts: str, **flags) -> list[str]:
         accessor,
         paths,
         list(texts),
-        CommandOpts(
+        Context(
             io=io_for(MongoDBVFS, accessor),
             index=RAMIndexCacheStore(),
             flags={**flags},

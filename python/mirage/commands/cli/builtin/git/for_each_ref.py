@@ -45,9 +45,10 @@ from mirage.commands.cli.builtin.git.util import (
     check_switches,
     fatal,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 DEFAULT_FORMAT = "%(objectname) %(objecttype)\t%(refname)"
 QUOTE_OPTIONS = (
@@ -74,7 +75,7 @@ def quote_style(fl: FlagView) -> QuoteStyle:
 
 
 async def for_each_ref(
-    inv: CLIInvocation[None],
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Format the repository's references, as git's ref-filter does.
 
@@ -83,16 +84,18 @@ async def for_each_ref(
     and each is printed through ``--format``.
 
     Args:
-        inv (CLIInvocation[None]): optional ref patterns and options.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the optional ref patterns.
+        ctx (Context): the line's context, with its options.
     """
-    fl = FlagView(inv.flags)
-    view = inv.view or CLIView()
-    words = filter_words(inv)
-    texts = without_filter_values(inv.texts, words)
+    fl = FlagView(ctx.flags)
+    words = filter_words(ctx)
+    operands = without_filter_values(texts, words)
     try:
-        check_switches(inv, texts)
-        repo, location = await opened(fl, view)
-        assert view.vfs is not None
+        check_switches(ctx, operands)
+        repo, location = await opened(ctx, fl)
+        assert ctx.vfs is not None
         filt = await asyncio.to_thread(ref_filter, repo, words)
         count = fl.as_int("count") or 0
         if count < 0:
@@ -103,11 +106,11 @@ async def for_each_ref(
         )
         keys = sort_keys(fl, ("refname",))
         icase = fl.as_bool("ignore_case")
-        patterns = texts
+        patterns = operands
         if fl.as_bool("stdin"):
-            if texts:
+            if operands:
                 raise GitError("unknown arguments supplied with --stdin")
-            text = (await read_stdin_async(inv.stdin) or b"").decode(
+            text = (await read_stdin_async(ctx.stdin) or b"").decode(
                 "utf-8", "replace"
             )
             lines = text.split("\n")
@@ -125,15 +128,15 @@ async def for_each_ref(
                 and not (excludes and match_as_path(name, excludes, icase))
             )
 
-        items, ctx, errors = await ref_listing(
-            view.vfs,
+        items, ref_ctx, errors = await ref_listing(
+            ctx.vfs,
             repo,
             location,
-            await read_config(view.vfs, location),
+            await read_config(ctx.vfs, location),
             used_fields(fmt, keys or ()),
             wanted,
             filt,
-            date_clock(inv.env),
+            date_clock(ctx.env),
             roots,
         )
         if roots:
@@ -146,7 +149,7 @@ async def for_each_ref(
         out, stopped = format_refs(
             fmt,
             items,
-            ctx,
+            ref_ctx,
             keys,
             count=count,
             omit_empty=fl.as_bool("omit_empty"),

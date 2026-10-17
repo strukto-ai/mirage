@@ -23,7 +23,7 @@ import { usageExitCode, usageHint } from '../../spec/usage.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { fsStrerror, isEisdir, isFsError, isMissingPath, isWalkError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { resolvePath } from '../../../utils/path.ts'
@@ -208,7 +208,7 @@ function countNoun(count: number, singular: string, plural: string): string {
 // (`-`, /dev/stdin) reads the command's input through `stream`, on the
 // cursor the list itself reads from. Mirrors Python's dispatched_reader.
 export function dispatchedReader(
-  dispatch: NonNullable<CommandOpts['dispatch']>,
+  dispatch: NonNullable<Context['dispatch']>,
   stream: Stream,
 ): Stream {
   const caller = currentCaller()
@@ -220,13 +220,13 @@ async function checkFile(
   p: PathSpec,
   algorithm: string,
   name: string,
-  opts: CommandOpts,
+  ctx: Context,
   flags: ChecksumFlags,
 ): Promise<[string, string, number]> {
   const data = DEC.decode(await materialize(stream(p)))
-  const listed = opts.dispatch !== undefined ? dispatchedReader(opts.dispatch, stream) : stream
+  const listed = ctx.dispatch !== undefined ? dispatchedReader(ctx.dispatch, stream) : stream
   // A list read from stdin names files on the mount the command runs on.
-  const mountPrefix = isStdin(p) ? (opts.mountPrefix ?? '') : mountPrefixOf(p.virtual, p.vfsPath)
+  const mountPrefix = isStdin(p) ? (ctx.mountPrefix ?? '') : mountPrefixOf(p.virtual, p.vfsPath)
   // GNU quotes its stdin name, which holds a space.
   const checkLabel =
     p.rawPath === '-' ? `'${STDIN_HEADER_NAME}'` : p.rawPath !== '' ? p.rawPath : p.virtual
@@ -256,7 +256,10 @@ async function checkFile(
     const [expected, filename] = parsed
     let digest: string
     try {
-      digest = await hashSource(listed(checkTarget(filename, opts.cwd, mountPrefix)), algorithm)
+      digest = await hashSource(
+        listed(checkTarget(filename, ctx.cwd.virtual, mountPrefix)),
+        algorithm,
+      )
     } catch (error) {
       if (!isWalkError(error)) throw error
       // GNU --ignore-missing skips only absence; a permission or
@@ -341,15 +344,15 @@ function parseCheckLine(line: string, name: string): [string, string] | null {
  */
 export async function checksumGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   read: Stream,
   name: string,
   stat?: (p: PathSpec) => Promise<unknown>,
   stored?: StoredDigest,
 ): Promise<CommandFnResult> {
-  const parsed = parseFlags(opts.flags, name)
+  const parsed = parseFlags(ctx.flags, name)
   const algorithm = name.slice(0, -3)
-  const stream = stdinStream(read, opts.stdin)
+  const stream = stdinStream(read, ctx.stdin)
   if (parsed.check) {
     let output = ''
     let errors = ''
@@ -361,7 +364,7 @@ export async function checksumGeneric(
     for (const p of paths.length > 0 ? paths : [STDIN_OPERAND]) {
       let checked: [string, string, number]
       try {
-        checked = await checkFile(stream, p, algorithm, name, opts, parsed)
+        checked = await checkFile(stream, p, algorithm, name, ctx, parsed)
       } catch (error) {
         if (!isWalkError(error)) throw error
         const label = p.rawPath !== '' ? p.rawPath : p.virtual

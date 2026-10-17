@@ -20,7 +20,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.core.awk.builtins import split_assignment
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -30,7 +30,7 @@ async def resolve_operands(
     ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> list[PathSpec]:
     """Expand awk's file operands, keeping ``var=value`` ones in place.
 
@@ -43,20 +43,20 @@ async def resolve_operands(
         ops (CommandIO): Backend I/O bundle.
         accessor (Accessor): Backend accessor.
         paths (list[PathSpec]): The operands in command-line order.
-        opts (CommandOpts): The invocation context.
+        ctx (Context): The invocation context.
     """
     out: list[PathSpec] = []
     run: list[PathSpec] = []
     for path in paths:
         if split_assignment(path.raw_path) is None and served_here(
-            opts.vfs, opts.mount_prefix, path
+            ctx.vfs, ctx.mount_prefix, path
         ):
             run.append(path)
             continue
-        out.extend(await resolve_or_empty(ops, accessor, run, opts.index))
+        out.extend(await resolve_or_empty(ops, accessor, run, ctx.index))
         run = []
         out.append(path)
-    out.extend(await resolve_or_empty(ops, accessor, run, opts.index))
+    out.extend(await resolve_or_empty(ops, accessor, run, ctx.index))
     return out
 
 
@@ -65,23 +65,23 @@ async def awk(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_operands(ops, accessor, paths, opts)
+    paths = await resolve_operands(ops, accessor, paths, ctx)
     return await generic_awk(
         paths,
         texts,
-        opts.flags,
-        read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
-        read_stream=bound_op(ops.read_stream, accessor, opts.index),
-        stdin=opts.stdin,
-        dispatch=opts.dispatch,
-        cwd=opts.cwd,
-        index=opts.index,
-        shell=opts.shell,
-        vfs=opts.vfs,
-        mount_prefix=opts.mount_prefix,
-        env=opts.env,
+        ctx.flags,
+        read_bytes=bound_op(ops.read_bytes, accessor, ctx.index),
+        read_stream=bound_op(ops.read_stream, accessor, ctx.index),
+        stdin=ctx.stdin,
+        dispatch=ctx.dispatch,
+        cwd=ctx.cwd,
+        index=ctx.index,
+        shell=ctx.shell,
+        vfs=ctx.vfs,
+        mount_prefix=ctx.mount_prefix,
+        env=ctx.env,
     )
 
 

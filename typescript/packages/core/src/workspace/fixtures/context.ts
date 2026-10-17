@@ -12,24 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLIInvocation } from '../../commands/cli/types.ts'
+import type { Context } from '../../commands/config.ts'
 import { ROOT_CWD } from '../../commands/constants.ts'
-import { PathSpec } from '../../types.ts'
 
 /**
- * A CLI invocation for a handler test. Every field the test leaves out takes
- * the default Python's `CLIInvocation` dataclass gives it.
+ * A handler's context for a test. Every field the test leaves out takes the
+ * default Python's `Context` dataclass gives it.
  */
-export function cliInvocation<ConfigT>(
-  fields: Partial<CLIInvocation<ConfigT>> & { config: ConfigT },
-): CLIInvocation<ConfigT> {
+export function context(fields: Partial<Context> = {}): Context {
   return {
-    argv: [],
-    paths: [],
-    texts: [],
     flags: {},
     stdin: null,
-    cwd: PathSpec.fromStrPath(ROOT_CWD),
+    cwd: ROOT_CWD,
     env: {},
     ...fields,
   }

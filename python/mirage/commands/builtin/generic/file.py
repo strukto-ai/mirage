@@ -13,7 +13,7 @@ from mirage.commands.builtin.utils.operands import (
     operand_stat,
 )
 from mirage.commands.builtin.utils.output import format_records
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -190,12 +190,12 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> FileFlags:
 async def file_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     stream: PolymorphicReadFn,
     stat_fn: StatFn,
     read_range: ReadRangeFn | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     return await file_cmd(
         paths,
         stream=stream,
@@ -203,7 +203,7 @@ async def file_generic(
         read_range=read_range,
         b=parsed.brief,
         i=parsed.mime,
-        links=links_of(opts),
-        stat_path=opts.stat_path,
-        mounts=mounts_of(opts),
+        links=links_of(ctx),
+        stat_path=ctx.stat_path,
+        mounts=mounts_of(ctx),
     )

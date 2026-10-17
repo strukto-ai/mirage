@@ -23,7 +23,7 @@ from mirage.commands.cli.builtin.ntn.util import (
     notion_config,
     rust_debug,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.notion.client import (
@@ -36,7 +36,7 @@ from mirage.core.notion.client import (
 from mirage.core.notion.config import NotionConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.types import JsonValue
+from mirage.types import JsonValue, PathSpec
 
 # Every byte below is probed against ntn 0.21.9. The exit codes are not
 # one family: a body that arrived malformed is 1, while a line the CLI
@@ -218,16 +218,16 @@ def refusal(stderr: str, code: int) -> tuple[None, IOResult]:
 
 
 async def api(
-    inv: CLIInvocation[NotionConfig],
+    config: NotionConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    path = first_text(inv.texts, "api path")
+    fl = FlagView(ctx.flags)
+    path = first_text(texts, "api path")
 
     # Upstream validates the three body sources in this order and only
     # then complains that more than one was given, so a malformed pipe
     # outranks a malformed --data, and both outrank the conflict. Probed
     # against ntn 0.21.9; the order is observable and worth keeping.
-    piped = await materialize(inv.stdin) if inv.stdin is not None else b""
+    piped = await materialize(ctx.stdin) if ctx.stdin is not None else b""
     stdin_text = piped.decode("utf-8", "replace")
     has_stdin = stdin_text.strip() != ""
     stdin_body: JsonValue = None
@@ -250,7 +250,7 @@ async def api(
     params: dict[str, str] = {}
     headers: dict[str, str] = {}
     try:
-        for token in inv.texts[1:]:
+        for token in texts[1:]:
             classify(token, inline, params, headers)
     except InlineRefusal as caught:
         return refusal(
@@ -289,7 +289,7 @@ async def api(
         raise UsageError(f"unsupported method: {method}")
     route = path if path.startswith("/") else f"/{path}"
     route = route[3:] if route.startswith("/v1/") else route
-    config = notion_config(inv)
+    config = notion_config(config, ctx)
     if method == "GET":
         result = await notion_get(
             config, route, params=params or None, extra_headers=headers or None

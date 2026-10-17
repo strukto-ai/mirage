@@ -32,7 +32,7 @@ import { fsErrorLine } from '../../../errors/render.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { shellQuoteAlways } from '../../../utils/quote.ts'
 import { contentSize, deviceRdev, posixMode, sizeUnknown } from '../../../utils/stat_view.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { fullIsoTime, lsModeString } from '../utils/formatting.ts'
 import { groupName, identityOf, ownerName, type Identity } from '../utils/identity.ts'
 import { formatRecords } from '../utils/output.ts'
@@ -515,24 +515,24 @@ function parseFlags(bag: Record<string, FlagValue>): StatFlags {
 
 export async function statGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stat: (p: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
-  const parsed = parseFlags(opts.flags)
+  const parsed = parseFlags(ctx.flags)
   if (paths.length === 0) throw missingOperandError('stat', null)
   const fmt = parsed.format
   if (parsed.fileSystem) {
-    const dispatch = opts.dispatch
+    const dispatch = ctx.dispatch
     const probe = (p: PathSpec): Promise<FileStat> =>
-      operandStat(p, stat, opts.statPath, mountsOf(opts), linksOf(opts))
+      operandStat(p, stat, ctx.statPath, mountsOf(ctx), linksOf(ctx))
     const statfs: StatfsFn | null =
       dispatch !== undefined ? (p) => dispatchedStatfs(dispatch, p) : null
     return fileSystems(paths, fmt ?? FS_LAYOUT, probe, statfs)
   }
   const lines: string[] = []
   let err = ''
-  const links = parsed.deref ? null : (linksOf(opts) ?? null)
-  const identity = identityOf(opts)
+  const links = parsed.deref ? null : (linksOf(ctx) ?? null)
+  const identity = identityOf(ctx)
   for (const p of paths) {
     // GNU stat lstats: a symlink operand reports the link itself, not
     // its target, unless -L asks to dereference. A link has no backend
@@ -548,7 +548,7 @@ export async function statGeneric(
     }
     let s: FileStat
     try {
-      s = await operandStat(p, stat, opts.statPath, mountsOf(opts), linksOf(opts))
+      s = await operandStat(p, stat, ctx.statPath, mountsOf(ctx), linksOf(ctx))
     } catch (e) {
       // GNU stat keeps reporting the remaining operands, exit 1.
       if (!isFsError(e)) throw e

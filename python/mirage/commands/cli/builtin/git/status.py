@@ -41,10 +41,11 @@ from mirage.commands.cli.builtin.git.worktree import (
     UNTRACKED_NO,
     UNTRACKED_NORMAL,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
 
@@ -162,7 +163,7 @@ async def render_report(
 
 
 async def status(
-    inv: CLIInvocation[None],
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Show the working tree status.
 
@@ -172,19 +173,20 @@ async def status(
     of those two answers, or a path neither side knows about.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model; it reads its repository
-            through ``inv.view.vfs``.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context; git reads its repository
+            through ``ctx.vfs``.
     """
-    view = inv.view or CLIView()
-    vfs = view.vfs
-    flags = inv.flags
+    vfs = ctx.vfs
+    flags = ctx.flags
     fl = FlagView(flags)
     try:
         if vfs is None:
             raise NoWorkspaceError()
         parsed = parse_flags(fl)
-        repo, location = await opened(fl, view, work_tree=True)
+        repo, location = await opened(ctx, fl, work_tree=True)
         head = await read_head(vfs, location.gitdir)
         rows, state, no_commits = await collect(
             vfs,

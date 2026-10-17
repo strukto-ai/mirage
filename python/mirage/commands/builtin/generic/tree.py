@@ -7,7 +7,7 @@ from functools import partial
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.output import format_records
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -439,7 +439,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TreeFlags:
 async def tree_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     readdir: ReaddirFn,
     stat: Stat,
     unbounded: tuple[ReaddirFn, Stat] | None = None,
@@ -449,14 +449,14 @@ async def tree_generic(
     Args:
         paths (list[PathSpec]): the operands.
         texts (list[str]): the raw words.
-        opts (CommandOpts): the parsed flags.
+        ctx (Context): the parsed flags.
         readdir (ReaddirFn): the walk's readdir.
         stat (Stat): the walk's stat.
         unbounded (tuple[ReaddirFn, Stat] | None): the walk to take when
             no ``-L`` bounds it (one the mount answers whole), else
             ``readdir`` and ``stat``.
     """
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     if unbounded is not None and parsed.max_depth is None:
         readdir, stat = unbounded
     return await tree(
@@ -468,10 +468,10 @@ async def tree_generic(
         ignore_pattern=parsed.ignore_pattern,
         dirs_only=parsed.dirs_only,
         match_pattern=parsed.match_pattern,
-        index=opts.index,
-        stat_path=opts.stat_path,
-        readdir_path=opts.readdir_path,
-        mounts=mounts_of(opts),
+        index=ctx.index,
+        stat_path=ctx.stat_path,
+        readdir_path=ctx.readdir_path,
+        mounts=mounts_of(ctx),
         one_file_system=parsed.one_file_system,
-        links=links_of(opts),
+        links=links_of(ctx),
     )

@@ -17,25 +17,25 @@ import { yieldBytes } from '../../../io/stream.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { sedGeneric } from './sed.ts'
 
 const DEC = new TextDecoder()
 
 async function runSed(
   texts: string[],
-  flags: CommandOpts['flags'] = {},
+  flags: Context['flags'] = {},
 ): Promise<{ exitCode: number; stderr: string }> {
-  const opts = {
+  const ctx = {
     stdin: null,
     flags,
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     vfs: { kind: 'ram' } as never,
-  } as CommandOpts
+  } as Context
   const result = await sedGeneric(
     [],
     texts,
-    opts,
+    ctx,
     () => {
       throw new Error('no operands; nothing to stream')
     },
@@ -66,9 +66,9 @@ it('closes primed input when an in-place write is refused', async () => {
       {
         stdin: null,
         flags: { i: true },
-        cwd: '/',
+        cwd: PathSpec.fromStrPath('/'),
         dispatch: () => Promise.reject(error),
-      } as CommandOpts,
+      } as Context,
       async function* () {
         try {
           await Promise.resolve()
@@ -89,7 +89,7 @@ describe('sed operands after a directory (GNU sed 4.9)', () => {
 
   async function run(
     script: string,
-    flags: CommandOpts['flags'] = {},
+    flags: Context['flags'] = {},
   ): Promise<{ out: string; code: number; reads: string[] }> {
     const files = new Map([
       ['/f', enc('one\ntwo\nthree\n')],
@@ -97,16 +97,16 @@ describe('sed operands after a directory (GNU sed 4.9)', () => {
     ])
     const reads: string[] = []
     const paths = ['/f', '/d', '/g'].map((p) => PathSpec.fromStrPath(p))
-    const opts = {
+    const ctx = {
       stdin: null,
       flags: { n: true, ...flags },
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
       vfs: { kind: 'ram' } as never,
-    } as CommandOpts
+    } as Context
     const result = await sedGeneric(
       paths,
       [script],
-      opts,
+      ctx,
       async function* (p) {
         await Promise.resolve()
         reads.push(p.virtual)
@@ -143,8 +143,8 @@ it.each([
       {
         stdin: new TextEncoder().encode('x\n'),
         flags: {},
-        cwd: '/',
-      } as CommandOpts,
+        cwd: PathSpec.fromStrPath('/'),
+      } as Context,
       () => yieldBytes(new Uint8Array()),
       async (p, data) => {
         files.set(p.virtual, await materialize(data))
@@ -167,8 +167,8 @@ it('shares bytes-valued stdin across repeated operands', async () => {
     {
       stdin: new TextEncoder().encode('x\n'),
       flags: {},
-      cwd: '/',
-    } as CommandOpts,
+      cwd: PathSpec.fromStrPath('/'),
+    } as Context,
     () => yieldBytes(new Uint8Array()),
     () => Promise.resolve(),
   )

@@ -58,7 +58,7 @@ async function unlink(io: CommandIO, path: string): Promise<[number, string]> {
   const result = await BUILDER.fn(io, {} as Accessor, [PathSpec.fromStrPath(path)], [], {
     stdin: null,
     flags: {},
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     index: INDEX,
   })
   if (result === null) throw new Error('unlink returned no result')

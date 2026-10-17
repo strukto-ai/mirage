@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from mirage.commands.builtin.generic.cut import cut, cut_generic, parse_flags
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -137,7 +137,7 @@ async def test_cut_reports_late_read_errors_and_continues(prefix):
     out, io = await cut_generic(
         [PathSpec.from_str_path(p) for p in ("/missing", "/denied", "/good")],
         [],
-        CommandOpts(flags={"fields": "1", "delimiter": ","}),
+        Context(flags={"fields": "1", "delimiter": ","}),
         _stat,
         source,
     )

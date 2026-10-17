@@ -47,7 +47,7 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
-import { type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { type CommandFnResult, type Context } from '../../config.ts'
 import { helpPage, versionLine } from '../../spec/standard.ts'
 import { UsageError } from '../../errors.ts'
 import { isStdin, stdinStream } from '../utils/stream.ts'
@@ -576,14 +576,11 @@ export class MainLoop {
 
 // Path flags arrive as resolved virtual-path strings, so a flag that
 // names a file builds its own PathSpec against the operands' mount.
-function pathSpecFactory(
-  paths: readonly PathSpec[],
-  opts: CommandOpts,
-): (value: string) => PathSpec {
+function pathSpecFactory(paths: readonly PathSpec[], ctx: Context): (value: string) => PathSpec {
   const first = paths[0]
   const mountPrefix =
     (first === undefined ? undefined : mountPrefixOf(first.virtual, first.vfsPath)) ??
-    opts.mountPrefix ??
+    ctx.mountPrefix ??
     ''
   return (value) => PathSpec.fromStrPath(value, mountKey(value, mountPrefix))
 }
@@ -598,12 +595,12 @@ function programFileOf(fl: FlagView, toSpec: (value: string) => PathSpec): PathS
 export async function jqGeneric(
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: Stream,
 ): Promise<CommandFnResult> {
-  const readInput = stdinStream(stream, opts.stdin)
-  const fl = new FlagView(opts.flags, specOf('jq'))
-  const toSpec = pathSpecFactory(paths, opts)
+  const readInput = stdinStream(stream, ctx.stdin)
+  const fl = new FlagView(ctx.flags, specOf('jq'))
+  const toSpec = pathSpecFactory(paths, ctx)
   const programFile = programFileOf(fl, toSpec)
   // -f, --rawfile and --slurpfile route nothing (the executor's FILE_KEYS and
   // DISPATCH_FLAG_KEYS), so a file may sit on another mount than the operands: it
@@ -611,8 +608,8 @@ export async function jqGeneric(
   // invocation's own stdin and `-` is a file named `-`.
   const readFlagFile = (path: PathSpec): Promise<Uint8Array> => {
     if (isStdin(path, false)) return materialize(readInput(path))
-    if (opts.dispatch === undefined) return materialize(stream(path))
-    return readProgramFile('jq', path, opts.dispatch)
+    if (ctx.dispatch === undefined) return materialize(stream(path))
+    return readProgramFile('jq', path, ctx.dispatch)
   }
   // jq reads its options before its program, so a refused option is reported
   // before an -f file is read.
@@ -669,7 +666,7 @@ export async function jqGeneric(
       for (const path of paths) {
         sources.push({ name: inputName(path), chunks: readInput(path) })
       }
-    } else if (opts.stdin !== null) {
+    } else if (ctx.stdin !== null) {
       sources.push({
         name: STDIN_NAME,
         chunks: readInput(PathSpec.fromStrPath('/dev/stdin')),
@@ -677,6 +674,6 @@ export async function jqGeneric(
     }
   }
   const io = new IOResult()
-  const loop = new MainLoop(sources, expr, jq, reads, args, io, opts.signal)
+  const loop = new MainLoop(sources, expr, jq, reads, args, io, ctx.signal)
   return [loop.outputs(), io]
 }

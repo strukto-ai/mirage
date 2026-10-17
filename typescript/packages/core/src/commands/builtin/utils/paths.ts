@@ -91,7 +91,7 @@ export function dispatchStat(dispatch: DispatchFn): StatFn {
 
 // A dispatcher lookup in the shape a chain walk reads. StatPath answers
 // null for a miss, while dotRefusal and its kin read a stat that throws, so
-// a command that holds only the lookup (`opts.statPath`) wraps it here.
+// a command that holds only the lookup (`ctx.statPath`) wraps it here.
 // Mirrors Python's stat_or_enoent.
 export function statOrEnoent(statPath: StatPath): StatFn {
   return async (path: PathSpec) => {

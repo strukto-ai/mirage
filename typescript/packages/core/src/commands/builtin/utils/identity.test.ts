@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseSessionProfile } from '../../../policy/profile.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { MountMode } from '../../../types.ts'
+import { MountMode, PathSpec } from '../../../types.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { SessionState } from '../../../workspace/session/session.ts'
 import { sessionView } from '../../../workspace/session/state.ts'
@@ -28,10 +28,14 @@ describe('identity', () => {
     const view = sessionView(session)
     expect(identityFrom(view)).toEqual({ profile: 'admin' })
     expect(identityFrom(undefined)).toEqual(NO_IDENTITY)
-    expect(identityOf({ stdin: null, flags: {}, cwd: '/', sessionView: view })).toEqual({
+    expect(
+      identityOf({ stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), session: view }),
+    ).toEqual({
       profile: 'admin',
     })
-    expect(identityOf({ stdin: null, flags: {}, cwd: '/' })).toEqual(NO_IDENTITY)
+    expect(identityOf({ stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/') })).toEqual(
+      NO_IDENTITY,
+    )
   })
 })
 

@@ -37,7 +37,7 @@ from mirage.commands.config import (
     AggregateFn,
     CommandFnResult,
     CommandIO,
-    CommandOpts,
+    Context,
 )
 from mirage.context import (
     get_admission,
@@ -92,7 +92,7 @@ class GenericCommandFn(Protocol):
         accessor: Any,
         paths: list[PathSpec],
         texts: list[str],
-        opts: CommandOpts,
+        ctx: Context,
     ) -> Awaitable[CommandFnResult]: ...
 
 
@@ -209,18 +209,18 @@ def require_op(ops: CommandIO, op: Operation) -> OperationFn:
     return fn
 
 
-def mount_io(opts: CommandOpts) -> CommandIO:
+def mount_io(ctx: Context) -> CommandIO:
     """The table of the mount a command runs on.
 
     Args:
-        opts (CommandOpts): the command's options.
+        ctx (Context): the command's options.
 
     Raises:
         TypeError: the command ran outside a mount.
     """
-    if opts.io is None:
-        raise TypeError(f"{opts.command}: ran without its mount's table")
-    return opts.io
+    if ctx.io is None:
+        raise TypeError(f"{ctx.command}: ran without its mount's table")
+    return ctx.io
 
 
 def over_mount_io(
@@ -242,11 +242,11 @@ def over_mount_io(
         accessor: Accessor,
         paths: list[PathSpec],
         texts: list[str],
-        opts: CommandOpts,
+        ctx: Context,
     ) -> Any:
-        io = mount_io(opts)
+        io = mount_io(ctx)
         handler = build(wrap(io) if wrap is not None else io)
-        return await handler(accessor, paths, texts, opts)
+        return await handler(accessor, paths, texts, ctx)
 
     return run
 
@@ -891,7 +891,7 @@ async def _is_implicit_dir(
     return any(norm(entry) == target for entry in entries)
 
 
-def _is_namespace_dir(opts: CommandOpts, path: PathSpec) -> bool:
+def _is_namespace_dir(ctx: Context, path: PathSpec) -> bool:
     """Whether a path no backend knows is a directory the namespace owns.
 
     The third way a read operand can be a directory, after the explicit
@@ -918,10 +918,10 @@ def _is_namespace_dir(opts: CommandOpts, path: PathSpec) -> bool:
     absence.
 
     Args:
-        opts (CommandOpts): the invocation's bag, for its files.
+        ctx (Context): the invocation's bag, for its files.
         path (PathSpec): the operand whose stat raised ENOENT.
     """
-    return bool(owed_names(opts.vfs, path.virtual))
+    return bool(owed_names(ctx.vfs, path.virtual))
 
 
 _READ_SLOTS = ("read_bytes", "read_stream", "read_range")
@@ -1091,16 +1091,16 @@ def with_dir_guard(ops: CommandIO) -> CommandIO:
 
 
 async def _stat_refusing_dirs(
-    ops: CommandIO, accessor: Accessor, opts: CommandOpts, path: PathSpec
+    ops: CommandIO, accessor: Accessor, ctx: Context, path: PathSpec
 ) -> FileStat:
     try:
-        st: FileStat = await ops.stat(accessor, path, opts.index)
+        st: FileStat = await ops.stat(accessor, path, ctx.index)
     except DotWalkError:
         raise
     except FileNotFoundError:
-        if await _is_implicit_dir(ops, accessor, path, opts.index):
+        if await _is_implicit_dir(ops, accessor, path, ctx.index):
             raise eisdir(path) from None
-        if _is_namespace_dir(opts, path):
+        if _is_namespace_dir(ctx, path):
             raise eisdir(path) from None
         raise
     if getattr(st, "type", None) == FileType.DIRECTORY:
@@ -1109,7 +1109,7 @@ async def _stat_refusing_dirs(
 
 
 def dir_aware_stat(
-    ops: CommandIO, accessor: Accessor, opts: CommandOpts
+    ops: CommandIO, accessor: Accessor, ctx: Context
 ) -> OperationFn:
     """Bound stat for the read-family chokepoint (``split_readable``).
 
@@ -1120,7 +1120,7 @@ def dir_aware_stat(
     ``Is a directory`` and keep the remaining operands (#457). Called as
     ``stat(path)``; mirrors ``dirAwareStat`` in adapter.ts.
 
-    Takes the whole ``opts`` rather than its index because this is where
+    Takes the whole ``ctx`` rather than its index because this is where
     every read command decides what a directory is, and the facts that
     answer that question arrive on the bag: threading them one at a time
     would mean editing every one of the two dozen builders again for the
@@ -1129,14 +1129,14 @@ def dir_aware_stat(
     Args:
         ops (CommandIO): Backend I/O bundle providing ``stat``/``readdir``.
         accessor (Accessor): Backend accessor bound into stats.
-        opts (CommandOpts): the invocation's bag, for the index and the
+        ctx (Context): the invocation's bag, for the index and the
             namespace's child names.
     """
-    return functools.partial(_stat_refusing_dirs, ops, accessor, opts)
+    return functools.partial(_stat_refusing_dirs, ops, accessor, ctx)
 
 
 def file_size(
-    ops: CommandIO, accessor: Accessor, opts: CommandOpts
+    ops: CommandIO, accessor: Accessor, ctx: Context
 ) -> Callable[[PathSpec], Awaitable[int | None]]:
     """A regular file's size from its stat, for a command whose answer is
     the size alone (``wc -c``), as GNU takes it from ``st_size``.
@@ -1160,7 +1160,7 @@ def file_size(
     Args:
         ops (CommandIO): Backend I/O bundle providing ``stat``/``readdir``.
         accessor (Accessor): Backend accessor bound into stats.
-        opts (CommandOpts): the invocation's bag, for the index and the
+        ctx (Context): the invocation's bag, for the index and the
             namespace's child names.
     """
 
@@ -1170,12 +1170,12 @@ def file_size(
             return None
         if revision_for(path.virtual) is not None:
             return None
-        st = await _stat_refusing_dirs(ops, accessor, opts, path)
+        st = await _stat_refusing_dirs(ops, accessor, ctx, path)
         if st.type != FileType.FILE or st.mode is not None:
             return None
-        if opts.dispatch is None:
+        if ctx.dispatch is None:
             return st.size
-        now, _ = await opts.dispatch("stat", path, fresh=True)
+        now, _ = await ctx.dispatch("stat", path, fresh=True)
         if not isinstance(now, FileStat) or now.size != st.size:
             return None
         return st.size
@@ -1184,15 +1184,15 @@ def file_size(
 
 
 async def _stream_refusing_dirs(
-    ops: CommandIO, accessor: Accessor, opts: CommandOpts, path: PathSpec
+    ops: CommandIO, accessor: Accessor, ctx: Context, path: PathSpec
 ) -> AsyncIterator[bytes]:
-    await _stat_refusing_dirs(ops, accessor, opts, path)
-    async for chunk in ops.read_stream(accessor, path, opts.index):
+    await _stat_refusing_dirs(ops, accessor, ctx, path)
+    async for chunk in ops.read_stream(accessor, path, ctx.index):
         yield chunk
 
 
 def dir_aware_stream(
-    ops: CommandIO, accessor: Accessor, opts: CommandOpts
+    ops: CommandIO, accessor: Accessor, ctx: Context
 ) -> OperationFn:
     """Bound read stream for the per-operand chokepoint (``read_operands``).
 
@@ -1208,10 +1208,10 @@ def dir_aware_stream(
         ops (CommandIO): Backend I/O bundle providing ``stat``/``readdir``
             and ``read_stream``.
         accessor (Accessor): Backend accessor bound into reads.
-        opts (CommandOpts): the invocation's bag, for the index and the
+        ctx (Context): the invocation's bag, for the index and the
             namespace's child names.
     """
-    return functools.partial(_stream_refusing_dirs, ops, accessor, opts)
+    return functools.partial(_stream_refusing_dirs, ops, accessor, ctx)
 
 
 async def resolve_or_empty(

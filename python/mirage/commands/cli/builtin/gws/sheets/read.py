@@ -12,20 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.core.gsheets.read import read_values
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 
 async def read(
-    inv: CLIInvocation[GoogleConfig],
+    config: GoogleConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    async with TokenManager(inv.config) as tm:
+    fl = FlagView(ctx.flags)
+    async with TokenManager(config) as tm:
         result = await read_values(
             tm, fl.as_str("spreadsheet") or "", fl.as_str("range") or ""
         )

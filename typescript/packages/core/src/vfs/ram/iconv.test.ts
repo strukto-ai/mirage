@@ -17,7 +17,7 @@ import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../io/types.ts'
 import { RAMVFS } from './ram.ts'
-import type { PathSpec } from '../../types.ts'
+import { PathSpec } from '../../types.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -38,7 +38,7 @@ async function runIconv(
     stdin,
     flags,
     io: commandIo(vfs),
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) return { out: new Uint8Array(), exitCode: -1 }
   const [out, ioResult] = result

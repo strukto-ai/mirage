@@ -60,22 +60,16 @@ import { makeResolveGlob } from '../../../utils/glob_walk.ts'
 import { norm, parent } from '../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 
-import type {
-  AggregateFn,
-  CommandFn,
-  CommandFnResult,
-  CommandIO,
-  CommandOpts,
-} from '../../config.ts'
+import type { AggregateFn, CommandFn, CommandFnResult, CommandIO, Context } from '../../config.ts'
 
 /**
  * The table of the mount a command runs on. Throws when the command ran
  * outside a mount. Mirrors Python's `mount_io`.
  */
-export function mountIo(opts: CommandOpts): CommandIO {
-  if (opts.io === undefined)
-    throw new TypeError(`${opts.command ?? ''}: ran without its mount's table`)
-  return opts.io
+export function mountIo(ctx: Context): CommandIO {
+  if (ctx.io === undefined)
+    throw new TypeError(`${ctx.command ?? ''}: ran without its mount's table`)
+  return ctx.io
 }
 
 /**
@@ -88,9 +82,9 @@ export function overMountIo(
   build: (io: CommandIO) => CommandFn,
   wrap?: (io: CommandIO) => CommandIO,
 ): CommandFn {
-  return (accessor, paths, texts, opts) => {
-    const io = mountIo(opts)
-    return build(wrap === undefined ? io : wrap(io))(accessor, paths, texts, opts)
+  return (accessor, paths, texts, ctx) => {
+    const io = mountIo(ctx)
+    return build(wrap === undefined ? io : wrap(io))(accessor, paths, texts, ctx)
   }
 }
 
@@ -278,9 +272,9 @@ export function commandIo(vfs: BaseVFS): CommandIO {
             (
               path: PathSpec,
               text: string,
-              opts: { wholeWord: boolean; ignoreCase: boolean },
+              ctx: { wholeWord: boolean; ignoreCase: boolean },
               _index?: IndexCacheStore,
-            ) => vfs.filesContaining(path, text, opts, {}),
+            ) => vfs.filesContaining(path, text, ctx, {}),
           ),
           searchable: vfs.searchable,
         }
@@ -291,9 +285,9 @@ export function commandIo(vfs: BaseVFS): CommandIO {
             (
               path: PathSpec,
               text: string,
-              opts: { ignoreCase: boolean },
+              ctx: { ignoreCase: boolean },
               _index?: IndexCacheStore,
-            ) => vfs.linesContaining(path, text, opts, {}),
+            ) => vfs.linesContaining(path, text, ctx, {}),
           ),
         }
       : {}),
@@ -622,16 +616,16 @@ const DISPATCHED_SLOTS = {
       })) as Map<string, FileStat> | null,
   filesContaining:
     (dispatch: DispatchFn): CommandIO['filesContaining'] =>
-    async (_accessor, path, text, opts) =>
+    async (_accessor, path, text, ctx) =>
       (await dispatchedCall(dispatch, 'files_containing', path, [text], {
-        whole_word: opts.wholeWord,
-        ignore_case: opts.ignoreCase,
+        whole_word: ctx.wholeWord,
+        ignore_case: ctx.ignoreCase,
       })) as PathSpec[] | null,
   linesContaining:
     (dispatch: DispatchFn): CommandIO['linesContaining'] =>
-    async (_accessor, path, text, opts) =>
+    async (_accessor, path, text, ctx) =>
       (await dispatchedCall(dispatch, 'lines_containing', path, [text], {
-        ignore_case: opts.ignoreCase,
+        ignore_case: ctx.ignoreCase,
       })) as ByteSource | null,
 } satisfies Partial<Record<keyof CommandIO, (dispatch: DispatchFn) => unknown>>
 
@@ -811,8 +805,8 @@ async function isImplicitDir<A extends Accessor>(
 // `namespaceListing` gates on, so the listing and this refusal cannot
 // disagree. It is hide-filtered for free, which is what keeps the parent of a
 // mount the session may not be told about reading as absence.
-function isNamespaceDir(opts: CommandOpts, p: PathSpec): boolean {
-  return owedNames(opts.vfs, p.virtual).length > 0
+function isNamespaceDir(ctx: Context, p: PathSpec): boolean {
+  return owedNames(ctx.vfs, p.virtual).length > 0
 }
 
 // The one place the read family decides what a directory is, shared by the
@@ -820,17 +814,17 @@ function isNamespaceDir(opts: CommandOpts, p: PathSpec): boolean {
 async function statRefusingDirs<A extends Accessor>(
   ops: CommandIO<A>,
   accessor: A,
-  opts: CommandOpts,
+  ctx: Context,
   p: PathSpec,
 ): Promise<FileStat> {
-  const index = opts.index ?? undefined
+  const index = ctx.index ?? undefined
   let st: FileStat
   try {
     st = await ops.stat(accessor, p, index)
   } catch (e) {
     if ((e as { code?: string }).code !== 'ENOENT' || isDotWalkError(e)) throw e
     if (await isImplicitDir(ops, accessor, p, index)) throw eisdir(p)
-    if (isNamespaceDir(opts, p)) throw eisdir(p)
+    if (isNamespaceDir(ctx, p)) throw eisdir(p)
     throw e
   }
   if (st.type === FileType.DIRECTORY) throw eisdir(p)
@@ -843,16 +837,16 @@ async function statRefusingDirs<A extends Accessor>(
 // or a namespace-only mount parent via the name plane), so cat/head/tail
 // report GNU's `Is a directory` and keep the remaining operands (#457).
 //
-// Takes the whole `opts` rather than its index because this is where every
+// Takes the whole `ctx` rather than its index because this is where every
 // read command decides what a directory is, and the facts that answer that
 // question arrive on the bag: threading them one at a time would mean
 // editing every one of the two dozen builders again for the next one.
 export function dirAwareStat<A extends Accessor>(
   ops: CommandIO<A>,
   accessor: A,
-  opts: CommandOpts,
+  ctx: Context,
 ): (p: PathSpec) => Promise<FileStat> {
-  return (p) => statRefusingDirs(ops, accessor, opts, p)
+  return (p) => statRefusingDirs(ops, accessor, ctx, p)
 }
 
 /**
@@ -874,16 +868,16 @@ export function dirAwareStat<A extends Accessor>(
 export function fileSize<A extends Accessor>(
   ops: CommandIO<A>,
   accessor: A,
-  opts: CommandOpts,
+  ctx: Context,
 ): (p: PathSpec) => Promise<number | null> {
   return async (p) => {
     const manager = activeCacheManager()
     if (manager !== null && (await manager.isCached(p))) return null
     if (revisionFor(p.virtual) !== null) return null
-    const st = await statRefusingDirs(ops, accessor, opts, p)
+    const st = await statRefusingDirs(ops, accessor, ctx, p)
     if (st.type !== FileType.FILE || st.mode !== null) return null
-    if (opts.dispatch === undefined) return st.size
-    const [now] = await opts.dispatch('stat', p, [], { fresh: true })
+    if (ctx.dispatch === undefined) return st.size
+    const [now] = await ctx.dispatch('stat', p, [], { fresh: true })
     return now instanceof FileStat && now.size === st.size ? st.size : null
   }
 }
@@ -1022,11 +1016,11 @@ export function withDirGuard<A extends Accessor = Accessor>(ops: CommandIO<A>): 
 async function* streamRefusingDirs<A extends Accessor>(
   ops: CommandIO<A>,
   accessor: A,
-  opts: CommandOpts,
+  ctx: Context,
   p: PathSpec,
 ): AsyncIterable<Uint8Array> {
-  await statRefusingDirs(ops, accessor, opts, p)
-  yield* ops.readStream(accessor, p, opts.index ?? undefined)
+  await statRefusingDirs(ops, accessor, ctx, p)
+  yield* ops.readStream(accessor, p, ctx.index ?? undefined)
 }
 
 // Read stream for the read-family per-operand chokepoint (`readOperands`):
@@ -1039,9 +1033,9 @@ async function* streamRefusingDirs<A extends Accessor>(
 export function dirAwareStream<A extends Accessor>(
   ops: CommandIO<A>,
   accessor: A,
-  opts: CommandOpts,
+  ctx: Context,
 ): (p: PathSpec) => AsyncIterable<Uint8Array> {
-  return (p) => streamRefusingDirs(ops, accessor, opts, p)
+  return (p) => streamRefusingDirs(ops, accessor, ctx, p)
 }
 
 export type GenericCommandFn<A extends Accessor = Accessor> = (
@@ -1049,7 +1043,7 @@ export type GenericCommandFn<A extends Accessor = Accessor> = (
   accessor: A,
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ) => Promise<CommandFnResult> | CommandFnResult
 
 export interface GenericCommand<A extends Accessor = Accessor> {

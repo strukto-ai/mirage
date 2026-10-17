@@ -14,7 +14,7 @@
 
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { perOperand } from '../utils/operands.ts'
 import { mapStream } from '../utils/lines.ts'
@@ -28,11 +28,11 @@ function reversed(line: Uint8Array): Uint8Array {
 
 export function revGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): CommandFnResult {
-  stream = stdinStream(stream, opts.stdin, false, false)
+  stream = stdinStream(stream, ctx.stdin, false, false)
   const io = new IOResult()
   const each = (source: ByteSource) => mapStream(source, reversed)
-  return [perOperand(paths, stream, opts.stdin, io, 'rev', each), io]
+  return [perOperand(paths, stream, ctx.stdin, io, 'rev', each), io]
 }

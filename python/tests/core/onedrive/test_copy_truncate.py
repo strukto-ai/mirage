@@ -5,7 +5,7 @@ from yarl import URL
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.core.msgraph.client import GraphError
 from mirage.core.onedrive.copy import copy
 from mirage.core.onedrive.truncate import truncate
@@ -278,7 +278,7 @@ async def test_cp_recursive_uses_server_side_folder_copy():
             _accessor(),
             [src, dst],
             [],
-            CommandOpts(
+            Context(
                 io=io_for(OneDriveVFS, _accessor()),
                 index=NULL_INDEX,
                 flags={"r": True},

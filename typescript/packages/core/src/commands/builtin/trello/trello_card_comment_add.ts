@@ -17,7 +17,7 @@ import { commentCreate } from '../../../core/trello/client.ts'
 import { normalizeComment } from '../../../core/trello/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { CommandSpec, Argument } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { resolveTextInput } from './_input.ts'
@@ -37,21 +37,21 @@ async function trelloCardCommentAdd(
   accessor: TrelloAccessor,
   _paths: PathSpec[],
   _texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, SPEC)
+  const fl = new FlagView(ctx.flags, SPEC)
   const cardId = fl.asStr('card_id')
   if (cardId === undefined || cardId === '') throw new Error('--card_id is required')
   const inlineText = fl.asStr('text') ?? null
   const textFile = fl.asPath('text_file') ?? null
-  const text = await resolveTextInput(accessor, opts, {
+  const text = await resolveTextInput(accessor, ctx, {
     inlineText,
     filePath: textFile,
     errorMessage: 'comment text is required',
   })
   // A card write is addressed by id, not path, so only the mount-wide
   // grant can admit it (a write-granting carve-out names no card).
-  requireMountWritable(opts.mountPrefix ?? '', opts.access)
+  requireMountWritable(ctx.mountPrefix ?? '', ctx.access)
   await requireCard(accessor, cardId)
   const comment = await commentCreate(accessor.transport, cardId, text)
   return [ENC.encode(JSON.stringify(normalizeComment(comment, cardId))), new IOResult()]

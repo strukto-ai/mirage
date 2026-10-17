@@ -1,4 +1,5 @@
 import errno
+from collections.abc import Sequence
 
 from mirage.commands.cli.builtin.git.discover import discover
 from mirage.commands.cli.builtin.git.errors import (
@@ -18,7 +19,7 @@ from mirage.commands.cli.builtin.git.io import (
 )
 from mirage.commands.cli.builtin.git.refs import valid_ref_name
 from mirage.commands.cli.builtin.git.util import fatal, start_point
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
@@ -57,13 +58,13 @@ async def lay_out(
     )
 
 
-def named_gitdir(fl: FlagView, texts: tuple[str, ...]) -> PathSpec:
+def named_gitdir(fl: FlagView, texts: Sequence[str]) -> PathSpec:
     """The git directory an ``init`` line names: ``--git-dir``, the
     directory itself under ``--bare``, and its ``.git`` otherwise.
 
     Args:
         fl (FlagView): the line's flags.
-        texts (tuple[str, ...]): the line's operands.
+        texts (Sequence[str]): the line's operands.
     """
     start = start_point(fl)
     explicit = fl.as_path("git_dir")
@@ -73,7 +74,9 @@ def named_gitdir(fl: FlagView, texts: tuple[str, ...]) -> PathSpec:
     return target if fl.as_bool("bare") else target.join(".git")
 
 
-async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
+async def init(
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+) -> tuple[ByteSource | None, IOResult]:
     """Initialize through the dispatcher, preserving an existing repository.
 
     No host templates, hooks or default-branch advisory are installed.
@@ -85,14 +88,16 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     ``objects`` where git stops at its first template directory.
 
     Args:
-        inv (CLIInvocation[None]): location and initialization flags.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the optional directory.
+        ctx (Context): the line's context, with the initialization flags.
     """
-    fl = FlagView(inv.flags)
-    view = inv.view
+    fl = FlagView(ctx.flags)
     try:
-        if view is None or view.vfs is None:
+        if ctx.vfs is None:
             raise NoWorkspaceError()
-        vfs = view.vfs
+        vfs = ctx.vfs
         start = start_point(fl)
         here = await stat_of(vfs, start)
         if here is None or here.type is not FileType.DIRECTORY:
@@ -100,15 +105,13 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                 start.raw_path,
                 FsCondition.ENOENT if here is None else FsCondition.ENOTDIR,
             )
-        target = PathSpec.from_str_path(
-            inv.texts[0] if inv.texts else ".", cwd=start
-        )
+        target = PathSpec.from_str_path(texts[0] if texts else ".", cwd=start)
         if target.walk_error == "ENOENT":
             raise CannotMkdirError(
                 target.raw_path, "No such file or directory"
             )
         bare = fl.as_bool("bare")
-        gitdir = named_gitdir(fl, inv.texts)
+        gitdir = named_gitdir(fl, texts)
         branch = fl.as_str("initial_branch") or "master"
         if not valid_ref_name(f"refs/heads/{branch}") or branch.startswith(
             "-"
@@ -127,14 +130,14 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             )
             gitdir = location.commondir
         existing = await read_optional(vfs, gitdir.join("HEAD")) is not None
-        made = bool(inv.texts) and await stat_of(vfs, target) is None
-        config = (
+        made = bool(texts) and await stat_of(vfs, target) is None
+        contents = (
             "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n"
             f"\tbare = {'true' if bare else 'false'}\n"
         )
         settings = gitdir.join("config")
         try:
-            await lay_out(vfs, gitdir, branch, config)
+            await lay_out(vfs, gitdir, branch, contents)
             if existing:
                 await take_lock(vfs, settings)
         except OSError as exc:
@@ -146,7 +149,7 @@ async def init(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             if exc.errno != errno.EROFS:
                 raise
             if made:
-                raise CannotMkdirError(inv.texts[0]) from exc
+                raise CannotMkdirError(texts[0]) from exc
             if locked:
                 raise ConfigLockError(
                     settings.virtual, FsCondition.EROFS

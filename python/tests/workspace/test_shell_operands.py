@@ -3,7 +3,8 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 
-from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.config import Context
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io.types import IOResult, materialize
 from mirage.types import MountMode
@@ -133,9 +134,11 @@ async def test_stdin_operands(
 async def test_dash_cli_stdin(ws: Workspace) -> None:
     seen: list[str] = []
 
-    async def consume(inv: CLIInvocation[None]) -> tuple[bytes, IOResult]:
-        seen.extend(inv.texts)
-        return await materialize(inv.stdin), IOResult()
+    async def consume(
+        config: None, paths, texts, ctx: Context
+    ) -> tuple[bytes, IOResult]:
+        seen.extend(texts)
+        return await materialize(ctx.stdin), IOResult()
 
     ws.register_cli(
         "consume",

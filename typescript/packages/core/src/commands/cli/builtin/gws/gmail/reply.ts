@@ -17,15 +17,20 @@ import { replyMessage } from '../../../../../core/gmail/send.ts'
 import { TokenManager } from '../../../../../core/google/client.ts'
 import type { GoogleConfig } from '../../../../../core/google/config.ts'
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
-import type { CommandFnResult } from '../../../../../commands/config.ts'
-import type { CLIInvocation } from '../../../../../commands/cli/types.ts'
+import type { CommandFnResult, Context } from '../../../../../commands/config.ts'
+import type { PathSpec } from '../../../../../types.ts'
 
 const ENC = new TextEncoder()
 
-export async function reply(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function reply(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const result = await replyMessage(
-    new TokenManager(inv.config as GoogleConfig),
+    new TokenManager(config as GoogleConfig),
     fl.asStr('message_id') ?? '',
     fl.asStr('body') ?? '',
   )

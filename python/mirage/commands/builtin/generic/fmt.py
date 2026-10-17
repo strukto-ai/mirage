@@ -8,7 +8,7 @@ from mirage.commands.builtin.utils.operands import (
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import stdin_stat, stdin_stream
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -487,7 +487,7 @@ async def _fmt_stream(
 async def fmt_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     stat: StatFn,
     stream: PolymorphicReadFn,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -496,13 +496,13 @@ async def fmt_generic(
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
         texts (list[str]): Non-path words, unused by fmt.
-        opts (CommandOpts): Flags and stdin from the dispatcher.
+        ctx (Context): Flags and stdin from the dispatcher.
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
     """
     stat = stdin_stat(stat)
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     readable, err = await split_readable(paths, stat, "fmt")
     if err and not readable:
         return None, IOResult(exit_code=1, stderr=err)
@@ -510,7 +510,7 @@ async def fmt_generic(
         await fmt(
             readable,
             read_stream=stream,
-            stdin=opts.stdin,
+            stdin=ctx.stdin,
             width=parsed.width,
             goal=parsed.goal,
             prefix=parsed.prefix,

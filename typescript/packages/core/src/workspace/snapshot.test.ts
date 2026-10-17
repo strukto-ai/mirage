@@ -29,7 +29,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
 import { registerCliSpec, unregisterCliSpec } from '../commands/cli/specs.ts'
-import { CLI, type CLIInvocation } from '../commands/cli/types.ts'
+import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 import { PolicyDenied } from '../policy/errors.ts'
 import type { Policy } from '../policy/index.ts'
@@ -500,11 +500,10 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
 })
 
 describe('cli registry snapshot', () => {
-  const cliEcho = (inv: CLIInvocation) =>
-    [
-      new TextEncoder().encode(`tok=${(inv.config as { token: string }).token}\n`),
-      new IOResult(),
-    ] as [Uint8Array, IOResult]
+  const cliEcho = (config: unknown): [Uint8Array, IOResult] => [
+    new TextEncoder().encode(`tok=${(config as { token: string }).token}\n`),
+    new IOResult(),
+  ]
 
   function makeCliSpec(): CLI {
     return new CLI({

@@ -61,7 +61,7 @@ export async function runDu(
   // The line's operand resolution, which the one walk's globs take.
   follow?: FollowOperands,
 ): Promise<CrossResult> {
-  const rendering = parseFlags({ stdin: null, flags: bag, cwd })
+  const rendering = parseFlags({ stdin: null, flags: bag, cwd: PathSpec.fromStrPath(cwd) })
   const bounded = new FlagView(bag, specOf('du')).asBool('one_file_system')
   const measuring = Object.fromEntries(Object.entries(bag).filter(([k]) => !RENDERING.has(k)))
   // Each start is then one mount's own part, and keeps only what that mount

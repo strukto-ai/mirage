@@ -15,12 +15,12 @@
 import { diffGeneric } from '../../generic/diff.ts'
 import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const diff: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
-  const idx = opts.index ?? undefined
+const diff: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   return diffGeneric(
     resolved,
-    opts,
+    ctx,
     (p) => ops.readStream(accessor, p, idx),
     (p) => ops.readdir(accessor, p, idx),
     (p) => ops.stat(accessor, p, idx),

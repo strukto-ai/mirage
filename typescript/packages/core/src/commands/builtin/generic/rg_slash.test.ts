@@ -17,7 +17,7 @@ import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { rgGeneric } from './rg.ts'
 
 const ENC = new TextEncoder()
@@ -44,12 +44,12 @@ function spec(path: string): PathSpec {
   })
 }
 
-function opts(flags: Record<string, string | boolean | number | string[]>): CommandOpts {
+function ctx(flags: Record<string, string | boolean | number | string[]>): Context {
   return {
     stdin: null,
     flags,
-    cwd: '/',
-  } as unknown as CommandOpts
+    cwd: PathSpec.fromStrPath('/'),
+  } as unknown as Context
 }
 
 const stat = (p: PathSpec): Promise<FileStat> =>
@@ -86,7 +86,7 @@ async function run(
   readdir: (p: PathSpec) => Promise<string[]>,
   flags: Record<string, string | boolean | number | string[]>,
 ): Promise<string> {
-  const [out] = (await rgGeneric([spec('/')], ['hello'], opts(flags), stat, readdir, stream)) as [
+  const [out] = (await rgGeneric([spec('/')], ['hello'], ctx(flags), stat, readdir, stream)) as [
     ByteSource,
     unknown,
   ]

@@ -42,7 +42,7 @@ from mirage.commands.builtin.grep_pushdown import (
 from mirage.commands.builtin.types import SearchTerms
 from mirage.commands.builtin.utils.links import links_of
 from mirage.commands.builtin.utils.tree import before_full_scan
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -333,7 +333,7 @@ async def search_reads(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[
     Callable[[PathSpec], Awaitable[bytes]],
     Callable[[PathSpec], AsyncIterator[bytes]] | None,
@@ -362,14 +362,14 @@ async def search_reads(
         accessor (Accessor): backend handle.
         paths (list[PathSpec]): resolved operands.
         texts (list[str]): pattern arguments.
-        opts (CommandOpts): parsed invocation context.
+        ctx (Context): parsed invocation context.
     """
-    index = opts.index
+    index = ctx.index
     read_bytes = bound_op(io.read_bytes, accessor, index)
     read_stream = bound_op(io.read_stream, accessor, index)
     files, lines = io.files_containing, io.lines_containing
-    links = links_of(opts)
-    fl = FlagView(opts.flags, spec=SPECS[name])
+    links = links_of(ctx)
+    fl = FlagView(ctx.flags, spec=SPECS[name])
     if not paths or (
         name == "rg" and (fl.as_bool("files") or fl.as_bool("type_list"))
     ):
@@ -377,20 +377,20 @@ async def search_reads(
     walked = name == "rg" or directories_action(fl) == "recurse"
     if files is None and lines is None:
         if walked:
-            await _full_scan(opts.dispatch, paths, name)
+            await _full_scan(ctx.dispatch, paths, name)
         return read_bytes, read_stream
     try:
         terms = (
             rg_terms(fl, texts)
             if name == "rg"
-            else grep_terms(fl, texts, utf8_locale(opts.env))
+            else grep_terms(fl, texts, utf8_locale(ctx.env))
         )
     except UsageError as exc:
         logger.debug("%s search left to the scan: %s", name, exc)
         return read_bytes, read_stream
     dirs = await _directories(io, accessor, index, paths) if walked else []
     if terms is None:
-        await _full_scan(opts.dispatch, dirs, name)
+        await _full_scan(ctx.dispatch, dirs, name)
         return read_bytes, read_stream
     drops_mark = name == "rg" and encoding_flag(fl) != "none"
     hits: set[str] | None = None
@@ -417,10 +417,10 @@ async def search_reads(
                 for hit in answer
             }
     if hits is None and lines is None:
-        await _full_scan(opts.dispatch, dirs, name)
+        await _full_scan(ctx.dispatch, dirs, name)
         return read_bytes, read_stream
     if hits is not None and terms.reads_binary:
-        await _full_scan(opts.dispatch, dirs, name)
+        await _full_scan(ctx.dispatch, dirs, name)
     named = {p.virtual for p in paths} - {p.virtual for p in dirs}
     scan_asked = False
     refusal: Exception | None = None
@@ -432,7 +432,7 @@ async def search_reads(
         if hits is None and not scan_asked:
             scan_asked = True
             try:
-                await _full_scan(opts.dispatch, dirs, name)
+                await _full_scan(ctx.dispatch, dirs, name)
             except Exception as exc:
                 refusal = exc
                 raise

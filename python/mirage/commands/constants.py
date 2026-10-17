@@ -14,9 +14,7 @@
 
 from mirage.types import PathSpec
 
-# The root working directory, as CommandOpts.cwd defaults to it: the
+# The root working directory, as Context.cwd defaults to it: the
 # promoted shape run_command gives "/" on an unprefixed mount. A frozen
-# PathSpec, so one instance serves as the field default. The TS twin
-# (commands/constants.ts) holds the pre-promotion string, because the
-# TS CommandOpts keeps cwd as a virtual-path string.
+# PathSpec, so one instance serves as the field default.
 ROOT_CWD = PathSpec(virtual="/", directory="/", vfs_path="", resolved=False)

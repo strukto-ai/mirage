@@ -21,7 +21,7 @@ from mirage.commands.cli.builtin.hf.accessor import (
     require_operands,
     text_out,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.concurrency.limiter import bounded_map
@@ -388,7 +388,7 @@ async def refuse_absent(accessor: HfHubAccessor, names: list[str]) -> None:
 
 
 async def download_cmd(
-    inv: CLIInvocation[HfConfig],
+    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Download files from a repository into the workspace.
 
@@ -399,12 +399,12 @@ async def download_cmd(
     reads the same bytes without a second copy -- so this exists for the
     repository a workspace has not mounted.
     """
-    require_operands(inv, ["repo_id"])
-    fl = FlagView(inv.flags)
+    require_operands(texts, ["repo_id"])
+    fl = FlagView(ctx.flags)
     local_dir = fl.as_path("local_dir")
-    cache_word = cache_root(dict(inv.env))
+    cache_word = cache_root(dict(ctx.env or {}))
     cache_dir = fl.as_path("cache_dir") or (
-        PathSpec.from_str_path(cache_word, cwd=inv.cwd) if cache_word else None
+        PathSpec.from_str_path(cache_word, cwd=ctx.cwd) if cache_word else None
     )
     if not local_dir and not cache_dir:
         raise UsageError(
@@ -412,9 +412,9 @@ async def download_cmd(
             "(or set HF_HUB_CACHE / HF_HOME), since a workspace has no "
             "home directory to default a cache under"
         )
-    if inv.view is None or inv.view.vfs is None:
+    if ctx.vfs is None:
         raise UsageError("hf download needs a workspace to write into")
-    repo_id, *names = list(inv.texts)
+    repo_id, *names = list(texts)
     include = list(fl.as_list("include"))
     exclude = list(fl.as_list("exclude"))
     if include:
@@ -422,7 +422,7 @@ async def download_cmd(
     if exclude:
         refuse_variadic(names, "--exclude", exclude)
     async with hub_for(
-        inv, repo_id, repo_type_of(fl), fl.as_str("revision")
+        config, repo_id, repo_type_of(fl), fl.as_str("revision")
     ) as accessor:
         try:
             tree = await fetch_tree(accessor)
@@ -434,8 +434,8 @@ async def download_cmd(
                 raise
             logger.debug("hf download tree refused: %s", exc)
             tree = {}
-        paths = selected(tree, names, include, exclude)
-        if not paths:
+        wanted = selected(tree, names, include, exclude)
+        if not wanted:
             await refuse_absent(accessor, names)
         workers = fl.as_int("max_workers") or MAX_DOWNLOAD_WORKERS
         if local_dir:
@@ -444,14 +444,14 @@ async def download_cmd(
             # --force-download only means anything in cache mode.
             base = local_dir.virtual
             written = await fetch_all(
-                inv.view.vfs, accessor, paths, local_dir, workers
+                ctx.vfs, accessor, wanted, local_dir, workers
             )
         else:
             base, written = await fetch_into_cache(
-                inv.view.vfs,
+                ctx.vfs,
                 accessor,
                 tree,
-                paths,
+                wanted,
                 cache_dir or PathSpec.from_str_path("/"),
                 bool(fl.as_bool("force_download")),
                 workers,

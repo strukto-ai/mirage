@@ -16,7 +16,7 @@ import git from 'isomorphic-git'
 
 import { compileSpec, expandGitLong } from '../../../spec/compile.ts'
 import { GIT_LONG_OPTIONS } from '../../constants.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { Context } from '../../../config.ts'
 import { HEAD } from './constants.ts'
 import {
   GitError,
@@ -74,12 +74,12 @@ export interface RefFilter {
  * and the scan stops at `--` the way the parser does. A long spelling may be a
  * unique prefix (`--cont`), as git's parse-options accepts.
  *
- * @param inv the invocation, whose `spec` is the leaf that parsed it
+ * @param ctx the line's context, whose `spec` is the leaf that parsed it
  */
-export function filterWords(inv: CLIInvocation): FilterWord[] {
-  if (inv.spec === undefined) return []
-  const cs = compileSpec(inv.spec)
-  const argv = inv.argv
+export function filterWords(ctx: Context): FilterWord[] {
+  if (ctx.spec === undefined) return []
+  const cs = compileSpec(ctx.spec)
+  const argv = ctx.argv ?? []
   const words: FilterWord[] = []
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i] ?? ''
@@ -87,7 +87,7 @@ export function filterWords(inv: CLIInvocation): FilterWord[] {
     if (token.startsWith('--')) {
       const eq = token.indexOf('=')
       const typed = eq === -1 ? token : token.slice(0, eq)
-      const expanded = expandGitLong(GIT_LONG_OPTIONS.get(inv.spec.name) ?? [], typed)
+      const expanded = expandGitLong(GIT_LONG_OPTIONS.get(ctx.spec.name) ?? [], typed)
       const spelling = expanded !== null && 'spelling' in expanded ? expanded.spelling : typed
       const next = argv[i + 1]
       if (LIST_MODE_ORDER.includes(spelling)) {

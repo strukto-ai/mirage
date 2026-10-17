@@ -17,7 +17,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
 import { encodeBase64 } from '../../../utils/base64.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { resolveSource, stdinStat, stdinStream } from '../utils/stream.ts'
 import { splitReadable } from '../utils/operands.ts'
 import { extraOperandError } from '../../spec/usage.ts'
@@ -144,17 +144,17 @@ async function* base64DecodeStream(
 // base64_generic.
 export async function base64Generic(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   stat: (p: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
-  stream = stdinStream(stream, opts.stdin)
+  stream = stdinStream(stream, ctx.stdin)
   if (paths.length > 1) throw extraOperandError(CommandName.BASE64, paths[1]?.rawPath ?? '')
   if (paths.length === 1) {
     const [, err] = await splitReadable(paths, stdinStat(stat), 'base64')
     if (err !== '') return [null, new IOResult({ exitCode: 1, stderr: encodeText(err) })]
   }
-  const parsed = parseFlags(opts.flags)
+  const parsed = parseFlags(ctx.flags)
   if (parsed.wrap !== null && parsed.wrap < 0) {
     return [
       null,
@@ -170,11 +170,11 @@ export async function base64Generic(
     if (first === undefined) return [null, new IOResult()]
     source = stream(first)
   } else {
-    source = resolveSource(opts.stdin)
+    source = resolveSource(ctx.stdin)
   }
   const io = new IOResult()
   const out = parsed.decode
-    ? base64DecodeStream(source, parsed.ignoreGarbage, io, opts.signal)
-    : base64EncodeStream(source, parsed.wrap, opts.signal)
+    ? base64DecodeStream(source, parsed.ignoreGarbage, io, ctx.signal)
+    : base64EncodeStream(source, parsed.wrap, ctx.signal)
   return [out, io]
 }

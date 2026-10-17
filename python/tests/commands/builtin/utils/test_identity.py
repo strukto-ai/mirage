@@ -7,7 +7,7 @@ from mirage.commands.builtin.utils.identity import (
     identity_of,
     owner_name,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.io.types import materialize
 from mirage.policy.profile import SessionProfile
 from mirage.types import MountMode
@@ -33,10 +33,8 @@ def test_identity_reads_the_session_plane():
     view = session_view(session)
     assert identity_from(view) == Identity(profile="admin")
     assert identity_from(None) == Identity()
-    assert identity_of(CommandOpts(session_view=view)) == Identity(
-        profile="admin"
-    )
-    assert identity_of(CommandOpts()) == Identity()
+    assert identity_of(Context(session=view)) == Identity(profile="admin")
+    assert identity_of(Context()) == Identity()
 
 
 async def _run(ws: Workspace, line: str) -> tuple[int, str]:

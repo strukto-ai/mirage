@@ -27,7 +27,7 @@ import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isEnoent, isFsError } from '../../../errors/fs.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { isStdin, resolveSource, stdinStream } from '../utils/stream.ts'
 import { asyncChain } from '../../../io/stream.ts'
 import { extraOperandError, readFailExitCode } from '../../spec/usage.ts'
@@ -557,26 +557,26 @@ function parseFlags(bag: Record<string, FlagValue>): XxdFlags {
  */
 export async function xxdGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   readBytes: ((p: PathSpec) => Promise<Uint8Array>) | null = null,
   writeBytes: ((p: PathSpec, data: ByteSource) => Promise<void>) | null = null,
   pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null = null,
 ): Promise<[ByteSource | null, IOResult]> {
-  stream = stdinStream(stream, opts.stdin, true)
-  const parsed = parseFlags(opts.flags)
+  stream = stdinStream(stream, ctx.stdin, true)
+  const parsed = parseFlags(ctx.flags)
   if (paths.length > 2) throw extraOperandError(CommandName.XXD, paths[2]?.rawPath ?? '')
   const { seek, limit, uppercase, plain } = parsed
   let source: AsyncIterable<Uint8Array>
   let base = 0
   if (parsed.reverse) {
-    source = paths[0] !== undefined ? stream(paths[0]) : resolveSource(opts.stdin)
+    source = paths[0] !== undefined ? stream(paths[0]) : resolveSource(ctx.stdin)
     if (seek.offset !== 0 || (limit ?? 0) > 0) {
       const after = await past(source, Math.max(seek.offset, 0))
       source = limited(after ?? singleChunk(new Uint8Array()), limit !== 0 ? limit : null)
     }
   } else {
-    const found = await seeked(paths[0] ?? null, stream, opts.stdin, seek, limit)
+    const found = await seeked(paths[0] ?? null, stream, ctx.stdin, seek, limit)
     if (found === null) {
       return [null, new IOResult({ exitCode: CANNOT_SEEK_EXIT, stderr: ENC.encode(CANNOT_SEEK) })]
     }

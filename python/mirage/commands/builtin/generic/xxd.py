@@ -17,7 +17,7 @@ from mirage.commands.builtin.utils.stream import (
     resolve_source,
     stdin_stream,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
@@ -708,20 +708,20 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> XxdFlags:
 async def xxd_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     read_stream: ReadStreamFn,
     read_bytes: ReadBytesFn | None = None,
     write_bytes: Callable[..., Awaitable[None]] | None = None,
     pwrite_bytes: Callable[..., Awaitable[None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     return await xxd(
         paths,
         read_stream=read_stream,
         read_bytes=read_bytes,
         write_bytes=write_bytes,
         pwrite_bytes=pwrite_bytes,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         reverse=parsed.reverse,
         plain=parsed.plain,
         uppercase=parsed.uppercase,

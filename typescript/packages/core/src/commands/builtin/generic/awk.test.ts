@@ -16,7 +16,7 @@ import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 
 import { awkGeneric } from './awk.ts'
 
@@ -32,8 +32,8 @@ function spec(path: string): PathSpec {
   })
 }
 
-function opts(flags: CommandOpts['flags'] = {}, stdin: Uint8Array | null = null): CommandOpts {
-  return { stdin, flags, cwd: '/' } as CommandOpts
+function ctx(flags: Context['flags'] = {}, stdin: Uint8Array | null = null): Context {
+  return { stdin, flags, cwd: PathSpec.fromStrPath('/') } as Context
 }
 
 function makeStream(files: Record<string, string>) {
@@ -56,7 +56,7 @@ function makeStream(files: Record<string, string>) {
 async function run(
   paths: PathSpec[],
   texts: string[],
-  o: CommandOpts,
+  o: Context,
   files: Record<string, string> = {},
 ): Promise<[string, IOResult]> {
   const result = await awkGeneric(paths, texts, o, makeStream(files))
@@ -66,13 +66,13 @@ async function run(
 
 describe('awkGeneric', () => {
   it('splits into characters with an empty FS', async () => {
-    const [out] = await run([], ['{print $2}'], opts({ F: '' }, ENC.encode('abc\n')))
+    const [out] = await run([], ['{print $2}'], ctx({ F: '' }, ENC.encode('abc\n')))
     expect(out).toBe('b\n')
   })
 
   it('processes all files with continuous NR', async () => {
     const files = { '/a.txt': 'one\ntwo\n', '/b.txt': 'three\n' }
-    const [out] = await run([spec('/a.txt'), spec('/b.txt')], ['{print NR, $1}'], opts(), files)
+    const [out] = await run([spec('/a.txt'), spec('/b.txt')], ['{print NR, $1}'], ctx(), files)
     expect(out).toBe('1 one\n2 two\n3 three\n')
   })
 
@@ -99,7 +99,7 @@ describe('awkGeneric', () => {
     const [out] = await run(
       data.map(spec),
       [],
-      opts({ f: (Array.isArray(f) ? f : [f]).map(spec) }),
+      ctx({ f: (Array.isArray(f) ? f : [f]).map(spec) }),
       files,
     )
     expect(out).toBe(expected)
@@ -109,7 +109,7 @@ describe('awkGeneric', () => {
     const result = await awkGeneric(
       [spec('/data.txt')],
       [],
-      opts({ f: spec('/missing.awk') }),
+      ctx({ f: spec('/missing.awk') }),
       makeStream({ '/data.txt': 'x\n' }),
     )
     const [stdout, io] = result ?? [null, new IOResult()]
@@ -126,16 +126,16 @@ describe('awkGeneric', () => {
       throw raw
     }
     await expect(
-      awkGeneric([spec('/data.txt')], [], opts({ f: spec('/prog.awk') }), stream),
+      awkGeneric([spec('/data.txt')], [], ctx({ f: spec('/prog.awk') }), stream),
     ).rejects.toThrow('403 Forbidden')
   })
 
   it('resolves a relative -f program file against the cwd', async () => {
     const files = { '/data/prog.awk': '{print $1}\n', '/data/in.txt': 'hey there\n' }
     const o = {
-      ...opts({ f: PathSpec.fromStrPath('prog.awk', undefined, '/data') }),
-      cwd: '/data',
-    } as CommandOpts
+      ...ctx({ f: PathSpec.fromStrPath('prog.awk', undefined, '/data') }),
+      cwd: PathSpec.fromStrPath('/data'),
+    } as Context
     const result = await awkGeneric([spec('/data/in.txt')], [], o, makeStream(files))
     const [stdout] = result ?? [null, new IOResult()]
     expect(DEC.decode(await materialize(stdout))).toBe('hey\n')
@@ -143,7 +143,7 @@ describe('awkGeneric', () => {
 })
 
 async function runIo(program: string, stdin: string): Promise<[string, number, string]> {
-  const [out, io] = await run([], [program], opts({}, ENC.encode(stdin)))
+  const [out, io] = await run([], [program], ctx({}, ENC.encode(stdin)))
   return [out, io.exitCode, DEC.decode(await materialize(io.stderr))]
 }
 
@@ -161,9 +161,9 @@ describe('awk fatal paths', () => {
 async function runStdin(
   program: string,
   stdin: string,
-  flags: CommandOpts['flags'] = {},
+  flags: Context['flags'] = {},
 ): Promise<string> {
-  const [out] = await run([], [program], opts(flags, ENC.encode(stdin)))
+  const [out] = await run([], [program], ctx(flags, ENC.encode(stdin)))
   return out
 }
 
@@ -190,13 +190,13 @@ describe('awk RS', () => {
     [['a:', 'b'], ':', 'a|b|'],
     [[Uint8Array.of(0x68, 0xc3), Uint8Array.of(0xa9, 0x3a, 0x78)], ':', 'h\u00e9|x|'],
   ])('holds a record across the chunks %j', async (parts, rs, expected) => {
-    const o = { ...opts({ v: [`RS=${rs}`] }), stdin: chunked(parts) }
+    const o = { ...ctx({ v: [`RS=${rs}`] }), stdin: chunked(parts) }
     const [out] = await run([], ['{printf "%s|", $0}'], o)
     expect(out).toBe(expected)
   })
 
   it('takes the whole newline run as the paragraph separator', async () => {
-    const o = { ...opts({ v: ['RS='] }), stdin: chunked(['a\n\n', '\nb\n']) }
+    const o = { ...ctx({ v: ['RS='] }), stdin: chunked(['a\n\n', '\nb\n']) }
     const [out] = await run([], ['{printf "%s|", $0; RS="\\n"}'], o)
     expect(out).toBe('a|b|')
   })

@@ -22,7 +22,7 @@ from mirage.commands.builtin.general.interpreter import (
     run_code,
     runtime_version,
 )
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import CommandOutput
@@ -34,27 +34,27 @@ async def _python3(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> CommandOutput:
-    label = opts.command or "python3"
-    if not isinstance(opts.runtime, LanguageRuntime):
-        return not_bound(label, opts.runtime_unavailable)
-    fl = FlagView(opts.flags, spec=SPECS["python3"])
+    label = ctx.command or "python3"
+    if not isinstance(ctx.runtime, LanguageRuntime):
+        return not_bound(label, ctx.runtime_unavailable)
+    fl = FlagView(ctx.flags, spec=SPECS["python3"])
     if fl.as_bool("version"):
-        return await runtime_version(opts.runtime, opts.env)
+        return await runtime_version(ctx.runtime, ctx.env)
     error, prepared = await resolve_source(
         label,
         paths,
         texts,
         fl.as_str("c"),
-        opts.stdin,
-        opts.dispatch,
-        opts.cwd,
-        opts.exec_allowed,
+        ctx.stdin,
+        ctx.dispatch,
+        ctx.cwd,
+        ctx.exec_allowed,
         fl.as_str("m"),
         CPYTHON_ARGV0,
         fl.as_bool("x"),
-        exec_path_allowed=opts.exec_path_allowed,
+        exec_path_allowed=ctx.exec_path_allowed,
     )
     if error is not None or prepared is None:
         assert error is not None
@@ -82,10 +82,10 @@ async def _python3(
     return await run_code(
         label,
         prepared,
-        opts.env,
+        ctx.env,
         init_flags,
-        opts.runtime,
-        cwd=opts.cwd,
+        ctx.runtime,
+        cwd=ctx.cwd,
     )
 
 

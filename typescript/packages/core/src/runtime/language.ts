@@ -63,7 +63,7 @@ export abstract class LanguageRuntime extends Runtime {
 
   protected executeCode(args: RunArgs, context?: RuntimeContext): Promise<RunResult> {
     return this.run(
-      args.cwd === undefined && context !== undefined ? { ...args, cwd: context.cwd } : args,
+      args.cwd === undefined && context !== undefined ? { ...args, cwd: context.ctx.cwd } : args,
       context,
     )
   }

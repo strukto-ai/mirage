@@ -27,7 +27,7 @@ import { mountParentReaddir, mountParentStat } from '../utils/wrap.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import {
   NEVER_MATCH,
   compilePattern,
@@ -214,9 +214,9 @@ export function filenameMode(fl: FlagView): boolean | null {
  * so the label is requested here; an explicit -h still wins, and an explicit
  * -H is already on the line.
  */
-export function labelled(opts: CommandOpts): CommandOpts {
-  if (filenameMode(new FlagView(opts.flags, specOf('grep'))) !== null) return opts
-  return { ...opts, flags: { ...opts.flags, with_filename: true } }
+export function labelled(ctx: Context): Context {
+  if (filenameMode(new FlagView(ctx.flags, specOf('grep'))) !== null) return ctx
+  return { ...ctx, flags: { ...ctx.flags, with_filename: true } }
 }
 
 function reason(error: unknown): string {
@@ -283,15 +283,15 @@ export async function grepGeneric(
   name: string,
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
   stat: Stat,
   readdir: Readdir,
   stream: Stream,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
-  const operandStream = stdinStream(stream, opts.stdin)
-  stream = (path) => guardInput(operandStream(path), opts)
-  const fl = new FlagView(opts.flags, specOf('grep'))
+  const operandStream = stdinStream(stream, ctx.stdin)
+  stream = (path) => guardInput(operandStream(path), ctx)
+  const fl = new FlagView(ctx.flags, specOf('grep'))
   // GNU refuses a bad option value in its option loop, before it looks for a
   // pattern.
   let f: FlagSet
@@ -302,7 +302,7 @@ export async function grepGeneric(
     const exitCode = error instanceof UsageError ? error.exitCode : 2
     return [null, new IOResult({ exitCode, stderr: ENC.encode(error.message + '\n') })]
   }
-  const resolution = await resolvePattern(name, texts, opts.flags, paths, opts.mountPrefix, stream)
+  const resolution = await resolvePattern(name, texts, ctx.flags, paths, ctx.mountPrefix, stream)
   if (resolution.error !== null || resolution.pattern === null)
     return [
       null,
@@ -312,7 +312,7 @@ export async function grepGeneric(
       }),
     ]
   if (resolution.neverMatch) f.fixedString = false
-  const utf8 = utf8Locale(opts.env)
+  const utf8 = utf8Locale(ctx.env)
   let pat: RegExp
   try {
     pat = resolution.neverMatch
@@ -338,7 +338,7 @@ export async function grepGeneric(
   const first = paths[0]
   if (first === undefined) {
     try {
-      const source = guardInput(resolveSource(opts.stdin), opts)
+      const source = guardInput(resolveSource(ctx.stdin), ctx)
       return [
         grepInput(
           source,
@@ -348,7 +348,7 @@ export async function grepGeneric(
           f.withFilename && !f.noFilename,
           io,
           false,
-          opts.signal,
+          ctx.signal,
           utf8,
         ),
         io,
@@ -360,12 +360,12 @@ export async function grepGeneric(
   }
   const worker = new Worker()
   const prefix = mountPrefixOf(first.virtual, first.vfsPath)
-  const mounts = mountsOf(opts)
+  const mounts = mountsOf(ctx)
   const rd = mountParentReaddir((p: string) => readdir(sameMountSpec(p, first)), mounts, prefix)
   const st = mountParentStat((p: string) => stat(sameMountSpec(p, first)), mounts)
   // The walk meets links as entries: -r leaves them, -R reads what each one
   // leads to, and a directory it reaches again is a loop.
-  const follow = f.recursive && f.dereference === true ? (linksOf(opts) ?? null) : null
+  const follow = f.recursive && f.dereference === true ? (linksOf(ctx) ?? null) : null
   const walkedSt = (p: string) => followedStat(st, follow, p)
   let failed = false
   const notices: Uint8Array[] = []
@@ -462,7 +462,7 @@ export async function grepGeneric(
           show,
           fileIO,
           printed,
-          opts.signal,
+          ctx.signal,
           utf8,
           info.type === FileType.FILE ? (info.size ?? null) : null,
           worker,

@@ -72,10 +72,10 @@ from mirage.commands.cli.builtin.git.util import (
     fatal,
     start_point,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType
+from mirage.types import FileType, PathSpec
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,7 +171,7 @@ def source_tree(repo: BaseRepo, revision: str) -> tuple[bytes, Tree]:
 
 
 async def restore(
-    inv: CLIInvocation[None],
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Put paths back to what a source records.
 
@@ -184,23 +184,23 @@ async def restore(
     match the source" means for it. Pinned against git 2.50.1.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model; it reads its repository
-            through ``inv.view.vfs``.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context; git reads its repository
+            through ``ctx.vfs``.
     """
-    view = inv.view or CLIView()
-    vfs = view.vfs
-    texts = inv.texts
-    fl = FlagView(inv.flags)
+    vfs = ctx.vfs
+    fl = FlagView(ctx.flags)
     notes: list[str] = []
     try:
         if vfs is None:
             raise NoWorkspaceError()
-        check_switches(inv, texts)
+        check_switches(ctx, texts)
         if not texts:
             raise NoRestorePathsError()
         flags = parse_flags(fl)
-        repo, location = await opened(fl, view, work_tree=True)
+        repo, location = await opened(ctx, fl, work_tree=True)
         source: Tree | None
         if flags.source is not None:
             _, source = await asyncio.to_thread(
@@ -221,9 +221,9 @@ async def restore(
         else:
             source = None
         notes, _ = await restore_paths(
+            ctx,
             repo,
             location,
-            view,
             texts,
             start_point(fl).virtual,
             source,
@@ -238,9 +238,9 @@ async def restore(
 
 
 async def restore_paths(
+    ctx: Context,
     repo: BaseRepo,
     location: RepoLocation,
-    view: CLIView,
     operands: Sequence[str],
     start: str,
     source: Tree | None,
@@ -257,9 +257,9 @@ async def restore_paths(
     path is removed.
 
     Args:
+        ctx (Context): the line's context, whose files git writes.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
-        view (CLIView): the invocation's view.
         operands (Sequence[str]): the pathspecs as typed.
         start (str): the directory the line runs in.
         source (Tree | None): the tree to restore from, None for the
@@ -272,7 +272,7 @@ async def restore_paths(
         tuple[list[str], int]: the warnings git prints, and how many
         working-tree files changed.
     """
-    vfs = view.vfs
+    vfs = ctx.vfs
     if vfs is None:
         raise NoWorkspaceError()
     notes: list[str] = []

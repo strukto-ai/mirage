@@ -303,7 +303,7 @@ async def test_retired_command_cannot_cache_bytes_for_replacement_mount(
     entered = asyncio.Event()
     release = asyncio.Event()
 
-    async def gate(_inv):
+    async def gate(config, paths, texts, ctx):
         entered.set()
         await release.wait()
         return None, IOResult()
@@ -626,7 +626,7 @@ async def test_close_refuses_lifecycle_changes_but_allows_runtime_drain(
     closes = []
     drained = []
 
-    async def cli(_inv):
+    async def cli(config, paths, texts, ctx):
         return None, IOResult()
 
     spec = CLI(

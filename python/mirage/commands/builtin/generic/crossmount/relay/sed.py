@@ -4,7 +4,7 @@ from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes,
 )
 from mirage.commands.builtin.generic.sed import sed_generic
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
@@ -50,7 +50,7 @@ async def run_sed(
     return await sed_generic(
         flat_scopes(scopes),
         texts,
-        CommandOpts(
+        Context(
             flags=flags,
             stdin=stdin,
             cwd=PathSpec.from_str_path(cwd),

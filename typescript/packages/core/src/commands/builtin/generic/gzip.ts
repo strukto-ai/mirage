@@ -23,7 +23,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { gnuBasename } from '../../../utils/path.ts'
 import { gzipCompressStream } from '../../../utils/compress.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { linkResolver } from '../utils/links.ts'
 import { resolveSource, stdinStream } from '../utils/stream.ts'
 import { GZIP_SUFFIX } from '../constants.ts'
@@ -76,7 +76,7 @@ function parseFlags(bag: Record<string, FlagValue>): GzipFlags {
 
 export async function gzipGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: ByteSource) => Promise<void>,
   unlink: (p: PathSpec) => Promise<void>,
@@ -90,15 +90,15 @@ export async function gzipGeneric(
     quiet,
     suffix,
     level,
-  } = parseFlags(opts.flags)
+  } = parseFlags(ctx.flags)
 
-  const resolver = linkResolver(opts)
+  const resolver = linkResolver(ctx)
 
   const refused = suffixRefusal(suffix)
   if (refused !== null) return [null, refused]
   if (decompress)
     return decompressInputs(paths, stream, {
-      stdin: opts.stdin,
+      stdin: ctx.stdin,
       keep,
       force,
       quiet,
@@ -110,10 +110,10 @@ export async function gzipGeneric(
       resolver,
     })
   if (paths.length === 0) {
-    const result: ByteSource = gzipCompressStream(resolveSource(opts.stdin), level)
+    const result: ByteSource = gzipCompressStream(resolveSource(ctx.stdin), level)
     return [result, new IOResult()]
   }
-  const read = stdinStream(stream, opts.stdin)
+  const read = stdinStream(stream, ctx.stdin)
   const io = new IOResult()
   const lines: string[] = []
   const report = (line: string, code: number, warning: boolean): void => {
@@ -201,7 +201,7 @@ export async function gzipGeneric(
       }
     }
   }
-  const body = new OutputStream(run(), () => closeQuietly(opts.stdin))
+  const body = new OutputStream(run(), () => closeQuietly(ctx.stdin))
   if (!stdoutMode && paths.every((p) => p.rawPath !== '-')) {
     await drain(body)
     return [null, io]

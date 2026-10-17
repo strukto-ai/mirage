@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
-import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
+import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
+import type { PathSpec } from '@struktoai/mirage-core/types'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import { repoUrl } from '../../../../core/hf_hub/client.ts'
 import { commit } from '../../../../core/hf_hub/commit.ts'
@@ -32,13 +32,19 @@ import { hubFor, repoTypeOf, requireOperands, requireToken, textOut } from './ac
  * matches nothing makes no commit, warns the way upstream's `create_commit`
  * does, and names the commit the revision already points at.
  */
-export async function deleteCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  requireOperands(inv, ['repo_id', 'patterns'])
-  requireToken(inv, 'repo-files delete')
-  const fl = new FlagView(inv.flags)
-  const [repoId, ...patterns] = inv.texts
+export async function deleteCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const cfg = config as HfConfig
+  requireOperands(texts, ['repo_id', 'patterns'])
+  requireToken(cfg, 'repo-files delete')
+  const fl = new FlagView(ctx.flags)
+  const [repoId, ...patterns] = texts
   const target = repoId ?? ''
-  const accessor = hubFor(inv, target, repoTypeOf(fl), fl.asStr('revision'))
+  const accessor = hubFor(cfg, target, repoTypeOf(fl), fl.asStr('revision'))
   const deletions = deletionsFor(repoFiles(await fetchTree(accessor)), patterns)
   const message = fl.asStr('commit_message')
   let url: string
@@ -53,7 +59,7 @@ export async function deleteCmd(inv: CLIInvocation): Promise<CommandFnResult> {
     createPr: fl.asBool('create_pr'),
   })
   if (reply === undefined) {
-    const home = repoUrl((inv.config as HfConfig).endpoint, accessor.repoType, target)
+    const home = repoUrl(cfg.endpoint, accessor.repoType, target)
     url = `${home}/commit/${await headCommit(accessor)}`
     stderr = EMPTY_COMMIT_WARNING
   } else {

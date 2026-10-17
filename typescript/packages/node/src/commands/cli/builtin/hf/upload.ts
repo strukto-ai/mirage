@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
-import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
+import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
 import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
@@ -121,23 +120,28 @@ export function inRepoBase(value: string): string {
 }
 
 /** Upload a workspace file or folder to a repository, as one commit. */
-export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  requireOperands(inv, ['repo_id'])
-  requireToken(inv, 'upload')
-  const fl = new FlagView(inv.flags)
-  const vfs = inv.view?.vfs
+export async function uploadCmd(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const cfg = config as HfConfig
+  requireOperands(texts, ['repo_id'])
+  requireToken(cfg, 'upload')
+  const fl = new FlagView(ctx.flags)
+  const vfs = ctx.vfs
   if (vfs === undefined) {
     throw new UsageError('hf upload needs a workspace to read from')
   }
-  const repoId = inv.texts[0] ?? ''
+  const repoId = texts[0] ?? ''
   // LOCAL_PATH is path-typed, so the parser resolved it against the cwd;
   // without one, upstream's `_resolve_upload_paths` reads the file or folder
   // named after the repository (`hf upload acme/model` reads `./model`) and
   // refuses when there is none.
   const source =
-    inv.paths[0] ??
-    PathSpec.fromStrPath(repoId.slice(repoId.lastIndexOf('/') + 1), undefined, inv.cwd)
-  const operands = [...inv.paths.map((path) => path.rawPath), ...inv.texts.slice(1)]
+    paths[0] ?? PathSpec.fromStrPath(repoId.slice(repoId.lastIndexOf('/') + 1), undefined, ctx.cwd)
+  const operands = [...paths.map((path) => path.rawPath), ...texts.slice(1)]
   const include = fl.asList('include')
   const exclude = fl.asList('exclude')
   const deletions = fl.asList('delete')
@@ -149,14 +153,14 @@ export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   for (const [flag, patterns] of patternFlags) {
     if (patterns.length > 0) refuseVariadic(operands, flag, patterns)
   }
-  const inRepo = inv.texts[1] ?? ''
+  const inRepo = texts[1] ?? ''
   let collected: { rows: Addition[]; fromDir: boolean }
   try {
     collected = await collect(vfs, source)
   } catch (err) {
     if (!isMissingPath(err) && !isEnotdir(err)) throw err
     throw new UsageError(
-      inv.paths.length > 0
+      paths.length > 0
         ? `${shellQuote(source.rawPath)}: ${fsStrerror(err) ?? posixPhrase('ENOENT')}`
         : `'${source.rawPath}' is not a local file or folder. Please set local_path explicitly.`,
     )
@@ -180,12 +184,12 @@ export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   // Upstream creates the repository if it is missing and ignores --private
   // when it already exists, so the flag picks the visibility of one this line
   // brings into being rather than changing an existing repository's.
-  await createRepo(inv.config as HfConfig, repoId, {
+  await createRepo(cfg, repoId, {
     repoType,
     private: fl.asBool('private'),
     existOk: true,
   })
-  const accessor = hubFor(inv, repoId, repoType, fl.asStr('revision'))
+  const accessor = hubFor(cfg, repoId, repoType, fl.asStr('revision'))
   // For a folder the --delete patterns match the repo's files under
   // `path_in_repo`, and a file this commit re-adds is not deleted first. A
   // commit that would change nothing is skipped, with upstream's create_commit
@@ -206,7 +210,7 @@ export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
     createPr: fl.asBool('create_pr'),
   })
   if (reply === undefined) warnings += EMPTY_COMMIT_WARNING
-  const home = repoUrl((inv.config as HfConfig).endpoint, accessor.repoType, repoId)
+  const home = repoUrl(cfg.endpoint, accessor.repoType, repoId)
   const url = rstripSlash(`${home}/tree/${accessor.revision}/${base}`)
   return textOut(`${url}\n`, warnings)
 }

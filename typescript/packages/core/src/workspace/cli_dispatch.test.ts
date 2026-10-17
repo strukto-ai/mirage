@@ -20,7 +20,8 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
 
-import { CLI, type CLIInvocation } from '../commands/cli/types.ts'
+import { CLI } from '../commands/cli/types.ts'
+import type { Context } from '../commands/config.ts'
 import { Argument } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import type { Policy } from '../policy/base.ts'
@@ -51,10 +52,15 @@ function tokenConfig(input: Record<string, unknown>): { token: string } {
   return { token: input.token }
 }
 
-function send(inv: CLIInvocation): [Uint8Array, IOResult] {
-  const token = (inv.config as { token: string }).token
-  const to = inv.flags.to as string | undefined
-  const body = inv.texts.join(' ')
+function send(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): [Uint8Array, IOResult] {
+  const token = (config as { token: string }).token
+  const to = ctx.flags.to as string | undefined
+  const body = texts.join(' ')
   return [new TextEncoder().encode(`sent[${token}] to=${String(to)}: ${body}\n`), new IOResult()]
 }
 
@@ -499,8 +505,13 @@ describe('policy cli fact', () => {
   })
 })
 
-async function peek(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
-  const vfs = inv.view?.vfs
+async function peek(
+  _config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<[Uint8Array, IOResult]> {
+  const vfs = ctx.vfs
   if (vfs === undefined) throw new Error('no files')
   return [await vfs.read(PathSpec.fromStrPath('/data/secret.txt')), new IOResult()]
 }
@@ -510,8 +521,13 @@ const PEEK = new CLI({
   handlers: { '': new CLIHandler({ fn: peek }) },
 })
 
-function later(inv: CLIInvocation): [AsyncIterable<Uint8Array>, IOResult] {
-  const found = inv.view?.vfs
+function later(
+  _config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): [AsyncIterable<Uint8Array>, IOResult] {
+  const found = ctx.vfs
   if (found === undefined) throw new Error('no files')
   const vfs = found
   async function* pulled(): AsyncIterable<Uint8Array> {
@@ -525,10 +541,15 @@ const LATER = new CLI({
   handlers: { '': new CLIHandler({ fn: later }) },
 })
 
-async function put(inv: CLIInvocation): Promise<[null, IOResult]> {
-  const vfs = inv.view?.vfs
+async function put(
+  _config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<[null, IOResult]> {
+  const vfs = ctx.vfs
   if (vfs === undefined) throw new Error('no files')
-  await vfs.write(PathSpec.fromStrPath(inv.texts[0] ?? ''), new TextEncoder().encode('hi\n'))
+  await vfs.write(PathSpec.fromStrPath(texts[0] ?? ''), new TextEncoder().encode('hi\n'))
   return [null, new IOResult()]
 }
 
@@ -553,12 +574,17 @@ class DenyAwsWrites implements Policy {
 }
 
 /** A leaf that writes the session plane through its entry point. */
-async function stash(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
-  const view = inv.view?.sessionView
+async function stash(
+  _config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<[Uint8Array, IOResult]> {
+  const view = ctx.session
   if (view === undefined) {
     return [new TextEncoder().encode('no session plane\n'), new IOResult({ exitCode: 1 })]
   }
-  const [name, value] = [inv.texts[0] ?? '', inv.texts[1] ?? '']
+  const [name, value] = [texts[0] ?? '', texts[1] ?? '']
   await view.set(name, value)
   return [new TextEncoder().encode(`${name}=${view.get(name) ?? ''}\n`), new IOResult()]
 }

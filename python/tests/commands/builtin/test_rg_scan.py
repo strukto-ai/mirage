@@ -31,7 +31,7 @@ from mirage.commands.builtin.rg_scan import (
     walk_error_line,
 )
 from mirage.commands.builtin.utils.wrap import to_pathspec
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.ram.mkdir import mkdir
@@ -108,7 +108,7 @@ async def rg(backend, path, pattern, **kwargs):
     out, io = await rg_generic(
         [to_pathspec(path)],
         [pattern],
-        CommandOpts(flags=flags),
+        Context(flags=flags),
         readdir=partial(_listed, accessor),
         stat=partial(stat, accessor),
         read_bytes=partial(read, accessor),

@@ -17,7 +17,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { parseFlags as parseLineFlags } from '../../../workspace/executor/command/flags.ts'
 import {
   MAX_OUTPUT_LINES,
@@ -52,16 +52,16 @@ async function run(
   flags: Record<string, FlagValue>,
   stdinText = 'x\n',
 ): Promise<{ exit: number; stdout: string; stderr: string }> {
-  const opts = {
+  const ctx = {
     stdin: stdinOf(stdinText),
     flags,
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     vfs: { kind: 'ram' } as never,
-  } as CommandOpts
+  } as Context
   // `CommandFnResult` is nullable — null is how a handler says it does not
   // apply — and shuf never answers that way, so say so rather than
   // destructure a union.
-  const result = await shufGeneric([], [], opts, stubStream, stubWrite)
+  const result = await shufGeneric([], [], ctx, stubStream, stubWrite)
   if (result === null) throw new Error('shuf declined to handle its own operands')
   const [out, io] = result
   return {
@@ -545,9 +545,14 @@ describe('shuf over several files', () => {
       await Promise.resolve()
       yield ENC.encode(files.get(p.virtual) ?? '')
     }
-    const opts = { stdin: null, flags: {}, cwd: '/', vfs: { kind: 'ram' } as never } as CommandOpts
+    const ctx = {
+      stdin: null,
+      flags: {},
+      cwd: PathSpec.fromStrPath('/'),
+      vfs: { kind: 'ram' } as never,
+    } as Context
     const paths = ['/a', '/b'].map((p) => PathSpec.fromStrPath(p))
-    const result = await shufGeneric(paths, [], opts, stream, stubWrite)
+    const result = await shufGeneric(paths, [], ctx, stream, stubWrite)
     if (result === null) throw new Error('shuf declined to handle its own operands')
     const [out] = result
     const text = out === null ? '' : DEC.decode(await materialize(out))

@@ -21,7 +21,8 @@ import pytest
 from pydantic import BaseModel, SecretStr
 
 from mirage.commands.cli.specs import register_cli_spec, unregister_cli_spec
-from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.config import Context
 from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.runtime.types import ScriptSource
@@ -531,9 +532,9 @@ class _CliCfg(BaseModel):
     channel: str = "general"
 
 
-async def _cli_echo(inv: CLIInvocation):
+async def _cli_echo(config, paths, texts, ctx: Context):
     return (
-        f"tok={inv.config.token.get_secret_value()}\n".encode(),
+        f"tok={config.token.get_secret_value()}\n".encode(),
         IOResult(),
     )
 
@@ -615,9 +616,9 @@ class _NestedCfg(BaseModel):
     auth: _NestedAuth
 
 
-async def _nested_echo(inv: CLIInvocation):
+async def _nested_echo(config, paths, texts, ctx: Context):
     return (
-        f"tok={inv.config.auth.token.get_secret_value()}\n".encode(),
+        f"tok={config.auth.token.get_secret_value()}\n".encode(),
         IOResult(),
     )
 

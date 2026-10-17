@@ -18,7 +18,7 @@ import { UsageError } from '../../errors.ts'
 import { quoteText } from '../../quote.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { eexist, fsStrerror, isEnoent, isFsError } from '../../../errors/fs.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
@@ -142,16 +142,16 @@ function parseFlags(bag: Record<string, FlagValue>): MktempFlags {
 
 export async function mktempGeneric(
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
   mkdir: (p: PathSpec) => Promise<void>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
   exists?: (p: PathSpec) => Promise<boolean>,
 ): Promise<CommandFnResult> {
-  const parsed = parseFlags(opts.flags)
+  const parsed = parseFlags(ctx.flags)
   if (texts.length > 1) throw extraOperandError(CommandName.MKTEMP, texts[1] ?? '')
   const { directory, tmpdir, useDestDir, templateMode: t } = parsed
   const destDir = tmpdir?.rawPath ?? ''
-  const envTmpdir = opts.env?.TMPDIR ?? ''
+  const envTmpdir = ctx.env?.TMPDIR ?? ''
   const [template, xCount, suffixLen] = planTemplate(
     texts[0],
     parsed.suffix ?? undefined,
@@ -168,13 +168,13 @@ export async function mktempGeneric(
     directory ? mkdir(path) : write(path, new Uint8Array(0))
   let name = draw()
   try {
-    let path = PathSpec.fromStrPath(name, undefined, opts.cwd)
+    let path = PathSpec.fromStrPath(name, undefined, ctx.cwd)
     let attempt = 0
     while (exists !== undefined && (await exists(path))) {
       attempt += 1
       if (attempt >= ATTEMPTS) throw eexist(path.virtual)
       name = draw()
-      path = PathSpec.fromStrPath(name, undefined, opts.cwd)
+      path = PathSpec.fromStrPath(name, undefined, ctx.cwd)
     }
     if (!parsed.dryRun) {
       try {

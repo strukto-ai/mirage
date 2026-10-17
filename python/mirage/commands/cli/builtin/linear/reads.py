@@ -16,7 +16,7 @@ import functools
 from collections.abc import Awaitable, Callable
 
 from mirage.commands.cli.builtin.linear.util import first_text, resolve_issue
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.linear.client import (
     get_issue,
@@ -45,7 +45,7 @@ from mirage.core.linear.normalize import (
 )
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import JsonValue
+from mirage.types import JsonValue, PathSpec
 
 
 def _require_team(fl: FlagView) -> str:
@@ -78,7 +78,7 @@ async def _project_issue_rows(
 
 
 async def _team_list(
-    config: LinearConfig, texts: tuple[str, ...], fl: FlagView
+    config: LinearConfig, texts: list[str], fl: FlagView
 ) -> bytes:
     teams = await list_teams(config)
     if config.team_ids:
@@ -87,14 +87,14 @@ async def _team_list(
 
 
 async def _team_get(
-    config: LinearConfig, texts: tuple[str, ...], fl: FlagView
+    config: LinearConfig, texts: list[str], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, first_text(texts, "team key"))
     return to_json_bytes(normalize_team(team))
 
 
 async def _team_members(
-    config: LinearConfig, texts: tuple[str, ...], fl: FlagView
+    config: LinearConfig, texts: list[str], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, first_text(texts, "team key"))
     users = await list_team_members(config, team["id"])
@@ -102,7 +102,7 @@ async def _team_members(
 
 
 async def _issue_list(
-    config: LinearConfig, texts: tuple[str, ...], fl: FlagView
+    config: LinearConfig, texts: list[str], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
     issues = await list_team_issues(config, team["id"])
@@ -110,7 +110,7 @@ async def _issue_list(
 
 
 async def _issue_get(
-    config: LinearConfig, texts: tuple[str, ...], fl: FlagView
+    config: LinearConfig, texts: list[str], fl: FlagView
 ) -> bytes:
     issue_id = await resolve_issue(config, first_text(texts, "issue key"))
     issue = await get_issue(config, issue_id)
@@ -118,7 +118,7 @@ async def _issue_get(
 
 
 async def _project_list(
-    config: LinearConfig, texts: tuple[str, ...], fl: FlagView
+    config: LinearConfig, texts: list[str], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
     projects = await list_team_projects(config, team["id"])
@@ -138,7 +138,7 @@ async def _project_list(
 
 
 async def _project_get(
-    config: LinearConfig, texts: tuple[str, ...], fl: FlagView
+    config: LinearConfig, texts: list[str], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
     project_id = first_text(texts, "project id")
@@ -159,7 +159,7 @@ async def _project_get(
 
 
 async def _cycle_list(
-    config: LinearConfig, texts: tuple[str, ...], fl: FlagView
+    config: LinearConfig, texts: list[str], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
     cycles = await list_team_cycles(config, team["id"])
@@ -169,7 +169,7 @@ async def _cycle_list(
 
 
 async def _cycle_current(
-    config: LinearConfig, texts: tuple[str, ...], fl: FlagView
+    config: LinearConfig, texts: list[str], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
     cycles = await list_team_cycles(config, team["id"])
@@ -180,7 +180,7 @@ async def _cycle_current(
 
 
 async def _cycle_get(
-    config: LinearConfig, texts: tuple[str, ...], fl: FlagView
+    config: LinearConfig, texts: list[str], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
     cycle_id = first_text(texts, "cycle id")
@@ -192,7 +192,7 @@ async def _cycle_get(
 
 
 async def _label_list(
-    config: LinearConfig, texts: tuple[str, ...], fl: FlagView
+    config: LinearConfig, texts: list[str], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
     labels = await list_team_labels(config, team["id"])
@@ -200,7 +200,7 @@ async def _label_list(
 
 
 async def _comment_list(
-    config: LinearConfig, texts: tuple[str, ...], fl: FlagView
+    config: LinearConfig, texts: list[str], fl: FlagView
 ) -> bytes:
     issue_id = await resolve_issue(config, first_text(texts, "issue key"))
     issue = await get_issue(config, issue_id)
@@ -229,14 +229,14 @@ async def _all_users(config: LinearConfig) -> list[dict[str, JsonValue]]:
 
 
 async def _user_list(
-    config: LinearConfig, texts: tuple[str, ...], fl: FlagView
+    config: LinearConfig, texts: list[str], fl: FlagView
 ) -> bytes:
     users = await _all_users(config)
     return to_json_bytes([normalize_user(user) for user in users])
 
 
 async def _user_get(
-    config: LinearConfig, texts: tuple[str, ...], fl: FlagView
+    config: LinearConfig, texts: list[str], fl: FlagView
 ) -> bytes:
     email = first_text(texts, "user email")
     for user in await _all_users(config):
@@ -246,7 +246,7 @@ async def _user_get(
 
 
 async def _document_list(
-    config: LinearConfig, texts: tuple[str, ...], fl: FlagView
+    config: LinearConfig, texts: list[str], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
     documents = await list_team_documents(config, team["id"])
@@ -256,7 +256,7 @@ async def _document_list(
 
 
 async def _document_get(
-    config: LinearConfig, texts: tuple[str, ...], fl: FlagView
+    config: LinearConfig, texts: list[str], fl: FlagView
 ) -> bytes:
     team = await resolve_team(config, _require_team(fl))
     document_id = first_text(texts, "document id")
@@ -268,7 +268,7 @@ async def _document_get(
 
 
 async def _search(
-    config: LinearConfig, texts: tuple[str, ...], fl: FlagView
+    config: LinearConfig, texts: list[str], fl: FlagView
 ) -> bytes:
     query = fl.as_str("query") or (texts[0] if texts else None)
     if not query:
@@ -277,14 +277,18 @@ async def _search(
     return to_json_bytes(results)
 
 
-Runner = Callable[[LinearConfig, tuple[str, ...], FlagView], Awaitable[bytes]]
+Runner = Callable[[LinearConfig, list[str], FlagView], Awaitable[bytes]]
 
 
 async def _dispatch(
-    runner: Runner, inv: CLIInvocation[LinearConfig]
+    runner: Runner,
+    config: LinearConfig,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    data = await runner(inv.config, inv.texts, fl)
+    fl = FlagView(ctx.flags)
+    data = await runner(config, texts, fl)
     return yield_bytes(data), IOResult()
 
 

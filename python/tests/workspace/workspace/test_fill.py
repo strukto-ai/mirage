@@ -22,8 +22,8 @@ from pydantic import BaseModel, ConfigDict, SecretStr
 
 from mirage import (
     Action,
-    CLIInvocation,
     CommandContext,
+    Context,
     Deny,
     MountMode,
     Policy,
@@ -1386,8 +1386,8 @@ async def _cli_noop(config, paths, *texts, **flags):
 _PROBE_FLAGS: list[dict[str, FlagValue]] = []
 
 
-async def _cli_probe(inv):
-    _PROBE_FLAGS.append(dict(inv.flags))
+async def _cli_probe(config, paths, texts, ctx):
+    _PROBE_FLAGS.append(dict(ctx.flags))
     return None, IOResult()
 
 
@@ -1481,8 +1481,8 @@ async def test_a_cli_the_allow_list_refuses_never_fetches():
         await ws.close()
 
 
-async def _print_token(inv: CLIInvocation[None]):
-    return f"{inv.flags.get('token')}\n".encode(), IOResult()
+async def _print_token(config: None, paths, texts, ctx: Context):
+    return f"{ctx.flags.get('token')}\n".encode(), IOResult()
 
 
 def _probe_cli() -> CLI:

@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from mirage.commands.builtin.generic.patch import patch_generic
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -124,12 +124,12 @@ async def test_patch_preserves_virtual_paths_for_mounted_io(prefix, source):
     flags = {"p": "1"}
     if source == "input":
         flags["i"] = input_path
-    opts = CommandOpts(
+    ctx = Context(
         flags=flags,
         mount_prefix=prefix,
         stdin=patch_data if source == "stdin" else None,
     )
     operands = [orig_path, input_path] if source == "operand" else []
-    await patch_generic(operands, [], opts, read, write, True)
+    await patch_generic(operands, [], ctx, read, write, True)
     assert "hello.txt" in seen
     assert files["hello.txt"] == b"hello\nuniverse\n"

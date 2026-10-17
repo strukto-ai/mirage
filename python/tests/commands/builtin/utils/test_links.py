@@ -25,7 +25,7 @@ from mirage.commands.builtin.utils.links import (
     owed_names,
     typed_link,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.errors.types import DotWalkLoop
 from mirage.io.types import IOResult
 from mirage.types import (
@@ -198,9 +198,9 @@ def test_a_link_the_router_followed_can_vanish_before_its_turn():
 
 def test_an_invocation_without_links_or_an_entry_point_has_no_link_resolver():
     files = Files([], _Dispatch(), links=_Table({}))
-    assert link_resolver(CommandOpts()) is None
-    assert link_resolver(CommandOpts(vfs=files)) is None
-    resolver = link_resolver(CommandOpts(vfs=files, dispatch=_Dispatch()))
+    assert link_resolver(Context()) is None
+    assert link_resolver(Context(vfs=files)) is None
+    resolver = link_resolver(Context(vfs=files, dispatch=_Dispatch()))
     assert resolver is not None and resolver.cwd == "/"
 
 

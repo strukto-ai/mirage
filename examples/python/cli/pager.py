@@ -23,9 +23,10 @@ from mirage import (
     RAMVFS,
     Argument,
     CLIHandler,
-    CLIInvocation,
     CommandSpec,
+    Context,
     FlagView,
+    PathSpec,
     Workspace,
 )
 from mirage.io import IOResult
@@ -43,7 +44,7 @@ class Incident:
     acknowledged_by: str | None = None
 
 
-# A real CLI would construct its service client from inv.config. This
+# A real CLI would construct its service client from config. This
 # deterministic service keeps the example runnable without credentials or
 # network access while preserving the same per-account semantics.
 INCIDENTS: dict[str, dict[str, Incident]] = {
@@ -57,11 +58,11 @@ INCIDENTS: dict[str, dict[str, Incident]] = {
 
 
 async def list_incidents(
-    inv: CLIInvocation[PagerConfig],
+    config: PagerConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[bytes, IOResult]:
-    incidents = INCIDENTS[inv.config.account]
-    wanted = set(inv.texts)
-    status = FlagView(inv.flags, inv.spec).as_str("state")
+    incidents = INCIDENTS[config.account]
+    wanted = set(texts)
+    status = FlagView(ctx.flags, ctx.spec).as_str("state")
     lines = []
     for incident_id, incident in sorted(incidents.items()):
         if wanted and incident_id not in wanted:
@@ -76,7 +77,7 @@ async def list_incidents(
             else f"acknowledged-by={incident.acknowledged_by}"
         )
         lines.append(
-            f"[{inv.config.account}] {incident_id} {state} {incident.summary}"
+            f"[{config.account}] {incident_id} {state} {incident.summary}"
         )
     return ("\n".join(lines) + ("\n" if lines else "")).encode(), IOResult()
 
@@ -86,20 +87,20 @@ async def list_incidents(
 # awaits is not made async for the executor's sake, and one that raises
 # before any await is refused exactly like one that raises after.
 def acknowledge(
-    inv: CLIInvocation[PagerConfig],
+    config: PagerConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[bytes | None, IOResult]:
-    if not inv.texts:
+    if not texts:
         raise ValueError("INCIDENT_ID is required")
-    incident_id = inv.texts[0]
-    by = FlagView(inv.flags, inv.spec).as_str("by")
-    incident = INCIDENTS[inv.config.account].get(incident_id)
+    incident_id = texts[0]
+    by = FlagView(ctx.flags, ctx.spec).as_str("by")
+    incident = INCIDENTS[config.account].get(incident_id)
     if incident is None:
         return None, IOResult(
             exit_code=1,
             stderr=f"pager: unknown incident {incident_id}\n".encode(),
         )
     incident.acknowledged_by = by
-    message = f"[{inv.config.account}] acknowledged {incident_id} by {by}\n"
+    message = f"[{config.account}] acknowledged {incident_id} by {by}\n"
     return message.encode(), IOResult()
 
 

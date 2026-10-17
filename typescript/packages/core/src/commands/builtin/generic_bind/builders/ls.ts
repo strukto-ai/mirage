@@ -20,11 +20,11 @@ import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
 import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const ls: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
-  const idx = opts.index ?? undefined
+const ls: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   // Only -R walks; a plain listing reads one directory.
-  const recursive = new FlagView(opts.flags, specOf('ls')).asBool('recursive')
+  const recursive = new FlagView(ctx.flags, specOf('ls')).asBool('recursive')
   const { readTree } = ops
   const [readdir, stat] = treeWalk<string[], FileStat>(
     !recursive || readTree === undefined ? undefined : (p) => readTree(accessor, p, idx),
@@ -32,7 +32,7 @@ const ls: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
       ops.readdir(accessor, p, idx, nofollow),
     (p: PathSpec) => ops.stat(accessor, p, idx),
   )
-  return lsGeneric(resolved, opts, readdir, stat)
+  return lsGeneric(resolved, ctx, readdir, stat)
 }
 
 export const BUILDER: GenericCommand = {

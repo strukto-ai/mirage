@@ -14,7 +14,7 @@
 
 from dataclasses import dataclass
 
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.view.types import SessionView
 
 # What an owner or group column prints when nothing names one: no uid or
@@ -53,13 +53,13 @@ def identity_from(session_view: SessionView | None) -> Identity:
     )
 
 
-def identity_of(opts: CommandOpts) -> Identity:
-    """The identity a command invocation runs as, read off its opts.
+def identity_of(ctx: Context) -> Identity:
+    """The identity a command invocation runs as, read off its ctx.
 
     Args:
-        opts (CommandOpts): the dispatcher context of the invocation.
+        ctx (Context): the dispatcher context of the invocation.
     """
-    return identity_from(opts.session_view)
+    return identity_from(ctx.session)
 
 
 def owner_name(uid: int | str | None, identity: Identity | None) -> str:

@@ -17,7 +17,7 @@ import { cardCreate } from '../../../core/trello/client.ts'
 import { normalizeCard } from '../../../core/trello/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { CommandSpec, Argument } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { resolveTextInput } from './_input.ts'
@@ -38,9 +38,9 @@ async function trelloCardCreate(
   accessor: TrelloAccessor,
   _paths: PathSpec[],
   _texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, SPEC)
+  const fl = new FlagView(ctx.flags, SPEC)
   const listId = fl.asStr('list_id')
   if (listId === undefined || listId === '') {
     throw new Error('--list_id is required')
@@ -52,8 +52,8 @@ async function trelloCardCreate(
   const inlineDesc = fl.asStr('desc') ?? null
   const descFile = fl.asPath('desc_file') ?? null
   let desc: string | undefined
-  if (inlineDesc !== null || descFile !== null || opts.stdin !== null) {
-    desc = await resolveTextInput(accessor, opts, {
+  if (inlineDesc !== null || descFile !== null || ctx.stdin !== null) {
+    desc = await resolveTextInput(accessor, ctx, {
       inlineText: inlineDesc,
       filePath: descFile,
       errorMessage: 'desc is required',
@@ -61,7 +61,7 @@ async function trelloCardCreate(
   }
   // A card write is addressed by id, not path, so only the mount-wide
   // grant can admit it (a write-granting carve-out names no card).
-  requireMountWritable(opts.mountPrefix ?? '', opts.access)
+  requireMountWritable(ctx.mountPrefix ?? '', ctx.access)
   await requireList(accessor, listId)
   const card = await cardCreate(accessor.transport, {
     listId,

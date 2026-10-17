@@ -75,11 +75,12 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
+from mirage.types import PathSpec
 
 
 @dataclass(frozen=True, slots=True)
@@ -335,7 +336,9 @@ def _render(
     return b"".join(parts)
 
 
-async def show(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
+async def show(
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+) -> tuple[ByteSource | None, IOResult]:
     """Show each object a line names, in order.
 
     A commit as its log entry and its diff against its parent, an
@@ -348,26 +351,26 @@ async def show(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     name.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model; it reads its repository
-            through ``inv.view.vfs``.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context; git reads its repository
+            through ``ctx.vfs``.
     """
-    view = inv.view or CLIView()
-    vfs = view.vfs
-    texts = inv.texts
-    flags = inv.flags
+    vfs = ctx.vfs
+    flags = ctx.flags
     fl = FlagView(flags)
     try:
         if vfs is None:
             raise NoWorkspaceError()
-        check_operands(inv, texts)
-        revisions, paths = split_marked(tuple(texts), inv.argv)
-        repo, location = await opened(fl, view)
+        check_operands(ctx, texts)
+        revisions, pathspecs = split_marked(tuple(texts), ctx.argv)
+        repo, location = await opened(ctx, fl)
         parsed = parse_show_flags(
             fl,
             await renames_enabled(vfs, location),
             await config_bool(vfs, location, b"core", b"quotepath", True),
-            inv.env,
+            ctx.env,
         )
         parsed = replace(
             parsed,
@@ -387,7 +390,7 @@ async def show(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
             diff=replace(
                 parsed.diff,
                 pathspecs=pathspec_patterns(
-                    location, start_point(fl).virtual, paths
+                    location, start_point(fl).virtual, pathspecs
                 ),
             ),
         )
@@ -425,7 +428,7 @@ def _diff_tree(
 
 
 async def diff_tree(
-    inv: CLIInvocation[None],
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Compare a commit with its parents.
 
@@ -433,18 +436,20 @@ async def diff_tree(
     resolved; they limit every block to the paths they name.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context.
     """
-    fl = FlagView(inv.flags)
-    view = inv.view or CLIView()
+    fl = FlagView(ctx.flags)
     try:
-        if view.vfs is None:
+        if ctx.vfs is None:
             raise NoWorkspaceError()
-        if option_operand(inv, inv.texts) is not None:
-            raise UsageError("", verb_usage(inv))
-        repo, location = await opened(fl, view)
+        if option_operand(ctx, texts) is not None:
+            raise UsageError("", verb_usage(ctx))
+        repo, location = await opened(ctx, fl)
         fully = await config_bool(
-            view.vfs, location, b"core", b"quotepath", True
+            ctx.vfs, location, b"core", b"quotepath", True
         )
         parsed = parse_diff_flags(
             fl,
@@ -452,14 +457,14 @@ async def diff_tree(
             porcelain=False,
             quote_path_fully=fully,
         )
-        revisions, paths = split_marked(tuple(inv.texts), inv.argv)
+        revisions, pathspecs = split_marked(tuple(texts), ctx.argv)
         commit = await asyncio.to_thread(
             resolve_commit, repo, revision_arg(revisions)
         )
         parsed = replace(
             parsed,
             pathspecs=pathspec_patterns(
-                location, start_point(fl).virtual, paths
+                location, start_point(fl).virtual, pathspecs
             ),
         )
         out = await asyncio.to_thread(

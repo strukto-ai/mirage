@@ -12,8 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// The root working directory, as CommandOpts.cwd defaults to it. A
-// virtual-path string here, because the TS CommandOpts keeps cwd as
-// one; the Python twin (commands/constants.py) holds the promoted
-// PathSpec shape its CommandOpts reads.
-export const ROOT_CWD = '/'
+import { PathSpec } from '../types.ts'
+
+// The root working directory, as Context.cwd defaults to it: the promoted
+// shape runCommand gives "/" on an unprefixed mount. A frozen PathSpec, so
+// one instance serves every default.
+export const ROOT_CWD = new PathSpec({
+  virtual: '/',
+  directory: '/',
+  vfsPath: '',
+  resolved: false,
+})

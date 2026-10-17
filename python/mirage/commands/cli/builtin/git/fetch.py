@@ -63,9 +63,10 @@ from mirage.commands.cli.builtin.git.util import (
     fatal,
     multivar,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
 HEADS = "refs/heads/"
@@ -564,18 +565,19 @@ def _config(data: bytes | None) -> ConfigFile:
 
 
 async def configured_headers(
-    inv: CLIInvocation[None], config: ConfigFile | None
+    ctx: Context, config: ConfigFile | None
 ) -> dict[str, str]:
     """``http.extraHeader`` from the user's config, then the repository's.
 
     Args:
-        inv (CLIInvocation[None]): the invocation, for its env.
+        ctx (Context): the line's context, for its env.
         config (ConfigFile | None): the repository's config, None
             before there is a repository.
     """
     values: list[bytes] = []
-    if inv.env.get("HOME") or inv.env.get("GIT_CONFIG_GLOBAL") is not None:
-        for _, user in await global_sources(inv, False):
+    env = ctx.env or {}
+    if env.get("HOME") or env.get("GIT_CONFIG_GLOBAL") is not None:
+        for _, user in await global_sources(ctx, False):
             values += multivar(user, (b"http",), b"extraheader")
     if config is not None:
         values += multivar(config, (b"http",), b"extraheader")
@@ -625,7 +627,7 @@ async def _prune(
 
 
 async def fetch(
-    inv: CLIInvocation[None],
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Download objects and refs from another repository.
 
@@ -635,41 +637,42 @@ async def fetch(
     arrived, writes FETCH_HEAD, and prints git's summary to stderr.
 
     Args:
-        inv (CLIInvocation[None]): the parsed invocation.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context.
     """
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     try:
-        check_switches(inv, inv.texts)
-        view = inv.view or CLIView()
-        _, location = await opened(fl, view)
-        vfs = view.vfs
+        check_switches(ctx, texts)
+        _, location = await opened(ctx, fl)
+        vfs = ctx.vfs
         if vfs is None:
             raise NoWorkspaceError()
-        config = _config(
+        cfg = _config(
             await read_optional(vfs, location.commondir.join("config"))
         )
         head = await read_head(vfs, location.gitdir)
-        texts = list(inv.texts)
         name = texts[0] if texts else None
         if name is None:
             branch = head.branch.encode() if head.branch else None
             remote = b"origin"
             if branch is not None:
                 remote = next(
-                    iter(multivar(config, (b"branch", branch), b"remote")),
+                    iter(multivar(cfg, (b"branch", branch), b"remote")),
                     b"origin",
                 )
             name = remote.decode()
-            if not multivar(config, (b"remote", remote), b"url"):
+            if not multivar(cfg, (b"remote", remote), b"url"):
                 if name == "origin" and not texts:
                     raise GitError(NO_REMOTE)
-        urls = multivar(config, (b"remote", name.encode()), b"url")
+        urls = multivar(cfg, (b"remote", name.encode()), b"url")
         url = urls[-1].decode() if urls else name
         configured = (
             [
                 parse_refspec(value.decode())
                 for value in multivar(
-                    config, (b"remote", name.encode()), b"fetch"
+                    cfg, (b"remote", name.encode()), b"fetch"
                 )
             ]
             if urls
@@ -678,18 +681,18 @@ async def fetch(
         merge = None
         if head.branch is not None and urls:
             remotes = multivar(
-                config, (b"branch", head.branch.encode()), b"remote"
+                cfg, (b"branch", head.branch.encode()), b"remote"
             )
             if remotes and remotes[-1].decode() == name:
                 merges = multivar(
-                    config, (b"branch", head.branch.encode()), b"merge"
+                    cfg, (b"branch", head.branch.encode()), b"merge"
                 )
                 merge = merges[-1].decode() if merges else None
         bare = await is_bare(vfs, location)
         start = location.gitdir if bare else location.worktree
         try:
             transport = await open_transport(
-                url, start, view, await configured_headers(inv, config)
+                ctx, url, start, await configured_headers(ctx, cfg)
             )
         except MissingRepositoryError as exc:
             raise GitError(
@@ -708,7 +711,7 @@ async def fetch(
                     f"refusing to fetch into branch '{checked}' "
                     f"checked out at '{location.worktree.virtual}'"
                 )
-        tag_opt = multivar(config, (b"remote", name.encode()), b"tagopt")
+        tag_opt = multivar(cfg, (b"remote", name.encode()), b"tagopt")
         follow = not fl.as_bool("no_tags") and tag_opt[-1:] != [b"--no-tags"]
         repo, taken = await fetch_objects(
             vfs, location, transport, adv, wanted, follow
@@ -716,7 +719,7 @@ async def fetch(
         pruned = []
         if fl.as_bool("prune") and not typed:
             pruned = await _prune(vfs, repo, location, adv, configured)
-        reason = " ".join(("fetch", *leaf_args(inv.argv, "fetch")))
+        reason = " ".join(("fetch", *leaf_args(ctx.argv, "fetch")))
         rows, rejected = await update_refs(
             vfs, repo, location, taken, reason, not bare
         )
@@ -739,13 +742,14 @@ async def fetch(
 
 
 def fetch_read_only(
-    inv: CLIInvocation[None], location: RepoLocation | None
+    texts: list[str], ctx: Context, location: RepoLocation | None
 ) -> GitError:
     """fetch's refusal by a read-only mount, at FETCH_HEAD, named the way
     git names it from the top of the work tree.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
+        texts (list[str]): the line's operands.
+        ctx (Context): the line's context.
         location (RepoLocation | None): the repository it opened.
     """
     if location is None or location.gitdir == location.worktree.join(".git"):

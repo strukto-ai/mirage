@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
-import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
+import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
+import type { PathSpec } from '@struktoai/mirage-core/types'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import { IOResult, materialize } from '@struktoai/mirage-core/io/types'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
@@ -22,26 +22,27 @@ import { deliver } from './deliver.ts'
 
 const ENC = new TextEncoder()
 
-export async function send(inv: CLIInvocation): Promise<CommandFnResult> {
+export async function send(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
   // The operand is a whole RFC 5322 message, so tokens rejoin with a
   // space and literal \n become real line breaks, the way upstream's
   // MessageArg resolves an inline message.
-  const inline = inv.texts.join(' ').replaceAll('\\r', '').replaceAll('\\n', '\n')
+  const inline = texts.join(' ').replaceAll('\\r', '').replaceAll('\\n', '\n')
   const raw =
     inline !== ''
       ? ENC.encode(inline)
-      : inv.stdin !== null
-        ? await materialize(inv.stdin)
+      : ctx.stdin !== null
+        ? await materialize(ctx.stdin)
         : new Uint8Array()
   if (new TextDecoder().decode(raw).trim() === '') {
     throw new Error('no message provided: pass it as an argument or pipe it via standard input')
   }
-  const fl = new FlagView(inv.flags)
-  const { parsed, warning } = await deliver(
-    inv.config as EmailConfig,
-    raw,
-    fl.asStr('save') ?? null,
-  )
+  const fl = new FlagView(ctx.flags)
+  const { parsed, warning } = await deliver(config as EmailConfig, raw, fl.asStr('save') ?? null)
   const result = {
     status: 'sent',
     to: parsed.to

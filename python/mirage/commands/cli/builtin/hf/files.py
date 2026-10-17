@@ -19,7 +19,7 @@ from mirage.commands.cli.builtin.hf.accessor import (
     require_token,
     text_out,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.hf_hub.client import repo_url
 from mirage.core.hf_hub.commit import commit
@@ -28,10 +28,11 @@ from mirage.core.hf_hub.constants import EMPTY_COMMIT_WARNING
 from mirage.core.hf_hub.repo import head_commit
 from mirage.core.hf_hub.tree import deletions_for, fetch_tree, repo_files
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 
 async def delete_cmd(
-    inv: CLIInvocation[HfConfig],
+    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Delete the files a set of glob patterns matches, in one commit.
 
@@ -42,13 +43,13 @@ async def delete_cmd(
     the way upstream's ``create_commit`` does, and names the commit the
     revision already points at.
     """
-    require_operands(inv, ["repo_id", "patterns"])
-    require_token(inv, "repo-files delete")
-    fl = FlagView(inv.flags)
-    repo_id, *patterns = list(inv.texts)
+    require_operands(texts, ["repo_id", "patterns"])
+    require_token(config, "repo-files delete")
+    fl = FlagView(ctx.flags)
+    repo_id, *patterns = list(texts)
     stderr = ""
     async with hub_for(
-        inv, repo_id, repo_type_of(fl), fl.as_str("revision")
+        config, repo_id, repo_type_of(fl), fl.as_str("revision")
     ) as accessor:
         deletions = deletions_for(
             repo_files(await fetch_tree(accessor)), patterns
@@ -62,7 +63,7 @@ async def delete_cmd(
             create_pr=bool(fl.as_bool("create_pr")),
         )
         if reply is None:
-            home = repo_url(inv.config.endpoint, accessor.repo_type, repo_id)
+            home = repo_url(config.endpoint, accessor.repo_type, repo_id)
             url = f"{home}/commit/{await head_commit(accessor)}"
             stderr = EMPTY_COMMIT_WARNING
         else:

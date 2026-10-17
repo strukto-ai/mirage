@@ -24,7 +24,7 @@ from mirage.accessor.base import NOOPAccessor
 from mirage.commands.builtin.errors import HttpConnectError
 from mirage.commands.builtin.general.wget import wget
 from mirage.commands.builtin.utils.http import HttpResponse
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
@@ -56,8 +56,8 @@ def _run(
 ) -> tuple[bytes, object]:
     base = cwd or "/"
     spec = PathSpec(virtual=base, directory=base, vfs_path="", resolved=False)
-    opts = CommandOpts(dispatch=dispatch, cwd=spec, flags=flags)
-    body, io = asyncio.run(wget(NOOPAccessor(), [], list(texts), opts))
+    ctx = Context(dispatch=dispatch, cwd=spec, flags=flags)
+    body, io = asyncio.run(wget(NOOPAccessor(), [], list(texts), ctx))
     if body is None:
         return b"", io
     return bytes(body), io
@@ -78,7 +78,7 @@ def _run_writing(
 
 def test_missing_url_is_usage_error_exit_1():
     with pytest.raises(UsageError) as excinfo:
-        asyncio.run(wget(NOOPAccessor(), [], [], CommandOpts()))
+        asyncio.run(wget(NOOPAccessor(), [], [], Context()))
     assert excinfo.value.exit_code == 1
     assert "wget: missing URL" in str(excinfo.value)
 

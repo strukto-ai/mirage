@@ -20,7 +20,7 @@ from mirage.commands.builtin.generic.archive.zip_update import (
 )
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.operands import normalized_read
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -497,13 +497,13 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> ZipFlags:
 async def zip_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     read_bytes: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
     stat: StatFn,
     walk: WalkFn,
 ) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     return await zip_cmd(
         paths,
         read_bytes=read_bytes,
@@ -515,6 +515,6 @@ async def zip_generic(
         q=parsed.quiet,
         y=parsed.store_links,
         x=list(parsed.exclude) or None,
-        links=links_of(opts),
-        mounts=mounts_of(opts),
+        links=links_of(ctx),
+        mounts=mounts_of(ctx),
     )

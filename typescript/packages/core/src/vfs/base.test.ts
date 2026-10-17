@@ -16,9 +16,9 @@ import { CLIHandler } from '../commands/cli/types.ts'
 import { describe, expect, it } from 'vitest'
 import { Accessor, NOOPAccessor } from '../accessor/base.ts'
 import { RAMAccessor } from '../accessor/ram.ts'
-import { command, type Command } from '../commands/config.ts'
+import { command, type Command, type Context } from '../commands/config.ts'
 import { CommandSpec, Argument } from '../commands/spec/types.ts'
-import { CLI, type CLIInvocation } from '../commands/cli/types.ts'
+import { CLI } from '../commands/cli/types.ts'
 import { RuntimeFiles } from '../runtime/files.ts'
 import { IOResult } from '../io/types.ts'
 import { ops } from '../test-utils.ts'
@@ -497,9 +497,14 @@ describe('custom VFS capability fallbacks', () => {
   })
 })
 
-async function readCli(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
-  const vfs = inv.view?.vfs
-  const path = inv.paths[0]
+async function readCli(
+  _config: unknown,
+  paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<[Uint8Array, IOResult]> {
+  const vfs = ctx.vfs
+  const path = paths[0]
   if (vfs === undefined || path === undefined) throw new Error('missing CLI files')
   const data = await vfs.read(path)
   const result = new IOResult()

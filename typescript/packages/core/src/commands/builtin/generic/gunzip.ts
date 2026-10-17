@@ -17,7 +17,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { GZIP_SUFFIX } from '../constants.ts'
 import type { StatFn } from './archive/walk.ts'
 import { linkResolver } from '../utils/links.ts'
@@ -46,18 +46,18 @@ function parseFlags(bag: Record<string, FlagValue>): GunzipFlags {
 
 export async function gunzipGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: ByteSource) => Promise<void>,
   unlink: (p: PathSpec) => Promise<void>,
   stat?: StatFn,
 ): Promise<CommandFnResult> {
   return decompressInputs(paths, stream, {
-    stdin: opts.stdin,
-    ...parseFlags(opts.flags),
+    stdin: ctx.stdin,
+    ...parseFlags(ctx.flags),
     write,
     unlink,
     ...(stat !== undefined ? { stat } : {}),
-    resolver: linkResolver(opts),
+    resolver: linkResolver(ctx),
   })
 }

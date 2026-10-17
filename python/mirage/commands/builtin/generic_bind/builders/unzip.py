@@ -25,7 +25,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
     require_op,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -35,22 +35,22 @@ async def unzip(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("unzip: missing operand")
     resolved = (
-        await ops.resolve_glob(accessor, paths, opts.index) if paths else []
+        await ops.resolve_glob(accessor, paths, ctx.index) if paths else []
     )
-    if opts.dispatch is not None:
+    if ctx.dispatch is not None:
         # Extraction writes wherever cwd or -d says, which need not be
         # this mount, so the functions are dispatch-relayed and each path
         # routes to the mount that owns it.
-        prim = transfer_primitives(opts.dispatch)
+        prim = transfer_primitives(ctx.dispatch)
         return await unzip_generic(
             resolved,
             list(texts),
-            opts,
+            ctx,
             prim["read_stream"],
             prim["write"],
             prim["mkdir"],
@@ -60,11 +60,11 @@ async def unzip(
     return await unzip_generic(
         resolved,
         list(texts),
-        opts,
-        bound_op(ops.read_stream, accessor, opts.index),
+        ctx,
+        bound_op(ops.read_stream, accessor, ctx.index),
         partial(require_op(ops, Operation.WRITE), accessor),
         partial(require_op(ops, Operation.MKDIR), accessor),
-        stat=bound_op(ops.stat, accessor, opts.index),
+        stat=bound_op(ops.stat, accessor, ctx.index),
     )
 
 

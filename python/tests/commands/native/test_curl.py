@@ -25,7 +25,7 @@ from mirage.accessor.base import NOOPAccessor
 from mirage.commands.builtin.errors import HttpConnectError, HttpTimeoutError
 from mirage.commands.builtin.general.curl import curl
 from mirage.commands.builtin.utils.http import HttpResponse
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
@@ -81,8 +81,8 @@ def _run(
 ) -> tuple[bytes, object]:
     base = cwd or "/"
     spec = PathSpec(virtual=base, directory=base, vfs_path="", resolved=False)
-    opts = CommandOpts(dispatch=dispatch, cwd=spec, flags=flags)
-    body, io = asyncio.run(curl(NOOPAccessor(), [], list(texts), opts))
+    ctx = Context(dispatch=dispatch, cwd=spec, flags=flags)
+    body, io = asyncio.run(curl(NOOPAccessor(), [], list(texts), ctx))
     if body is None:
         return b"", io
     return bytes(body), io
@@ -110,7 +110,7 @@ def test_get_returns_body(monkeypatch):
 
 def test_missing_url_is_usage_error_exit_2():
     with pytest.raises(UsageError) as excinfo:
-        asyncio.run(curl(NOOPAccessor(), [], [], CommandOpts()))
+        asyncio.run(curl(NOOPAccessor(), [], [], Context()))
     assert excinfo.value.exit_code == 2
     assert "no URL specified" in str(excinfo.value)
 

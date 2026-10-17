@@ -22,12 +22,12 @@ const ENC = new TextEncoder()
 
 export const BUILDER: GenericCommand = {
   name: 'sed',
-  fn: async (ops, accessor, paths, texts, opts) => {
-    const idx = opts.index ?? undefined
+  fn: async (ops, accessor, paths, texts, ctx) => {
+    const idx = ctx.index ?? undefined
     const { write } = ops
     // The default stream-to-stdout path is read-only and works on every
     // backend; only in-place editing needs a write op (#382).
-    const fl = new FlagView(opts.flags, specOf('sed'))
+    const fl = new FlagView(ctx.flags, specOf('sed'))
     if (fl.asBool('i') && write === undefined) {
       return [
         null,
@@ -40,13 +40,13 @@ export const BUILDER: GenericCommand = {
     // With -e/-f the positional operand is a file, not the script.
     const usingE = fl.asList('e').length > 0
     const usingF = fl.asPaths('f').length > 0
-    const operands = usingE || usingF ? [...positionalAsPaths(texts, opts), ...paths] : paths
+    const operands = usingE || usingF ? [...positionalAsPaths(texts, ctx), ...paths] : paths
     const resolved =
       operands.length > 0 ? await resolveGlobOf(ops)(accessor, operands, idx) : operands
     return sedGeneric(
       resolved,
       texts,
-      opts,
+      ctx,
       (p) => ops.readStream(accessor, p, idx),
       (p, d) => {
         if (write === undefined) {

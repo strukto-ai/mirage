@@ -23,7 +23,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     require_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -33,15 +33,15 @@ async def xxd(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
+    resolved = await resolve_or_empty(ops, accessor, paths, ctx.index)
     return await xxd_generic(
         resolved,
         list(texts),
-        opts,
-        bound_op(ops.read_stream, accessor, opts.index),
-        bound_op(ops.read_bytes, accessor, opts.index),
+        ctx,
+        bound_op(ops.read_stream, accessor, ctx.index),
+        bound_op(ops.read_bytes, accessor, ctx.index),
         partial(require_op(ops, Operation.WRITE), accessor),
         partial(ops.pwrite, accessor) if ops.pwrite is not None else None,
     )

@@ -17,35 +17,36 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.accessor.airtable import AirtableAccessor
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.airtable.config import AirtableConfig
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.types import PathSpec
 
 Outcome = tuple[ByteSource | None, IOResult]
 
 Verb = Callable[
-    [AirtableAccessor, CLIInvocation[AirtableConfig], FlagView],
+    [AirtableConfig, list[str], Context, AirtableAccessor, FlagView],
     Awaitable[Outcome],
 ]
 
 
-def no_operands(texts: tuple[str, ...]) -> None:
+def no_operands(texts: list[str]) -> None:
     """Refuse an operand on a verb that takes none.
 
     Args:
-        texts (tuple[str, ...]): the line's operands.
+        texts (list[str]): the line's operands.
     """
     if texts:
         raise UsageError(f"unrecognized arguments: {' '.join(texts)}")
 
 
-def one_operand(texts: tuple[str, ...], name: str) -> str:
+def one_operand(texts: list[str], name: str) -> str:
     """The one operand a verb requires.
 
     Args:
-        texts (tuple[str, ...]): the line's operands.
+        texts (list[str]): the line's operands.
         name (str): the operand's name in the verb's usage line.
     """
     if not texts:
@@ -54,11 +55,11 @@ def one_operand(texts: tuple[str, ...], name: str) -> str:
     return texts[0]
 
 
-def optional_operand(texts: tuple[str, ...]) -> str | None:
+def optional_operand(texts: list[str]) -> str | None:
     """The operand a verb may take once, None when the line has none.
 
     Args:
-        texts (tuple[str, ...]): the line's operands.
+        texts (list[str]): the line's operands.
     """
     no_operands(texts[1:])
     return texts[0] if texts else None
@@ -140,7 +141,13 @@ async def stdin_text(stdin: ByteSource) -> str:
     return (await materialize(stdin)).decode("utf-8-sig", errors="replace")
 
 
-async def run(verb: Verb, inv: CLIInvocation[AirtableConfig]) -> Outcome:
+async def run(
+    verb: Verb,
+    config: AirtableConfig,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
+) -> Outcome:
     """Run one verb on its own accessor.
 
     The accessor lives for the invocation and closes with it, the way a
@@ -150,7 +157,12 @@ async def run(verb: Verb, inv: CLIInvocation[AirtableConfig]) -> Outcome:
 
     Args:
         verb (Verb): the verb's body.
-        inv (CLIInvocation[AirtableConfig]): the line.
+        config (AirtableConfig): the install's validated config.
+        paths (list[PathSpec]): the cwd-resolved path operands.
+        texts (list[str]): the line's operands.
+        ctx (Context): the leaf's context.
     """
-    async with AirtableAccessor(inv.config) as accessor:
-        return await verb(accessor, inv, FlagView(inv.flags, inv.spec))
+    async with AirtableAccessor(config) as accessor:
+        return await verb(
+            config, texts, ctx, accessor, FlagView(ctx.flags, ctx.spec)
+        )

@@ -29,7 +29,7 @@ from mirage.commands.cli.refusal import (
     git_option_refusal,
     git_usage,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandSpec
@@ -134,7 +134,7 @@ def split_marked(
     return texts[:cut], texts[cut:]
 
 
-def switches(inv: CLIInvocation[None]) -> frozenset[str]:
+def switches(ctx: Context) -> frozenset[str]:
     """The one-letter switches the leaf declares, without their dash.
 
     Read off the spec the line was parsed against, so the set is the
@@ -142,13 +142,13 @@ def switches(inv: CLIInvocation[None]) -> frozenset[str]:
     the record.
 
     Args:
-        inv (CLIInvocation): the invocation, carrying its leaf.
+        ctx (Context): the line's context, carrying its leaf.
     """
-    if inv.spec is None:
+    if ctx.spec is None:
         return frozenset()
     return frozenset(
         name[1:]
-        for option in compile_spec(inv.spec).options
+        for option in compile_spec(ctx.spec).options
         for name in option.names
         if len(name) == 2
     )
@@ -178,7 +178,7 @@ def offending_switch(text: str, known: frozenset[str] | None) -> str:
 
 
 def offending(
-    texts: tuple[str, ...],
+    texts: Sequence[str],
     marked: frozenset[str] = frozenset(),
     known: frozenset[str] | None = None,
 ) -> str | None:
@@ -206,7 +206,7 @@ def offending(
     an answer.
 
     Args:
-        texts (tuple[str, ...]): positional text operands, as typed.
+        texts (Sequence[str]): positional text operands, as typed.
         marked (frozenset[str]): operands a ``--`` on the line escaped.
         known (frozenset[str] | None): the verb's one-letter switches,
             which narrow a refused cluster to its first unknown letter
@@ -219,8 +219,8 @@ def offending(
 
 
 def option_operand(
-    inv: CLIInvocation[None],
-    texts: tuple[str, ...],
+    ctx: Context,
+    texts: Sequence[str],
     help_stream: str = STDOUT,
 ) -> str | None:
     """The first operand that is really an option, once ``-h`` is out.
@@ -231,23 +231,23 @@ def option_operand(
     ``offending`` for which words count.
 
     Args:
-        inv (CLIInvocation): the invocation, carrying its leaf.
-        texts (tuple[str, ...]): positional text operands, as typed.
+        ctx (Context): the line's context, carrying its leaf.
+        texts (Sequence[str]): positional text operands, as typed.
         help_stream (str): where ``-h`` puts the usage block.
 
     Raises:
         UsageError: the line asked for the usage block.
     """
-    word = offending(texts, escaped(inv.argv))
+    word = offending(texts, escaped(ctx.argv))
     if word == HELP_SWITCH:
-        usage = verb_usage(inv)
+        usage = verb_usage(ctx)
         if help_stream == STDOUT:
             raise UsageError(usage, "")
         raise UsageError("", usage)
     return word
 
 
-def check_operands(inv: CLIInvocation[None], texts: tuple[str, ...]) -> None:
+def check_operands(ctx: Context, texts: Sequence[str]) -> None:
     """Refuse an operand that is really an option, as an unrecognized
     argument.
 
@@ -255,25 +255,25 @@ def check_operands(inv: CLIInvocation[None], texts: tuple[str, ...]) -> None:
     ``reflog``), whose refusal names the whole word (git 2.50.1).
 
     Args:
-        inv (CLIInvocation): the invocation, carrying its leaf.
-        texts (tuple[str, ...]): positional text operands, as typed.
+        ctx (Context): the line's context, carrying its leaf.
+        texts (Sequence[str]): positional text operands, as typed.
     """
-    word = option_operand(inv, texts)
+    word = option_operand(ctx, texts)
     if word is not None:
         raise UnrecognizedArgumentError(word)
 
 
-def verb_usage(inv: CLIInvocation[None]) -> str:
+def verb_usage(ctx: Context) -> str:
     """The verb's usage block, as parse-options prints it.
 
     Args:
-        inv (CLIInvocation): the invocation, carrying its leaf.
+        ctx (Context): the line's context, carrying its leaf.
     """
-    spec = inv.spec or CommandSpec()
+    spec = ctx.spec or CommandSpec()
     return git_usage(spec.name, spec)
 
 
-def check_switches(inv: CLIInvocation[None], texts: tuple[str, ...]) -> None:
+def check_switches(ctx: Context, texts: Sequence[str]) -> None:
     """Refuse an operand that is really an option, as parse-options does.
 
     The verbs built on parse-options (``status``, ``add``, ``branch``,
@@ -283,12 +283,12 @@ def check_switches(inv: CLIInvocation[None], texts: tuple[str, ...]) -> None:
     ``git_option_refusal``. Measured on git 2.50.1.
 
     Args:
-        inv (CLIInvocation): the invocation, carrying its leaf.
-        texts (tuple[str, ...]): positional text operands, as typed.
+        ctx (Context): the line's context, carrying its leaf.
+        texts (Sequence[str]): positional text operands, as typed.
     """
-    word = offending(texts, escaped(inv.argv), switches(inv))
+    word = offending(texts, escaped(ctx.argv), switches(ctx))
     if word is not None:
-        spec = inv.spec or CommandSpec()
+        spec = ctx.spec or CommandSpec()
         raise UsageError(*git_option_refusal(word, spec.name, spec))
 
 

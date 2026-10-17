@@ -24,7 +24,7 @@ import {
 } from './du.ts'
 import { PathSpec } from '../../../types.ts'
 import { enoent } from '../../../errors/fs.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import type { MountView } from '../../../view/types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
@@ -39,12 +39,12 @@ function spec(virtual: string, vfsPath: string, rawPath?: string): PathSpec {
   })
 }
 
-function opts(flags: Record<string, string | boolean> = {}): CommandOpts {
+function ctx(flags: Record<string, string | boolean> = {}): Context {
   return {
     stdin: null,
     flags,
-    cwd: '/',
-  } as unknown as CommandOpts
+    cwd: PathSpec.fromStrPath('/'),
+  } as unknown as Context
 }
 
 function flags(over: Partial<DuFlags> = {}): DuFlags {
@@ -75,7 +75,7 @@ describe('du', () => {
     }
     const [out, io] = await duGeneric(
       [spec('/data/nosuch', 'nosuch')],
-      opts({ c: true }),
+      ctx({ c: true }),
       (targets) => Promise.resolve(targets),
       (p) => Promise.reject(enoent(p.virtual)),
       boom as unknown as ComputeSize,

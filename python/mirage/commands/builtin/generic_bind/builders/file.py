@@ -18,7 +18,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -28,18 +28,18 @@ async def file(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or not paths:
         raise ValueError("file: missing operand")
-    resolved = await ops.resolve_glob(accessor, paths, opts.index)
+    resolved = await ops.resolve_glob(accessor, paths, ctx.index)
     return await file_generic(
         resolved,
         list(texts),
-        opts,
-        bound_op(ops.read_stream, accessor, opts.index),
-        bound_op(ops.stat, accessor, opts.index),
-        bound_op(ops.read_range, accessor, opts.index),
+        ctx,
+        bound_op(ops.read_stream, accessor, ctx.index),
+        bound_op(ops.stat, accessor, ctx.index),
+        bound_op(ops.read_range, accessor, ctx.index),
     )
 
 

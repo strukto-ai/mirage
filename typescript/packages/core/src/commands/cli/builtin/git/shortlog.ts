@@ -1,9 +1,9 @@
 import { loadMailmap, mappedIdentity } from './mailmap.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { GitError, ShortlogOptionError } from './errors.ts'
 import { subject } from './format.ts'
 import { parseFlags, refCommits, select } from './history.ts'
@@ -12,17 +12,22 @@ import { splitRevisions } from './revparse.ts'
 import { fatal, optionOperand, verbUsage } from './util.ts'
 
 /** Summarize repository history by author. */
-export async function shortlog(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function shortlog(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    const word = optionOperand(inv, inv.texts)
-    if (word !== null) throw new ShortlogOptionError(word, verbUsage(inv))
-    const repo = await opened(fl, inv.view ?? {})
+    const word = optionOperand(ctx, texts)
+    if (word !== null) throw new ShortlogOptionError(word, verbUsage(ctx))
+    const repo = await opened(ctx, fl)
     const mailmap = await loadMailmap(repo.vfs, repo.location)
     const flags = parseFlags(fl)
     const [starts, hidden] = await splitRevisions(
       repo,
-      inv.texts.length ? inv.texts : flags.allRefs ? [] : ['HEAD'],
+      texts.length ? texts : flags.allRefs ? [] : ['HEAD'],
     )
     if (flags.allRefs) starts.push(...(await refCommits(repo)))
     const groups = new Map<string, string[]>()

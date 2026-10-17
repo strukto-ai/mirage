@@ -21,7 +21,7 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import UsageStyle
 from mirage.core.hf_hub.config import HfConfig
-from tests.commands.cli.builtin.hf.conftest import inv
+from tests.commands.cli.builtin.hf.conftest import CONFIG
 
 
 def test_registers_itself_under_the_head_word_hf():
@@ -72,7 +72,7 @@ def test_repo_type_refuses_an_unknown_kind():
 
 
 def test_hub_for_carries_the_installs_credential_and_endpoint():
-    accessor = hub_for(inv(), "acme/widget", "dataset", "v2")
+    accessor = hub_for(CONFIG, "acme/widget", "dataset", "v2")
     assert accessor.repo_type == "dataset"
     assert accessor.repo_id == "acme/widget"
     assert accessor.revision == "v2"
@@ -80,4 +80,4 @@ def test_hub_for_carries_the_installs_credential_and_endpoint():
 
 
 def test_hub_for_defaults_the_revision_to_main():
-    assert hub_for(inv(), "a/b", "model").revision == "main"
+    assert hub_for(CONFIG, "a/b", "model").revision == "main"

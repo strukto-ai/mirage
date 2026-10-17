@@ -23,7 +23,7 @@ from mirage.commands.cli.builtin.hf.accessor import (
     text_out,
 )
 from mirage.commands.cli.builtin.hf.download import refuse_variadic
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.hf_hub.admin import create_repo
@@ -48,7 +48,7 @@ from mirage.utils.quote import shell_quote
 
 
 async def collect(
-    view: CLIView, local: PathSpec
+    ctx: Context, local: PathSpec
 ) -> tuple[list[Addition], bool]:
     """Read workspace files as additions relative to the source.
 
@@ -56,14 +56,14 @@ async def collect(
     the names reached through the source directory.
 
     Args:
-        view (CLIView): the invocation's view, whose files are read.
+        ctx (Context): the invocation's context, whose files are read.
         local (PathSpec): the resolved source file or directory.
 
     Returns:
         tuple[list[Addition], bool]: sorted files and whether the source
         was a directory, which determines the destination semantics.
     """
-    vfs = view.vfs
+    vfs = ctx.vfs
     if vfs is None:
         raise UsageError("hf upload: no workspace to read from")
     if (await vfs.stat(local)).type is not FileType.DIRECTORY:
@@ -118,25 +118,25 @@ def in_repo_base(value: str) -> str:
 
 
 async def upload_cmd(
-    inv: CLIInvocation[HfConfig],
+    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Upload a workspace file or folder to a repository, as one commit."""
-    require_operands(inv, ["repo_id"])
-    require_token(inv, "upload")
-    fl = FlagView(inv.flags)
-    if inv.view is None or inv.view.vfs is None:
+    require_operands(texts, ["repo_id"])
+    require_token(config, "upload")
+    fl = FlagView(ctx.flags)
+    if ctx.vfs is None:
         raise UsageError("hf upload needs a workspace to read from")
-    repo_id = inv.texts[0]
+    repo_id = texts[0]
     # LOCAL_PATH is path-typed, so the parser resolved it against the cwd;
     # without one, upstream's `_resolve_upload_paths` reads the file or
     # folder named after the repository (`hf upload acme/model` reads
     # `./model`) and refuses when there is none.
     source = (
-        inv.paths[0]
-        if inv.paths
-        else PathSpec.from_str_path(repo_id.split("/")[-1], cwd=inv.cwd)
+        paths[0]
+        if paths
+        else PathSpec.from_str_path(repo_id.split("/")[-1], cwd=ctx.cwd)
     )
-    operands = [*(path.raw_path for path in inv.paths), *inv.texts[1:]]
+    operands = [*(path.raw_path for path in paths), *texts[1:]]
     include = list(fl.as_list("include"))
     exclude = list(fl.as_list("exclude"))
     deletions = list(fl.as_list("delete"))
@@ -148,13 +148,13 @@ async def upload_cmd(
     for flag, patterns in pattern_flags:
         if patterns:
             refuse_variadic(operands, flag, patterns)
-    in_repo = inv.texts[1] if len(inv.texts) > 1 else ""
+    in_repo = texts[1] if len(texts) > 1 else ""
     try:
-        collected, from_dir = await collect(inv.view, source)
+        collected, from_dir = await collect(ctx, source)
     except (FileNotFoundError, NotADirectoryError) as exc:
         raise UsageError(
             f"{shell_quote(source.raw_path)}: {fs_strerror(exc)}"
-            if inv.paths
+            if paths
             else f"'{source.raw_path}' is not a local file or folder. "
             "Please set local_path explicitly."
         ) from None
@@ -186,14 +186,14 @@ async def upload_cmd(
     # of one this line brings into being rather than changing an
     # existing repository's.
     await create_repo(
-        inv.config,
+        config,
         repo_id,
         repo_type,
         private=bool(fl.as_bool("private")),
         exist_ok=True,
     )
     async with hub_for(
-        inv, repo_id, repo_type, fl.as_str("revision")
+        config, repo_id, repo_type, fl.as_str("revision")
     ) as accessor:
         # For a folder the --delete patterns match the repo's files under
         # `path_in_repo`, and a file this commit re-adds is not deleted
@@ -221,6 +221,6 @@ async def upload_cmd(
         )
         if reply is None:
             warnings += EMPTY_COMMIT_WARNING
-        home = repo_url(inv.config.endpoint, accessor.repo_type, repo_id)
+        home = repo_url(config.endpoint, accessor.repo_type, repo_id)
         url = f"{home}/tree/{accessor.revision}/{base}".rstrip("/")
         return text_out(f"{url}\n", warnings)

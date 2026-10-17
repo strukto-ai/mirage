@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
-import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
+import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
+import type { PathSpec } from '@struktoai/mirage-core/types'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
@@ -24,15 +24,20 @@ import { envelopesJsonBytes } from '../../../../core/email/render.ts'
 import { DEFAULT_PAGE_SIZE } from './list.ts'
 import { pageSlice, parseQuery, sortHeaders, uidBudget } from './query.ts'
 
-export async function searchEnvelopes(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function searchEnvelopes(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const mailbox = fl.asStr('mailbox') ?? 'INBOX'
   const page = fl.asInt('page') ?? 1
   const pageSize = fl.asInt('page_size') ?? DEFAULT_PAGE_SIZE
   // The shell already split the query; upstream joins argv the same way
   // before parsing, so a pattern with spaces needs literal quotes.
-  const query = parseQuery(inv.texts.join(' '))
-  const account = inv.config as EmailConfig
+  const query = parseQuery(texts.join(' '))
+  const account = config as EmailConfig
   const budget = uidBudget(page, pageSize, query.sorters, account.maxMessages)
   const accessor = new EmailAccessor(account)
   let headers

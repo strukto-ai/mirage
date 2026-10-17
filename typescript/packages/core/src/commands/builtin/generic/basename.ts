@@ -21,8 +21,8 @@ import { gnuBasename } from '../../../utils/path.ts'
 
 const ENC = new TextEncoder()
 
-export const basenameFn: CommandFn = (_accessor, _paths, texts, opts) => {
-  const fl = new FlagView(opts.flags, specOf('basename'))
+export const basenameFn: CommandFn = (_accessor, _paths, texts, ctx) => {
+  const fl = new FlagView(ctx.flags, specOf('basename'))
   const suffixValue = fl.asStr('suffix')
   const suffix = typeof suffixValue === 'string' ? suffixValue : undefined
   const multiple = fl.asBool('multiple') || suffix !== undefined

@@ -13,7 +13,7 @@ from mirage.commands.builtin.utils.stream import (
     stdin_stat,
     stdin_stream,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -153,7 +153,7 @@ async def tac(
 async def tac_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     stat: StatFn,
     stream: PolymorphicReadFn,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -162,14 +162,14 @@ async def tac_generic(
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
         texts (list[str]): Non-path words, unused by tac.
-        opts (CommandOpts): Flags and stdin from the dispatcher.
+        ctx (Context): Flags and stdin from the dispatcher.
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
     """
     stat = stdin_stat(stat)
-    stream = stdin_stream(stream, opts.stdin)
-    parsed = parse_flags(opts.flags)
+    stream = stdin_stream(stream, ctx.stdin)
+    parsed = parse_flags(ctx.flags)
     readable, err = await split_readable(paths, stat, "tac")
     if err and not readable:
         return None, IOResult(exit_code=1, stderr=err)
@@ -177,7 +177,7 @@ async def tac_generic(
         await tac(
             readable,
             read_stream=normalized_read(stream),
-            stdin=opts.stdin,
+            stdin=ctx.stdin,
             separator=parsed.separator,
             before=parsed.before,
             regex=parsed.regex,

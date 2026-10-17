@@ -29,7 +29,7 @@ from mirage.commands.cli.builtin.airtable.util import (
     scoped_base,
     stdin_text,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.airtable.client import (
@@ -149,24 +149,26 @@ async def landed(
 
 
 async def _record_create(
+    config: AirtableConfig,
+    texts: list[str],
+    ctx: Context,
     accessor: AirtableAccessor,
-    inv: CLIInvocation[AirtableConfig],
     fl: FlagView,
 ) -> Outcome:
-    no_operands(inv.texts)
+    no_operands(texts)
     fields = fl.as_str("fields")
     table = fl.as_str("table") or ""
     rows: Rows | None = None
     if fields is not None:
         cells = [json_object("--fields", fields)]
-    elif inv.stdin is not None:
+    elif ctx.stdin is not None:
         rows = record_lines(
-            await stdin_text(inv.stdin), need_id=False, need_fields=True
+            await stdin_text(ctx.stdin), need_id=False, need_fields=True
         )
         cells = [row["fields"] for row in rows]
     else:
         raise UsageError("--fields or records on stdin are required")
-    base_id = scoped_base(inv.config, fl.as_str("base") or "")
+    base_id = scoped_base(config, fl.as_str("base") or "")
     if rows:
         cells = await writable(accessor, base_id, table, cells)
     batches = create_records(
@@ -176,11 +178,13 @@ async def _record_create(
 
 
 async def _record_update(
+    config: AirtableConfig,
+    texts: list[str],
+    ctx: Context,
     accessor: AirtableAccessor,
-    inv: CLIInvocation[AirtableConfig],
     fl: FlagView,
 ) -> Outcome:
-    record_id = optional_operand(inv.texts)
+    record_id = optional_operand(texts)
     fields = fl.as_str("fields")
     table = fl.as_str("table") or ""
     if record_id is not None and fields is None:
@@ -191,15 +195,15 @@ async def _record_update(
     if record_id is not None and fields is not None:
         ids = [record_id]
         cells = [json_object("--fields", fields)]
-    elif inv.stdin is not None:
+    elif ctx.stdin is not None:
         rows = record_lines(
-            await stdin_text(inv.stdin), need_id=True, need_fields=True
+            await stdin_text(ctx.stdin), need_id=True, need_fields=True
         )
         ids = [row["record_id"] for row in rows]
         cells = [row["fields"] for row in rows]
     else:
         raise UsageError("RECORD --fields or records on stdin are required")
-    base_id = scoped_base(inv.config, fl.as_str("base") or "")
+    base_id = scoped_base(config, fl.as_str("base") or "")
     if rows:
         cells = await writable(accessor, base_id, table, cells)
     batches = update_records(
@@ -213,20 +217,22 @@ async def _record_update(
 
 
 async def _record_delete(
+    config: AirtableConfig,
+    texts: list[str],
+    ctx: Context,
     accessor: AirtableAccessor,
-    inv: CLIInvocation[AirtableConfig],
     fl: FlagView,
 ) -> Outcome:
-    if inv.texts:
-        record_ids = list(inv.texts)
-    elif inv.stdin is not None:
+    if texts:
+        record_ids = list(texts)
+    elif ctx.stdin is not None:
         rows = record_lines(
-            await stdin_text(inv.stdin), need_id=True, need_fields=False
+            await stdin_text(ctx.stdin), need_id=True, need_fields=False
         )
         record_ids = [row["record_id"] for row in rows]
     else:
         raise UsageError("RECORD or records on stdin are required")
-    base_id = scoped_base(inv.config, fl.as_str("base") or "")
+    base_id = scoped_base(config, fl.as_str("base") or "")
     batches = delete_records(
         accessor, base_id, fl.as_str("table") or "", record_ids
     )
@@ -234,20 +240,22 @@ async def _record_delete(
 
 
 async def _comment_add(
+    config: AirtableConfig,
+    texts: list[str],
+    ctx: Context,
     accessor: AirtableAccessor,
-    inv: CLIInvocation[AirtableConfig],
     fl: FlagView,
 ) -> Outcome:
-    record_id = one_operand(inv.texts, "RECORD")
+    record_id = one_operand(texts, "RECORD")
     text = fl.as_str("text")
     if text is None:
-        if inv.stdin is None:
+        if ctx.stdin is None:
             raise UsageError("--text or text on stdin is required")
-        piped = await stdin_text(inv.stdin)
+        piped = await stdin_text(ctx.stdin)
         text = piped[:-1] if piped.endswith("\n") else piped
     if not text:
         raise UsageError("the comment text is empty")
-    base_id = scoped_base(inv.config, fl.as_str("base") or "")
+    base_id = scoped_base(config, fl.as_str("base") or "")
     comment = await create_comment(
         accessor, base_id, fl.as_str("table") or "", record_id, text
     )

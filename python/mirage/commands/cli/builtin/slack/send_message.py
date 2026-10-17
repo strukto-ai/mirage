@@ -14,25 +14,26 @@
 
 import json
 
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.post import post_message, reply_to_thread
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 
 async def send_message(
-    inv: CLIInvocation[SlackConfig],
+    config: SlackConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     channel = fl.as_str("channel") or ""
     text = fl.as_str("text") or ""
     thread_ts = fl.as_str("thread_ts")
     if thread_ts:
-        result = await reply_to_thread(inv.config, channel, thread_ts, text)
+        result = await reply_to_thread(config, channel, thread_ts, text)
     else:
-        result = await post_message(inv.config, channel, text)
+        result = await post_message(config, channel, text)
     out = json.dumps(
         result, ensure_ascii=False, separators=(",", ":")
     ).encode()

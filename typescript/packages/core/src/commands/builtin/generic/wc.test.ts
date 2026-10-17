@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest'
 
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { formatWcLines, numberWidth, parseFlags, wcGeneric } from './wc.ts'
 
 // GNU's ARGMATCH refusal names the refused word through gnulib's quote(),
@@ -89,8 +89,8 @@ describe('wc asks the mount for a line count', () => {
       Promise.resolve(p.virtual === '/a' ? 5 : null)
     const paths = [PathSpec.fromStrPath('/a'), PathSpec.fromStrPath('/bb')]
     const run = async (flags: Record<string, boolean>): Promise<string> => {
-      const opts = { stdin: null, flags, cwd: '/' } as unknown as CommandOpts
-      const result = await wcGeneric(paths, [], opts, stream, lineCount)
+      const ctx = { stdin: null, flags, cwd: PathSpec.fromStrPath('/') } as unknown as Context
+      const result = await wcGeneric(paths, [], ctx, stream, lineCount)
       return new TextDecoder().decode(await materialize(result?.[0] ?? null))
     }
     expect(await run({ lines: true })).toBe('    5 /a\n12345 /bb\n12350 total\n')
@@ -118,8 +118,8 @@ describe('wc takes bytes alone from the size', () => {
       asked.push(p.virtual)
       return Promise.resolve(4)
     }
-    const opts = { stdin: null, flags, cwd: '/' } as unknown as CommandOpts
-    await wcGeneric([PathSpec.fromStrPath('/f')], [], opts, stream, undefined, sizeOf)
+    const ctx = { stdin: null, flags, cwd: PathSpec.fromStrPath('/') } as unknown as Context
+    await wcGeneric([PathSpec.fromStrPath('/f')], [], ctx, stream, undefined, sizeOf)
     expect([asked.length > 0, reads.length > 0]).toEqual([sized, read])
   })
 
@@ -128,12 +128,12 @@ describe('wc takes bytes alone from the size', () => {
       await Promise.resolve()
       yield new TextEncoder().encode('abcde')
     }
-    const opts = {
+    const ctx = {
       stdin: null,
       flags: { bytes: true },
-      cwd: '/',
-    } as unknown as CommandOpts
-    const result = await wcGeneric([PathSpec.fromStrPath('/f')], [], opts, stream, undefined, () =>
+      cwd: PathSpec.fromStrPath('/'),
+    } as unknown as Context
+    const result = await wcGeneric([PathSpec.fromStrPath('/f')], [], ctx, stream, undefined, () =>
       Promise.resolve(null),
     )
     expect(new TextDecoder().decode(await materialize(result?.[0] ?? null))).toBe('5 /f\n')

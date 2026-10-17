@@ -34,7 +34,7 @@ from mirage.commands.builtin.utils.links import (
     typed_link,
 )
 from mirage.commands.builtin.utils.tree import tree_walk
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.context import session_visibility
@@ -92,19 +92,19 @@ async def cp(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("cp: no VFS")
-    fl = FlagView(opts.flags, spec=SPECS["cp"])
+    fl = FlagView(ctx.flags, spec=SPECS["cp"])
     parsed = parse_flags(fl)
     # A native copy or find answers for a whole tree in one call, so the
     # dispatcher declines one whose tree the caller's view restricts; cp
     # takes the entry-by-entry walk up front there, which is where GNU's
     # per-entry refusals are worded.
-    if paths_scoped(paths, opts.mount_prefix):
+    if paths_scoped(paths, ctx.mount_prefix):
         ops = replace(ops, copy=None, dir_copy=None)
-    paths = await ops.resolve_glob(accessor, paths, opts.index)
+    paths = await ops.resolve_glob(accessor, paths, ctx.index)
     dir_copy = partial(ops.dir_copy, accessor) if ops.dir_copy else None
     mkdir = partial(ops.mkdir, accessor) if ops.mkdir else None
     if ops.copy is None and ops.write is None:
@@ -126,47 +126,47 @@ async def cp(
         # (the cross-mount relay's own path), which is also where GNU's
         # per-entry refusals are worded.
         strategy = PrimitiveCopy(
-            read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
-            read_stream=bound_op(ops.read_stream, accessor, opts.index),
+            read_bytes=bound_op(ops.read_bytes, accessor, ctx.index),
+            read_stream=bound_op(ops.read_stream, accessor, ctx.index),
             write=partial(_write, ops.write, accessor),
             mkdir=partial(require_op(ops, Operation.MKDIR), accessor),
-            readdir=bound_op(ops.readdir, accessor, opts.index),
+            readdir=bound_op(ops.readdir, accessor, ctx.index),
         )
     else:
         strategy = NativeCopy(
             copy=partial(require_op(ops, Operation.COPY), accessor),
-            find=_make_find(ops, accessor, opts.index),
+            find=_make_find(ops, accessor, ctx.index),
             dir_copy=dir_copy,
             mkdir=mkdir,
         )
-    links = links_of(opts)
-    cwd = opts.cwd.virtual if opts.cwd is not None else "/"
+    links = links_of(ctx)
+    cwd = ctx.cwd.virtual if ctx.cwd is not None else "/"
     return await generic_cp(
         paths,
         strategy=strategy,
-        stat=bound_op(ops.stat, accessor, opts.index),
+        stat=bound_op(ops.stat, accessor, ctx.index),
         flags=parsed,
-        readdir=bound_op(ops.readdir, accessor, opts.index),
+        readdir=bound_op(ops.readdir, accessor, ctx.index),
         link_at=(
             partial(typed_link, links, cwd=cwd) if links is not None else None
         ),
         copies=(
             transfer_links_of(
                 links,
-                opts.dispatch,
+                ctx.dispatch,
                 cwd,
                 session_visibility(),
                 partial(
                     serves,
-                    mounts_of(opts),
-                    opts.mount_prefix,
+                    mounts_of(ctx),
+                    ctx.mount_prefix,
                 ),
             )
-            if links is not None and opts.dispatch is not None
+            if links is not None and ctx.dispatch is not None
             else None
         ),
-        stdin=opts.stdin,
-        dispatch=opts.dispatch,
+        stdin=ctx.stdin,
+        dispatch=ctx.dispatch,
     )
 
 

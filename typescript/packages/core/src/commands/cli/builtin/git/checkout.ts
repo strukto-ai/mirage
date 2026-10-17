@@ -16,9 +16,8 @@ import { PathSpec } from '../../../../types.ts'
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIView, CLIInvocation } from '../../types.ts'
 import {
   branchUpstream,
   headCommit,
@@ -585,16 +584,16 @@ async function namesPath(repo: Repo, vfs: Files, start: string, operand: string)
  * rewrote, from the index or from the tree's abbreviated id. Pinned against
  * git 2.50.1.
  *
+ * @param ctx the line's context
  * @param repo the opened repository
- * @param view the invocation's view
  * @param fl the line's flags
  * @param treeish the tree-ish named ahead of the paths, null for the index
  * @param paths the pathspecs as typed
  * @param counted whether the line named its paths without `--`
  */
 async function checkoutPaths(
+  ctx: Context,
   repo: Repo,
-  view: CLIView,
   fl: FlagView,
   treeish: string | null,
   paths: readonly string[],
@@ -611,8 +610,8 @@ async function checkoutPaths(
     }
   }
   const [notes, updated] = await restorePaths(
+    ctx,
     repo,
-    view,
     paths,
     lineStart(fl).virtual,
     source,
@@ -637,26 +636,29 @@ async function checkoutPaths(
  * operand the index holds and no ref names, are put back instead; see
  * `checkoutPaths`.
  */
-export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
-  const view = inv.view ?? {}
-  const texts = [...inv.texts]
-  const fl = new FlagView(inv.flags)
+export async function checkout(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   let carried: string
   let note: string
   let warnings = ''
   try {
-    const vfs = view.vfs
+    const vfs = ctx.vfs
     if (vfs === undefined) {
       throw new NoWorkspaceError()
     }
-    checkSwitches(inv, texts)
+    checkSwitches(ctx, texts)
     const detach = fl.asBool('detach')
     if (detach && fl.asBool('b')) throw new DetachWithCreateError()
     const target = texts[0] ?? (detach ? HEAD : undefined)
     if (target === undefined) throw new UnknownPathspecError('')
     const extra = texts[1]
     if (detach && extra !== undefined) throw new DetachPathError(extra)
-    const repo = await opened(fl, view, true)
+    const repo = await opened(ctx, fl, true)
     const mode = await trackMode(repo)
     const head = await readHead(vfs, repo.location.gitdir)
     let creating = fl.asBool('b')
@@ -664,15 +666,15 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
     const known = await loadRefs(vfs, repo.location.gitdir, repo.location.commondir)
     if (creating && texts.length > 2) throw new PathsWithBranchError(target)
     if (!creating && !detach) {
-      const [leading, marked] = splitMarked(texts, inv.argv)
+      const [leading, marked] = splitMarked(texts, ctx.argv ?? [])
       if (marked.length > 0) {
         const paths = [...leading.slice(1), ...marked]
-        return await checkoutPaths(repo, view, fl, leading[0] ?? null, paths, false)
+        return await checkoutPaths(ctx, repo, fl, leading[0] ?? null, paths, false)
       }
       if (texts.length > 1) {
         const treeish = (await readsAsCommit(repo, known, target)) ? target : null
         const paths = treeish === null ? texts : texts.slice(1)
-        return await checkoutPaths(repo, view, fl, treeish, paths, true)
+        return await checkoutPaths(ctx, repo, fl, treeish, paths, true)
       }
     }
     if (creating && known.has(ref)) throw new BranchExistsError(target)
@@ -686,7 +688,7 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
       } catch {
         if (detach) throw new DetachPathError(target)
         if (await namesPath(repo, vfs, lineStart(fl).virtual, target)) {
-          return await checkoutPaths(repo, view, fl, null, texts, true)
+          return await checkoutPaths(ctx, repo, fl, null, texts, true)
         }
         guessed = await remoteBranch(repo, target)
         if (guessed === null) throw new UnknownPathspecError(target)
@@ -784,9 +786,10 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
  * checkout's refusal by a read-only mount: the new branch's ref under `-b`,
  * whose lock git takes first, and the index's otherwise.
  */
-export const checkoutReadOnly: ReadOnlyRefusal = (inv, location) => {
-  const name = inv.texts[0]
-  if (!new FlagView(inv.flags).asBool('b') || name === undefined) return indexLocked(inv, location)
+export const checkoutReadOnly: ReadOnlyRefusal = (texts, ctx, location) => {
+  const name = texts[0]
+  if (!new FlagView(ctx.flags).asBool('b') || name === undefined)
+    return indexLocked(texts, ctx, location)
   const ref = `${BRANCH_PREFIX}${name}`
   return new RefReadOnlyError(
     ref,

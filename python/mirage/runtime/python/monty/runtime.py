@@ -102,12 +102,12 @@ class MontyRuntime(PythonRuntime):
         notice = unhonored_notice(args.flags, self.name)
         context = context or self._capture_context()
         if args.cwd is None and context is not None:
-            args = replace(args, cwd=context.cwd)
+            args = replace(args, cwd=context.ctx.cwd)
         # A nested call must not queue behind a parent holding this pool.
         nested = (
             context is not None
-            and context.processes is not None
-            and context.processes.depth > 0
+            and context.ctx.processes is not None
+            and context.ctx.processes.depth > 0
         )
         execution = (
             MontyExecution(self._max_memory) if nested else self._execution

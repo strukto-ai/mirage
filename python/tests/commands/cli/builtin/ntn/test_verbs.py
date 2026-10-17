@@ -25,7 +25,7 @@ from mirage.commands.cli.builtin.ntn.pages.edit import edit
 from mirage.commands.cli.builtin.ntn.pages.get import get
 from mirage.commands.cli.builtin.ntn.pages.trash import trash
 from mirage.commands.cli.builtin.ntn.whoami import whoami, whoami_row
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.core.notion.config import NotionConfig
 from mirage.io.types import materialize
@@ -89,12 +89,10 @@ async def test_pages_get_renders_markdown_with_frontmatter(monkeypatch):
 
     monkeypatch.setitem(get.__globals__, "get_page_markdown", fake_markdown)
     monkeypatch.setitem(get.__globals__, "get_page", fake_page)
-    out, _io = await get(CLIInvocation(CONFIG, texts=("P1",)))
+    out, _io = await get(CONFIG, [], ["P1"], Context())
     assert await _text(out) == "---\ntitle: Doc\n---\n\n# Body\n"
 
-    out, _io = await get(
-        CLIInvocation(CONFIG, texts=("P1",), flags={"json": True})
-    )
+    out, _io = await get(CONFIG, [], ["P1"], Context(flags={"json": True}))
     payload = await _json(out)
     assert payload["markdown"]["object"] == "page_markdown"
     assert payload["page"]["id"] == "P1"
@@ -103,7 +101,7 @@ async def test_pages_get_renders_markdown_with_frontmatter(monkeypatch):
 @pytest.mark.asyncio
 async def test_pages_get_needs_a_positional_id():
     with pytest.raises(UsageError, match="page id is required"):
-        await get(CLIInvocation(CONFIG))
+        await get(CONFIG, [], [], Context())
 
 
 @pytest.mark.asyncio
@@ -116,7 +114,10 @@ async def test_pages_create_posts_markdown_and_prints_the_id(monkeypatch):
 
     monkeypatch.setitem(create.__globals__, "create_page", fake_create)
     out, _io = await create(
-        CLIInvocation(CONFIG, flags={"content": "# Hi", "parent": "page:root"})
+        CONFIG,
+        [],
+        [],
+        Context(flags={"content": "# Hi", "parent": "page:root"}),
     )
     assert calls == [{"markdown": "# Hi", "parent": {"page_id": "root"}}]
     assert await _text(out) == "NEW\n"
@@ -136,7 +137,7 @@ async def test_pages_create_maps_every_parent_kind(monkeypatch):
         ("data-source:S1", {"data_source_id": "S1"}),
     ):
         await create(
-            CLIInvocation(CONFIG, flags={"content": "#", "parent": spec})
+            CONFIG, [], [], Context(flags={"content": "#", "parent": spec})
         )
     assert calls == [{"database_id": "D1"}, {"data_source_id": "S1"}]
 
@@ -145,7 +146,7 @@ async def test_pages_create_maps_every_parent_kind(monkeypatch):
 async def test_pages_create_refuses_a_malformed_parent():
     with pytest.raises(UsageError, match="--parent must be"):
         await create(
-            CLIInvocation(CONFIG, flags={"content": "#", "parent": "nope:X"})
+            CONFIG, [], [], Context(flags={"content": "#", "parent": "nope:X"})
         )
 
 
@@ -161,7 +162,7 @@ async def test_pages_edit_replaces_the_body(monkeypatch):
         edit.__globals__, "replace_page_markdown", fake_replace
     )
     out, _io = await edit(
-        CLIInvocation(CONFIG, texts=("P1",), flags={"content": "# New"})
+        CONFIG, [], ["P1"], Context(flags={"content": "# New"})
     )
     assert calls == [("P1", "# New")]
     assert await _text(out) == "P1\n"
@@ -176,15 +177,13 @@ async def test_pages_trash_refuses_without_yes(monkeypatch):
         return {"id": page_id}
 
     monkeypatch.setitem(trash.__globals__, "update_page", fake_update)
-    out, io = await trash(CLIInvocation(CONFIG, texts=("P2",)))
+    out, io = await trash(CONFIG, [], ["P2"], Context())
     assert out is None
     assert io.exit_code == 1
     assert "non-interactive" in (await materialize(io.stderr)).decode()
     assert calls == []
 
-    _out, io = await trash(
-        CLIInvocation(CONFIG, texts=("P2",), flags={"yes": True})
-    )
+    _out, io = await trash(CONFIG, [], ["P2"], Context(flags={"yes": True}))
     assert calls == [("P2", {"in_trash": True})]
     assert (await materialize(io.stderr)).decode() == "✔ Page trashed\n"
 
@@ -195,12 +194,10 @@ async def test_datasources_resolve_lists_stubs(monkeypatch):
         return {"data_sources": [{"id": "S1", "name": "Tasks"}]}
 
     monkeypatch.setitem(resolve.__globals__, "get_database", fake_database)
-    out, _io = await resolve(CLIInvocation(CONFIG, texts=("D1",)))
+    out, _io = await resolve(CONFIG, [], ["D1"], Context())
     assert await _text(out) == "S1\tTasks\n"
 
-    out, _io = await resolve(
-        CLIInvocation(CONFIG, texts=("D1",), flags={"json": True})
-    )
+    out, _io = await resolve(CONFIG, [], ["D1"], Context(flags={"json": True}))
     assert (await _json(out))["data_sources"][0]["name"] == "Tasks"
 
 
@@ -240,11 +237,10 @@ async def test_datasources_query_sorts_columns_by_name(monkeypatch):
         query.__globals__, "query_data_source_page", fake_query
     )
     out, _io = await query(
-        CLIInvocation(
-            CONFIG,
-            texts=("S1",),
-            flags={"limit": 5, "sort": ["Priority desc"]},
-        )
+        CONFIG,
+        [],
+        ["S1"],
+        Context(flags={"limit": 5, "sort": ["Priority desc"]}),
     )
     assert calls == [
         (
@@ -294,7 +290,7 @@ async def test_datasources_query_takes_columns_from_the_rows(monkeypatch):
     monkeypatch.setitem(
         query.__globals__, "query_data_source_page", fake_query
     )
-    out, _io = await query(CLIInvocation(CONFIG, texts=("S1",), flags={}))
+    out, _io = await query(CONFIG, [], ["S1"], Context(flags={}))
     assert await _text(out) == "R2\tRow page\n"
 
 
@@ -310,7 +306,7 @@ async def test_datasources_query_reports_the_next_cursor(monkeypatch):
     monkeypatch.setitem(
         query.__globals__, "query_data_source_page", fake_query
     )
-    _out, io = await query(CLIInvocation(CONFIG, texts=("S1",)))
+    _out, io = await query(CONFIG, [], ["S1"], Context())
     assert (await materialize(io.stderr)).decode() == (
         "\nMore results available. Use --start-cursor 7 to continue.\n"
     )
@@ -339,13 +335,13 @@ async def test_datasources_query_follows_a_database_id(monkeypatch):
     monkeypatch.setitem(
         query.__globals__, "query_data_source_page", fake_query
     )
-    await query(CLIInvocation(CONFIG, texts=("D1",)))
+    await query(CONFIG, [], ["D1"], Context())
     assert seen == ["D1", "S1"]
 
 
 @pytest.mark.asyncio
 async def test_auth_token_prints_the_configured_key():
-    out, _io = await token(CLIInvocation(CONFIG))
+    out, _io = await token(CONFIG, [], [], Context())
     assert await _text(out) == "secret\n"
 
 
@@ -355,7 +351,7 @@ async def test_whoami_renders_the_row(monkeypatch):
         return WORKSPACE_OWNED
 
     monkeypatch.setitem(whoami.__globals__, "get_self", fake_self)
-    out, _io = await whoami(CLIInvocation(CONFIG))
+    out, _io = await whoami(CONFIG, [], [], Context())
     assert await _text(out) == (
         "ID\tNAME\tbot\t\tWSID\tWSNAME\tWSID\tWSNAME\tworkspace\n"
     )
@@ -389,11 +385,9 @@ async def test_api_infers_method_and_strips_the_version_prefix(monkeypatch):
     monkeypatch.setitem(
         api.__globals__, "METHODS", {"GET": fake_get, "POST": fake_post}
     )
-    await api(CLIInvocation(CONFIG, texts=("v1/users/me",)))
-    await api(CLIInvocation(CONFIG, texts=("v1/search", "query=Roadmap")))
-    await api(
-        CLIInvocation(CONFIG, texts=("v1/blocks/B1/children", "page_size==1"))
-    )
+    await api(CONFIG, [], ["v1/users/me"], Context())
+    await api(CONFIG, [], ["v1/search", "query=Roadmap"], Context())
+    await api(CONFIG, [], ["v1/blocks/B1/children", "page_size==1"], Context())
     assert gets[0] == ("/users/me", None)
     assert posts[0] == ("/search", {"query": "Roadmap"})
     assert gets[1] == ("/blocks/B1/children", {"page_size": "1"})
@@ -412,10 +406,10 @@ async def test_api_builds_nested_bodies(monkeypatch):
     monkeypatch.setitem(api.__globals__, "notion_post", fake_post)
     monkeypatch.setitem(api.__globals__, "METHODS", {"POST": fake_post})
     await api(
-        CLIInvocation(
-            CONFIG,
-            texts=("v1/pages", "parent[page_id]=root", "archived:=true"),
-        )
+        CONFIG,
+        [],
+        ["v1/pages", "parent[page_id]=root", "archived:=true"],
+        Context(),
     )
     assert posts[0] == {"parent": {"page_id": "root"}, "archived": True}
 
@@ -426,5 +420,5 @@ async def test_api_prints_compact_sorted_json(monkeypatch):
         return {"b": 1, "a": {"d": 2, "c": 3}}
 
     monkeypatch.setitem(api.__globals__, "notion_get", fake_get)
-    out, _io = await api(CLIInvocation(CONFIG, texts=("v1/users/me",)))
+    out, _io = await api(CONFIG, [], ["v1/users/me"], Context())
     assert await _text(out) == '{"a":{"c":3,"d":2},"b":1}\n'

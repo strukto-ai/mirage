@@ -20,7 +20,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { LINK_TARGET_KEY, FileType, PathSpec, type FileStat } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { enoent, isMissError, isWalkError } from '../../../errors/fs.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import type { MountView } from '../../../view/types.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { formatRecords } from '../utils/output.ts'
@@ -255,34 +255,34 @@ function notCrossed(): Promise<string[]> {
  */
 export async function treeGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   readdir: (p: PathSpec) => Promise<string[]>,
   stat: (p: PathSpec) => Promise<FileStat>,
   unbounded?: [(p: PathSpec) => Promise<string[]>, (p: PathSpec) => Promise<FileStat>],
 ): Promise<CommandFnResult> {
-  const parsed = parseFlags(opts.flags)
+  const parsed = parseFlags(ctx.flags)
   if (unbounded !== undefined && parsed.maxDepth === null) [readdir, stat] = unbounded
   const targets =
     paths.length > 0
       ? paths
       : [
           new PathSpec({
-            virtual: opts.cwd,
-            directory: opts.cwd,
+            virtual: ctx.cwd.virtual,
+            directory: ctx.cwd.virtual,
             resolved: false,
-            vfsPath: mountKey(opts.cwd, opts.mountPrefix ?? ''),
+            vfsPath: mountKey(ctx.cwd.virtual, ctx.mountPrefix ?? ''),
           }),
         ]
-  const readdirPath = opts.readdirPath
-  const statPath = opts.statPath
-  const links = linksOf(opts)
+  const readdirPath = ctx.readdirPath
+  const statPath = ctx.statPath
+  const links = linksOf(ctx)
   const treeOpts: TreeOpts = {
     showHidden: parsed.showHidden,
     maxDepth: parsed.maxDepth,
     ignorePattern: parsed.ignorePattern,
     dirsOnly: parsed.dirsOnly,
     matchPattern: parsed.matchPattern,
-    mounts: mountsOf(opts) ?? null,
+    mounts: mountsOf(ctx) ?? null,
     crossReaddir:
       readdirPath === undefined
         ? null
@@ -323,8 +323,8 @@ export async function treeGeneric(
     // GNU prints the same inline marker either way; what differs is the
     // count and the status. A non-directory exists, so it is counted and
     // the exit stays 0; a path that is not there is not counted and exits 2.
-    if (opts.statPath !== undefined) {
-      const start = await opts.statPath(p)
+    if (ctx.statPath !== undefined) {
+      const start = await ctx.statPath(p)
       if (start === null) {
         lines[before] = `${label}${UNOPENABLE_MARK}`
         anyError = true

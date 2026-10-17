@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../types.ts'
 import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
@@ -33,7 +34,7 @@ async function runCut(
     stdin,
     flags,
     io: commandIo(vfs),
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) return ''
   const [out] = result
@@ -75,7 +76,7 @@ describe('cut', () => {
       stdin: null,
       flags: { fields: '1' },
       io: commandIo(vfs),
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
     })
     if (result === null) throw new Error('result null')
     const [out, ioResult] = result

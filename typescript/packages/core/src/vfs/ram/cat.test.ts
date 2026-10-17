@@ -32,7 +32,7 @@ describe('cat', () => {
       stdin: null,
       flags: {},
       io: commandIo(vfs),
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
     })
     if (result === null) throw new Error('null')
     const [out] = result

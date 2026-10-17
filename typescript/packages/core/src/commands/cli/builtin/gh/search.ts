@@ -1,7 +1,7 @@
 import { CommandSpec } from '../../../spec/types.ts'
 
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import type { JsonValue } from '../../../../types.ts'
+import type { JsonValue, PathSpec } from '../../../../types.ts'
 import { csvValues, ghBool, ghTransport, jsonFields, textOut, typedOut } from './accessor.ts'
 import {
   SEARCH_ALIASES,
@@ -13,8 +13,8 @@ import {
   SEARCH_SORTS,
 } from './constants.ts'
 import { renderTemplate } from './template.ts'
-import { CLIHandler, type CLIInvocation } from '../../types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import { CLIHandler } from '../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { UsageError } from '../../../errors.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { Argument } from '../../../spec/types.ts'
@@ -125,28 +125,36 @@ export function searchHandlers(): Record<string, CLIHandler> {
   return Object.fromEntries(
     Object.keys(SEARCH_FLAGS).map((kind) => [
       `search ${kind}`,
-      new CLIHandler({ fn: (inv) => searchCmd(kind, inv) }),
+      new CLIHandler({
+        fn: (config, paths, texts, ctx) => searchCmd(kind, config, paths, texts, ctx),
+      }),
     ]),
   )
 }
 
-async function searchCmd(kind: string, inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags, inv.spec)
+async function searchCmd(
+  kind: string,
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const fields = jsonFields(fl, SEARCH_FIELDS[kind] ?? [])
   const limit = fl.asInt('limit')
   if (limit === undefined || limit < 1 || limit > 1000)
     throw new UsageError('`--limit` must be between 1 and 1000', 1)
-  if (inv.texts.length === 0 && inv.argv.length <= 2)
+  if (texts.length === 0 && (ctx.argv ?? []).length <= 2)
     throw new UsageError('specify search keywords or flags', 1)
   if (fields === null && (fl.asStr('jq') !== undefined || fl.asStr('template') !== undefined))
     throw new UsageError('cannot use `--jq` or `--template` without `--json`', 1)
   if (fl.asStr('jq') !== undefined && fl.asStr('template') !== undefined)
     throw new UsageError('cannot use `--jq` and `--template` together', 1)
-  const expression = query(kind, inv.texts, fl)
+  const expression = query(kind, texts, fl)
   let values: unknown[]
   try {
     values = await search(
-      ghTransport(inv.config),
+      ghTransport(config),
       ({ repos: 'repositories', prs: 'issues' } as Record<string, string>)[kind] ?? kind,
       expression,
       limit,

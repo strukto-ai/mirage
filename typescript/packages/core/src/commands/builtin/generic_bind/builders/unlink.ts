@@ -20,11 +20,11 @@ import { fsStrerror, isFsError } from '../../../../errors/fs.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 import { linksOf } from '../../utils/links.ts'
 
-const unlink: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
+const unlink: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
   if (paths.length === 0) {
     throw new UsageError("unlink: missing operand\nTry 'unlink --help' for more information.", 1)
   }
-  const idx = opts.index ?? undefined
+  const idx = ctx.index ?? undefined
   const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
   if (resolved.length > 1) {
     const extra = resolved[1]
@@ -34,7 +34,7 @@ const unlink: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   if (p === undefined) return [null, new IOResult()]
   const unlinkOp = requireOp(ops.unlink, 'unlink')
   const enc = new TextEncoder()
-  const links = linksOf(opts) ?? null
+  const links = linksOf(ctx) ?? null
   // unlink(2) never follows, so a trailing slash on a link operand is
   // refused rather than resolved: GNU answers `unlink dlink/` and
   // `unlink flink/` alike with ENOTDIR, where a real directory under a

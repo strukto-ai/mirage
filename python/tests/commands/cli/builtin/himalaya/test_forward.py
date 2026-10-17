@@ -21,7 +21,7 @@ import pytest
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya import forward
 from mirage.commands.cli.builtin.himalaya import util as util_module
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import materialize
 
@@ -66,7 +66,7 @@ def parse(raw: bytes):
 @pytest.mark.asyncio
 async def test_forward_quotes_the_source_and_prefixes_fwd(patched):
     out, io = await forward(
-        CLIInvocation(CONFIG, texts=("7",), flags={"to": "carol@example.com"})
+        CONFIG, [], ["7"], Context(flags={"to": "carol@example.com"})
     )
     assert io.exit_code == 0
     assert patched["args"] == ("INBOX", "7")
@@ -81,11 +81,10 @@ async def test_forward_quotes_the_source_and_prefixes_fwd(patched):
 @pytest.mark.asyncio
 async def test_forward_carries_the_users_own_note_above_the_quote(patched):
     out, _ = await forward(
-        CLIInvocation(
-            CONFIG,
-            texts=("7",),
-            flags={"to": "carol@example.com", "body": "see below"},
-        )
+        CONFIG,
+        [],
+        ["7"],
+        Context(flags={"to": "carol@example.com", "body": "see below"}),
     )
     message = parse(await materialize(out))
     assert message.get_content() == "see below\r\n\r\n> the numbers\r\n"
@@ -94,11 +93,10 @@ async def test_forward_carries_the_users_own_note_above_the_quote(patched):
 @pytest.mark.asyncio
 async def test_send_flag_pushes_through_smtp_and_reports_json(patched):
     out, io = await forward(
-        CLIInvocation(
-            CONFIG,
-            texts=("7",),
-            flags={"to": "carol@example.com", "send": True},
-        )
+        CONFIG,
+        [],
+        ["7"],
+        Context(flags={"to": "carol@example.com", "send": True}),
     )
     assert io.exit_code == 0
     assert b"Fwd: Quarterly numbers" in patched["raw"]
@@ -112,10 +110,12 @@ async def test_send_flag_pushes_through_smtp_and_reports_json(patched):
 @pytest.mark.asyncio
 async def test_forward_needs_a_recipient(patched):
     with pytest.raises(ValueError, match="no recipient"):
-        await forward(CLIInvocation(CONFIG, texts=("7",)))
+        await forward(CONFIG, [], ["7"], Context())
 
 
 @pytest.mark.asyncio
 async def test_forward_without_an_id_is_a_usage_error(patched):
     with pytest.raises(ValueError, match="message id is required"):
-        await forward(CLIInvocation(CONFIG, flags={"to": "carol@example.com"}))
+        await forward(
+            CONFIG, [], [], Context(flags={"to": "carol@example.com"})
+        )

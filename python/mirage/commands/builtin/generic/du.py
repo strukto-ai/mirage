@@ -8,7 +8,7 @@ from mirage.commands.builtin.constants import INTMAX
 from mirage.commands.builtin.utils.formatting import scaled_size
 from mirage.commands.builtin.utils.links import mounts_of
 from mirage.commands.builtin.utils.output import format_records
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
@@ -111,7 +111,7 @@ def parse_depth(text: str) -> int | None:
     return value if -INTMAX - 1 <= value <= INTMAX else None
 
 
-def parse_flags(opts: CommandOpts) -> DuFlags:
+def parse_flags(ctx: Context) -> DuFlags:
     """Validate a ``du`` command line the way GNU does, before any I/O.
 
     GNU parses ``--max-depth`` as each option is read, so a bad depth is
@@ -119,12 +119,12 @@ def parse_flags(opts: CommandOpts) -> DuFlags:
     whole line is parsed. All three exit 1, du's usage-error code.
 
     Args:
-        opts (CommandOpts): the flags as the dispatcher parsed them.
+        ctx (Context): the flags as the dispatcher parsed them.
 
     Raises:
         UsageError: on a bad depth or a conflicting combination.
     """
-    fl = FlagView(opts.flags, spec=SPECS["du"])
+    fl = FlagView(ctx.flags, spec=SPECS["du"])
     s = fl.as_bool("s")
     a = fl.as_bool("a")
     raw = fl.as_str("max_depth")
@@ -736,7 +736,7 @@ def _respell_under(virtual: str, paths: Sequence[PathSpec]) -> str:
 async def du_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     resolve_glob: Callable[[list[PathSpec]], Awaitable[list[PathSpec]]],
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     compute_size: ComputeSize,
@@ -764,7 +764,7 @@ async def du_generic(
     Args:
         paths (list[PathSpec]): The operands as parsed, possibly empty.
         texts (list[str]): Non-path words, unused by du.
-        opts (CommandOpts): Flags and cwd from the dispatcher.
+        ctx (Context): Flags and cwd from the dispatcher.
         resolve_glob (Callable[[list[PathSpec]], Awaitable[list[PathSpec]]]):
             Expands globs against the backend.
         stat (Callable[[PathSpec], Awaitable[FileStat]]):
@@ -784,10 +784,10 @@ async def du_generic(
     Raises:
         UsageError: on a bad depth or a conflicting flag combination.
     """
-    flags = parse_flags(opts)
+    flags = parse_flags(ctx)
     present, missing = await du_operands(
         paths,
-        opts.cwd,
+        ctx.cwd,
         resolve_glob,
         stat,
         partial(
@@ -795,7 +795,7 @@ async def du_generic(
             session_visibility(),
             compute_entries,
         ),
-        stat_path=opts.stat_path,
+        stat_path=ctx.stat_path,
     )
     out = await du(
         present,
@@ -806,7 +806,7 @@ async def du_generic(
         truncated=truncated,
         unreadable=unreadable,
         directories=directories,
-        mounts=mounts_of(opts),
+        mounts=mounts_of(ctx),
         inaccessible=inaccessible,
         repeated=repeated,
     )

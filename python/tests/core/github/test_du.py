@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.commands.builtin.generic_bind.builders.du import du
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.core.github.stat import tree
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.io.stream import materialize
@@ -90,7 +90,7 @@ async def test_du_sums_the_tree_it_reads_once(
         accessor,
         [PathSpec.from_str_path(operand)],
         [],
-        CommandOpts(flags=flags),
+        Context(flags=flags),
     )
     assert (
         (await materialize(stream)).decode(),

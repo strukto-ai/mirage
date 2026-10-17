@@ -127,20 +127,22 @@ async def test_callbacks_retain_session_and_gate_after_capture():
         ws.create_session("agent", profile={"paths": {"hide": ["/secret"]}})
         context = ws.runtime_context("agent")
         other = ws.runtime_context()
-        assert context.session_view is not None
-        assert context.vfs is not None
-        assert "/secret/" not in context.scope.call(context.vfs.mount_prefixes)
+        assert context.ctx.session is not None
+        assert context.ctx.vfs is not None
+        assert "/secret/" not in context.scope.call(
+            context.ctx.vfs.mount_prefixes
+        )
         with pytest.raises((FileNotFoundError, PermissionError)):
             await context.dispatch("read", PathSpec.from_str_path("/secret/a"))
         assert (
             await other.dispatch("read", PathSpec.from_str_path("/secret/a"))
         )[0] == b"private\n"
-        await context.session_view.set("PUBLIC", "agent")
-        assert context.session_view.get("PUBLIC") == "agent"
-        assert other.session_view.get("PUBLIC") is None
-        assert "PUBLIC" not in context.env  # launch environment is a copy
+        await context.ctx.session.set("PUBLIC", "agent")
+        assert context.ctx.session.get("PUBLIC") == "agent"
+        assert other.ctx.session.get("PUBLIC") is None
+        assert "PUBLIC" not in context.ctx.env  # launch environment is a copy
         with pytest.raises(PolicyDenied) as refused:
-            await context.session_view.set("SECRET", "no")
+            await context.ctx.session.set("SECRET", "no")
         assert refused.value.refusal is not None
         assert "protected" in refused.value.refusal.reason
         # A captured scope carries the owner as well as the session.
@@ -153,12 +155,12 @@ async def test_callbacks_retain_session_and_gate_after_capture():
         reads = await asyncio.gather(
             context.scope.run(
                 lambda: asyncio.sleep(
-                    0, result=context.session_view.get("PUBLIC")
+                    0, result=context.ctx.session.get("PUBLIC")
                 )
             ),
             other.scope.run(
                 lambda: asyncio.sleep(
-                    0, result=other.session_view.get("PUBLIC")
+                    0, result=other.ctx.session.get("PUBLIC")
                 )
             ),
         )
@@ -171,7 +173,7 @@ async def test_context_keeps_namespace_live_and_matches_native_projection():
         await ws.shell("echo shared > /data/a; chmod 600 /data/a")
         context = ws.runtime_context()
         await ws.shell("ln -s /data/a /data/link")
-        links = link_view(context.vfs)
+        links = link_view(context.ctx.vfs)
         assert links is not None
         assert context.scope.call(links.resolve, "/data/link") == "/data/a"
         ws.add_mount("/data/nested", RAMVFS(), mode=MountMode.EXEC)
@@ -215,12 +217,12 @@ async def test_command_execution_supplies_its_active_workspace_context():
         result = await ws.shell("python3 -c hello", session_id="agent")
         assert result.stdout == b"hello"
         captured = runtime.contexts[-1]
-        assert captured.cwd.virtual == "/data"
-        assert captured.env["PUBLIC"] == "agent"
-        assert captured.session_view.get("PUBLIC") == "agent"
+        assert captured.ctx.cwd.virtual == "/data"
+        assert (captured.ctx.env or {})["PUBLIC"] == "agent"
+        assert captured.ctx.session.get("PUBLIC") == "agent"
         await ws.shell("python3 -c other")
-        assert "PUBLIC" not in runtime.contexts[-1].env
-        assert captured.session_view.get("PUBLIC") == "agent"
+        assert "PUBLIC" not in (runtime.contexts[-1].ctx.env or {})
+        assert captured.ctx.session.get("PUBLIC") == "agent"
 
 
 @pytest.mark.asyncio
@@ -293,8 +295,8 @@ async def test_process_views_do_not_share_by_profile_or_follow_reused_sessions()
     with Workspace({}, runtimes=[], profiles={"agent": {}}) as ws:
         ws.create_session("one", profile="agent")
         ws.create_session("two", profile="agent")
-        one = ws.runtime_context("one").processes
-        two = ws.runtime_context("two").processes
+        one = ws.runtime_context("one").ctx.processes
+        two = ws.runtime_context("two").ctx.processes
         release = asyncio.Event()
 
         async def run():
@@ -312,7 +314,7 @@ async def test_process_views_do_not_share_by_profile_or_follow_reused_sessions()
         await ws.close_session("one")
         ws.create_session("one", profile="agent")
         assert one.list() == ()
-        assert ws.runtime_context("one").processes.list() == ()
+        assert ws.runtime_context("one").ctx.processes.list() == ()
         release.set()
         await process.join()
 

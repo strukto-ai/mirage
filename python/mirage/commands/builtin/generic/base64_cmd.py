@@ -8,7 +8,7 @@ from mirage.commands.builtin.utils.stream import (
     stdin_stat,
     stdin_stream,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
@@ -166,7 +166,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> Base64Flags:
 async def base64_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     read_stream: ReadStreamFn,
     stat: StatFn,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -179,12 +179,12 @@ async def base64_generic(
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
         texts (list[str]): Non-path words, unused by base64.
-        opts (CommandOpts): Flags and stdin from the dispatcher.
+        ctx (Context): Flags and stdin from the dispatcher.
         read_stream (ReadStreamFn): Bound reader called as
             ``read_stream(path)``.
         stat (StatFn): Bound stat called as ``stat(path)``.
     """
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     if len(paths) == 1:
         _, err = await split_readable(paths, stdin_stat(stat), "base64")
         if err:
@@ -192,7 +192,7 @@ async def base64_generic(
     return await base64_cmd(
         paths,
         read_stream=read_stream,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         decode=parsed.decode,
         wrap=parsed.wrap,
         ignore_garbage=parsed.ignore_garbage,

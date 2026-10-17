@@ -15,12 +15,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as AccessorModule from './accessor.ts'
 import { GitHubApiError, type GitHubTransport } from '../../../../core/github/client.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { PartialOutputError, UsageError } from '../../../errors.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { PathSpec } from '../../../../types.ts'
 import { crc32 } from '../../../../utils/compress.ts'
 import { runViewCmd, workflowViewCmd } from './actions.ts'
-import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
+import { context } from '../../../../workspace/fixtures/context.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -55,8 +55,11 @@ vi.mock('./accessor.ts', async (importOriginal) => {
   return { ...actual, ghTransport: () => new RouteTransport() }
 })
 
-function inv(texts: string[], flags: CLIInvocation['flags'] = {}): CLIInvocation {
-  return cliInvocation({ config: { token: 't', repo: 'o/r' }, texts, flags })
+function args(
+  texts: string[],
+  flags: Context['flags'] = {},
+): [unknown, PathSpec[], string[], Context] {
+  return [{ token: 't', repo: 'o/r' }, [], texts, context({ flags })]
 }
 
 function text(result: CommandFnResult): string {
@@ -141,7 +144,7 @@ describe('gh run view --log', () => {
         ['build  test unit/2_Run tests.txt', 'one\n\ntwo'],
       ]),
     )
-    expect(text(await runViewCmd(inv(['7'], { log: true })))).toBe(
+    expect(text(await runViewCmd(...args(['7'], { log: true })))).toBe(
       'build / test: unit\tSet up job\tready\n' +
         'build / test: unit\tRun tests\tone\n' +
         'build / test: unit\tRun tests\t\n' +
@@ -170,7 +173,9 @@ describe('gh run view --log', () => {
         ['test/2_Run tests.txt', 'boom\n'],
       ]),
     )
-    expect(text(await runViewCmd(inv(['7'], { log_failed: true })))).toBe('test\tRun tests\tboom\n')
+    expect(text(await runViewCmd(...args(['7'], { log_failed: true })))).toBe(
+      'test\tRun tests\tboom\n',
+    )
   })
 
   it("reads a job's whole log when the archive has no step of it", async () => {
@@ -181,7 +186,9 @@ describe('gh run view --log', () => {
       ],
     })
     ROUTES.set(`GET ${RUN}/logs`, storedZip([['-2147483648_test.txt', 'legacy\n']]))
-    expect(text(await runViewCmd(inv(['7'], { log: true })))).toBe('test\tUNKNOWN STEP\tlegacy\n')
+    expect(text(await runViewCmd(...args(['7'], { log: true })))).toBe(
+      'test\tUNKNOWN STEP\tlegacy\n',
+    )
   })
 
   it('fetches a job the archive lacks on its own, and names one that has no log', async () => {
@@ -193,7 +200,7 @@ describe('gh run view --log', () => {
     })
     ROUTES.set(`GET ${RUN}/logs`, storedZip([]))
     ROUTES.set('GET /repos/o/r/actions/jobs/1/logs', 'from the api\n')
-    const failure = runViewCmd(inv(['7'], { log: true }))
+    const failure = runViewCmd(...args(['7'], { log: true }))
     await expect(failure).rejects.toThrow(PartialOutputError)
     await expect(failure).rejects.toMatchObject({
       message: 'log not found: 2',
@@ -204,7 +211,7 @@ describe('gh run view --log', () => {
   it('refuses a run still going before it asks for any log', async () => {
     ROUTES.set(`GET ${RUN}`, { id: 7, status: 'queued', conclusion: null })
     ROUTES.set(`GET ${RUN}/jobs`, { jobs: [] })
-    await expect(runViewCmd(inv(['7'], { log: true }))).rejects.toThrow(
+    await expect(runViewCmd(...args(['7'], { log: true }))).rejects.toThrow(
       'run 7 is still in progress; logs will be available when it is complete',
     )
     expect(CALLS).not.toContain(`GET ${RUN}/logs`)
@@ -212,21 +219,21 @@ describe('gh run view --log', () => {
 
   it('names a run whose archive is missing or is no zip', async () => {
     ROUTES.set(`GET ${RUN}/jobs`, { jobs: [] })
-    await expect(runViewCmd(inv(['7'], { log: true }))).rejects.toThrow(
+    await expect(runViewCmd(...args(['7'], { log: true }))).rejects.toThrow(
       'failed to get run log: log not found',
     )
     ROUTES.set(`GET ${RUN}/logs`, ENC.encode('not a zip'))
-    await expect(runViewCmd(inv(['7'], { log: true }))).rejects.toThrow(
+    await expect(runViewCmd(...args(['7'], { log: true }))).rejects.toThrow(
       'failed to get run log: zip: not a valid zip file',
     )
   })
 
   it('takes one of --log and --log-failed, and answers --json first', async () => {
-    await expect(runViewCmd(inv(['7'], { log: true, log_failed: true }))).rejects.toThrow(
+    await expect(runViewCmd(...args(['7'], { log: true, log_failed: true }))).rejects.toThrow(
       UsageError,
     )
     expect(CALLS).toEqual([])
-    const out = text(await runViewCmd(inv(['7'], { log: true, json: 'status' })))
+    const out = text(await runViewCmd(...args(['7'], { log: true, json: 'status' })))
     expect(out).toBe('{"status":"completed"}\n')
   })
 })
@@ -239,7 +246,7 @@ describe('gh workflow view --yaml', () => {
     ROUTES.set('GET /repos/o/r/contents/.github/workflows/ci.yml', {
       content: 'bmFtZTogQ0kKb246IHB1c2g=\n',
     })
-    expect(text(await workflowViewCmd(inv(['ci.yml'], { yaml: true, ref: 'dev' })))).toBe(
+    expect(text(await workflowViewCmd(...args(['ci.yml'], { yaml: true, ref: 'dev' })))).toBe(
       'name: CI\non: push\n',
     )
     expect(CALLS).toEqual([
@@ -249,7 +256,7 @@ describe('gh workflow view --yaml', () => {
   })
 
   it('refuses --ref without --yaml before asking anything', async () => {
-    await expect(workflowViewCmd(inv(['ci.yml'], { ref: 'dev' }))).rejects.toThrow(
+    await expect(workflowViewCmd(...args(['ci.yml'], { ref: 'dev' }))).rejects.toThrow(
       '`--yaml` required when specifying `--ref`',
     )
     expect(CALLS).toEqual([])
@@ -260,7 +267,7 @@ describe('gh workflow view --yaml', () => {
     [{ ref: 'dev' }, 'could not find workflow file ci.yml on dev, try specifying a different ref'],
   ])('names a file the ref lacks as gh does (%o)', async (flags, message) => {
     ROUTES.set('GET /repos/o/r/actions/workflows/ci.yml', WORKFLOW)
-    await expect(workflowViewCmd(inv(['ci.yml'], { yaml: true, ...flags }))).rejects.toThrow(
+    await expect(workflowViewCmd(...args(['ci.yml'], { yaml: true, ...flags }))).rejects.toThrow(
       message,
     )
   })

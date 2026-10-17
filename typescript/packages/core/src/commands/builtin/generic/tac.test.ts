@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { tacGeneric } from './tac.ts'
 
 const ENC = new TextEncoder()
@@ -28,8 +28,8 @@ function streamOf(data: Uint8Array): (p: PathSpec) => AsyncIterable<Uint8Array> 
   }
 }
 
-function opts(flags: Record<string, unknown>, stdin: Uint8Array | null = null): CommandOpts {
-  return { flags, stdin } as unknown as CommandOpts
+function ctx(flags: Record<string, unknown>, stdin: Uint8Array | null = null): Context {
+  return { flags, stdin } as unknown as Context
 }
 
 describe('tac records', () => {
@@ -44,7 +44,7 @@ describe('tac records', () => {
     ],
   ])('%#', async (data, before, expected) => {
     const flags = before ? { before: true, separator: '|' } : { separator: '|' }
-    const [out] = await tacGeneric([], opts(flags, data), streamOf(new Uint8Array()))
+    const [out] = await tacGeneric([], ctx(flags, data), streamOf(new Uint8Array()))
     expect(await materialize(out)).toEqual(expected)
   })
 })
@@ -59,7 +59,7 @@ describe('tac failures and separators', () => {
     }
     const [out, io] = await tacGeneric(
       [PathSpec.fromStrPath('/bad'), PathSpec.fromStrPath('/good')],
-      opts({}),
+      ctx({}),
       stream,
     )
     expect(new TextDecoder().decode(await materialize(out))).toBe('b\na\n')
@@ -70,7 +70,7 @@ describe('tac failures and separators', () => {
   // Mirrors python's test_an_empty_separator_is_nul.
   it('reads an empty separator as NUL', async () => {
     const data = Uint8Array.of(0x61, 0x00, 0x62, 0x00)
-    const [out] = await tacGeneric([], opts({ separator: '' }, data), streamOf(new Uint8Array()))
+    const [out] = await tacGeneric([], ctx({ separator: '' }, data), streamOf(new Uint8Array()))
     expect(await materialize(out)).toEqual(Uint8Array.of(0x62, 0x00, 0x61, 0x00))
   })
 
@@ -79,7 +79,7 @@ describe('tac failures and separators', () => {
     const data = Uint8Array.of(0x61, 0x80, 0x62, 0x80)
     const [out] = await tacGeneric(
       [],
-      opts({ separator: '\udc80' }, data),
+      ctx({ separator: '\udc80' }, data),
       streamOf(new Uint8Array()),
     )
     expect(await materialize(out)).toEqual(Uint8Array.of(0x62, 0x80, 0x61, 0x80))

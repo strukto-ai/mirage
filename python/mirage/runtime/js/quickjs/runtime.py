@@ -140,7 +140,7 @@ class QuickJsRuntime(JsRuntime):
         # starts scriptArgs after it, and the -e branch still wins over
         # any filename (quickjs-ng v0.15.1 qjs.c).
         named = [args.prog] if args.prog else []
-        cwd = args.cwd or (context.cwd if context is not None else None)
+        cwd = args.cwd or (context.ctx.cwd if context is not None else None)
         source = args.code
         if cwd is not None and cwd.virtual != "/":
             # Evaluate scripts separately so their directive prologue still

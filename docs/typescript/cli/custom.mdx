@@ -13,7 +13,9 @@ Shell builtins and CLIs keep separate catalogs and dispatch. Both use
 
 ## Define a typed command
 
-Each handler receives one `CLIInvocation`. The example below shows the
+Each handler receives `(config, paths, texts, ctx)`: the installation's
+config, the operands, and the same `Context` a shell command gets. The
+example below shows the
 registration and parsing contract; the runnable [pager example](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/cli/pager.ts)
 adds a mutable incident service and shared cross-language coverage.
 
@@ -23,8 +25,9 @@ import {
   CLI,
   CLIHandler,
   CommandSpec,
-  type CLIInvocation,
+  type Context,
   IOResult,
+  type PathSpec,
   Workspace,
   z,
   type CommandFnResult,
@@ -34,10 +37,15 @@ import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 const PagerConfigSchema = z.strictObject({ account: z.enum(['engineering', 'support']) })
 type PagerConfig = z.infer<typeof PagerConfigSchema>
 
-function acknowledge(inv: CLIInvocation): CommandFnResult {
-  const { account } = inv.config as PagerConfig
-  const incidentId = inv.texts[0]
-  const by = new FlagView(inv.flags, inv.spec).asStr('by')
+function acknowledge(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): CommandFnResult {
+  const { account } = config as PagerConfig
+  const incidentId = texts[0]
+  const by = new FlagView(ctx.flags, ctx.spec).asStr('by')
   return [
     new TextEncoder().encode(`[${account}] acknowledged ${incidentId} by ${by}\n`),
     new IOResult(),
@@ -66,7 +74,7 @@ ws.registerCli('pager-support', PAGER, { account: 'support' })
 
 
 The same CLI can be installed for multiple accounts. Service IDs use textual
-operands; file operands use `type: 'path'`. Read flags through `new FlagView(inv.flags, inv.spec)`
+operands; file operands use `type: 'path'`. Read flags through `new FlagView(ctx.flags, ctx.spec)`
 so a read of an undeclared option fails rather than looking like an omitted flag.
 
 ## Choose the command shape
@@ -88,7 +96,7 @@ such as `--by` declares an option; a bare name declares a positional.
 such as `"ack"`, `"incident ack"`, or `""` for a single-command program.
 
 Declare `configModel` on the account `CLI`. Registration validates
-each installation, and `inv.config` holds that account's settings. Without a
+each installation, and `config` holds that account's settings. Without a
 config model, a typed CLI accepts no config and receives `null`.
 
 Mark mutating `CLIHandler` bindings `write: true`. This classifies the command for policy and
@@ -142,16 +150,16 @@ that with policy; shell functions can otherwise shadow it like they do in bash.
 
 ## Use workspace files
 
-Build the service client from `inv.config`. A CLI should not find a matching
+Build the service client from `config`. A CLI should not find a matching
 VFS to obtain credentials or a backend accessor. Reuse core service functions
 between CLI and VFS implementations where their behavior is the same.
 
-For file arguments such as uploads or attachments, use `inv.view`:
+For file arguments such as uploads or attachments, use `ctx`:
 
-| Entry point | Purpose |
+| Field | Purpose |
 | --- | --- |
 | `vfs` | The session's files, the same API as `session.vfs`: `read`, `write`, `stat`, `readdir`, `symlink`, `readlink` and the rest, with workspace policy and mount modes applied |
-| `sessionView` | Live, gated session reads and writes; `inv.env` is the frozen invocation snapshot |
+| `session` | Live, gated session reads and writes; `ctx.env` is the frozen invocation snapshot |
 
 `vfs.stat(path, undefined, { nofollow: true })` reports a link itself.
 `vfs.mountOf(path)` names the mount serving a path, `vfs.isMount(path)` says
@@ -162,10 +170,10 @@ learning the hidden name. A CLI that keeps paths in its own data, as git keeps
 its index, checks `vfs.isVisible(path)` before it prints one.
 
 Declare file options and operands with `type: 'path'`; preserve the resulting
-`PathSpec` values when calling `inv.view.vfs`. Use `PathSpec.fromStrPath(value, undefined, inv.cwd)` for a path string from
+`PathSpec` values when calling `ctx.vfs`. Use `PathSpec.fromStrPath(value, undefined, ctx.cwd)` for a path string from
 config, and derive paths with `join` and `parent`. Do not convert them to plain
-strings before filesystem access. Direct handler callers may omit the view;
-a handler requiring files must refuse when the needed entry point is absent.
+strings before filesystem access. Direct handler callers may leave
+`ctx.vfs` unset; a handler requiring files must refuse when it is absent.
 
 Account CLI writes, including failed writes that may have reached the service,
 expire mounted caches. Config-free filesystem CLIs rely on the dispatcher's
@@ -250,7 +258,7 @@ and [`CommandSpec` and `Argument`](https://github.com/strukto-ai/mirage/blob/mai
 | `CLI.handlers` | Canonical leaf paths mapped to `CLIHandler` bindings. |
 | `CLI.configModel` | Zod schema or normalizer for per-install account validation. |
 | `CLI.script`, `CLI.runtime` | Embedded script and optional runtime; used instead of typed handlers. |
-| `CLIHandler.fn` | Leaf handler, called as `fn(inv)`. |
+| `CLIHandler.fn` | Leaf handler, called as `fn(config, paths, texts, ctx)`. |
 | `CLIHandler.write`, `CLIHandler.limit` | Mutation classification and optional execution-limit category. |
 
 ### `CommandSpec`
@@ -281,18 +289,20 @@ This follows argparse's naming conventions and supports a subset of its
 features. Positional defaults and variadic options are unsupported; `append`
 collects single option values, while `extend` flattens fixed groups.
 
-### `CLIInvocation`
+### Handler arguments and `Context`
 
-| Field | Handler view |
+| Argument or field | Handler view |
 | --- | --- |
 | `config` | This installation's validated config, or `null`. |
-| `argv` | Verbatim words after the installed head word, including subcommands. |
 | `paths` | Cwd-resolved path operands. |
 | `texts` | Textual and numeric operands in declaration order. |
-| `flags` | Group and leaf flags keyed by normalized property name. |
-| `stdin` | Piped bytes or an async byte source, or `null`. |
-| `env` | Frozen environment snapshot for this invocation. |
-| `view` | Optional workspace state-plane access for verbs that explicitly need it. |
+| `ctx.argv` | Verbatim words after the installed head word, including subcommands. |
+| `ctx.flags` | Group and leaf flags keyed by normalized property name. |
+| `ctx.spec` | The resolved leaf grammar. |
+| `ctx.stdin` | Piped bytes or an async byte source, or `null`. |
+| `ctx.cwd` | The session's working directory. |
+| `ctx.env` | Frozen environment snapshot for this invocation. |
+| `ctx.vfs`, `ctx.session` | The session's files and live session, for verbs that need them; absent outside a workspace. |
 
 
 ## Verify a custom CLI

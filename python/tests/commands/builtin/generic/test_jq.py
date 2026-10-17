@@ -14,7 +14,7 @@ from mirage.commands.builtin.generic.jq import (
     read_options,
     run_status,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
@@ -96,15 +96,15 @@ async def _walk(*words: str) -> JqOptions | bytes:
 
 
 async def _options(*words: str) -> JqOptions:
-    opts = await _walk(*words)
-    assert isinstance(opts, JqOptions)
-    return opts
+    ctx = await _walk(*words)
+    assert isinstance(ctx, JqOptions)
+    return ctx
 
 
 async def _bound(**flags: FlagValue) -> dict[str, str]:
-    opts = await read_options(_spec_flags(**flags), [], False, _unread)
-    assert isinstance(opts, JqOptions)
-    return dict(opts.named_args)
+    ctx = await read_options(_spec_flags(**flags), [], False, _unread)
+    assert isinstance(ctx, JqOptions)
+    return dict(ctx.named_args)
 
 
 def _printed(*outputs: str) -> int:
@@ -136,9 +136,9 @@ def test_join_and_nul_output_imply_raw():
 
 @pytest.mark.asyncio
 async def test_indent_minus_one_is_tab_indentation():
-    opts = await read_options(_spec_flags(indent="-1"), [], False, _unread)
-    assert opts.tab
-    assert opts.indent == 2
+    ctx = await read_options(_spec_flags(indent="-1"), [], False, _unread)
+    assert ctx.tab
+    assert ctx.indent == 2
 
 
 @pytest.mark.parametrize(
@@ -210,9 +210,9 @@ def test_indent_refuses_any_other_word_in_jqs_words(word):
     ],
 )
 async def test_the_last_layout_option_typed_wins(words, layout):
-    opts = await _options(*words, ".")
+    ctx = await _options(*words, ".")
     assert (
-        "compact" if opts.compact else "tab" if opts.tab else opts.indent
+        "compact" if ctx.compact else "tab" if ctx.tab else ctx.indent
     ) == layout
 
 
@@ -253,7 +253,7 @@ async def test_argjson_refuses_invalid_json_with_jq_1_8s_hint(value):
 
 @pytest.mark.asyncio
 async def test_bindings_keep_the_order_they_were_typed_in():
-    opts = await _options(
+    ctx = await _options(
         "-n",
         "--slurpfile",
         "s",
@@ -269,7 +269,7 @@ async def test_bindings_keep_the_order_they_were_typed_in():
         "2",
         "$ARGS.named",
     )
-    assert list(opts.named_args.items()) == [
+    assert list(ctx.named_args.items()) == [
         ("s", "[1,2,3,4]"),
         ("a", '"1"'),
         ("r", '"1"'),
@@ -298,8 +298,8 @@ async def test_bindings_keep_the_order_they_were_typed_in():
     ],
 )
 async def test_the_first_binding_of_a_name_wins(words, text):
-    opts = await _options("-n", *words, "$v")
-    assert opts.named_args == {"v": text}
+    ctx = await _options("-n", *words, "$v")
+    assert ctx.named_args == {"v": text}
 
 
 @pytest.mark.asyncio
@@ -313,10 +313,10 @@ async def test_the_first_binding_of_a_name_wins(words, text):
 )
 async def test_a_binding_of_a_taken_name_is_never_read(words):
     bag, texts = _parsed_line("-n", "--arg", "v", "1", *words, "$v")
-    opts = await read_options(
+    ctx = await read_options(
         FlagView(bag, spec=SPECS["jq"]), texts, False, _unread
     )
-    assert opts.named_args == {"v": '"1"'}
+    assert ctx.named_args == {"v": '"1"'}
 
 
 @pytest.mark.parametrize(
@@ -396,24 +396,24 @@ def test_jsonargs_rejects_invalid_json_in_jqs_words():
 async def test_each_operand_takes_the_mode_typed_last_before_it(
     words, positional
 ):
-    opts = await _options("-n", ".", *words)
-    assert opts.positional_args == positional
+    ctx = await _options("-n", ".", *words)
+    assert ctx.positional_args == positional
 
 
 @pytest.mark.asyncio
 async def test_the_program_comes_first_whatever_the_mode():
-    opts = await _options(
+    ctx = await _options(
         "-n", "--jsonargs", ".", "1", "--args", "2", "--jsonargs", "3"
     )
-    assert opts.positional_args == ("1", '"2"', "3")
+    assert ctx.positional_args == ("1", '"2"', "3")
 
 
 @pytest.mark.asyncio
 async def test_a_from_file_program_leaves_every_operand_to_the_modes():
-    opts = await _options(
+    ctx = await _options(
         "-n", "-f", "/d/prog.jq", "/d/a.json", "--args", "b", "--jsonargs", "2"
     )
-    assert opts.positional_args == ('"b"', "2")
+    assert ctx.positional_args == ('"b"', "2")
 
 
 @pytest.mark.asyncio
@@ -430,10 +430,10 @@ async def test_a_from_file_program_leaves_every_operand_to_the_modes():
 async def test_keyword_operands_come_after_every_option(
     flags, has_program_file, texts, positional
 ):
-    opts = await read_options(
+    ctx = await read_options(
         _spec_flags(**flags), texts, has_program_file, _unread
     )
-    assert opts.positional_args == positional
+    assert ctx.positional_args == positional
 
 
 async def _flagged(
@@ -721,7 +721,7 @@ async def _run_program_file(*words: str) -> tuple[bytes, IOResult]:
     bag = parse_to_kwargs(parsed)
     bag["from_file"] = _path(str(bag["from_file"]))
     source, io = await jq_generic(
-        [], parsed.texts(), CommandOpts(flags=bag), _read_bytes, _read_stream
+        [], parsed.texts(), Context(flags=bag), _read_bytes, _read_stream
     )
     return (await materialize(source) if source is not None else b""), io
 

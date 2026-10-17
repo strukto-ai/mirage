@@ -22,7 +22,7 @@ from typing import NamedTuple
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.general.expr import digits_of_int, int_of_digits
 from mirage.commands.builtin.utils.strtod import strtod_whole
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
@@ -812,9 +812,9 @@ async def seq(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(opts.flags, spec=SPECS["seq"])
+    fl = FlagView(ctx.flags, spec=SPECS["seq"])
     if not texts:
         raise missing_operand_error(CommandName.SEQ, None)
     if len(texts) > 3:

@@ -17,7 +17,7 @@ import { noMount } from '../../../errors/fs.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize, type IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { grepGeneric, labelled } from './grep.ts'
 import { prependStderr } from '../utils/output.ts'
 import { yieldBytes } from '../../../io/stream.ts'
@@ -36,12 +36,12 @@ function spec(path: string): PathSpec {
   })
 }
 
-function opts(flags: Record<string, string | boolean | number | string[]>): CommandOpts {
+function ctx(flags: Record<string, string | boolean | number | string[]>): Context {
   return {
     stdin: null,
     flags,
-    cwd: '/',
-  } as unknown as CommandOpts
+    cwd: PathSpec.fromStrPath('/'),
+  } as unknown as Context
 }
 
 const stat = (p: PathSpec): Promise<FileStat> =>
@@ -76,7 +76,7 @@ async function runGrep(
   flags: Record<string, string | boolean | number | string[]>,
   paths: PathSpec[] = [spec('/data')],
 ): Promise<[GrepOut, IOResult]> {
-  const result = await grepGeneric('grep', paths, ['alice'], opts(flags), stat, readdir, stream)
+  const result = await grepGeneric('grep', paths, ['alice'], ctx(flags), stat, readdir, stream)
   const [out, io] = result as [GrepOut, IOResult]
   return [out === null ? null : await materialize(out), io]
 }
@@ -128,7 +128,7 @@ describe('grepGeneric excluded entries', () => {
       'grep',
       [spec('/data')],
       ['alice'],
-      opts({ recursive: true, exclude_dir: ['0ghost'] }),
+      ctx({ recursive: true, exclude_dir: ['0ghost'] }),
       probe,
       listing,
       stream,
@@ -157,7 +157,7 @@ describe('labelled', () => {
       { no_filename: true, with_filename: true },
     ],
   ])('asks for filenames only when the line did not decide: %j', (flags, expected) => {
-    const out = labelled(opts(flags))
+    const out = labelled(ctx(flags))
     expect(out.flags).toEqual(expected)
     expect(Object.keys(out.flags)).toEqual(Object.keys(expected))
   })
@@ -175,7 +175,7 @@ describe('grepGeneric failures that are not filesystem errors', () => {
       'grep',
       paths,
       ['alice'],
-      opts(flags),
+      ctx(flags),
       stat,
       readdir,
       broken,
@@ -219,7 +219,7 @@ describe('grepGeneric no messages', () => {
       'grep',
       paths.map(spec),
       ['alice'],
-      opts({ no_messages: true, ...flags }),
+      ctx({ no_messages: true, ...flags }),
       probe,
       readdir,
       stream,
@@ -242,7 +242,7 @@ describe('grepGeneric no messages', () => {
         'grep',
         [spec('/data/bad.txt')],
         ['alice'],
-        opts({ no_messages: noMessages }),
+        ctx({ no_messages: noMessages }),
         stat,
         readdir,
         unreadable,
@@ -269,7 +269,7 @@ it.each([['/data/a.txt'], ['/data/a.txt', '/data/b.txt'], ['/data']])(
       'grep',
       paths.map(spec),
       ['alice'],
-      opts({ no_messages: true, recursive: true }),
+      ctx({ no_messages: true, recursive: true }),
       stat,
       readdir,
       broken,
@@ -295,7 +295,7 @@ it.each(['stat', 'readdir', 'read'] as const)(
       'grep',
       [spec('/data')],
       ['alice'],
-      opts({ no_messages: true, recursive: true }),
+      ctx({ no_messages: true, recursive: true }),
       probe,
       listing,
       broken,
@@ -333,7 +333,7 @@ describe('grepGeneric streaming results', () => {
         'grep',
         [...(missing ? ['/missing'] : []), ...paths].map(spec),
         ['alice'],
-        opts(flags),
+        ctx(flags),
         probe,
         readdir,
         read,
@@ -362,7 +362,7 @@ describe('grepGeneric streaming results', () => {
         'grep',
         [spec('/data/a.txt')],
         ['alice'],
-        { ...opts({ no_messages: noMessages }), env: { LC_ALL: 'C.UTF-8' } },
+        { ...ctx({ no_messages: noMessages }), env: { LC_ALL: 'C.UTF-8' } },
         stat,
         readdir,
         read,
@@ -381,7 +381,7 @@ describe('grepGeneric streaming results', () => {
       'grep',
       [spec('/data/bad.txt'), spec('/data/a.txt')],
       ['*alice'],
-      opts({ extended_regexp: true }),
+      ctx({ extended_regexp: true }),
       stat,
       readdir,
       stream,
@@ -404,7 +404,7 @@ it('settles late binary detection after a match', async () => {
     'grep',
     [spec('/data/a.txt')],
     ['alice'],
-    opts({ args_I: true }),
+    ctx({ args_I: true }),
     stat,
     readdir,
     read,
@@ -425,7 +425,7 @@ it('flushes a binary notice on early close', async () => {
     'grep',
     [spec('/data/a.txt')],
     ['alice'],
-    { ...opts({}), env: { LC_ALL: 'C.UTF-8' } },
+    { ...ctx({}), env: { LC_ALL: 'C.UTF-8' } },
     stat,
     readdir,
     read,

@@ -17,20 +17,20 @@ import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { unreadableStdin } from '../../../shell/descriptors.ts'
 import { enoent } from '../../../errors/fs.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { buildConfig, sortLines } from '../sort_keys.ts'
 import { parseFlags, sortGeneric } from './sort.ts'
 
 const DEC = new TextDecoder()
 
-async function stderrOf(flags: CommandOpts['flags']): Promise<[string, number]> {
-  const opts = {
+async function stderrOf(flags: Context['flags']): Promise<[string, number]> {
+  const ctx = {
     stdin: new TextEncoder().encode('b\na\n'),
     flags,
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     vfs: { kind: 'ram' } as never,
-  } as CommandOpts
-  const result = await sortGeneric([], opts, () => {
+  } as Context
+  const result = await sortGeneric([], ctx, () => {
     throw new Error('paths are empty; the source is stdin')
   })
   if (result === null) throw new Error('sort returned no result')
@@ -91,17 +91,17 @@ function bytes(text: string): Uint8Array {
 interface Run {
   paths?: PathSpec[]
   files?: Record<string, Source>
-  flags?: CommandOpts['flags']
-  stdin?: CommandOpts['stdin']
+  flags?: Context['flags']
+  stdin?: Context['stdin']
 }
 
 async function run(r: Run): Promise<[string, string, number]> {
-  const opts = {
+  const ctx = {
     stdin: r.stdin ?? null,
     flags: r.flags ?? {},
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     vfs: { kind: 'ram' } as never,
-  } as CommandOpts
+  } as Context
   const files = r.files ?? {}
   async function* stream(path: PathSpec): AsyncIterable<Uint8Array> {
     await Promise.resolve()
@@ -110,7 +110,7 @@ async function run(r: Run): Promise<[string, string, number]> {
     if (source instanceof Error) throw source
     yield source
   }
-  const result = await sortGeneric(r.paths ?? [], opts, stream)
+  const result = await sortGeneric(r.paths ?? [], ctx, stream)
   if (result === null) throw new Error('sort returned no result')
   const [out, io] = result
   const stdout = out === null ? '' : DEC.decode(await materialize(out))
@@ -274,7 +274,7 @@ describe('sort past one chunk', () => {
     (_, i) =>
       `${words[i % words.length] ?? ''} ${words[(i * 7) % words.length] ?? ''} ${String(i % 5)}`,
   )
-  it.each<CommandOpts['flags']>([
+  it.each<Context['flags']>([
     {},
     { reverse: true },
     { unique: true },

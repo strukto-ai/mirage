@@ -15,7 +15,7 @@
 import type { Files } from '../../../../workspace/files.ts'
 import { type PathSpec, type FileStat } from '../../../../types.ts'
 import type { Zone } from '../../../../utils/timezone.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { Context } from '../../../config.ts'
 import type { GitError } from './errors.ts'
 
 /**
@@ -249,7 +249,11 @@ export interface DateMode {
  * git's refusal for a verb a read-only mount turned down, built from the line
  * and the repository it opened, null when it opened none.
  */
-export type ReadOnlyRefusal = (inv: CLIInvocation, location: RepoLocation | null) => GitError
+export type ReadOnlyRefusal = (
+  texts: string[],
+  ctx: Context,
+  location: RepoLocation | null,
+) => GitError
 
 /** Where a chain of symbolic refs ends: the last name reached, and whether any hop was symbolic. */
 export interface SymbolicEnd {

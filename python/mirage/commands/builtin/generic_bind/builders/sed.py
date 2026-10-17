@@ -21,7 +21,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -40,14 +40,14 @@ async def sed(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     return await sed_generic(
         paths,
         list(texts),
-        opts,
-        partial(_resolve, ops, accessor, opts.index),
-        bound_op(ops.read_stream, accessor, opts.index),
+        ctx,
+        partial(_resolve, ops, accessor, ctx.index),
+        bound_op(ops.read_stream, accessor, ctx.index),
         (partial(ops.write, accessor) if ops.write is not None else None),
     )
 

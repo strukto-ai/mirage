@@ -6,10 +6,10 @@ import { compilePosixRegex, posixLineMatcher } from '../../../../utils/posix.ts'
 import { compilePattern } from '../../../builtin/grep_pattern.ts'
 import { RegexSyntax } from '../../../builtin/types.ts'
 import { BreError, PosixSyntax, translateEre } from '../../../builtin/utils/bre.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { UsageError as PatternError } from '../../../errors.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { requireWorkTree } from './discover.ts'
 import {
   NoWorkspaceError,
@@ -143,23 +143,28 @@ async function searchEntries(repo: Repo, name: string): Promise<Map<string, Tree
 }
 
 /** Search tracked working files, index blobs, or named historical trees. */
-export async function grep(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function grep(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   try {
-    checkSwitches(inv, inv.texts.slice(0, 1))
-    let words = [...inv.texts]
+    checkSwitches(ctx, texts.slice(0, 1))
+    let words = [...texts]
     let patterns = fl.asList('e')
     const origin = patterns.length ? '-e option' : 'command line'
     let paths: string[]
     let marked: boolean
     if (patterns.length) {
-      ;[words, paths] = splitMarked(inv.texts, inv.argv)
-      marked = inv.argv.includes('--')
+      ;[words, paths] = splitMarked(texts, ctx.argv ?? [])
+      marked = (ctx.argv ?? []).includes('--')
       if (words.at(-1) === '--') words.pop()
     } else {
       const pattern = words.shift()
       if (pattern === undefined) {
-        if (fl.asBool('h')) throw new UsageError(verbUsage(inv), '')
+        if (fl.asBool('h')) throw new UsageError(verbUsage(ctx), '')
         throw new GitError('no pattern given')
       }
       patterns = [pattern]
@@ -168,9 +173,8 @@ export async function grep(inv: CLIInvocation): Promise<CommandFnResult> {
       paths = words.slice(cut + 1)
       words = words.slice(0, cut)
     }
-    const flags = parseFlags(fl, patterns, origin, utf8Locale(inv.env))
-    const view = inv.view ?? {}
-    const repo = await opened(fl, view)
+    const flags = parseFlags(fl, patterns, origin, utf8Locale(ctx.env))
+    const repo = await opened(ctx, fl)
     const start = startPoint(fl).virtual
     const prefix = repoRelative(repo.location, start, '.')
     const cached = fl.asBool('cached')
@@ -194,8 +198,8 @@ export async function grep(inv: CLIInvocation): Promise<CommandFnResult> {
     }
     if (sources.length && cached) throw new GitError('both --cached and trees are given')
     if (!sources.length && !cached) {
-      if (view.vfs === undefined) throw new NoWorkspaceError()
-      await requireWorkTree(view.vfs, repo.location, fl.asPath('work_tree') !== undefined)
+      if (ctx.vfs === undefined) throw new NoWorkspaceError()
+      await requireWorkTree(ctx.vfs, repo.location, fl.asPath('work_tree') !== undefined)
     }
     const specs = pathspecPatterns(repo.location, start, paths)
     if (!specs.length) specs.push(prefix)

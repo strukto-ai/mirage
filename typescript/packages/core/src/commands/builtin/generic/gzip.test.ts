@@ -36,7 +36,7 @@ it.each([false, true])('compression skips suffixes or reports late errors: %s', 
   }
   const result = await gzipGeneric(
     [PathSpec.fromStrPath(name), PathSpec.fromStrPath('/good')],
-    { flags: {}, stdin: null, cwd: '/' },
+    { flags: {}, stdin: null, cwd: PathSpec.fromStrPath('/') },
     read,
     async (path, data) => {
       writes.set(path.virtual, await materialize(data))

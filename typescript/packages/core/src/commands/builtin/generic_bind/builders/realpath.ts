@@ -15,12 +15,12 @@
 import { realpathGeneric } from '../../generic/realpath.ts'
 import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const realpath: GenericCommandFn = async (ops, accessor, paths, texts, opts) =>
+const realpath: GenericCommandFn = async (ops, accessor, paths, texts, ctx) =>
   realpathGeneric(
-    await resolveGlobOf(ops)(accessor, paths, opts.index ?? undefined),
+    await resolveGlobOf(ops)(accessor, paths, ctx.index ?? undefined),
     texts,
-    opts,
-    (p) => ops.stat(accessor, p, opts.index ?? undefined),
+    ctx,
+    (p) => ops.stat(accessor, p, ctx.index ?? undefined),
   )
 
 export const BUILDER: GenericCommand = {

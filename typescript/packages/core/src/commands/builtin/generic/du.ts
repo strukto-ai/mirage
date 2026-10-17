@@ -15,7 +15,7 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { PathSpec, type Visibility } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { IOResult, type SizedRun } from '../../../io/types.ts'
 import { pathsScoped } from '../../../view/namespace_view.ts'
@@ -111,8 +111,8 @@ function line(size: number, human: boolean, label: string): string {
  * ahead of the mutually-exclusive checks that run once the whole line is
  * parsed. All three exit 1, du's usage-error code.
  */
-export function parseFlags(opts: CommandOpts): DuFlags {
-  const fl = new FlagView(opts.flags, specOf('du'))
+export function parseFlags(ctx: Context): DuFlags {
+  const fl = new FlagView(ctx.flags, specOf('du'))
   const s = fl.asBool('s')
   const a = fl.asBool('a')
   const raw = fl.asStr('max_depth')
@@ -361,7 +361,7 @@ export function rollup(
   // `dirs`: paths that are directories even though no leaf may point at
   // them: the directories a walk met (an empty one, or one it could not
   // open) and the roots of descendant mounts, which still get GNU's `0` row.
-  opts: {
+  ctx: {
     all: boolean
     maxDepth: number | null
     dirs?: readonly string[]
@@ -370,7 +370,7 @@ export function rollup(
 ): [string, number][] {
   const rootKey = norm(root)
   const prefix = rootKey.endsWith('/') ? rootKey : `${rootKey}/`
-  const separateDirs = opts.separateDirs === true
+  const separateDirs = ctx.separateDirs === true
   const sizes = new Map<string, number>()
   const files = new Map<string, number>()
   for (const [leaf, size] of entries) {
@@ -395,7 +395,7 @@ export function rollup(
 
   // Set only when absent: a hinted directory that does hold leaves
   // already carries their total.
-  for (const hinted of opts.dirs ?? []) {
+  for (const hinted of ctx.dirs ?? []) {
     let node = norm(hinted)
     while (node !== rootKey && node.startsWith(prefix)) {
       if (!sizes.has(node)) sizes.set(node, 0)
@@ -406,7 +406,7 @@ export function rollup(
   // Keyed backends (S3, GridFS) carry a zero-byte marker object for a
   // directory, which arrives here as a leaf. Under -a it must not replace
   // that directory's computed total, so sums win on a clash.
-  const nodes = opts.all ? new Map(files) : new Map<string, number>()
+  const nodes = ctx.all ? new Map(files) : new Map<string, number>()
   for (const [node, size] of sizes) nodes.set(node, size)
   const kids = new Map<string, string[]>()
   for (const node of nodes.keys()) {
@@ -424,7 +424,7 @@ export function rollup(
     if (frame === undefined) break
     const [node, expanded] = frame
     if (expanded) {
-      const deep = opts.maxDepth !== null && depthOf(node, rootKey) > opts.maxDepth
+      const deep = ctx.maxDepth !== null && depthOf(node, rootKey) > ctx.maxDepth
       if (node !== rootKey && !deep) order.push([node, nodes.get(node) ?? 0])
       continue
     }
@@ -644,7 +644,7 @@ export async function du(
  */
 export async function duGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   resolveGlob: (targets: PathSpec[]) => Promise<PathSpec[]>,
   stat: (p: PathSpec) => Promise<unknown>,
   computeSize: ComputeSize,
@@ -655,15 +655,15 @@ export async function duGeneric(
   inaccessible?: () => readonly (readonly [string, string | null])[],
   repeated?: (p: PathSpec) => boolean,
 ): Promise<[Uint8Array, IOResult]> {
-  const flags = parseFlags(opts)
+  const flags = parseFlags(ctx)
   const { present, missing } = await duOperands(
     paths,
-    opts.cwd,
+    ctx.cwd.virtual,
     resolveGlob,
     stat,
-    (p) => duHasContent(opts.vfs?.vis() ?? undefined, computeEntries, p),
-    opts.mountPrefix,
-    opts.statPath ?? null,
+    (p) => duHasContent(ctx.vfs?.vis() ?? undefined, computeEntries, p),
+    ctx.mountPrefix,
+    ctx.statPath ?? null,
   )
   const out = await du(
     present,
@@ -672,10 +672,10 @@ export async function duGeneric(
     computeEntries,
     missing,
     truncated,
-    mountsOf(opts) ?? null,
+    mountsOf(ctx) ?? null,
     unreadable,
     directories,
-    opts.vfs,
+    ctx.vfs,
     inaccessible,
     repeated,
   )

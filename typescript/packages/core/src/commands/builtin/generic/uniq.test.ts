@@ -11,23 +11,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { PathSpec } from '../../../types.ts'
 import { describe, expect, it } from 'vitest'
 
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { ensureStream } from '../../../io/stream.ts'
 import { materialize, type ByteSource } from '../../../io/types.ts'
 import { uniqGeneric } from './uniq.ts'
 
 const DEC = new TextDecoder()
 
-async function stderrOf(flags: CommandOpts['flags']): Promise<[string, number]> {
-  const opts = {
+async function stderrOf(flags: Context['flags']): Promise<[string, number]> {
+  const ctx = {
     stdin: new TextEncoder().encode('a\na\nb\n'),
     flags,
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     vfs: { kind: 'ram' } as never,
-  } as CommandOpts
-  const result = await uniqGeneric([], opts, () => {
+  } as Context
+  const result = await uniqGeneric([], ctx, () => {
     throw new Error('paths are empty; the source is stdin')
   })
   if (result === null) throw new Error('uniq returned no result')
@@ -100,15 +101,15 @@ describe('uniq argument refusals carry GNU candidate blocks', () => {
   })
 })
 
-async function run(stdin: ByteSource, flags: CommandOpts['flags']) {
-  const result = await uniqGeneric([], { stdin, flags, cwd: '/' }, () => {
+async function run(stdin: ByteSource, flags: Context['flags']) {
+  const result = await uniqGeneric([], { stdin, flags, cwd: PathSpec.fromStrPath('/') }, () => {
     throw new Error('no file operand')
   })
   if (result === null) throw new Error('uniq returned no result')
   return result
 }
 
-it.each<[CommandOpts['flags'], string, string]>([
+it.each<[Context['flags'], string, string]>([
   [{}, 'a\n', 'a\n'],
   [{ count: true }, 'a\na\nb\n', '      2 a\n'],
   [{ repeated: true }, 'a\na\n', 'a\n'],
@@ -145,7 +146,7 @@ async function* oneByteChunks(data: string): AsyncIterable<Uint8Array> {
   for (const byte of new TextEncoder().encode(data)) yield Uint8Array.of(byte)
 }
 
-it.each<[CommandOpts['flags'], string]>([
+it.each<[Context['flags'], string]>([
   [{ ignore_case: true }, 'A\nb\nC\n'],
   [{ ignore_case: true, count: true }, '      3 A\n      1 b\n      2 C\n'],
   [{ ignore_case: true, all_repeated: 'separate' }, 'A\na\nA\n\nC\nc\n'],

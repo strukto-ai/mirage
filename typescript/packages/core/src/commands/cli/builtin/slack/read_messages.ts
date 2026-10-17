@@ -15,16 +15,21 @@
 import { FlagView } from '../../../spec/flag_view.ts'
 import { fetchRecentMessages } from '../../../../core/slack/history.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 import { slackAccessor } from '../../../../accessor/slack.ts'
 
 const ENC = new TextEncoder()
 
-export async function readMessages(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function readMessages(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const messages = await fetchRecentMessages(
-    slackAccessor(inv.config),
+    slackAccessor(config),
     fl.asStr('channel') ?? '',
     fl.asInt('limit') ?? 20,
   )

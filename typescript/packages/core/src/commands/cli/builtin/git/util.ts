@@ -14,7 +14,7 @@
 import { compileSpec } from '../../../spec/compile.ts'
 import { CommandSpec } from '../../../spec/types.ts'
 
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { HEAD } from './constants.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
 import { IOResult } from '../../../../io/types.ts'
@@ -24,7 +24,6 @@ import {
   UnrecognizedArgumentError,
   UsageError,
 } from './errors.ts'
-import { type CLIInvocation } from '../../types.ts'
 import { HELP_SWITCH, gitOptionRefusal, gitUsage } from '../../refusal.ts'
 
 import { PathSpec } from '../../../../types.ts'
@@ -168,19 +167,19 @@ export function offending(
  * verbs and on stderr for a few (`diff`); every other word is the caller's to
  * refuse in the verb's own words. See `offending` for which words count.
  *
- * @param inv the invocation, carrying its leaf
+ * @param ctx the line's context, carrying its leaf
  * @param texts positional text operands, as typed
  * @param helpStream where `-h` puts the usage block
  * @throws UsageError the line asked for the usage block
  */
 export function optionOperand(
-  inv: CLIInvocation,
+  ctx: Context,
   texts: readonly string[],
   helpStream: typeof STDOUT | typeof STDERR = STDOUT,
 ): string | null {
-  const word = offending(texts, escaped(inv.argv))
+  const word = offending(texts, escaped(ctx.argv ?? []))
   if (word === HELP_SWITCH) {
-    const usage = verbUsage(inv)
+    const usage = verbUsage(ctx)
     if (helpStream === STDOUT) throw new UsageError(usage, '')
     throw new UsageError('', usage)
   }
@@ -193,21 +192,21 @@ export function optionOperand(
  * For the verbs git words without a usage block (`log`, `show`, `reflog`),
  * whose refusal names the whole word (git 2.50.1).
  *
- * @param inv the invocation, carrying its leaf
+ * @param ctx the line's context, carrying its leaf
  * @param texts positional text operands, as typed
  */
-export function checkOperands(inv: CLIInvocation, texts: readonly string[]): void {
-  const word = optionOperand(inv, texts)
+export function checkOperands(ctx: Context, texts: readonly string[]): void {
+  const word = optionOperand(ctx, texts)
   if (word !== null) throw new UnrecognizedArgumentError(word)
 }
 
 /**
  * The verb's usage block, as parse-options prints it.
  *
- * @param inv the invocation, carrying its leaf
+ * @param ctx the line's context, carrying its leaf
  */
-export function verbUsage(inv: CLIInvocation): string {
-  const spec = inv.spec ?? new CommandSpec({ name: '' })
+export function verbUsage(ctx: Context): string {
+  const spec = ctx.spec ?? new CommandSpec({ name: '' })
   return gitUsage(spec.name, spec)
 }
 
@@ -219,13 +218,13 @@ export function verbUsage(inv: CLIInvocation): string {
  * block, refuse a boolean handed a value on one line, and print the usage block
  * on stdout for `-h`; see `gitOptionRefusal`. Measured on git 2.50.1.
  *
- * @param inv the invocation, carrying its leaf
+ * @param ctx the line's context, carrying its leaf
  * @param texts positional text operands, as typed
  */
-export function checkSwitches(inv: CLIInvocation, texts: readonly string[]): void {
-  const word = offending(texts, escaped(inv.argv), switches(inv))
+export function checkSwitches(ctx: Context, texts: readonly string[]): void {
+  const word = offending(texts, escaped(ctx.argv ?? []), switches(ctx))
   if (word !== null) {
-    const spec = inv.spec ?? new CommandSpec({ name: '' })
+    const spec = ctx.spec ?? new CommandSpec({ name: '' })
     throw new UsageError(...gitOptionRefusal(word, spec.name, spec))
   }
 }
@@ -236,11 +235,11 @@ export function checkSwitches(inv: CLIInvocation, texts: readonly string[]): voi
  * Read off the spec the line was parsed against, so the set is the verb's
  * own and never a copy of it; empty where no executor built the record.
  *
- * @param inv the invocation, carrying its leaf
+ * @param ctx the line's context, carrying its leaf
  */
-export function switches(inv: CLIInvocation): ReadonlySet<string> {
+export function switches(ctx: Context): ReadonlySet<string> {
   const letters = new Set<string>()
-  for (const option of inv.spec === undefined ? [] : compileSpec(inv.spec).options) {
+  for (const option of ctx.spec === undefined ? [] : compileSpec(ctx.spec).options) {
     for (const name of option.names) if (name.length === 2) letters.add(name.slice(1))
   }
   return letters

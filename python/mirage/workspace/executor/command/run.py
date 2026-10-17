@@ -15,7 +15,7 @@
 import functools
 import logging
 
-from mirage.commands.config import ExecContext
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import CommandSpec, FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
@@ -196,7 +196,7 @@ async def run_nested_line(
     execute_fn: ExecuteLine,
     session_id: str,
     line: str,
-    stdin: ByteSource | None,
+    stdin: ByteSource | None = None,
 ) -> IOResult:
     """Run a line a command handler asked for, in the handler's session.
 
@@ -301,15 +301,10 @@ async def run_on_mount(
             paths,
             texts,
             flag_kwargs,
-            ExecContext(
+            Context(
                 access=session_access(session),
-                limit_override=(
-                    session.command_limits.get(cmd_name)
-                    or mount.command_limits.get(cmd_name)
-                    or registry.command_limits.get(cmd_name)
-                ),
                 stdin=stdin,
-                cwd=session.cwd,
+                cwd=PathSpec.from_str_path(session.cwd),
                 dispatch=dispatch,
                 vfs=Files(
                     registry.mount_rows(),
@@ -319,7 +314,7 @@ async def run_on_mount(
                 ),
                 session_id=session.session_id,
                 env=env_snapshot(session),
-                session_view=session_view(
+                session=session_view(
                     session,
                     registry.policies,
                     diagnostics=context.frame.diagnostics,
@@ -342,6 +337,11 @@ async def run_on_mount(
                     else None
                 ),
                 argv=argv,
+            ),
+            limit_override=(
+                session.command_limits.get(cmd_name)
+                or mount.command_limits.get(cmd_name)
+                or registry.command_limits.get(cmd_name)
             ),
         )
     except UsageError as exc:

@@ -16,17 +16,22 @@ import { issueCreate, resolveTeam } from '../../../../../core/linear/client.ts'
 import { normalizeIssue, toJsonBytes } from '../../../../../core/linear/normalize.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { IOResult } from '../../../../../io/types.ts'
-import type { CommandFnResult } from '../../../../config.ts'
-import type { CLIInvocation } from '../../../types.ts'
+import type { CommandFnResult, Context } from '../../../../config.ts'
+import type { PathSpec } from '../../../../../types.ts'
 import { linearTransport, textOrStdin } from '../util.ts'
 
-export async function create(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const transport = linearTransport(inv.config)
+export async function create(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const transport = linearTransport(config)
   const team = await resolveTeam(transport, fl.asStr('team') ?? '')
   let description: string | null = null
-  if (fl.asStr('description') !== undefined || inv.stdin !== null) {
-    description = await textOrStdin(fl.asStr('description'), inv.stdin, 'description is required')
+  if (fl.asStr('description') !== undefined || ctx.stdin !== null) {
+    description = await textOrStdin(fl.asStr('description'), ctx.stdin, 'description is required')
   }
   const issue = await issueCreate(transport, {
     teamId: typeof team.id === 'string' ? team.id : '',

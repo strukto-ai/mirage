@@ -15,8 +15,8 @@
 import { readlinkGeneric } from '../../generic/readlink.ts'
 import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const readlink: GenericCommandFn = async (ops, accessor, paths, texts, opts) =>
-  readlinkGeneric(await resolveGlobOf(ops)(accessor, paths, opts.index ?? undefined), texts, opts)
+const readlink: GenericCommandFn = async (ops, accessor, paths, texts, ctx) =>
+  readlinkGeneric(await resolveGlobOf(ops)(accessor, paths, ctx.index ?? undefined), texts, ctx)
 
 export const BUILDER: GenericCommand = {
   name: 'readlink',

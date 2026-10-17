@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { command, Command } from './config.ts'
 import { CommandSpec } from './spec/types.ts'
 import { IOResult, materialize } from '../io/types.ts'
+import { context } from '../workspace/fixtures/context.ts'
 
 const noopFn = (): Promise<[Uint8Array, IOResult]> =>
   Promise.resolve([new Uint8Array(), new IOResult()])
@@ -86,11 +87,7 @@ describe('command() registers multiple mounts', () => {
         return Promise.resolve([new Uint8Array(), new IOResult()])
       },
     })
-    const opts = {
-      stdin: null,
-      flags: { help: true },
-      cwd: '/',
-    }
+    const opts = context({ flags: { help: true } })
     const cmd = cmds[0]
     if (cmd === undefined) throw new Error('expected a registered command')
     const result = await cmd.fn({} as never, [], [], opts)
@@ -126,11 +123,7 @@ describe('command() registers multiple mounts', () => {
         return Promise.resolve([new Uint8Array(), new IOResult()])
       },
     })
-    const opts = {
-      stdin: null,
-      flags: { version: true },
-      cwd: '/',
-    }
+    const opts = context({ flags: { version: true } })
     const cmd = cmds[0]
     if (cmd === undefined) throw new Error('expected a registered command')
     const result = await cmd.fn({} as never, [], [], opts)

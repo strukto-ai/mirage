@@ -23,15 +23,15 @@ import {
 } from '../adapter.ts'
 import type { PathSpec } from '../../../../types.ts'
 
-const head: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
-  const idx = opts.index ?? undefined
+const head: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   const firstLines = ops.firstLines
   return headGeneric(
     resolved,
     texts,
-    opts,
-    dirAwareStat(ops, accessor, opts),
+    ctx,
+    dirAwareStat(ops, accessor, ctx),
     (p) => ops.readStream(accessor, p, idx),
     boundUncached(firstLines && ((p: PathSpec, n: number) => firstLines(accessor, p, n, idx))),
   )

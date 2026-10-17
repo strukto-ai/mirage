@@ -48,8 +48,7 @@ from mirage.commands.builtin.utils.links import link_view
 from mirage.commands.builtin.utils.paths import dispatch_stat, link_follow
 from mirage.commands.config import (
     Command,
-    CommandOpts,
-    ExecContext,
+    Context,
     registered_commands,
 )
 from mirage.commands.errors import UsageError
@@ -875,7 +874,8 @@ class MountEntry:
         paths: list[PathSpec],
         texts: list[str],
         flag_kwargs: dict[str, FlagValue],
-        context: ExecContext = ExecContext(),
+        ctx: Context = Context(),
+        limit_override: Limit | None = None,
     ) -> tuple[ByteSource | None, IOResult]:
         """Execute a command on this mount's VFS.
 
@@ -888,17 +888,18 @@ class MountEntry:
             paths (list[PathSpec]): positional path args.
             texts (list[str]): positional text args.
             flag_kwargs (dict): parsed flags from upstream.
-            context (ExecContext): the invocation's execution context —
-                everything the workspace supplies beyond the parsed line
-                (the fifth argument TypeScript's ``runCommand`` has
-                always taken); re-boxed whole onto ``CommandOpts``
-                beside the facts only this mount can supply. A handler
-                reads the fields it wants, so no list of command names
-                is kept here.
+            ctx (Context): what the workspace supplies beyond the
+                parsed line (the fifth argument TypeScript's
+                ``runCommand`` has always taken); the handler gets it
+                with the facts only this mount can supply added. A
+                handler reads the fields it wants, so no list of command
+                names is kept here.
+            limit_override (Limit | None): the caller's output limit,
+                which the mount applies itself.
         """
         async with self.use():
             handlers = await self._pick_handlers(
-                cmd_name, paths, context.stat_path
+                cmd_name, paths, ctx.stat_path
             )
             if not handlers:
                 return None, IOResult(
@@ -907,8 +908,8 @@ class MountEntry:
                 )
             paths = self._keyed_paths(cmd_name, paths)
             flags = self._keyed_flags(flag_kwargs)
-            opts = self._command_opts(cmd_name, flags, context, paths)
-            with self._command_scope(context):
+            run_ctx = self._command_ctx(cmd_name, flags, ctx, paths)
+            with self._command_scope(run_ctx):
                 for cmd in handlers:
                     refusal = self._read_only_refusal(
                         cmd_name, cmd, flags
@@ -916,7 +917,7 @@ class MountEntry:
                     if refusal is not None:
                         return None, refusal
                     result = await self._run_handler(
-                        cmd_name, cmd, paths, texts, opts, context
+                        cmd_name, cmd, paths, texts, run_ctx, limit_override
                     )
                     if result is not None:
                         return self._wrap_output(cmd_name, cmd, paths, result)
@@ -1046,32 +1047,28 @@ class MountEntry:
                 flags[k] = v
         return flags
 
-    def _command_opts(
+    def _command_ctx(
         self,
         cmd_name: str,
         flags: dict[str, FlagValue],
-        context: ExecContext,
+        ctx: Context,
         paths: list[PathSpec],
-    ) -> CommandOpts:
-        """The one typed bag a handler reads, built here and nowhere else.
-
-        A handler reads the fields it wants and ignores the rest, so there
-        is no opt-in registry (mirrors Mount.runCommand building
-        CommandOpts).
+    ) -> Context:
+        """The context a handler reads: the workspace's, with what only
+        this mount knows added (mirrors Mount.runCommand).
 
         Args:
             cmd_name (str): command name.
             flags (dict[str, FlagValue]): the keyed flags.
-            context (ExecContext): the invocation's execution context.
+            ctx (Context): the workspace's context for the command.
             paths (list[PathSpec]): the command's operands, which its
                 whole reads warm ahead of themselves.
         """
         mount_prefix = self.prefix.rstrip("/")
-        cwd = context.cwd
-        return CommandOpts(
+        cwd = ctx.cwd.virtual
+        return dataclasses.replace(
+            ctx,
             command=cmd_name,
-            access=context.access,
-            stdin=context.stdin,
             flags=flags,
             cwd=PathSpec(
                 virtual=cwd,
@@ -1082,28 +1079,13 @@ class MountEntry:
             mount_prefix=mount_prefix,
             index=self.index,
             io=dataclasses.replace(
-                dispatched_io(self.io, context.dispatch, paths),
-                access=context.access,
+                dispatched_io(self.io, ctx.dispatch, paths),
+                access=ctx.access,
             ),
-            dispatch=context.dispatch,
-            vfs=context.vfs,
-            session_id=context.session_id,
-            env=context.env,
-            exec_allowed=context.exec_allowed,
-            exec_path_allowed=context.exec_path_allowed,
-            runtime=context.runtime,
-            runtime_unavailable=context.runtime_unavailable,
-            follow_operands=context.follow_operands,
-            stat_path=context.stat_path,
-            readdir_path=context.readdir_path,
-            session_view=context.session_view,
-            processes=context.processes,
-            shell=context.shell,
-            argv=context.argv,
         )
 
     @contextmanager
-    def _command_scope(self, context: ExecContext) -> Iterator[None]:
+    def _command_scope(self, ctx: Context) -> Iterator[None]:
         """Bind what a handler's backend calls read from the context.
 
         The recorder's mount, the snapshot revision pins, the mount's
@@ -1114,10 +1096,10 @@ class MountEntry:
         dispatcher's stat and link follow are bound here.
 
         Args:
-            context (ExecContext): the invocation's execution context.
+            ctx (Context): the handler's context.
         """
         outer = current_caller()
-        links = link_view(context.vfs)
+        links = link_view(ctx.vfs)
         token = bind_caller(
             dataclasses.replace(
                 self._on_mount(outer),
@@ -1126,12 +1108,10 @@ class MountEntry:
                 mount=(self.prefix, self.mode),
                 walk_probe=(
                     WalkProbe(
-                        stat=functools.partial(
-                            dispatch_stat, context.dispatch
-                        ),
+                        stat=functools.partial(dispatch_stat, ctx.dispatch),
                         follow=link_follow(links),
                     )
-                    if context.dispatch is not None
+                    if ctx.dispatch is not None
                     else outer.walk_probe
                 ),
             )
@@ -1229,8 +1209,8 @@ class MountEntry:
         cmd: Command,
         paths: list[PathSpec],
         texts: list[str],
-        opts: CommandOpts,
-        context: ExecContext,
+        ctx: Context,
+        limit_override: Limit | None,
     ) -> Any:
         """Run one handler under the mount-resolved timeout.
 
@@ -1244,14 +1224,13 @@ class MountEntry:
             cmd (Command): the handler to run.
             paths (list[PathSpec]): the keyed path operands.
             texts (list[str]): positional text args.
-            opts (CommandOpts): the handler's options.
-            context (ExecContext): the invocation's execution context.
+            ctx (Context): the handler's context.
+            limit_override (Limit | None): the caller's output limit.
         """
         resolved_limit = resolve_limit(
             cmd_name,
             command_default=cmd.limit,
-            mount_override=context.limit_override
-            or self.command_limits.get(cmd_name),
+            mount_override=limit_override or self.command_limits.get(cmd_name),
         )
         cmd_timeout = (
             resolved_limit.timeout_seconds
@@ -1260,7 +1239,7 @@ class MountEntry:
         )
         with host_io():
             return await run_with_timeout(
-                cmd.fn(self.vfs.accessor, paths, texts, opts),
+                cmd.fn(self.vfs.accessor, paths, texts, ctx),
                 cmd_timeout,
                 cmd_name,
             )

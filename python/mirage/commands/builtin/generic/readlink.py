@@ -2,7 +2,7 @@ import posixpath
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -58,11 +58,11 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> ReadlinkFlags:
 async def readlink_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise missing_operand_error("readlink", None)
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     return await readlink(
         paths,
         f=parsed.canonicalize,

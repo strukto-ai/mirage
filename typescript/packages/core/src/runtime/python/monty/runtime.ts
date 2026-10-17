@@ -79,10 +79,10 @@ export class MontyRuntime extends PythonRuntime {
   async run(args: RunArgs, context = this.captureContext()): Promise<RunResult> {
     const notice = unhonoredNotice((args.flags ?? {}) as InitFlags, this.name)
     const execution =
-      (context?.processes?.depth ?? 0) > 0 ? new MontyExecution(this.maxMemory) : this.execution
+      (context?.ctx.processes?.depth ?? 0) > 0 ? new MontyExecution(this.maxMemory) : this.execution
     const result = await execution
       .run(
-        args.cwd === undefined && context !== undefined ? { ...args, cwd: context.cwd } : args,
+        args.cwd === undefined && context !== undefined ? { ...args, cwd: context.ctx.cwd } : args,
         RuntimeFiles.of(context),
       )
       .finally(async () => {

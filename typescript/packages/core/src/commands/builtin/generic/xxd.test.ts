@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { parseLimit, parseSeek, strtol, xxdGeneric } from './xxd.ts'
 
 const ENC = new TextEncoder()
@@ -24,8 +24,8 @@ const DEC = new TextDecoder()
 const DATA = ENC.encode('defgh')
 const F = new PathSpec({ virtual: '/f', directory: '/', vfsPath: 'f', rawPath: '/f' })
 
-function opts(flags: Record<string, unknown>, stdin: Uint8Array | null = null): CommandOpts {
-  return { flags, stdin } as unknown as CommandOpts
+function ctx(flags: Record<string, unknown>, stdin: Uint8Array | null = null): Context {
+  return { flags, stdin } as unknown as Context
 }
 
 describe('xxd numbers', () => {
@@ -68,14 +68,14 @@ describe('xxd -s', () => {
     ['0', undefined, '00000000: 6465 6667 68                             defgh\n'],
   ])('-s %s -l %s', async (seek, limit, out) => {
     const flags = limit === undefined ? { s: seek } : { s: seek, args_l: limit }
-    const [stdout, result] = await xxdGeneric([F], opts(flags), stream)
+    const [stdout, result] = await xxdGeneric([F], ctx(flags), stream)
     expect(DEC.decode(await materialize(stdout))).toBe(out)
     expect(result.exitCode).toBe(0)
   })
 
   // Mirrors python's test_a_seek_before_the_start_cannot_seek.
   it.each(['-10', '+-2'])('-s %s cannot seek', async (seek) => {
-    const [stdout, result] = await xxdGeneric([F], opts({ s: seek }), stream)
+    const [stdout, result] = await xxdGeneric([F], ctx({ s: seek }), stream)
     expect([stdout, result.exitCode, DEC.decode(await materialize(result.stderr))]).toEqual([
       null,
       4,
@@ -93,7 +93,7 @@ describe('xxd -s', () => {
       await Promise.resolve()
       yield new Uint8Array()
     }
-    const [stdout, result] = await xxdGeneric([], opts({ s: seek }, DATA), empty)
+    const [stdout, result] = await xxdGeneric([], ctx({ s: seek }, DATA), empty)
     expect([DEC.decode(await materialize(stdout)), result.exitCode]).toEqual([out, code])
   })
 })

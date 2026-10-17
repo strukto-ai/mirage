@@ -21,16 +21,19 @@ from mirage.commands.cli.builtin.hf.upload import (
     in_repo_base,
     upload_cmd,
 )
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.core.hf_hub.commit import Addition
 from mirage.types import PathSpec
-from tests.commands.cli.builtin.hf.conftest import ANON, inv
+from tests.commands.cli.builtin.hf.conftest import ANON, leaf_args
 
 
 @pytest.mark.asyncio
 async def test_collect_reads_one_file_under_its_basename(view):
     record, _, _, _ = view
-    assert await collect(record, PathSpec.from_str_path("/work/a.txt")) == (
+    assert await collect(
+        Context(vfs=record), PathSpec.from_str_path("/work/a.txt")
+    ) == (
         [Addition("a.txt", b"alpha")],
         False,
     )
@@ -39,7 +42,9 @@ async def test_collect_reads_one_file_under_its_basename(view):
 @pytest.mark.asyncio
 async def test_collect_walks_a_directory_relative_to_it(view):
     record, _, _, _ = view
-    assert await collect(record, PathSpec.from_str_path("/work")) == (
+    assert await collect(
+        Context(vfs=record), PathSpec.from_str_path("/work")
+    ) == (
         [Addition("a.txt", b"alpha"), Addition("sub/b.txt", b"beta")],
         True,
     )
@@ -53,11 +58,11 @@ async def test_upload_commits_every_walked_file_at_once(
 ):
     record, _, _, _ = view
     await upload_cmd(
-        inv(
+        *leaf_args(
             texts=("acme/widget",),
             paths=("/work",),
             flags={"create_pr": True},
-            view=record,
+            vfs=record,
         )
     )
     additions = mock_commit.await_args.kwargs["additions"]
@@ -83,7 +88,7 @@ async def test_upload_destination(
     """A file lands at path_in_repo; a folder spreads underneath it."""
     record, _, _, _ = view
     texts = ("acme/widget", in_repo) if in_repo else ("acme/widget",)
-    await upload_cmd(inv(texts=texts, paths=(local,), view=record))
+    await upload_cmd(*leaf_args(texts=texts, paths=(local,), vfs=record))
     assert [
         a.path for a in mock_commit.await_args.kwargs["additions"]
     ] == expected
@@ -94,11 +99,11 @@ async def test_upload_refuses_without_a_token(view):
     record, _, _, _ = view
     with pytest.raises(UsageError, match="token"):
         await upload_cmd(
-            inv(
+            *leaf_args(
                 texts=("acme/widget",),
                 paths=("/work",),
                 config=ANON,
-                view=record,
+                vfs=record,
             )
         )
 
@@ -106,7 +111,7 @@ async def test_upload_refuses_without_a_token(view):
 @pytest.mark.asyncio
 async def test_upload_needs_a_workspace():
     with pytest.raises(UsageError, match="workspace"):
-        await upload_cmd(inv(texts=("acme/widget",), paths=("/work",)))
+        await upload_cmd(*leaf_args(texts=("acme/widget",), paths=("/work",)))
 
 
 @pytest.mark.parametrize(

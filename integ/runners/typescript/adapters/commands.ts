@@ -62,7 +62,7 @@ export class CommandService extends RAMVFS {
         name: original.name,
         vfs: 'ram',
         spec: specOf(original.name),
-        fn: async (accessor, paths, texts, opts) => {
+        fn: async (accessor, paths, texts, ctx) => {
           this.calls.push(...paths.map((p) => original.name + ' ' + p.virtual))
           if (original.name === 'rev' && paths[0]!.virtual.endsWith('.gated')) {
             GATE.ready ??= new Promise<void>((resolve) => {
@@ -88,8 +88,8 @@ export class CommandService extends RAMVFS {
               try {
                 yield new TextEncoder().encode(paths[0]!.rawPath + '\n')
                 await new Promise<void>((resolve) => {
-                  if (opts.signal?.aborted === true) resolve()
-                  else opts.signal?.addEventListener('abort', () => resolve(), { once: true })
+                  if (ctx.signal?.aborted === true) resolve()
+                  else ctx.signal?.addEventListener('abort', () => resolve(), { once: true })
                 })
               } finally {
                 calls.push('closed ' + paths[0]!.virtual)
@@ -104,7 +104,7 @@ export class CommandService extends RAMVFS {
             }
             return [stream(), new IOResult()]
           }
-          return original.fn(accessor, paths, texts, { ...opts, io: own })
+          return original.fn(accessor, paths, texts, { ...ctx, io: own })
         },
       })
     })
@@ -167,13 +167,13 @@ export const CLI = new CLIProgram({
   }),
   handlers: {
     '': new CLIHandler({
-      fn: async (inv) => {
+      fn: async (_config, paths, _texts, ctx) => {
         let size = 0
-        for (const path of inv.paths) {
-          size += (await inv.view.vfs.stat(path)).size ?? 0
+        for (const path of paths) {
+          size += (await ctx.vfs!.stat(path)).size ?? 0
         }
         return [
-          new TextEncoder().encode(`${size}:${inv.paths.map((p) => p.virtual).join(',')}\n`),
+          new TextEncoder().encode(`${size}:${paths.map((p) => p.virtual).join(',')}\n`),
           new IOResult(),
         ]
       },

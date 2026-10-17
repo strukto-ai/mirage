@@ -25,9 +25,10 @@ from mirage.commands.cli.builtin.git.util import (
     option_operand,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 
 def _summary(
@@ -76,26 +77,28 @@ def _summary(
 
 
 async def shortlog(
-    inv: CLIInvocation[None],
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Summarize repository history by author.
 
     Args:
-        inv (CLIInvocation[None]): the parsed invocation.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context.
     """
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     try:
-        word = option_operand(inv, inv.texts)
+        word = option_operand(ctx, texts)
         if word is not None:
-            raise ShortlogOptionError(word, verb_usage(inv))
-        view = inv.view or CLIView()
-        repo, location = await opened(fl, view)
-        assert view.vfs is not None
-        mailmap = await load_mailmap(view.vfs, location)
+            raise ShortlogOptionError(word, verb_usage(ctx))
+        repo, location = await opened(ctx, fl)
+        assert ctx.vfs is not None
+        mailmap = await load_mailmap(ctx.vfs, location)
         out = await asyncio.to_thread(
             _summary,
             repo,
-            tuple(inv.texts),
+            tuple(texts),
             parse_flags(fl),
             fl.as_bool("email"),
             fl.as_bool("numbered"),

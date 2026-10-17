@@ -668,20 +668,22 @@ export class Workspace {
     return captureBinding(
       this.runtimeBinding,
       {
-        vfs: new Files(
-          dispatcher.dispatch,
-          null,
-          this.namespace,
-          (path) => this.registry.mountOwner(path),
-          {
-            prefixes: () => this.registry.mountPrefixes(),
-            visibility: () => session.visibility,
-          },
-        ),
-        sessionView: sessionView(session, this.policies),
-        processes: this.processView(session),
-        cwd: PathSpec.fromStrPath(session.cwd),
-        env: envSnapshot(session),
+        ctx: {
+          vfs: new Files(
+            dispatcher.dispatch,
+            null,
+            this.namespace,
+            (path) => this.registry.mountOwner(path),
+            {
+              prefixes: () => this.registry.mountPrefixes(),
+              visibility: () => session.visibility,
+            },
+          ),
+          session: sessionView(session, this.policies),
+          processes: this.processView(session),
+          cwd: PathSpec.fromStrPath(session.cwd),
+          env: envSnapshot(session),
+        },
         dispatch: this.buildWorkspaceBridge(undefined, dispatcher, getAdmission()),
         restrictedMounts: restrictedMountsFor(session, this.sandboxMounts()),
       },

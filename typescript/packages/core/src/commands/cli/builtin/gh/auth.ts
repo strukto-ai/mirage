@@ -2,15 +2,19 @@ import { GitHubApiError } from '../../../../core/github/client.ts'
 import type { GhConfig } from '../../../../core/github/config.ts'
 import { login } from '../../../../core/github/repo.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { ghTransport, webOrigin } from './accessor.ts'
 
 /** Check the resolved config secret, whose original environment/file source is not retained. */
-export async function status(inv: CLIInvocation): Promise<CommandFnResult> {
-  const config = inv.config as GhConfig
-  const host = new URL(webOrigin(config)).hostname
+export async function status(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  _ctx: Context,
+): Promise<CommandFnResult> {
+  const host = new URL(webOrigin(config as GhConfig)).hostname
   let account: string
   try {
     account = await login(ghTransport(config))
@@ -46,9 +50,14 @@ export async function status(inv: CLIInvocation): Promise<CommandFnResult> {
  * `gh auth token`, refused: the token stays in Mirage configuration, where
  * every gh verb reads it, and is never printed. Mirrors Python's token.
  */
-export function token(inv: CLIInvocation): CommandFnResult {
-  const config = inv.config as GhConfig
-  const host = new FlagView(inv.flags).asStr('hostname') ?? new URL(webOrigin(config)).hostname
+export function token(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): CommandFnResult {
+  const host =
+    new FlagView(ctx.flags).asStr('hostname') ?? new URL(webOrigin(config as GhConfig)).hostname
   return [
     null,
     new IOResult({

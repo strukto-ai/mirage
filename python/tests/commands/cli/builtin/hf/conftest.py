@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.core.hf_hub.config import HfConfig
 from mirage.io.stream import yield_bytes
 from mirage.types import PathSpec
@@ -24,28 +24,26 @@ CONFIG = HfConfig(token="hf_test")
 ANON = HfConfig()
 
 
-def inv(
+def leaf_args(
     texts=(),
     flags=None,
     config=CONFIG,
-    view=None,
+    vfs=None,
     stdin=None,
     paths=(),
 ):
-    """One `hf` invocation, as the executor would build it."""
-    return CLIInvocation(
+    """One `hf` leaf's arguments, as the executor would build them."""
+    return (
         config,
-        argv=tuple(texts),
-        paths=tuple(PathSpec.from_str_path(p) for p in paths),
-        texts=tuple(texts),
-        flags=flags or {},
-        stdin=None if stdin is None else yield_bytes(stdin),
-        view=view,
+        [PathSpec.from_str_path(p) for p in paths],
+        list(texts),
+        Context(
+            argv=tuple(texts),
+            flags=flags or {},
+            stdin=None if stdin is None else yield_bytes(stdin),
+            vfs=vfs,
+        ),
     )
-
-
-class FakeView(CLIView):
-    """Workspace entry points recording every dispatched op."""
 
 
 @pytest.fixture
@@ -93,5 +91,5 @@ def view():
             return None, None
         raise AssertionError(f"unexpected op {op}")
 
-    record = CLIView(vfs=Files([], dispatch))
+    record = Files([], dispatch)
     return record, calls, tree, dirs

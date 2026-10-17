@@ -81,7 +81,13 @@ import { standardRequest } from '../../../commands/spec/standard.ts'
 import { dropsMountCaches, handleCli } from './cli.ts'
 import { pathStat } from '../../mount/namespace/probe.ts'
 import { Files } from '../../files.ts'
-import { dropMountCaches, findStartPoints, runOnMount, type RunOnMountCtx } from './run.ts'
+import {
+  dropMountCaches,
+  findStartPoints,
+  nestedShell,
+  runOnMount,
+  type RunOnMountCtx,
+} from './run.ts'
 import type { SessionView, StatPath } from '../../../view/types.ts'
 import { applyFindActions } from '../find_action_dispatch.ts'
 import { operandFollow } from '../builtins/links/links.ts'
@@ -271,7 +277,7 @@ export async function handleCommand(
   // below functions (a user can wrap an installed CLI, bash-style)
   // and above every mount branch (a CLI consults no mount).
   // A CLI that works on files rather than an API (`git`) reaches them
-  // through `inv.view.vfs`, the session's files made by the command; the
+  // through `ctx.vfs`, the session's files made by the command; the
   // rest never look.
   const cliInstall = registry.clis.get(cmdName)
   if (cliInstall !== null) {
@@ -285,21 +291,12 @@ export async function handleCommand(
         session,
         stdin,
         {
-          ...(executeFn !== undefined
-            ? {
-                shell: (command: string) =>
-                  executeFn(command, {
-                    sessionId: session.sessionId,
-                    session,
-                    ...(cliSignal !== undefined ? { signal: cliSignal } : {}),
-                  }),
-              }
-            : {}),
+          ...(executeFn !== undefined ? { shell: nestedShell(executeFn, session, cliSignal) } : {}),
           ...(cliSignal !== undefined ? { signal: cliSignal } : {}),
           commandLimits: registry.commandLimits,
           entries: registry.runtimeEntries,
           vfs: files,
-          sessionView: sessionView(session, registry.policies, context.frame.diagnostics),
+          session: sessionView(session, registry.policies, context.frame.diagnostics),
           ...(registry.processView === undefined
             ? {}
             : { processes: registry.processView(session) }),

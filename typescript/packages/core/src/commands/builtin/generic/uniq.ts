@@ -16,7 +16,7 @@ import { stdinStat, stdinStream } from '../utils/stream.ts'
 import { splitReadable } from '../utils/operands.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { argmatchError, extraOperandError } from '../../spec/usage.ts'
 import { argmatch } from '../../spec/argmatch.ts'
 import { CommandName, type FlagValue, type ParsedFlagValue } from '../../spec/types.ts'
@@ -223,16 +223,16 @@ async function* uniqStream(
 
 export async function uniqGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write?: (p: PathSpec, data: Uint8Array) => Promise<void>,
   stat?: (p: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
-  stream = stdinStream(stream, opts.stdin)
+  stream = stdinStream(stream, ctx.stdin)
   if (paths.length > 2) throw extraOperandError(CommandName.UNIQ, paths[2]?.rawPath ?? '')
   let parsed: UniqFlags
   try {
-    parsed = parseFlags(opts.flags)
+    parsed = parseFlags(ctx.flags)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(`${message}\n`) })]
@@ -251,7 +251,7 @@ export async function uniqGeneric(
     source = stream(input)
   } else {
     try {
-      source = resolveSource(opts.stdin)
+      source = resolveSource(ctx.stdin)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       return [null, new IOResult({ exitCode: 1, stderr: encodeText(`${message}\n`) })]

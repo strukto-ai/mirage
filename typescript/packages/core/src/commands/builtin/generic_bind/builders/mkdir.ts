@@ -208,13 +208,13 @@ export async function makeDirectory<A extends Accessor>(
   return null
 }
 
-const mkdir: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
-  const fl = new FlagView(opts.flags, specOf('mkdir'))
+const mkdir: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+  const fl = new FlagView(ctx.flags, specOf('mkdir'))
   const parents = fl.asBool('parents')
   const verbose = fl.asBool('verbose')
   const modeText = fl.asStr('mode') ?? null
   if (paths.length === 0) throw missingOperandError('mkdir', null)
-  const idx = opts.index ?? undefined
+  const idx = ctx.index ?? undefined
   const { setAttrs } = ops
   const mkdirOp = requireOp(ops.mkdir, 'mkdir')
   let mode: number | null = null
@@ -232,13 +232,13 @@ const mkdir: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
     // mask away from bash's default costs a setattr, since 755 is what
     // every backend already renders for a fresh directory; parents
     // made by `-p` keep that default.
-    const umask = sessionUmask(opts.access)
+    const umask = sessionUmask(ctx.access)
     if (umask !== DEFAULT_UMASK) mode = 0o777 & ~umask
   }
   const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
   const lines: string[] = []
   const errors: string[] = []
-  const links = linksOf(opts) ?? null
+  const links = linksOf(ctx) ?? null
   for (const p of resolved) {
     const collision = await mkdirLinkRefusal(p, links, { parents })
     if (collision.taken) {

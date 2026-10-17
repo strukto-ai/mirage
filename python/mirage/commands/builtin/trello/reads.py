@@ -23,7 +23,7 @@ from mirage.commands.builtin.trello._scope import (
     require_card,
     require_list,
 )
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.core.trello.client import (
@@ -166,9 +166,9 @@ async def _dispatch(
     accessor: TrelloAccessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(opts.flags, spec=entry.spec)
+    fl = FlagView(ctx.flags, spec=entry.spec)
     data = await entry.runner(accessor, list(texts), fl)
     return yield_bytes(data), IOResult()
 

@@ -25,9 +25,9 @@ import {
 } from '../../../../core/google/client.ts'
 import type { GoogleConfig } from '../../../../core/google/config.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 
-import type { CLIInvocation } from '../../types.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { Argument } from '../../../spec/types.ts'
 import type { GwsMethod, GwsService } from './methods.ts'
@@ -194,9 +194,12 @@ async function placeInScope(
 
 export async function runGwsMethod(
   method: GwsMethod,
-  inv: CLIInvocation<GoogleConfig>,
+  config: GoogleConfig,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+  const fl = new FlagView(ctx.flags)
   let params: Record<string, unknown>
   let body: Record<string, unknown>
   try {
@@ -209,8 +212,8 @@ export async function runGwsMethod(
   if (method.needsBody === true && Object.keys(body).length === 0) {
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode('--json is required\n') })]
   }
-  ;[body, params] = scopeRequest(method, inv.config, body, params)
-  const tm = new TokenManager(inv.config)
+  ;[body, params] = scopeRequest(method, config, body, params)
+  const tm = new TokenManager(config)
   let path: string
   let query: Record<string, unknown>
   try {
@@ -349,7 +352,8 @@ export function apiHandlers(): Record<string, CLIHandler> {
     GWS_METHODS.map((method) => [
       `${method.service} ${method.resource} ${method.method}`,
       new CLIHandler({
-        fn: (inv) => runGwsMethod(method, inv as CLIInvocation<GoogleConfig>),
+        fn: (config, paths, texts, ctx) =>
+          runGwsMethod(method, config as GoogleConfig, paths, texts, ctx),
         write: method.http !== 'GET',
       }),
     ]),

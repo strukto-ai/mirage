@@ -614,7 +614,7 @@ export const LIVE_KEY = 'mirage.live'
 /**
  * The metadata fields a `setattr` writes, all optional.
  *
- * Spelled the way the op, the CommandOpts bag and the guest bridge
+ * Spelled the way the op, the Context bag and the guest bridge
  * spell them, so one fact keeps one name from a shell line down to a
  * guest's utime. `nofollow` is not a field but the AT_SYMLINK_NOFOLLOW
  * bit: it writes the link entry's own attrs rather than its target's.

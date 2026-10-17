@@ -17,8 +17,8 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
-from mirage.commands.config import command
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.config import Context, command
 from mirage.commands.errors import PartialOutputError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_command
@@ -54,23 +54,23 @@ class TokenConfig(BaseModel):
     token: str
 
 
-CALLS: list[dict] = []
+CALLS: list[tuple] = []
 
 
-async def send(inv: CLIInvocation[TokenConfig]):
-    CALLS.append(inv)
-    return f"sent[{inv.config.token}]\n".encode(), IOResult()
+async def send(config: TokenConfig, paths, texts, ctx: Context):
+    CALLS.append((config, paths, texts, ctx))
+    return f"sent[{config.token}]\n".encode(), IOResult()
 
 
-def send_sync(inv: CLIInvocation[TokenConfig]):
-    return f"sync[{inv.config.token}]\n".encode(), IOResult()
+def send_sync(config: TokenConfig, paths, texts, ctx: Context):
+    return f"sync[{config.token}]\n".encode(), IOResult()
 
 
-def raise_sync(inv: CLIInvocation[TokenConfig]):
+def raise_sync(config: TokenConfig, paths, texts, ctx: Context):
     raise RuntimeError("sync boom")
 
 
-def raise_after_output(inv: CLIInvocation[TokenConfig]):
+def raise_after_output(config: TokenConfig, paths, texts, ctx: Context):
     raise PartialOutputError("late boom", b"first\n")
 
 
@@ -116,19 +116,19 @@ async def test_leaf_runs_with_config_group_flags_and_texts():
     parts = ["prog", "-vv", "message", "send", "-t", "#eng", "hello", "world"]
     session = SessionState("t")
     seed_var(session, "EDITOR", "vi")
-    # Exported: `inv.env` is the process view a CLI receives, which
+    # Exported: `ctx.env` is the process view a CLI receives, which
     # carries exported names only, the way a child process's environ
     # does. A plain shell variable is deliberately not in it.
     set_attr(session, "EDITOR", VarAttr.EXPORT)
     stdout, io, node = await handle_cli(install, parts, session)
     assert io.exit_code == 0
     assert await materialize(stdout) == b"sent[tok]\n"
-    inv = CALLS.pop()
-    assert inv.config.token == "tok"
-    assert inv.texts == ("hello", "world")
-    assert inv.flags["to"] == "#eng"
-    assert inv.flags["verbose"] == 2
-    assert inv.argv == (
+    config, _, texts, ctx = CALLS.pop()
+    assert config.token == "tok"
+    assert texts == ["hello", "world"]
+    assert ctx.flags["to"] == "#eng"
+    assert ctx.flags["verbose"] == 2
+    assert ctx.argv == (
         "-vv",
         "message",
         "send",
@@ -138,7 +138,7 @@ async def test_leaf_runs_with_config_group_flags_and_texts():
         "world",
     )
     # `$PWD` is exported, so a CLI subprocess inherits it as bash's would.
-    assert inv.env == {"EDITOR": "vi", "PWD": "/"}
+    assert ctx.env == {"EDITOR": "vi", "PWD": "/"}
     assert node.command == "prog -vv message send -t #eng hello world"
 
     paths_install = CLIInstall(
@@ -176,11 +176,9 @@ async def test_leaf_runs_with_config_group_flags_and_texts():
         )
         await materialize(stdout)
         assert result.exit_code == 0
-        received = CALLS.pop()
-        assert received.texts == tuple(words[:-1])
-        assert [path.virtual for path in received.paths] == [
-            "/work/report.txt"
-        ]
+        _, paths, texts, received = CALLS.pop()
+        assert texts == words[:-1]
+        assert [path.virtual for path in paths] == ["/work/report.txt"]
         assert isinstance(received.flags["output"], PathSpec)
         output = FlagView(received.flags, spec=received.spec).as_paths(
             "output"
@@ -271,8 +269,8 @@ async def test_leaf_usage_error_exits_2_with_prog_attribution():
     )
 
 
-async def own_help(inv: CLIInvocation[None]):
-    return f"help={inv.flags.get('help')!r}\n".encode(), IOResult()
+async def own_help(config: None, paths, texts, ctx: Context):
+    return f"help={ctx.flags.get('help')!r}\n".encode(), IOResult()
 
 
 @pytest.mark.asyncio
@@ -297,7 +295,7 @@ async def test_leaf_declaring_help_is_handed_the_flag():
     assert await materialize(stdout) == b"help=True\n"
 
 
-async def slow_send(inv: CLIInvocation[None]):
+async def slow_send(config: None, paths, texts, ctx: Context):
     await asyncio.sleep(0.5)
     return None, IOResult()
 
@@ -351,7 +349,7 @@ async def test_a_canceled_write_still_drops_the_caches():
     async def drop():
         dropped.append(True)
 
-    async def send(inv):
+    async def send(config, paths, texts, ctx):
         entered.set()
         await asyncio.Event().wait()
 
@@ -375,7 +373,7 @@ async def test_a_canceled_write_still_drops_the_caches():
 
 @pytest.mark.asyncio
 async def test_stdin_rides_the_invocation_record():
-    # stdin is a field of the one CLIInvocation, never a synthetic
+    # stdin is a field of the one Context, never a synthetic
     # flag: a leaf declaring its own --stdin option can no longer be
     # clobbered by piped input.
     CALLS.clear()
@@ -386,9 +384,9 @@ async def test_stdin_rides_the_invocation_record():
         SessionState("t"),
         stdin=b"body",
     )
-    inv = CALLS.pop()
-    assert inv.stdin == b"body"
-    assert "stdin" not in inv.flags
+    ctx = CALLS.pop()[3]
+    assert ctx.stdin == b"body"
+    assert "stdin" not in ctx.flags
 
 
 @pytest.mark.asyncio
@@ -399,7 +397,7 @@ async def test_the_session_cwd_rides_the_invocation_record():
         ["prog", "message", "send", "-t", "x"],
         SessionState(session_id="t", cwd="/data"),
     )
-    assert CALLS.pop().cwd.virtual == "/data"
+    assert CALLS.pop()[3].cwd.virtual == "/data"
 
 
 class FakePyRuntime(LanguageRuntime):
@@ -534,7 +532,7 @@ async def test_script_env_carries_mirage_config_json():
     install = script_install(config={"api_key": "k1"})
     session = SessionState("t")
     seed_var(session, "EDITOR", "vi")
-    # Exported: `inv.env` is the process view a CLI receives, which
+    # Exported: `ctx.env` is the process view a CLI receives, which
     # carries exported names only, the way a child process's environ
     # does. A plain shell variable is deliberately not in it.
     set_attr(session, "EDITOR", VarAttr.EXPORT)
@@ -976,13 +974,13 @@ class DenyAwsWrites(Policy):
         return None
 
 
-async def stash(inv: CLIInvocation[None]):
+async def stash(config: None, paths, texts, ctx: Context):
     """A leaf that writes the session plane through its entry point."""
-    view = inv.view.session_view if inv.view is not None else None
+    view = ctx.session
     if view is None:
         return b"no session plane\n", IOResult(exit_code=1)
-    await view.set(inv.texts[0], inv.texts[1])
-    return f"{inv.texts[0]}={view.get(inv.texts[0])}\n".encode(), IOResult()
+    await view.set(texts[0], texts[1])
+    return f"{texts[0]}={view.get(texts[0])}\n".encode(), IOResult()
 
 
 STASH = CLI(
@@ -1025,7 +1023,7 @@ def _out_of_band_writer(root):
     """A leaf that reaches its service past every mount, as an account
     CLI does: the file lands on disk, and no vfs path was touched."""
 
-    async def leaf(inv: CLIInvocation):
+    async def leaf(config, paths, texts, ctx: Context):
         (root / "made.txt").write_bytes(b"made\n")
         return b"ok\n", IOResult()
 
@@ -1185,13 +1183,13 @@ async def test_invocation_shell_is_revoked_after_handler_settles(fails):
     saved = []
     calls = []
 
-    async def evaluate(line):
+    async def evaluate(line, stdin=None):
         calls.append(line)
         return IOResult()
 
-    async def probe(inv):
-        saved.append(inv.shell)
-        await inv.shell("echo allowed")
+    async def probe(config, paths, texts, ctx):
+        saved.append(ctx.shell)
+        await ctx.shell("echo allowed")
         if fails:
             raise RuntimeError("handler failed")
         return None, IOResult()
@@ -1215,11 +1213,11 @@ async def test_invocation_shell_is_revoked_after_cancellation():
     entered = asyncio.Event()
     saved = []
 
-    async def evaluate(line):
+    async def evaluate(line, stdin=None):
         raise AssertionError("cancelled callback must not run a line")
 
-    async def probe(inv):
-        saved.append(inv.shell)
+    async def probe(config, paths, texts, ctx):
+        saved.append(ctx.shell)
         entered.set()
         await asyncio.Event().wait()
 
@@ -1258,8 +1256,8 @@ async def test_argparse_required_positionals_refuse_before_the_handler(
 ):
     calls = []
 
-    async def handler(inv):
-        calls.append(inv.texts)
+    async def handler(config, paths, texts, ctx):
+        calls.append(texts)
         if style is UsageStyle.COBRA:
             raise ValueError("handler requires ID")
         return b"called", IOResult()
@@ -1287,11 +1285,11 @@ async def test_argparse_required_positionals_refuse_before_the_handler(
         assert (await materialize(stdout)).startswith(
             b"usage: renamed [-h] ID\n"
         )
-        assert calls == [()]
+        assert calls == [[]]
     elif usage is None:
         assert io.exit_code == 0
         assert await materialize(stdout) == b"called"
-        assert calls == [()]
+        assert calls == [[]]
     else:
         assert stdout is None
         assert io.exit_code == 2
@@ -1322,7 +1320,7 @@ async def test_native_output_closes_on_early_pipeline_consumer_exit():
         finally:
             closed.set()
 
-    async def writer(inv):
+    async def writer(config, paths, texts, ctx):
         return source(), IOResult()
 
     with Workspace({"/ram": RAMVFS()}, mode="write") as ws:
@@ -1341,7 +1339,7 @@ async def test_native_output_closes_on_early_pipeline_consumer_exit():
 async def test_native_cli_unstarted_output_close_joins_producer(timeout):
     closed = asyncio.Event()
 
-    async def writer(inv):
+    async def writer(config, paths, texts, ctx):
         return _HeldSource(b"prefix", closed.set), IOResult()
 
     cli = CLI(
@@ -1388,7 +1386,7 @@ async def _warning():
     yield b"warn\n"
 
 
-async def _warns_leaf(inv):
+async def _warns_leaf(config, paths, texts, ctx):
     return b"out\n", IOResult(stderr=_warning())
 
 

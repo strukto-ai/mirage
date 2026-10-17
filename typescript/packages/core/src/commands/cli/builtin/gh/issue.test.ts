@@ -15,8 +15,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as AccessorModule from './accessor.ts'
 import type * as IssueModule from '../../../../core/github/issue.ts'
-import type { CLIInvocation } from '../../types.ts'
-import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
+import type { Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import { context } from '../../../../workspace/fixtures/context.ts'
 
 const FIELDS = vi.fn<typeof IssueModule.issueFields>()
 const LIST = vi.fn<typeof IssueModule.listIssueFields>()
@@ -37,8 +38,8 @@ vi.mock('../../../../core/github/issue.ts', async (importOriginal) => {
 
 const { ISSUE_FIELDS, listCmd, viewCmd } = await import('./issue.ts')
 
-function inv(flags: CLIInvocation['flags'] = {}): CLIInvocation {
-  return cliInvocation({ config: { token: 't' }, texts: ['4'], flags: { repo: 'o/r', ...flags } })
+function args(flags: Context['flags'] = {}): [unknown, PathSpec[], string[], Context] {
+  return [{ token: 't' }, [], ['4'], context({ flags: { repo: 'o/r', ...flags } })]
 }
 
 function json(result: Awaited<ReturnType<typeof viewCmd>>): unknown {
@@ -83,7 +84,7 @@ describe('gh issue view --json', () => {
 
   it('asks for the number as an issue or a pull request, without issue-only fields for one', async () => {
     FIELDS.mockResolvedValueOnce({ __typename: 'Issue', title: 'bug', isPinned: true, id: 'I_1' })
-    expect(json(await viewCmd(inv({ json: 'title,isPinned' })))).toEqual({
+    expect(json(await viewCmd(...args({ json: 'title,isPinned' })))).toEqual({
       isPinned: true,
       title: 'bug',
     })
@@ -94,7 +95,9 @@ describe('gh issue view --json', () => {
     FIELDS.mockResolvedValueOnce({ __typename: 'PullRequest', title: 'docs', id: 'PR_1' })
     expect(
       json(
-        await viewCmd(inv({ json: 'title,isPinned,stateReason,closedByPullRequestsReferences' })),
+        await viewCmd(
+          ...args({ json: 'title,isPinned,stateReason,closedByPullRequestsReferences' }),
+        ),
       ),
     ).toEqual({
       closedByPullRequestsReferences: [],
@@ -113,7 +116,9 @@ describe('gh issue view --json', () => {
       },
     })
     FIELDS.mockResolvedValueOnce(page('first', 'c1')).mockResolvedValueOnce(page('second', null))
-    const out = json(await viewCmd(inv({ json: 'comments' }))) as { comments: { body: string }[] }
+    const out = json(await viewCmd(...args({ json: 'comments' }))) as {
+      comments: { body: string }[]
+    }
     expect(out.comments.map((comment) => comment.body)).toEqual(['first', 'second'])
     const selections = FIELDS.mock.calls[1]?.[3]
     expect(selections?.issue).toBe('')
@@ -130,7 +135,7 @@ describe('gh issue view --json', () => {
       __typename: 'Issue',
       projectItems: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
     })
-    expect(json(await viewCmd(inv({ json: 'projectItems' })))).toEqual({ projectItems: [] })
+    expect(json(await viewCmd(...args({ json: 'projectItems' })))).toEqual({ projectItems: [] })
     expect(FIELDS.mock.calls[0]?.[3]).toEqual({ issue: 'id,number', pull: 'id,number' })
     expect(FIELDS.mock.calls[1]?.[3].issue).toMatch(/^projectItems\(first: 100\)/)
   })
@@ -145,7 +150,7 @@ describe('gh issue list --json', () => {
     LIST.mockResolvedValueOnce([{ number: 3, stateReason: 'COMPLETED' }])
     const out = json(
       await listCmd(
-        inv({ json: 'number,stateReason', state: 'all', author: 'me', label: ['bug'] }),
+        ...args({ json: 'number,stateReason', state: 'all', author: 'me', label: ['bug'] }),
       ),
     )
     expect(out).toEqual([{ number: 3, stateReason: 'COMPLETED' }])

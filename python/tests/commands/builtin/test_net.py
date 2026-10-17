@@ -27,7 +27,7 @@ from cryptography.x509.oid import NameOID
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.builtin.general.curl import curl
 from mirage.commands.builtin.utils.http import HttpResponse
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.vfs.base import BaseVFS
 
 curl_mod = sys.modules["mirage.commands.builtin.general.curl"]
@@ -66,7 +66,7 @@ def http_url():
 class TestCurl:
     @pytest.mark.asyncio
     async def test_curl_raw_returns_html(self, http_url):
-        result, io = await curl(None, None, [http_url], CommandOpts())
+        result, io = await curl(None, None, [http_url], Context())
         assert io.exit_code == 0
         assert result == b"<html><body><h1>Local Test Page</h1></body></html>"
 

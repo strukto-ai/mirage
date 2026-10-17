@@ -20,7 +20,8 @@ from mirage.commands.cli.builtin.gh.constants import (
     SEARCH_SORTS,
 )
 from mirage.commands.cli.builtin.gh.template import render_template
-from mirage.commands.cli.types import CLIHandler, CLIInvocation
+from mirage.commands.cli.types import CLIHandler
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import Argument, CommandSpec
@@ -28,6 +29,7 @@ from mirage.core.github.client import GitHubApiError
 from mirage.core.github.config import GhConfig
 from mirage.core.github.search import search
 from mirage.io.types import CommandOutput, IOResult
+from mirage.types import PathSpec
 
 
 def _quote(value: str) -> str:
@@ -42,7 +44,7 @@ def _boolean(fl: FlagView, name: str) -> bool:
     return gh_bool(fl, name.replace("-", "_"))
 
 
-def _query(kind: str, words: tuple[str, ...], fl: FlagView) -> str:
+def _query(kind: str, words: list[str], fl: FlagView) -> str:
     qualifiers: dict[str, list[str]] = {}
     for name in SEARCH_FLAGS[kind]:
         value = fl.raw(name.replace("-", "_"))
@@ -183,13 +185,19 @@ def _search_error(exc: GitHubApiError, query: str) -> str:
     return f"HTTP {exc.status}: {message} ({exc.url})"
 
 
-async def search_cmd(kind: str, inv: CLIInvocation[GhConfig]) -> CommandOutput:
-    fl = FlagView(inv.flags, inv.spec)
+async def search_cmd(
+    kind: str,
+    config: GhConfig,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
+) -> CommandOutput:
+    fl = FlagView(ctx.flags, ctx.spec)
     fields = json_fields(fl, SEARCH_FIELDS[kind])
     limit = fl.as_int("limit")
     if limit is None or limit < 1 or limit > 1000:
         raise UsageError("`--limit` must be between 1 and 1000", 1)
-    if not inv.texts and len(inv.argv) <= 2:
+    if not texts and len(ctx.argv) <= 2:
         raise UsageError("specify search keywords or flags", 1)
     if fields is None and (
         fl.as_str("jq") is not None or fl.as_str("template") is not None
@@ -199,10 +207,10 @@ async def search_cmd(kind: str, inv: CLIInvocation[GhConfig]) -> CommandOutput:
         )
     if fl.as_str("jq") is not None and fl.as_str("template") is not None:
         raise UsageError("cannot use `--jq` and `--template` together", 1)
-    query = _query(kind, inv.texts, fl)
+    query = _query(kind, texts, fl)
     try:
         values = await search(
-            inv.config,
+            config,
             {"repos": "repositories", "prs": "issues"}.get(kind, kind),
             query,
             limit,

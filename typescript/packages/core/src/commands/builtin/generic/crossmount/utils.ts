@@ -21,11 +21,12 @@ import type { TransferLinks } from '../cp.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import type { LinkView } from '../../../../view/types.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
+import { ROOT_CWD } from '../../../constants.ts'
 import { eisdir, isFsError } from '../../../../errors/fs.ts'
 import { fsErrorLine } from '../../../../errors/render.ts'
 import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
 import { type FileStat, FileType, PathSpec, type Visibility } from '../../../../types.ts'
-import type { CommandOpts } from '../../../config.ts'
+import type { Context } from '../../../config.ts'
 import type { DispatchFn, OperandRun, RunSingle } from './types.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { readFailExitCode } from '../../../spec/usage.ts'
@@ -130,15 +131,15 @@ export function flatten(scopes: PathSpec[]): PathSpec[] {
   )
 }
 
-// Minimal CommandOpts for delegating a read/compare to a generic: only flags,
+// Minimal Context for delegating a read/compare to a generic: only flags,
 // mountPrefix and stdin are read by those generics. The cross command always
 // has path operands, so stdin is never consulted.
-export function crossOpts(flagKwargs: Record<string, FlagValue>): CommandOpts {
+export function crossOpts(flagKwargs: Record<string, FlagValue>): Context {
   return {
     stdin: null,
     flags: flagKwargs,
     mountPrefix: '',
-    cwd: '/',
+    cwd: ROOT_CWD,
   }
 }
 

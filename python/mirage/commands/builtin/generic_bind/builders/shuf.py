@@ -21,7 +21,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,7 +31,7 @@ async def shuf(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run shuf over resolved operands; mirrors shufGeneric.
 
@@ -53,10 +53,10 @@ async def shuf(
         accessor (Accessor): the backend handle.
         paths (list[PathSpec]): operands, empty for stdin.
         texts (list[str]): non-path words, which `-e` shuffles.
-        opts (CommandOpts): flags and stdin from the dispatcher.
+        ctx (Context): flags and stdin from the dispatcher.
     """
     try:
-        return await _shuf(ops, accessor, paths, texts, opts)
+        return await _shuf(ops, accessor, paths, texts, ctx)
     except ValueError as exc:
         # Every user-facing refusal becomes an IOResult, but a `-o` on a
         # backend with no write op is a wiring fault and the TypeScript
@@ -71,11 +71,11 @@ async def _shuf(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(opts.flags)
+    parsed = parse_flags(ctx.flags)
     if paths:
-        paths = await ops.resolve_glob(accessor, paths, opts.index)
+        paths = await ops.resolve_glob(accessor, paths, ctx.index)
     elif not ops.is_mounted(accessor):
         paths = []
     # Only ``-o`` writes, so a read-only backend still serves plain shuf.
@@ -84,8 +84,8 @@ async def _shuf(
     return await generic_shuf(
         paths,
         texts,
-        read_bytes=bound_op(ops.read_stream, accessor, opts.index),
-        stdin=opts.stdin,
+        read_bytes=bound_op(ops.read_stream, accessor, ctx.index),
+        stdin=ctx.stdin,
         count=parsed.count,
         echo=parsed.echo,
         zero_terminated=parsed.zero_terminated,

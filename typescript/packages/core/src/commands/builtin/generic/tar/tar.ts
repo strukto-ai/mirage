@@ -22,7 +22,7 @@ import { OutputStream, asyncChain, primeStream, closeQuietly } from '../../../..
 import { gzipCompressStream, gunzipStream } from '../../../../utils/compress.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { gzip, getCompressionCodec } from '../../../../utils/compress.ts'
-import type { CommandFnResult, CommandOpts } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import {
   readTarSpool,
   writeTarStream,
@@ -566,11 +566,11 @@ function longMember(entry: TarEntry, name: string): string {
 export async function tarGeneric(
   paths: PathSpec[],
   texts: readonly string[],
-  opts: CommandOpts,
+  ctx: Context,
   deps: TarDeps,
   relay = false,
 ): Promise<CommandFnResult> {
-  const parsed = parseFlags(opts.flags)
+  const parsed = parseFlags(ctx.flags)
   const { create, extract, list, compression, verbose } = parsed
   const missing = unsupportedKind(compression, create)
   if (missing !== null) {
@@ -586,7 +586,7 @@ export async function tarGeneric(
   const stripN = parsed.stripComponents
   const exclude = parsed.exclude
   const toStdout = parsed.toStdout
-  const mountPrefix = relay ? '' : (opts.mountPrefix ?? '')
+  const mountPrefix = relay ? '' : (ctx.mountPrefix ?? '')
   // With no -f the archive is standard input or output, which is GNU tar's
   // compiled-in default (no TAPE in the environment).
   const archiveSpec =
@@ -599,11 +599,11 @@ export async function tarGeneric(
           resolved: true,
           rawPath: '-',
         })
-  const destPath = extractDest(CFlag, opts.cwd)
+  const destPath = extractDest(CFlag, ctx.cwd.virtual)
   const directories = COperands.map((operand) =>
     makePathSpec(operand.virtual, mountPrefix, operand),
   )
-  const archiveStream = stdinStream(deps.stream, opts.stdin)
+  const archiveStream = stdinStream(deps.stream, ctx.stdin)
   const selectors = [...texts]
   const verboseLines: string[] = []
 
@@ -616,8 +616,8 @@ export async function tarGeneric(
       walk: deps.walk,
       isDir: deps.isDir,
       directories,
-      links: linksOf(opts) ?? null,
-      mounts: mountsOf(opts) ?? null,
+      links: linksOf(ctx) ?? null,
+      mounts: mountsOf(ctx) ?? null,
       oneFileSystem: parsed.oneFileSystem,
     })
     if (!plan.write) {

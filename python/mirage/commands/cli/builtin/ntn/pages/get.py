@@ -17,24 +17,25 @@ from mirage.commands.cli.builtin.ntn.util import (
     notion_config,
     pretty_json,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.normalize import extract_title
 from mirage.core.notion.pages import get_page, get_page_markdown
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 
 async def get(
-    inv: CLIInvocation[NotionConfig],
+    config: NotionConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    page_id = first_text(inv.texts, "page id")
+    fl = FlagView(ctx.flags)
+    page_id = first_text(texts, "page id")
     # Both calls happen either way: the body comes from the markdown
     # endpoint and the title heading the frontmatter only exists on the
     # page object.
-    config = notion_config(inv)
+    config = notion_config(config, ctx)
     rendered = await get_page_markdown(config, page_id)
     page = await get_page(config, page_id)
     if fl.as_bool("json"):

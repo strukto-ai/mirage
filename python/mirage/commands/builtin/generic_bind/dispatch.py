@@ -25,7 +25,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
 )
 from mirage.commands.builtin.utils.links import mount_view
 from mirage.commands.builtin.utils.paths import dispatch_stat
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
@@ -207,7 +207,7 @@ async def run_dispatch(
                 else item
                 for item in value
             ]
-    opts = CommandOpts(
+    ctx = Context(
         flags=rebased,
         stdin=stdin,
         cwd=PathSpec(virtual=cwd, directory=cwd, vfs_path=cwd.strip("/")),
@@ -225,7 +225,7 @@ async def run_dispatch(
         NOOPAccessor(),
         [replace(p, vfs_path=p.virtual.strip("/")) for p in paths],
         texts,
-        opts,
+        ctx,
     )
     if result is None:
         return None, IOResult()

@@ -15,28 +15,29 @@
 import json
 
 from mirage.commands.cli.builtin.himalaya.deliver import deliver
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.email.config import EmailConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.types import PathSpec
 
 
 async def send(
-    inv: CLIInvocation[EmailConfig],
+    config: EmailConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     # The operand is a whole RFC 5322 message, so tokens rejoin with a
     # space and literal \n become real line breaks, the way upstream's
     # MessageArg resolves an inline message.
-    inline = " ".join(inv.texts).replace("\\r", "").replace("\\n", "\n")
-    raw = inline.encode() if inline else await materialize(inv.stdin)
+    inline = " ".join(texts).replace("\\r", "").replace("\\n", "\n")
+    raw = inline.encode() if inline else await materialize(ctx.stdin)
     if not raw.strip():
         raise ValueError(
             "no message provided: pass it as an argument "
             "or pipe it via standard input"
         )
     message, warning = await deliver(
-        inv.config, raw, FlagView(inv.flags).as_str("save")
+        config, raw, FlagView(ctx.flags).as_str("save")
     )
     result = {
         "status": "sent",

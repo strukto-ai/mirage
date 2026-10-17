@@ -1,5 +1,5 @@
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
-import type { PathSpec } from '../../../../../types.ts'
+import { PathSpec } from '../../../../../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { sedGeneric } from '../../sed.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
@@ -28,7 +28,14 @@ export async function runSed(
     (await sedGeneric(
       flatten(scopes),
       texts,
-      { ...crossOpts(bag), stdin, cwd, dispatch, argv, ...(env !== undefined ? { env } : {}) },
+      {
+        ...crossOpts(bag),
+        stdin,
+        cwd: PathSpec.fromStrPath(cwd),
+        dispatch,
+        argv,
+        ...(env !== undefined ? { env } : {}),
+      },
       fileStreamOp(dispatch),
       write,
     )) ?? [null, new IOResult()]

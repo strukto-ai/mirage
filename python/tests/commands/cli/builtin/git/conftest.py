@@ -26,7 +26,7 @@ from mirage.commands.cli.builtin.git.constants import GITLINK
 from mirage.commands.cli.builtin.git.discover import discover
 from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.builtin.git.types import RepoLocation
-from mirage.commands.cli.types import CLIView
+from mirage.commands.config import Context
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
@@ -308,24 +308,24 @@ async def open_mounted(ws):
     Args:
         ws (Workspace): the workspace under test.
     """
-    vfs = repo_view(ws).vfs
+    vfs = repo_context(ws).vfs
     assert vfs is not None
     location = await discover(vfs, REPO)
     return await open_repo(vfs, location)
 
 
-def repo_view(ws) -> CLIView:
-    """The entry points the dispatcher offers a git leaf inside a workspace.
+def repo_context(ws) -> Context:
+    """The context the dispatcher offers a git leaf inside a workspace.
 
-    Built the way ``handle_command`` builds them, so a test exercising
+    Built the way ``handle_command`` builds it, so a test exercising
     a leaf directly sees the same planes a typed line would.
 
     Args:
         ws (Workspace): the workspace under test.
     """
-    return CLIView(
+    return Context(
         vfs=Files(ws._registry.mount_rows(), ws.dispatch, links=ws._namespace),
-        session_view=session_view(SessionState(session_id="test")),
+        session=session_view(SessionState(session_id="test")),
     )
 
 

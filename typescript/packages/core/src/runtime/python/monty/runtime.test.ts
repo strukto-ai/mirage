@@ -651,7 +651,13 @@ describe('monty unavailable', () => {
       scriptPath: null,
       mode: 'payload' as const,
     }
-    const out = await runCode('python3', source, runtime, {}, { stdin: null, flags: {}, cwd: '/' })
+    const out = await runCode(
+      'python3',
+      source,
+      runtime,
+      {},
+      { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/') },
+    )
     if (out === null) throw new Error('no output')
     const [, io] = out
     expect(io.exitCode).toBe(127)

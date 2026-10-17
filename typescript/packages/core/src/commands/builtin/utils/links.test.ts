@@ -28,7 +28,7 @@ import {
 import { Files } from '../../../workspace/files.ts'
 import { isDotWalkError } from '../../../errors/fs.ts'
 import { CycleError } from '../../../utils/path.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import {
   LinkResolver,
   linkResolver,
@@ -163,7 +163,7 @@ describe('the link resolver', () => {
 
   it('is absent without links or a dispatcher', () => {
     const [dispatch] = recorder()
-    const base: CommandOpts = { stdin: null, flags: {}, cwd: '/' }
+    const base: Context = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/') }
     const vfs = new Files(dispatch, null, table({}))
     expect(linkResolver(base)).toBeNull()
     expect(linkResolver({ ...base, vfs })).toBeNull()

@@ -16,7 +16,7 @@ import asyncio
 from functools import partial
 from unittest.mock import AsyncMock, MagicMock
 
-from mirage.commands.config import ExecContext
+from mirage.commands.config import Context
 from mirage.io import IOResult
 from mirage.io.config import IOConfig
 from mirage.io.stream import materialize
@@ -108,7 +108,7 @@ def _mock_registry():
 
 
 async def _sort_run_command(
-    name, paths, texts, flag_kwargs, context=ExecContext()
+    name, paths, texts, flag_kwargs, context=Context(), limit_override=None
 ):
     """Mock run_command that sorts stdin for sort command."""
     if name == "sort" and context.stdin:
@@ -1105,7 +1105,7 @@ def test_command_flags_stay_text():
 
 def test_execute_cmd_receives_the_positional_args_and_one_context():
     """run_command is called with (cmd_name, paths, texts, flag_kwargs,
-    context) — the workspace's side arrives as one ExecContext value."""
+    context) — the workspace's side arrives as one Context value."""
     _, _, _, _, mount, _ = _exec("cat /data/file.txt")
     args = mount.run_command.call_args[0]
     assert len(args) == 5
@@ -1113,7 +1113,7 @@ def test_execute_cmd_receives_the_positional_args_and_one_context():
     assert isinstance(args[1], list)
     assert isinstance(args[2], list)
     assert isinstance(args[3], dict)
-    assert isinstance(args[4], ExecContext)
+    assert isinstance(args[4], Context)
 
 
 def test_flag_kwargs_is_empty_without_spec():

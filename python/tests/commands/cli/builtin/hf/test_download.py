@@ -30,7 +30,7 @@ from mirage.core.hf_hub.tree import parse_entry
 from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.workspace.files import Files
-from tests.commands.cli.builtin.hf.conftest import inv
+from tests.commands.cli.builtin.hf.conftest import leaf_args
 from tests.core.hf_hub.conftest import dir_row, file_row
 
 TREE = {
@@ -79,10 +79,10 @@ async def test_download_still_names_the_absence_when_the_tree_refuses(
     ):
         with pytest.raises(HfHubError, match="Repository Not Found"):
             await download_cmd(
-                inv(
+                *leaf_args(
                     texts=("acme/widget",),
                     flags={"local_dir": PathSpec.from_str_path("/work/out")},
-                    view=record,
+                    vfs=record,
                 )
             )
 
@@ -98,10 +98,10 @@ async def test_download_lets_a_server_failure_through(mock_tree, view):
     ):
         with pytest.raises(HfHubError, match="boom"):
             await download_cmd(
-                inv(
+                *leaf_args(
                     texts=("acme/widget",),
                     flags={"local_dir": PathSpec.from_str_path("/work/out")},
-                    view=record,
+                    vfs=record,
                 )
             )
     classify.assert_not_awaited()
@@ -117,10 +117,10 @@ async def test_download_writes_through_the_workspace_dispatcher(
     mock_tree.return_value = TREE
     mock_bytes.return_value = b"payload"
     await download_cmd(
-        inv(
+        *leaf_args(
             texts=("acme/widget", "a.txt"),
             flags={"local_dir": PathSpec.from_str_path("/work/out")},
-            view=record,
+            vfs=record,
         )
     )
     assert tree["/work/out/a.txt"] == b"payload"
@@ -140,10 +140,10 @@ async def test_download_creates_every_nested_level(
     mock_tree.return_value = TREE
     mock_bytes.return_value = b"x"
     await download_cmd(
-        inv(
+        *leaf_args(
             texts=("acme/widget", "sub/b.json"),
             flags={"local_dir": PathSpec.from_str_path("/work/out")},
-            view=record,
+            vfs=record,
         )
     )
     made = [path for op, path, _ in calls if op == "mkdir"]
@@ -158,7 +158,7 @@ async def test_download_requires_a_local_dir(view):
     agent cannot see."""
     record, _, _, _ = view
     with pytest.raises(UsageError, match="--local-dir"):
-        await download_cmd(inv(texts=("acme/widget",), view=record))
+        await download_cmd(*leaf_args(texts=("acme/widget",), vfs=record))
 
 
 @pytest.mark.asyncio
@@ -166,9 +166,9 @@ async def test_download_requires_a_repo_id(view):
     record, _, _, _ = view
     with pytest.raises(UsageError, match="repo_id"):
         await download_cmd(
-            inv(
+            *leaf_args(
                 flags={"local_dir": PathSpec.from_str_path("/work")},
-                view=record,
+                vfs=record,
             )
         )
 
@@ -177,7 +177,7 @@ async def test_download_requires_a_repo_id(view):
 async def test_download_needs_a_workspace():
     with pytest.raises(UsageError, match="workspace"):
         await download_cmd(
-            inv(
+            *leaf_args(
                 texts=("acme/widget",),
                 flags={"local_dir": PathSpec.from_str_path("/work")},
             )
@@ -198,13 +198,13 @@ async def test_download_refuses_when_nothing_matched(mock_tree, view):
     ):
         with pytest.raises(HfHubError, match="matched the line"):
             await download_cmd(
-                inv(
+                *leaf_args(
                     texts=("acme/widget",),
                     flags={
                         "local_dir": PathSpec.from_str_path("/work/out"),
                         "include": ["zzz*"],
                     },
-                    view=record,
+                    vfs=record,
                 )
             )
 
@@ -229,12 +229,12 @@ async def test_download_tells_the_three_absences_apart(mock_tree, view):
         ):
             with pytest.raises(HfHubError, match=expected):
                 await download_cmd(
-                    inv(
+                    *leaf_args(
                         texts=("acme/widget", *names),
                         flags={
                             "local_dir": PathSpec.from_str_path("/work/out")
                         },
-                        view=record,
+                        vfs=record,
                     )
                 )
 
@@ -248,13 +248,13 @@ async def test_quiet_prints_only_the_directory(mock_tree, mock_bytes, view):
     mock_bytes.return_value = b"x"
     text = await _text(
         await download_cmd(
-            inv(
+            *leaf_args(
                 texts=("acme/widget", "a.txt"),
                 flags={
                     "local_dir": PathSpec.from_str_path("/work/out"),
                     "quiet": True,
                 },
-                view=record,
+                vfs=record,
             )
         )
     )
@@ -286,13 +286,13 @@ async def test_download_refuses_the_upstream_variadic_line(
     mock_bytes.return_value = b"x"
     with pytest.raises(UsageError, match="--include"):
         await download_cmd(
-            inv(
+            *leaf_args(
                 texts=("acme/widget", "*.json"),
                 flags={
                     "include": ["*.txt"],
                     "local_dir": PathSpec.from_str_path("/work/out"),
                 },
-                view=record,
+                vfs=record,
             )
         )
 
@@ -310,13 +310,13 @@ async def test_download_fetches_with_a_bounded_pool(
     mock_tree.return_value = TREE
     mock_bytes.return_value = b"x"
     await download_cmd(
-        inv(
+        *leaf_args(
             texts=("acme/widget",),
             flags={
                 "local_dir": PathSpec.from_str_path("/work/out"),
                 "max_workers": 2,
             },
-            view=record,
+            vfs=record,
         )
     )
     assert "/work/out/a.txt" in tree

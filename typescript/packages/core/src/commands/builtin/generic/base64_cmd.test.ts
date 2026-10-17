@@ -1,10 +1,11 @@
 import { expect, it } from 'vitest'
+import { PathSpec } from '../../../types.ts'
 import { ensureStream } from '../../../io/stream.ts'
 import { materialize, type ByteSource } from '../../../io/types.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeBase64 } from '../../../utils/base64.ts'
 import { base64Generic } from './base64_cmd.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -12,8 +13,13 @@ function unused(): never {
   throw new Error('no file operand')
 }
 
-async function run(stdin: ByteSource, flags: CommandOpts['flags'] = {}) {
-  const result = await base64Generic([], { stdin, flags, cwd: '/' }, unused, unused)
+async function run(stdin: ByteSource, flags: Context['flags'] = {}) {
+  const result = await base64Generic(
+    [],
+    { stdin, flags, cwd: PathSpec.fromStrPath('/') },
+    unused,
+    unused,
+  )
   if (result === null) throw new Error('base64 returned no result')
   return result
 }
@@ -93,7 +99,7 @@ it.each<[string, boolean, string, number]>([
         await Promise.resolve()
         for (let at = 0; at < data.length; at += size) yield data.subarray(at, at + size)
       }
-      const flags: CommandOpts['flags'] = { decode: true, ignore_garbage: ignore }
+      const flags: Context['flags'] = { decode: true, ignore_garbage: ignore }
       const [out, io] = await run(source(), flags)
       expect(DEC.decode(await materialize(out))).toBe(expected)
       expect(io.exitCode).toBe(code)

@@ -27,7 +27,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     resolve_or_empty,
     with_dir_guard,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.context import (
     reset_current_session,
     reset_mount_gate,
@@ -176,20 +176,20 @@ def _probe_ops(
 
 # No namespace facts, which is what a command bound outside a workspace
 # gets: only the two probes below the backend can fire.
-NO_NS = CommandOpts()
+NO_NS = Context()
 
 
 async def _nothing(op: str, path: PathSpec, **_):
     return None, None
 
 
-def _ns_dir(directory: str) -> CommandOpts:
+def _ns_dir(directory: str) -> Context:
     """A bag whose namespace owes one path a child name and nothing else:
     a mount below it."""
     row = MountRow(
         prefix=f"{directory}/alpha/", resource_type="ram", mode=MountMode.READ
     )
-    return CommandOpts(vfs=Files([row], _nothing))
+    return Context(vfs=Files([row], _nothing))
 
 
 @pytest.mark.asyncio
@@ -810,7 +810,7 @@ async def test_file_size_reads_a_file_whose_size_moved_since_its_listing(
         return FileStat(name="f", type=FileType.FILE, size=now), None
 
     listed = FileStat(name="f", type=FileType.FILE, size=7)
-    bound = file_size(_sized_ops(listed), None, CommandOpts(dispatch=dispatch))
+    bound = file_size(_sized_ops(listed), None, Context(dispatch=dispatch))
     assert await bound(PathSpec.from_str_path("/f")) == size
     assert asked == [("stat", {"fresh": True})]
 

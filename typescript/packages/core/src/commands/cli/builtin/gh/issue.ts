@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CommandFnResult } from '../../../config.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 import type { GitHubTransport } from '../../../../core/github/client.ts'
 import {
   commentIssue,
@@ -142,8 +142,8 @@ function viewText(row: Record<string, unknown>): string {
   return `title:\t${textValue(row.title)}\nstate:\t${textValue(row.state).toUpperCase()}\nauthor:\t${textValue(author?.login)}\nlabels:\t${labels(row)}\n--\n${textValue(row.body)}\n`
 }
 
-function target(inv: CLIInvocation, fl: FlagView) {
-  return repoNumber(inv, fl, inv.texts[0], 'issue', 'issues')
+function target(config: unknown, texts: string[], fl: FlagView) {
+  return repoNumber(config, fl, texts[0], 'issue', 'issues')
 }
 
 /**
@@ -151,8 +151,13 @@ function target(inv: CLIInvocation, fl: FlagView) {
  * named, the way gh's IssueList does, so every field gh accepts is answered
  * in gh's own shape; the text view reads the REST listing.
  */
-export async function listCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function listCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const state = fl.asStr('state') ?? 'open'
   const assignee = fl.asStr('assignee')
   const author = fl.asStr('author')
@@ -160,8 +165,8 @@ export async function listCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   const fields = jsonFields(fl, ISSUE_FIELDS)
   if (fields !== null) {
     const rows = await listIssueFields(
-      ghTransport(inv.config),
-      repoFor(inv, fl),
+      ghTransport(config),
+      repoFor(config, fl),
       { states: STATES[state] ?? ['OPEN'], assignee, author, labels: labelValues },
       fl.asInt('limit') ?? 30,
       selection(ISSUE_FIELD_TABLE, fields, false),
@@ -178,8 +183,8 @@ export async function listCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   if (author !== undefined) params.creator = author
   if (labelValues.length > 0) params.labels = labelValues.join(',')
   const values = await listIssues(
-    ghTransport(inv.config),
-    repoFor(inv, fl),
+    ghTransport(config),
+    repoFor(config, fl),
     params,
     fl.asInt('limit') ?? 30,
   )
@@ -192,16 +197,21 @@ export async function listCmd(inv: CLIInvocation): Promise<CommandFnResult> {
  * gh does (see viewedIssue); the text view reads the REST object, and `-c`
  * its comments.
  */
-export async function viewCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const [ref, number] = target(inv, fl)
+export async function viewCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const [ref, number] = target(config, texts, fl)
   const fields = jsonFields(fl, ISSUE_FIELDS)
   if (fields !== null) {
-    const node = await viewedIssue(ghTransport(inv.config), ref, number, fields)
+    const node = await viewedIssue(ghTransport(config), ref, number, fields)
     return typedOut(exportedNode(ISSUE_FIELD_TABLE, node, fields), fl, '', ISSUE_FIELDS)
   }
-  const row = issue(await getIssue(ghTransport(inv.config), ref, number))
-  const comments = await commentsFor(inv, fl, ref, number)
+  const row = issue(await getIssue(ghTransport(config), ref, number))
+  const comments = await commentsFor(config, fl, ref, number)
   return typedOut(
     row,
     fl,
@@ -210,27 +220,37 @@ export async function viewCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   )
 }
 
-export async function createCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function createCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const title = fl.asStr('title')
   if (title === undefined || title === '')
     throw new Error('--title is required in noninteractive mode')
-  const body: Record<string, unknown> = { title, body: (await bodyValue(inv, fl)) ?? '' }
+  const body: Record<string, unknown> = { title, body: (await bodyValue(ctx, fl)) ?? '' }
   const labelValues = csvValues(fl.asList('label'))
   const assignees = csvValues(fl.asList('assignee'))
   if (labelValues.length > 0) body.labels = labelValues
   if (assignees.length > 0) body.assignees = assignees
-  const created = issue(await createIssue(ghTransport(inv.config), repoFor(inv, fl), body))
+  const created = issue(await createIssue(ghTransport(config), repoFor(config, fl), body))
   return textOut(`${textValue(created.url)}\n`)
 }
 
-export async function editCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const transport = ghTransport(inv.config)
-  const [ref, number] = target(inv, fl)
+export async function editCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const transport = ghTransport(config)
+  const [ref, number] = target(config, texts, fl)
   const body: Record<string, unknown> = {}
   const title = fl.asStr('title')
-  const text = await bodyValue(inv, fl)
+  const text = await bodyValue(ctx, fl)
   if (title !== undefined) body.title = title
   if (text !== undefined) body.body = text
   const additions = csvValues(fl.asList('add_label'))
@@ -266,40 +286,60 @@ export async function editCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   return textOut(`${textValue(edited.url)}\n`)
 }
 
-async function state(inv: CLIInvocation, next: 'open' | 'closed'): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const [ref, number] = target(inv, fl)
-  const edited = issue(await editIssue(ghTransport(inv.config), ref, number, { state: next }))
+async function state(
+  config: unknown,
+  texts: string[],
+  ctx: Context,
+  next: 'open' | 'closed',
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const [ref, number] = target(config, texts, fl)
+  const edited = issue(await editIssue(ghTransport(config), ref, number, { state: next }))
   const verb = next === 'closed' ? 'Closed' : 'Reopened'
   return textOut(
     `✓ ${verb} issue ${ref.owner}/${ref.repo}#${String(number)} (${textValue(edited.title)})\n`,
   )
 }
 
-export async function closeCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  return state(inv, 'closed')
+export async function closeCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  return state(config, texts, ctx, 'closed')
 }
 
-export async function reopenCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  return state(inv, 'open')
+export async function reopenCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  return state(config, texts, ctx, 'open')
 }
 
-export async function commentCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const body = await bodyValue(inv, fl, { required: true })
-  const [ref, number] = target(inv, fl)
-  const comment = issue(await commentIssue(ghTransport(inv.config), ref, number, body ?? ''))
+export async function commentCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const body = await bodyValue(ctx, fl, { required: true })
+  const [ref, number] = target(config, texts, fl)
+  const comment = issue(await commentIssue(ghTransport(config), ref, number, body ?? ''))
   return textOut(`${textValue(comment.url)}\n`)
 }
 
 export async function commentsFor(
-  inv: CLIInvocation,
+  config: unknown,
   fl: FlagView,
   ref: { owner: string; repo: string },
   number: number,
 ): Promise<Record<string, unknown>[] | null> {
   if (!ghBool(fl, 'comments')) return null
-  const rows = await issueComments(ghTransport(inv.config), ref, number)
+  const rows = await issueComments(ghTransport(config), ref, number)
   return rows.map((row) => ({
     ...row,
     author: row.author ?? { login: '' },

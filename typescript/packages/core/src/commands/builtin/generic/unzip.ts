@@ -32,7 +32,7 @@ import { PathSpec } from '../../../types.ts'
 import { ByteSpool } from '../../../io/spool.ts'
 import { OutputStream, asyncChain, yieldBytes, drain } from '../../../io/stream.ts'
 import { inflateRaw, inflateRawStream, crc32 } from '../../../utils/compress.ts'
-import { type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { type CommandFnResult, type Context } from '../../config.ts'
 import { versionLine } from '../../spec/standard.ts'
 import { UsageError } from '../../errors.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
@@ -671,14 +671,14 @@ function parseFlags(fl: FlagView): UnzipFlags {
 export async function unzipGeneric(
   paths: PathSpec[],
   members: readonly string[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: ByteSource) => Promise<void>,
   mkdir: (p: PathSpec, parents?: boolean) => Promise<void>,
   stat?: StatFn,
   relay = false,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('unzip'))
+  const fl = new FlagView(ctx.flags, specOf('unzip'))
   const parsed = parseFlags(fl)
   const verbose = parsed.verbose
   if (paths.length === 0) {
@@ -776,7 +776,7 @@ export async function unzipGeneric(
         return [listing, new IOResult({ exitCode, stderr })]
       }
       const mountPrefix = relay ? '' : mountPrefixOf(archivePath.virtual, archivePath.vfsPath)
-      const destRaw = extractDest(fl.asPath('d') ?? null, opts.cwd)
+      const destRaw = extractDest(fl.asPath('d') ?? null, ctx.cwd.virtual)
       const dest =
         mountPrefix !== '' && destRaw.startsWith(mountPrefix + '/')
           ? destRaw.slice(mountPrefix.length)
@@ -887,8 +887,8 @@ export async function unzipGeneric(
       let replaceAll = parsed.overwrite && !parsed.neverOverwrite
       let skipAll = parsed.neverOverwrite
       const answer = async (): Promise<Uint8Array | null> => {
-        if (opts.stdin === null) return null
-        answers ??= new AsyncLineIterator(opts.stdin)
+        if (ctx.stdin === null) return null
+        answers ??= new AsyncLineIterator(ctx.stdin)
         return answers.readline()
       }
       // Where a file entry goes when a file may hold its name. Info-ZIP asks

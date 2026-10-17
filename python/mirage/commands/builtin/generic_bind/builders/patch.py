@@ -23,7 +23,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     dir_aware_stat,
     require_op,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -33,10 +33,10 @@ async def patch(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    stat = dir_aware_stat(ops, accessor, opts)
-    read = bound_op(ops.read_bytes, accessor, opts.index)
+    stat = dir_aware_stat(ops, accessor, ctx)
+    read = bound_op(ops.read_bytes, accessor, ctx.index)
 
     async def read_file(path: PathSpec) -> bytes:
         # Stat first, as GNU patch does: a directory is refused before it
@@ -49,7 +49,7 @@ async def patch(
     return await patch_generic(
         paths,
         list(texts),
-        opts,
+        ctx,
         read_file,
         partial(require_op(ops, Operation.WRITE), accessor),
         ops.is_mounted(accessor),

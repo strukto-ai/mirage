@@ -15,7 +15,7 @@
 import type { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
+import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
@@ -50,9 +50,9 @@ function uname(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): CommandFnResult {
-  const fl = new FlagView(opts.flags, specOf('uname'))
+  const fl = new FlagView(ctx.flags, specOf('uname'))
   const extra = texts[0]
   if (extra !== undefined) throw extraOperandError(CommandName.UNAME, extra)
   const chosen = fl.asBool('all')

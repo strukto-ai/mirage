@@ -25,7 +25,7 @@ import { PathSpec } from '../../../types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { isMissingPath } from '../../../errors/fs.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { resolveScript } from '../utils/paths.ts'
 
 /**
@@ -238,7 +238,7 @@ function toPathSpec(p: PathSpec): PathSpec {
  *   paths: positional path operands.
  *   texts: positional text operands.
  *   payload: the -c/-e flag value, if given.
- *   opts: the command's options (stdin, dispatch, cwd, the x checks).
+ *   ctx: the command's options (stdin, dispatch, cwd, the x checks).
  *   module: the -m module name, if given.
  *   argv0Rules: what this interpreter calls itself where no file names it.
  *   skipLine: drop the script file's first line (CPython's -x).
@@ -251,7 +251,7 @@ export async function resolveSource(
   paths: PathSpec[],
   texts: string[],
   payload: string | null,
-  opts: CommandOpts,
+  ctx: Context,
   module: string | null = null,
   argv0Rules: Argv0Rules = {},
   skipLine = false,
@@ -284,7 +284,7 @@ export async function resolveSource(
     mode = 'stdin'
     argv0 = argv0Rules.stdinOperand
   } else if (texts.length > 0) {
-    scriptPath = resolveScript(texts[0] ?? '', opts.cwd)
+    scriptPath = resolveScript(texts[0] ?? '', ctx.cwd.virtual)
     args = texts.slice(1)
     mode = 'file'
     // As typed, which is what CPython puts in argv[0]; the resolved
@@ -297,20 +297,20 @@ export async function resolveSource(
   }
 
   if (mode === 'file' && scriptPath !== null) {
-    const allowed = opts.execPathAllowed?.(scriptPath.virtual) ?? opts.execAllowed !== false
+    const allowed = ctx.execPathAllowed?.(scriptPath.virtual) ?? ctx.execAllowed !== false
     if (!allowed) {
       const display = scriptPath.rawPath !== '' ? scriptPath.rawPath : scriptPath.virtual
       return failed(label, `${display}: not in EXEC mode`, 126)
     }
-  } else if (opts.execAllowed === false) {
+  } else if (ctx.execAllowed === false) {
     return failed(label, "root mount '/' is not in EXEC mode", 126)
   }
 
   if (code === null && scriptPath !== null) {
-    if (opts.dispatch === undefined) return failed(label, 'no dispatch available to read script', 1)
+    if (ctx.dispatch === undefined) return failed(label, 'no dispatch available to read script', 1)
     let data: unknown
     try {
-      data = (await opts.dispatch('read', toPathSpec(scriptPath)))[0]
+      data = (await ctx.dispatch('read', toPathSpec(scriptPath)))[0]
     } catch (err) {
       if (!isMissingPath(err)) throw err
       return failed(label, `${scriptPath.virtual}: No such file`, 1)
@@ -319,7 +319,7 @@ export async function resolveSource(
     if (skipLine) code = skipFirstLine(code)
   }
 
-  let stdin = opts.stdin !== null ? await materialize(opts.stdin) : null
+  let stdin = ctx.stdin !== null ? await materialize(ctx.stdin) : null
   if (code === null) {
     if (stdin === null || stdin.length === 0) return failed(label, 'no input', 1)
     code = DEC.decode(stdin)
@@ -338,14 +338,14 @@ export async function resolveSource(
  *   runtime: the runtime bound to this command.
  *   switches: interpreter-level switches (Python's InitFlags, js's
  *     `module`), handed to the runtime as its run flags.
- *   opts: the command's options (env, cwd, signal, limit).
+ *   ctx: the command's options (env, cwd, signal, limit).
  */
 export async function runCode(
   label: string,
   prepared: Source,
   runtime: LanguageRuntime,
   switches: Record<string, unknown>,
-  opts: CommandOpts,
+  ctx: Context,
 ): Promise<CommandFnResult> {
   if (prepared.mode === 'module' && runtime instanceof PythonRuntime && !runtime.runsModules) {
     // Exit 1, CPython's code for a `-m` that could not run, but not its
@@ -359,14 +359,14 @@ export async function runCode(
       language: runtime.language,
       code: prepared.code,
       args: prepared.args,
-      env: opts.env ?? {},
-      cwd: PathSpec.fromStrPath(opts.cwd),
+      env: ctx.env ?? {},
+      cwd: PathSpec.fromStrPath(ctx.cwd),
       ...(prepared.scriptPath !== null ? { scriptPath: prepared.scriptPath } : {}),
       stdin: prepared.stdin,
       ...(prepared.argv0 !== undefined ? { prog: prepared.argv0 } : {}),
       flags: switches,
-      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
-      ...(opts.timeoutSeconds !== undefined ? { timeoutSeconds: opts.timeoutSeconds } : {}),
+      ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
+      ...(ctx.timeoutSeconds !== undefined ? { timeoutSeconds: ctx.timeoutSeconds } : {}),
     })
     return runOutput(result)
   } catch (err) {

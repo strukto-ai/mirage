@@ -7,7 +7,7 @@ from mirage.commands.builtin.generic.cat import (
     cat_generic,
     display_lines,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.errors.fs import efbig
 from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
@@ -82,7 +82,7 @@ async def test_cat_generic_without_display_flags_streams_each_chunk():
     out, _ = await cat_generic(
         [PathSpec.from_str_path("/a.txt")],
         [],
-        CommandOpts(),
+        Context(),
         stat,
         read,
     )
@@ -108,7 +108,7 @@ async def test_cat_generic_reports_a_refused_read_and_goes_on():
             raise efbig(p)
 
     paths = [PathSpec.from_str_path(p) for p in files]
-    out, io = await cat_generic(paths, [], CommandOpts(), stat, read)
+    out, io = await cat_generic(paths, [], Context(), stat, read)
     assert await materialize(out) == b"a1\nb1\nb2\n"
     assert io.stderr == b"cat: /a.txt: File too large\n"
     assert io.exit_code == 1

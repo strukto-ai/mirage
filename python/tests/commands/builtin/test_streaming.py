@@ -17,7 +17,7 @@ import pytest
 from mirage.accessor import NOOPAccessor
 from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.builtin.generic_bind.factory import GENERIC_COMMANDS
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
 from tests.fixtures.driver_ops import ops
@@ -52,7 +52,7 @@ async def test_cat_file_returns_async_iterator(backend):
         backend.accessor,
         [_ps("/tmp/f.txt")],
         [],
-        CommandOpts(io=command_io(backend)),
+        Context(io=command_io(backend)),
     )
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
@@ -63,7 +63,7 @@ async def test_cat_file_returns_async_iterator(backend):
 async def test_cat_stdin_returns_async_iterator():
     source = _chunks([b"hello ", b"world"])
     stdout, io = await cat(
-        _NOOP, [], [], CommandOpts(io=command_io(RAMVFS()), stdin=source)
+        _NOOP, [], [], Context(io=command_io(RAMVFS()), stdin=source)
     )
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
@@ -73,7 +73,7 @@ async def test_cat_stdin_returns_async_iterator():
 @pytest.mark.asyncio
 async def test_cat_bytes_stdin():
     stdout, io = await cat(
-        _NOOP, [], [], CommandOpts(io=command_io(RAMVFS()), stdin=b"hello")
+        _NOOP, [], [], Context(io=command_io(RAMVFS()), stdin=b"hello")
     )
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
@@ -87,7 +87,7 @@ async def test_cat_number_lines(backend):
         backend.accessor,
         [_ps("/tmp/f.txt")],
         [],
-        CommandOpts(io=command_io(backend), flags={"number": True}),
+        Context(io=command_io(backend), flags={"number": True}),
     )
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
@@ -109,7 +109,7 @@ async def test_grep_file_returns_async_iterator(backend):
         backend.accessor,
         [_ps("/tmp/f.txt")],
         ["ap"],
-        CommandOpts(io=command_io(backend)),
+        Context(io=command_io(backend)),
     )
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
@@ -122,7 +122,7 @@ async def test_grep_file_returns_async_iterator(backend):
 async def test_grep_stdin_streaming():
     source = _chunks([b"apple\nban", b"ana\napricot\ncherry\n"])
     stdout, io = await grep(
-        _NOOP, [], ["ap"], CommandOpts(io=command_io(RAMVFS()), stdin=source)
+        _NOOP, [], ["ap"], Context(io=command_io(RAMVFS()), stdin=source)
     )
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
@@ -145,7 +145,7 @@ async def test_grep_max_count_stops_early():
         _NOOP,
         [],
         ["match"],
-        CommandOpts(
+        Context(
             io=command_io(RAMVFS()),
             stdin=_counting(),
             flags={"max_count": "3"},
@@ -161,7 +161,7 @@ async def test_grep_max_count_stops_early():
 async def test_grep_no_match_exit_code():
     source = _chunks([b"apple\nbanana\n"])
     stdout, io = await grep(
-        _NOOP, [], ["zzz"], CommandOpts(io=command_io(RAMVFS()), stdin=source)
+        _NOOP, [], ["zzz"], Context(io=command_io(RAMVFS()), stdin=source)
     )
     collected = b"".join([chunk async for chunk in stdout])
     assert collected == b""
@@ -174,7 +174,7 @@ async def test_grep_ignore_case():
         _NOOP,
         [],
         ["ap"],
-        CommandOpts(
+        Context(
             io=command_io(RAMVFS()), stdin=source, flags={"ignore_case": True}
         ),
     )
@@ -191,7 +191,7 @@ async def test_grep_invert():
         _NOOP,
         [],
         ["banana"],
-        CommandOpts(
+        Context(
             io=command_io(RAMVFS()), stdin=source, flags={"invert_match": True}
         ),
     )
@@ -208,9 +208,7 @@ async def test_grep_count_only():
         _NOOP,
         [],
         ["ap"],
-        CommandOpts(
-            io=command_io(RAMVFS()), stdin=source, flags={"count": True}
-        ),
+        Context(io=command_io(RAMVFS()), stdin=source, flags={"count": True}),
     )
     collected = b"".join([chunk async for chunk in stdout])
     assert collected.strip() == b"2"
@@ -227,7 +225,7 @@ async def test_head_file_returns_async_iterator(backend):
         backend.accessor,
         [_ps("/tmp/f.txt")],
         [],
-        CommandOpts(io=command_io(backend), flags={"lines": "3"}),
+        Context(io=command_io(backend), flags={"lines": "3"}),
     )
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
@@ -241,9 +239,7 @@ async def test_head_stdin_streaming():
         _NOOP,
         [],
         [],
-        CommandOpts(
-            io=command_io(RAMVFS()), stdin=source, flags={"lines": "2"}
-        ),
+        Context(io=command_io(RAMVFS()), stdin=source, flags={"lines": "2"}),
     )
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
@@ -264,7 +260,7 @@ async def test_head_early_termination():
         _NOOP,
         [],
         [],
-        CommandOpts(
+        Context(
             io=command_io(RAMVFS()), stdin=_infinite(), flags={"lines": "3"}
         ),
     )
@@ -279,7 +275,7 @@ async def test_head_default_10_lines():
     data = b"\n".join(f"line{i}".encode() for i in range(20)) + b"\n"
     source = _chunks([data])
     stdout, io = await head(
-        _NOOP, [], [], CommandOpts(io=command_io(RAMVFS()), stdin=source)
+        _NOOP, [], [], Context(io=command_io(RAMVFS()), stdin=source)
     )
     collected = b"".join([chunk async for chunk in stdout])
     assert collected.count(b"\n") == 10
@@ -292,9 +288,7 @@ async def test_head_bytes_mode():
         _NOOP,
         [],
         [],
-        CommandOpts(
-            io=command_io(RAMVFS()), stdin=source, flags={"bytes": "5"}
-        ),
+        Context(io=command_io(RAMVFS()), stdin=source, flags={"bytes": "5"}),
     )
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
@@ -311,7 +305,7 @@ async def test_cut_stdin_streaming():
         _NOOP,
         [],
         [],
-        CommandOpts(
+        Context(
             io=command_io(RAMVFS()),
             stdin=source,
             flags={"delimiter": ",", "fields": "2"},
@@ -329,7 +323,7 @@ async def test_cut_file_returns_async_iterator(backend):
         backend.accessor,
         [_ps("/tmp/f.txt")],
         [],
-        CommandOpts(
+        Context(
             io=command_io(backend), flags={"delimiter": ",", "fields": "2"}
         ),
     )
@@ -345,7 +339,7 @@ async def test_cut_file_returns_async_iterator(backend):
 async def test_uniq_stdin_streaming():
     source = _chunks([b"a\na\nb\nb\nb\nc\n"])
     stdout, io = await uniq(
-        _NOOP, [], [], CommandOpts(io=command_io(RAMVFS()), stdin=source)
+        _NOOP, [], [], Context(io=command_io(RAMVFS()), stdin=source)
     )
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
@@ -359,9 +353,7 @@ async def test_uniq_count():
         _NOOP,
         [],
         [],
-        CommandOpts(
-            io=command_io(RAMVFS()), stdin=source, flags={"count": True}
-        ),
+        Context(io=command_io(RAMVFS()), stdin=source, flags={"count": True}),
     )
     collected = b"".join([chunk async for chunk in stdout])
     assert b"2" in collected
@@ -375,7 +367,7 @@ async def test_uniq_count():
 async def test_nl_stdin_streaming():
     source = _chunks([b"aaa\nbbb\nccc\n"])
     stdout, io = await nl(
-        _NOOP, [], [], CommandOpts(io=command_io(RAMVFS()), stdin=source)
+        _NOOP, [], [], Context(io=command_io(RAMVFS()), stdin=source)
     )
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
@@ -393,7 +385,7 @@ async def test_tr_stdin_streaming():
         _NOOP,
         [],
         ["o", "0"],
-        CommandOpts(io=command_io(RAMVFS()), stdin=source),
+        Context(io=command_io(RAMVFS()), stdin=source),
     )
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
@@ -407,9 +399,7 @@ async def test_tr_delete():
         _NOOP,
         [],
         ["lo"],
-        CommandOpts(
-            io=command_io(RAMVFS()), stdin=source, flags={"delete": True}
-        ),
+        Context(io=command_io(RAMVFS()), stdin=source, flags={"delete": True}),
     )
     collected = b"".join([chunk async for chunk in stdout])
     assert collected == b"he wrd"
@@ -425,9 +415,7 @@ async def test_wc_lines_streaming():
         _NOOP,
         [],
         [],
-        CommandOpts(
-            io=command_io(RAMVFS()), stdin=source, flags={"args_l": True}
-        ),
+        Context(io=command_io(RAMVFS()), stdin=source, flags={"args_l": True}),
     )
     collected = (
         b"".join([chunk async for chunk in stdout])
@@ -441,7 +429,7 @@ async def test_wc_lines_streaming():
 async def test_wc_full_streaming():
     source = _chunks([b"one two\nthree\n"])
     stdout, io = await wc(
-        _NOOP, [], [], CommandOpts(io=command_io(RAMVFS()), stdin=source)
+        _NOOP, [], [], Context(io=command_io(RAMVFS()), stdin=source)
     )
     collected = (
         b"".join([chunk async for chunk in stdout])

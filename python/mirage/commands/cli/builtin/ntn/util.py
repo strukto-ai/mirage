@@ -14,7 +14,7 @@
 
 import json
 
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.notion.config import NotionConfig
@@ -111,11 +111,11 @@ def rust_debug(text: str) -> str:
     return "".join(out)
 
 
-def first_text(texts: tuple[str, ...], what: str) -> str:
+def first_text(texts: list[str], what: str) -> str:
     """Take the leading positional operand or refuse the line.
 
     Args:
-        texts (tuple[str, ...]): the leaf's text operands.
+        texts (list[str]): the leaf's text operands.
         what (str): what the operand names, for the message.
 
     Returns:
@@ -219,23 +219,24 @@ def parse_json_text(text: str, flag: str) -> dict[str, JsonValue]:
     return parsed
 
 
-def notion_config(inv: CLIInvocation[NotionConfig]) -> NotionConfig:
+def notion_config(config: NotionConfig, ctx: Context) -> NotionConfig:
     """The install's config with this line's Notion-Version applied.
 
     ``--notion-version`` is upstream's per-invocation override of the
     header, and the executor has already filled it from
     ``NOTION_API_VERSION`` when the line omitted it, so a verb reads one
     flag and never the environment. Every verb goes through here rather
-    than passing ``inv.config`` straight down, or the override would
+    than passing ``config`` straight down, or the override would
     work on whichever verbs remembered it.
 
     Args:
-        inv (CLIInvocation): the line's invocation record.
+        config (NotionConfig): the install's config.
+        ctx (Context): the leaf's context, carrying its flags.
 
     Returns:
         NotionConfig: the config to hand the transport.
     """
-    version = FlagView(inv.flags).as_str("notion_version")
+    version = FlagView(ctx.flags).as_str("notion_version")
     if not version:
-        return inv.config
-    return inv.config.model_copy(update={"api_version": version})
+        return config
+    return config.model_copy(update={"api_version": version})

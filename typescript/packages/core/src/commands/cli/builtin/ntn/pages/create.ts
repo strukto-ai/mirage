@@ -15,8 +15,8 @@
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { createPageRaw } from '../../../../../core/notion/pages.ts'
 import { IOResult } from '../../../../../io/types.ts'
-import type { CommandFnResult } from '../../../../config.ts'
-import type { CLIInvocation } from '../../../types.ts'
+import type { CommandFnResult, Context } from '../../../../config.ts'
+import type { PathSpec } from '../../../../../types.ts'
 import { contentOrStdin, notionTransport, prettyJson, usageError } from '../util.ts'
 
 const ENC = new TextEncoder()
@@ -37,11 +37,16 @@ function parseParent(spec: string): Record<string, unknown> {
   return { [key]: ident }
 }
 
-export async function create(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function create(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const body: Record<string, unknown> = {}
   try {
-    body.markdown = await contentOrStdin(fl.asStr('content'), inv.stdin)
+    body.markdown = await contentOrStdin(fl.asStr('content'), ctx.stdin)
     // The parent really is optional upstream: omitted, the request goes out
     // without one and the API decides whether to refuse it.
     const parent = fl.asStr('parent')
@@ -49,7 +54,7 @@ export async function create(inv: CLIInvocation): Promise<CommandFnResult> {
   } catch (err) {
     return usageError(err)
   }
-  const page = await createPageRaw(notionTransport(inv.config, inv.flags), body)
+  const page = await createPageRaw(notionTransport(config, ctx.flags), body)
   if (fl.asBool('json')) return [prettyJson(page), new IOResult()]
   const id = typeof page.id === 'string' ? page.id : ''
   return [ENC.encode(`${id}\n`), new IOResult()]

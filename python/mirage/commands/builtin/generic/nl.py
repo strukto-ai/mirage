@@ -12,7 +12,7 @@ from mirage.commands.builtin.utils.operands import (
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import stdin_stat, stdin_stream
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -654,7 +654,7 @@ async def nl(
 async def nl_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     stat: StatFn,
     stream: PolymorphicReadFn,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -663,15 +663,15 @@ async def nl_generic(
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
         texts (list[str]): Non-path words, unused by nl.
-        opts (CommandOpts): Flags and stdin from the dispatcher.
+        ctx (Context): Flags and stdin from the dispatcher.
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
     """
     stat = stdin_stat(stat)
-    stream = stdin_stream(stream, opts.stdin)
+    stream = stdin_stream(stream, ctx.stdin)
     try:
-        parsed = parse_flags(opts.flags)
+        parsed = parse_flags(ctx.flags)
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=f"{exc}\n".encode())
     readable, err = await split_readable(paths, stat, "nl")
@@ -681,7 +681,7 @@ async def nl_generic(
         await nl(
             readable,
             read_stream=normalized_read(stream),
-            stdin=opts.stdin,
+            stdin=ctx.stdin,
             body_numbering_raw=parsed.body_numbering_raw,
             start_raw=parsed.start_raw,
             increment_raw=parsed.increment_raw,

@@ -10,7 +10,7 @@ from mirage.commands.builtin.generic.find import (
 from mirage.commands.builtin.generic.find import (
     find_walk_generic as stream_walk_find,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import FindParseError
 from mirage.core.generic.find import walk_find
 from mirage.core.generic.find_eval import FindArgs, Name, Not, Or
@@ -428,7 +428,7 @@ async def _walk(
     return await find_walk_generic(
         paths,
         list(texts),
-        CommandOpts(flags=flags, stat_path=stat_path),
+        Context(flags=flags, stat_path=stat_path),
         readdir=readdir,
         stat=stat,
     )
@@ -702,7 +702,7 @@ async def test_walk_selection_preserves_newlines_before_rendering():
     _, io = await find_walk_generic(
         [_file_spec(virtual="/mnt", key="")],
         ["-type", "f"],
-        CommandOpts(stat_path=_stat_map(stats)),
+        Context(stat_path=_stat_map(stats)),
         readdir=AsyncMock(return_value=["/mnt/a\nb"]),
         stat=AsyncMock(side_effect=lambda path, *_: stats[path.virtual]),
     )
@@ -718,7 +718,7 @@ async def test_start_point_streams_before_the_walk():
         return_value=FileStat(name="remote", type=FileType.DIRECTORY)
     )
     out, _ = await stream_walk_find(
-        [root], [], CommandOpts(stat_path=probe), readdir=readdir, stat=readdir
+        [root], [], Context(stat_path=probe), readdir=readdir, stat=readdir
     )
     assert await anext(out) == b"/remote\n"
     await out.aclose()

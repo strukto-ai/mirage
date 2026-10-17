@@ -19,7 +19,7 @@ from mirage.commands.builtin.utils.paths import (
     link_follow,
     stat_or_enoent,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -473,7 +473,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> FindFlags:
 async def find_walk_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     *,
     readdir: Callable[..., Awaitable[list[str]]],
     stat: Callable[..., Awaitable[FileStat]],
@@ -492,7 +492,7 @@ async def find_walk_generic(
     Args:
         paths (list[PathSpec]): Glob-resolved start points.
         texts (list[str]): The raw expression words.
-        opts (CommandOpts): Flags, the index for the walk, and namespace
+        ctx (Context): Flags, the index for the walk, and namespace
             facts (stat_path, links) from the dispatcher.
         readdir (Callable): Bound readdir called as ``readdir(p, index)``.
         stat (Callable): Bound overlaid stat called as ``stat(p, index)``.
@@ -500,12 +500,12 @@ async def find_walk_generic(
             when no ``-maxdepth`` bounds it (one the mount answers whole),
             else ``readdir`` and ``stat``.
     """
-    parsed = parse_flags(opts.flags)
-    flags = FlagView(opts.flags, spec=SPECS["find"])
+    parsed = parse_flags(ctx.flags)
+    flags = FlagView(ctx.flags, spec=SPECS["find"])
     bounded = flags.as_bool("xdev") or flags.as_bool("mount")
-    mounts = mounts_of(opts)
-    stat_path = opts.stat_path
-    links = links_of(opts)
+    mounts = mounts_of(ctx)
+    stat_path = ctx.stat_path
+    links = links_of(ctx)
     searches = (
         paths if paths else [PathSpec(virtual="/", directory="/", vfs_path="")]
     )
@@ -533,7 +533,7 @@ async def find_walk_generic(
                 search,
                 args,
                 stat_path,
-                stat=partial(stat, index=opts.index),
+                stat=partial(stat, index=ctx.index),
                 is_link=is_link(links, search),
                 follow=link_follow(links),
             )
@@ -571,7 +571,7 @@ async def find_walk_generic(
                     search,
                     readdir=readdir,
                     stat=stat,
-                    index=opts.index,
+                    index=ctx.index,
                     args=args,
                     follow=links if parsed.follow else None,
                     unreadable=unreadable,

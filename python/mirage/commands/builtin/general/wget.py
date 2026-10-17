@@ -16,7 +16,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.errors import HttpConnectError, HttpTimeoutError
 from mirage.commands.builtin.general.curl import resolve_target
 from mirage.commands.builtin.utils.http import http_get
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -44,13 +44,13 @@ async def wget(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(opts.flags, spec=SPECS["wget"])
+    fl = FlagView(ctx.flags, spec=SPECS["wget"])
     args_O = fl.raw("args_O")
     q = fl.as_bool("q")
     spider = fl.as_bool("spider")
-    dispatch = opts.dispatch
+    dispatch = ctx.dispatch
     if not texts:
         raise UsageError(USAGE, exit_code=EXIT_GENERIC)
     url = texts[0]
@@ -124,7 +124,7 @@ async def wget(
     # truncates the -O target before it learns the response code.
     data = b"" if resp.is_error else resp.body
     if dispatch is not None:
-        scope = resolve_target(dest_raw, opts.cwd)
+        scope = resolve_target(dest_raw, ctx.cwd)
         try:
             await dispatch("write", scope, data=data)
         # WALK_ERRORS is the shared recoverable set (every filesystem error

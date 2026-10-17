@@ -15,10 +15,10 @@
 import { lookGeneric } from '../../generic/look.ts'
 import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const look: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
-  const idx = opts.index ?? undefined
+const look: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return lookGeneric(resolved, texts, opts, (p) => ops.readStream(accessor, p, idx))
+  return lookGeneric(resolved, texts, ctx, (p) => ops.readStream(accessor, p, idx))
 }
 
 export const BUILDER: GenericCommand = {

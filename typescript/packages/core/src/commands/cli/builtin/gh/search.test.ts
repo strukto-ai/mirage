@@ -4,7 +4,7 @@ import { GitHubApiError } from '../../../../core/github/client.ts'
 import { search } from '../../../../core/github/search.ts'
 import { materialize } from '../../../../io/types.ts'
 import { searchSpec, searchHandlers } from './search.ts'
-import { cliInvocation } from '../../../../workspace/fixtures/cli_invocation.ts'
+import { context } from '../../../../workspace/fixtures/context.ts'
 
 vi.mock('../../../../core/github/search.ts', () => ({ search: vi.fn(() => Promise.resolve([])) }))
 
@@ -47,10 +47,11 @@ describe('search qualifiers match native gh', () => {
     const handler = searchHandlers()[`search ${leaf?.name ?? ''}`]
     if (!leaf || !handler?.fn) throw new Error('missing search handler')
     await handler.fn(
-      cliInvocation({
-        config: { token: 't' },
+      { token: 't' },
+      [],
+      ['two words'],
+      context({
         argv: ['search', kind, 'two words'],
-        texts: ['two words'],
         flags: { ...flags, limit: '30', json: 'url' },
         spec: leaf,
       }),
@@ -90,10 +91,11 @@ describe('a failed search reads as gh words it', () => {
     if (!leaf || !handler?.fn) throw new Error('missing search handler')
     const fn = handler.fn
     const result = await fn(
-      cliInvocation({
-        config: { token: 't' },
+      { token: 't' },
+      [],
+      ['needle'],
+      context({
         argv: ['search', 'issues', 'needle'],
-        texts: ['needle'],
         flags: { limit: '30' },
         spec: leaf,
       }),

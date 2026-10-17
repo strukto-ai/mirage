@@ -28,7 +28,7 @@ from mirage.commands.builtin.generic.crossmount.types import (
 from mirage.commands.builtin.generic.du import du, parse_flags
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.builtin.utils.links import mount_view
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -85,7 +85,7 @@ async def run_du(
         follow (FollowOperands | None): The line's operand resolution,
             which the one walk's globs take.
     """
-    rendering = parse_flags(CommandOpts(flags=flags))
+    rendering = parse_flags(Context(flags=flags))
     bounded = FlagView(flags, spec=SPECS["du"]).as_bool("one_file_system")
     measuring = {k: v for k, v in flags.items() if k not in RENDERING}
     # Each start is then one mount's own part, and keeps only what that

@@ -76,7 +76,7 @@ async function rm(
     {} as Accessor,
     paths.map((p) => PathSpec.fromStrPath(p)),
     [],
-    { stdin: null, flags, cwd: '/', index: INDEX },
+    { stdin: null, flags, cwd: PathSpec.fromStrPath('/'), index: INDEX },
   )
   if (result === null) throw new Error('rm returned no result')
   const [out, res] = result
@@ -168,7 +168,7 @@ it.each([
     const result = await command.fn({} as Accessor, [refused, valid], [], {
       flags: { f: force },
       stdin: null,
-      cwd: '/',
+      cwd: PathSpec.fromStrPath('/'),
       io,
     })
     await materialize(result?.[0] ?? null)
@@ -207,7 +207,7 @@ it('rm -r names a mount below and fails', async () => {
   const result = await command.fn({} as Accessor, [PathSpec.fromStrPath('/data')], [], {
     flags: { r: true },
     stdin: null,
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     io,
     vfs: new Files(dispatchNothing, null, null, () => null, {
       prefixes: () => ['/data/', '/data/inner/'],

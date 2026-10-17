@@ -17,7 +17,7 @@ import pytest
 from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.io.types import materialize
 from mirage.types import PathSpec
 from mirage.vfs.langfuse import LangfuseVFS
@@ -44,7 +44,7 @@ async def _run(paths, *texts: str, **flags) -> list[str]:
         accessor,
         paths,
         list(texts),
-        CommandOpts(
+        Context(
             io=io_for(LangfuseVFS, accessor),
             index=RAMIndexCacheStore(),
             flags={**flags},

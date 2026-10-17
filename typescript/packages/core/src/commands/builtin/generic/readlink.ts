@@ -18,7 +18,7 @@ import type { FlagValue } from '../../spec/types.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { lstripSlash } from '../../../utils/slash.ts'
 import { missingOperandError } from '../../spec/usage.ts'
 
@@ -59,10 +59,10 @@ function parseFlags(bag: Record<string, FlagValue>): ReadlinkFlags {
 export function readlinkGeneric(
   paths: PathSpec[],
   _texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
 ): CommandFnResult {
   if (paths.length === 0) throw missingOperandError('readlink', null)
-  const parsed = parseFlags(opts.flags)
+  const parsed = parseFlags(ctx.flags)
   const normalize = parsed.canonicalize || parsed.canonicalizeExisting || parsed.canonicalizeMissing
   const noNewline = parsed.noNewline
   const results: string[] = []

@@ -24,7 +24,7 @@ import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import type { PathSpec } from '../../../types.ts'
 import { strverscmp } from '../../../utils/strverscmp.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { neverOpened, stdinStream } from '../utils/stream.ts'
 import {
   CUT,
@@ -322,12 +322,12 @@ function parseFlags(bag: Record<string, FlagValue>): IconvFlags {
  */
 export async function iconvGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: ByteSource) => Promise<void>,
 ): Promise<CommandFnResult> {
-  stream = stdinStream(stream, opts.stdin)
-  const parsed = parseFlags(opts.flags)
+  stream = stdinStream(stream, ctx.stdin)
+  const parsed = parseFlags(ctx.flags)
   if (parsed.listCharsets) return [listText(), new IOResult()]
   const fromName = parsed.fromEnc
   const toName = parsed.toEnc
@@ -347,7 +347,7 @@ export async function iconvGeneric(
   const operands =
     paths.length > 0
       ? paths.map((path) => ({ path, source: stream(path) }))
-      : [{ path: null, source: opts.stdin ?? new Uint8Array() }]
+      : [{ path: null, source: ctx.stdin ?? new Uint8Array() }]
   const io = new IOResult()
   const inputCharset = fromCharset
   const report = async (line: string): Promise<void> => {

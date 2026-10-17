@@ -24,16 +24,16 @@ import {
 } from '../adapter.ts'
 import type { PathSpec } from '../../../../types.ts'
 
-const tail: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
-  const idx = opts.index ?? undefined
+const tail: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   const { readRange, lastLines, follow } = ops
   return tailGeneric(
     resolved,
     texts,
-    opts,
-    dirAwareStream(ops, accessor, opts),
-    dirAwareStat(ops, accessor, opts),
+    ctx,
+    dirAwareStream(ops, accessor, ctx),
+    dirAwareStat(ops, accessor, ctx),
     readRange === undefined ? null : (p, offset, size) => readRange(accessor, p, idx, offset, size),
     boundUncached(lastLines && ((p: PathSpec, n: number) => lastLines(accessor, p, n, idx))),
     follow && ((p: PathSpec, n: number, interval: number) => follow(accessor, p, n, interval, idx)),

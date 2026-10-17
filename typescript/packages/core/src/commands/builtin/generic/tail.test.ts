@@ -22,7 +22,7 @@ import {
   PathSpec,
   ReadPolicy,
 } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { efbig, enoent } from '../../../errors/fs.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { followFlags, tailGeneric } from './tail.ts'
@@ -48,13 +48,13 @@ function spec(path: string): PathSpec {
   })
 }
 
-function opts(flags: Record<string, string | boolean>, signal?: AbortSignal): CommandOpts {
+function ctx(flags: Record<string, string | boolean>, signal?: AbortSignal): Context {
   return {
     stdin: null,
     flags,
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
     signal,
-  } as unknown as CommandOpts
+  } as unknown as Context
 }
 
 const bytesOf = (body: Uint8Array | null | undefined): Uint8Array => body ?? new Uint8Array()
@@ -122,11 +122,8 @@ async function drainFor(
   return chunks.map((c) => DEC.decode(c)).join('')
 }
 
-function followOpts(
-  abort: AbortController,
-  extra: Record<string, string | boolean> = {},
-): CommandOpts {
-  return opts({ follow: true, sleep_interval: '0.02', ...extra }, abort.signal)
+function followOpts(abort: AbortController, extra: Record<string, string | boolean> = {}): Context {
+  return ctx({ follow: true, sleep_interval: '0.02', ...extra }, abort.signal)
 }
 
 describe('tail -f -s inf', () => {
@@ -357,7 +354,7 @@ describe('tail -f', () => {
     const [stream, io] = (await tailGeneric(
       [spec('/d/dir')],
       [],
-      opts({ sleep_interval: '0.02', ...flags }),
+      ctx({ sleep_interval: '0.02', ...flags }),
       fs.stream,
       fs.stat,
       fs.readRange,
@@ -405,7 +402,7 @@ describe('tail -f', () => {
     const [stream, io] = (await tailGeneric(
       [spec('/d/later')],
       [],
-      opts({ F: true, sleep_interval: '0.02' }, abort.signal),
+      ctx({ F: true, sleep_interval: '0.02' }, abort.signal),
       fs.stream,
       fs.stat,
       fs.readRange,
@@ -428,7 +425,7 @@ describe('tail -f', () => {
     const [stream, io] = (await tailGeneric(
       [spec('/d/later')],
       [],
-      opts({ F: true, follow: 'descriptor', sleep_interval: '0.02' }, abort.signal),
+      ctx({ F: true, follow: 'descriptor', sleep_interval: '0.02' }, abort.signal),
       fs.stream,
       fs.stat,
       fs.readRange,
@@ -783,7 +780,7 @@ describe('tail asks the mount for the last lines', () => {
     const result = await tailGeneric(
       [spec('/d/log')],
       [],
-      opts(flags),
+      ctx(flags),
       fs.stream,
       fs.stat,
       null,
@@ -807,7 +804,7 @@ describe('tail asks the mount for the last lines', () => {
       const result = await tailGeneric(
         [spec('/big'), spec('/gone'), spec('/small')],
         [],
-        opts({ n: '1' }),
+        ctx({ n: '1' }),
         fs.stream,
         fs.stat,
         null,

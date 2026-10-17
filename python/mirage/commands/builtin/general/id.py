@@ -17,7 +17,7 @@ from mirage.commands.builtin.utils.identity import (
     UNKNOWN_NAME,
     identity_of,
 )
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -35,14 +35,14 @@ async def id_cmd(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """GNU ``id`` over mirage's identity: the session's profile, as both its
     user and its group. Mirage has names but no numbers, so every id slot
     holds the name, ``-`` for a session with no profile; errors and their
     order are coreutils 9.7's.
     """
-    fl = FlagView(opts.flags, spec=SPECS["id"])
+    fl = FlagView(ctx.flags, spec=SPECS["id"])
     if fl.as_bool("context"):
         return None, IOResult(exit_code=1, stderr=CONTEXT.encode())
     only = [d for d in ("user", "group", "groups") if fl.as_bool(d)]
@@ -54,7 +54,7 @@ async def id_cmd(
         return None, IOResult(exit_code=1, stderr=NAMES_NEED.encode())
     if not only and zero:
         return None, IOResult(exit_code=1, stderr=ZERO_DEFAULT.encode())
-    identity = identity_of(opts)
+    identity = identity_of(ctx)
     user = group = identity.profile or UNKNOWN_NAME
     end = "\0" if zero else "\n"
     out: list[str] = []

@@ -373,7 +373,7 @@ async def test_snapshot_fingerprints_keep_read_mount_ownership(
         entered = asyncio.Event()
         release = asyncio.Event()
 
-        async def gate(_inv):
+        async def gate(config, paths, texts, ctx):
             entered.set()
             await release.wait()
             return None, IOResult()

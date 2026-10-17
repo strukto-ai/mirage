@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { IOResult } from '../../../io/types.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
@@ -24,21 +24,18 @@ import { csplitGeneric } from './csplit.ts'
 
 const ENC = new TextEncoder()
 
-async function runCsplit(
-  flags: CommandOpts['flags'],
-  cwd = '/data',
-): Promise<[PathSpec[], IOResult]> {
+async function runCsplit(flags: Context['flags'], cwd = '/data'): Promise<[PathSpec[], IOResult]> {
   const specs: PathSpec[] = []
-  const opts = {
+  const ctx = {
     stdin: ENC.encode('a\nb\n'),
     flags,
-    cwd,
+    cwd: PathSpec.fromStrPath(cwd),
     mountPrefix: '/data',
-  } as CommandOpts
+  } as Context
   const result = await csplitGeneric(
     [],
     ['2'],
-    opts,
+    ctx,
     () => {
       throw new Error('paths are empty; the source is stdin')
     },
@@ -55,7 +52,7 @@ async function runCsplit(
 // With no -f, `xx` in the working directory names every output (GNU).
 // Mirrors test_csplit.py.
 describe('csplit names outputs in the working directory', () => {
-  it.each<[CommandOpts['flags'], string, string[]]>([
+  it.each<[Context['flags'], string, string[]]>([
     [{}, '/data', ['/data/xx00', '/data/xx01']],
     [{}, '/data/sub', ['/data/sub/xx00', '/data/sub/xx01']],
     [
@@ -63,7 +60,7 @@ describe('csplit names outputs in the working directory', () => {
       '/data',
       ['/data/sub/cs00', '/data/sub/cs01'],
     ],
-    ...['d/..', 'd/.', 'd/', '.'].map((prefix): [CommandOpts['flags'], string, string[]] => [
+    ...['d/..', 'd/.', 'd/', '.'].map((prefix): [Context['flags'], string, string[]] => [
       { prefix: PathSpec.fromStrPath(prefix, undefined, '/data') },
       '/data',
       [`/data/${prefix}00`, `/data/${prefix}01`],

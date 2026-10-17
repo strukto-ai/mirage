@@ -3,7 +3,7 @@ from mirage.commands.builtin.generic.numfmt import (
     numfmt_generic as generic_numfmt,
 )
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -15,12 +15,12 @@ async def numfmt(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(opts.flags, spec=SPECS["numfmt"])
+    fl = FlagView(ctx.flags, spec=SPECS["numfmt"])
     return await generic_numfmt(
         *texts,
-        stdin=opts.stdin,
+        stdin=ctx.stdin,
         to_mode=fl.as_str("to") or "none",
         from_mode=fl.as_str("from") or "none",
         suffix=fl.as_str("suffix") or "",

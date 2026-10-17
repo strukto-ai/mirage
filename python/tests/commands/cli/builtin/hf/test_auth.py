@@ -20,7 +20,7 @@ from mirage.commands.cli.builtin.hf.auth import list_cmd, whoami_cmd
 from mirage.commands.errors import UsageError
 from mirage.core.hf_hub.config import HfConfig
 from mirage.io.types import materialize
-from tests.commands.cli.builtin.hf.conftest import ANON, inv
+from tests.commands.cli.builtin.hf.conftest import ANON, leaf_args
 
 
 async def _text(result) -> str:
@@ -42,14 +42,17 @@ async def test_whoami_labels_the_orgs_the_way_upstream_does(mock_whoami):
         "name": "zoe",
         "orgs": [{"name": "acme"}, {"name": "widgets"}],
     }
-    assert await _text(await whoami_cmd(inv())) == "zoe\norgs:  acme,widgets\n"
+    assert (
+        await _text(await whoami_cmd(*leaf_args()))
+        == "zoe\norgs:  acme,widgets\n"
+    )
 
 
 @pytest.mark.asyncio
 @patch("mirage.commands.cli.builtin.hf.auth.whoami")
 async def test_whoami_says_nothing_of_orgs_when_there_are_none(mock_whoami):
     mock_whoami.return_value = {"name": "zoe", "orgs": []}
-    assert await _text(await whoami_cmd(inv())) == "zoe\n"
+    assert await _text(await whoami_cmd(*leaf_args())) == "zoe\n"
 
 
 @pytest.mark.asyncio
@@ -59,7 +62,7 @@ async def test_whoami_names_a_private_endpoint(mock_whoami):
     mirage install that is every origin: the endpoint is the deployment's."""
     mock_whoami.return_value = {"name": "zoe"}
     config = HfConfig(token="hf_test", endpoint="http://127.0.0.1:5199")
-    text = await _text(await whoami_cmd(inv(config=config)))
+    text = await _text(await whoami_cmd(*leaf_args(config=config)))
     assert text == (
         "zoe\nAuthenticated through private endpoint: http://127.0.0.1:5199\n"
     )
@@ -71,7 +74,7 @@ async def test_whoami_refuses_without_a_token():
     anonymous call, which reads as a wrong credential, not a missing
     one."""
     with pytest.raises(UsageError):
-        await whoami_cmd(inv(config=ANON))
+        await whoami_cmd(*leaf_args(config=ANON))
 
 
 @pytest.mark.asyncio
@@ -80,7 +83,7 @@ async def test_auth_list_reports_the_one_install_credential(mock_whoami):
     """A workspace has no token store; an install carries exactly one
     credential, so the list is that one and never more."""
     mock_whoami.return_value = {"name": "zoe"}
-    text = await _text(await list_cmd(inv()))
+    text = await _text(await list_cmd(*leaf_args()))
     assert text.splitlines()[0].split() == ["NAME", "TOKEN"]
     assert text.splitlines()[1].startswith("zoe")
     assert "hf_test" not in text
@@ -88,5 +91,5 @@ async def test_auth_list_reports_the_one_install_credential(mock_whoami):
 
 @pytest.mark.asyncio
 async def test_auth_list_is_just_a_header_without_a_token():
-    text = await _text(await list_cmd(inv(config=ANON)))
+    text = await _text(await list_cmd(*leaf_args(config=ANON)))
     assert len(text.splitlines()) == 1

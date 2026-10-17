@@ -5,17 +5,23 @@ import {
   IOResult,
   Argument,
   z,
-  type CLIInvocation,
   type CommandFnResult,
+  type Context,
+  type PathSpec,
 } from '@struktoai/mirage-core'
 
 const TallyConfig = z.object({ unit: z.string() })
 
 type TallyConfigShape = { unit: string }
 
-function total(inv: CLIInvocation): CommandFnResult {
-  const sum: number = inv.texts.reduce((acc: number, text: string) => acc + Number(text), 0)
-  const line = `total ${sum} ${(inv.config as TallyConfigShape).unit}\n`
+function total(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  _ctx: Context,
+): CommandFnResult {
+  const sum: number = texts.reduce((acc: number, text: string) => acc + Number(text), 0)
+  const line = `total ${sum} ${(config as TallyConfigShape).unit}\n`
   return [new TextEncoder().encode(line), new IOResult()]
 }
 

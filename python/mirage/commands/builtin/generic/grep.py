@@ -43,7 +43,7 @@ from mirage.commands.builtin.utils.wrap import (
     mount_parent_readdir,
     mount_parent_stat,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
@@ -248,7 +248,7 @@ def filename_mode(fl: FlagView) -> bool | None:
     return mode
 
 
-def labelled(opts: CommandOpts) -> CommandOpts:
+def labelled(ctx: Context) -> Context:
     """Ask for the filename a walk would have printed on its own.
 
     A content search hands the generic explicit files where the user
@@ -256,12 +256,12 @@ def labelled(opts: CommandOpts) -> CommandOpts:
     still wins, and an explicit -H is already on the line.
 
     Args:
-        opts (CommandOpts): the narrowing wrapper's options.
+        ctx (Context): the narrowing wrapper's options.
     """
-    flags = opts.flags or {}
+    flags = ctx.flags or {}
     if filename_mode(FlagView(flags, spec=SPECS["grep"])) is not None:
-        return opts
-    return replace(opts, flags={**flags, "with_filename": True})
+        return ctx
+    return replace(ctx, flags={**flags, "with_filename": True})
 
 
 def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
@@ -356,7 +356,7 @@ def line_warnings(
 async def grep_generic(
     paths: list[PathSpec],
     texts: Sequence[str],
-    opts: CommandOpts,
+    ctx: Context,
     *,
     readdir: Callable[..., Awaitable[list[str]]],
     stat: Callable[..., Awaitable[FileStat]],
@@ -367,7 +367,7 @@ async def grep_generic(
     operand_stream = stdin_stream(
         read_stream if read_stream is not None else read_bytes, stdin
     )
-    fl = FlagView(opts.flags, spec=SPECS["grep"])
+    fl = FlagView(ctx.flags, spec=SPECS["grep"])
     # GNU refuses a bad option value in its option loop, before it looks
     # for a pattern.
     f = parse_flags(fl, never_match=False)
@@ -376,7 +376,7 @@ async def grep_generic(
     )
     if never_match:
         f = replace(f, fixed_string=False)
-    utf8 = utf8_locale(opts.env)
+    utf8 = utf8_locale(ctx.env)
     pat = (
         re.compile(NEVER_MATCH)
         if never_match
@@ -405,13 +405,13 @@ async def grep_generic(
         ), io
 
     worker = Worker()
-    mounts = mounts_of(opts)
+    mounts = mounts_of(ctx)
     prefix = mount_prefix_of(paths[0].virtual, paths[0].vfs_path)
     rd = mount_parent_readdir(
         partial(call_readdir, readdir, prefix=prefix), mounts, prefix
     )
     st = mount_parent_stat(partial(call_stat, stat, prefix=prefix), mounts)
-    links = links_of(opts)
+    links = links_of(ctx)
     # The walk meets links as entries: -r leaves them, -R reads what each
     # one leads to, and a directory it reaches again is a loop.
     follow = links if f.recursive and f.dereference else None

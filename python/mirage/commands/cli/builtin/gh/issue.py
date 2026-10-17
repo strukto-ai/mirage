@@ -36,7 +36,7 @@ from mirage.commands.cli.builtin.gh.fields import (
     references,
     selection,
 )
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.config import GhConfig
 from mirage.core.github.issue import (
@@ -53,7 +53,7 @@ from mirage.core.github.issue import (
 )
 from mirage.core.github.repo import RepoRef
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import JsonValue
+from mirage.types import JsonValue, PathSpec
 
 # Every field `gh issue view --json` and `gh issue list --json` accept in
 # gh 2.85: the ones pull requests share, and the ones only an issue has.
@@ -162,29 +162,34 @@ def _view_text(row: dict[str, Any]) -> str:
     )
 
 
-def _target(inv: CLIInvocation[GhConfig], fl: FlagView) -> tuple[RepoRef, int]:
+def _target(
+    config: GhConfig, texts: list[str], fl: FlagView
+) -> tuple[RepoRef, int]:
     return repo_number(
-        inv, fl, inv.texts[0] if inv.texts else None, "issue", "issues"
+        config, fl, texts[0] if texts else None, "issue", "issues"
     )
 
 
 async def list_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """``gh issue list``. With ``--json`` it asks GraphQL for exactly the
     fields named, the way gh's IssueList does, so every field gh accepts is
     answered in gh's own shape; the text view reads the REST listing.
 
     Args:
-        inv (CLIInvocation[GhConfig]): the parsed invocation.
+        config (GhConfig): the install's account config.
+        paths (list[PathSpec]): the path operands.
+        texts (list[str]): the text operands.
+        ctx (Context): the parsed flags and context.
     """
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     state = fl.as_str("state") or "open"
     fields = json_fields(fl, ISSUE_FIELDS)
     if fields is not None:
         answers = await list_issue_fields(
-            inv.config,
-            repo_for(inv, fl),
+            config,
+            repo_for(config, fl),
             IssueListFilter(
                 _STATES.get(state, ("OPEN",)),
                 fl.as_str("assignee"),
@@ -212,35 +217,38 @@ async def list_cmd(
     if labels:
         params["labels"] = ",".join(labels)
     values = await list_issues(
-        inv.config, repo_for(inv, fl), params, list_limit(fl, 30)
+        config, repo_for(config, fl), params, list_limit(fl, 30)
     )
     rows = [_issue(value) for value in values]
     return await typed_out(rows, fl, _list_text(rows), ISSUE_FIELDS)
 
 
 async def view_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """``gh issue view``. With ``--json`` it reads the fields named over
     GraphQL, as gh does (see _viewed_issue); the text view reads the REST
     object, and ``-c`` its comments.
 
     Args:
-        inv (CLIInvocation[GhConfig]): the parsed invocation.
+        config (GhConfig): the install's account config.
+        paths (list[PathSpec]): the path operands.
+        texts (list[str]): the text operands.
+        ctx (Context): the parsed flags and context.
     """
-    fl = FlagView(inv.flags)
-    ref, number = _target(inv, fl)
+    fl = FlagView(ctx.flags)
+    ref, number = _target(config, texts, fl)
     fields = json_fields(fl, ISSUE_FIELDS)
     if fields is not None:
-        node = await _viewed_issue(inv.config, ref, number, fields)
+        node = await _viewed_issue(config, ref, number, fields)
         return await typed_out(
             exported_node(ISSUE_FIELD_TABLE, node, fields),
             fl,
             "",
             ISSUE_FIELDS,
         )
-    row = _issue(await get_issue(inv.config, ref, number))
-    comments = await comments_for(inv, fl, ref, number)
+    row = _issue(await get_issue(config, ref, number))
+    comments = await comments_for(config, fl, ref, number)
     return await typed_out(
         row,
         fl,
@@ -252,15 +260,15 @@ async def view_cmd(
 
 
 async def create_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
+    fl = FlagView(ctx.flags)
     title = fl.as_str("title")
     if not title:
         raise ValueError("--title is required in noninteractive mode")
     body: dict[str, JsonValue] = {
         "title": title,
-        "body": await body_value(inv, fl) or "",
+        "body": await body_value(ctx, fl) or "",
     }
     labels = csv_values(fl.as_list("label"))
     assignees = csv_values(fl.as_list("assignee"))
@@ -268,7 +276,7 @@ async def create_cmd(
         body["labels"] = cast(JsonValue, labels)
     if assignees:
         body["assignees"] = cast(JsonValue, assignees)
-    created = _issue(await create_issue(inv.config, repo_for(inv, fl), body))
+    created = _issue(await create_issue(config, repo_for(config, fl), body))
     return text_out(f"{created.get('url', '')}\n")
 
 
@@ -285,14 +293,14 @@ def _names(value: Any) -> list[str]:
 
 
 async def edit_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    ref, number = _target(inv, fl)
+    fl = FlagView(ctx.flags)
+    ref, number = _target(config, texts, fl)
     body: dict[str, JsonValue] = {}
     if fl.as_str("title") is not None:
         body["title"] = fl.as_str("title") or ""
-    body_text = await body_value(inv, fl)
+    body_text = await body_value(ctx, fl)
     if body_text is not None:
         body["body"] = body_text
     additions = csv_values(fl.as_list("add_label"))
@@ -300,7 +308,7 @@ async def edit_cmd(
     add_assignees = csv_values(fl.as_list("add_assignee"))
     remove_assignees = set(csv_values(fl.as_list("remove_assignee")))
     if additions or removals or add_assignees or remove_assignees:
-        current = _issue(await get_issue(inv.config, ref, number))
+        current = _issue(await get_issue(config, ref, number))
         if additions or removals:
             names = _names(current.get("labels"))
             body["labels"] = list(
@@ -319,18 +327,16 @@ async def edit_cmd(
             )
     if not body:
         raise ValueError("no issue fields to edit")
-    edited = _issue(await edit_issue(inv.config, ref, number, body))
+    edited = _issue(await edit_issue(config, ref, number, body))
     return text_out(f"{edited.get('url', '')}\n")
 
 
 async def _state(
-    inv: CLIInvocation[GhConfig], state: str
+    config: GhConfig, texts: list[str], ctx: Context, state: str
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    ref, number = _target(inv, fl)
-    edited = _issue(
-        await edit_issue(inv.config, ref, number, {"state": state})
-    )
+    fl = FlagView(ctx.flags)
+    ref, number = _target(config, texts, fl)
+    edited = _issue(await edit_issue(config, ref, number, {"state": state}))
     verb = "Closed" if state == "closed" else "Reopened"
     return text_out(
         f"✓ {verb} issue {ref.owner}/{ref.repo}#{number} "
@@ -339,33 +345,33 @@ async def _state(
 
 
 async def close_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    return await _state(inv, "closed")
+    return await _state(config, texts, ctx, "closed")
 
 
 async def reopen_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    return await _state(inv, "open")
+    return await _state(config, texts, ctx, "open")
 
 
 async def comment_cmd(
-    inv: CLIInvocation[GhConfig],
+    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(inv.flags)
-    body = await body_value(inv, fl, required=True)
-    ref, number = _target(inv, fl)
-    comment = _issue(await comment_issue(inv.config, ref, number, body or ""))
+    fl = FlagView(ctx.flags)
+    body = await body_value(ctx, fl, required=True)
+    ref, number = _target(config, texts, fl)
+    comment = _issue(await comment_issue(config, ref, number, body or ""))
     return text_out(f"{comment.get('url', '')}\n")
 
 
 async def comments_for(
-    inv: CLIInvocation[GhConfig], fl: FlagView, ref: RepoRef, number: int
+    config: GhConfig, fl: FlagView, ref: RepoRef, number: int
 ) -> list[dict[str, Any]] | None:
     if not gh_bool(fl, "comments"):
         return None
-    rows = await issue_comments(inv.config, ref, number)
+    rows = await issue_comments(config, ref, number)
     for row in rows:
         row["author"] = row.get("author") or {"login": ""}
         row["minimizedReason"] = row.get("minimizedReason") or ""

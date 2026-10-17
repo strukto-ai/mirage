@@ -17,7 +17,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { perOperand } from '../utils/operands.ts'
 import { chunks } from '../../../io/cooperative.ts'
@@ -60,13 +60,13 @@ function parseFlags(bag: Record<string, FlagValue>): StringsFlags {
 
 export function stringsGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): CommandFnResult {
   // binutils strings never reads `-` as stdin; only /dev/stdin is.
-  stream = stdinStream(stream, opts.stdin, false, false)
-  const { minLen } = parseFlags(opts.flags)
+  stream = stdinStream(stream, ctx.stdin, false, false)
+  const { minLen } = parseFlags(ctx.flags)
   const io = new IOResult()
   const each = (source: ByteSource) => stringsStream(source, minLen)
-  return [perOperand(paths, stream, opts.stdin, io, 'strings', each), io]
+  return [perOperand(paths, stream, ctx.stdin, io, 'strings', each), io]
 }

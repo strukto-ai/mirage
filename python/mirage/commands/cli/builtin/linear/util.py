@@ -26,7 +26,7 @@ from mirage.io.types import ByteSource, materialize
 ISSUE_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*-[0-9]+$")
 
 
-def first_text(texts: tuple[str, ...], label: str) -> str:
+def first_text(texts: list[str], label: str) -> str:
     if not texts:
         raise ValueError(f"{label} is required")
     return texts[0]

@@ -198,7 +198,7 @@ def test_hidden_var_reads_as_unset():
 
 def test_snapshot_omits_hidden_vars():
     # Every copy-out routes through env_snapshot, so one omission here
-    # is invisibility in inv.env, RunArgs.env and the env builtin at
+    # is invisibility in ctx.env, RunArgs.env and the env builtin at
     # once.
     view, _session = _hidden_view()
     snap = view.snapshot()

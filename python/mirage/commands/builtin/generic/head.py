@@ -25,7 +25,7 @@ from mirage.commands.builtin.utils.stream import (
     stdin_stat,
     stdin_stream,
 )
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -262,7 +262,7 @@ async def _head_multi(
 async def head_generic(
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
     stat: StatFn,
     stream: PolymorphicReadFn,
     first_lines: Callable[[PathSpec, int], Awaitable[bytes | None]]
@@ -283,7 +283,7 @@ async def head_generic(
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
         texts (list[str]): Non-path words, unused by head.
-        opts (CommandOpts): Flags and stdin from the dispatcher.
+        ctx (Context): Flags and stdin from the dispatcher.
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
@@ -293,9 +293,9 @@ async def head_generic(
             the file.
     """
     stat = stdin_stat(stat)
-    stream = stdin_stream(stream, opts.stdin)
+    stream = stdin_stream(stream, ctx.stdin)
     try:
-        parsed = parse_flags(opts.flags)
+        parsed = parse_flags(ctx.flags)
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=encode_text(str(exc)))
     if paths:
@@ -316,8 +316,8 @@ async def head_generic(
         refused: set[str] = set()
 
         def source_for(p: PathSpec) -> AsyncIterator[bytes]:
-            if is_stdin(p) and isinstance(opts.stdin, SharedInput):
-                return opts.stdin
+            if is_stdin(p) and isinstance(ctx.stdin, SharedInput):
+                return ctx.stdin
             source = read(p)
 
             async def bounded() -> AsyncIterator[bytes]:
@@ -367,7 +367,7 @@ async def head_generic(
             unread=unread,
             refused=refused,
         ), io
-    source = resolve_source(opts.stdin)
+    source = resolve_source(ctx.stdin)
     body = head(
         source,
         n=parsed.lines,

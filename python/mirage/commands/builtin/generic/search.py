@@ -3,7 +3,7 @@ from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.paths import default_paths
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -57,15 +57,15 @@ def make_search(
         accessor: Accessor,
         paths: list[PathSpec],
         texts: list[str],
-        opts: CommandOpts,
+        ctx: Context,
     ) -> tuple[ByteSource | None, IOResult]:
         if not texts or not texts[0]:
             raise UsageError("search: query is required")
-        fl = FlagView(opts.flags, spec=SPECS["search"])
+        fl = FlagView(ctx.flags, spec=SPECS["search"])
         output = await search_resources(
-            opts.io.search if opts.io is not None else None,
+            ctx.io.search if ctx.io is not None else None,
             accessor,
-            default_paths(paths, opts.cwd),
+            default_paths(paths, ctx.cwd),
             SearchQuery(texts[0], options=options(fl)),
         )
         return output, IOResult()

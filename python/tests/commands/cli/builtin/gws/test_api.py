@@ -19,7 +19,7 @@ import pytest
 
 from mirage.commands.cli.builtin.gws.api import fill_path, run_gws_method
 from mirage.commands.cli.builtin.gws.methods import GWS_METHODS
-from mirage.commands.cli.types import CLIInvocation
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.core.google.config import GoogleConfig
 from mirage.io.stream import materialize
@@ -53,7 +53,10 @@ async def test_documents_get_hits_docs_api():
     ) as get:
         out, io = await run_gws_method(
             method,
-            CLIInvocation(CONFIG, flags={"params": '{"documentId": "d1"}'}),
+            CONFIG,
+            [],
+            [],
+            Context(flags={"params": '{"documentId": "d1"}'}),
         )
     assert io.exit_code == 0
     assert json.loads(await materialize(out)) == {
@@ -76,7 +79,7 @@ async def test_files_list_follows_next_page_token_by_default():
         new_callable=AsyncMock,
         side_effect=pages,
     ) as get:
-        out, io = await run_gws_method(method, CLIInvocation(CONFIG))
+        out, io = await run_gws_method(method, CONFIG, [], [], Context())
     assert io.exit_code == 0
     assert get.await_count == 3
     tokens = [c.kwargs["params"].get("pageToken") for c in get.await_args_list]
@@ -97,7 +100,7 @@ async def test_single_page_output_has_no_trailing_newline():
         new_callable=AsyncMock,
         return_value={"files": []},
     ):
-        out, _io = await run_gws_method(method, CLIInvocation(CONFIG))
+        out, _io = await run_gws_method(method, CONFIG, [], [], Context())
     assert await materialize(out) == b'{"files":[]}'
 
 
@@ -115,7 +118,7 @@ async def test_page_limit_stops_early():
         side_effect=pages,
     ) as get:
         out, _io = await run_gws_method(
-            method, CLIInvocation(CONFIG, flags={"page_limit": "2"})
+            method, CONFIG, [], [], Context(flags={"page_limit": "2"})
         )
     assert get.await_count == 2
     assert len((await materialize(out)).decode().splitlines()) == 2
@@ -131,7 +134,7 @@ async def test_rejects_a_non_numeric_page_limit(raw):
         UsageError, match="--page-limit must be a whole number"
     ):
         await run_gws_method(
-            method, CLIInvocation(CONFIG, flags={"page_limit": raw})
+            method, CONFIG, [], [], Context(flags={"page_limit": raw})
         )
 
 
@@ -143,7 +146,11 @@ async def test_files_delete_outputs_nothing():
         new_callable=AsyncMock,
     ) as delete:
         out, io = await run_gws_method(
-            method, CLIInvocation(CONFIG, flags={"params": '{"fileId": "f1"}'})
+            method,
+            CONFIG,
+            [],
+            [],
+            Context(flags={"params": '{"fileId": "f1"}'}),
         )
     assert out is None
     assert io.exit_code == 0
@@ -154,7 +161,7 @@ async def test_files_delete_outputs_nothing():
 async def test_files_create_requires_body():
     method = METHODS[("drive", "files", "create")]
     with pytest.raises(UsageError, match="--json is required"):
-        await run_gws_method(method, CLIInvocation(CONFIG))
+        await run_gws_method(method, CONFIG, [], [], Context())
 
 
 @pytest.mark.asyncio
@@ -162,7 +169,7 @@ async def test_malformed_json_flag_is_a_usage_error():
     method = METHODS[("drive", "files", "create")]
     with pytest.raises(UsageError, match="--json must be valid JSON"):
         await run_gws_method(
-            method, CLIInvocation(CONFIG, flags={"json": "{not json"})
+            method, CONFIG, [], [], Context(flags={"json": "{not json"})
         )
 
 
@@ -176,12 +183,14 @@ async def test_permissions_create_posts_body():
     ) as post:
         out, _io = await run_gws_method(
             method,
-            CLIInvocation(
-                CONFIG,
+            CONFIG,
+            [],
+            [],
+            Context(
                 flags={
                     "params": '{"fileId": "f1"}',
                     "json": '{"role": "reader", "type": "anyone"}',
-                },
+                }
             ),
         )
     assert await materialize(out) == b'{"id":"p1"}'
@@ -199,11 +208,13 @@ async def test_files_export_returns_raw_bytes():
     ) as get_bytes:
         out, _io = await run_gws_method(
             method,
-            CLIInvocation(
-                CONFIG,
+            CONFIG,
+            [],
+            [],
+            Context(
                 flags={
                     "params": '{"fileId": "f1", "mimeType": "application/pdf"}'
-                },
+                }
             ),
         )
     assert await materialize(out) == b"%PDF-1.4"
@@ -227,7 +238,7 @@ async def test_injected_parent_declares_shared_drive_support():
         return_value={"id": "f9"},
     ) as post:
         await run_gws_method(
-            method, CLIInvocation(SCOPED, flags={"json": '{"name": "n"}'})
+            method, SCOPED, [], [], Context(flags={"json": '{"name": "n"}'})
         )
     assert post.await_args.args[2] == {"name": "n", "parents": ["F1"]}
     assert "supportsAllDrives=true" in post.await_args.args[1]
@@ -245,9 +256,10 @@ async def test_explicit_parents_stay_a_passthrough():
     ) as post:
         await run_gws_method(
             method,
-            CLIInvocation(
-                SCOPED, flags={"json": '{"name": "n", "parents": ["OTHER"]}'}
-            ),
+            SCOPED,
+            [],
+            [],
+            Context(flags={"json": '{"name": "n", "parents": ["OTHER"]}'}),
         )
     assert post.await_args.args[2] == {"name": "n", "parents": ["OTHER"]}
     assert "supportsAllDrives" not in post.await_args.args[1]
@@ -270,9 +282,10 @@ async def test_relocation_declares_shared_drive_support():
         ) as patch_call:
             await run_gws_method(
                 method,
-                CLIInvocation(
-                    SCOPED, flags={"json": '{"properties": {"title": "T"}}'}
-                ),
+                SCOPED,
+                [],
+                [],
+                Context(flags={"json": '{"properties": {"title": "T"}}'}),
             )
     assert patch_call.await_args.kwargs["params"] == {
         "addParents": "F1",
@@ -295,9 +308,10 @@ async def test_unscoped_install_places_nothing():
         ) as patch_call:
             await run_gws_method(
                 method,
-                CLIInvocation(
-                    CONFIG, flags={"json": '{"properties": {"title": "T"}}'}
-                ),
+                CONFIG,
+                [],
+                [],
+                Context(flags={"json": '{"properties": {"title": "T"}}'}),
             )
     patch_call.assert_not_awaited()
 
@@ -314,9 +328,10 @@ async def test_an_explicitly_empty_parents_array_is_still_the_callers():
     ) as post:
         await run_gws_method(
             method,
-            CLIInvocation(
-                SCOPED, flags={"json": '{"name": "n", "parents": []}'}
-            ),
+            SCOPED,
+            [],
+            [],
+            Context(flags={"json": '{"name": "n", "parents": []}'}),
         )
     assert post.await_args.args[2] == {"name": "n", "parents": []}
     assert "supportsAllDrives" not in post.await_args.args[1]

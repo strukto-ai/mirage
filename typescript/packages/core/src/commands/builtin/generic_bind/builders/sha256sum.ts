@@ -23,15 +23,15 @@ import {
 } from '../adapter.ts'
 import type { PathSpec } from '../../../../types.ts'
 
-const sha256sum: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
-  const idx = opts.index ?? undefined
+const sha256sum: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   const { checksum } = ops
   return sha256sumGeneric(
     resolved,
-    opts,
-    dirAwareStream(ops, accessor, opts),
-    dirAwareStat(ops, accessor, opts),
+    ctx,
+    dirAwareStream(ops, accessor, ctx),
+    dirAwareStat(ops, accessor, ctx),
     boundUncached(checksum && ((p: PathSpec, a: string) => checksum(accessor, p, a, idx))),
   )
 }

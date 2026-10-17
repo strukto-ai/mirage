@@ -34,7 +34,7 @@ async function runSplit(
     stdin,
     flags,
     io: commandIo(vfs),
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) return { exitCode: -1 }
   const [, ioResult] = result

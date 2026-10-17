@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CLIInvocation } from '@struktoai/mirage-core/commands/cli/types'
-import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
+import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
 import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
@@ -21,6 +20,7 @@ import { boundedMap } from '@struktoai/mirage-core/concurrency/limiter'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import type { HfHubAccessor } from '../../../../accessor/hf_hub.ts'
+import type { HfConfig } from '../../../../core/hf_hub/config.ts'
 import {
   blobPath,
   cacheRoot,
@@ -322,14 +322,19 @@ async function refuseAbsent(accessor: HfHubAccessor, names: readonly string[]): 
  * a second copy -- so this exists for the repository a workspace has not
  * mounted.
  */
-export async function downloadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  requireOperands(inv, ['repo_id'])
-  const fl = new FlagView(inv.flags)
+export async function downloadCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  requireOperands(texts, ['repo_id'])
+  const fl = new FlagView(ctx.flags)
   const localDir = fl.asPath('local_dir')
-  const cacheWord = cacheRoot(inv.env)
+  const cacheWord = cacheRoot(ctx.env ?? {})
   const cacheDir =
     fl.asPath('cache_dir') ??
-    (cacheWord ? PathSpec.fromStrPath(cacheWord, undefined, inv.cwd) : undefined)
+    (cacheWord ? PathSpec.fromStrPath(cacheWord, undefined, ctx.cwd) : undefined)
   if (localDir === undefined && cacheDir === undefined) {
     throw new UsageError(
       'nothing to download into: pass --local-dir, or --cache-dir (or set ' +
@@ -337,16 +342,16 @@ export async function downloadCmd(inv: CLIInvocation): Promise<CommandFnResult> 
         'default a cache under',
     )
   }
-  const vfs = inv.view?.vfs
+  const vfs = ctx.vfs
   if (vfs === undefined) {
     throw new UsageError('hf download needs a workspace to write into')
   }
-  const [repoId, ...names] = inv.texts
+  const [repoId, ...names] = texts
   const include = fl.asList('include')
   const exclude = fl.asList('exclude')
   if (include.length > 0) refuseVariadic(names, '--include', include)
   if (exclude.length > 0) refuseVariadic(names, '--exclude', exclude)
-  const accessor = hubFor(inv, repoId ?? '', repoTypeOf(fl), fl.asStr('revision'))
+  const accessor = hubFor(config as HfConfig, repoId ?? '', repoTypeOf(fl), fl.asStr('revision'))
   const tree = await listedOrEmpty(accessor)
   const paths = selected(tree, names, include, exclude)
   if (paths.length === 0) await refuseAbsent(accessor, names)

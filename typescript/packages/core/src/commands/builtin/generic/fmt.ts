@@ -18,7 +18,7 @@ import type { FlagValue } from '../../spec/types.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { perOperand } from '../utils/operands.ts'
 
@@ -450,17 +450,17 @@ function parseFlags(bag: Record<string, FlagValue>): FmtFlags {
 
 export function fmtGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): CommandFnResult {
-  stream = stdinStream(stream, opts.stdin)
-  const parsed = parseFlags(opts.flags)
+  stream = stdinStream(stream, ctx.stdin)
+  const parsed = parseFlags(ctx.flags)
   const [maxWidth, goalWidth] = widths(parsed.width, parsed.goal)
   const { prefix, splitOnly, tagged, crown, uniform } = parsed
   const each = (source: ByteSource) =>
     fmtStream(source, new Formatter(maxWidth, goalWidth, prefix, splitOnly, tagged, crown, uniform))
   const io = new IOResult()
-  return [perOperand(paths, stream, opts.stdin, io, 'fmt', each), io]
+  return [perOperand(paths, stream, ctx.stdin, io, 'fmt', each), io]
 }
 
 async function* fmtStream(source: ByteSource, formatter: Formatter): AsyncIterable<Uint8Array> {

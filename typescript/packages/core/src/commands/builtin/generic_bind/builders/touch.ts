@@ -22,15 +22,15 @@ import { usageHint } from '../../../spec/usage.ts'
 
 const ENC = new TextEncoder()
 
-const touch: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
+const touch: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
   if (paths.length === 0) {
     throw new UsageError(`touch: missing file operand\n${usageHint('touch')}`, 1)
   }
-  const idx = opts.index ?? undefined
+  const idx = ctx.index ?? undefined
   const write = requireOp(ops.write, 'write')
   const exists = requireOp(ops.exists, 'exists')
   const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
-  const createOnly = new FlagView(opts.flags, specOf('touch')).asBool('no_create')
+  const createOnly = new FlagView(ctx.flags, specOf('touch')).asBool('no_create')
   const errors: string[] = []
   for (const p of resolved) {
     if (createOnly) continue

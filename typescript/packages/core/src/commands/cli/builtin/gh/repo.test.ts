@@ -8,7 +8,7 @@ import { MountMode, PathSpec } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import type { ExecuteResult } from '../../../../workspace/workspace/types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { Context } from '../../../config.ts'
 import * as git from '../git/clone.ts'
 import { GH } from './index.ts'
 
@@ -24,11 +24,11 @@ beforeAll(async () => {
 })
 afterEach(() => vi.restoreAllMocks())
 
-function clones(): CLIInvocation[] {
-  const calls: CLIInvocation[] = []
+function clones(): [string[], Context][] {
+  const calls: [string[], Context][] = []
   vi.spyOn(github, 'login').mockResolvedValue('alice')
-  vi.spyOn(git, 'clone').mockImplementation((inv) => {
-    calls.push(inv)
+  vi.spyOn(git, 'clone').mockImplementation((_config, _paths, texts, ctx) => {
+    calls.push([texts, ctx])
     return Promise.resolve([null, new IOResult()])
   })
   return calls
@@ -71,5 +71,5 @@ it.each([
   const calls = clones()
   const result = await run(line, base)
   expect([result.exitCode, result.stderr.length]).toEqual([0, 0])
-  expect([calls[0]?.texts, calls[0]?.flags]).toEqual([texts, flags])
+  expect([calls[0]?.[0], calls[0]?.[1].flags]).toEqual([texts, flags])
 })

@@ -18,9 +18,8 @@ import { fsStrerror, isEacces, isEisdir, isEnotdir, isMissingPath } from '../../
 import { sha1Hex } from '../../../../utils/hash.ts'
 import { PathSpec } from '../../../../types.ts'
 import { readStdinAsync } from '../../../builtin/utils/stream.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CLIInvocation } from '../../types.ts'
 import { OBJECT_TYPES } from './cat_file.ts'
 import { GitError, NoWorkspaceError, ObjectWriteReadOnlyError } from './errors.ts'
 import { readFile } from './io.ts'
@@ -123,27 +122,28 @@ async function content(vfs: Files, base: PathSpec, name: string): Promise<Uint8A
  * `--literally` (without git's fsck detail lines), and `-w` writes the object.
  * Pinned against git 2.50.1.
  */
-export async function hashObject(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const view = inv.view ?? {}
-  const vfs = view.vfs
-  const texts = [...inv.texts]
+export async function hashObject(
+  config: unknown,
+  paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const vfs = ctx.vfs
   try {
     if (vfs === undefined) throw new NoWorkspaceError()
-    checkSwitches(inv, texts)
+    checkSwitches(ctx, texts)
     const asked = fl.asStr('t') ?? 'blob'
     const kind = OBJECT_TYPES.find((type) => type === asked)
     if (kind === undefined) throw new GitError(`invalid object type "${asked}"`)
     const base = startPoint(fl)
     const contents: Uint8Array[] = []
     if (fl.asBool('stdin')) {
-      contents.push((await readStdinAsync(inv.stdin ?? null)) ?? new Uint8Array())
+      contents.push((await readStdinAsync(ctx.stdin)) ?? new Uint8Array())
     }
     const names = [...texts]
     if (fl.asBool('stdin_paths')) {
-      const listed = new TextDecoder().decode(
-        (await readStdinAsync(inv.stdin ?? null)) ?? new Uint8Array(),
-      )
+      const listed = new TextDecoder().decode((await readStdinAsync(ctx.stdin)) ?? new Uint8Array())
       names.push(...listed.split('\n').filter((line) => line !== ''))
     }
     for (const name of names) contents.push(await content(vfs, base, name))
@@ -151,7 +151,7 @@ export async function hashObject(inv: CLIInvocation): Promise<CommandFnResult> {
       throw new GitError('refusing to create malformed object')
     }
     if (fl.asBool('w') && contents.length > 0) {
-      const repo = await opened(fl, view)
+      const repo = await opened(ctx, fl)
       for (const data of contents) {
         // hash-object writes any of the four types, which only the general
         // writer takes.
@@ -173,8 +173,12 @@ export async function hashObject(inv: CLIInvocation): Promise<CommandFnResult> {
  * hash-object's refusal by a read-only mount: the first object it could not
  * add, named as typed, `(null)` for stdin's.
  */
-export function hashObjectReadOnly(inv: CLIInvocation, _location: RepoLocation | null): GitError {
-  const fl = new FlagView(inv.flags)
-  const first = inv.texts[0]
+export function hashObjectReadOnly(
+  texts: string[],
+  ctx: Context,
+  _location: RepoLocation | null,
+): GitError {
+  const fl = new FlagView(ctx.flags)
+  const first = texts[0]
   return new ObjectWriteReadOnlyError(fl.asBool('stdin') || first === undefined ? '(null)' : first)
 }

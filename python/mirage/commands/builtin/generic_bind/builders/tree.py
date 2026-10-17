@@ -21,7 +21,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
 )
 from mirage.commands.builtin.utils.tree import tree_walk
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,21 +31,21 @@ async def tree(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("tree: no VFS")
-    resolved = await ops.resolve_glob(accessor, paths, opts.index)
+    resolved = await ops.resolve_glob(accessor, paths, ctx.index)
     readdir = partial(ops.readdir, accessor)
     stat = partial(ops.stat, accessor)
     return await tree_generic(
         resolved,
         list(texts),
-        opts,
+        ctx,
         readdir,
         stat,
         unbounded=tree_walk(
-            bound_op(ops.read_tree, accessor, opts.index), readdir, stat
+            bound_op(ops.read_tree, accessor, ctx.index), readdir, stat
         ),
     )
 

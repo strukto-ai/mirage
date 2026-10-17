@@ -73,7 +73,7 @@ from mirage.commands.cli.builtin.git.util import (
     start_point,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
@@ -147,7 +147,10 @@ def remote_head(
 
 
 async def clone(
-    inv: CLIInvocation[None],
+    config: None,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
     credentials: Mapping[str, str] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Clone a repository into a new directory.
@@ -159,26 +162,28 @@ async def clone(
     directory that was already there, empty, as git does.
 
     Args:
-        inv (CLIInvocation[None]): the parsed invocation.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the repository and the optional directory.
+        ctx (Context): the line's context.
         credentials (Mapping[str, str] | None): the Authorization
             ``gh repo clone`` sends, scoped to the URL's origin as userinfo
             is and never written to the clone's config.
     """
-    fl = FlagView(inv.flags)
-    view = inv.view or CLIView()
-    vfs = view.vfs
+    fl = FlagView(ctx.flags)
+    vfs = ctx.vfs
     try:
-        check_switches(inv, inv.texts)
-        if not inv.texts:
+        check_switches(ctx, texts)
+        if not texts:
             raise UsageError(
                 "",
                 "fatal: You must specify a repository to clone.\n\n"
-                + verb_usage(inv),
+                + verb_usage(ctx),
             )
     except GitError as exc:
         return fatal(exc)
-    url = inv.texts[0]
-    name = inv.texts[1] if len(inv.texts) > 1 else default_directory(url)
+    url = texts[0]
+    name = texts[1] if len(texts) > 1 else default_directory(url)
     quiet = fl.as_bool("quiet")
     try:
         if vfs is None:
@@ -195,7 +200,7 @@ async def clone(
                 "is not an empty directory."
             )
         transport = await open_transport(
-            url, start, view, await configured_headers(inv, None), credentials
+            ctx, url, start, await configured_headers(ctx, None), credentials
         )
     except GitError as exc:
         return fatal(exc)
@@ -210,7 +215,7 @@ async def clone(
     notes = "" if quiet else f"Cloning into '{name}'...\n"
     try:
         notes += await _populate(
-            inv, view, transport, target, stored, local and not quiet
+            ctx, transport, target, stored, local and not quiet
         )
     except GitError as exc:
         if info is None:
@@ -230,8 +235,7 @@ async def clone(
 
 
 async def _populate(
-    inv: CLIInvocation[None],
-    view: CLIView,
+    ctx: Context,
     transport: LocalTransport | HttpTransport,
     target: PathSpec,
     url: str,
@@ -240,8 +244,7 @@ async def _populate(
     """Lay the clone out, fetch into it and check it out.
 
     Args:
-        inv (CLIInvocation[None]): the parsed invocation.
-        view (CLIView): the invocation's view.
+        ctx (Context): the line's context.
         transport (LocalTransport | HttpTransport): the remote.
         target (PathSpec): the clone's working tree.
         url (str): the remote URL as the config records it.
@@ -250,8 +253,8 @@ async def _populate(
     Returns:
         str: what the clone prints to stderr after ``Cloning into``.
     """
-    fl = FlagView(inv.flags)
-    vfs = view.vfs
+    fl = FlagView(ctx.flags)
+    vfs = ctx.vfs
     assert vfs is not None
     gitdir = target.join(".git")
     remote = fl.as_str("origin") or "origin"
@@ -358,16 +361,16 @@ async def _populate(
 
 
 def clone_read_only(
-    inv: CLIInvocation[None], location: RepoLocation | None
+    texts: list[str], ctx: Context, location: RepoLocation | None
 ) -> GitError:
     """clone's refusal by a read-only mount, at the work tree it could
     not make.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
+        texts (list[str]): the line's operands.
+        ctx (Context): the line's context.
         location (RepoLocation | None): the repository it opened.
     """
-    texts = inv.texts
     return CloneReadOnlyError(
         texts[1]
         if len(texts) > 1

@@ -19,7 +19,7 @@ import { chunks } from '../../../io/cooperative.ts'
 import { ByteWriter } from '../../../io/writer.ts'
 import { PipeClosed } from '../../../io/errors.ts'
 import type { PathSpec, StatFn } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { eisdir, enotdir, fsError, isEnoent, isFsError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
@@ -76,15 +76,15 @@ export function parseFlags(bag: Record<string, FlagValue>): TeeFlags {
 export async function teeGeneric(
   paths: PathSpec[],
   texts: string[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: ByteSource) => Promise<void>,
   append?: (p: PathSpec, data: ByteSource) => Promise<void>,
   stat?: StatFn,
   outputKey?: (path: PathSpec) => string,
 ): Promise<CommandFnResult> {
-  const parsed = parseFlags(opts.flags)
-  if (opts.stdin != null && !(opts.stdin instanceof Uint8Array)) {
+  const parsed = parseFlags(ctx.flags)
+  if (ctx.stdin != null && !(ctx.stdin instanceof Uint8Array)) {
     const opened: PathSpec[] = []
     const [, io] = await writeOutput(
       paths,
@@ -98,10 +98,10 @@ export async function teeGeneric(
     )
     io.closedStdout = closedStdout(parsed)
     if (io.exitCode !== 0 && parsed.stopOnError) {
-      await closeQuietly(opts.stdin)
+      await closeQuietly(ctx.stdin)
       return [null, io]
     }
-    const source = opts.stdin
+    const source = ctx.stdin
     const parked = { atYield: false }
     return [
       new OutputStream(
@@ -113,7 +113,7 @@ export async function teeGeneric(
           write,
           append,
           io,
-          outputKey ?? ((p) => linksOf(opts)?.resolve(p.virtual) ?? p.virtual),
+          outputKey ?? ((p) => linksOf(ctx)?.resolve(p.virtual) ?? p.virtual),
           parked,
         )[Symbol.asyncIterator](),
         // Parked at a yield, tee's own return copies what its files still
@@ -123,7 +123,7 @@ export async function teeGeneric(
       io,
     ]
   }
-  const stdinData = await readStdinAsync(opts.stdin)
+  const stdinData = await readStdinAsync(ctx.stdin)
   const raw: Uint8Array = stdinData ?? encodeText(texts.join(' '))
   const [stdout, io] =
     paths.length === 0

@@ -15,8 +15,8 @@
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { RestCall } from '../../../../core/notion/client.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
-import type { CommandFnResult } from '../../../config.ts'
-import type { CLIInvocation } from '../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 import { serdeMessage } from './serde.ts'
 import { compactJson, firstText, notionTransport, rustDebug, usageError } from './util.ts'
 
@@ -143,8 +143,13 @@ function refusal(stderr: string, code: number): CommandFnResult {
   return [null, new IOResult({ stderr: ENC.encode(stderr), exitCode: code })]
 }
 
-export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function api(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const inline: Record<string, unknown> = {}
   const params: Record<string, unknown> = {}
   const headers: Record<string, string> = {}
@@ -153,13 +158,13 @@ export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
   let body: unknown
   let named: string[]
   try {
-    path = firstText(inv.texts, 'api path')
+    path = firstText(texts, 'api path')
 
     // Upstream validates the three body sources in this order and only then
     // complains that more than one was given, so a malformed pipe outranks a
     // malformed --data, and both outrank the conflict. Probed against ntn
     // 0.21.9; the order is observable and worth keeping.
-    const piped = inv.stdin !== null ? DEC.decode(await materialize(inv.stdin)) : ''
+    const piped = ctx.stdin !== null ? DEC.decode(await materialize(ctx.stdin)) : ''
     const hasStdin = piped.trim() !== ''
     let stdinBody: unknown
     if (hasStdin) {
@@ -177,7 +182,7 @@ export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
     }
 
     try {
-      for (const token of inv.texts.slice(1)) classify(token, inline, params, headers)
+      for (const token of texts.slice(1)) classify(token, inline, params, headers)
     } catch (err) {
       if (!(err instanceof InlineRefusal)) throw err
       return refusal(`${INLINE_LEAD}${err.message}\n${INLINE_HINT}`, REFUSAL_EXIT)
@@ -215,6 +220,6 @@ export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
   if (Object.keys(params).length > 0) call.query = params
   if (method !== 'GET') call.body = body
   if (Object.keys(headers).length > 0) call.headers = headers
-  const result = await notionTransport(inv.config, inv.flags).request(call)
+  const result = await notionTransport(config, ctx.flags).request(call)
   return [compactJson(result), new IOResult()]
 }

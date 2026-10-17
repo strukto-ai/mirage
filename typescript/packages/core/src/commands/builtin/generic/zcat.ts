@@ -15,7 +15,7 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { GZIP_SUFFIX } from '../constants.ts'
 import { linkResolver } from '../utils/links.ts'
 import { decompressInputs } from './decompress.ts'
@@ -25,16 +25,16 @@ import { decompressInputs } from './decompress.ts'
  * Python's zcat_generic. */
 export async function zcatGeneric(
   paths: PathSpec[],
-  opts: CommandOpts,
+  ctx: Context,
   stream: (path: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(opts.flags, specOf('zcat'))
+  const fl = new FlagView(ctx.flags, specOf('zcat'))
   return decompressInputs(paths, stream, {
-    stdin: opts.stdin,
+    stdin: ctx.stdin,
     toStdout: true,
     force: fl.asBool('f'),
     quiet: fl.asBool('q'),
     suffix: fl.asStr('S') ?? GZIP_SUFFIX,
-    resolver: linkResolver(opts),
+    resolver: linkResolver(ctx),
   })
 }

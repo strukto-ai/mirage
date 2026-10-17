@@ -15,10 +15,10 @@
 import { jqGeneric } from '../../generic/jq.ts'
 import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const jq: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
-  const idx = opts.index ?? undefined
+const jq: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return jqGeneric(resolved, texts, opts, (p) => ops.readStream(accessor, p, idx))
+  return jqGeneric(resolved, texts, ctx, (p) => ops.readStream(accessor, p, idx))
 }
 
 export const BUILDER: GenericCommand = {

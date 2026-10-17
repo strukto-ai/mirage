@@ -36,7 +36,7 @@ async function runLook(
     stdin,
     flags,
     io: commandIo(vfs),
-    cwd: '/',
+    cwd: PathSpec.fromStrPath('/'),
   })
   if (result === null) return { out: '', exitCode: -1 }
   const [out, ioResult] = result

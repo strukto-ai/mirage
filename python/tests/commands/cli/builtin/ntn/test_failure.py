@@ -24,8 +24,10 @@ from mirage.commands.cli.builtin.ntn.failure import (
     source_hint,
 )
 from mirage.commands.cli.types import CLIHandler
+from mirage.commands.config import Context
 from mirage.core.notion.client import NotionAPIError
 from mirage.io.types import IOResult
+from mirage.types import PathSpec
 
 # Every line here was printed by ntn 0.21.9 against a server returning that
 # status with Notion's own error envelope. The two shapes upstream has for a
@@ -166,16 +168,16 @@ def test_hint_rides_the_same_render() -> None:
 async def test_guarded_renders_an_api_error_and_passes_others_through() -> (
     None
 ):
-    caught = await guarded(_raise_api, None)
+    caught = await guarded(_raise_api, None, [], [], Context())
     assert caught[0] is None
     assert caught[1].exit_code == 5
     with pytest.raises(ValueError):
-        await guarded(_raise_other, None)
+        await guarded(_raise_other, None, [], [], Context())
 
 
 @pytest.mark.asyncio
 async def test_guarded_returns_a_successful_verb_untouched() -> None:
-    assert await guarded(_succeed, None) == (None, _OK)
+    assert await guarded(_succeed, None, [], [], Context()) == (None, _OK)
 
 
 def test_every_ntn_leaf_is_guarded() -> None:
@@ -192,15 +194,21 @@ def test_every_ntn_leaf_is_guarded() -> None:
 _OK = IOResult()
 
 
-async def _raise_api(_inv: None) -> tuple[None, IOResult]:
+async def _raise_api(
+    _config: None, _paths: list[PathSpec], _texts: list[str], _ctx: Context
+) -> tuple[None, IOResult]:
     raise NotionAPIError("boom.", status=404, code="object_not_found")
 
 
-async def _raise_other(_inv: None) -> tuple[None, IOResult]:
+async def _raise_other(
+    _config: None, _paths: list[PathSpec], _texts: list[str], _ctx: Context
+) -> tuple[None, IOResult]:
     raise ValueError("not an API failure")
 
 
-async def _succeed(_inv: None) -> tuple[None, IOResult]:
+async def _succeed(
+    _config: None, _paths: list[PathSpec], _texts: list[str], _ctx: Context
+) -> tuple[None, IOResult]:
     return None, _OK
 
 

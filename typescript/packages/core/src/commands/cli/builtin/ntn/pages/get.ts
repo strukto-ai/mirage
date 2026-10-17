@@ -16,21 +16,26 @@ import { FlagView } from '../../../../spec/flag_view.ts'
 import { getPage, getPageMarkdown } from '../../../../../core/notion/pages.ts'
 import { extractTitle } from '../../../../../core/notion/normalize.ts'
 import { IOResult } from '../../../../../io/types.ts'
-import type { CommandFnResult } from '../../../../config.ts'
-import type { CLIInvocation } from '../../../types.ts'
+import type { CommandFnResult, Context } from '../../../../config.ts'
+import type { PathSpec } from '../../../../../types.ts'
 import { firstText, notionTransport, prettyJson, usageError } from '../util.ts'
 
 const ENC = new TextEncoder()
 
-export async function get(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function get(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   let pageId: string
   try {
-    pageId = firstText(inv.texts, 'page id')
+    pageId = firstText(texts, 'page id')
   } catch (err) {
     return usageError(err)
   }
-  const transport = notionTransport(inv.config, inv.flags)
+  const transport = notionTransport(config, ctx.flags)
   // Both calls happen either way: the body comes from the markdown endpoint
   // and the title heading the frontmatter only exists on the page object.
   const rendered = await getPageMarkdown(transport, pageId)

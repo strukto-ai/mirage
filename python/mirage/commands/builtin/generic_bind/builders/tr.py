@@ -19,7 +19,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -29,15 +29,15 @@ async def tr(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_or_empty(ops, accessor, paths, opts.index)
+    paths = await resolve_or_empty(ops, accessor, paths, ctx.index)
     return await generic_tr(
         paths,
         texts,
-        read_stream=bound_op(ops.read_stream, accessor, opts.index),
-        stdin=opts.stdin,
-        flags=opts.flags,
+        read_stream=bound_op(ops.read_stream, accessor, ctx.index),
+        stdin=ctx.stdin,
+        flags=ctx.flags,
     )
 
 

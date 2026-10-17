@@ -35,9 +35,10 @@ from mirage.commands.cli.builtin.git.util import (
     fatal,
     verb_usage,
 )
-from mirage.commands.cli.types import CLIInvocation, CLIView
+from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 OBJECT_TYPES = ("blob", "tree", "commit", "tag")
 # The query modes, each named by the switch that selects it.
@@ -169,22 +170,23 @@ async def _batch_lines(
 
 
 async def cat_file(
-    inv: CLIInvocation[None],
+    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """``git cat-file``: an object's type, size, existence or content, for one
     name, a ``<type> <object>`` pair or each stdin line under ``--batch``.
     Pinned against git 2.50.1.
 
     Args:
-        inv (CLIInvocation[None]): the line's invocation record.
+        config (None): git declares no config_model.
+        paths (list[PathSpec]): the path operands; git declares none.
+        texts (list[str]): the operands.
+        ctx (Context): the line's context.
     """
-    fl = FlagView(inv.flags)
-    view = inv.view or CLIView()
-    texts = tuple(inv.texts)
+    fl = FlagView(ctx.flags)
     try:
-        if view.vfs is None:
+        if ctx.vfs is None:
             raise NoWorkspaceError()
-        check_switches(inv, texts)
+        check_switches(ctx, texts)
         modes = fl.typed_order(*QUERIES)
         if len(modes) > 1:
             raise IncompatibleOptionsError(f"-{modes[1]}", f"-{modes[0]}")
@@ -194,15 +196,15 @@ async def cat_file(
                 raise UsageError(
                     "",
                     "fatal: batch modes take no arguments\n\n"
-                    + verb_usage(inv),
+                    + verb_usage(ctx),
                 )
             value = fl.raw(batch[-1])
             template = value if isinstance(value, str) else BATCH_FORMAT
             for found in FORMAT_ATOM.finditer(template):
                 if found.group(1) not in BATCH_ATOMS:
                     raise GitError(f"bad cat-file format: {found.group(0)}")
-            repo, _ = await opened(fl, view)
-            text = (await read_stdin_async(inv.stdin) or b"").decode(
+            repo, _ = await opened(ctx, fl)
+            text = (await read_stdin_async(ctx.stdin) or b"").decode(
                 "utf-8", "replace"
             )
             lines = text.split("\n")
@@ -215,19 +217,19 @@ async def cat_file(
             contents = batch[-1] == "batch"
             return _batch_lines(repo, heads, contents), IOResult()
         if not modes and not texts:
-            raise UsageError("", verb_usage(inv))
+            raise UsageError("", verb_usage(ctx))
         if modes:
             if not texts:
                 raise UsageError(
                     "",
                     f"fatal: <object> required with '-{modes[0]}'\n\n"
-                    + verb_usage(inv),
+                    + verb_usage(ctx),
                 )
             if len(texts) > 1:
                 raise UsageError(
-                    "", "fatal: too many arguments\n\n" + verb_usage(inv)
+                    "", "fatal: too many arguments\n\n" + verb_usage(ctx)
                 )
-            repo, _ = await opened(fl, view)
+            repo, _ = await opened(ctx, fl)
             out, code = await asyncio.to_thread(
                 _query, repo, modes[0], texts[0]
             )
@@ -236,12 +238,12 @@ async def cat_file(
             raise UsageError(
                 "",
                 "fatal: only two arguments allowed in <type> <object> mode, "
-                f"not {len(texts)}\n\n" + verb_usage(inv),
+                f"not {len(texts)}\n\n" + verb_usage(ctx),
             )
         kind, name = texts
         if kind not in OBJECT_TYPES:
             raise GitError(f'invalid object type "{kind}"')
-        repo, _ = await opened(fl, view)
+        repo, _ = await opened(ctx, fl)
         obj = peeled(
             repo, await asyncio.to_thread(named_object, repo, name), kind
         )

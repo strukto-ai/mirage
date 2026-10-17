@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.history import HistoryAccessor
-from mirage.commands.config import CommandOpts, command
+from mirage.commands.config import Context, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.history.render import render_history_listing
@@ -31,7 +31,7 @@ async def history_cmd(
     accessor: HistoryAccessor,
     paths: list[PathSpec],
     texts: list[str],
-    opts: CommandOpts,
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """GNU history builtin over the recorder.
 
@@ -44,15 +44,15 @@ async def history_cmd(
     When -s and -p are combined, -s wins and nothing is printed
     (bash-verified for both -ps and -sp).
     """
-    fl = FlagView(opts.flags, spec=SPECS["history"])
+    fl = FlagView(ctx.flags, spec=SPECS["history"])
     c = fl.as_bool("c")
     d = fl.as_str("d")
     s = fl.as_bool("s")
     p = fl.as_bool("p")
     observer = accessor.observer
-    if opts.session_id is None:
+    if ctx.session_id is None:
         raise ValueError("history requires the caller's session id")
-    session = opts.session_id
+    session = ctx.session_id
     if c:
         await observer.log_clear(session=session)
     if d is not None:
@@ -67,7 +67,7 @@ async def history_cmd(
         await observer.log_delete(session=session, offset=offset)
     if s and texts:
         await observer.log_command_text(
-            " ".join(texts), session=session, cwd=opts.cwd.virtual
+            " ".join(texts), session=session, cwd=ctx.cwd.virtual
         )
     if p and not s:
         out = "\n".join(texts) + "\n" if texts else ""

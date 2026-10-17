@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FlagView } from '../../../spec/flag_view.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 import { PartialOutputError, UsageError } from '../../../errors.ts'
-import type { CLIInvocation } from '../../types.ts'
 import {
   dispatchWorkflow,
   getRun,
@@ -109,8 +109,13 @@ function workflow(value: unknown): Record<string, unknown> {
   return row !== null && typeof row === 'object' ? (row as Record<string, unknown>) : {}
 }
 
-export async function runListCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function runListCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const params: Record<string, string> = {}
   for (const [flag, key] of [
     ['branch', 'branch'],
@@ -125,8 +130,8 @@ export async function runListCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   }
   const rows = (
     await listRuns(
-      ghTransport(inv.config),
-      repoFor(inv, fl),
+      ghTransport(config),
+      repoFor(config, fl),
       params,
       fl.asInt('limit') ?? 20,
       fl.asStr('workflow'),
@@ -141,15 +146,20 @@ export async function runListCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   return typedOut(rows, fl, human, RUN_FIELDS)
 }
 
-export async function runViewCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const raw = inv.texts[0] ?? ''
+export async function runViewCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const raw = texts[0] ?? ''
   if (!/^\d+$/.test(raw)) throw new Error('a run ID is required in noninteractive mode')
   const logs = ghBool(fl, 'log')
   const failedOnly = ghBool(fl, 'log_failed')
   if (logs && failedOnly) throw new UsageError('specify only one of --log or --log-failed', 1)
-  const transport = ghTransport(inv.config)
-  const ref = repoFor(inv, fl)
+  const transport = ghTransport(config)
+  const ref = repoFor(config, fl)
   const row = run(await getRun(transport, ref, Number(raw)))
   // `--json` is answered first, as gh's exporter is.
   if ((logs || failedOnly) && fl.asStr('json') === undefined) {
@@ -338,12 +348,17 @@ async function runLog(
   return concat(printed)
 }
 
-export async function runRerunCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const raw = inv.texts[0] ?? ''
+export async function runRerunCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const raw = texts[0] ?? ''
   if (!/^\d+$/.test(raw)) throw new Error('a run ID is required in noninteractive mode')
-  const transport = ghTransport(inv.config)
-  const ref = repoFor(inv, fl)
+  const transport = ghTransport(config)
+  const ref = repoFor(config, fl)
   const job = fl.asStr('job')
   if (job !== undefined && job !== '') {
     if (!/^\d+$/.test(job)) throw new Error('--job expects a numeric job ID')
@@ -360,12 +375,17 @@ export async function runRerunCmd(inv: CLIInvocation): Promise<CommandFnResult> 
   return textOut('')
 }
 
-export async function workflowListCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
+export async function workflowListCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
   const rows = (
     await listWorkflows(
-      ghTransport(inv.config),
-      repoFor(inv, fl),
+      ghTransport(config),
+      repoFor(config, fl),
       fl.asInt('limit') ?? 50,
       ghBool(fl, 'all') ? undefined : (row) => row.state === 'active',
     )
@@ -376,15 +396,20 @@ export async function workflowListCmd(inv: CLIInvocation): Promise<CommandFnResu
   return typedOut(rows, fl, human, WORKFLOW_FIELDS)
 }
 
-export async function workflowViewCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const id = inv.texts[0] ?? ''
+export async function workflowViewCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const id = texts[0] ?? ''
   if (id === '') throw new Error('a workflow ID, name, or filename is required')
   const yaml = ghBool(fl, 'yaml')
   const gitRef = fl.asStr('ref') ?? ''
   if (!yaml && gitRef !== '') throw new UsageError('`--yaml` required when specifying `--ref`', 1)
-  const transport = ghTransport(inv.config)
-  const ref = repoFor(inv, fl)
+  const transport = ghTransport(config)
+  const ref = repoFor(config, fl)
   const row = workflow(await getWorkflow(transport, ref, id))
   if (!yaml) {
     return textOut(
@@ -421,12 +446,12 @@ async function workflowYaml(
   return content.at(-1) === NEWLINE ? content : concat([content, ENC.encode('\n')])
 }
 
-async function workflowInputs(inv: CLIInvocation, fl: FlagView): Promise<Record<string, unknown>> {
+async function workflowInputs(ctx: Context, fl: FlagView): Promise<Record<string, unknown>> {
   if (ghBool(fl, 'json')) {
-    if (inv.stdin === null) throw new Error('--json needs standard input')
+    if (ctx.stdin === null) throw new Error('--json needs standard input')
     let value: unknown
     try {
-      value = JSON.parse(new TextDecoder().decode(await materialize(inv.stdin)))
+      value = JSON.parse(new TextDecoder().decode(await materialize(ctx.stdin)))
     } catch (err) {
       if (err instanceof SyntaxError)
         throw new Error(`invalid JSON from standard input: ${err.message}`)
@@ -448,24 +473,29 @@ async function workflowInputs(inv: CLIInvocation, fl: FlagView): Promise<Record<
     if (at < 0) throw new Error(`expected "key=value", got "${pair}"`)
     const value = pair.slice(at + 1)
     inputs[pair.slice(0, at)] = value.startsWith('@')
-      ? new TextDecoder().decode(await readCliFile(inv, value.slice(1), '--field'))
+      ? new TextDecoder().decode(await readCliFile(ctx, value.slice(1), '--field'))
       : value
   }
   return inputs
 }
 
-export async function workflowRunCmd(inv: CLIInvocation): Promise<CommandFnResult> {
-  const fl = new FlagView(inv.flags)
-  const id = inv.texts[0] ?? ''
+export async function workflowRunCmd(
+  config: unknown,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const id = texts[0] ?? ''
   if (id === '') throw new Error('a workflow ID, name, or filename is required')
-  const transport = ghTransport(inv.config)
-  const ref = repoFor(inv, fl)
-  let branch = fl.asStr('ref') ?? (inv.config as { branch?: string }).branch
+  const transport = ghTransport(config)
+  const ref = repoFor(config, fl)
+  let branch = fl.asStr('ref') ?? (config as { branch?: string }).branch
   if (branch === undefined || branch === '') {
     const repository = (await viewRepo(transport, ref)) as { default_branch?: unknown }
     branch = typeof repository.default_branch === 'string' ? repository.default_branch : undefined
   }
   if (branch === undefined || branch === '') throw new Error('a workflow ref is required')
-  await dispatchWorkflow(transport, ref, id, { ref: branch, inputs: await workflowInputs(inv, fl) })
+  await dispatchWorkflow(transport, ref, id, { ref: branch, inputs: await workflowInputs(ctx, fl) })
   return textOut('')
 }

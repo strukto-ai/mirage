@@ -15,15 +15,15 @@
 import { cmpGeneric } from '../../generic/cmp.ts'
 import { type GenericCommand, fileSize, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
-const cmpCmd: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
-  const idx = opts.index ?? undefined
+const cmpCmd: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
+  const idx = ctx.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   return cmpGeneric(
     resolved,
     texts,
-    opts,
+    ctx,
     (p) => ops.readStream(accessor, p, idx),
-    fileSize(ops, accessor, opts),
+    fileSize(ops, accessor, ctx),
   )
 }
 
