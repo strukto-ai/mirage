@@ -68,7 +68,11 @@ def test_reach_defaults_to_process():
     assert MarkerRuntime().reach == "process"
 
 
-class SlowCloseRuntime(Runtime):
+class StubEngine:
+    name = "stub"
+
+
+class SlowCloseRuntime(Runtime[StubEngine]):
     name = "slow-close"
 
     def __init__(self) -> None:
@@ -77,10 +81,10 @@ class SlowCloseRuntime(Runtime):
         self.release = asyncio.Event()
         self.closed = 0
 
-    async def open_engine(self) -> object:
-        return object()
+    async def open_engine(self) -> StubEngine:
+        return StubEngine()
 
-    async def close_engine(self, engine: object) -> None:
+    async def close_engine(self, engine: StubEngine) -> None:
         self.entered.set()
         await self.release.wait()
         self.closed += 1

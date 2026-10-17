@@ -15,7 +15,11 @@
 import { describe, expect, it } from 'vitest'
 import { Runtime } from './base.ts'
 
-class SlowCloseRuntime extends Runtime<object> {
+class StubEngine {
+  readonly name = 'stub'
+}
+
+class SlowCloseRuntime extends Runtime<StubEngine> {
   readonly name = 'slow-close'
   closed = 0
   release!: () => void
@@ -29,11 +33,11 @@ class SlowCloseRuntime extends Runtime<object> {
     })
   }
 
-  protected override openEngine(): Promise<object> {
-    return Promise.resolve({})
+  protected override openEngine(): Promise<StubEngine> {
+    return Promise.resolve(new StubEngine())
   }
 
-  protected override async closeEngine(_engine: object): Promise<void> {
+  protected override async closeEngine(_engine: StubEngine): Promise<void> {
     this.markEntered()
     await new Promise<void>((resolve) => {
       this.release = resolve
