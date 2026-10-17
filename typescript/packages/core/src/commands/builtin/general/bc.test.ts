@@ -16,7 +16,7 @@ import { PathSpec } from '../../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { GENERAL_BC } from './bc.ts'
+import { GENERAL_BC } from './bc/index.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -75,9 +75,6 @@ describe('bc', () => {
     expect(await runBc('2^10\n')).toEqual({ out: '1024\n', err: '', exitCode: 0 })
   })
 
-  // Repeated squaring on a base and a result float64 represents exactly
-  // is exact, so these are GNU's answers byte for byte. 10^22 is the
-  // largest power of ten float64 holds exactly; 10^23 is not one.
   it('^ is exact where float64 is exact', async () => {
     const want: [string, string][] = [
       ['2^31', '2147483648'],
@@ -90,20 +87,14 @@ describe('bc', () => {
     }
   })
 
-  // The divergence the in-tree power exists to close: `**` through V8
-  // and `pow` through glibc are one ulp apart here, and the renderer
-  // prints the shortest digits that read back as the double, so the ulp
-  // reached stdout as 24257295885134.4530 against .4570. Both hosts now
-  // multiply in one order. GNU, being exact decimal, answers
-  // 24257295885134.4544 and 821783259531709.90, which no double carries.
   it('^ of a fractional base agrees between the hosts', async () => {
     expect(await runBc('7.8041^15\n')).toEqual({
-      out: '24257295885134.4650\n',
+      out: '24257295885134.4544\n',
       err: '',
       exitCode: 0,
     })
     expect(await runBc('9.87^15\n')).toEqual({
-      out: '821783259531708.90\n',
+      out: '821783259531709.90\n',
       err: '',
       exitCode: 0,
     })
@@ -173,13 +164,6 @@ describe('bc', () => {
     })
   })
 
-  // A double is a dyadic rational, so its expansion is finite and gets
-  // truncated exactly rather than rounded by a formatter. 2^-101 is the
-  // case that proves it: its expansion is exactly 101 digits long and
-  // the last one is a 5, so `toFixed`'s half-away-from-zero and
-  // python's half-to-even disagree, which is how the two hosts used to.
-  // These are GNU's own 100 digits (GNU folds the line at 70 characters
-  // with a trailing backslash, which neither host does).
   it('the hundredth digit is truncated, not rounded', async () => {
     // GNU's own 100 digits, measured, with the backslash it folds the
     // line at after 68 characters of value.
@@ -254,12 +238,6 @@ describe('bc', () => {
     expect((await runBc('sqrt(-1)\n2+2\n')).out).toBe('4\n')
   })
 
-  // GNU writes a printed value a character at a time and breaks with a
-  // backslash and a newline when the column reaches `line_size`, so a
-  // folded line carries `line_size - 2` characters of the value. Every
-  // expectation below is real bc 1.07.1's output byte for byte, and
-  // every value is one float64 carries exactly, so none of it is
-  // confounded by the precision gap.
   it('a long value folds at sixty-eight characters', async () => {
     expect(await runBc('2^300\n')).toEqual({ out: POWER_300, err: '', exitCode: 0 })
     expect(await runBc('obase=2; 2^100\n')).toEqual({
@@ -427,15 +405,9 @@ describe('bc', () => {
     })
   })
 
-  // The six functions under -l, at the float64 values both hosts share.
-  // GNU is arbitrary precision, so its last digits differ on the
-  // irrationals; that gap is accepted and documented, and what is pinned
-  // here is what the python twin answers: the shortest digits that read
-  // back as the double, padded with zeros past float64's ~17 significant
-  // digits.
   it('-l sqrt', async () => {
     expect(await runBc('sqrt(2)\n', { args_l: true })).toEqual({
-      out: '1.41421356237309510000\n',
+      out: '1.41421356237309504880\n',
       err: '',
       exitCode: 0,
     })
@@ -454,11 +426,8 @@ describe('bc', () => {
   })
 
   it('-l arctangent of one', async () => {
-    // From the in-tree series rather than a libm, so the last bit is
-    // the series' -- one ulp either way, and the same ulp in both
-    // hosts, which is the point. GNU: .78539816339744830961.
     expect(await runBc('a(1)\n', { args_l: true })).toEqual({
-      out: '.78539816339744840000\n',
+      out: '.78539816339744830961\n',
       err: '',
       exitCode: 0,
     })
@@ -471,32 +440,25 @@ describe('bc', () => {
   it('-l exponential of one', async () => {
     // GNU: 2.71828182845904523536.
     expect(await runBc('e(1)\n', { args_l: true })).toEqual({
-      out: '2.71828182845904550000\n',
+      out: '2.71828182845904523536\n',
       err: '',
       exitCode: 0,
     })
   })
 
-  // The divergence the in-tree series exist to close: `Math.cos(.1)`
-  // and `math.cos(.1)` are one ulp apart, and the renderer prints the
-  // shortest digits that read back as the double, so the ulp reached
-  // stdout. Both hosts now compute the same double.
   it('-l cosine and log are computed from series, not from a libm', async () => {
     expect(await runBc('c(.1)\n', { args_l: true })).toEqual({
-      out: '.99500416527802570000\n',
+      out: '.99500416527802576609\n',
       err: '',
       exitCode: 0,
     })
     expect(await runBc('l(3)\n', { args_l: true })).toEqual({
-      out: '1.09861228866810980000\n',
+      out: '1.09861228866810969139\n',
       err: '',
       exitCode: 0,
     })
   })
 
-  // Every one of these is GNU bc 1.07.1's own output byte for byte
-  // (measured): float64 carries about 17 significant digits, so the gap
-  // only opens past a scale of 15.
   it('-l matches GNU exactly up to scale fifteen', async () => {
     const want: [string, string][] = [
       ['scale=15; s(1)', '.841470984807896'],
@@ -518,27 +480,12 @@ describe('bc', () => {
     }
   })
 
-  // `2^10000` leaves float64's range, and the reductions have to refuse
-  // such an argument rather than iterate on it: the log's square-root
-  // loop and the trigonometric quadrant reduction both run forever on an
-  // infinity. GNU is arbitrary precision and has no infinity at all, so
-  // there is nothing to match but the other host.
-  // `2^10000-2^10000` is the NaN -- an infinity less itself. `sqrt(-1)`
-  // used to be how to write one; GNU refuses that, so it is a runtime
-  // error now.
-  it('-l answers a non-finite argument', async () => {
+  it('-l retains exact cancellation beyond floating-point range', async () => {
     const want: [string, string][] = [
-      ['l(2^10000)', 'Infinity'],
-      ['s(2^10000)', 'NaN'],
-      ['c(2^10000)', 'NaN'],
-      ['e(2^10000)', 'Infinity'],
-      ['e(0-2^10000)', '0'],
-      ['a(2^10000)', '1.57079632679489660000'],
-      ['l(2^10000-2^10000)', 'NaN'],
-      ['s(2^10000-2^10000)', 'NaN'],
-      ['c(2^10000-2^10000)', 'NaN'],
-      ['a(2^10000-2^10000)', 'NaN'],
-      ['e(2^10000-2^10000)', 'NaN'],
+      ['s(2^10000-2^10000)', '0'],
+      ['c(2^10000-2^10000)', '1.00000000000000000000'],
+      ['a(2^10000-2^10000)', '0'],
+      ['e(2^10000-2^10000)', '1.00000000000000000000'],
     ]
     for (const [line, out] of want) {
       expect(await runBc(line + '\n', { args_l: true })).toEqual({
@@ -549,8 +496,6 @@ describe('bc', () => {
     }
   })
 
-  // GNU's libmath.b `l(x)` answers `(1 - 10^scale)/1` for x <= 0 rather
-  // than refusing, and float64 carries that exactly to a scale of 15.
   it('-l log of a non-positive argument answers from scale', async () => {
     expect(await runBc('scale=5; l(0)\n', { args_l: true })).toEqual({
       out: '-99999.00000\n',
@@ -584,12 +529,6 @@ describe('bc', () => {
     expect(await runBc('1+1\n\n2+2\n')).toEqual({ out: '2\n4\n', err: '', exitCode: 0 })
   })
 
-  // -- Section S: reducing to a scale TRUNCATES TOWARD ZERO -----------
-  // Every row below distinguishes truncation from both rounding modes,
-  // and none of them sits on a float64 boundary where the two would
-  // agree by accident. `1.005` and `1.015` are deliberately absent:
-  // they are not exactly representable, so they test nothing.
-
   it('a product truncates rather than rounding', async () => {
     // The decisive row: 1.5*2.5 is exactly 3.75 and the product's scale
     // is 1, so it has to be reduced. Rounding either way says 3.8.
@@ -597,8 +536,6 @@ describe('bc', () => {
   })
 
   it('the rest of the product truncation table', async () => {
-    // 0.7*0.7 is 0.48999999999999994 in float64 and 0.49 exactly in
-    // GNU; truncation answers `.4` for both reasons, rounding `.5`.
     expect(await runBc('0.7*0.7\n')).toEqual({ out: '.4\n', err: '', exitCode: 0 })
     expect(await runBc('0.29*0.3\n')).toEqual({ out: '.08\n', err: '', exitCode: 0 })
   })
@@ -1195,8 +1132,6 @@ describe('bc', () => {
         exitCode: 0,
       })
     }
-    // A separated sign is not the doubled token, and `-` is the only
-    // unary sign there is, so `1- -2` works where `1+ +2` does not.
     expect(await runBc('1- -2\n')).toEqual({ out: '3\n', err: '', exitCode: 0 })
     expect(await runBc('1+ +2\n')).toEqual({
       out: '',
@@ -1568,7 +1503,6 @@ describe('bc', () => {
   })
 
   it('print expands the escapes GNU has a rule for', async () => {
-    // `\a \b \f \n \q \r \t \\`, and `\q` is the double quote.
     expect((await runBc('print "A\\aB\\bC\\fD\\nE\\qF\\rG\\tH\\\\I"\n')).out).toBe(
       'A\x07B\bC\fD\nE"F\rG\tH\\I',
     )
@@ -1812,11 +1746,8 @@ describe('bc', () => {
   })
 
   it('the issue 1156 program', async () => {
-    // The report's own heredoc. GNU prints `a=50.204700469970704`; the
-    // last digits differ because bc's values are float64 here, which is
-    // the separate gap tracked in #1119.
     const program = 'scale=15\na=7*7.172100067138672\nprint "a="; a; print "\\n"\n'
-    expect((await runBc(program, { args_l: true })).out).toBe('a=50.204700469970700\n\n')
+    expect((await runBc(program, { args_l: true })).out).toBe('a=50.204700469970704\n\n')
   })
 })
 
@@ -1828,5 +1759,48 @@ describe('bc decimal precision', () => {
 
   it('preserves twenty decimal places in the math library', async () => {
     expect((await runBc('s(1)\n', { args_l: true })).out).toBe('.84147098480789650665\n')
+  })
+})
+
+describe('bc exact decimal operations', () => {
+  it('truncates a product before a later multiplication', async () => {
+    expect((await runBc('scale=0;(1.23*1.23)*100\n')).out).toBe('151.00\n')
+  })
+
+  it('retains the complete remainder product', async () => {
+    expect((await runBc('scale=5;-9007199254740993%7.000\n')).out).toBe('-.00004000\n')
+  })
+
+  it('increments a scaled coefficient by a whole unit', async () => {
+    expect((await runBc('a=9007199254740993.00;++a;a--;a\n')).out).toBe(
+      '9007199254740994.00\n9007199254740994.00\n9007199254740993.00\n',
+    )
+  })
+
+  it('renders enough radix digits to retain the decimal scale', async () => {
+    expect((await runBc('obase=2;.125\n')).out).toBe('.0010000000\n')
+    expect((await runBc('obase=20;.50\n')).out).toBe('.10 00\n')
+    expect((await runBc('obase=999;9007199254740993.125\n')).out).toBe(
+      ' 009 052 317 984 921 204.124 874\n',
+    )
+  })
+
+  it('preserves literal fractional scale above the global register ceiling', async () => {
+    const literal = '.' + '0'.repeat(119) + '1'
+    expect(
+      (
+        await runBc(
+          `scale(${literal});length(${literal});${literal}*1\n`,
+          {},
+          { BC_LINE_LENGTH: '0' },
+        )
+      ).out,
+    ).toBe(`120\n120\n${literal}\n`)
+  })
+
+  it('takes square roots of integers beyond floating-point precision', async () => {
+    expect((await runBc('scale=20;sqrt(81129638414606699710187514626049)\n')).out).toBe(
+      '9007199254740993.00000000000000000000\n',
+    )
   })
 })

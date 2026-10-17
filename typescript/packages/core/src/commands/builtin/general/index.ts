@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Command } from '../../config.ts'
-import { GENERAL_BC } from './bc.ts'
+import { GENERAL_BC } from './bc/index.ts'
 import { GENERAL_CURL } from './curl.ts'
 import { GENERAL_DATE } from './date.ts'
 import { GENERAL_EXPR } from './expr.ts'

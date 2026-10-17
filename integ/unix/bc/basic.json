@@ -1634,7 +1634,7 @@
       "command": "echo '7.8041^15' | bc",
       "expect": {
         "exit": 0,
-        "stdout": "24257295885134.4650\n",
+        "stdout": "24257295885134.4544\n",
         "stderr": ""
       }
     },
@@ -1804,7 +1804,7 @@
       "command": "echo 's(1)' | bc -l",
       "expect": {
         "exit": 0,
-        "stdout": ".84147098480789650000\n",
+        "stdout": ".84147098480789650665\n",
         "stderr": ""
       }
     },
@@ -1838,7 +1838,7 @@
       "command": "echo 'c(.1)' | bc -l",
       "expect": {
         "exit": 0,
-        "stdout": ".99500416527802570000\n",
+        "stdout": ".99500416527802576609\n",
         "stderr": ""
       }
     },
@@ -1872,7 +1872,7 @@
       "command": "echo 'a(1)' | bc -l",
       "expect": {
         "exit": 0,
-        "stdout": ".78539816339744840000\n",
+        "stdout": ".78539816339744830961\n",
         "stderr": ""
       }
     },
@@ -1906,7 +1906,7 @@
       "command": "echo 'l(3)' | bc -l",
       "expect": {
         "exit": 0,
-        "stdout": "1.09861228866810980000\n",
+        "stdout": "1.09861228866810969139\n",
         "stderr": ""
       }
     },
@@ -1940,7 +1940,7 @@
       "command": "echo 'e(1)' | bc -l",
       "expect": {
         "exit": 0,
-        "stdout": "2.71828182845904550000\n",
+        "stdout": "2.71828182845904523536\n",
         "stderr": ""
       }
     },
@@ -1974,7 +1974,7 @@
       "command": "echo 'sqrt(2)' | bc -l",
       "expect": {
         "exit": 0,
-        "stdout": "1.41421356237309510000\n",
+        "stdout": "1.41421356237309504880\n",
         "stderr": ""
       }
     },
@@ -2552,7 +2552,7 @@
       "command": "printf 'scale=15\\na=7*7.172100067138672\\nprint \"a=\"; a; print \"\\\\n\"\\n' | bc -l",
       "expect": {
         "exit": 0,
-        "stdout": "a=50.204700469970700\n\n",
+        "stdout": "a=50.204700469970704\n\n",
         "stderr": ""
       }
     },

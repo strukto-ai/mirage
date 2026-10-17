@@ -98,29 +98,17 @@ def test_bc_power_and_parentheses():
     assert _out("bc", b"(1+2)*3\n")[0] == b"9\n"
 
 
-def test_bc_power_is_exact_where_float64_is_exact():
-    # Repeated squaring on a base and a result float64 represents
-    # exactly is exact, so these are GNU's answers byte for byte
-    # (measured on bc 1.07.1).
+def test_bc_integer_powers_preserve_all_digits():
     assert _out("bc", b"2^31\n")[0] == b"2147483648\n"
     assert _out("bc", b"2^62\n")[0] == b"4611686018427387904\n"
-    # 10^22 is the largest power of ten float64 holds exactly; 10^23 is
-    # not one, and neither host can print GNU's answer for it.
     assert _out("bc", b"10^22\n")[0] == b"10000000000000000000000\n"
     assert _out("bc", b"3^5\n")[0] == b"243\n"
     assert _out("bc", b"2^100\n")[0] == b"1267650600228229401496703205376\n"
 
 
-def test_bc_power_of_a_fractional_base_agrees_between_the_hosts():
-    # The divergence the in-tree power exists to close: `pow` through
-    # glibc and through V8 are one ulp apart here, and the renderer
-    # prints the shortest digits that read back as the double, so the
-    # ulp reached stdout as 24257295885134.4570 against .4530. Both
-    # hosts now multiply in one order. The value stays float64-limited:
-    # GNU, which is exact decimal, answers 24257295885134.4544 (and
-    # 821783259531709.90), and no double can carry that.
-    assert _out("bc", b"7.8041^15\n")[0] == b"24257295885134.4650\n"
-    assert _out("bc", b"9.87^15\n")[0] == b"821783259531708.90\n"
+def test_bc_power_of_a_fractional_base_matches_gnu():
+    assert _out("bc", b"7.8041^15\n")[0] == b"24257295885134.4544\n"
+    assert _out("bc", b"9.87^15\n")[0] == b"821783259531709.90\n"
 
 
 def test_bc_power_scale_rules_are_gnus():
@@ -381,30 +369,13 @@ def test_bc_math_library_exact_one_is_padded():
     assert _out("bc -l", b"c(0)\n")[0] == b"1.00000000000000000000\n"
 
 
-def test_bc_math_library_irrationals_are_float64_limited():
-    # These are the three ground-truth values float64 cannot reach.
-    # GNU (arbitrary precision) prints:
-    #   sqrt(2) 1.41421356237309504880
-    #   a(1)     .78539816339744830961
-    #   e(1)    2.71828182845904523536
-    # Both hosts share one float64 model (TypeScript has no bigdecimal
-    # in-tree), so both print the shortest digits that read back as the
-    # double and pad the rest with zeros -- float64 carries about 17
-    # significant digits and nothing beyond them is information.
-    # `a(1)` and `e(1)` come from the in-tree series rather than from a
-    # libm, so their last bit is the series' and not glibc's: one ulp
-    # either way, and the same ulp in both hosts, which is the point.
-    # At any scale up to 15 both are GNU's answer exactly (below).
-    assert _out("bc -l", b"sqrt(2)\n")[0] == b"1.41421356237309510000\n"
-    assert _out("bc -l", b"a(1)\n")[0] == b".78539816339744840000\n"
-    assert _out("bc -l", b"e(1)\n")[0] == b"2.71828182845904550000\n"
+def test_bc_math_library_irrationals_preserve_twenty_places():
+    assert _out("bc -l", b"sqrt(2)\n")[0] == b"1.41421356237309504880\n"
+    assert _out("bc -l", b"a(1)\n")[0] == b".78539816339744830961\n"
+    assert _out("bc -l", b"e(1)\n")[0] == b"2.71828182845904523536\n"
 
 
 def test_bc_math_library_matches_gnu_up_to_scale_fifteen():
-    # float64 carries about 17 significant digits, so every one of these
-    # is GNU bc 1.07.1's own output byte for byte (measured); the gap
-    # only opens past a scale of 15, where GNU keeps going and the
-    # doubles have run out of information.
     assert _out("bc -l", b"scale=15; s(1)\n")[0] == b".841470984807896\n"
     assert _out("bc -l", b"scale=15; c(.1)\n")[0] == b".995004165278025\n"
     assert _out("bc -l", b"scale=15; l(3)\n")[0] == b"1.098612288668109\n"
@@ -417,40 +388,41 @@ def test_bc_math_library_matches_gnu_up_to_scale_fifteen():
     assert _out("bc -l", b"scale=10; e(2)\n")[0] == b"7.3890560989\n"
 
 
-def test_bc_math_library_is_computed_from_series_not_libm():
-    # The divergence these series exist to close: `math.cos(.1)` and
-    # `Math.cos(.1)` are one ulp apart, and the renderer prints the
-    # shortest digits that read back as the double, so the ulp reached
-    # stdout. The two hosts now compute the same double, which is what
-    # `integ/runners/parity.py` compares; the value is float64-limited
-    # either way (GNU: .99500416527802576609 and 1.09861228866810969139).
-    assert _out("bc -l", b"c(.1)\n")[0] == b".99500416527802570000\n"
-    assert _out("bc -l", b"l(3)\n")[0] == b"1.09861228866810980000\n"
+def test_bc_cosine_and_log_preserve_twenty_places():
+    assert _out("bc -l", b"c(.1)\n")[0] == b".99500416527802576609\n"
+    assert _out("bc -l", b"l(3)\n")[0] == b"1.09861228866810969139\n"
 
 
-def test_bc_math_library_answers_a_non_finite_argument():
-    # `2^10000` leaves float64's range, and the reductions have to
-    # refuse such an argument rather than iterate on it: the log's
-    # square-root loop and the trigonometric quadrant reduction both run
-    # forever on an infinity. GNU is arbitrary precision and has no
-    # infinity at all, so there is nothing to match but the other host.
-    assert _out("bc -l", b"l(2^10000)\n")[0] == b"Infinity\n"
-    assert _out("bc -l", b"s(2^10000)\n")[0] == b"NaN\n"
-    assert _out("bc -l", b"c(2^10000)\n")[0] == b"NaN\n"
-    assert _out("bc -l", b"e(2^10000)\n")[0] == b"Infinity\n"
-    assert _out("bc -l", b"e(0-2^10000)\n")[0] == b"0\n"
-    assert _out("bc -l", b"a(2^10000)\n")[0] == b"1.57079632679489660000\n"
-    # `2^10000-2^10000` is the NaN -- an infinity less itself -- and
-    # every function carries it through. (`sqrt(-1)` used to be how to
-    # write one; GNU refuses that, so it is a runtime error now.)
+def test_bc_math_library_accepts_finite_arguments_beyond_double_precision():
+    assert (
+        _out("bc -l", b"scale=30; l(2^1000)\n")[0]
+        == b"693.147180559945309417232121458176\n"
+    )
+    assert (
+        _out("bc -l", b"scale=30; a(2^1000)\n")[0]
+        == b"1.570796326794896619231321691639\n"
+    )
+    assert (
+        _out("bc -l", b"scale=30; s(100000000000000000001)\n")[0]
+        == b".294228171296185908340258685740\n"
+    )
+    assert (
+        _out("bc -l", b"scale=30; c(-100000000000000000001)\n")[0]
+        == b".955735205596038657686129658004\n"
+    )
+    assert _out("bc -l", b"e(-1000)\n")[0] == b"0\n"
     for call in (b"l", b"s", b"c", b"a", b"e"):
-        assert _out("bc -l", call + b"(2^10000-2^10000)\n")[0] == b"NaN\n"
+        expected = (
+            b"-99999999999999999999.00000000000000000000\n"
+            if call == b"l"
+            else (
+                b"1.00000000000000000000\n" if call in (b"c", b"e") else b"0\n"
+            )
+        )
+        assert _out("bc -l", call + b"(2^1000-2^1000)\n")[0] == expected
 
 
 def test_bc_log_of_a_non_positive_argument_answers_from_scale():
-    # GNU's libmath.b `l(x)` returns `(1 - 10^scale)/1` for x <= 0
-    # rather than refusing, and float64 carries that exactly to a scale
-    # of 15. Measured: `scale=5; l(0)` and `scale=5; l(-1)`.
     assert _out("bc -l", b"scale=5; l(0)\n")[0] == b"-99999.00000\n"
     assert _out("bc -l", b"scale=5; l(-1)\n")[0] == b"-99999.00000\n"
     assert _out("bc -l", b"scale=0; l(0)\n")[0] == b"0\n"
@@ -1639,11 +1611,8 @@ def test_bc_line_length_bounds_a_printed_string_too():
 
 
 def test_bc_the_issue_1156_program():
-    # The report's own heredoc. GNU prints `a=50.204700469970704`; the
-    # last digits differ because bc's values are float64 here, which is
-    # the separate gap tracked in #1119.
     program = b'scale=15\na=7*7.172100067138672\nprint "a="; a; print "\\n"\n'
-    assert _out("bc -l", program)[0] == b"a=50.204700469970700\n\n"
+    assert _out("bc -l", program)[0] == b"a=50.204700469970704\n\n"
 
 
 def test_bc_the_fold_column_counts_utf8_bytes():
@@ -1675,3 +1644,67 @@ def test_bc_preserves_integer_literals_above_float_precision():
 
 def test_bc_math_library_preserves_twenty_decimal_places():
     assert _out("bc -l", b"s(1)\n")[0] == b".84147098480789650665\n"
+
+
+def test_bc_fractional_literal_keeps_its_full_scale_above_the_register_limit():
+    literal = b"." + b"1234567890" * 12
+    assert (
+        _out("BC_LINE_LENGTH=0 bc", literal + b"\nscale(" + literal + b")\n")[
+            0
+        ]
+        == literal + b"\n120\n"
+    )
+
+
+def test_bc_integer_rendering_exceeds_the_python_conversion_limit():
+    literal = b"9" * 5000
+    assert _out("BC_LINE_LENGTH=0 bc", literal + b"\n")[0] == literal + b"\n"
+
+
+def test_bc_division_and_square_root_preserve_one_hundred_places():
+    assert (
+        _out("BC_LINE_LENGTH=0 bc", b"scale=100; 1/7\n")[0]
+        == b"." + b"142857" * 16 + b"1428\n"
+    )
+    assert _out("BC_LINE_LENGTH=0 bc", b"scale=100; sqrt(2)\n")[0] == (
+        b"1.41421356237309504880168872420969807856967187537694"
+        b"80731766797379907324784621070388503875343276415727\n"
+    )
+
+
+def test_bc_math_preserves_one_hundred_places():
+    assert _out("BC_LINE_LENGTH=0 bc -l", b"scale=100; s(1)\n")[0] == (
+        b".84147098480789650665250232163029899962256306079837"
+        b"10656727517099919104043912396689486397435430526958\n"
+    )
+    assert _out("BC_LINE_LENGTH=0 bc -l", b"scale=100; l(2)\n")[0] == (
+        b".69314718055994530941723212145817656807550013436025"
+        b"52541206800094933936219696947156058633269964186875\n"
+    )
+    assert _out("BC_LINE_LENGTH=0 bc -l", b"scale=100; e(-1)\n")[0] == (
+        b".36787944117144232159552377016146086744581113103176"
+        b"78345078368016974614957448998033571472743459196437\n"
+    )
+
+
+def test_bc_modulo_keeps_the_full_quotient_product_scale():
+    assert _out("bc", b"scale=2; -123.45%7.89\n")[0] == b"-.0504\n"
+
+
+def test_bc_increment_preserves_large_fractional_values():
+    assert _out("bc", b"x=9007199254740993.25;x++;x;--x\n")[0] == (
+        b"9007199254740993.25\n9007199254740994.25\n9007199254740993.25\n"
+    )
+
+
+def test_bc_grouped_output_fractions_do_not_prefix_the_first_digit_with_a_space():
+    assert _out("bc", b"obase=20;.50;.05;1.50;-1.50\n")[0] == (
+        b".10 00\n.01 00\n 01.10 00\n- 01.10 00\n"
+    )
+
+
+def test_bc_math_uses_global_scale_and_sqrt_keeps_argument_scale():
+    assert _out(
+        "bc -l",
+        b"scale=3;s(1.0000000);scale(s(1.0000000));sqrt(2.0000000);scale(sqrt(2.0000000))\n",
+    )[0] == (b".841\n3\n1.4142135\n7\n")
