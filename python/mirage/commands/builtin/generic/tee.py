@@ -118,9 +118,9 @@ async def write_one(
     existing = b""
     try:
         existing = await materialize(read_stream(path))
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
         # GNU tee -a creates a missing file: append to empty.
-        pass
+        logger.debug("appending to a new file at %s: %s", path.virtual, exc)
     await write_bytes(path, existing + raw)
 
 
@@ -366,8 +366,10 @@ async def _consume_output(
         existing = b""
         try:
             existing = await materialize(read_stream(path))
-        except FileNotFoundError:
-            pass
+        except FileNotFoundError as exc:
+            logger.debug(
+                "appending to a new file at %s: %s", path.virtual, exc
+            )
 
         async def joined() -> AsyncIterator[bytes]:
             yield existing

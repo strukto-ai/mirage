@@ -315,6 +315,50 @@ async def test_without_a_native_append_it_reads_and_rewrites():
     assert written == {"/n": b"oldadd"}
 
 
+async def _missing(p):
+    raise FileNotFoundError(p.mount_path)
+    yield b""
+
+
+@pytest.mark.asyncio
+async def test_appending_to_a_missing_file_writes_only_the_input():
+    written, write = _sink()
+
+    _source, io = await tee_generic(
+        [_spec("/n")],
+        (),
+        read_stream=_missing,
+        write_bytes=write,
+        stdin=b"add",
+        flags={"append": True},
+    )
+    assert written == {"/n": b"add"}
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_append_to_a_missing_file_writes_only_the_input():
+    written: dict[str, bytes] = {}
+
+    async def _write(p, d):
+        written[p.mount_path] = await materialize(d)
+
+    async def _stdin():
+        yield b"add"
+
+    source, io = await tee_generic(
+        [_spec("/n")],
+        (),
+        read_stream=_missing,
+        write_bytes=_write,
+        stdin=_stdin(),
+        flags={"append": True},
+    )
+    assert await materialize(source) == b"add"
+    assert written == {"/n": b"add"}
+    assert io.exit_code == 0
+
+
 @pytest.mark.asyncio
 async def test_a_read_only_mount_runs_tee_and_refuses_its_file_operand():
     # With no operand tee only copies stdin to stdout, so a read-only cwd

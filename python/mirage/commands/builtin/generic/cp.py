@@ -750,8 +750,8 @@ async def dest_kind(
         # Its `..` passes a name that is not there: the chain of the path
         # it simplifies to says nothing about this one.
         return False, False, FsCondition.ENOENT
-    except (FileNotFoundError, ValueError):
-        pass
+    except (FileNotFoundError, ValueError) as exc:
+        _logger.debug("no destination at %s: %s", target.virtual, exc)
     else:
         return True, info.type == FileType.DIRECTORY, None
     return False, False, await absent_dest_error(stat, target)
@@ -812,8 +812,8 @@ async def source_kind(
         return None, FsCondition.ENOTDIR
     except DotWalkLoop:
         return None, FsCondition.ELOOP
-    except (FileNotFoundError, ValueError):
-        pass
+    except (FileNotFoundError, ValueError) as exc:
+        _logger.debug("no source at %s: %s", path.virtual, exc)
     else:
         return info.type, None
     _, is_dir = await nearest_ancestor(stat, path)

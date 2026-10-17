@@ -25,11 +25,17 @@ def _spec(virtual: str) -> PathSpec:
     return PathSpec.from_str_path(virtual)
 
 
-def _tree_ops(calls: list[tuple[str, str]], gone: str | None = None):
+def _tree_ops(
+    calls: list[tuple[str, str]],
+    gone: str | None = None,
+    vanished: str | None = None,
+):
     async def readdir(path):
         return TREE.get(path.virtual, [])
 
     async def stat(path):
+        if path.virtual == vanished:
+            raise FileNotFoundError(path.virtual)
         kind = FileType.DIRECTORY if path.virtual in TREE else FileType.FILE
         return FileStat(name=path.virtual, type=kind)
 
@@ -80,3 +86,16 @@ async def test_remove_tree_force_takes_an_entry_gone_as_removed(force):
         [] if force else ["/t/inner/b.txt"]
     )
     assert (("rmdir", "/t/inner") in calls) is force
+
+
+@pytest.mark.asyncio
+async def test_remove_tree_skips_a_child_gone_before_its_stat():
+    calls: list[tuple[str, str]] = []
+    _, failures = await remove_tree(
+        _spec("/t/inner"),
+        **_tree_ops(calls, vanished="/t/inner/b.txt"),
+        mounts=None,
+        force=False,
+    )
+    assert failures == []
+    assert calls == [("rmdir", "/t/inner")]

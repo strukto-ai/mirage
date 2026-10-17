@@ -99,6 +99,18 @@ def test_patch_N():
     assert b"universe" in _bytes(stdout)
 
 
+def test_patch_creates_a_missing_file():
+    diff_text = "--- a/new.txt\n+++ b/new.txt\n@@ -0,0 +1 @@\n+fresh\n"
+    ws = _ws()
+    stdout, io = _run_raw(
+        ws, "patch -p1", cwd="/data", stdin=diff_text.encode()
+    )
+    assert _bytes(stdout) == b"patching file new.txt\n"
+    assert io.exit_code == 0
+    stdout, _ = _run_raw(ws, "cat /data/new.txt")
+    assert _bytes(stdout) == b"fresh\n"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("prefix", ["", "/data", "/nested/data"])
 @pytest.mark.parametrize("source", ["stdin", "operand", "input"])

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import Awaitable, Callable
 
 from mirage.commands.builtin.utils.paths import descendant_path
@@ -20,6 +21,8 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.view.types import MountView
+
+logger = logging.getLogger(__name__)
 
 
 def rm_without_operands(force: bool) -> tuple[ByteSource | None, IOResult]:
@@ -102,7 +105,10 @@ async def remove_tree(
                 continue
             try:
                 info = await stat(child)
-            except FileNotFoundError:
+            except FileNotFoundError as exc:
+                logger.debug(
+                    "gone before rm reached %s: %s", child.virtual, exc
+                )
                 continue
             except FS_ERRORS as exc:
                 failures.append((child, exc))

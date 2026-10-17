@@ -1,3 +1,4 @@
+import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.quote import shell_quote
+
+logger = logging.getLogger(__name__)
 
 
 def _strip_name(name: str, strip_count: int) -> str | None:
@@ -661,8 +664,8 @@ async def _patch_file(
             report,
         )
         return True
-    except FileNotFoundError:
-        pass
+    except FileNotFoundError as exc:
+        logger.debug("nothing to patch yet at %s: %s", spec.virtual, exc)
     report.append(f"patching file {shown}")
     outcome = _apply_section(
         split_lines((original or b"").decode(errors="replace")),
