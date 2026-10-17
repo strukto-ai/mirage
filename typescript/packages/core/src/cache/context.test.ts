@@ -12,19 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { RAMFileCacheStore } from './file/ram.ts'
-import { LISTING_TRUST_WINDOW } from './index/constants.ts'
-import { RAMIndexCacheStore } from './index/ram.ts'
-import { CacheManager } from './manager.ts'
-import { shiftPerformanceNow } from './_test_util.ts'
 import { PathSpec } from '../types.ts'
 import {
   activeCacheManager,
   captureRead,
   publishRead,
-  listingRefreshed,
   nativeCondition,
   runWithCacheManager,
   runWithWriteContext,
@@ -33,10 +27,6 @@ import {
 import type { WriteContext } from './types.ts'
 
 class FakeManager {
-  listingTrusted(_folder: string): boolean {
-    return false
-  }
-
   probedStat(): null {
     return null
   }
@@ -69,27 +59,6 @@ describe('cache context', () => {
         await Promise.resolve()
       })
       expect(activeCacheManager()).toBe(outer)
-    })
-  })
-})
-
-describe('listingRefreshed', () => {
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  // github's truncated-tree walk asks here rather than through the gate, so a
-  // read that belongs to no command trusts a listing for the window too.
-  it("follows the manager's listing rule", async () => {
-    const clock = shiftPerformanceNow()
-    const index = new RAMIndexCacheStore({ ttl: 600 })
-    const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
-    await manager.scopeIndex(index).setDir('/data', [])
-    await runWithCacheManager(manager, () => {
-      expect(listingRefreshed('/data')).toBe(true)
-      clock.advance(LISTING_TRUST_WINDOW * 1000)
-      expect(listingRefreshed('/data')).toBe(false)
-      return Promise.resolve()
     })
   })
 })

@@ -65,7 +65,6 @@ function gate(): [Promise<void>, () => void] {
 
 function fakeManager(): CacheInvalidator {
   return {
-    listingTrusted: () => false,
     probedStat: () => null,
     cachedSize(): Promise<number | null> {
       return Promise.resolve(null)

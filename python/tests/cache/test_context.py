@@ -20,7 +20,6 @@ import pytest
 from mirage.cache.context import (
     active_cache_manager,
     capture_read,
-    listing_refreshed,
     native_condition,
     own_write_version,
     publish_read,
@@ -29,10 +28,6 @@ from mirage.cache.context import (
     settle_after,
     write_condition,
 )
-from mirage.cache.file.ram import RAMFileCacheStore
-from mirage.cache.index.constants import LISTING_TRUST_WINDOW
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.cache.manager import CacheManager
 from mirage.cache.types import LiveVersion, WriteCondition, WriteContext
 from mirage.errors.types import OperationNotSupportedError
 from mirage.types import PathSpec
@@ -43,9 +38,6 @@ def _run(coro):
 
 
 class FakeManager:
-    def listing_trusted(self, _folder: str) -> bool:
-        return False
-
     def probed_stat(self, _path):
         return None
 
@@ -77,26 +69,6 @@ def test_push_returns_previous_manager():
     assert prev1 is not None
     assert active is not restored
     assert restored is prev1
-
-
-@pytest.mark.asyncio
-async def test_listing_refreshed_follows_the_managers_listing_rule(
-    monkeypatch,
-):
-    # github's truncated-tree walk asks here rather than through the gate, so
-    # a read that belongs to no command trusts a listing for the window too.
-    now = [100.0]
-    monkeypatch.setattr("mirage.cache.manager._now", lambda: now[0])
-    index = RAMIndexCacheStore(ttl=600)
-    manager = CacheManager(RAMFileCacheStore(), index, "/data/", True)
-    await manager.scope_index(index).set_dir("/data", [])
-    prev = push_cache_manager(manager)
-    try:
-        assert listing_refreshed("/data") is True
-        now[0] += LISTING_TRUST_WINDOW
-        assert listing_refreshed("/data") is False
-    finally:
-        push_cache_manager(prev)
 
 
 class _OpFailed(Exception):

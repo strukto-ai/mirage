@@ -54,8 +54,6 @@ class CacheInvalidator(Protocol):
 
     async def is_cached(self, path: PathSpec) -> bool: ...
 
-    def listing_trusted(self, folder: str) -> bool: ...
-
     def probed_stat(self, path: PathSpec) -> FileStat | None: ...
 
 
@@ -112,19 +110,6 @@ async def settle_after(
         raise
     await settle(result)
     return result
-
-
-def listing_refreshed(folder: str) -> bool:
-    """Whether the active mount's listing of ``folder`` is recent enough.
-
-    The same rule as the fresh listing gate: written during this command,
-    or within the trust window when no command is running.
-
-    Args:
-        folder (str): mount-absolute directory key.
-    """
-    manager = active_cache_manager()
-    return manager is not None and manager.listing_trusted(folder)
 
 
 async def capture_read(

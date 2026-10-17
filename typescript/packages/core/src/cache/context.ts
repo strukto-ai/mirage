@@ -37,7 +37,6 @@ import {
 export interface CacheInvalidator {
   cachedSize(path: PathSpec): Promise<number | null>
   isCached(path: PathSpec): Promise<boolean>
-  listingTrusted(folder: string): boolean
   probedStat(path: PathSpec): FileStat | null
 }
 
@@ -106,15 +105,6 @@ export async function settleAfter<T>(
   }
   await settle(result)
   return result
-}
-
-/**
- * Whether the active mount's listing of `folder` is recent enough: the same
- * rule as the fresh listing gate, written during this command or within the
- * trust window when no command is running.
- */
-export function listingRefreshed(folder: string): boolean {
-  return activeCacheManager()?.listingTrusted(folder) === true
 }
 
 /** A fetch collecting the tokens its bytes carried. */
