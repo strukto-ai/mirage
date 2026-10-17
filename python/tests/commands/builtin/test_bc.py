@@ -1666,3 +1666,12 @@ def test_bc_the_fold_column_counts_utf8_bytes():
         _out("bc", f'print "{"x" * 67}éé"\n'.encode())[0]
         == ("x" * 67 + "\\\n" + "éé").encode()
     )
+
+
+def test_bc_preserves_integer_literals_above_float_precision():
+    assert _out("bc", b"9007199254740993\n")[0] == b"9007199254740993\n"
+    assert _out("bc", b"9007199254740993-9007199254740992\n")[0] == b"1\n"
+
+
+def test_bc_math_library_preserves_twenty_decimal_places():
+    assert _out("bc -l", b"s(1)\n")[0] == b".84147098480789650665\n"
