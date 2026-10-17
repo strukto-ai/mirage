@@ -18,7 +18,7 @@ import git from 'isomorphic-git'
 
 import { getOpcodes } from '../../../builtin/diff_format.ts'
 import { DiffOpTag } from '../../../builtin/diff_types.ts'
-import { lines } from './patch.ts'
+import { byteLines } from './patch.ts'
 import { repoArgs, type Repo } from './repo.ts'
 import { BINARY_SNIFF } from './summary.ts'
 import { treeEntries } from './tree.ts'
@@ -130,8 +130,8 @@ export async function greps(
     const now = await blob(repo, newOid)
     if (!forceText && [old, now].some((data) => data.subarray(0, BINARY_SNIFF).includes(0)))
       continue
-    const before = lines(old)
-    const after = lines(now)
+    const before = byteLines(old)
+    const after = byteLines(now)
     for (const [tag, i1, i2, j1, j2] of getOpcodes(before, after)) {
       if (tag === DiffOpTag.EQUAL) continue
       for (const line of [...before.slice(i1, i2), ...after.slice(j1, j2)]) {

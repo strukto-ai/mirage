@@ -218,12 +218,12 @@ def refname_option(arg: str | None, name: str) -> tuple[str, int]:
     raise _bad_arg(name, arg)
 
 
-def _refname(field: RefField) -> RefField:
+def _parse_refname(field: RefField) -> RefField:
     option, number = refname_option(field.arg, field.name)
     return replace(field, option=option, number=number)
 
 
-def _upstream(field: RefField) -> RefField:
+def _parse_upstream(field: RefField) -> RefField:
     """``remote_ref_atom_parser``: which fact about the upstream shows.
 
     git hands the refname parser the whole argument rather than the
@@ -265,7 +265,7 @@ def _no_argument(word: str) -> Callable[[RefField], RefField]:
     return parse
 
 
-def _objectsize(field: RefField) -> RefField:
+def _parse_objectsize(field: RefField) -> RefField:
     if field.arg is None:
         return field
     if field.arg == "disk":
@@ -273,7 +273,7 @@ def _objectsize(field: RefField) -> RefField:
     raise _bad_arg("objectsize", field.arg)
 
 
-def _subject(field: RefField) -> RefField:
+def _parse_subject(field: RefField) -> RefField:
     if field.arg is None:
         return replace(field, option="subject")
     if field.arg == "sanitize":
@@ -281,7 +281,7 @@ def _subject(field: RefField) -> RefField:
     raise _bad_arg("subject", field.arg)
 
 
-def _contents_arg(field: RefField) -> RefField:
+def _parse_contents(field: RefField) -> RefField:
     arg = field.arg
     if arg is None:
         return replace(field, option="bare")
@@ -299,7 +299,7 @@ def _contents_arg(field: RefField) -> RefField:
     raise _bad_arg("contents", arg)
 
 
-def _raw(field: RefField) -> RefField:
+def _parse_raw(field: RefField) -> RefField:
     if field.arg is None:
         return replace(field, option="bare")
     if field.arg == "size":
@@ -307,7 +307,7 @@ def _raw(field: RefField) -> RefField:
     raise _bad_arg("raw", field.arg)
 
 
-def _oid(field: RefField) -> RefField:
+def _parse_oid(field: RefField) -> RefField:
     """``oid_atom_parser``: a full id, or one abbreviated.
 
     Args:
@@ -330,7 +330,7 @@ def _oid(field: RefField) -> RefField:
     raise _bad_arg(field.name, arg)
 
 
-def _person_name(field: RefField) -> RefField:
+def _parse_person_name(field: RefField) -> RefField:
     if field.arg is None:
         return field
     if field.arg == "mailmap":
@@ -338,7 +338,7 @@ def _person_name(field: RefField) -> RefField:
     raise _bad_arg(field.name, field.arg)
 
 
-def _person_email(field: RefField) -> RefField:
+def _parse_person_email(field: RefField) -> RefField:
     """``person_email_atom_parser``: ``trim``, ``localpart`` and
     ``mailmap``, comma-separated, each a prefix git reads off in turn.
 
@@ -368,7 +368,7 @@ def _person_email(field: RefField) -> RefField:
     return replace(field, words=frozenset(words))
 
 
-def _align(field: RefField) -> RefField:
+def _parse_align(field: RefField) -> RefField:
     """``align_atom_parser``: a width and a position, in either order.
 
     Args:
@@ -399,7 +399,7 @@ def _align(field: RefField) -> RefField:
     return replace(field, number=width, text=position)
 
 
-def _if(field: RefField) -> RefField:
+def _parse_if(field: RefField) -> RefField:
     arg = field.arg
     if arg is None:
         return field
@@ -410,24 +410,24 @@ def _if(field: RefField) -> RefField:
 
 
 PARSERS: dict[str, Callable[[RefField], RefField]] = {
-    "refname": _refname,
-    "symref": _refname,
-    "upstream": _upstream,
+    "refname": _parse_refname,
+    "symref": _parse_refname,
+    "upstream": _parse_upstream,
     "objecttype": _no_argument("objecttype"),
-    "objectsize": _objectsize,
-    "objectname": _oid,
-    "tree": _oid,
-    "parent": _oid,
+    "objectsize": _parse_objectsize,
+    "objectname": _parse_oid,
+    "tree": _parse_oid,
+    "parent": _parse_oid,
     "body": _no_argument("body"),
-    "subject": _subject,
-    "contents": _contents_arg,
-    "raw": _raw,
+    "subject": _parse_subject,
+    "contents": _parse_contents,
+    "raw": _parse_raw,
     "HEAD": _no_argument("HEAD"),
-    "align": _align,
-    "if": _if,
+    "align": _parse_align,
+    "if": _parse_if,
     "rest": _no_argument("rest"),
-    **{f"{who}name": _person_name for who in PEOPLE},
-    **{f"{who}email": _person_email for who in PEOPLE},
+    **{f"{who}name": _parse_person_name for who in PEOPLE},
+    **{f"{who}email": _parse_person_email for who in PEOPLE},
 }
 
 
@@ -835,7 +835,7 @@ def _sanitized(subject: str) -> str:
     return "".join(out).rstrip(".-")
 
 
-def _lines(text: str, count: int) -> str:
+def _lines_of(text: str, count: int) -> str:
     """``append_lines``: the first lines of a message, continued lines
     indented by four spaces.
 
@@ -877,7 +877,7 @@ def _message(obj: RefObject, field: RefField) -> FieldValue:
         size = len(message.encode())
         return FieldValue(str(size), size)
     if option == "lines":
-        return FieldValue(_lines(message[:sig], field.number))
+        return FieldValue(_lines_of(message[:sig], field.number))
     return FieldValue(message)
 
 

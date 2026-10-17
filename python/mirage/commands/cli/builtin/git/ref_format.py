@@ -414,7 +414,7 @@ def _satisfied(frame: FormatFrame, text: str) -> bool:
     return bool(text.strip(C_SPACE))
 
 
-def _end(stack: list[FormatFrame], quote: QuoteStyle) -> None:
+def _end_block(stack: list[FormatFrame], quote: QuoteStyle) -> None:
     """``end_atom_handler``: close the innermost ``align`` or ``if``.
 
     Args:
@@ -500,7 +500,7 @@ def render_ref(fmt: RefFormat, item: RefItem, table: ValueTable) -> str:
                 FormatFrame(kind="if", opener=frame.opener, head=frame)
             )
         elif head == "end":
-            _end(stack, fmt.quote)
+            _end_block(stack, fmt.quote)
         elif len(stack) == 1:
             stack[-1].out.append(quote_text(value.text, fmt.quote))
         else:

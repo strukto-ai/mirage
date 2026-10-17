@@ -330,7 +330,7 @@ def render_changes(
             )
             numbers.append(f"{counts}\t{display}")
         if flags.summary:
-            summaries.extend(_summary(row, display, shown))
+            summaries.extend(_summary_lines(row, display, shown))
         if flags.patch:
             patches.append(
                 file_patch(
@@ -412,7 +412,7 @@ def _row_stat(repo: BaseRepo, row: Change, display: str) -> FileStat:
     )
 
 
-def _summary(row: Change, display: str, shown: str) -> list[str]:
+def _summary_lines(row: Change, display: str, shown: str) -> list[str]:
     """The ``--summary`` lines for one change, git's diff_summary.
 
     Args:

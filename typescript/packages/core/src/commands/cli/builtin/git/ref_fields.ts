@@ -118,7 +118,7 @@ const MINIMUM_ABBREV = 4
 const C_INTEGER = /^[ \t\n\v\f\r]*([+-]?)([0-9]+)$/
 const INT_MAX = 2 ** 31 - 1
 const UINT_MAX = 2 ** 32 - 1
-const TITLE_CHAR = /[a-zA-Z0-9._]/
+const TITLE_CHARS = /[a-zA-Z0-9._]/
 const LEADING_DIGITS = /^[ \t\n\v\f\r]*([0-9]*)/
 const LEADING_ZONE = /^[ \t\n\v\f\r]*([+-]?[0-9]+)/
 
@@ -632,7 +632,7 @@ function sanitized(subject: string): string {
   let space = 2
   for (let i = 0; i < subject.length; i++) {
     const char = subject[i] ?? ''
-    if (TITLE_CHAR.test(char)) {
+    if (TITLE_CHARS.test(char)) {
       if (space === 1) out.push('-')
       space = 0
       out.push(char)

@@ -186,7 +186,7 @@ function renameName(old: string, fresh: string, fully = true): string {
   return prefix.length || suffix.length ? [...prefix, `{${middle}}`, ...suffix].join('/') : middle
 }
 
-function lines(data: Uint8Array): string[] {
+function textLines(data: Uint8Array): string[] {
   const text = new TextDecoder().decode(data)
   return text === '' ? [] : text.split(/(?<=\n)/)
 }
@@ -488,7 +488,9 @@ async function combinedPatch(
       parents: Uint8Array[] = []
     for (const entry of old) parents.push(await blobData(repo, entry))
     const binary = [...parents, data].some((d) => d.subarray(0, 8000).includes(0))
-    const body = binary ? [] : combinedLines(parents.map(lines), lines(data), dense, context)
+    const body = binary
+      ? []
+      : combinedLines(parents.map(textLines), textLines(data), dense, context)
     const mode = fresh?.mode ?? '000000'
     const moved = old.some((e) => (e?.mode ?? '000000') !== mode)
     if (!binary && !body.length && !moved) continue

@@ -35,7 +35,7 @@ export async function blobData(repo: Repo, entry: TreeEntry | null): Promise<Uin
 }
 
 /** A blob's lines, each keeping its newline, as xdiff splits them. */
-export function lines(data: Uint8Array): string[] {
+export function byteLines(data: Uint8Array): string[] {
   const text = decodeText(data)
   return text === '' ? [] : text.split(/(?<=\n)/)
 }
@@ -117,7 +117,7 @@ export async function filePatch(
     to = after ? target : DEV_NULL
   if (!forceText && [old, fresh].some((data) => data.subarray(0, BINARY_SNIFF).includes(0)))
     return text([...head, `Binary files ${from} and ${to} differ`])
-  const body = hunks(lines(old), lines(fresh), count, functionContext)
+  const body = hunks(byteLines(old), byteLines(fresh), count, functionContext)
   return (
     text(body ? [...head, `--- ${from}${labelTab(from)}`, `+++ ${to}${labelTab(to)}`] : head) + body
   )

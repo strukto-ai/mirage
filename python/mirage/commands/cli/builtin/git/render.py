@@ -486,7 +486,7 @@ def long_format(
     return "".join(f"{line}\n" for line in lines)
 
 
-def _relative(path: str, base: list[str]) -> str:
+def _relative_path(path: str, base: list[str]) -> str:
     """A repository-relative path as seen from a directory inside the tree.
 
     Computed on the names alone, as git's ``relative_path`` does: the
@@ -525,8 +525,8 @@ def relative_entries(
     return [
         replace(
             row,
-            path=_relative(row.path, base),
-            original=_relative(row.original, base)
+            path=_relative_path(row.path, base),
+            original=_relative_path(row.original, base)
             if row.original is not None
             else None,
         )

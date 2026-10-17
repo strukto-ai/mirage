@@ -53,7 +53,10 @@ from mirage.commands.cli.builtin.git.shortlog import shortlog
 from mirage.commands.cli.builtin.git.show import diff_tree, show
 from mirage.commands.cli.builtin.git.stash import stash_list, stash_show
 from mirage.commands.cli.builtin.git.status import status
-from mirage.commands.cli.builtin.git.switch import switch, switch_read_only
+from mirage.commands.cli.builtin.git.switch import (
+    switch_branch,
+    switch_read_only,
+)
 from mirage.commands.cli.builtin.git.symbolic_ref import (
     symbolic_ref,
     symbolic_ref_read_only,
@@ -1583,7 +1586,9 @@ GIT = CLI(
         "checkout": CLIHandler(
             fn=verb(checkout, checkout_read_only), write=True
         ),
-        "switch": CLIHandler(fn=verb(switch, switch_read_only), write=True),
+        "switch": CLIHandler(
+            fn=verb(switch_branch, switch_read_only), write=True
+        ),
         "restore": CLIHandler(fn=verb(restore, index_locked), write=True),
         "rm": CLIHandler(fn=verb(rm, index_locked), write=True),
         "mv": CLIHandler(fn=verb(mv, index_locked), write=True),

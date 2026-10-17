@@ -118,7 +118,7 @@ def expected_kind(known: set[Ref], name: str) -> str:
     return COMMIT
 
 
-async def switch(
+async def switch_branch(
     config: None, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Switch to a branch, creating it under ``-c``.

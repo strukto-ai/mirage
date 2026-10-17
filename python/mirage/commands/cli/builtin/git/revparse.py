@@ -121,7 +121,7 @@ def split_operators(revision: str) -> tuple[str, tuple[RevOp, ...]]:
     return base or HEAD, tuple(ops)
 
 
-def _step(
+def _apply_step(
     repo: BaseRepo, commit: Commit, step: AncestryStep, revision: str
 ) -> Commit:
     """Apply one ancestry suffix to a commit.
@@ -189,7 +189,7 @@ def resolve_commit(repo: BaseRepo, revision: str) -> Commit:
     note_ambiguity(repo, base)
     for op in ops:
         if isinstance(op, AncestryStep):
-            commit = _step(repo, commit, op, revision)
+            commit = _apply_step(repo, commit, op, revision)
             continue
         # A peel this caller can use is one that lands back on a
         # commit: ``^{}`` and ``^{commit}`` do, ``^{tree}`` does not,
@@ -700,5 +700,5 @@ def resolve_object(repo: BaseRepo, revision: str) -> ShaFile:
         commit = unwrapped(repo, obj, revision)
         if not isinstance(commit, Commit):
             raise AmbiguousArgumentError(revision)
-        obj = _step(repo, commit, op, revision)
+        obj = _apply_step(repo, commit, op, revision)
     return obj
