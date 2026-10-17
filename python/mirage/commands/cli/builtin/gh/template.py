@@ -27,7 +27,7 @@ def _text(value: Any) -> str:
     return str(value)
 
 
-def _value(token: str, dot: Any, root: Any, variables: Variables) -> Any:
+def _lookup(token: str, dot: Any, root: Any, variables: Variables) -> Any:
     if token.startswith('"'):
         return json.loads(token)
     if token.startswith("`"):
@@ -107,7 +107,9 @@ def _call(name: str, args: list[Any]) -> Any:
     raise ValueError(f'template: function "{name}" not defined')
 
 
-def _eval(expression: str, dot: Any, root: Any, variables: Variables) -> Any:
+def _evaluate(
+    expression: str, dot: Any, root: Any, variables: Variables
+) -> Any:
     tokens = TEMPLATE_TOKEN.findall(expression)
     parts: list[list[str]] = [[]]
     for token in tokens:
@@ -119,11 +121,11 @@ def _eval(expression: str, dot: Any, root: Any, variables: Variables) -> Any:
     for i, part in enumerate(parts):
         if not part:
             raise ValueError("template: empty pipeline")
-        args = [_value(token, dot, root, variables) for token in part[1:]]
+        args = [_lookup(token, dot, root, variables) for token in part[1:]]
         if i:
             args.append(value)
         value = (
-            _value(part[0], dot, root, variables)
+            _lookup(part[0], dot, root, variables)
             if len(part) == 1
             and not i
             and (
@@ -202,7 +204,7 @@ def render_template(template: str, value: Any) -> str:
                     raise ValueError(
                         f"template: too many declarations in {command}"
                     )
-                resolved = _eval(pipeline, dot, value, variables)
+                resolved = _evaluate(pipeline, dot, value, variables)
                 body_end = alternate if alternate is not None else cursor
                 scope = dict(variables)
                 if names and command != "range":
@@ -236,7 +238,7 @@ def render_template(template: str, value: Any) -> str:
                 raise ValueError(f"template: unexpected {command}")
             else:
                 names, pipeline, assign = _declaration(action)
-                result = _eval(pipeline, dot, value, variables)
+                result = _evaluate(pipeline, dot, value, variables)
                 if not names:
                     output.append(_text(result))
                 elif not assign:

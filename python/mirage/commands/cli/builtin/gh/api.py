@@ -176,7 +176,7 @@ async def _fields(
     return fields
 
 
-def _headers(fl: FlagView) -> dict[str, str]:
+def _request_headers(fl: FlagView) -> dict[str, str]:
     headers: dict[str, str] = {}
     for header in fl.as_list("header"):
         key, sep, value = header.partition(":")
@@ -186,7 +186,7 @@ def _headers(fl: FlagView) -> dict[str, str]:
     return headers
 
 
-async def _input(ctx: Context, fl: FlagView) -> "JsonValue | None":
+async def _input_body(ctx: Context, fl: FlagView) -> "JsonValue | None":
     raw = fl.raw("input")
     if raw is None:
         return None
@@ -200,7 +200,7 @@ async def _input(ctx: Context, fl: FlagView) -> "JsonValue | None":
         raise ValueError(f"invalid JSON in {path}: {exc.msg}") from None
 
 
-def _query(value: Any) -> str:
+def _query_value(value: Any) -> str:
     if isinstance(value, (dict, list)):
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     if value is True:
@@ -242,7 +242,7 @@ async def api(
     if not endpoint:
         raise ValueError("an API endpoint is required")
     fields = await _fields(config, ctx, fl)
-    input_body = await _input(ctx, fl)
+    input_body = await _input_body(ctx, fl)
     has_input = fl.raw("input") is not None
     method = fl.as_str("method") or ("POST" if fields or has_input else "GET")
     upper = method.upper()
@@ -254,9 +254,13 @@ async def api(
     body: "JsonValue | None" = None
     if has_input:
         body = input_body
-        params = {key: _query(value) for key, value in fields.items()} or None
+        params = {
+            key: _query_value(value) for key, value in fields.items()
+        } or None
     elif upper == "GET":
-        params = {key: _query(value) for key, value in fields.items()} or None
+        params = {
+            key: _query_value(value) for key, value in fields.items()
+        } or None
     else:
         body = fields or None
 
@@ -275,7 +279,7 @@ async def api(
                     body,
                     request_params,
                     base_url=config.base_url,
-                    headers=_headers(fl) or None,
+                    headers=_request_headers(fl) or None,
                 )
             else:
                 response = await github_request_response(
@@ -284,7 +288,7 @@ async def api(
                     current,
                     params=request_params,
                     base_url=config.base_url,
-                    headers=_headers(fl) or None,
+                    headers=_request_headers(fl) or None,
                 )
         except GitHubApiError as exc:
             head = _response_head(exc.status, exc.headers) if include else ""

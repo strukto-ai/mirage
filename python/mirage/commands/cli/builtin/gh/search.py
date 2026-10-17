@@ -221,7 +221,7 @@ async def search_cmd(
         return None, IOResult(
             exit_code=1, stderr=f"{_search_error(exc, query)}\n".encode()
         )
-    rows = [_export(kind, value) for value in values]
+    rows = [_exported(kind, value) for value in values]
     template = fl.as_str("template")
     if template is not None:
         selected = [
@@ -281,7 +281,7 @@ def _user(value: Any) -> dict[str, Any]:
     }
 
 
-def _export(kind: str, value: Any) -> dict[str, Any]:
+def _exported(kind: str, value: Any) -> dict[str, Any]:
     raw = _record(value)
     row: dict[str, Any] = _shape(
         {
@@ -341,7 +341,7 @@ def _export(kind: str, value: Any) -> dict[str, Any]:
             "tree": _shape("Tree", info.get("tree")),
         }
         row["parents"] = row.get("parents") or []
-        repo = _export("repos", raw.get("repository"))
+        repo = _exported("repos", raw.get("repository"))
         row["repository"] = {
             key: repo[key]
             for key in (

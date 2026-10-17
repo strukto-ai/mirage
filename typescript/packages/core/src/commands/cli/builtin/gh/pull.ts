@@ -77,11 +77,11 @@ const REVIEW = struct(
 )
 const FILE = struct(['path', 'string'], ['additions', 'int'], ['deletions', 'int'])
 
-const REVIEWS = (after: string): string =>
+const reviews = (after: string): string =>
   `reviews(first: 100${after}) {nodes {id,author{login},authorAssociation,submittedAt,body,` +
   'state,commit{oid},reactionGroups{content,users{totalCount}}}' +
   'pageInfo{hasNextPage,endCursor}totalCount}'
-const CHECKS = (after: string): string =>
+const checks = (after: string): string =>
   'statusCheckRollup: commits(last: 1) {nodes {commit {statusCheckRollup ' +
   `{contexts(first:100${after}) {nodes {__typename...on StatusContext {context,state,` +
   'targetUrl,createdAt,description},...on CheckRun {name,checkSuite{workflowRun{workflow' +
@@ -237,10 +237,10 @@ const PULL_FIELD_TABLE: ReadonlyMap<string, Field> = new Map<string, Field>([
       export: requestsOf,
     },
   ],
-  nodes('reviews', REVIEWS(''), REVIEW, paged('reviews', REVIEWS)),
+  nodes('reviews', reviews(''), REVIEW, paged('reviews', reviews)),
   [
     'statusCheckRollup',
-    { select: CHECKS(''), pages: { select: CHECKS, at: contexts }, export: checksOf },
+    { select: checks(''), pages: { select: checks, at: contexts }, export: checksOf },
   ],
 ])
 

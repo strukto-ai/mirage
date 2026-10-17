@@ -121,7 +121,7 @@ const PROJECT_CARD = struct(
 
 export const AFTER = ', after: $endCursor'
 
-const COMMENTS = (after: string): string =>
+const comments = (after: string): string =>
   `comments(first: 100${after}) {nodes {id,author{login,...on User{id,name}},authorAssociation,` +
   'body,createdAt,includesCreatedEdit,isMinimized,minimizedReason,' +
   'reactionGroups{content,users{totalCount}},url,viewerDidAuthor},' +
@@ -129,7 +129,7 @@ const COMMENTS = (after: string): string =>
 const PROJECT_ITEMS =
   'projectItems(first:100){nodes{id, project{id,title}, status:fieldValueByName(name: ' +
   '"Status") { ... on ProjectV2ItemFieldSingleSelectValue{optionId,name}}},totalCount}'
-const PROJECT_ITEMS_ALONE = (after: string): string =>
+const projectItemsAlone = (after: string): string =>
   `projectItems(first: 100${after}){totalCount,nodes{id,project{id,title},` +
   'status:fieldValueByName(name: "Status"){... on ProjectV2ItemFieldSingleSelectValue' +
   '{optionId,name}}},pageInfo{hasNextPage,endCursor}}'
@@ -207,7 +207,7 @@ export const SHARED_FIELDS: readonly (readonly [string, Field])[] = [
   plain('body', 'string'),
   plain('closed', 'bool'),
   plain('closedAt', 'raw'),
-  nodes('comments', COMMENTS(''), COMMENT, paged('comments', COMMENTS)),
+  nodes('comments', comments(''), COMMENT, paged('comments', comments)),
   plain('createdAt', 'time'),
   plain('id', 'string'),
   nodes('labels', 'labels(first:100){nodes{id,name,description,color},totalCount}', LABEL),
@@ -227,7 +227,7 @@ export const SHARED_FIELDS: readonly (readonly [string, Field])[] = [
     {
       select: PROJECT_ITEMS,
       view: 'apart',
-      pages: paged('projectItems', PROJECT_ITEMS_ALONE),
+      pages: paged('projectItems', projectItemsAlone),
       export: projectItemsOf,
     },
   ],
