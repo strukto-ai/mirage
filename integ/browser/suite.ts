@@ -189,9 +189,9 @@ const CHECKS: [string, Check][] = [
           spec: new CommandSpec({ name: 'pause' }),
           handlers: {
             '': new CLIHandler({
-              fn: async (inv) => {
+              fn: async (_config, _paths, _texts, ctx) => {
                 if (++entered === 2) enterBoth()
-                await (inv.env.LABEL === 'loose' ? looseHeld : tightHeld)
+                await (ctx.env?.LABEL === 'loose' ? looseHeld : tightHeld)
                 return [null, new IOResult()]
               },
             }),

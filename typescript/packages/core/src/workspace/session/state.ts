@@ -62,8 +62,8 @@ import type { SessionState } from './session.ts'
 /**
  * The one copy-out of a session's environment.
  *
- * Every tier that hands the env onward as a process view (command
- * opts, `inv.env`, guest `RunArgs.env`, the `env` builtin) copies
+ * Every tier that hands the env onward as a process view (a command's or
+ * CLI's `ctx.env`, guest `RunArgs.env`, the `env` builtin) copies
  * through here, so the hidden-vars filter lands on all of them by
  * construction rather than on however many hand-rolled copies someone
  * remembers. The copy keeps the null prototype session records carry.

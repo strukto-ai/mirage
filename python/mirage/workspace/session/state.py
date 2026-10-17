@@ -68,8 +68,8 @@ P = ParamSpec("P")
 def env_snapshot(session: SessionState) -> dict[str, str]:
     """The one copy-out of a session's environment.
 
-    Every tier that hands the env onward as a process view (command
-    kwargs, ``inv.env``, guest ``RunArgs.env``, the ``env`` builtin)
+    Every tier that hands the env onward as a process view (a command's
+    or CLI's ``ctx.env``, guest ``RunArgs.env``, the ``env`` builtin)
     copies through here, so the hidden-vars filter lands on all of
     them by construction rather than on however many hand-rolled
     copies someone remembers.

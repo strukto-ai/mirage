@@ -232,7 +232,7 @@ describe('hidden vars in the session view', () => {
 
   it('snapshot omits hidden vars', () => {
     // Every copy-out routes through envSnapshot, so one omission here
-    // is invisibility in inv.env, RunArgs.env and the env builtin at
+    // is invisibility in ctx.env, RunArgs.env and the env builtin at
     // once.
     const [view] = makeHiddenView()
     const snap = view.snapshot()

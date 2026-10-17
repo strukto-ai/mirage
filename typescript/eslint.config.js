@@ -17,7 +17,7 @@ const SORT_COMPARATOR_SELECTOR = {
 }
 
 const FLAG_BAG_MESSAGE =
-  'Read flags through FlagView (new FlagView(opts.flags, specOf(name))), not the flag bag directly.'
+  'Read flags through FlagView (new FlagView(ctx.flags, specOf(name))), not the flag bag directly.'
 
 // Commands read flags only through FlagView, which is constructed with the
 // command's spec and throws on a name the spec does not declare. Reaching
@@ -29,20 +29,20 @@ const FLAG_BAG_MESSAGE =
 // the shapes TypeScript writes it in.
 const FLAG_BAG_SELECTORS = [
   {
-    // opts.flags.x, opts.flags['x'], inv.flags.x -- the bag reached through
-    // the two records that carry it.
+    // ctx.flags.x, ctx.flags['x'] -- the bag reached through the context
+    // every command and CLI handler gets.
     selector:
-      "MemberExpression[object.type='MemberExpression'][object.object.name=/^(opts|inv)$/][object.property.name='flags']",
+      "MemberExpression[object.type='MemberExpression'][object.object.name='ctx'][object.property.name='flags']",
     message: FLAG_BAG_MESSAGE,
   },
   {
-    // `const flags = opts.flags`. Aliasing the bag into a local is how
+    // `const flags = ctx.flags`. Aliasing the bag into a local is how
     // every read below the alias escaped the old selector; banning the
     // alias itself is what makes `flags.c` unwritable without naming a
-    // second shape. Passing `opts.flags` to FlagView or to a helper that
+    // second shape. Passing `ctx.flags` to FlagView or to a helper that
     // takes the whole bag stays legal.
     selector:
-      "VariableDeclarator[init.type='MemberExpression'][init.object.name=/^(opts|inv)$/][init.property.name='flags']",
+      "VariableDeclarator[init.type='MemberExpression'][init.object.name='ctx'][init.property.name='flags']",
     message: FLAG_BAG_MESSAGE,
   },
   {

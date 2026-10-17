@@ -45,14 +45,14 @@ const PROBE = `function takesBag(bag: Record<string, FlagValue>, flags: Record<s
   return [bag.name, bag.show_all, bag[flags.name]]
 }
 
-function reads(opts, inv, xs, name, parsed) {
-  const flags = opts.flags
+function reads(ctx, xs, name, parsed) {
+  const flags = ctx.flags
   xs.sort()
   return [
-    opts.flags.help,
+    ctx.flags.help,
     flags.show_all,
     flags[name],
-    inv.flags.json,
+    ctx.flags.json,
     parsed.showAll,
     parsed.lines,
   ]
@@ -117,9 +117,9 @@ describe('no-restricted-syntax flag-bag rule', () => {
     // 5:  `bag.name`, `bag.show_all`, `bag[flags.name]` -- a SIMPLE dest
     //     as well as an underscored one, plus the computed read. The
     //     simple one is what escaped before this rule was widened.
-    // 9:  `const flags = opts.flags`, the alias every read below it hid
-    //     behind. 12/13/14/15: opts.flags.help, flags.show_all,
-    //     flags[name], inv.flags.json.
+    // 9:  `const flags = ctx.flags`, the alias every read below it hid
+    //     behind. 12/13/14/15: ctx.flags.help, flags.show_all,
+    //     flags[name], ctx.flags.json.
     // Not reported, all deliberate: line 3's `copy.H = true` and line 4's
     // subscript on the left (a bag a wrapper builds to hand down stays
     // writable, as python's regex also allows), line 5's `flags.name` (a
