@@ -149,7 +149,7 @@ export class MountRegistry {
   // mounts (a CLI exists because it was installed, never because
   // storage was mounted). The registry object is just the vehicle that
   // already reaches every dispatch site, same as the runtime fields.
-  readonly clis = new CLIRegistry()
+  readonly clis = new CLIRegistry(() => this.mountList.map((m) => m.vfs.accessor))
 
   /** Refetch cached data after native code may have changed the workspace. */
   async invalidateAfterExternal(): Promise<void> {

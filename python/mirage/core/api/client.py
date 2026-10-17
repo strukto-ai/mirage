@@ -135,6 +135,12 @@ class SessionPool:
         self._retry_connection = retry_connection
         self._session: aiohttp.ClientSession | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._holders = 1
+
+    def share(self) -> "SessionPool":
+        """Count one more holder; the last one's ``close`` drains."""
+        self._holders += 1
+        return self
 
     def get(self) -> aiohttp.ClientSession:
         """The shared session, created on first use.
@@ -169,7 +175,11 @@ class SessionPool:
         return self._session
 
     async def close(self) -> None:
-        """Drain the pool. Idempotent, and safe before first use."""
+        """Release one holder, draining the pool on the last. Idempotent
+        for a sole holder, and safe before first use."""
+        if self._holders > 1:
+            self._holders -= 1
+            return
         if self._session is not None and not self._session.closed:
             await self._session.close()
         self._session = None

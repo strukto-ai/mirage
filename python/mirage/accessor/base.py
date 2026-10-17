@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterable
 from types import TracebackType
 from typing import Self
 
@@ -24,6 +25,15 @@ from mirage.types import JsonValue
 
 class Accessor:
     async def close(self) -> None:
+        return None
+
+    def join(self, peers: Iterable["Accessor"]) -> None:
+        """Share what a peer on the same account holds; the default
+        shares nothing.
+
+        Args:
+            peers (Iterable[Accessor]): the workspace's other accessors.
+        """
         return None
 
 
@@ -55,6 +65,14 @@ class SessionAccessor(Accessor):
 
     async def close(self) -> None:
         await self.pool.close()
+
+    def share(self, other: "SessionAccessor") -> None:
+        """Ride ``other``'s pool; whichever closes last drains it.
+
+        Args:
+            other (SessionAccessor): the accessor whose pool to ride.
+        """
+        self.pool = other.pool.share()
 
     async def __aenter__(self) -> Self:
         return self

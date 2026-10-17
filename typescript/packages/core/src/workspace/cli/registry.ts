@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Accessor } from '../../accessor/base.ts'
 import type { CLI } from '../../commands/cli/types.ts'
 import { BUILTIN_SPECS } from '../../commands/spec/builtins.ts'
 import { errorSummary } from '../../secrets/summary.ts'
@@ -44,6 +45,9 @@ import { compareCodePoints } from '../../utils/sort.ts'
 export class CLIRegistry {
   private readonly installs = new Map<string, CLIInstall>()
 
+  /** @param peers the mounts' accessors, which an install may share an account with. */
+  constructor(private readonly peers: () => readonly Accessor[] = () => []) {}
+
   /**
    * Install a CLI under a head word. The name must be a single word and
    * must not collide with another installed CLI, a shell builtin, or a
@@ -69,12 +73,9 @@ export class CLIRegistry {
       throw new Error(`CLI name '${name}' collides with a general command`)
     }
     const validated = this.validateConfig(name, spec, config)
-    const install: CLIInstall = {
-      name,
-      cli: spec,
-      config: validated,
-      accessor: spec.accessor(validated),
-    }
+    const accessor = spec.accessor(validated)
+    accessor.join?.([...this.peers(), ...[...this.installs.values()].map((i) => i.accessor)])
+    const install: CLIInstall = { name, cli: spec, config: validated, accessor }
     this.installs.set(name, install)
     return install
   }

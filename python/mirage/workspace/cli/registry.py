@@ -12,10 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
 
 from pydantic import BaseModel, ValidationError
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.types import CLI
 from mirage.commands.spec import SPECS
 from mirage.secrets.summary import error_summary
@@ -49,10 +50,17 @@ class CLIRegistry:
     word against that belongs in the policy layer's ``pre_command``,
     since it is a per-deployment call rather than a property of the
     registry.
+
+    Args:
+        peers (Callable[[], Iterable[Accessor]]): the mounts' accessors,
+            which a new install's accessor may share an account with.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self, peers: Callable[[], Iterable[Accessor]] = tuple
+    ) -> None:
         self._installs: dict[str, CLIInstall] = {}
+        self._peers = peers
 
     def install(
         self,
@@ -89,11 +97,12 @@ class CLIRegistry:
                 f"CLI name {name!r} collides with a general command"
             )
         validated = self._validate_config(name, spec, config)
+        accessor = spec.accessor(validated)
+        accessor.join(
+            [*self._peers(), *(i.accessor for i in self._installs.values())]
+        )
         install = CLIInstall(
-            name=name,
-            cli=spec,
-            config=validated,
-            accessor=spec.accessor(validated),
+            name=name, cli=spec, config=validated, accessor=accessor
         )
         self._installs[name] = install
         return install

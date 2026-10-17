@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import Iterable
 
 from mirage.accessor.base import Accessor, SessionAccessor
 from mirage.core.github.config import GhConfig
@@ -32,6 +33,27 @@ class GitHubAccount(SessionAccessor):
     def __init__(self, config: GhConfig) -> None:
         super().__init__()
         self.config = config
+
+    def join(self, peers: Iterable[Accessor]) -> None:
+        """Ride the pool of a peer account (a gh install's, or a github
+        mount's) on the same token and API base.
+
+        Args:
+            peers (Iterable[Accessor]): the workspace's other accessors.
+        """
+        token = self.config.token.get_secret_value()
+        for peer in peers:
+            account = (
+                peer.account if isinstance(peer, GitHubAccessor) else peer
+            )
+            if (
+                isinstance(account, GitHubAccount)
+                and account is not self
+                and account.config.token.get_secret_value() == token
+                and account.config.base_url == self.config.base_url
+            ):
+                self.share(account)
+                return
 
 
 class GitHubAccessor(Accessor):

@@ -17,6 +17,9 @@ export class Accessor {
 
   /** Release what this accessor holds, when it holds anything. */
   close?(): Promise<void>
+
+  /** Share what a peer on the same account holds (the workspace's other accessors). */
+  join?(peers: readonly Accessor[]): void
 }
 
 /** The accessor of a mount or CLI with no client of its own. */

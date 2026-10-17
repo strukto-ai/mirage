@@ -145,7 +145,7 @@ class MountRegistry:
         # storage was mounted). The registry object is just the vehicle
         # that already reaches every dispatch site, same as the
         # runtime fields above.
-        self.clis = CLIRegistry()
+        self.clis = CLIRegistry(lambda: [m.vfs.accessor for m in self._mounts])
         # The workspace-level default a mount overrides, kept so the
         # runtime entry point (`Workspace.add_mount`) has something to resolve
         # an unset policy against.

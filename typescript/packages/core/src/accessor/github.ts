@@ -22,7 +22,7 @@ import type { TreeEntry } from '../core/github/tree_entry.ts'
  * install's accessor, and the account a github mount holds.
  */
 export class GitHubAccount extends Accessor {
-  readonly transport: GitHubTransport
+  transport: GitHubTransport
 
   constructor(
     readonly config: GhConfig,
@@ -30,6 +30,25 @@ export class GitHubAccount extends Accessor {
   ) {
     super()
     this.transport = transport ?? new HttpGitHubTransport(config)
+  }
+
+  /**
+   * Ride the transport (and its write limiter) of a peer account, a gh
+   * install's or a github mount's, on the same token and API base.
+   */
+  override join(peers: readonly Accessor[]): void {
+    for (const peer of peers) {
+      const account = peer instanceof GitHubAccessor ? peer.account : peer
+      if (
+        account instanceof GitHubAccount &&
+        account !== this &&
+        account.config.token === this.config.token &&
+        account.config.baseUrl === this.config.baseUrl
+      ) {
+        this.transport = account.transport
+        return
+      }
+    }
   }
 }
 
