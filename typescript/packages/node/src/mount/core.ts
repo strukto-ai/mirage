@@ -453,12 +453,37 @@ export class MountCore {
   /** Buffer a write on its handle, or apply it directly when there is none. */
   async write(path: string, fd: number, data: Uint8Array, pos: number): Promise<void> {
     const ctx = this.handles.get(fd)
+    const key = ctx === undefined ? this.identity(path) : ctx.key
+    await this.landOverlapped(key, pos, data.byteLength, ctx)
     if (ctx !== undefined) {
       ctx.writeBuf ??= []
       ctx.writeBuf.push([pos, data])
       return
     }
-    await this.mutate(this.identity(path), () => this.applyWrites(path, [[pos, data]]))
+    await this.mutate(key, () => this.applyWrites(path, [[pos, data]]))
+  }
+
+  /**
+   * Land the writes another handle holds that a new write overlaps. No two
+   * handles on a file then hold overlapping bytes, so whichever flush,
+   * release or sync lands first, the file ends as its writes were made.
+   * Writes that do not overlap stay buffered.
+   */
+  private async landOverlapped(
+    key: string,
+    pos: number,
+    size: number,
+    ctx: Handle | undefined,
+  ): Promise<void> {
+    const end = pos + size
+    for (const other of this.openOn(key)) {
+      if (
+        other !== ctx &&
+        (other.writeBuf ?? []).some(([at, run]) => at < end && pos < at + run.byteLength)
+      ) {
+        await this.land(other)
+      }
+    }
   }
 
   /**
@@ -915,17 +940,22 @@ export class MountCore {
 
   /**
    * Land what every open handle holds, as sync(2) does, for a client whose
-   * close(2) returns before it releases the handle (sshfs). A landing that
-   * fails is logged, and its bytes stay on the handle for its own flush to
-   * retry and report.
+   * close(2) returns before it releases the handle (sshfs).
    */
   async sync(): Promise<void> {
-    for (const ctx of [...this.handles.values()]) {
-      try {
-        await this.settle(ctx)
-      } catch (err) {
-        console.warn(`fuse: landing ${ctx.path} failed: ${String(err)}`)
-      }
+    for (const ctx of [...this.handles.values()]) await this.land(ctx)
+  }
+
+  /**
+   * Land a handle's buffer for a caller other than the handle's own flush:
+   * a failure is logged, and its bytes stay on the handle for that flush to
+   * retry and report.
+   */
+  private async land(ctx: Handle): Promise<void> {
+    try {
+      await this.settle(ctx)
+    } catch (err) {
+      console.warn(`fuse: landing ${ctx.path} failed: ${String(err)}`)
     }
   }
 }

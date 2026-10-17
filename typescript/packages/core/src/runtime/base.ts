@@ -85,6 +85,16 @@ export abstract class Runtime {
     return this.reach === 'workspace'
   }
 
+  /**
+   * Land the file writes this runtime still holds for a line. The executor
+   * calls it when a line ends, however it ended, so the line's writes are
+   * in the workspace by the time it returns. Holds none by default; a
+   * sandbox serving the workspace over SFTP lands what its servers hold.
+   */
+  settle(): Promise<void> {
+    return Promise.resolve()
+  }
+
   get capabilities(): RuntimeCapabilities {
     return {
       languages: [],

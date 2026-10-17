@@ -104,6 +104,7 @@ async def run_whole_line(
     finally:
         # The line may have written anywhere in the runtime's view of
         # the workspace; local read caches are stale.
+        await runtime.settle()
         if not runtime.file_effects_dispatched:
             await invalidate()
     refused, bound = None, None

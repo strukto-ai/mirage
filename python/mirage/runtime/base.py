@@ -113,6 +113,16 @@ class Runtime(ABC):
         """Whether workspace file mutations already invalidate through dispatch."""
         return self.reach == "workspace"
 
+    async def settle(self) -> None:
+        """Land the file writes this runtime still holds for a line.
+
+        The executor calls it when a line ends, however it ended, so the
+        line's writes are in the workspace by the time it returns. Holds
+        none by default; a sandbox serving the workspace over SFTP lands
+        what its servers hold.
+        """
+        return None
+
     @property
     def capabilities(self) -> RuntimeCapabilities:
         return RuntimeCapabilities(

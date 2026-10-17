@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import io
 import shlex
 
 import pytest
@@ -24,6 +25,7 @@ from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import SSHFS_OPTIONS
 from mirage.runtime.sandbox.mounts import mount_table, top_prefixes
 from mirage.runtime.types import RunResult, SandboxPipe
+from mirage.types import Limit
 
 
 class Sink:
@@ -38,6 +40,7 @@ class Drain:
     """A served prefix's server that reads its pipe to the end."""
 
     def __init__(self, files, session):
+        self.files = files
         self.session = session
 
     async def serve(self, reader, writer):
@@ -79,6 +82,8 @@ class FakeSandbox(RemoteSandbox):
             return RunResult(
                 stdout=b"", stderr=None, exit_code=0 if self.sshfs else 1
             )
+        if line == "python3 slow.py":
+            await asyncio.Event().wait()
         if line.startswith("fusermount3 -uz "):
             if self.fail_unmount:
                 raise RuntimeError("the sandbox went away")
@@ -100,7 +105,7 @@ class FakeSandbox(RemoteSandbox):
         return SandboxPipe(requests, Sink(), stop)
 
 
-def workspace(runtime, hide=(), modes=None):
+def workspace(runtime, hide=(), modes=None, **options):
     profile = {"paths": {"hide": list(hide)}}
     if modes is not None:
         profile["mounts"] = modes
@@ -114,6 +119,7 @@ def workspace(runtime, hide=(), modes=None):
         mode=MountMode.WRITE,
         profiles={"agent": profile},
         runtimes=[runtime, "workspace"],
+        **options,
     )
 
 
@@ -389,22 +395,56 @@ async def test_a_server_runs_outside_the_line_that_started_it(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_line_returns_once_every_server_has_synced(monkeypatch):
+async def test_a_line_returns_once_every_server_has_landed(monkeypatch):
     # sshfs sends the close that lands a line's writes after the line has
-    # ended, so the line lands them itself, outside the line, as that
-    # close would.
-    sandbox = FakeSandbox("ssh")
+    # ended, so the line lands them itself, one server at a time, outside
+    # the line but with its write admission: a capture waiting for the
+    # line lets those writes through.
+    held = asyncio.Queue()
+    landed = []
+
+    class Server(Drain):
+        async def sync(self):
+            go = asyncio.Event()
+            await held.put(go)
+            await go.wait()
+            await self.files.write("/data/landed.txt", b"x")
+            landed.append(line_running())
+
+    monkeypatch.setattr(mounts, "PipeServer", Server)
+    ws = workspace(FakeSandbox("ssh"))
+    agent = await ws.session("agent", profile="agent")
+    line = asyncio.create_task(agent.shell("python3 job.py"))
+    first = await asyncio.wait_for(held.get(), 5)
+    capture = asyncio.create_task(ws.snapshot(io.BytesIO()))
+    while ws._admitting.is_set():
+        await asyncio.sleep(0)
+    first.set()
+    second = await asyncio.wait_for(held.get(), 5)
+    assert not line.done()
+    second.set()
+    assert (await asyncio.wait_for(line, 5)).exit_code == 0
+    await asyncio.wait_for(capture, 5)
+    assert landed == [False, False]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_line_that_times_out_still_lands_its_writes(monkeypatch):
     synced = []
 
     class Server(Drain):
         async def sync(self):
-            synced.append((sandbox.commands[-1], line_running()))
+            synced.append(line_running())
 
     monkeypatch.setattr(mounts, "PipeServer", Server)
-    ws = workspace(sandbox)
+    ws = workspace(
+        FakeSandbox("ssh"),
+        command_limits={"python3": Limit(timeout_seconds=0.05)},
+    )
     agent = await ws.session("agent", profile="agent")
-    assert (await agent.shell("python3 job.py")).exit_code == 0
-    assert synced == [("python3 job.py", False)] * 2
+    assert (await agent.shell("python3 slow.py")).exit_code == 124
+    assert synced == [False, False]
     await ws.close()
 
 

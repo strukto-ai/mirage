@@ -110,6 +110,7 @@ async def run_external(
             argv.name,
         )
     finally:
+        await runtime.settle()
         if not runtime.file_effects_dispatched:
             await registry.invalidate_after_external()
     io = IOResult(
@@ -180,6 +181,7 @@ def _stream_external(
             pipe.end(exc)
             raise
         finally:
+            await runtime.settle()
             if not runtime.file_effects_dispatched:
                 await registry.invalidate_after_external()
 

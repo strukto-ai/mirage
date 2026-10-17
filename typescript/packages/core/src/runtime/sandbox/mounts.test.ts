@@ -16,7 +16,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
 import { getAdmission, getCurrentSession, lineRunning } from '../../context/session_context.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { MountMode } from '../../types.ts'
+import { Limit, MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { ProfileMount } from '../../policy/profile.ts'
 import type { SessionState } from '../../workspace/session/session.ts'
@@ -66,7 +66,7 @@ class FakeSandbox extends RemoteSandbox {
     signal?: AbortSignal,
   ): Promise<RunResult> {
     this.commands.push(line)
-    if (line === 'cat /proc/mounts' && this.hang) {
+    if ((line === 'cat /proc/mounts' && this.hang) || line === 'python3 slow.py') {
       return new Promise((_, reject) => {
         signal?.addEventListener('abort', () => {
           reject(new Error('aborted'))
@@ -126,6 +126,7 @@ async function workspace(
   sandbox: FakeSandbox,
   hide: string[] = [],
   mounts?: ReadonlyMap<string, ProfileMount>,
+  commandLimits?: Record<string, Limit>,
 ): Promise<Workspace> {
   return new Workspace(
     {
@@ -139,8 +140,16 @@ async function workspace(
       shellParser: await getTestParser(),
       profiles: { agent: { paths: { hide }, ...(mounts === undefined ? {} : { mounts }) } },
       runtimes: [sandbox, 'workspace'],
+      ...(commandLimits === undefined ? {} : { commandLimits }),
     },
   )
+}
+
+async function until(ready: () => boolean): Promise<void> {
+  for (let tries = 0; tries < 1000 && !ready(); tries++) {
+    await new Promise((resolve) => setTimeout(resolve, 1))
+  }
+  expect(ready()).toBe(true)
 }
 
 const sessions: SessionState[] = []
@@ -413,27 +422,60 @@ describe('SandboxMounts', () => {
     }
   })
 
-  it('returns a line once every server has synced', async () => {
+  it('returns a line once every server has landed', async () => {
     // sshfs sends the close that lands a line's writes after the line has
-    // ended, so the line lands them itself, outside the line, as that
-    // close would.
-    const sandbox = new FakeSandbox('ssh')
-    const synced: unknown[] = []
+    // ended, so the line lands them itself, one server at a time, outside
+    // the line but with its write admission: a capture waiting for the
+    // line lets those writes through.
+    const holds: (() => void)[] = []
+    const landed: boolean[] = []
+    registerPipeServer((files, session) => ({
+      ...drain(files, session),
+      sync: async () => {
+        await new Promise<void>((resolve) => holds.push(resolve))
+        await files.write('/data/landed.txt', 'x')
+        landed.push(lineRunning())
+      },
+    }))
+    try {
+      const ws = await workspace(new FakeSandbox('ssh'))
+      const agent = await ws.session('agent', { profile: 'agent' })
+      let done = false
+      const line = agent.shell('python3 job.py').finally(() => {
+        done = true
+      })
+      await until(() => holds.length === 1)
+      const capture = ws.snapshot()
+      await until(() => (ws as unknown as { capturing: boolean }).capturing)
+      holds[0]?.()
+      await until(() => holds.length === 2)
+      expect(done).toBe(false)
+      holds[1]?.()
+      expect((await line).exitCode).toBe(0)
+      await capture
+      expect(landed).toEqual([false, false])
+      await ws.close()
+    } finally {
+      registerPipeServer(drain)
+    }
+  })
+
+  it('lands the writes of a line that times out', async () => {
+    const synced: boolean[] = []
     registerPipeServer((files, session) => ({
       ...drain(files, session),
       sync: () => {
-        synced.push([sandbox.commands.at(-1), lineRunning()])
+        synced.push(lineRunning())
         return Promise.resolve()
       },
     }))
     try {
-      const ws = await workspace(sandbox)
+      const ws = await workspace(new FakeSandbox('ssh'), [], undefined, {
+        python3: new Limit({ timeoutSeconds: 0.05 }),
+      })
       const agent = await ws.session('agent', { profile: 'agent' })
-      expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
-      expect(synced).toEqual([
-        ['python3 job.py', false],
-        ['python3 job.py', false],
-      ])
+      expect((await agent.shell('python3 slow.py')).exitCode).toBe(124)
+      expect(synced).toEqual([false, false])
       await ws.close()
     } finally {
       registerPipeServer(drain)

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { getCurrentSession } from '../../context/session_context.ts'
+import { currentCaller, getCurrentSession, runWithCaller } from '../../context/session_context.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { singleQuote } from '../../utils/quote.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -248,10 +248,17 @@ export class SandboxMounts {
    * sends the SFTP close that lands them afterwards, so a line can end
    * before they land. Its programs have closed their files by then, so
    * this lands every one, outside the line as that close would, and
-   * `fileEffectsDispatched` holds.
+   * `fileEffectsDispatched` holds. Each landing keeps the line's write
+   * admission alone: a capture waiting for the line lets it through rather
+   * than waiting on it.
    */
   async sync(): Promise<void> {
-    for (const { server } of [...this.served.values()]) await runDetached(() => server.sync())
+    const { stop, writeHeld } = currentCaller()
+    for (const { server } of [...this.served.values()]) {
+      await runDetached(() =>
+        runWithCaller({ ...currentCaller(), stop, writeHeld }, () => server.sync()),
+      )
+    }
   }
 
   private refusal(ruled: ReadonlySet<string>): string | null {

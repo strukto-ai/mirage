@@ -20,7 +20,12 @@ from collections.abc import Awaitable, Callable, Iterable
 from contextvars import Context
 from typing import Any
 
-from mirage.context import get_current_session
+from mirage.context import (
+    Caller,
+    bind_caller,
+    current_caller,
+    get_current_session,
+)
 from mirage.runtime.binding import WorkspaceBinding, restricted_mounts_for
 from mirage.runtime.sandbox.constants import (
     MOUNT_POLL_SECONDS,
@@ -249,10 +254,16 @@ class SandboxMounts:
         sends the SFTP close that lands them afterwards, so a line can end
         before they land. Its programs have closed their files by then,
         so this lands every one, outside the line as that close would,
-        and ``file_effects_dispatched`` holds.
+        and ``file_effects_dispatched`` holds. Each landing keeps the
+        line's write admission alone: a capture waiting for the line lets
+        it through rather than waiting on it.
         """
+        line = current_caller()
+        admitted = Caller(stop=line.stop, write_held=line.write_held)
         for _, _, server in list(self._served.values()):
-            await asyncio.create_task(server.sync(), context=Context())
+            context = Context()
+            context.run(bind_caller, admitted)
+            await asyncio.create_task(server.sync(), context=context)
 
     def _refusal(self, ruled: frozenset[str]) -> str | None:
         for prefix in sorted(ruled):

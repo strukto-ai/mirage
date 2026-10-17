@@ -110,6 +110,7 @@ export async function runWholeLine(
       }
     }
   } finally {
+    await runtime.settle()
     if (!runtime.fileEffectsDispatched) await invalidate()
   }
   const [refused, bound] =

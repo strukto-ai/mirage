@@ -109,6 +109,25 @@ async def test_release_flushes_buffered_writes(seeded):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("land", ["sync", "release"])
+async def test_two_handles_writes_land_in_the_order_they_were_made(
+    seeded, land
+):
+    # The handle opened first writes the same bytes last and lands first:
+    # the later write still wins, however the handles land.
+    first = await seeded.open("/a.txt", os.O_WRONLY)
+    second = await seeded.open("/a.txt", os.O_WRONLY)
+    await seeded.write("/a.txt", b"old", 0, second)
+    await seeded.write("/a.txt", b"new", 0, first)
+    if land == "sync":
+        await seeded.sync()
+    else:
+        await seeded.release(first)
+        await seeded.release(second)
+    assert await seeded.read("/a.txt", 100, 0, None) == b"newlo world"
+
+
+@pytest.mark.asyncio
 async def test_open_with_o_trunc_drops_the_old_body(seeded):
     # libfuse 3 negotiates atomic O_TRUNC, so the kernel never sends a
     # separate truncate before an O_TRUNC open; the flag on the open has

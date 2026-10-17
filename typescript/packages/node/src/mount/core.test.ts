@@ -317,6 +317,27 @@ describe('MountCore', () => {
     expect(new TextDecoder().decode(body)).toBe('rewritten, longer than before\n')
   })
 
+  it.each(['sync', 'release'])(
+    "lands two handles' writes in the order they were made (%s)",
+    async (land) => {
+      // The handle opened first writes the same bytes last and lands first:
+      // the later write still wins, however the handles land.
+      const core = await mkCore()
+      const first = await core.open('/data/greeting.txt', fsConstants.O_WRONLY)
+      const second = await core.open('/data/greeting.txt', fsConstants.O_WRONLY)
+      await core.write('/data/greeting.txt', second, new TextEncoder().encode('old'), 0)
+      await core.write('/data/greeting.txt', first, new TextEncoder().encode('new'), 0)
+      if (land === 'sync') {
+        await core.sync()
+      } else {
+        await core.release(first)
+        await core.release(second)
+      }
+      const body = await core.read('/data/greeting.txt', -1, 0, 100)
+      expect(new TextDecoder().decode(body)).toBe('newlo world\n')
+    },
+  )
+
   it('drops the old body when the open carries O_TRUNC', async () => {
     // libfuse 3 negotiates atomic O_TRUNC, so the kernel never sends a
     // separate truncate before an O_TRUNC open; the flag on the open has

@@ -539,14 +539,39 @@ class MountCore:
             int: number of bytes accepted.
         """
         ctx = self._handles.get(fh) if fh is not None else None
+        key = self.identity(path) if ctx is None else ctx.key
+        await self._land_overlapped(key, offset, len(data), ctx)
         if ctx is not None:
             ctx.write_buf.append((offset, data))
             return len(data)
         await self._mutate(
-            self.identity(path),
-            lambda: self._apply_writes(path, [(offset, data)]),
+            key, lambda: self._apply_writes(path, [(offset, data)])
         )
         return len(data)
+
+    async def _land_overlapped(
+        self, key: str, offset: int, size: int, ctx: Handle | None
+    ) -> None:
+        """Land the writes another handle holds that a new write overlaps.
+
+        No two handles on a file then hold overlapping bytes, so whichever
+        flush, release or sync lands first, the file ends as its writes
+        were made. Writes that do not overlap stay buffered.
+
+        Args:
+            key (str): the file identity.
+            offset (int): where the new write starts.
+            size (int): its length.
+            ctx (Handle | None): the handle making it, None for a direct
+                write.
+        """
+        end = offset + size
+        for other in self._open_on(key):
+            if other is not ctx and any(
+                at < end and offset < at + len(run)
+                for at, run in other.write_buf
+            ):
+                await self._land(other)
 
     async def create(self, path: str, mode: int | None = None) -> int:
         """Create an empty file and return a fresh handle.
@@ -890,14 +915,23 @@ class MountCore:
         """Land what every open handle holds, as sync(2) does.
 
         For a client whose close(2) returns before it releases the handle
-        (sshfs). A landing that fails is logged, and its bytes stay on the
-        handle for its own flush to retry and report.
+        (sshfs).
         """
         for ctx in list(self._handles.values()):
-            try:
-                await self._settle(ctx)
-            except Exception as err:
-                logger.warning("fuse: landing %s failed: %r", ctx.path, err)
+            await self._land(ctx)
+
+    async def _land(self, ctx: Handle) -> None:
+        """Land a handle's buffer for a caller other than the handle's own
+        flush: a failure is logged, and its bytes stay on the handle for
+        that flush to retry and report.
+
+        Args:
+            ctx (Handle): the handle whose buffer to land.
+        """
+        try:
+            await self._settle(ctx)
+        except Exception as err:
+            logger.warning("fuse: landing %s failed: %r", ctx.path, err)
 
     async def _settle(self, ctx: Handle) -> None:
         """Land a handle's buffered writes in its file's turn.
