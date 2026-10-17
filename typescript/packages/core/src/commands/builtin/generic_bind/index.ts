@@ -17,7 +17,6 @@ export {
   type GenericCommandFn,
   commandIo,
   mountIo,
-  overMountIo,
   resolveGlobOf,
 } from './adapter.ts'
 export { type ResolveGlobOp } from '../../../vfs/types.ts'

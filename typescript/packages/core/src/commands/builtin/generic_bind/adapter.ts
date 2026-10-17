@@ -60,7 +60,7 @@ import { makeResolveGlob } from '../../../utils/glob_walk.ts'
 import { norm, parent } from '../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 
-import type { AggregateFn, CommandFn, CommandFnResult, CommandIO, Context } from '../../config.ts'
+import type { AggregateFn, CommandFnResult, CommandIO, Context } from '../../config.ts'
 
 /**
  * The table of the mount a command runs on. Throws when the command ran
@@ -70,22 +70,6 @@ export function mountIo(ctx: Context): CommandIO {
   if (ctx.io === undefined)
     throw new TypeError(`${ctx.command ?? ''}: ran without its mount's table`)
   return ctx.io
-}
-
-/**
- * A handler that builds `build`'s handler over the running mount's table,
- * wrapped by `wrap`, on every call. For a builder that reads its slots
- * once, up front: the table is the mount's, so it is only known once a
- * command runs. Mirrors Python's `over_mount_io`.
- */
-export function overMountIo(
-  build: (io: CommandIO) => CommandFn,
-  wrap?: (io: CommandIO) => CommandIO,
-): CommandFn {
-  return (accessor, paths, texts, ctx) => {
-    const io = mountIo(ctx)
-    return build(wrap === undefined ? io : wrap(io))(accessor, paths, texts, ctx)
-  }
 }
 
 // What a command calls a slot with: the accessor in front, which the VFS

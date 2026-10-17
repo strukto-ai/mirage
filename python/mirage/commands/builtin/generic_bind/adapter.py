@@ -223,34 +223,6 @@ def mount_io(ctx: Context) -> CommandIO:
     return ctx.io
 
 
-def over_mount_io(
-    build: Callable[[CommandIO], Callable[..., Any]],
-    wrap: Callable[[CommandIO], CommandIO] | None = None,
-) -> Callable[..., Any]:
-    """A handler that builds ``build``'s handler over the running mount's
-    table, wrapped by ``wrap``, on every call.
-
-    For a builder that reads its slots once, up front: the table is the
-    mount's, so it is only known once a command runs.
-
-    Args:
-        build (Callable): makes the handler for one table.
-        wrap (Callable | None): the guards to put over the table first.
-    """
-
-    async def run(
-        accessor: Accessor,
-        paths: list[PathSpec],
-        texts: list[str],
-        ctx: Context,
-    ) -> Any:
-        io = mount_io(ctx)
-        handler = build(wrap(io) if wrap is not None else io)
-        return await handler(accessor, paths, texts, ctx)
-
-    return run
-
-
 def _without_accessor(method: Callable[..., Any]) -> OperationFn:
     """``method`` callable the way a command calls a slot.
 
