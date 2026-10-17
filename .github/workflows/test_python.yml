@@ -211,64 +211,13 @@ jobs:
           run integ/truth/python/redis_vfs.json
           exit $bad
 
-  import-isolation:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - extra: pydantic-ai
-            module: mirage.agents.pydantic_ai
-            blocked: deepagents
-          - extra: openai
-            module: mirage.agents.openai_agents
-            blocked: deepagents
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: ./.github/actions/setup-uv
-        with:
-          save-cache: "false"
-
-      - name: Create venv and install only the target extra
-        working-directory: python
-        run: |
-          uv venv .venv-iso
-          uv pip install --python .venv-iso/bin/python ".[${{ matrix.extra }}]"
-
-      - name: Verify blocked package is not installed
-        working-directory: python
-        run: |
-          if .venv-iso/bin/python -c "import ${{ matrix.blocked }}" 2>/dev/null; then
-            echo "FAIL: ${{ matrix.blocked }} should not be installed for extra=${{ matrix.extra }}"
-            exit 1
-          fi
-          echo "OK: ${{ matrix.blocked }} is absent"
-
-      - name: Import agent package and prompt without blocked dep
-        working-directory: python
-        run: |
-          .venv-iso/bin/python - <<'PY'
-          import importlib, sys
-          mod = importlib.import_module("${{ matrix.module }}")
-          assert isinstance(mod.MIRAGE_SYSTEM_PROMPT, str)
-          assert callable(mod.build_system_prompt)
-          assert "${{ matrix.blocked }}" not in sys.modules, \
-              f"${{ matrix.blocked }} got imported transitively"
-          print(f"OK: imported ${{ matrix.module }} cleanly without ${{ matrix.blocked }}")
-          PY
-
+  # The runtimes, then installs that must leave a package out, then the
+  # informational audit: each takes under a minute, about what a job of its
+  # own spends setting up.
   runtime:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
+    name: runtime, isolated installs and audit
     runs-on: ubuntu-latest
     env:
       WASI_BUILD: python-3.14.7-wasi_sdk-24
@@ -393,32 +342,41 @@ jobs:
           print("OK: no-monty degradation verified")
           PY
 
-  audit:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
+      # Each agent extra installs alone into a venv of its own, and neither
+      # may pull in deepagents, directly or through its imports.
+      - name: Agent extras install and import without deepagents
+        working-directory: python
+        run: |
+          for pair in pydantic-ai:mirage.agents.pydantic_ai openai:mirage.agents.openai_agents; do
+            extra=${pair%%:*} module=${pair#*:}
+            uv venv ".venv-iso-$extra"
+            uv pip install --python ".venv-iso-$extra/bin/python" ".[$extra]"
+            if ".venv-iso-$extra/bin/python" -c "import deepagents" 2>/dev/null; then
+              echo "FAIL: deepagents should not be installed for extra=$extra"
+              exit 1
+            fi
+            MODULE=$module ".venv-iso-$extra/bin/python" - <<'PY'
+          import importlib, os, sys
+          name = os.environ["MODULE"]
+          mod = importlib.import_module(name)
+          assert isinstance(mod.MIRAGE_SYSTEM_PROMPT, str)
+          assert callable(mod.build_system_prompt)
+          assert "deepagents" not in sys.modules, "deepagents got imported transitively"
+          print(f"OK: imported {name} cleanly without deepagents")
+          PY
+          done
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: ./.github/actions/setup-uv
-        with:
-          save-cache: "false"
-
+      # Informational: a fresh advisory reports without failing the job.
       - name: Audit dependencies for known vulnerabilities (informational)
+        continue-on-error: true
+        timeout-minutes: 5
         working-directory: python
         run: uv audit --preview-features audit
 
   gate:
     name: test-python-gate
     runs-on: ubuntu-latest
-    needs: [changes, test, import-isolation, runtime]
+    needs: [changes, test, runtime]
     if: always()
     steps:
       - name: Check required jobs

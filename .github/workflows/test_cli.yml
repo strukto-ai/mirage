@@ -870,34 +870,10 @@ jobs:
       - name: Run cross-language index store interop (both directions)
         run: bash integ/index_store.sh
 
-  cross-config:
-    needs: [changes, typescript-build]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
-    name: CLI ref and env batteries
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: CLI battery toolchain
-        uses: ./.github/actions/cli-battery-setup
-
-      - name: Run CLI ref battery (a program tree installed from a file)
-        run: |
-          bash integ/cli_ref.sh \
-            "python/.venv/bin/mirage" \
-            "node typescript/packages/cli/dist/bin/mirage.js"
-
-      - name: Run CLI env battery (env block presets and managed sources)
-        run: |
-          bash integ/cli_env.sh \
-            "python/.venv/bin/mirage" \
-            "node typescript/packages/cli/dist/bin/mirage.js"
-
   cross-ref-fuse:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
-    name: VFS/runtime ref and CLI FUSE batteries
+    name: CLI, VFS and runtime ref, env and FUSE batteries
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -907,6 +883,12 @@ jobs:
         uses: ./.github/actions/cli-battery-setup
         with:
           libfuse: "true"
+
+      - name: Run CLI ref battery (a program tree installed from a file)
+        run: |
+          bash integ/cli_ref.sh \
+            "python/.venv/bin/mirage" \
+            "node typescript/packages/cli/dist/bin/mirage.js"
 
       - name: Run vfs ref battery (a backend mounted from a file, snapshotted and reloaded)
         run: |
@@ -920,16 +902,22 @@ jobs:
             "python/.venv/bin/mirage" \
             "node typescript/packages/cli/dist/bin/mirage.js"
 
-      # Closes a latent hazard the split makes likelier rather than one it
-      # invents. cli_fuse.sh is the only daemon-driving battery with no
-      # MIRAGE_HOME of its own, and the only one on 8765 with no freeport
-      # helper. If runtime_ref.sh's final `daemon stop` does not take, its
-      # daemon stays on 8765: /v1/health skips auth, so the CLI adopts the
-      # survivor rather than spawning, and every real request then 401s on a
-      # token minted under a different home -- the battery dies on errors that
-      # look nothing like FUSE. cli_env.sh used to run between the two, on
-      # 9430/9440, so it never cleared 8765 either; what it did do was give a
-      # leftover daemon a chance to reach its 30s idle-grace self-exit.
+      # Between runtime_ref.sh and cli_fuse.sh, it gives a daemon the former
+      # left behind time to reach its 30s idle-grace self-exit.
+      - name: Run CLI env battery (env block presets and managed sources)
+        run: |
+          bash integ/cli_env.sh \
+            "python/.venv/bin/mirage" \
+            "node typescript/packages/cli/dist/bin/mirage.js"
+
+      # cli_fuse.sh is the only daemon-driving battery with no MIRAGE_HOME of
+      # its own, and the only one on 8765 with no freeport helper. If
+      # runtime_ref.sh's final `daemon stop` does not take, its daemon stays
+      # on 8765: /v1/health skips auth, so the CLI adopts the survivor rather
+      # than spawning, and every real request then 401s on a token minted
+      # under a different home -- the battery dies on errors that look
+      # nothing like FUSE. cli_env.sh runs on 9430/9440 and never clears
+      # 8765, so the port is cleared here.
       - name: Run CLI end-to-end FUSE (two per-mount subtrees, real libfuse)
         run: |
           lsof -ti:8765 | xargs -r kill -9 || true
@@ -940,7 +928,7 @@ jobs:
   gate:
     name: cli-gate
     runs-on: ubuntu-latest
-    needs: [changes, typescript-build, python, typescript, cross-parity, access, cross-snapshot, cross-config, cross-ref-fuse]
+    needs: [changes, typescript-build, python, typescript, cross-parity, access, cross-snapshot, cross-ref-fuse]
     if: always()
     steps:
       - name: Check required jobs

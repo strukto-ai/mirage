@@ -202,9 +202,13 @@ jobs:
         working-directory: typescript
         run: pnpm exec knip
 
+  # The Pyodide filesystem example, then the informational audit, which
+  # needs only this job's install. Its timeout keeps a stalled registry
+  # inside the time the test legs already take, so the gate does not wait.
   python-fs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
+    name: python-fs and audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -230,28 +234,6 @@ jobs:
       - name: Python filesystem example (output checked against integ/ truth file)
         run: python3 integ/check_example.py integ/truth/typescript/pyodide_vfs.json
 
-  audit:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v6.1.0
-        with:
-          version: 10.32.1
-
-      # No `cache: pnpm` here on purpose: the audit step below
-      # resolves straight from the lockfile and never installs, so the pnpm
-      # store does not exist and the post-run save fails path validation on
-      # every cache miss.
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-
       # Advisories read against the resolved lockfile, which is what the 27
       # hand-written pnpm.overrides in typescript/package.json pin. Those
       # pins were the only thing between a published advisory and this
@@ -267,6 +249,8 @@ jobs:
       # that stall as a failed audit three runs out of four. A longer
       # timeout and more retries ride it out; a real advisory still fails.
       - name: Audit dependencies for known vulnerabilities (informational)
+        continue-on-error: true
+        timeout-minutes: 5
         working-directory: typescript
         env:
           npm_config_fetch_timeout: "300000"

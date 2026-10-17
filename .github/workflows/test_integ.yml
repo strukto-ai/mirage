@@ -230,38 +230,14 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  integ-interrupt:
-    needs: [changes, typescript-build]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-      - uses: ./.github/actions/setup-uv
-      - name: Install Python dependencies
-        working-directory: python
-        run: uv sync --frozen --extra monty --extra s3 --extra redis
-      - uses: ./.github/actions/setup-node-pnpm
-        with:
-          node-version: '24'
-      - name: Install TypeScript dependencies
-        working-directory: typescript
-        run: pnpm install --frozen-lockfile --ignore-scripts
-      - uses: actions/download-artifact@v8
-        with:
-          name: integ-typescript-dist
-          path: typescript/packages
-      - name: Interrupt real HTTP executions on both hosts
-        run: ./python/.venv/bin/python integ/interrupt/run.py
-
+  # Both run real HTTP servers of each host against the same install: the
+  # interrupt battery (free ports, no services), then the hosted requests.
   integ-hosting:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
+    name: integ-hosting and integ-interrupt
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     services:
       redis:
         image: redis:7
@@ -296,6 +272,8 @@ jobs:
         with:
           name: integ-typescript-dist
           path: typescript/packages
+      - name: Interrupt real HTTP executions on both hosts
+        run: ./python/.venv/bin/python integ/interrupt/run.py
       - name: Generate the Slack fixture client
         working-directory: integ
         env:
