@@ -199,15 +199,24 @@ class CLIRegistry:
         on an install is unwinding: it gets ``ABORT_JOIN_SECONDS`` to
         finish before its accessor goes, rather than meeting a closed
         client mid-request, and no longer, so one that never settles
-        cannot hold the workspace open.
+        cannot hold the workspace open. Each close is a tracked task, as
+        a removal is, so a caller cancelled mid-close leaves it running
+        and a retried close waits for it.
         """
         installs = list(self._installs.values())
         self._installs.clear()
+        for install in installs:
+            self._retiring[id(install)] = asyncio.create_task(
+                _close_after_grace(install)
+            )
+        closing = list(self._retiring.items())
         results = await asyncio.gather(
-            *(_close_after_grace(install) for install in installs),
-            *(asyncio.shield(task) for task in self._retiring.values()),
+            *(asyncio.shield(task) for _, task in closing),
             return_exceptions=True,
         )
+        for identity, task in closing:
+            if task.done():
+                self._retiring.pop(identity, None)
         failures = [r for r in results if isinstance(r, BaseException)]
         if failures:
             raise (

@@ -241,6 +241,27 @@ async def test_close_does_not_wait_out_a_line_that_never_ends():
     assert install.accessor.closed
 
 
+@pytest.mark.asyncio
+async def test_a_cancelled_close_still_closes_and_a_retry_waits_for_it():
+    reg = CLIRegistry()
+    install = reg.install(
+        "prog", tree(TokenConfig, ClosingAccessor), {"token": "ok"}
+    )
+    release = install.activity.acquire()
+    closing = asyncio.create_task(reg.close())
+    await asyncio.sleep(0)
+    closing.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+    assert not install.accessor.closed
+    retry = asyncio.create_task(reg.close())
+    await asyncio.sleep(0)
+    assert not retry.done()
+    release()
+    await asyncio.wait_for(retry, 1)
+    assert install.accessor.closed
+
+
 @pytest.mark.parametrize("name,spec", [("slack", SLACK), ("discord", DISCORD)])
 def test_account_clis_refuse_a_mount_time_scope(name, spec):
     with pytest.raises(

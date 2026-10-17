@@ -181,11 +181,7 @@ export class CLIRegistry {
       throw new Error(`CLI name '${name}' is not installed`)
     }
     this.installs.delete(name)
-    const closing = retire(install).finally(() => {
-      this.retiring.delete(install)
-    })
-    this.retiring.set(install, closing)
-    await closing
+    await this.track(install, retire(install))
   }
 
   /**
@@ -196,18 +192,26 @@ export class CLIRegistry {
    * install is unwinding (or ignoring its abort): it gets `ABORT_JOIN_MS` to
    * settle before its accessor goes, rather than meeting a closed client
    * mid-request, and no longer, so one that never settles cannot hold the
-   * workspace open.
+   * workspace open. Each close is tracked, as a removal is, so a second close
+   * waits for the clients the first is still closing.
    */
   async close(): Promise<void> {
     const installs = [...this.installs.values()]
     this.installs.clear()
-    const results = await Promise.allSettled([
-      ...installs.map((install) => closeAfterGrace(install)),
-      ...this.retiring.values(),
-    ])
+    for (const install of installs) void this.track(install, closeAfterGrace(install))
+    const results = await Promise.allSettled([...this.retiring.values()])
     const failures = results.flatMap((r) => (r.status === 'rejected' ? [r.reason as unknown] : []))
     if (failures.length > 0)
       throw failures.length === 1 ? failures[0] : new AggregateError(failures, 'CLI close failed')
+  }
+
+  /** Keep `closing` in `retiring` until it settles, so `close` waits for it. */
+  private track(install: CLIInstall, closing: Promise<void>): Promise<void> {
+    const tracked = closing.finally(() => {
+      this.retiring.delete(install)
+    })
+    this.retiring.set(install, tracked)
+    return tracked
   }
 
   /** Look up an installation by head word. */

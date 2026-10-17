@@ -186,6 +186,23 @@ describe('CLIRegistry', () => {
     await reg.close()
     expect((install.accessor as ClosingAccessor).closed).toBe(true)
   })
+
+  it('a second close waits for the clients the first is closing', async () => {
+    const reg = new CLIRegistry()
+    const install = reg.install(
+      'prog',
+      tree(tokenConfig, (config) => new ClosingAccessor(config as TokenConfig)),
+      { token: 'ok' },
+    )
+    const accessor = install.accessor as ClosingAccessor
+    const release = install.activity.acquire()
+    const first = reg.close()
+    const second = reg.close().then(() => accessor.closed)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    release()
+    expect(await second).toBe(true)
+    await first
+  })
 })
 
 describe('CLIRegistry zod config schemas', () => {
