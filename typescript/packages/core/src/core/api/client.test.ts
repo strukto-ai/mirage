@@ -259,15 +259,18 @@ describe('apiRequest', () => {
     expect(sentBody).toBe('a=1&b=2')
   })
 
-  it('timeoutSeconds arms a per-attempt signal', async () => {
-    let sentSignal: AbortSignal | null | undefined
-    const fakeFetch: typeof fetch = (_url, init) => {
-      sentSignal = init?.signal
-      return Promise.resolve(jsonResponse({}))
-    }
-    await apiRequest('GET', TARGET, { errorOf, fetchFn: fakeFetch, timeoutSeconds: 30 })
-    expect(sentSignal).toBeInstanceOf(AbortSignal)
-  })
+  it.each([30, 1.001, 0.0001])(
+    'timeoutSeconds %s arms a per-attempt signal',
+    async (timeoutSeconds) => {
+      let sentSignal: AbortSignal | null | undefined
+      const fakeFetch: typeof fetch = (_url, init) => {
+        sentSignal = init?.signal
+        return Promise.resolve(jsonResponse({}))
+      }
+      await apiRequest('GET', TARGET, { errorOf, fetchFn: fakeFetch, timeoutSeconds })
+      expect(sentSignal).toBeInstanceOf(AbortSignal)
+    },
+  )
 })
 
 describe('retry delays', () => {

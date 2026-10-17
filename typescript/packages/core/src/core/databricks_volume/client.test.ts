@@ -15,6 +15,7 @@ import {
 } from './client.ts'
 import { read } from './read.ts'
 import { stat } from './stat.ts'
+import { DatabricksVolumeVFSBase } from '../../vfs/databricks_volume/databricks_volume.ts'
 import { jsonResponse, spec } from './_test_util.ts'
 
 const BASE = {
@@ -101,7 +102,7 @@ describe('Files client', () => {
     ).toEqual(['Bearer second', 'Bearer first'])
   })
 
-  it('propagates provider failures unchanged before I/O', async () => {
+  it('preserves provider failures as a cause before I/O', async () => {
     const failure = new Error('broker token does not exist')
     const fetch = vi.fn<typeof globalThis.fetch>()
     vi.stubGlobal('fetch', fetch)
@@ -112,9 +113,70 @@ describe('Files client', () => {
         }),
         '/Volumes/x/a',
       ),
+    ).rejects.toMatchObject({
+      message: 'databricks_volume: credential provider failed',
+      cause: failure,
+    })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('preserves provider cancellation before I/O', async () => {
+    const failure = new DOMException('cancelled', 'AbortError')
+    const fetch = vi.fn<typeof globalThis.fetch>()
+    vi.stubGlobal('fetch', fetch)
+    await expect(
+      download(accessor({ token: () => Promise.reject(failure) }), '/Volumes/x/a'),
     ).rejects.toBe(failure)
     expect(fetch).not.toHaveBeenCalled()
   })
+
+  it.each(['exists', 'append', 'append_empty'])(
+    'does not hide or replace an existing file when credentials are missing during %s',
+    async (operation) => {
+      const failure = Object.assign(new Error('credential file is absent'), { code: 'ENOENT' })
+      let calls = 0
+      let contents = 'original contents'
+      const requests: string[] = []
+      const server = await localServer((request, response) => {
+        requests.push(request.method ?? '')
+        if (request.method === 'PUT') {
+          const chunks: Buffer[] = []
+          request.on('data', (chunk: Buffer) => chunks.push(chunk))
+          request.on('end', () => {
+            contents = Buffer.concat(chunks).toString()
+            response.end()
+          })
+        } else {
+          response.end(contents)
+        }
+      })
+      const mount = new DatabricksVolumeVFSBase({
+        accessor: accessor({
+          host: server.host,
+          token: () => {
+            if (++calls === 1) throw failure
+            return 'recovered'
+          },
+        }),
+      })
+      const path = spec('/volume/existing.txt')
+      try {
+        const result =
+          operation === 'exists'
+            ? mount.exists(path)
+            : mount.append(
+                path,
+                new TextEncoder().encode(operation === 'append_empty' ? '' : ' appended'),
+              )
+        await expect(result).rejects.toMatchObject({ cause: failure })
+        expect(requests).toEqual([])
+        expect(contents).toBe('original contents')
+        expect(new TextDecoder().decode(await mount.read(path))).toBe('original contents')
+      } finally {
+        await server.close()
+      }
+    },
+  )
 
   it.each([401, 403])(
     'does not probe a directory after an auth refusal with status %i',
@@ -244,6 +306,30 @@ async function localServer(
 }
 
 describe('Files client HTTP lifecycle', () => {
+  it.each(['buffered', 'stream'])(
+    'accepts fractional-second timeouts for %s requests',
+    async (mode) => {
+      let requests = 0
+      const server = await localServer((_request, response) => {
+        requests += 1
+        response.end('data')
+      })
+      try {
+        const a = accessor({ host: server.host, timeout: 1.001 })
+        if (mode === 'buffered') {
+          expect(new TextDecoder().decode(await download(a, '/Volumes/x/a'))).toBe('data')
+        } else {
+          const chunks = []
+          for await (const chunk of downloadStream(a, '/Volumes/x/a')) chunks.push(...chunk)
+          expect(new TextDecoder().decode(new Uint8Array(chunks))).toBe('data')
+        }
+        expect(requests).toBe(1)
+      } finally {
+        await server.close()
+      }
+    },
+  )
+
   it.each(['PUT', 'DELETE', 'GET', 'HEAD'])(
     'does not replay a completed %s after disconnect',
     async (method) => {

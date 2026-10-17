@@ -276,7 +276,7 @@ async def test_invalid_provider_value_is_rejected_without_request(
 
 
 @pytest.mark.asyncio
-async def test_provider_exception_propagates_unchanged_and_is_not_missing(
+async def test_provider_exception_preserves_cause_and_is_not_missing(
     http_files,
 ):
     failure = RuntimeError("credential not found")
@@ -287,9 +287,70 @@ async def test_provider_exception_propagates_unchanged_and_is_not_missing(
     async with http_files.accessor(provider) as accessor:
         with pytest.raises(RuntimeError) as error:
             await download(accessor, REMOTE)
-    assert error.value is failure
-    assert not is_not_found(failure)
+    assert error.value.__cause__ is failure
+    assert str(error.value) == "databricks_volume: credential provider failed"
+    assert not is_not_found(error.value)
     assert http_files.requests == []
+
+
+@pytest.mark.asyncio
+async def test_provider_cancellation_propagates_unchanged(http_files):
+    failure = asyncio.CancelledError()
+
+    async def provider():
+        raise failure
+
+    async with http_files.accessor(provider) as accessor:
+        with pytest.raises(asyncio.CancelledError) as error:
+            await download(accessor, REMOTE)
+    assert error.value is failure
+    assert http_files.requests == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["exists", "append", "append_empty"])
+@pytest.mark.parametrize("async_provider", [False, True])
+async def test_missing_credential_does_not_hide_or_replace_existing_file(
+    http_files, operation, async_provider
+):
+    failure = FileNotFoundError("credential file is absent")
+    calls = 0
+    contents = b"original contents"
+
+    def token():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise failure
+        return "recovered"
+
+    async def async_token():
+        return token()
+
+    async def handler(request):
+        nonlocal contents
+        if request.method == "PUT":
+            contents = await request.read()
+        return web.Response(body=contents)
+
+    http_files.handler = handler
+    accessor = http_files.accessor(async_token if async_provider else token)
+    mount = DatabricksVolumeVFS(accessor.config)
+    path = PathSpec.from_str_path("/existing.txt")
+    try:
+        with pytest.raises(RuntimeError) as error:
+            if operation == "exists":
+                await mount.exists(path)
+            else:
+                await mount.append(
+                    path, b"" if operation == "append_empty" else b" appended"
+                )
+        assert error.value.__cause__ is failure
+        assert http_files.requests == []
+        assert contents == b"original contents"
+        assert await mount.read(path) == b"original contents"
+    finally:
+        await mount.accessor.close()
 
 
 @pytest.mark.asyncio
