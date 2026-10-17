@@ -36,9 +36,9 @@ export class SlackAccessor extends Accessor {
 }
 
 /**
- * The accessor the `slack` CLI's verbs reach the API through, built from
- * the install's config. Python's verbs hand the config to core directly;
- * here core takes an accessor.
+ * The `slack` CLI's accessor factory: the registry builds one per install
+ * from its validated config, so every verb of that install rides one
+ * transport. Python passes `SlackAccessor` itself.
  */
 export function slackAccessor(config: unknown): SlackAccessor {
   const cfg = config as SlackConfig

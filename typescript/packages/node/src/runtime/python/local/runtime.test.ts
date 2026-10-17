@@ -17,13 +17,30 @@ import { execFileSync } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
+import type { Context } from '@struktoai/mirage-core/commands/config'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
+import type { Program } from '@struktoai/mirage-core/runtime/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { Workspace } from '../../../workspace.ts'
 import { LocalRuntime } from './runtime.ts'
 
 const DEC = new TextDecoder()
+
+function interpret(rt: LocalRuntime, program: Partial<Program>, fields: Partial<Context> = {}) {
+  const ctx = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), ...fields }
+  return rt.interpret(undefined, { code: '', args: [], stdin: null, ...program }, ctx)
+}
+
+function runProcess(
+  rt: LocalRuntime,
+  argv: readonly string[],
+  cwd: string,
+  stdin: Uint8Array | null = null,
+) {
+  const ctx = { stdin, flags: {}, cwd: PathSpec.fromStrPath(cwd) }
+  return rt.runProcess(undefined, [], [...argv], ctx)
+}
 
 describe('LocalRuntime', () => {
   it('waits for an exited native child without requiring stdin to close', async () => {
@@ -55,7 +72,7 @@ describe('LocalRuntime', () => {
         new URL(`../../../../../../../integ/fixtures/runtime/${fixture}`, import.meta.url),
         'utf8',
       )
-      const result = await rt.run({ code, args: [], env: { MIRAGE_TEST_ROOT: dir }, stdin: null })
+      const result = await interpret(rt, { code }, { env: { MIRAGE_TEST_ROOT: dir } })
       expect(result.exitCode, DEC.decode(result.stderr ?? new Uint8Array())).toBe(0)
       expect(DEC.decode(result.stdout)).toBe(expected)
       expect(result.stderr).toBeNull()
@@ -69,12 +86,11 @@ describe('LocalRuntime', () => {
     'keeps script-CLI input off the process argv',
     async (stdin) => {
       const rt = new LocalRuntime()
-      const result = await rt.run({
+      const result = await interpret(rt, {
         code: "from __future__ import annotations\nimport sys\nprint(argv)\nprint(stdin is None, len(stdin or b''), sys.stdin.buffer.read() == (stdin or b''))",
         prog: 'pager',
         args: ['one'],
         scriptCli: true,
-        env: {},
         stdin,
       })
       expect(result.exitCode).toBe(0)
@@ -180,7 +196,7 @@ describe('LocalRuntime', () => {
       const refused = await ws.shell("python -c 'pass'", { env })
       expect(refused.exitCode).toBe(126)
       await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
-      const control = await rt.run({ code: 'pass', args: [], stdin: null, env })
+      const control = await interpret(rt, { code: 'pass' }, { env })
       expect(control.exitCode).toBe(0)
       expect(await readFile(marker, 'utf8')).toBe('ran')
     } finally {
@@ -191,13 +207,15 @@ describe('LocalRuntime', () => {
 
   it('runs code on the host python with argv, stdin and env', async () => {
     const rt = new LocalRuntime()
-    const result = await rt.run({
-      code: 'import os, sys; print(sys.argv[1:], sys.stdin.read(), os.environ["K"])',
-      args: ['alpha', 'beta'],
-      stdin: new TextEncoder().encode('piped'),
-      env: { K: 'V' },
-      flags: {},
-    })
+    const result = await interpret(
+      rt,
+      {
+        code: 'import os, sys; print(sys.argv[1:], sys.stdin.read(), os.environ["K"])',
+        args: ['alpha', 'beta'],
+        stdin: new TextEncoder().encode('piped'),
+      },
+      { env: { K: 'V' } },
+    )
     expect(result.exitCode).toBe(0)
     expect(DEC.decode(result.stdout)).toBe("['alpha', 'beta'] piped V\n")
   })
@@ -206,15 +224,15 @@ describe('LocalRuntime', () => {
     vi.stubEnv('MIRAGE_TEST_HOST_ONLY', 'host')
     const rt = new LocalRuntime({ config: { env: { MIRAGE_TEST_CONFIG: 'config' } } })
     try {
-      const result = await rt.run({
-        code:
-          "import os; print(os.environ.get('MIRAGE_TEST_HOST_ONLY'), " +
-          "os.environ['MIRAGE_TEST_CONFIG'], os.environ['MY_VAR'])",
-        args: [],
-        stdin: null,
-        env: { MY_VAR: 'session' },
-        flags: {},
-      })
+      const result = await interpret(
+        rt,
+        {
+          code:
+            "import os; print(os.environ.get('MIRAGE_TEST_HOST_ONLY'), " +
+            "os.environ['MIRAGE_TEST_CONFIG'], os.environ['MY_VAR'])",
+        },
+        { env: { MY_VAR: 'session' } },
+      )
       expect(result.exitCode).toBe(0)
       expect(DEC.decode(result.stdout)).toBe('None config session\n')
     } finally {
@@ -225,13 +243,11 @@ describe('LocalRuntime', () => {
 
   it('hands the init switches to the host interpreter', async () => {
     const rt = new LocalRuntime()
-    const result = await rt.run({
-      code: 'import sys; print(sys.flags.optimize, sys.dont_write_bytecode, sys.warnoptions)',
-      args: [],
-      stdin: null,
-      env: {},
-      flags: { O: 2, B: true, W: ['ignore'] },
-    })
+    const result = await interpret(
+      rt,
+      { code: 'import sys; print(sys.flags.optimize, sys.dont_write_bytecode, sys.warnoptions)' },
+      { flags: { O: 2, B: true, W: ['ignore'] } },
+    )
     expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('')
     expect(DEC.decode(result.stdout)).toBe("2 True ['ignore']\n")
   })
@@ -254,20 +270,21 @@ describe('LocalRuntime', () => {
 
   it('names a script after its file, as CPython does', async () => {
     const rt = new LocalRuntime()
-    const result = await rt.run({
-      code: 'import sys\nprint(sys.argv[0], __file__)\nraise SystemExit(sys.argv[1])\n',
-      args: ['bye'],
-      prog: './s.py',
-      scriptPath: new PathSpec({
-        virtual: '/w/s.py',
-        directory: '/w/',
-        vfsPath: 'w/s.py',
-        rawPath: './s.py',
-      }),
-      cwd: PathSpec.fromStrPath('/w'),
-      stdin: null,
-      env: {},
-    })
+    const result = await interpret(
+      rt,
+      {
+        code: 'import sys\nprint(sys.argv[0], __file__)\nraise SystemExit(sys.argv[1])\n',
+        args: ['bye'],
+        prog: './s.py',
+        scriptPath: new PathSpec({
+          virtual: '/w/s.py',
+          directory: '/w/',
+          vfsPath: 'w/s.py',
+          rawPath: './s.py',
+        }),
+      },
+      { cwd: PathSpec.fromStrPath('/w') },
+    )
     expect(DEC.decode(result.stdout)).toBe('./s.py /w/./s.py\n')
     expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('bye\n')
     expect(result.exitCode).toBe(1)
@@ -275,13 +292,7 @@ describe('LocalRuntime', () => {
 
   it('reports the interpreter exit code and stderr', async () => {
     const rt = new LocalRuntime()
-    const result = await rt.run({
-      code: 'import sys; sys.exit(3)',
-      args: [],
-      stdin: null,
-      env: {},
-      flags: {},
-    })
+    const result = await interpret(rt, { code: 'import sys; sys.exit(3)' })
     expect(result.exitCode).toBe(3)
   })
 
@@ -295,14 +306,7 @@ describe('LocalRuntime', () => {
     const rt = new LocalRuntime()
     const ctl = new AbortController()
     const started = Date.now()
-    const pending = rt.run({
-      code: 'import time; time.sleep(60)',
-      args: [],
-      stdin: null,
-      env: {},
-      flags: {},
-      signal: ctl.signal,
-    })
+    const pending = interpret(rt, { code: 'import time; time.sleep(60)' }, { signal: ctl.signal })
     setTimeout(() => {
       ctl.abort()
     }, 100)
@@ -312,25 +316,13 @@ describe('LocalRuntime', () => {
 
   it('stdin larger than the pipe buffer to an early-exiting program is not an error', async () => {
     const rt = new LocalRuntime()
-    const result = await rt.run({
-      code: 'pass',
-      args: [],
-      stdin: new Uint8Array(4 * 1024 * 1024),
-      env: {},
-      flags: {},
-    })
+    const result = await interpret(rt, { code: 'pass', stdin: new Uint8Array(4 * 1024 * 1024) })
     expect(result.exitCode).toBe(0)
   })
 
   it('close() kills any child still running', async () => {
     const rt = new LocalRuntime()
-    const pending = rt.run({
-      code: 'import time; time.sleep(60)',
-      args: [],
-      stdin: null,
-      env: {},
-      flags: {},
-    })
+    const pending = interpret(rt, { code: 'import time; time.sleep(60)' })
     await new Promise((r) => setTimeout(r, 100))
     await rt.close()
     const result = await pending
@@ -352,13 +344,7 @@ describe('LocalRuntime', () => {
     async (argv, cwd, exitCode, stdout, stderr) => {
       const rt = new LocalRuntime({ captures: ['python3', '@external'] })
       try {
-        const result = await rt.runProcess({
-          kind: 'process',
-          argv: argv as unknown as [string, ...string[]],
-          cwd: PathSpec.fromStrPath(cwd),
-          env: {},
-          stdin: new TextEncoder().encode('hi'),
-        })
+        const result = await runProcess(rt, argv, cwd, new TextEncoder().encode('hi'))
         expect([
           result.exitCode,
           DEC.decode(result.stdout),
@@ -377,13 +363,7 @@ describe('LocalRuntime', () => {
     await chmod(tool, 0o755)
     const rt = new LocalRuntime({ captures: ['@external'] })
     try {
-      const result = await rt.runProcess({
-        kind: 'process',
-        argv: ['./mirage-tool'],
-        cwd: PathSpec.fromStrPath(dir),
-        env: {},
-        stdin: null,
-      })
+      const result = await runProcess(rt, ['./mirage-tool'], dir)
       expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'tool\n'])
     } finally {
       await rt.close()
@@ -401,13 +381,7 @@ describe('LocalRuntime', () => {
     await mkdir(join(dir, 'sub'))
     const rt = new LocalRuntime({ captures: ['@external'] })
     try {
-      const result = await rt.runProcess({
-        kind: 'process',
-        argv: [name],
-        cwd: PathSpec.fromStrPath(dir),
-        env: {},
-        stdin: null,
-      })
+      const result = await runProcess(rt, [name], dir)
       expect([result.exitCode, DEC.decode(result.stderr ?? new Uint8Array())]).toEqual([
         exitCode,
         stderr,
@@ -428,13 +402,7 @@ describe('LocalRuntime', () => {
     await symlink(join(dir, 'opt', 'build'), join(dir, 'work', 'link'))
     const rt = new LocalRuntime({ captures: ['@external'] })
     try {
-      const result = await rt.runProcess({
-        kind: 'process',
-        argv: ['link/../mirage-tool'],
-        cwd: PathSpec.fromStrPath(join(dir, 'work')),
-        env: {},
-        stdin: null,
-      })
+      const result = await runProcess(rt, ['link/../mirage-tool'], join(dir, 'work'))
       expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'opt\n'])
     } finally {
       await rt.close()
@@ -450,13 +418,7 @@ describe('LocalRuntime', () => {
     const rt = new LocalRuntime({ captures: ['@external'] })
     vi.stubEnv('PATH', dir)
     try {
-      const result = await rt.runProcess({
-        kind: 'process',
-        argv: ['mirage-broken'],
-        cwd: PathSpec.fromStrPath(dir),
-        env: {},
-        stdin: null,
-      })
+      const result = await runProcess(rt, ['mirage-broken'], dir)
       expect([result.exitCode, DEC.decode(result.stderr ?? new Uint8Array())]).toEqual([
         126,
         'mirage-broken: cannot execute: No such file or directory\n',
@@ -480,13 +442,7 @@ describe('LocalRuntime', () => {
     vi.stubEnv('PATHEXT', '.COM;.EXE')
     Object.defineProperty(process, 'platform', { ...platform, value: 'win32' })
     try {
-      const result = await rt.runProcess({
-        kind: 'process',
-        argv: ['mirage-tool'],
-        cwd: PathSpec.fromStrPath(dir),
-        env: {},
-        stdin: null,
-      })
+      const result = await runProcess(rt, ['mirage-tool'], dir)
       expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'tool\n'])
     } finally {
       Object.defineProperty(process, 'platform', platform)

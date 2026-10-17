@@ -20,6 +20,7 @@ from collections.abc import Mapping
 
 from dulwich.objects import ObjectID
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.checkout import (
     DETACHED_ADVICE,
     switch_to,
@@ -146,7 +147,7 @@ def remote_head(
 
 
 async def clone(
-    config: None,
+    accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
@@ -161,7 +162,7 @@ async def clone(
     directory that was already there, empty, as git does.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the repository and the optional directory.
         ctx (Context): the line's context.

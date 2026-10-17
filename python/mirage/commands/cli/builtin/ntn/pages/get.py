@@ -12,14 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.notion import NotionAccessor
 from mirage.commands.cli.builtin.ntn.util import (
     first_text,
-    notion_config,
+    notion_transport,
     pretty_json,
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.normalize import extract_title
 from mirage.core.notion.pages import get_page, get_page_markdown
 from mirage.io.stream import yield_bytes
@@ -28,16 +28,19 @@ from mirage.types import PathSpec
 
 
 async def get(
-    config: NotionConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: NotionAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     page_id = first_text(texts, "page id")
     # Both calls happen either way: the body comes from the markdown
     # endpoint and the title heading the frontmatter only exists on the
     # page object.
-    config = notion_config(config, ctx)
-    rendered = await get_page_markdown(config, page_id)
-    page = await get_page(config, page_id)
+    line = notion_transport(accessor, ctx)
+    rendered = await get_page_markdown(line, page_id)
+    page = await get_page(line, page_id)
     if fl.as_bool("json"):
         return yield_bytes(
             pretty_json({"markdown": rendered, "page": page})

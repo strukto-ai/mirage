@@ -17,6 +17,7 @@ from mirage.commands.builtin.errors import HttpConnectError, HttpTimeoutError
 from mirage.commands.builtin.general.curl import said
 from mirage.commands.builtin.utils.constants import HTTP_TIMEOUT_SECONDS
 from mirage.commands.builtin.utils.http import http_get
+from mirage.commands.builtin.utils.links import dispatch_of
 from mirage.commands.builtin.utils.paths import resolve_target
 from mirage.commands.config import Context, command
 from mirage.commands.errors import UsageError
@@ -53,7 +54,7 @@ async def wget(
     args_O = fl.raw("args_O")
     q = fl.as_bool("q")
     spider = fl.as_bool("spider")
-    dispatch = ctx.dispatch
+    dispatch = dispatch_of(ctx)
     if not texts:
         raise UsageError(USAGE, exit_code=EXIT_GENERIC)
     url = texts[0]

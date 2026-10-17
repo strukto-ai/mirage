@@ -17,18 +17,19 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.history import fetch_messages_for_day, get_history_jsonl
 from mirage.core.time_range import TimeRange
 
 
 @pytest.fixture
-def config():
-    return SlackConfig(token="xoxb-test-token")
+def accessor():
+    return SlackAccessor(SlackConfig(token="xoxb-test-token"))
 
 
 @pytest.mark.asyncio
-async def test_get_history_jsonl(config):
+async def test_get_history_jsonl(accessor):
     mock_data = {
         "ok": True,
         "messages": [
@@ -43,7 +44,7 @@ async def test_get_history_jsonl(config):
         return_value=mock_data,
     ):
         result = await get_history_jsonl(
-            config, "C001", "2023-11-14", TimeRange()
+            accessor, "C001", "2023-11-14", TimeRange()
         )
 
     lines = result.decode().strip().split("\n")
@@ -56,7 +57,7 @@ async def test_get_history_jsonl(config):
 
 
 @pytest.mark.asyncio
-async def test_get_history_empty(config):
+async def test_get_history_empty(accessor):
     mock_data = {
         "ok": True,
         "messages": [],
@@ -68,14 +69,14 @@ async def test_get_history_empty(config):
         return_value=mock_data,
     ):
         result = await get_history_jsonl(
-            config, "C001", "2023-11-14", TimeRange()
+            accessor, "C001", "2023-11-14", TimeRange()
         )
 
     assert result == b""
 
 
 @pytest.mark.asyncio
-async def test_messages_after_a_ts_start_past_it(config):
+async def test_messages_after_a_ts_start_past_it(accessor):
     page = {
         "ok": True,
         "messages": [
@@ -90,7 +91,7 @@ async def test_messages_after_a_ts_start_past_it(config):
         return_value=page,
     ) as get:
         found = await fetch_messages_for_day(
-            config,
+            accessor,
             "C001",
             "2023-11-14",
             TimeRange(),

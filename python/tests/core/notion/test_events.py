@@ -69,7 +69,7 @@ def _hook(monkeypatch) -> tuple[NotionEventHook, dict, list[str]]:
     objects = _objects()
     calls: list[str] = []
 
-    async def fake_get(config, object_id, session=None):
+    async def fake_get(accessor, object_id):
         calls.append(object_id)
         if object_id not in objects:
             raise NotionAPIError("object_not_found", status=404)

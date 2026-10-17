@@ -20,6 +20,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
     resolve_or_empty,
 )
+from mirage.commands.builtin.utils.links import dispatch_of
 from mirage.commands.config import CommandIO, Context
 from mirage.core.awk.builtins import split_assignment
 from mirage.io.types import ByteSource, IOResult
@@ -75,7 +76,7 @@ async def awk(
         read_bytes=bound_op(ops.read_bytes, accessor, ctx.index),
         read_stream=bound_op(ops.read_stream, accessor, ctx.index),
         stdin=ctx.stdin,
-        dispatch=ctx.dispatch,
+        dispatch=dispatch_of(ctx),
         cwd=ctx.cwd,
         index=ctx.index,
         shell=ctx.shell,

@@ -22,6 +22,7 @@ import type { FlagValue } from '../../../../commands/spec/types.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { PathSpec } from '../../../../types.ts'
+import { sessionView } from '../../../session/state.ts'
 
 const USAGE =
   'history: usage: history [-c] [-d offset] [n] or ' +
@@ -118,7 +119,7 @@ export async function handleHistory(
   }
   const [stream, io] = await mount.runCommand('history', [], texts, flags, {
     cwd: PathSpec.fromStrPath(session.cwd),
-    sessionId: session.sessionId,
+    session: sessionView(session, registry.policies),
   })
   // The view command always returns byte stderr, but io.stderr is typed
   // as a ByteSource (a possible lazy stream); resolve it to bytes so the

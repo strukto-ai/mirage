@@ -15,12 +15,13 @@
 import asyncio
 import shlex
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 
 import pytest
 import yaml
 
 from mirage import EXTERNAL_COMMANDS, RAMVFS, Limit, MountMode, Workspace
-from mirage.commands.config import command
+from mirage.commands.config import Context, command
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.config import _build_runtime_entries
 from mirage.io import IOResult
@@ -29,10 +30,16 @@ from mirage.policy.builtin.output_cap import DEFAULT_COMMAND_LIMITS
 from mirage.policy.rule import RulePolicy
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
-from mirage.runtime.types import ProcessExecution, RunResult
+from mirage.runtime.types import RunResult
 from mirage.workspace.expand import argv as argv_module
 from mirage.workspace.lookup import SHELL_NAMES, Consumer, lookup, lookup_all
 from mirage.workspace.session import SessionState
+
+
+def _request(texts: list[str], ctx: Context) -> SimpleNamespace:
+    return SimpleNamespace(
+        argv=tuple(texts), cwd=ctx.cwd, env=ctx.env or {}, stdin=ctx.stdin
+    )
 
 
 class ProcessProbe(Runtime, ProcessExecutorMixin):
@@ -41,9 +48,10 @@ class ProcessProbe(Runtime, ProcessExecutorMixin):
 
     def __init__(self, **options):
         super().__init__(**options)
-        self.requests: list[ProcessExecution] = []
+        self.requests: list[SimpleNamespace] = []
 
-    async def run_process(self, request: ProcessExecution) -> RunResult:
+    async def run_process(self, engine, paths, texts, ctx) -> RunResult:
+        request = _request(texts, ctx)
         self.requests.append(request)
         return RunResult(
             stdout=request.stdin or b"GPU ready\nother\n",
@@ -55,8 +63,8 @@ class ProcessProbe(Runtime, ProcessExecutorMixin):
 class DelayedProcessProbe(ProcessProbe):
     cancelled = False
 
-    async def run_process(self, request: ProcessExecution) -> RunResult:
-        self.requests.append(request)
+    async def run_process(self, engine, paths, texts, ctx) -> RunResult:
+        self.requests.append(_request(texts, ctx))
         try:
             await asyncio.sleep(0.15)
             return RunResult(stdout=b"completed\n", stderr=None, exit_code=0)
@@ -287,8 +295,8 @@ class ShellProbe(Runtime, LineExecutorMixin):
         super().__init__(**options)
         self.lines: list[str] = []
 
-    async def run_line(self, line, stdin, env, cwd):
-        self.lines.append(line)
+    async def run_line(self, engine, paths, texts, ctx):
+        self.lines.append(ctx.flags["c"])
         return RunResult(stdout=b"ok\n", stderr=None, exit_code=0)
 
 
@@ -704,7 +712,7 @@ async def test_explicit_process_command_captures_reach_the_runtime(name, args):
 
 
 class FailingProcess(ProcessProbe):
-    async def run_process(self, request: ProcessExecution) -> RunResult:
+    async def run_process(self, engine, paths, texts, ctx) -> RunResult:
         raise RuntimeError("provider unavailable")
 
 

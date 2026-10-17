@@ -69,7 +69,7 @@ async def _ask(
 ):
     accessor = LinearAccessor(LinearConfig(api_key="k", content_search=True))
 
-    def nodes(config, query, variables, **kwargs):
+    def nodes(handle, query, variables):
         ids = (
             named.get(variables["term"], [])
             if isinstance(named, dict)

@@ -25,7 +25,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     with_dir_guard,
 )
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
-from mirage.commands.builtin.utils.links import links_of
+from mirage.commands.builtin.utils.links import follow_of, links_of
 from mirage.commands.config import (
     Command,
     CommandCatalog,
@@ -180,7 +180,7 @@ async def _run_builder(
     stamped = replace(
         raw,
         glob_target_stat=(links.target_stat if links is not None else None),
-        glob_follow=ctx.follow_operands,
+        glob_follow=follow_of(ctx),
     )
     # The command's path checks speak outside the stat and slash wraps
     # (`finish`), for the slots that still reach the backend past the

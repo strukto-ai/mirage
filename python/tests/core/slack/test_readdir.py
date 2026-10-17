@@ -317,7 +317,7 @@ async def test_end_scoped_bare_listing_pages_only_history_before_the_end():
     end = datetime(2026, 6, 2, tzinfo=timezone.utc).timestamp()
     asked = []
 
-    async def pages(config, endpoint, params, items_key, session=None):
+    async def pages(accessor, endpoint, params, items_key):
         asked.append(params)
         yield [{"ts": f"{first + 3600:.6f}"}, {"ts": f"{first:.6f}"}]
 

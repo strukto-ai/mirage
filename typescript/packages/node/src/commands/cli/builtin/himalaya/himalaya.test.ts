@@ -107,6 +107,8 @@ const CONFIG: EmailConfig = {
   sentFolder: null,
 }
 
+const ACCOUNT = new EmailAccessor(CONFIG)
+
 // Every --send path now also files the sender's copy over IMAP, so the
 // account's IMAP side is stubbed for the whole file: without this the
 // verbs would reach for a real connection to host 'h'.
@@ -447,7 +449,7 @@ describe('himalaya verbs', () => {
   it('compose writes MIME to stdout without sending', async () => {
     sendRawMock.mockClear()
     const [out, io] = (await import('./compose.ts').then((m) =>
-      m.compose(CONFIG, [], [], context({ flags: { to: 'a@b.com', subject: 'Hi', body: 'yo' } })),
+      m.compose(ACCOUNT, [], [], context({ flags: { to: 'a@b.com', subject: 'Hi', body: 'yo' } })),
     )) as [Uint8Array, IOResult]
     expect(io.exitCode).toBe(0)
     expect(sendRawMock).not.toHaveBeenCalled()
@@ -463,7 +465,7 @@ describe('himalaya verbs', () => {
     sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
     const [out] = (await import('./compose.ts').then((m) =>
       m.compose(
-        CONFIG,
+        ACCOUNT,
         [],
         [],
         context({ flags: { to: 'a@b.com', subject: 'Hi', body: 'yo', send: true } }),
@@ -489,7 +491,7 @@ describe('himalaya verbs', () => {
     })
     const [out, io] = (await import('./compose.ts').then((m) =>
       m.compose(
-        CONFIG,
+        ACCOUNT,
         [],
         [],
         context({
@@ -515,7 +517,7 @@ describe('himalaya verbs', () => {
     await expect(
       import('./compose.ts').then((m) =>
         m.compose(
-          CONFIG,
+          ACCOUNT,
           [],
           [],
           context({
@@ -535,7 +537,7 @@ describe('himalaya verbs', () => {
     await expect(
       import('./compose.ts').then((m) =>
         m.compose(
-          CONFIG,
+          ACCOUNT,
           [],
           [],
           context({
@@ -551,8 +553,7 @@ describe('himalaya verbs', () => {
   })
 
   it('reply derives subject, recipients and threading', async () => {
-    const closeSpy = vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
-    const [out] = (await reply(CONFIG, [], ['7'], context({ flags: { body: 'thanks' } }))) as [
+    const [out] = (await reply(ACCOUNT, [], ['7'], context({ flags: { body: 'thanks' } }))) as [
       Uint8Array,
       IOResult,
     ]
@@ -562,13 +563,11 @@ describe('himalaya verbs', () => {
     expect(text).toContain('In-Reply-To: <m1@example.com>')
     expect(text).toContain('References: <m0@example.com> <m1@example.com>')
     expect(text).toContain('thanks\r\n\r\n> the numbers')
-    closeSpy.mockRestore()
   })
 
   it('forward prefixes Fwd and keeps References but not In-Reply-To', async () => {
-    const closeSpy = vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
     const [out] = (await forward(
-      CONFIG,
+      ACCOUNT,
       [],
       ['7'],
       context({ flags: { to: 'carol@example.com' } }),
@@ -577,29 +576,26 @@ describe('himalaya verbs', () => {
     expect(text).toContain('Subject: Fwd: Quarterly numbers')
     expect(text).not.toContain('In-Reply-To')
     expect(text).toContain('References: <m0@example.com> <m1@example.com>')
-    closeSpy.mockRestore()
   })
 
   // `message read` and `cat` of the .email.json are the same document, so
   // they share one renderer and INTERNALDATE reaches neither.
   it('read serves exactly what the mount renders', async () => {
-    const closeSpy = vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
-    const [out] = (await read(CONFIG, [], ['7'], context())) as [Uint8Array, IOResult]
+    const [out] = (await read(ACCOUNT, [], ['7'], context())) as [Uint8Array, IOResult]
     const bytes = await materialize(out)
     expect(bytes).toEqual(messageJsonBytes(ORIGINAL))
     expect(decode(bytes)).not.toContain('internalDate')
-    closeSpy.mockRestore()
   })
 
   it('reply without an id is a usage error', async () => {
-    await expect(reply(CONFIG, [], [], context())).rejects.toThrow('message id is required')
+    await expect(reply(ACCOUNT, [], [], context())).rejects.toThrow('message id is required')
   })
 
   it('send reads a raw message from stdin', async () => {
     sendRawMock.mockClear()
     sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
     const raw = new TextEncoder().encode('From: me@x\nTo: a@b.com\nSubject: Hi\n\nyo')
-    const [out] = (await send(CONFIG, [], [], context({ stdin: raw }))) as [Uint8Array, IOResult]
+    const [out] = (await send(ACCOUNT, [], [], context({ stdin: raw }))) as [Uint8Array, IOResult]
     expect(sendRawMock.mock.calls[0]?.[1]).toEqual(raw)
     expect(JSON.parse(decode(await materialize(out)))).toEqual({
       status: 'sent',
@@ -612,7 +608,7 @@ describe('himalaya verbs', () => {
     sendRawMock.mockClear()
     sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
     const raw = new TextEncoder().encode('From: me@x\nTo: a@b.com\nSubject: Hi\n\nyo')
-    const [, io] = (await send(CONFIG, [], [], context({ stdin: raw }))) as [Uint8Array, IOResult]
+    const [, io] = (await send(ACCOUNT, [], [], context({ stdin: raw }))) as [Uint8Array, IOResult]
     expect(appendMock).toHaveBeenCalledWith('Sent', Buffer.from(raw), ['\\Seen'])
     expect(io.stderr).toBeNull()
   })
@@ -622,7 +618,7 @@ describe('himalaya verbs', () => {
     sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
     appendMock.mockRejectedValue(new Error('Sent: no such mailbox'))
     const raw = new TextEncoder().encode('From: me@x\nTo: a@b.com\nSubject: Hi\n\nyo')
-    const [out, io] = (await send(CONFIG, [], [], context({ stdin: raw }))) as [
+    const [out, io] = (await send(ACCOUNT, [], [], context({ stdin: raw }))) as [
       Uint8Array,
       IOResult,
     ]
@@ -640,9 +636,9 @@ describe('himalaya verbs', () => {
     sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
     const compose = await import('./compose.ts').then((m) => m.compose)
     const ctx = context({ flags: { to: 'a@b.com', subject: 'Hi', body: 'yo', send: true } })
-    await compose(CONFIG, [], [], ctx)
+    await compose(ACCOUNT, [], [], ctx)
     expect(appendMock).toHaveBeenCalledTimes(1)
-    await compose({ ...CONFIG, saveCopy: false }, [], [], ctx)
+    await compose(new EmailAccessor({ ...CONFIG, saveCopy: false }), [], [], ctx)
     expect(appendMock).toHaveBeenCalledTimes(1)
   })
 
@@ -650,7 +646,7 @@ describe('himalaya verbs', () => {
     sendRawMock.mockClear()
     const compose = await import('./compose.ts').then((m) => m.compose)
     const [out, io] = (await compose(
-      CONFIG,
+      ACCOUNT,
       [],
       [],
       context({ flags: { to: 'a@b.com', subject: 'Draft it', body: 'yo', save: 'Drafts' } }),
@@ -672,21 +668,21 @@ describe('himalaya verbs', () => {
     appendMock.mockRejectedValue(new Error('Drafts: no such mailbox'))
     const compose = await import('./compose.ts').then((m) => m.compose)
     await expect(
-      compose(CONFIG, [], [], context({ flags: { to: 'a@b.com', body: 'yo', save: 'Drafts' } })),
+      compose(ACCOUNT, [], [], context({ flags: { to: 'a@b.com', body: 'yo', save: 'Drafts' } })),
     ).rejects.toThrow('Drafts: no such mailbox')
   })
 
   it('send refuses an empty message before reaching SMTP', async () => {
     sendRawMock.mockClear()
     await expect(
-      send(CONFIG, [], [], context({ stdin: new TextEncoder().encode('  \n ') })),
+      send(ACCOUNT, [], [], context({ stdin: new TextEncoder().encode('  \n ') })),
     ).rejects.toThrow('no message provided')
     expect(sendRawMock).not.toHaveBeenCalled()
   })
 
-  it('list orders most recent first and closes its accessor', async () => {
+  it('list orders most recent first and leaves the install accessor open', async () => {
     const closeSpy = vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
-    const [out] = (await listEnvelopes(CONFIG, [], [], context())) as [Uint8Array, IOResult]
+    const [out] = (await listEnvelopes(ACCOUNT, [], [], context())) as [Uint8Array, IOResult]
     const rows = JSON.parse(decode(await materialize(out))) as Record<string, unknown>[]
     expect(rows.map((r) => r.uid)).toEqual(['2', '1'])
     // INTERNALDATE only picks the date directory; it is not an envelope
@@ -697,20 +693,18 @@ describe('himalaya verbs', () => {
     expect(rows.every((r) => !('body_text' in r) && !('body_html' in r))).toBe(true)
     expect(rows.every((r) => !('snippet' in r))).toBe(true)
     expect(rows.map((r) => r.subject)).toEqual(['alpha', 'beta'])
-    expect(closeSpy).toHaveBeenCalledTimes(1)
+    expect(closeSpy).not.toHaveBeenCalled()
     closeSpy.mockRestore()
   })
 
   it('search sorts client side from the query clause', async () => {
-    const closeSpy = vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
-    const [out] = (await searchEnvelopes(CONFIG, [], ['order', 'by', 'subject'], context())) as [
+    const [out] = (await searchEnvelopes(ACCOUNT, [], ['order', 'by', 'subject'], context())) as [
       Uint8Array,
       IOResult,
     ]
     const rows = JSON.parse(decode(await materialize(out))) as Record<string, unknown>[]
     expect(rows.map((r) => r.uid)).toEqual(['2', '1'])
     expect(rows.every((r) => !('body_text' in r) && !('body_html' in r))).toBe(true)
-    closeSpy.mockRestore()
   })
 })
 

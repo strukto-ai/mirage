@@ -16,6 +16,7 @@ import json
 
 import pytest
 
+from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh.pull import (
     PR_FIELDS,
     _check,
@@ -30,14 +31,14 @@ from mirage.core.github.config import GhConfig
 from mirage.io.types import materialize
 from mirage.types import PathSpec
 
-CONFIG = GhConfig(token="t")
+ACCOUNT = GitHubAccount(GhConfig(token="t"))
 
 
 def _args(
     texts=(), flags=None
-) -> tuple[GhConfig, list[PathSpec], list[str], Context]:
+) -> tuple[GitHubAccount, list[PathSpec], list[str], Context]:
     return (
-        CONFIG,
+        ACCOUNT,
         [],
         list(texts),
         Context(argv=(), flags=flags or {}, stdin=None, vfs=None),

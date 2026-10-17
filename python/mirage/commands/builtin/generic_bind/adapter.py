@@ -219,7 +219,8 @@ def mount_io(ctx: Context) -> CommandIO:
         TypeError: the command ran outside a mount.
     """
     if ctx.io is None:
-        raise TypeError(f"{ctx.command}: ran without its mount's table")
+        name = ctx.spec.name if ctx.spec is not None else ""
+        raise TypeError(f"{name}: ran without its mount's table")
     return ctx.io
 
 
@@ -1145,9 +1146,9 @@ def file_size(
         st = await _stat_refusing_dirs(ops, accessor, ctx, path)
         if st.type != FileType.FILE or st.mode is not None:
             return None
-        if ctx.dispatch is None:
+        if ctx.vfs is None:
             return st.size
-        now, _ = await ctx.dispatch("stat", path, fresh=True)
+        now, _ = await ctx.vfs.dispatch("stat", path, fresh=True)
         if not isinstance(now, FileStat) or now.size != st.size:
             return None
         return st.size

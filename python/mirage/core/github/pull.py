@@ -16,8 +16,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from mirage.accessor.github import GitHubAccount
 from mirage.core.github.client import github_request
-from mirage.core.github.config import GhConfig
 from mirage.core.github.paginate import github_pages
 from mirage.core.github.repo import RepoRef, graphql_data
 from mirage.types import JsonValue
@@ -30,7 +30,7 @@ def _path(ref: RepoRef, tail: str = "") -> str:
 
 
 async def list_pulls(
-    config: GhConfig,
+    account: GitHubAccount,
     ref: RepoRef,
     params: dict[str, str],
     limit: int,
@@ -38,18 +38,18 @@ async def list_pulls(
     include: Callable[[dict[str, Any]], bool] | None = None,
 ) -> list[dict[str, Any]]:
     return await github_pages(
-        config, _path(ref), params=params, limit=limit, include=include
+        account, _path(ref), params=params, limit=limit, include=include
     )
 
 
-async def get_pull(config: GhConfig, ref: RepoRef, number: int) -> JsonValue:
-    return await github_request(
-        config.token, "GET", _path(ref, f"/{number}"), base_url=config.base_url
-    )
+async def get_pull(
+    account: GitHubAccount, ref: RepoRef, number: int
+) -> JsonValue:
+    return await github_request(account, "GET", _path(ref, f"/{number}"))
 
 
 async def pull_request_fields(
-    config: GhConfig,
+    account: GitHubAccount,
     ref: RepoRef,
     number: int,
     selection: str,
@@ -62,7 +62,7 @@ async def pull_request_fields(
     ``end_cursor``.
 
     Args:
-        config (GhConfig): the install's configuration.
+        account (GitHubAccount): the token, API base and pool to ride.
         ref (RepoRef): the repository.
         number (int): the pull request.
         selection (str): the GraphQL selection inside ``pullRequest { }``.
@@ -77,7 +77,7 @@ async def pull_request_fields(
         variables["endCursor"] = end_cursor
     cursor = "" if end_cursor is None else ", $endCursor: String"
     data = await graphql_data(
-        config,
+        account,
         "query PullRequestByNumber($owner: String!, $repo: String!, "
         f"$pr_number: Int!{cursor}) {{\n"
         "    repository(owner: $owner, name: $repo) {\n"
@@ -127,7 +127,7 @@ _PULL_LIST = (
 
 
 async def list_pull_request_fields(
-    config: GhConfig,
+    account: GitHubAccount,
     ref: RepoRef,
     filter_: PullListFilter,
     limit: int,
@@ -140,7 +140,7 @@ async def list_pull_request_fields(
     line asked for ``number``.
 
     Args:
-        config (GhConfig): the install's configuration.
+        account (GitHubAccount): the token, API base and pool to ride.
         ref (RepoRef): the repository.
         filter_ (PullListFilter): the states and the base and head
             branches.
@@ -165,7 +165,7 @@ async def list_pull_request_fields(
             variables["headBranch"] = filter_.head
         if cursor is not None:
             variables["endCursor"] = cursor
-        data = await graphql_data(config, query, variables)
+        data = await graphql_data(account, query, variables)
         repository = data.get("repository") or {}
         page = repository.get("pullRequests") or {}
         for node in page.get("nodes") or []:
@@ -187,60 +187,50 @@ async def list_pull_request_fields(
 
 
 async def create_pull(
-    config: GhConfig, ref: RepoRef, body: dict[str, JsonValue]
+    account: GitHubAccount, ref: RepoRef, body: dict[str, JsonValue]
 ) -> JsonValue:
-    return await github_request(
-        config.token, "POST", _path(ref), body, base_url=config.base_url
-    )
+    return await github_request(account, "POST", _path(ref), body)
 
 
 async def edit_pull(
-    config: GhConfig, ref: RepoRef, number: int, body: dict[str, JsonValue]
+    account: GitHubAccount,
+    ref: RepoRef,
+    number: int,
+    body: dict[str, JsonValue],
 ) -> JsonValue:
     return await github_request(
-        config.token,
-        "PATCH",
-        _path(ref, f"/{number}"),
-        body,
-        base_url=config.base_url,
+        account, "PATCH", _path(ref, f"/{number}"), body
     )
 
 
 async def merge_pull(
-    config: GhConfig, ref: RepoRef, number: int, body: dict[str, JsonValue]
+    account: GitHubAccount,
+    ref: RepoRef,
+    number: int,
+    body: dict[str, JsonValue],
 ) -> JsonValue:
     if not body:
         return await github_request(
-            config.token,
-            "PUT",
-            _path(ref, f"/{number}/merge"),
-            base_url=config.base_url,
+            account, "PUT", _path(ref, f"/{number}/merge")
         )
     return await github_request(
-        config.token,
-        "PUT",
-        _path(ref, f"/{number}/merge"),
-        body,
-        base_url=config.base_url,
+        account, "PUT", _path(ref, f"/{number}/merge"), body
     )
 
 
 async def comment_pull(
-    config: GhConfig, ref: RepoRef, number: int, body: str
+    account: GitHubAccount, ref: RepoRef, number: int, body: str
 ) -> JsonValue:
-    await get_pull(config, ref, number)
+    await get_pull(account, ref, number)
     path = f"/repos/{ref.owner}/{ref.repo}/issues/{number}/comments"
-    return await github_request(
-        config.token, "POST", path, {"body": body}, base_url=config.base_url
-    )
+    return await github_request(account, "POST", path, {"body": body})
 
 
-async def diff_pull(config: GhConfig, ref: RepoRef, number: int) -> str:
+async def diff_pull(account: GitHubAccount, ref: RepoRef, number: int) -> str:
     value = await github_request(
-        config.token,
+        account,
         "GET",
         _path(ref, f"/{number}"),
-        base_url=config.base_url,
         headers={"Accept": "application/vnd.github.v3.diff"},
     )
     return value if isinstance(value, str) else ""
@@ -261,13 +251,10 @@ def _status_check(row: dict[str, Any]) -> dict[str, Any]:
 
 
 async def commit_statuses(
-    config: GhConfig, ref: RepoRef, sha: str
+    account: GitHubAccount, ref: RepoRef, sha: str
 ) -> list[dict[str, Any]]:
     value = await github_request(
-        config.token,
-        "GET",
-        f"/repos/{ref.owner}/{ref.repo}/commits/{sha}/status",
-        base_url=config.base_url,
+        account, "GET", f"/repos/{ref.owner}/{ref.repo}/commits/{sha}/status"
     )
     rows = value.get("statuses") if isinstance(value, dict) else None
     if not isinstance(rows, list):
@@ -276,14 +263,14 @@ async def commit_statuses(
 
 
 async def pull_checks(
-    config: GhConfig, ref: RepoRef, number: int, limit: int = 100
+    account: GitHubAccount, ref: RepoRef, number: int, limit: int = 100
 ) -> list[dict[str, Any]]:
-    pull = await get_pull(config, ref, number)
+    pull = await get_pull(account, ref, number)
     head = pull.get("head") if isinstance(pull, dict) else None
     sha = head.get("sha") if isinstance(head, dict) else None
     if not isinstance(sha, str):
         return []
     path = f"/repos/{ref.owner}/{ref.repo}/commits/{sha}/check-runs"
-    runs = await github_pages(config, path, limit=limit, key="check_runs")
-    statuses = await commit_statuses(config, ref, sha)
+    runs = await github_pages(account, path, limit=limit, key="check_runs")
+    statuses = await commit_statuses(account, ref, sha)
     return runs + [_status_check(row) for row in statuses]

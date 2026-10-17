@@ -16,9 +16,10 @@ import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MontyRuntime } from '../runtime/python/monty/index.ts'
 import { PrefixResolver } from '../runtime/resolver.ts'
-import type { BridgeDispatchFn } from '../runtime/types.ts'
+import { workspaceBridge } from '../runtime/binding.ts'
+import type { DispatchFn } from '../runtime/types.ts'
 import { RuntimeFiles } from '../runtime/files.ts'
-import { MountMode } from '../types.ts'
+import { MountMode, PathSpec } from '../types.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { FILE_MODE, LINK_MODE } from '../utils/stat_view.ts'
@@ -29,15 +30,16 @@ function mkWorld(): { ws: Workspace; vfs: RAMVFS } {
   return { ws, vfs }
 }
 
-// The file adapter a sandboxed runtime holds, over this workspace's own bridge
-// and the same two sources the workspace hands its runtimes: the mount
-// prefixes and the node table's link names.
+// The file adapter a sandboxed runtime holds, over this workspace's own program
+// dispatch and the same two sources the workspace hands its runtimes: the
+// mount prefixes and the node table's link names.
 function filesOn(ws: Workspace): RuntimeFiles {
-  const bridge = (
-    ws as unknown as { buildWorkspaceBridge(): BridgeDispatchFn }
-  ).buildWorkspaceBridge()
+  const dispatch = (ws as unknown as { programDispatch(): DispatchFn }).programDispatch()
   return new RuntimeFiles(
-    bridge,
+    workspaceBridge(
+      async (name, path, args, kwargs) =>
+        (await dispatch(name, PathSpec.fromStrPath(path), args, kwargs))[0],
+    ),
     new PrefixResolver(
       () => ['/data/'],
       (directory) => ws.namespace.linkNamesUnder(directory),

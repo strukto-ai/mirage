@@ -14,14 +14,14 @@
 
 from collections.abc import Awaitable, Callable
 
+from mirage.accessor.notion import NotionAccessor
 from mirage.commands.config import Context
 from mirage.core.notion.client import NotionAPIError
-from mirage.core.notion.config import NotionConfig
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 VerbFn = Callable[
-    [NotionConfig, list[PathSpec], list[str], Context],
+    [NotionAccessor, list[PathSpec], list[str], Context],
     Awaitable[tuple[ByteSource | None, IOResult]],
 ]
 
@@ -115,7 +115,7 @@ def api_failure(exc: NotionAPIError) -> tuple[str, int]:
 
 async def guarded(
     fn: VerbFn,
-    config: NotionConfig,
+    accessor: NotionAccessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
@@ -131,7 +131,7 @@ async def guarded(
 
     Args:
         fn (VerbFn): the leaf handler being guarded.
-        config (NotionConfig): the install's config.
+        accessor (NotionAccessor): the install's accessor.
         paths (list[PathSpec]): the leaf's path operands.
         texts (list[str]): the leaf's text operands.
         ctx (Context): the leaf's context.
@@ -141,7 +141,7 @@ async def guarded(
             rendered failure.
     """
     try:
-        return await fn(config, paths, texts, ctx)
+        return await fn(accessor, paths, texts, ctx)
     except NotionAPIError as failed:
         stderr, code = api_failure(failed)
         return None, IOResult(stderr=stderr.encode(), exit_code=code)

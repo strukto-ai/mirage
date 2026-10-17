@@ -17,12 +17,12 @@ import { getDatabase } from '../../../../../core/notion/pages.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { firstText, notionTransport, prettyJson, usageError } from '../util.ts'
+import { firstText, notionTransport, prettyJson, usageError, type NtnAccessor } from '../util.ts'
 
 const ENC = new TextEncoder()
 
 export async function resolve(
-  config: unknown,
+  accessor: NtnAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -34,7 +34,7 @@ export async function resolve(
   } catch (err) {
     return usageError(err)
   }
-  const database = await getDatabase(notionTransport(config, ctx.flags), databaseId)
+  const database = await getDatabase(notionTransport(accessor, ctx.flags), databaseId)
   const stubs = Array.isArray(database.data_sources) ? database.data_sources : []
   if (fl.asBool('json')) {
     return [prettyJson({ database_id: databaseId, data_sources: stubs }), new IOResult()]

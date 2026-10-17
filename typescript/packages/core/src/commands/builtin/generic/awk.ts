@@ -43,7 +43,7 @@ import { currentCaller } from '../../../context/session_context.ts'
 import { fsStrerror, isEnotdir, isFsError, isMissingPath, isWalkError } from '../../../errors/fs.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
-import { mountsOf } from '../utils/links.ts'
+import { mountsOf, dispatchOf } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
 
@@ -140,7 +140,7 @@ export class AwkStreams implements AwkHost {
    * back what it printed. `local`: an operand this mount's backend serves.
    */
   private async *readPath(name: string | PathSpec, local = false): AsyncIterable<Uint8Array> {
-    const dispatch = this.ctx.dispatch
+    const dispatch = dispatchOf(this.ctx)
     if (dispatch === undefined && !local) throw new AwkIOError(posixPhrase('ENOENT'))
     const path = PathSpec.fromStrPath(name, undefined, this.ctx.cwd)
     await this.flushOutput()
@@ -168,7 +168,7 @@ export class AwkStreams implements AwkHost {
   }
 
   async writeFile(name: string, body: string, append: boolean): Promise<void> {
-    const dispatch = this.ctx.dispatch
+    const dispatch = dispatchOf(this.ctx)
     if (dispatch === undefined) throw new AwkRuntimeError('awk: file output requires a workspace')
     const path = PathSpec.fromStrPath(textView(name), undefined, this.ctx.cwd)
     try {

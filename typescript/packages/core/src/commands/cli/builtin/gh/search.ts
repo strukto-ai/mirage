@@ -1,8 +1,9 @@
 import { CommandSpec } from '../../../spec/types.ts'
 
+import type { GitHubAccount } from '../../../../accessor/github.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { JsonValue, PathSpec } from '../../../../types.ts'
-import { csvValues, ghBool, ghTransport, jsonFields, textOut, typedOut } from './accessor.ts'
+import { csvValues, ghBool, jsonFields, textOut, typedOut } from './accessor.ts'
 import {
   SEARCH_ALIASES,
   SEARCH_BOOLEAN,
@@ -126,7 +127,7 @@ export function searchHandlers(): Record<string, CLIHandler> {
     Object.keys(SEARCH_FLAGS).map((kind) => [
       `search ${kind}`,
       new CLIHandler({
-        fn: (config, paths, texts, ctx) => searchCmd(kind, config, paths, texts, ctx),
+        fn: (accessor, paths, texts, ctx) => searchCmd(kind, accessor, paths, texts, ctx),
       }),
     ]),
   )
@@ -134,7 +135,7 @@ export function searchHandlers(): Record<string, CLIHandler> {
 
 async function searchCmd(
   kind: string,
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -154,7 +155,7 @@ async function searchCmd(
   let values: unknown[]
   try {
     values = await search(
-      ghTransport(config),
+      accessor.transport,
       ({ repos: 'repositories', prs: 'issues' } as Record<string, string>)[kind] ?? kind,
       expression,
       limit,

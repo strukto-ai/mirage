@@ -14,27 +14,28 @@
 
 import json
 
+from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.gmail.send import send_message
-from mirage.core.google.client import TokenManager
-from mirage.core.google.config import GoogleConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def send(
-    config: GoogleConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GoogleApiAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    async with TokenManager(config) as tm:
-        result = await send_message(
-            tm,
-            fl.as_str("to") or "",
-            fl.as_str("subject") or "",
-            fl.as_str("body") or "",
-        )
+    result = await send_message(
+        accessor.token_manager,
+        fl.as_str("to") or "",
+        fl.as_str("subject") or "",
+        fl.as_str("body") or "",
+    )
     out = json.dumps(
         result, ensure_ascii=False, separators=(",", ":")
     ).encode()

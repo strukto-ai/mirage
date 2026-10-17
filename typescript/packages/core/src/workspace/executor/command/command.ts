@@ -88,7 +88,7 @@ import {
   runOnMount,
   type RunOnMountCtx,
 } from './run.ts'
-import type { SessionView, StatPath } from '../../../view/types.ts'
+import type { FollowOperands, SessionView, StatPath } from '../../../view/types.ts'
 import { applyFindActions } from '../find_action_dispatch.ts'
 import { operandFollow } from '../builtins/links/links.ts'
 import { sessionView } from '../../session/state.ts'
@@ -268,10 +268,14 @@ export async function handleCommand(
       report,
       caller ?? { ...currentCaller(), ruleGate: admission },
     )
-  const files = new Files(dispatch, null, namespace ?? null, (path) => registry.mountOwner(path), {
-    prefixes: () => registry.mountPrefixes(),
-    visibility: () => session.visibility,
-  })
+  // The command's own files keep no ledger: the dispatcher accounts for the line.
+  const commandFiles = (follow: FollowOperands | null): Files =>
+    new Files(dispatch, null, namespace ?? null, (path) => registry.mountOwner(path), {
+      prefixes: () => registry.mountPrefixes(),
+      visibility: () => session.visibility,
+      follow,
+      ledger: false,
+    })
 
   // Installed CLIs: dispatch by name, never by operand path. Sits
   // below functions (a user can wrap an installed CLI, bash-style)
@@ -295,7 +299,7 @@ export async function handleCommand(
           ...(cliSignal !== undefined ? { signal: cliSignal } : {}),
           commandLimits: registry.commandLimits,
           entries: registry.runtimeEntries,
-          vfs: files,
+          vfs: commandFiles(null),
           session: sessionView(session, registry.policies, context.frame.diagnostics),
           ...(registry.processView === undefined
             ? {}
@@ -322,6 +326,7 @@ export async function handleCommand(
     namespace !== undefined
       ? operandFollow(namespace, dispatch, cmdName, parts, session.visibility)
       : undefined
+  const files = commandFiles(follow ?? null)
   const runCtx: RunOnMountCtx = {
     admission,
     ...(signal !== undefined ? { signal } : {}),

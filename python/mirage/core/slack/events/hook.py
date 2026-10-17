@@ -109,12 +109,7 @@ class SlackEventHook:
         cached = self._users.get(user_id)
         if cached is not None:
             return cached
-        data = await slack_get(
-            self._accessor.config,
-            "users.info",
-            {"user": user_id},
-            session=self._accessor.pool,
-        )
+        data = await slack_get(self._accessor, "users.info", {"user": user_id})
         user = data.get("user") or {}
         name = str(user.get("name") or user_id)
         self._users[user_id] = name
@@ -130,10 +125,7 @@ class SlackEventHook:
         if cached is not None:
             return cached
         data = await slack_get(
-            self._accessor.config,
-            "conversations.info",
-            {"channel": channel_id},
-            session=self._accessor.pool,
+            self._accessor, "conversations.info", {"channel": channel_id}
         )
         channel = data.get("channel") or {}
         channel.setdefault("id", channel_id)

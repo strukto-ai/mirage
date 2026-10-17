@@ -32,6 +32,7 @@ import { isStdin, stdinStream } from '../utils/stream.ts'
 import { callerStream } from '../generic_bind/dispatch.ts'
 import { currentCaller } from '../../../context/session_context.ts'
 import { concat } from '../../../utils/bytes.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -207,10 +208,7 @@ function countNoun(count: number, singular: string, plural: string): string {
 // checksum list names files anywhere, not on the list's mount. A stdin name
 // (`-`, /dev/stdin) reads the command's input through `stream`, on the
 // cursor the list itself reads from. Mirrors Python's dispatched_reader.
-export function dispatchedReader(
-  dispatch: NonNullable<Context['dispatch']>,
-  stream: Stream,
-): Stream {
+export function dispatchedReader(dispatch: DispatchFn, stream: Stream): Stream {
   const caller = currentCaller()
   return (path) => (isStdin(path) ? stream(path) : callerStream(dispatch, caller, path))
 }
@@ -224,7 +222,7 @@ async function checkFile(
   flags: ChecksumFlags,
 ): Promise<[string, string, number]> {
   const data = DEC.decode(await materialize(stream(p)))
-  const listed = ctx.dispatch !== undefined ? dispatchedReader(ctx.dispatch, stream) : stream
+  const listed = ctx.vfs !== undefined ? dispatchedReader(ctx.vfs.dispatch, stream) : stream
   // A list read from stdin names files on the mount the command runs on.
   const mountPrefix = isStdin(p) ? (ctx.mountPrefix ?? '') : mountPrefixOf(p.virtual, p.vfsPath)
   // GNU quotes its stdin name, which holds a space.

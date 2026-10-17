@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
-from mirage.core.hf_hub.client import stall_timeout
+from mirage.accessor.hf_hub import stall_timeout
 from mirage.vfs.hf_buckets.config import HfBucketsConfig
 
 
@@ -34,7 +34,7 @@ def test_bucket_uri():
 @pytest.mark.asyncio
 async def test_the_accessor_owns_a_pool_that_close_drains():
     acc = HfBucketsAccessor(HfBucketsConfig(bucket="org/b"))
-    session = acc.pool.get()
+    session = acc.account.pool.get()
     assert not session.closed
     await acc.close()
     assert session.closed
@@ -74,7 +74,7 @@ def test_bucket_path_applies_the_key_prefix_once():
 def test_the_pool_waits_the_configured_timeout_without_progress():
     assert HfBucketsAccessor(
         HfBucketsConfig(bucket="o/b")
-    ).pool._timeout == stall_timeout(30)
+    ).account.pool._timeout == stall_timeout(30)
     assert HfBucketsAccessor(
         HfBucketsConfig(bucket="o/b", timeout=5)
-    ).pool._timeout == stall_timeout(5)
+    ).account.pool._timeout == stall_timeout(5)

@@ -17,6 +17,7 @@ from dataclasses import replace
 
 from dulwich.repo import BaseRepo
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.changes import (
     head_entries,
     staged_entries,
@@ -174,7 +175,7 @@ def _output(
 
 
 async def diff(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Diff the working tree, staged content or commits.
 
@@ -187,7 +188,7 @@ async def diff(
     they name.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context; git reads its repository

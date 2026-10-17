@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import copy
 import logging
 import re
 from typing import Any
@@ -20,7 +21,6 @@ from typing import Any
 import aiohttp
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.core.api.client import SessionArg
 from mirage.core.hierarchy.probe import row_at, rows_of
 from mirage.core.hierarchy.scope import ROOT
 from mirage.core.render.json import compact_json_bytes
@@ -385,20 +385,15 @@ def search_available(config: SlackConfig) -> bool:
 
 
 async def search_messages(
-    config: SlackConfig,
-    query: str,
-    count: int = 20,
-    page: int = 1,
-    session: SessionArg = None,
+    accessor: SlackAccessor, query: str, count: int = 20, page: int = 1
 ) -> bytes:
     """Search messages across workspace (single page).
 
     Args:
-        config (SlackConfig): Slack credentials.
+        accessor (SlackAccessor): Slack accessor.
         query (str): search query.
         count (int): results per page (Slack caps at 100).
         page (int): 1-based page number.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         bytes: JSON response.
@@ -409,27 +404,20 @@ async def search_messages(
         "page": page,
         "sort": "timestamp",
     }
-    data = await slack_get(
-        config, "search.messages", params=params, session=session
-    )
+    data = await slack_get(accessor, "search.messages", params=params)
     return compact_json_bytes(data)
 
 
 async def search_files(
-    config: SlackConfig,
-    query: str,
-    count: int = 20,
-    page: int = 1,
-    session: SessionArg = None,
+    accessor: SlackAccessor, query: str, count: int = 20, page: int = 1
 ) -> bytes:
     """Search files across workspace via search.files (single page).
 
     Args:
-        config (SlackConfig): Slack credentials.
+        accessor (SlackAccessor): Slack accessor.
         query (str): search query.
         count (int): results per page (Slack caps at 100).
         page (int): 1-based page number.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         bytes: JSON response.
@@ -440,20 +428,14 @@ async def search_files(
         "page": page,
         "sort": "timestamp",
     }
-    data = await slack_get(
-        config, "search.files", params=params, session=session
-    )
+    data = await slack_get(accessor, "search.files", params=params)
     return compact_json_bytes(data)
 
 
 async def _fetch_name_words(accessor: SlackAccessor) -> frozenset[str]:
     names: list[Any] = []
     async for page in cursor_pages(
-        accessor.config,
-        "users.list",
-        base_params={"limit": 200},
-        items_key="members",
-        session=accessor.pool,
+        accessor, "users.list", base_params={"limit": 200}, items_key="members"
     ):
         for user in page:
             profile = user.get("profile") or {}
@@ -464,7 +446,7 @@ async def _fetch_name_words(accessor: SlackAccessor) -> frozenset[str]:
                 profile.get("display_name"),
                 profile.get("first_name"),
             ]
-    auth = await slack_get(accessor.config, "auth.test", session=accessor.pool)
+    auth = await slack_get(accessor, "auth.test")
     names.append(auth.get("url"))
     words: set[str] = set()
     for name in names:
@@ -528,7 +510,7 @@ async def _matches(
     page = 1
     while True:
         data = await slack_get(
-            accessor.config,
+            accessor,
             method,
             params={
                 "query": query,
@@ -536,7 +518,6 @@ async def _matches(
                 "page": page,
                 "sort": "timestamp",
             },
-            session=accessor.pool,
         )
         block = data.get(key) or {}
         found.extend(block.get("matches") or [])
@@ -622,12 +603,13 @@ async def _searched_channels(
     search_token = accessor.config.search_token
     if not reveal_secret(search_token):
         return None
-    searcher = accessor.config.model_copy(update={"token": search_token})
+    searcher = copy.copy(accessor)
+    searcher.config = accessor.config.model_copy(
+        update={"token": search_token}
+    )
     return frozenset(
         channel["id"]
-        for channel in await list_channels(
-            searcher, types=_SEARCHED_TYPES, session=accessor.pool
-        )
+        for channel in await list_channels(searcher, types=_SEARCHED_TYPES)
     )
 
 

@@ -15,10 +15,11 @@
 from typing import ClassVar
 
 from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.mixin import E
 from mirage.runtime.types import Language
 
 
-class JsRuntime(LanguageRuntime):
+class JsRuntime(LanguageRuntime[E]):
     """The js tier: every runtime that interprets JavaScript source.
 
     Groups the engines behind the node/js commands (quickjs today), so

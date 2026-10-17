@@ -15,9 +15,10 @@
 import { describe, expect, it } from 'vitest'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { Limit, MountMode } from '../../types.ts'
+import { Limit, MountMode, PathSpec } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RemoteSandbox } from './base.ts'
+import { LanguageRuntime } from '../language.ts'
 import { isLineExecutor } from '../mixin.ts'
 import type { RunResult } from '../types.ts'
 import type { RuntimeOptions } from '../config.ts'
@@ -118,7 +119,12 @@ describe('RemoteSandbox', () => {
 
   it('passes cwd through verbatim and merges env', async () => {
     const box = new RecordingSandbox({ captures: ['*'], config: { env: { BASE: '1' } } })
-    const result = await box.runLine('nvidia-smi', null, { LINE: '2' }, '/data/deep')
+    const result = await box.runLine(undefined, [], [], {
+      flags: { c: 'nvidia-smi' },
+      stdin: null,
+      env: { LINE: '2' },
+      cwd: PathSpec.fromStrPath('/data/deep'),
+    })
     expect(result.exitCode).toBe(0)
     const [, , env, cwd] = box.execs[box.execs.length - 1] ?? [
       '',
@@ -150,7 +156,7 @@ describe('RemoteSandbox', () => {
     // command: it carries the line entry point and no interpreter entry point.
     const box = new RecordingSandbox()
     expect(isLineExecutor(box)).toBe(true)
-    expect('run' in box).toBe(false)
+    expect(box).not.toBeInstanceOf(LanguageRuntime)
   })
 
   it('a line timeout answers 124', async () => {

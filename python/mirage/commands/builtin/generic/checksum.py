@@ -594,8 +594,8 @@ async def checksum_generic(
             algorithm=algorithm,
             read_bytes=materialized_read(stream),
             read_stream=(
-                dispatched_reader(ctx.dispatch, normalized_read(stream))
-                if ctx.dispatch is not None
+                dispatched_reader(ctx.vfs.dispatch, normalized_read(stream))
+                if ctx.vfs is not None
                 else normalized_read(stream)
             ),
             check=True,

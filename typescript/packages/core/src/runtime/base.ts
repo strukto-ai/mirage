@@ -12,14 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Context } from '../commands/config.ts'
+import type { PathSpec } from '../types.ts'
 import { Activity } from '../utils/activity.ts'
 import { coerceRuntimeConfig, type RuntimeConfig, type RuntimeOptions } from './config.ts'
-import type { WorkspaceBinding, RuntimeContext } from './binding.ts'
+import type { WorkspaceBinding } from './binding.ts'
 import { UnsupportedExecutionError } from './errors.ts'
 import { isLineExecutor, isProcessExecutor, isStreamingProcess } from './mixin.ts'
 import type {
-  ExecutionRequest,
+  ExecutionKind,
   FilesystemOperation,
+  OutputFn,
   RuntimeCapabilities,
   RunResult,
   RuntimeReach,
@@ -31,22 +34,24 @@ import type {
  * A runtime is to its commands what the regex engine is to grep: the
  * machinery inside a handler, invisible to the dispatcher. Each runtime
  * declares the command names it captures; a command binds to the first
- * runtime in the workspace's ordered list that captures it.
- * Implementations own their engine lifecycle (lazy boot, reuse across
- * runs, teardown in close).
+ * runtime in the workspace's ordered list that captures it. Its hooks take
+ * what a handler takes, `(engine, paths, texts, ctx)`: the engine (`E`) is
+ * built once by `openEngine`; a runtime with none declares
+ * `Runtime<undefined>`.
  *
  * The base holds only what every tier shares: the registry name, the
- * captured command names and the coerced config. What a runtime can DO
- * is declared by its tier and mixins, detected by type and never by
- * probing: LanguageRuntime interprets one command's code (run),
- * LineExecutor takes whole lines (runLine).
+ * captured command names, the coerced config and the engine. What a
+ * runtime can DO is declared by its tier and mixins, detected by type and
+ * never by probing: LanguageRuntime interprets code in its language
+ * (run), LineExecutor takes whole lines (runLine), ProcessExecutor runs
+ * an argv (runProcess).
  *
  * Every runtime is constructed the same way (captures, config); each
  * subclass hands the base its class-default captures and its config key
  * list, so a config field the runtime does not have fails loud
  * (config_cls in Python).
  */
-export abstract class Runtime {
+export abstract class Runtime<E = unknown> {
   abstract readonly name: string
   readonly captures: readonly string[]
   /**
@@ -69,6 +74,7 @@ export abstract class Runtime {
   protected binding: WorkspaceBinding | null = null
   private readonly activity = new Activity()
   private retired = false
+  private opening: Promise<E> | null = null
 
   constructor(
     options: RuntimeOptions<RuntimeConfig> = {},
@@ -114,36 +120,122 @@ export abstract class Runtime {
     this.binding = binding
   }
 
-  /** Engine entry point; Workspace.shell still owns shell admission and routing. */
-  async execute(request: ExecutionRequest, context?: RuntimeContext): Promise<RunResult> {
+  /**
+   * Run once, as the session the bound workspace captures. The capture
+   * supplies the files (`ctx.vfs`, judged as the program's own calls) and
+   * the session; the caller's `ctx` the rest.
+   *
+   * @param paths the path operands (a script).
+   * @param texts the text operands (argv; a process's program first).
+   * @param ctx the run's context.
+   * @param opts `kind`: code in the runtime's language (the default), a
+   *   whole line (`sh -c` with `ctx.flags.c`), or a process; `output`:
+   *   where a streamed process writes its output, absent to collect it in
+   *   the result.
+   */
+  async execute(
+    paths: readonly PathSpec[],
+    texts: readonly string[],
+    ctx: Context,
+    opts: { kind?: ExecutionKind; output?: OutputFn } = {},
+  ): Promise<RunResult> {
     const release = this.admit()
     try {
-      const current = context ?? this.captureContext()
-      if (current !== undefined) {
-        if (current.binding !== this.binding)
-          throw new Error(`${this.name}: context belongs to another binding`)
-        if (
-          this.reach !== 'workspace' &&
-          (current.restrictedMounts?.length ?? 0) > 0 &&
-          !this.servesSession(current)
-        )
-          return {
-            stdout: new Uint8Array(),
-            exitCode: 127,
-            stderr: new TextEncoder().encode(
-              `${this.name}: runtime cannot enforce this session's file restrictions\n`,
-            ),
-          }
-        return await current.scope.run(() => this.executeRequest(request, current))
+      const kind = opts.kind ?? 'code'
+      const capture = this.binding?.capture()
+      const restricted = capture?.restrictedMounts ?? []
+      if (this.reach !== 'workspace' && restricted.length > 0 && !this.servesSession(restricted))
+        return {
+          stdout: new Uint8Array(),
+          exitCode: 127,
+          stderr: new TextEncoder().encode(
+            `${this.name}: runtime cannot enforce this session's file restrictions\n`,
+          ),
+        }
+      const engine = await this.engine()
+      if (capture === undefined)
+        return await this.runAs(kind, engine, [...paths], [...texts], ctx, opts.output)
+      const { vfs, session } = capture.ctx
+      const processes = ctx.processes ?? capture.ctx.processes
+      const runCtx: Context = {
+        ...ctx,
+        ...(session !== undefined ? { session } : {}),
+        ...(processes !== undefined ? { processes } : {}),
       }
-      return await this.executeRequest(request)
+      if (vfs === undefined) delete runCtx.vfs
+      else runCtx.vfs = vfs
+      return await capture.scope.run(() =>
+        this.runAs(kind, engine, [...paths], [...texts], runCtx, opts.output),
+      )
     } finally {
       release()
     }
   }
 
-  /** Whether every restricted mount is served through this caller's gate. */
-  protected servesSession(_context: RuntimeContext): boolean {
+  /** Hand the run to the capability its kind asks for. */
+  private async runAs(
+    kind: ExecutionKind,
+    engine: E,
+    paths: PathSpec[],
+    texts: string[],
+    ctx: Context,
+    output: OutputFn | undefined,
+  ): Promise<RunResult> {
+    if (kind === 'process' && texts.length === 0) throw new Error('process argv must not be empty')
+    if (kind === 'code') return this.run(engine, paths, texts, ctx)
+    if (kind === 'line' && isLineExecutor(this)) return this.runLine(engine, paths, texts, ctx)
+    if (kind === 'process' && output !== undefined) {
+      if (isStreamingProcess(this)) return this.runStream(engine, paths, texts, ctx, output)
+    } else if (kind === 'process' && isProcessExecutor(this)) {
+      return this.runProcess(engine, paths, texts, ctx)
+    }
+    const shown = output !== undefined ? 'stream' : kind
+    throw new UnsupportedExecutionError(`${this.name}: ${shown} execution is unsupported`)
+  }
+
+  /**
+   * Run code in this runtime's language; only a language runtime has one.
+   *
+   * @param _engine the install's engine.
+   * @param _paths the script operand, if any.
+   * @param _texts the program's argv.
+   * @param _ctx the run's context.
+   */
+  run(_engine: E, _paths: PathSpec[], _texts: string[], _ctx: Context): Promise<RunResult> {
+    return Promise.reject(
+      new UnsupportedExecutionError(`${this.name}: code execution is unsupported`),
+    )
+  }
+
+  /** Build the engine every run reuses, once; the default is none. */
+  protected openEngine(): Promise<E> {
+    return Promise.resolve(undefined as E)
+  }
+
+  /**
+   * Release what `openEngine` built.
+   *
+   * @param _engine the engine.
+   */
+  protected closeEngine(_engine: E): Promise<void> {
+    return Promise.resolve()
+  }
+
+  /** The engine, opened once and shared; a failed open is retried. */
+  engine(): Promise<E> {
+    const opening = (this.opening ??= this.openEngine())
+    return opening.catch((err: unknown) => {
+      if (this.opening === opening) this.opening = null
+      throw err
+    })
+  }
+
+  /**
+   * Whether every restricted mount is served through this caller's gate.
+   *
+   * @param _restrictedMounts the mounts the session restricts.
+   */
+  protected servesSession(_restrictedMounts: readonly string[]): boolean {
     return false
   }
 
@@ -159,33 +251,19 @@ export abstract class Runtime {
     await this.activity.wait()
   }
 
-  protected captureContext(): RuntimeContext | undefined {
-    return this.binding?.capture()
-  }
-
-  protected async executeRequest(
-    request: ExecutionRequest,
-    _context?: RuntimeContext,
-  ): Promise<RunResult> {
-    if (request.kind === 'stream' && isStreamingProcess(this)) return this.runStream(request)
-    if (request.kind === 'process' && isProcessExecutor(this)) {
-      if (request.argv.length === 0) throw new Error('process argv must not be empty')
-      return this.runProcess(request)
+  /** Close the engine, when one was opened. */
+  async close(): Promise<void> {
+    const opening = this.opening
+    this.opening = null
+    if (opening === null) return
+    let engine: E
+    try {
+      engine = await opening
+    } catch (err) {
+      console.debug(`${this.name}: engine never opened`, err)
+      return
     }
-    if (request.kind === 'shell' && isLineExecutor(this))
-      return this.runLine(
-        request.line,
-        request.stdin,
-        request.env,
-        request.cwd.virtual,
-        request.signal,
-      )
-    throw new UnsupportedExecutionError(`${this.name}: ${request.kind} execution is unsupported`)
-  }
-
-  /** Release engine resources. Default: nothing held. */
-  close(): Promise<void> {
-    return Promise.resolve()
+    await this.closeEngine(engine)
   }
 }
 

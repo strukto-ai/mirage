@@ -14,10 +14,11 @@
 
 from typing import Any
 
+from mirage.accessor.notion import NotionAccessor
 from mirage.commands.cli.builtin.ntn.failure import HintedAPIError, source_hint
 from mirage.commands.cli.builtin.ntn.util import (
     first_text,
-    notion_config,
+    notion_transport,
     parse_json_text,
     pretty_json,
     property_cell,
@@ -26,7 +27,6 @@ from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.notion.client import NotionAPIError
-from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.pages import (
     get_data_source,
     get_database,
@@ -79,7 +79,7 @@ def parse_sort(spec: str) -> dict[str, JsonValue]:
     return {"property": spec, "direction": "ascending"}
 
 
-async def resolve_source(config: NotionConfig, ref: str) -> dict[str, Any]:
+async def resolve_source(accessor: NotionAccessor, ref: str) -> dict[str, Any]:
     """Fetch the data source an operand names, following a database.
 
     A database id is accepted in the same slot as a data source id, so
@@ -87,14 +87,14 @@ async def resolve_source(config: NotionConfig, ref: str) -> dict[str, Any]:
     database endpoint misses too.
 
     Args:
-        config (NotionConfig): notion API config.
+        accessor (NotionAccessor): this line's accessor.
         ref (str): the id to resolve.
 
     Returns:
         dict: the data source object.
     """
     try:
-        return await get_data_source(config, ref)
+        return await get_data_source(accessor, ref)
     except NotionAPIError as miss:
         if miss.status != 404:
             raise
@@ -105,7 +105,7 @@ async def resolve_source(config: NotionConfig, ref: str) -> dict[str, Any]:
     # second miss would tell the user their data source id is not a
     # database id, which they never claimed it was.
     try:
-        database = await get_database(config, ref)
+        database = await get_database(accessor, ref)
     except NotionAPIError as second:
         if second.status != 404:
             raise
@@ -113,7 +113,7 @@ async def resolve_source(config: NotionConfig, ref: str) -> dict[str, Any]:
     stubs = database.get("data_sources") or []
     if not stubs or not isinstance(stubs[0], dict):
         raise UsageError(f"database {ref} has no data sources")
-    return await get_data_source(config, str(stubs[0].get("id", "")))
+    return await get_data_source(accessor, str(stubs[0].get("id", "")))
 
 
 async def filter_body(fl: FlagView, vfs: Files | None) -> dict[str, JsonValue]:
@@ -140,7 +140,10 @@ async def filter_body(fl: FlagView, vfs: Files | None) -> dict[str, JsonValue]:
 
 
 async def query(
-    config: NotionConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: NotionAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     # clap checks a value as it parses it, ahead of the missing operand.
@@ -163,10 +166,10 @@ async def query(
     if chosen:
         body["filter"] = chosen
 
-    config = notion_config(config, ctx)
-    data_source = await resolve_source(config, ref)
+    line = notion_transport(accessor, ctx)
+    data_source = await resolve_source(line, ref)
     source_id = str(data_source.get("id", ""))
-    result = await query_data_source_page(config, source_id, body)
+    result = await query_data_source_page(line, source_id, body)
     if fl.as_bool("json"):
         return yield_bytes(pretty_json(result)), IOResult()
 

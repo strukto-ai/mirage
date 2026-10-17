@@ -58,16 +58,16 @@ describe('HfBucketsAccessor', () => {
   })
 
   it("waits python's 30 seconds without progress unless configured", () => {
-    expect(new HfBucketsAccessor({ bucket: 'a/b' }).timeoutMs).toBe(HF_TIMEOUT_MS)
-    expect(new HfBucketsAccessor({ bucket: 'a/b', timeoutMs: 5000 }).timeoutMs).toBe(5000)
+    expect(new HfBucketsAccessor({ bucket: 'a/b' }).account.timeoutMs).toBe(HF_TIMEOUT_MS)
+    expect(new HfBucketsAccessor({ bucket: 'a/b', timeoutMs: 5000 }).account.timeoutMs).toBe(5000)
   })
 
   it('reaches the Hub at the default endpoint unless one is configured', () => {
     // A partial override: the endpoint is the only field that changes.
     const plain = new HfBucketsAccessor({ bucket: 'ns/store', token: 't' })
-    expect([plain.endpoint, plain.token]).toEqual([HF_ENDPOINT, 't'])
+    expect([plain.endpoint, plain.account.token]).toEqual([HF_ENDPOINT, 't'])
     const custom = new HfBucketsAccessor({ bucket: 'ns/store', endpoint: 'http://x' })
-    expect([custom.endpoint, custom.token]).toEqual(['http://x', undefined])
+    expect([custom.endpoint, custom.account.token]).toEqual(['http://x', undefined])
   })
 
   it('applies the key prefix to a bucket path once', () => {

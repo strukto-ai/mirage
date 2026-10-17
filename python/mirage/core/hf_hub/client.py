@@ -20,12 +20,11 @@ from urllib.parse import quote
 import aiohttp
 from pydantic import SecretStr
 
+from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.core.api.client import (
     ApiResponse,
     RetryPolicy,
-    SessionArg,
     api_request,
-    resolve_session,
     status_error,
 )
 from mirage.core.hf_hub.constants import (
@@ -68,30 +67,6 @@ class HfHubError(Exception):
         super().__init__(message)
         self.status = status
         self.error_code = error_code
-
-
-def stall_timeout(seconds: float) -> aiohttp.ClientTimeout:
-    """How long a mount's Hub request may go without progress.
-
-    The clock runs while connecting and waiting for the answer, and
-    restarts on every chunk of the body, so a large download that keeps
-    flowing is never cut off; a total bound would fail any file that takes
-    longer than it to arrive. It is what huggingface_hub's own timeout
-    means, and the TypeScript twin is ``stallFetch``. A bound of zero or
-    less is none: aiohttp reads a zero that way, but a negative read bound
-    would fire at once.
-
-    Args:
-        seconds (float): the mount's configured timeout.
-
-    Returns:
-        aiohttp.ClientTimeout: the bound, for the accessor's pool.
-    """
-    if seconds <= 0:
-        return aiohttp.ClientTimeout(total=None)
-    return aiohttp.ClientTimeout(
-        total=None, sock_connect=seconds, sock_read=seconds
-    )
 
 
 def hub_headers(token: SecretStr | None) -> dict[str, str]:
@@ -237,77 +212,69 @@ def _error_of(resp: aiohttp.ClientResponse, text: str) -> Exception:
 
 
 async def hub_get(
-    token: SecretStr | None,
+    account: HfAccountAccessor,
     url: str,
     params: dict[str, Any] | None = None,
-    *,
-    session: SessionArg = None,
 ) -> JsonValue:
     """One GET against the Hub API, decoded as JSON."""
     data: JsonValue = await api_request(
         "GET",
         url,
         error_of=_error_of,
-        headers=hub_headers(token),
+        headers=hub_headers(account.token),
         params=params,
         retry=RETRY,
-        session=session,
+        session=account.pool,
     )
     return data
 
 
 async def hub_get_response(
-    token: SecretStr | None,
+    account: HfAccountAccessor,
     url: str,
     params: dict[str, Any] | None = None,
-    *,
-    session: SessionArg = None,
 ) -> ApiResponse:
     """One GET retaining status and headers, which tree pagination reads."""
     response: ApiResponse = await api_request(
         "GET",
         url,
         error_of=_error_of,
-        headers=hub_headers(token),
+        headers=hub_headers(account.token),
         params=params,
         retry=RETRY,
         read="response",
-        session=session,
+        session=account.pool,
     )
     return response
 
 
 async def hub_post(
-    token: SecretStr | None,
+    account: HfAccountAccessor,
     url: str,
     body: JsonValue,
     params: dict[str, Any] | None = None,
-    *,
-    session: SessionArg = None,
 ) -> JsonValue:
     """One JSON POST against the Hub API."""
     data: JsonValue = await api_request(
         "POST",
         url,
         error_of=_error_of,
-        headers=hub_headers(token),
+        headers=hub_headers(account.token),
         params=params,
         json_body=body,
         json_body_present=True,
         retry=RETRY,
-        session=session,
+        session=account.pool,
     )
     return data
 
 
 async def hub_request(
-    token: SecretStr | None,
+    account: HfAccountAccessor,
     method: str,
     url: str,
     body: JsonValue,
     params: dict[str, Any] | None = None,
-    *,
-    session: SessionArg = None,
 ) -> JsonValue:
     """One arbitrary JSON call against the Hub API.
 
@@ -317,12 +284,11 @@ async def hub_request(
     which those same endpoints tolerate.
 
     Args:
-        token (SecretStr | None): the user access token.
+        account (HfAccountAccessor): the token and pool the call rides.
         method (str): the HTTP method.
         url (str): the absolute URL.
         body (JsonValue): the JSON body.
         params (dict[str, Any] | None): query parameters.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         JsonValue: the decoded body, None for an empty one.
@@ -331,38 +297,35 @@ async def hub_request(
         method.upper(),
         url,
         error_of=_error_of,
-        headers=hub_headers(token),
+        headers=hub_headers(account.token),
         params=params,
         json_body=body,
         json_body_present=body is not None,
         retry=RETRY,
-        session=session,
+        session=account.pool,
     )
     return data
 
 
 async def hub_post_ndjson(
-    token: SecretStr | None,
+    account: HfAccountAccessor,
     url: str,
     payload: bytes,
     params: dict[str, Any] | None = None,
-    *,
-    session: SessionArg = None,
 ) -> JsonValue:
     """One newline-delimited-JSON POST, which is the commit endpoint's shape.
 
     Args:
-        token (SecretStr | None): the user access token.
+        account (HfAccountAccessor): the token and pool the call rides.
         url (str): the commit URL.
         payload (bytes): the already-serialized ndjson body.
         params (dict[str, Any] | None): query parameters.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         JsonValue: the decoded commit response.
     """
     headers = {
-        **hub_headers(token),
+        **hub_headers(account.token),
         "Content-Type": "application/x-ndjson",
     }
     data: JsonValue = await api_request(
@@ -373,17 +336,15 @@ async def hub_post_ndjson(
         params=params,
         data=payload,
         retry=RETRY,
-        session=session,
+        session=account.pool,
     )
     return data
 
 
 async def hub_bytes(
-    token: SecretStr | None,
+    account: HfAccountAccessor,
     url: str,
     window: ByteWindow | None = None,
-    *,
-    session: SessionArg = None,
 ) -> bytes:
     """Fetch file content, optionally a byte window of it.
 
@@ -392,10 +353,9 @@ async def hub_bytes(
     trip.
 
     Args:
-        token (SecretStr | None): the user access token.
+        account (HfAccountAccessor): the token and pool the call rides.
         url (str): the resolve URL.
         window (ByteWindow | None): the byte range to ask for.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         bytes: the content, trimmed to the window when the CDN ignored
@@ -405,21 +365,19 @@ async def hub_bytes(
         "GET",
         url,
         error_of=_error_of,
-        headers=hub_headers(token),
+        headers=hub_headers(account.token),
         retry=RETRY,
         read="bytes",
         window=window,
-        session=session,
+        session=account.pool,
     )
     return content
 
 
 async def hub_bytes_tagged(
-    token: SecretStr | None,
+    account: HfAccountAccessor,
     url: str,
     window: ByteWindow | None = None,
-    *,
-    session: SessionArg = None,
 ) -> tuple[bytes, str]:
     """Fetch file content together with the ETag the bytes came with.
 
@@ -428,10 +386,9 @@ async def hub_bytes_tagged(
     actually served, which is the only one that can vouch for them.
 
     Args:
-        token (SecretStr | None): the user access token.
+        account (HfAccountAccessor): the token and pool the call rides.
         url (str): the resolve URL.
         window (ByteWindow | None): the byte range to ask for.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         tuple[bytes, str]: the content, trimmed to the window when the CDN
@@ -441,11 +398,11 @@ async def hub_bytes_tagged(
         "GET",
         url,
         error_of=_error_of,
-        headers=hub_headers(token),
+        headers=hub_headers(account.token),
         retry=RETRY,
         read="bytes_response",
         window=window,
-        session=session,
+        session=account.pool,
     )
     return response.data, response.headers.get("etag", "")
 
@@ -466,11 +423,10 @@ def etag_value(raw: str) -> str:
 
 
 async def hub_stream(
-    token: SecretStr | None,
+    account: HfAccountAccessor,
     url: str,
     chunk_size: int,
     *,
-    session: SessionArg = None,
     on_response: Callable[[Mapping[str, str]], None] | None = None,
 ) -> AsyncIterator[bytes]:
     """Stream file content without holding it whole in memory.
@@ -480,10 +436,9 @@ async def hub_stream(
     redirect to the CDN is followed by aiohttp itself.
 
     Args:
-        token (SecretStr | None): the user access token.
+        account (HfAccountAccessor): the token and pool the call rides.
         url (str): the resolve URL.
         chunk_size (int): bytes per yielded chunk.
-        session (SessionArg): pool or live session to ride.
         on_response (Callable | None): told the final response's headers,
             lower-cased, once and before the first chunk, so an empty file
             reports them too.
@@ -494,23 +449,19 @@ async def hub_stream(
     Raises:
         HfHubError: the Hub or the CDN refused.
     """
-    sess, own = resolve_session(session)
-    try:
-        async with sess.get(url, headers=hub_headers(token)) as resp:
-            if resp.status >= 400:
-                raise _error_of(resp, await resp.text())
-            if on_response is not None:
-                on_response(
-                    {
-                        key.lower(): ", ".join(resp.headers.getall(key))
-                        for key in resp.headers.keys()
-                    }
-                )
-            async for chunk in resp.content.iter_chunked(chunk_size):
-                yield chunk
-    finally:
-        if own:
-            await sess.close()
+    session = account.pool.get()
+    async with session.get(url, headers=hub_headers(account.token)) as resp:
+        if resp.status >= 400:
+            raise _error_of(resp, await resp.text())
+        if on_response is not None:
+            on_response(
+                {
+                    key.lower(): ", ".join(resp.headers.getall(key))
+                    for key in resp.headers.keys()
+                }
+            )
+        async for chunk in resp.content.iter_chunked(chunk_size):
+            yield chunk
 
 
 __all__ = [

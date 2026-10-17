@@ -32,7 +32,7 @@ specific to the Python SDK.
 - The CPython build is read-only in the run. A mount at `/` coexists with it:
   each mount wins under its prefix.
 - A run starts in the shell's working directory; a missing one fails before
-  any code runs. A direct `run()` can pass `RunArgs.cwd`.
+  any code runs. A direct `execute()` runs in its context's `cwd`.
 - A script runs as in CPython: `__file__` is absolute, tracebacks quote its
   lines, and `sys.path[0]` is its directory (`-P` and `-I` leave it off).
 - The first run compiles `python.wasm` and caches `python.cwasm` beside it;

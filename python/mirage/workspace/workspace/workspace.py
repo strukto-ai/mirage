@@ -252,7 +252,7 @@ class Workspace:
         namespace_store: NamespaceStore | None = None,
         session_store: SessionStore | None = None,
         console_factory: ConsoleFactory | None = None,
-        runtimes: list[Runtime | str] | None = None,
+        runtimes: list[Runtime[Any] | str] | None = None,
         route_policy: RoutePolicy | None = None,
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
         | None = None,
@@ -1035,15 +1035,16 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         return self._registry.clis.install(name, spec, config)
 
-    def unregister_cli(self, name: str) -> None:
-        """Remove an installed CLI; its head word stops resolving (127).
+    async def unregister_cli(self, name: str) -> None:
+        """Remove an installed CLI and close its accessor; its head word
+        stops resolving (127).
 
         Args:
             name (str): installed head word.
         """
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
-        self._registry.clis.uninstall(name)
+        await self._registry.clis.uninstall(name)
 
     def clis(self) -> dict[str, CLIInstall]:
         """Snapshot of the installed CLIs keyed by head word."""
@@ -1269,11 +1270,11 @@ class Workspace:
 
         return ChildProcess(process, input_stream, output, cancel)
 
-    def runtimes(self) -> list[Runtime]:
+    def runtimes(self) -> list[Runtime[Any]]:
         """The ordered runtime world, first capturer first."""
         return list(self._runtimes.entries)
 
-    def add_runtime(self, runtime: Runtime | str) -> Runtime:
+    def add_runtime(self, runtime: Runtime[Any] | str) -> Runtime[Any]:
         """Append a runtime entry to the workspace's ordered set.
 
         Args:
@@ -1536,7 +1537,11 @@ class Workspace:
             cache=self._cache,
             owns_state_store=self._owns_state_store,
             state_store=self._state_store,
-            closers=[self._script_policy.close, self._runtimes.close],
+            closers=[
+                self._script_policy.close,
+                self._runtimes.close,
+                self._registry.clis.close,
+            ],
             job_table=self.job_table,
             processes=self.processes,
             registry=self._registry,
@@ -2419,7 +2424,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision[Runtime] | None = None,
+        routing_decision: RouteDecision[Runtime[Any]] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
@@ -2440,7 +2445,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision[Runtime] | None = None,
+        routing_decision: RouteDecision[Runtime[Any]] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
@@ -2461,7 +2466,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision[Runtime] | None = None,
+        routing_decision: RouteDecision[Runtime[Any]] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
@@ -2481,7 +2486,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision[Runtime] | None = None,
+        routing_decision: RouteDecision[Runtime[Any]] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
@@ -2630,7 +2635,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision[Runtime] | None = None,
+        routing_decision: RouteDecision[Runtime[Any]] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,

@@ -54,6 +54,10 @@ function config(overrides: Partial<EmailConfig> = {}): EmailConfig {
   }
 }
 
+function account(overrides: Partial<EmailConfig> = {}): EmailAccessor {
+  return new EmailAccessor(config(overrides))
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   listMock.mockResolvedValue(PLAIN)
@@ -69,38 +73,38 @@ beforeEach(() => {
 describe('resolveSentFolder', () => {
   it('takes the mailbox the server tags \\Sent', async () => {
     listMock.mockResolvedValue(GMAIL)
-    expect(await resolveSentFolder(new EmailAccessor(config()), null)).toBe('[Gmail]/Sent Mail')
+    expect(await resolveSentFolder(account(), null)).toBe('[Gmail]/Sent Mail')
   })
 
   it('falls back to Sent when the server tags nothing', async () => {
-    expect(await resolveSentFolder(new EmailAccessor(config()), null)).toBe('Sent')
+    expect(await resolveSentFolder(account(), null)).toBe('Sent')
   })
 
   it('lets a configured folder win, without asking the server', async () => {
     listMock.mockResolvedValue(GMAIL)
-    expect(await resolveSentFolder(new EmailAccessor(config()), 'Archive')).toBe('Archive')
+    expect(await resolveSentFolder(account(), 'Archive')).toBe('Archive')
     expect(listMock).not.toHaveBeenCalled()
   })
 })
 
 describe('saveSentCopy', () => {
-  it('appends the message seen, and closes the accessor', async () => {
+  it('appends the message seen, and leaves the accessor open', async () => {
     listMock.mockResolvedValue(GMAIL)
-    expect(await saveSentCopy(config(), RAW)).toBe('[Gmail]/Sent Mail')
+    expect(await saveSentCopy(account(), RAW)).toBe('[Gmail]/Sent Mail')
     expect(appendMock).toHaveBeenCalledWith('[Gmail]/Sent Mail', Buffer.from(RAW), ['\\Seen'])
-    expect(closeSpy).toHaveBeenCalled()
+    expect(closeSpy).not.toHaveBeenCalled()
   })
 
   it('names the mailbox when the server refuses', async () => {
     appendMock.mockResolvedValue(false)
-    await expect(saveSentCopy(config(), RAW)).rejects.toThrow('Sent: the server refused')
-    expect(closeSpy).toHaveBeenCalled()
+    await expect(saveSentCopy(account(), RAW)).rejects.toThrow('Sent: the server refused')
+    expect(closeSpy).not.toHaveBeenCalled()
   })
 })
 
 describe('deliver', () => {
   it('sends, then saves', async () => {
-    const { parsed, warning } = await deliver(config(), RAW)
+    const { parsed, warning } = await deliver(account(), RAW)
     expect(sendRawMock).toHaveBeenCalledWith(expect.anything(), RAW)
     expect(parsed.subject).toBe('Hi')
     expect(warning).toBe('')
@@ -108,7 +112,7 @@ describe('deliver', () => {
   })
 
   it('sends and touches no mailbox when saveCopy is off', async () => {
-    const { warning } = await deliver(config({ saveCopy: false }), RAW)
+    const { warning } = await deliver(account({ saveCopy: false }), RAW)
     expect(sendRawMock).toHaveBeenCalledOnce()
     expect(warning).toBe('')
     expect(appendMock).not.toHaveBeenCalled()
@@ -119,14 +123,14 @@ describe('deliver', () => {
     // become a failed send: a non-zero exit invites a retry that would
     // send it a second time.
     appendMock.mockRejectedValue(new Error('Sent: over quota'))
-    const { parsed, warning } = await deliver(config(), RAW)
+    const { parsed, warning } = await deliver(account(), RAW)
     expect(parsed.subject).toBe('Hi')
     expect(warning).toBe('himalaya: sent copy not saved: Sent: over quota\n')
   })
 
   it('files into the mailbox --save names, over the account default', async () => {
     listMock.mockResolvedValue(GMAIL)
-    const { warning } = await deliver(config(), RAW, 'Drafts')
+    const { warning } = await deliver(account(), RAW, 'Drafts')
     expect(warning).toBe('')
     expect(appendMock).toHaveBeenCalledWith('Drafts', Buffer.from(RAW), ['\\Seen'])
     expect(listMock).not.toHaveBeenCalled()
@@ -135,7 +139,7 @@ describe('deliver', () => {
   it('honours --save even when saveCopy is off', async () => {
     // --save is the user asking on this one line, so the account-level
     // switch does not veto it.
-    const { warning } = await deliver(config({ saveCopy: false }), RAW, 'Drafts')
+    const { warning } = await deliver(account({ saveCopy: false }), RAW, 'Drafts')
     expect(warning).toBe('')
     expect(appendMock).toHaveBeenCalledOnce()
   })
@@ -144,7 +148,7 @@ describe('deliver', () => {
     vi.spyOn(EmailAccessor.prototype, 'getImap').mockRejectedValue(
       new Error('IMAP login failed for u on h'),
     )
-    const { warning } = await deliver(config(), RAW)
+    const { warning } = await deliver(account(), RAW)
     expect(warning).toBe('himalaya: sent copy not saved: IMAP login failed for u on h\n')
   })
 })

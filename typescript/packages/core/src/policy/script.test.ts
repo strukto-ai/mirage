@@ -1,17 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Context } from '../commands/config.ts'
 import { WordKind } from '../commands/spec/types.ts'
+import { IOResult } from '../io/types.ts'
 import type { WorkspaceBinding } from '../runtime/binding.ts'
 import type * as ScriptModule from '../runtime/script.ts'
 import { SCRIPT_EVAL_TIMEOUT } from '../runtime/constants.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
 import { PrefixResolver } from '../runtime/resolver.ts'
-import {
-  ScriptSource,
-  type BridgeDispatchFn,
-  type CodeExecution,
-  type ExecutionRequest,
-  type RunResult,
-} from '../runtime/types.ts'
+import { ScriptSource, type DispatchFn, type RunResult } from '../runtime/types.ts'
 import {
   type CapacityResult,
   CapacityState,
@@ -42,6 +38,7 @@ import {
   type VfsContext,
   type VfsResultContext,
 } from './types.ts'
+import { sessionAccess } from '../context/session_context.ts'
 
 // Mirrors python/tests/policy/test_script.py.
 
@@ -68,7 +65,7 @@ vi.mock('../runtime/script.ts', async (importOriginal) => {
 class FakeProgram extends LanguageRuntime {
   readonly name = 'fake'
   readonly language = 'python' as const
-  readonly requests: CodeExecution[] = []
+  readonly requests: Context[] = []
   attached: WorkspaceBinding | null = null
   closed = false
 
@@ -85,9 +82,12 @@ class FakeProgram extends LanguageRuntime {
     this.attached = binding
   }
 
-  override async execute(request: ExecutionRequest): Promise<RunResult> {
-    if (request.kind !== 'code') throw new Error('a policy program is a code run')
-    this.requests.push(request)
+  override async execute(
+    ...[paths, texts, ctx, opts]: Parameters<LanguageRuntime['execute']>
+  ): Promise<RunResult> {
+    if ((opts?.kind ?? 'code') !== 'code' || paths.length > 0 || texts.length > 0)
+      throw new Error('a policy program is a code run')
+    this.requests.push(ctx)
     if (this.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.delayMs))
     return {
       stdout: new TextEncoder().encode(this.stdout),
@@ -96,7 +96,7 @@ class FakeProgram extends LanguageRuntime {
     }
   }
 
-  run(): Promise<RunResult> {
+  interpret(): Promise<RunResult> {
     throw new Error('unused')
   }
 
@@ -112,9 +112,9 @@ class Waiting extends FakeProgram {
     super()
   }
 
-  override async execute(request: ExecutionRequest): Promise<RunResult> {
+  override async execute(...run: Parameters<FakeProgram['execute']>): Promise<RunResult> {
     await this.started
-    return super.execute(request)
+    return super.execute(...run)
   }
 }
 
@@ -124,9 +124,9 @@ class Starting extends FakeProgram {
     super()
   }
 
-  override async execute(request: ExecutionRequest): Promise<RunResult> {
+  override async execute(...run: Parameters<FakeProgram['execute']>): Promise<RunResult> {
     this.start()
-    return super.execute(request)
+    return super.execute(...run)
   }
 }
 
@@ -135,12 +135,12 @@ class Overlapping extends FakeProgram {
   running = 0
   most = 0
 
-  override async execute(request: ExecutionRequest): Promise<RunResult> {
+  override async execute(...run: Parameters<FakeProgram['execute']>): Promise<RunResult> {
     this.running++
     this.most = Math.max(this.most, this.running)
     await new Promise((resolve) => setTimeout(resolve, 10))
     this.running--
-    return super.execute(request)
+    return super.execute(...run)
   }
 }
 
@@ -187,6 +187,8 @@ function sessionView(cwd = '/data'): SessionView {
     isReadonly: (name) => name === 'HOME',
     profile: () => 'reviewer',
     cwd: () => cwd,
+    sessionId: 'reviewer',
+    access: () => sessionAccess(null),
   }
 }
 
@@ -401,15 +403,13 @@ describe('ScriptPolicy', () => {
     expect(await policy.preCommand(judged)).toEqual([{ kind: 'deny', reason: 'sealed' }])
     const [request] = engine.requests
     if (request === undefined) throw new Error('the program never ran')
-    expect(request.code).toBe('SOURCE 0')
-    expect(request.language).toBe('python')
-    expect(request.cwd?.virtual).toBe('/')
-    const payload = request.env[CTX_ENV] ?? ''
+    expect(request.cwd.virtual).toBe('/')
+    const payload = request.env?.[CTX_ENV] ?? ''
     expect(JSON.parse(payload)).toEqual(scriptContext(judged))
-    expect(new TextDecoder().decode(request.stdin ?? new Uint8Array())).toBe(payload)
+    expect(request.stdin).toEqual(bytes(payload))
     expect(request.env).toEqual({ [CTX_ENV]: payload })
     expect((JSON.parse(payload) as { env: Record<string, string> }).env.TEAM).toBe('core')
-    expect(request.flags).toEqual({})
+    expect(request.flags).toEqual({ c: 'SOURCE 0' })
   })
 
   it("keeps the session's directory off a pyodide program's path", async () => {
@@ -417,7 +417,7 @@ describe('ScriptPolicy', () => {
     built.factory = () => engine
     const policy = track(new ScriptPolicy(scripts({ preCommand: [entry('pyodide')] })))
     await policy.preCommand(ctx('cat', { session: sessionView('/data') }))
-    expect(engine.requests[0]?.flags).toEqual({ P: true })
+    expect(engine.requests[0]?.flags).toEqual({ c: 'SOURCE', P: true })
   })
 
   it('answers after the action too', async () => {
@@ -425,7 +425,7 @@ describe('ScriptPolicy', () => {
     const policy = policyWith('postCommand', engine)
     const done: CommandResultContext = { ...ctx(), exitCode: 3, stderr: '', records: [] }
     expect(await policy.postCommand(done)).toEqual([{ kind: 'deny', reason: 'after' }])
-    const payload = JSON.parse(engine.requests[0]?.env[CTX_ENV] ?? '{}') as Record<string, unknown>
+    const payload = JSON.parse(engine.requests[0]?.env?.[CTX_ENV] ?? '{}') as { exit_code: number }
     expect(payload.exit_code).toBe(3)
   })
 
@@ -446,16 +446,16 @@ describe('ScriptPolicy', () => {
     const stamped: symbol[] = []
     const policy = track(
       new ScriptPolicy(scripts({ preVfs: [entry()], postVfs: [entry()] }), {
-        bridge: (issuer) => {
+        dispatch: (issuer) => {
           stamped.push(issuer)
-          return () => Promise.resolve(null)
+          return () => Promise.resolve([null, new IOResult()])
         },
         resolver: new PrefixResolver(() => ['/repo/']),
       }),
     )
     await policy.preVfs(opsCtx('read', '/repo/a', false))
     const [token] = stamped
-    if (token === undefined) throw new Error('the bridge was never built')
+    if (token === undefined) throw new Error('the dispatch was never built')
     const done: VfsResultContext = { ...opsCtx('read', '/repo/a', false), result: bytes('x') }
     expect(await policy.postVfs({ ...done, issuer: token })).toBeNull()
     expect(await policy.postVfs(done)).toEqual([{ kind: 'deny', reason: 'frozen' }])
@@ -699,10 +699,10 @@ describe('ScriptPolicy', () => {
   it('attaches the entry points it is wired to, and a bare policy none', async () => {
     const wired = new FakeProgram()
     built.factory = () => wired
-    const bridge: BridgeDispatchFn = () => Promise.resolve(null)
+    const dispatch: DispatchFn = () => Promise.resolve([null, new IOResult()])
     const resolver = new PrefixResolver(() => ['/repo/'])
     const policy = track(
-      new ScriptPolicy(scripts({ preCommand: [entry()] }), { bridge: () => bridge, resolver }),
+      new ScriptPolicy(scripts({ preCommand: [entry()] }), { dispatch: () => dispatch, resolver }),
     )
     expect(await policy.preCommand(ctx())).toBeNull()
     expect(wired.attached?.resolver).toBe(resolver)
@@ -720,9 +720,9 @@ describe('ScriptPolicy', () => {
     const stamped: symbol[] = []
     const policy = track(
       new ScriptPolicy(scripts({ preVfs: [entry()] }), {
-        bridge: (issuer) => {
+        dispatch: (issuer) => {
           stamped.push(issuer)
-          return () => Promise.resolve(null)
+          return () => Promise.resolve([null, new IOResult()])
         },
         resolver: new PrefixResolver(() => ['/repo/']),
       }),
@@ -731,7 +731,7 @@ describe('ScriptPolicy', () => {
       { kind: 'deny', reason: 'frozen' },
     ])
     const [token] = stamped
-    if (token === undefined) throw new Error('the bridge was never built')
+    if (token === undefined) throw new Error('the dispatch was never built')
     expect(await policy.preVfs({ ...opsCtx('read', '/repo/a', false), issuer: token })).toBeNull()
     expect(engine.requests).toHaveLength(1)
   })
@@ -756,7 +756,7 @@ describe('ScriptPolicy', () => {
     const engine = new FakeProgram()
     const policy = policyWith('preCommand', engine)
     await policy.preCommand(ctx('cat', { session: sessionView('/data') }))
-    expect(engine.requests[0]?.cwd?.virtual).toBe('/data')
+    expect(engine.requests[0]?.cwd.virtual).toBe('/data')
   })
 })
 
@@ -783,8 +783,9 @@ print(json.dumps(verdict))
  * open lists the directory and stats the file before it reads, so the
  * dispatcher answers all three.
  */
-function bridgeOver(files: Record<string, string>): BridgeDispatchFn {
-  return (op, path) => {
+function dispatchOver(files: Record<string, string>): DispatchFn {
+  return (op, spec) => {
+    const path = spec.virtual
     if (op === 'readdir') {
       const names = Object.keys(files).filter(
         (p) => p.startsWith(path) && !p.slice(path.length).includes('/'),
@@ -792,23 +793,24 @@ function bridgeOver(files: Record<string, string>): BridgeDispatchFn {
       if (names.length === 0) {
         return Promise.reject(Object.assign(new Error(path), { code: 'ENOENT' }))
       }
-      return Promise.resolve(names)
+      return Promise.resolve([names, new IOResult()])
     }
     const body = files[path]
     if (body === undefined) {
       return Promise.reject(Object.assign(new Error(path), { code: 'ENOENT' }))
     }
     const content = ENCODE.encode(body)
-    if (op === 'read') return Promise.resolve(content)
+    if (op === 'read') return Promise.resolve([content, new IOResult()])
     if (op === 'stat') {
-      return Promise.resolve(
+      return Promise.resolve([
         new FileStat({
           name: path,
           size: content.length,
           type: FileType.FILE,
           content: ContentType.TEXT,
         }),
-      )
+        new IOResult(),
+      ])
     }
     return Promise.reject(Object.assign(new Error(`${op} ${path}`), { code: 'EROFS' }))
   }
@@ -818,7 +820,7 @@ describe('a policy program on monty', () => {
   it('reads the workspace through the entry points it is wired to', async () => {
     const policy = track(
       new ScriptPolicy(scripts({ preCommand: [entry('monty', READER)] }), {
-        bridge: () => bridgeOver({ '/repo/sealed/k': 'subject: invoice\n\na payload\n' }),
+        dispatch: () => dispatchOver({ '/repo/sealed/k': 'subject: invoice\n\na payload\n' }),
         resolver: new PrefixResolver(() => ['/repo/']),
       }),
     )

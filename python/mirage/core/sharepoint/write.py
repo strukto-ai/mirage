@@ -26,10 +26,7 @@ async def write(
     resolved = await resolve_item(accessor, path)
     timer = start_op()
     await write_item(
-        accessor.config,
-        drive_loc(accessor.config, resolved, path.vfs_path),
-        data,
-        session=accessor.pool,
+        accessor, drive_loc(accessor.config, resolved, path.vfs_path), data
     )
     record("write", path.virtual, "sharepoint", len(data), timer)
 
@@ -40,9 +37,6 @@ async def write_stream(
     resolved = await resolve_item(accessor, path)
     timer = start_op()
     size = await write_item_stream(
-        accessor.config,
-        drive_loc(accessor.config, resolved, path.vfs_path),
-        data,
-        session=accessor.pool,
+        accessor, drive_loc(accessor.config, resolved, path.vfs_path), data
     )
     record("write", path.virtual, "sharepoint", size, timer)

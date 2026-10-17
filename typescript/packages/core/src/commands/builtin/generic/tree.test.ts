@@ -93,11 +93,12 @@ describe('treeGeneric with trailing-slash folder entries', () => {
 
 describe('treeGeneric operand that is not a directory', () => {
   function optsWith(start: FileStat | null): Context {
+    const dispatch: DispatchFn = () => Promise.resolve([start, new IOResult()])
     return {
       stdin: null,
       flags: {},
       cwd: PathSpec.fromStrPath('/'),
-      statPath: () => Promise.resolve(start),
+      vfs: new Files(dispatch, null, null, () => null, { ledger: false }),
     } as unknown as Context
   }
 
@@ -165,18 +166,25 @@ describe('treeGeneric across a nested mount', () => {
   }
 
   function crossOpts(): Context {
-    const nothing: DispatchFn = () => Promise.resolve([null, new IOResult()])
+    const dispatch: DispatchFn = (op, path) => {
+      const virtual = path.virtual
+      if (op === 'readdir') {
+        return Promise.resolve([listing(owner(virtual), virtual), new IOResult()])
+      }
+      const type = owner(virtual)[virtual]
+      return Promise.resolve([
+        type === undefined ? null : new FileStat({ name: virtual.split('/').pop() ?? '', type }),
+        new IOResult(),
+      ])
+    }
+    // `io` makes this a run on the parent mount, so the nested mount is a boundary.
     return {
       ...ctx({}),
-      vfs: new Files(nothing, null, null, () => null, { prefixes: () => ['/', `${ROOT}/`] }),
-      readdirPath: (virtual: string) => Promise.resolve(listing(owner(virtual), virtual)),
-      statPath: (path: string | PathSpec) => {
-        const virtual = path instanceof PathSpec ? path.virtual : path
-        const type = owner(virtual)[virtual]
-        return Promise.resolve(
-          type === undefined ? null : new FileStat({ name: virtual.split('/').pop() ?? '', type }),
-        )
-      },
+      io: {},
+      vfs: new Files(dispatch, null, null, () => null, {
+        prefixes: () => ['/', `${ROOT}/`],
+        ledger: false,
+      }),
     } as unknown as Context
   }
 

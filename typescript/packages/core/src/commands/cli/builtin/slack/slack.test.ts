@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
-import type * as SlackAccessorModule from '../../../../accessor/slack.ts'
+import { describe, expect, it } from 'vitest'
+import { SlackAccessor, slackAccessor } from '../../../../accessor/slack.ts'
 import type { SlackResponse, SlackTransport } from '../../../../core/slack/client.ts'
 import { cliSpecFor } from '../../specs.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
@@ -54,10 +54,7 @@ class FakeTransport implements SlackTransport {
   }
 }
 
-vi.mock('../../../../accessor/slack.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof SlackAccessorModule>()
-  return { ...actual, slackAccessor: () => new actual.SlackAccessor(new FakeTransport()) }
-})
+const ACCESSOR = new SlackAccessor(new FakeTransport())
 
 function unwrap(result: CommandFnResult): [ByteSource | null, IOResult] {
   if (result === null) throw new Error('expected a result tuple')
@@ -82,6 +79,7 @@ describe('slack tree', () => {
   it('matches the OpenClaw vocabulary and registers itself', () => {
     expect(SLACK.spec.subcommands.map((v) => v.name)).toEqual(VERBS)
     expect(cliSpecFor('slack')).toBe(SLACK)
+    expect(SLACK.accessor).toBe(slackAccessor)
   })
 
   it('classifies writers', () => {
@@ -96,9 +94,9 @@ describe('slack verbs', () => {
   it('send-message posts, and threads when --thread-ts is given', async () => {
     CALLS.length = 0
     RESPONSE = { ok: true, ts: '9.9' }
-    await sendMessage({}, [], [], leafContext('send-message', { channel: 'C1', text: 'hi' }))
+    await sendMessage(ACCESSOR, [], [], leafContext('send-message', { channel: 'C1', text: 'hi' }))
     await sendMessage(
-      {},
+      ACCESSOR,
       [],
       [],
       leafContext('send-message', { channel: 'C1', text: 'hi', thread_ts: '1.0' }),
@@ -111,7 +109,7 @@ describe('slack verbs', () => {
     CALLS.length = 0
     RESPONSE = { ok: true, messages: [{ ts: '1.0', text: 'hey' }] }
     const [out] = unwrap(
-      await readMessages({}, [], [], leafContext('read-messages', { channel: 'C1' })),
+      await readMessages(ACCESSOR, [], [], leafContext('read-messages', { channel: 'C1' })),
     )
     expect(CALLS[0]?.endpoint).toBe('conversations.history')
     expect(CALLS[0]?.params).toEqual({ channel: 'C1', limit: '20' })
@@ -121,8 +119,8 @@ describe('slack verbs', () => {
   it('read-messages and search keep an explicit zero', async () => {
     CALLS.length = 0
     RESPONSE = { ok: true, messages: [] }
-    await readMessages({}, [], [], context({ flags: { channel: 'C1', limit: 0 } }))
-    await search({}, [], [], context({ flags: { query: 'q', count: 0, page: 0 } }))
+    await readMessages(ACCESSOR, [], [], context({ flags: { channel: 'C1', limit: 0 } }))
+    await search(ACCESSOR, [], [], context({ flags: { query: 'q', count: 0, page: 0 } }))
     expect(CALLS[0]?.params).toEqual({ channel: 'C1', limit: '0' })
     expect(CALLS[1]?.params).toMatchObject({ query: 'q', count: '0', page: '0' })
   })
@@ -130,14 +128,16 @@ describe('slack verbs', () => {
   it('list-pins renders the items array', async () => {
     CALLS.length = 0
     RESPONSE = { ok: true, items: [{ type: 'message' }] }
-    const [out] = unwrap(await listPins({}, [], [], leafContext('list-pins', { channel: 'C1' })))
+    const [out] = unwrap(
+      await listPins(ACCESSOR, [], [], leafContext('list-pins', { channel: 'C1' })),
+    )
     expect(JSON.parse(DEC.decode(out as Uint8Array))).toEqual([{ type: 'message' }])
   })
 
   it('emoji-list renders the emoji mapping', async () => {
     CALLS.length = 0
     RESPONSE = { ok: true, emoji: { shipit: 'url' } }
-    const [out] = unwrap(await emojiList({}, [], [], leafContext('emoji-list')))
+    const [out] = unwrap(await emojiList(ACCESSOR, [], [], leafContext('emoji-list')))
     expect(JSON.parse(DEC.decode(out as Uint8Array))).toEqual({ shipit: 'url' })
   })
 })

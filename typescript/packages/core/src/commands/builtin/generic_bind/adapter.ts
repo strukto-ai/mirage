@@ -70,7 +70,7 @@ import type { AggregateFn, CommandFnResult, CommandIO, Context } from '../../con
  */
 export function mountIo(ctx: Context): CommandIO {
   if (ctx.io === undefined)
-    throw new TypeError(`${ctx.command ?? ''}: ran without its mount's table`)
+    throw new TypeError(`${ctx.spec?.name ?? ''}: ran without its mount's table`)
   return ctx.io
 }
 
@@ -865,8 +865,8 @@ export function fileSize<A extends Accessor>(
     if (revisionFor(p.virtual) !== null) return null
     const st = await statRefusingDirs(ops, accessor, ctx, p)
     if (st.type !== FileType.FILE || st.mode !== null) return null
-    if (ctx.dispatch === undefined) return st.size
-    const [now] = await ctx.dispatch('stat', p, [], { fresh: true })
+    if (ctx.vfs === undefined) return st.size
+    const [now] = await ctx.vfs.dispatch('stat', p, [], { fresh: true })
     return now instanceof FileStat && now.size === st.size ? st.size : null
   }
 }

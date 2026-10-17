@@ -14,7 +14,8 @@
 
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { mainFilename } from '../execution.ts'
-import type { RunArgs, RunResult } from '../../types.ts'
+import type { Context } from '../../../commands/config.ts'
+import type { Program, RunResult } from '../../types.ts'
 import {
   loadMontyModule,
   type MontyModuleLike,
@@ -72,24 +73,34 @@ export class MontyExecution {
     this.limits = maxMemory === null ? LIMITS : { ...LIMITS, maxMemory }
   }
 
-  async run(args: RunArgs, files: RuntimeFiles | null): Promise<RunResult> {
+  /**
+   * Run one program on a pooled worker.
+   *
+   * @param program the source and argv to run.
+   * @param ctx the run's context: working directory, environment, signal
+   *   and limit.
+   * @param files the run's file adapter; null outside a workspace.
+   */
+  async run(program: Program, ctx: Context, files: RuntimeFiles | null): Promise<RunResult> {
+    // A script is Monty's own script_name, which it keeps the last part of
+    // for `__file__`, under the directory a feed starts in.
     const session = await this.checkout(
-      args.scriptPath === undefined ? undefined : mainFilename(args),
+      program.scriptPath === undefined ? undefined : mainFilename(program, ctx.cwd),
     )
     // Monty executes on its own worker process, so the event loop stays
     // live to observe the limit deadline and the kill signal; a trip
     // SIGKILLs the worker (see killWorker). Deadline -> exit 124 via
     // CommandTimeoutError, kill -> exit 1 like the local runtime.
     const workerPid = session.workerPid
-    const interruption = this.installInterruption(args.signal, args.timeoutSeconds)
+    const interruption = this.installInterruption(ctx.signal, ctx.timeoutSeconds)
     try {
-      const run = this.feedOne(session, args.code, args, files)
+      const run = this.feedOne(session, program, ctx, files)
       const winner = await Promise.race([run, interruption.promise])
       if (winner !== INTERRUPTED) return winner
       run.catch(() => undefined)
       killWorker(workerPid)
-      if (interruption.timedOut.value && args.timeoutSeconds !== undefined) {
-        throw new CommandTimeoutError(this.name, args.timeoutSeconds)
+      if (interruption.timedOut.value && ctx.timeoutSeconds !== undefined) {
+        throw new CommandTimeoutError(this.name, ctx.timeoutSeconds)
       }
       return { stdout: new Uint8Array(), stderr: null, exitCode: 1 }
     } finally {
@@ -197,8 +208,8 @@ export class MontyExecution {
 
   private async feedOne(
     session: MontySessionLike,
-    code: string,
-    args: RunArgs,
+    program: Program,
+    ctx: Context,
     files: RuntimeFiles | null,
   ): Promise<RunResult> {
     const module = await this.loadModule()
@@ -207,17 +218,19 @@ export class MontyExecution {
     const options: Record<string, unknown> = {
       // argv[0] is the program's own name when the caller has one (a
       // CLI install's head word), else the interpreter's placeholder.
-      inputs: { argv: [args.prog ?? DEFAULT_PROG, ...args.args], stdin: args.stdin },
-      cwd: args.cwd?.virtual,
+      // `??`, not `||`: "" is CPython's own argv[0] for a program piped in
+      // with no operand, so an empty prog is an answer.
+      inputs: { argv: [program.prog ?? DEFAULT_PROG, ...program.args], stdin: program.stdin },
+      cwd: ctx.cwd.virtual,
       printCallback: (stream: 'stdout' | 'stderr', text: string) => {
         if (stream === 'stderr') err.push(text)
         else out.push(text)
       },
-      os: new MontyFs(module, args.env, files).handle,
+      os: new MontyFs(module, ctx.env ?? {}, files).handle,
     }
     let exitCode = 0
     try {
-      await session.feedRun(code, options)
+      await session.feedRun(program.code, options)
     } catch (caught) {
       exitCode = 1
       if (caught instanceof module.MontySyntaxError || caught instanceof module.MontyRuntimeError) {

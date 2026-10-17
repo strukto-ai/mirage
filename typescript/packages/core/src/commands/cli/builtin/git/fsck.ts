@@ -1,5 +1,6 @@
 import git from 'isomorphic-git'
 import Hash from 'sha.js'
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { type PathSpec, FileType } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -125,7 +126,7 @@ function reachable(
 
 /** Hash and decode every object, including unreachable objects and packed objects. */
 export async function fsck(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

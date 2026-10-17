@@ -17,7 +17,7 @@ import { updatePage } from '../../../../../core/notion/pages.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { firstText, notionTransport, usageError } from '../util.ts'
+import { firstText, notionTransport, usageError, type NtnAccessor } from '../util.ts'
 
 const ENC = new TextEncoder()
 const NEEDS_YES =
@@ -25,7 +25,7 @@ const NEEDS_YES =
   '  hint: Use --yes to skip the confirmation prompt.\n'
 
 export async function trash(
-  config: unknown,
+  accessor: NtnAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -42,6 +42,6 @@ export async function trash(
   if (!fl.asBool('yes')) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(NEEDS_YES) })]
   }
-  await updatePage(notionTransport(config, ctx.flags), pageId, { in_trash: true })
+  await updatePage(notionTransport(accessor, ctx.flags), pageId, { in_trash: true })
   return [null, new IOResult({ stderr: ENC.encode('✔ Page trashed\n') })]
 }

@@ -19,9 +19,9 @@ import sys
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, ClassVar
 
+from mirage.commands.config import Context
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource
-from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.config import RuntimeConfig, resolve_home
 from mirage.runtime.mixin import StreamingProcessMixin
 from mirage.runtime.python.base import PythonRuntime
@@ -34,14 +34,9 @@ from mirage.runtime.sandbox.cli import (
     cwd_refusal,
     run_cli,
 )
-from mirage.runtime.types import (
-    ProcessExecution,
-    RunArgs,
-    RunResult,
-    RuntimeReach,
-    StreamExecution,
-)
+from mirage.runtime.types import OutputFn, Program, RunResult, RuntimeReach
 from mirage.shell.bytes import encode_text
+from mirage.types import PathSpec
 
 LOCAL_HOME_ENV = "MIRAGE_LOCAL_HOME"
 
@@ -76,7 +71,7 @@ def _not_run(message: str, exit_code: int) -> RunResult:
     )
 
 
-class LocalRuntime(PythonRuntime, StreamingProcessMixin):
+class LocalRuntime(PythonRuntime[None], StreamingProcessMixin[None]):
     """Run Python code, and any other captured program, on the host.
 
     Each python3 run spawns `<interpreter> -c <code>`. Any other name
@@ -130,30 +125,48 @@ class LocalRuntime(PythonRuntime, StreamingProcessMixin):
         # Session loader variables can execute code before --version is read.
         return await self._spawn(self._python, ["--version"], {})
 
-    async def run(
-        self, args: RunArgs, context: RuntimeContext | None = None
+    async def interpret(
+        self, engine: None, program: Program, ctx: Context
     ) -> RunResult:
         # Honoring the init switches is just handing them back to the
         # real interpreter, which is why this tier gets them exactly
         # right (sys.flags included) where an in-process engine cannot.
         return await self._spawn(
             self._python,
-            [*init_argv(args.flags), "-c", prepare_source(args), *args.args],
-            args.env,
-            args.stdin,
+            [
+                *init_argv(ctx.flags),
+                "-c",
+                prepare_source(program, ctx.cwd),
+                *program.args,
+            ],
+            ctx.env or {},
+            program.stdin,
         )
 
-    async def run_process(self, request: ProcessExecution) -> RunResult:
-        return await self._run_process(request)
+    async def run_process(
+        self,
+        engine: None,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+    ) -> RunResult:
+        return await self._run_process(texts, ctx, None)
 
-    async def run_stream(self, request: StreamExecution) -> RunResult:
-        return await self._run_process(request)
+    async def run_stream(
+        self,
+        engine: None,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+        output: OutputFn,
+    ) -> RunResult:
+        return await self._run_process(texts, ctx, output)
 
     async def _run_process(
-        self, request: ProcessExecution | StreamExecution
+        self, argv: list[str], ctx: Context, output: OutputFn | None
     ) -> RunResult:
-        name = request.argv[0]
-        cwd = request.cwd.virtual
+        name = argv[0]
+        cwd = ctx.cwd.virtual
         refusal = cwd_refusal(name, cwd)
         if refusal is not None:
             return refusal
@@ -181,13 +194,11 @@ class LocalRuntime(PythonRuntime, StreamingProcessMixin):
         try:
             return await self._spawn(
                 program,
-                list(request.argv[1:]),
-                request.env,
-                request.stdin,
+                argv[1:],
+                ctx.env or {},
+                ctx.stdin,
                 cwd,
-                request.output
-                if isinstance(request, StreamExecution)
-                else None,
+                output,
             )
         except OSError as exc:
             reason = fs_strerror(exc) or errno.errorcode.get(

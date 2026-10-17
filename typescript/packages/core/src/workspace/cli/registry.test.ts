@@ -121,14 +121,12 @@ describe('CLIRegistry', () => {
     expect(reg.install('prog', tree()).config).toBeNull()
   })
 
-  it('uninstall removes and unknown throws', () => {
+  it('uninstall removes and unknown throws', async () => {
     const reg = new CLIRegistry()
     reg.install('prog', tree())
-    reg.uninstall('prog')
+    await reg.uninstall('prog')
     expect(reg.get('prog')).toBeNull()
-    expect(() => {
-      reg.uninstall('prog')
-    }).toThrow(/not installed/)
+    await expect(reg.uninstall('prog')).rejects.toThrow(/not installed/)
   })
 })
 

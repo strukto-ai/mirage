@@ -17,37 +17,29 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { EmailAccessor } from '../../../../accessor/email.ts'
+import type { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchHeaders, listMessageUids } from '../../../../core/email/client.ts'
-import type { EmailConfig } from '../../../../core/email/config.ts'
 import { envelopesJsonBytes } from '../../../../core/email/render.ts'
 import { pageSlice, pageWindow, sortHeaders, uidBudget } from './query.ts'
 
 export const DEFAULT_PAGE_SIZE = 25
 
 export async function listEnvelopes(
-  config: unknown,
+  accessor: EmailAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   const mailbox = fl.asStr('mailbox', 'INBOX')
-  const account = config as EmailConfig
   const [page, pageSize] = pageWindow(
     fl.asInt('page', 1),
     fl.asInt('page_size', DEFAULT_PAGE_SIZE),
-    account.maxMessages,
+    accessor.config.maxMessages,
   )
-  const budget = uidBudget(page, pageSize, [], account.maxMessages)
-  const accessor = new EmailAccessor(account)
-  let headers
-  try {
-    const uids = await listMessageUids(accessor, mailbox, 'ALL', budget)
-    headers = uids.length > 0 ? await fetchHeaders(accessor, mailbox, uids) : []
-  } finally {
-    await accessor.close()
-  }
+  const budget = uidBudget(page, pageSize, [], accessor.config.maxMessages)
+  const uids = await listMessageUids(accessor, mailbox, 'ALL', budget)
+  const headers = uids.length > 0 ? await fetchHeaders(accessor, mailbox, uids) : []
   const pageOf = pageSlice(sortHeaders(headers, []), page, pageSize)
   const out: ByteSource = envelopesJsonBytes(pageOf)
   return [out, new IOResult()]

@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
+from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.core.hf_hub.account import whoami
 from mirage.core.hf_hub.config import HfConfig
 
@@ -24,12 +25,14 @@ from mirage.core.hf_hub.config import HfConfig
 @patch("mirage.core.hf_hub.account.hub_get")
 async def test_whoami_reads_the_v2_endpoint(mock_get):
     mock_get.return_value = {"name": "zoe"}
-    assert await whoami(HfConfig(token="t")) == {"name": "zoe"}
+    account = HfAccountAccessor(HfConfig(token="t"))
+    assert await whoami(account) == {"name": "zoe"}
     assert mock_get.await_args.args[1].endswith("/api/whoami-v2")
+    assert mock_get.await_args.args[0] is account
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.hf_hub.account.hub_get")
 async def test_whoami_of_a_non_object_is_empty(mock_get):
     mock_get.return_value = None
-    assert await whoami(HfConfig()) == {}
+    assert await whoami(HfAccountAccessor(HfConfig())) == {}

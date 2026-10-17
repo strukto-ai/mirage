@@ -14,8 +14,7 @@
 
 import { FlagView } from '../../../../../commands/spec/flag_view.ts'
 import { extractHeader, getMessageRaw, listMessages } from '../../../../../core/gmail/messages.ts'
-import { TokenManager } from '../../../../../core/google/client.ts'
-import type { GoogleConfig } from '../../../../../core/google/config.ts'
+import type { GoogleApiAccessor } from '../../../../../accessor/google_api.ts'
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../../commands/config.ts'
 import type { PathSpec } from '../../../../../types.ts'
@@ -23,7 +22,7 @@ import type { PathSpec } from '../../../../../types.ts'
 const ENC = new TextEncoder()
 
 export async function triage(
-  config: unknown,
+  accessor: GoogleApiAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
@@ -31,8 +30,7 @@ export async function triage(
   const fl = new FlagView(ctx.flags)
   const query = fl.asStr('query', 'is:unread')
   const maxResults = fl.asInt('max', 20)
-  const tm = new TokenManager(config as GoogleConfig)
-  const stubs = await listMessages(tm, { query, maxResults })
+  const stubs = await listMessages(accessor.tokenManager, { query, maxResults })
   const summaries: {
     id: string
     from: string
@@ -43,7 +41,7 @@ export async function triage(
   for (const stub of stubs) {
     const mid = stub.id
     if (mid === '') continue
-    const raw = await getMessageRaw(tm, mid)
+    const raw = await getMessageRaw(accessor.tokenManager, mid)
     const headers = raw.payload?.headers ?? []
     summaries.push({
       id: mid,

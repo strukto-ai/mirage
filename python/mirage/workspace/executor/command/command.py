@@ -218,7 +218,7 @@ async def handle_command(
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
     namespace: Namespace | None = None,
-    routing_decision: RouteDecision[Runtime] | None = None,
+    routing_decision: RouteDecision[Runtime[Any]] | None = None,
     execute_fn: ExecuteLine | None = None,
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
@@ -296,6 +296,8 @@ async def handle_command(
         dispatch,
         links=namespace,
         visibility=lambda _session: session.visibility,
+        follow=follow,
+        ledger=False,
     )
 
     # Installed CLIs: dispatch by name, never by operand path. Sits

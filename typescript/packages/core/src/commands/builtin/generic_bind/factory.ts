@@ -28,7 +28,7 @@ import {
   type Context,
 } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { linksOf } from '../utils/links.ts'
+import { linksOf, followOf } from '../utils/links.ts'
 import { type GenericCommand, mountIo, withAbortGuard, withDirGuard } from './adapter.ts'
 import { type StatOp } from '../../../vfs/types.ts'
 import { BUILDERS } from './builders/index.ts'
@@ -103,12 +103,13 @@ function writeWraps<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
 // take the uniform path.
 function stampNamespace(raw: CommandIO, ctx: Context): CommandIO {
   const links = linksOf(ctx)
+  const follow = followOf(ctx)
   return {
     ...raw,
     ...(links === undefined
       ? {}
       : { globTargetStat: (virtual: string) => links.targetStat(virtual) }),
-    ...(ctx.followOperands === undefined ? {} : { globFollow: ctx.followOperands }),
+    ...(follow === undefined ? {} : { globFollow: follow }),
   }
 }
 

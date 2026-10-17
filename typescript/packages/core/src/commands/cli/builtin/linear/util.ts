@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { LinearAccessor } from '../../../../accessor/linear.ts'
 import {
   HttpLinearTransport,
   resolveIssueId,
@@ -19,7 +20,6 @@ import {
   listTeamLabels,
   listTeamProjects,
 } from '../../../../core/linear/client.ts'
-import type { LinearTransport } from '../../../../core/linear/client.ts'
 import type { LinearConfig } from '../../../../core/linear/config.ts'
 import { materialize, type ByteSource } from '../../../../io/types.ts'
 import { enoent } from '../../../../errors/fs.ts'
@@ -27,11 +27,16 @@ import { enoent } from '../../../../errors/fs.ts'
 const ISSUE_KEY_RE = /^[A-Za-z][A-Za-z0-9]*-\d+$/
 const DEC = new TextDecoder()
 
-export function linearTransport(config: unknown): LinearTransport {
+// The install's accessor: one transport every leaf rides, and `team list`'s team filter.
+export function linearAccessor(config: unknown): LinearAccessor {
   const cfg = config as LinearConfig
-  return new HttpLinearTransport({
+  const transport = new HttpLinearTransport({
     apiKey: cfg.apiKey,
     ...(cfg.baseUrl !== undefined && cfg.baseUrl !== '' ? { baseUrl: cfg.baseUrl } : {}),
+  })
+  return new LinearAccessor(transport, {
+    ...(cfg.teamIds !== undefined ? { teamIds: cfg.teamIds } : {}),
+    ...(cfg.contentSearch !== undefined ? { contentSearch: cfg.contentSearch } : {}),
   })
 }
 
@@ -41,13 +46,13 @@ export function firstText(texts: readonly string[], label: string): string {
   return value
 }
 
-export async function resolveIssue(transport: LinearTransport, token: string): Promise<string> {
-  if (ISSUE_KEY_RE.test(token)) return resolveIssueId(transport, null, token)
+export async function resolveIssue(accessor: LinearAccessor, token: string): Promise<string> {
+  if (ISSUE_KEY_RE.test(token)) return resolveIssueId(accessor.transport, null, token)
   return token
 }
 
 export async function resolveStateId(
-  transport: LinearTransport,
+  accessor: LinearAccessor,
   stateId: string | null | undefined,
   stateName: string | null | undefined,
 ): Promise<string> {
@@ -55,7 +60,7 @@ export async function resolveStateId(
   if (stateName === undefined || stateName === null || stateName === '') {
     throw new Error('--state-id or --state-name is required')
   }
-  const teams = await listTeams(transport)
+  const teams = await listTeams(accessor.transport)
   for (const team of teams) {
     const states = team.states
     const nodes =
@@ -70,7 +75,7 @@ export async function resolveStateId(
 }
 
 export async function resolveLabelId(
-  transport: LinearTransport,
+  accessor: LinearAccessor,
   teamId: string,
   labelId: string | null | undefined,
   labelName: string | null | undefined,
@@ -79,14 +84,14 @@ export async function resolveLabelId(
   if (labelName === undefined || labelName === null || labelName === '') {
     throw new Error('--label or --label-name is required')
   }
-  for (const label of await listTeamLabels(transport, teamId)) {
+  for (const label of await listTeamLabels(accessor.transport, teamId)) {
     if (label.name === labelName && typeof label.id === 'string') return label.id
   }
   throw enoent(labelName)
 }
 
 export async function resolveProjectId(
-  transport: LinearTransport,
+  accessor: LinearAccessor,
   teamId: string,
   projectId: string | null | undefined,
   projectName: string | null | undefined,
@@ -95,7 +100,7 @@ export async function resolveProjectId(
   if (projectName === undefined || projectName === null || projectName === '') {
     throw new Error('--project or --project-name is required')
   }
-  for (const project of await listTeamProjects(transport, teamId)) {
+  for (const project of await listTeamProjects(accessor.transport, teamId)) {
     if (project.name === projectName && typeof project.id === 'string') return project.id
   }
   throw enoent(projectName)

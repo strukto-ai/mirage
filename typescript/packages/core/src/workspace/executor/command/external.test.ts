@@ -11,16 +11,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { command } from '../../../commands/config.ts'
+import { type Context, command } from '../../../commands/config.ts'
 import { CommandSpec, Argument } from '../../../commands/spec/types.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RulePolicy } from '../../../policy/rule.ts'
 import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import { Runtime } from '../../../runtime/base.ts'
-import type { ProcessExecution, StreamExecution, RunResult } from '../../../runtime/types.ts'
+import type { OutputFn, RunResult } from '../../../runtime/types.ts'
 import {
   LINE_EXECUTOR,
   PROCESS_EXECUTOR,
@@ -31,7 +31,7 @@ import {
 } from '../../../runtime/mixin.ts'
 import type { RuntimeOptions } from '../../../runtime/config.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { Limit, MountMode } from '../../../types.ts'
+import { Limit, MountMode, type PathSpec } from '../../../types.ts'
 import * as globs from '../../expand/globs.ts'
 import { Consumer, SHELL_NAMES, lookup, lookupAll } from '../../lookup/index.ts'
 import { SessionState } from '../../session/session.ts'
@@ -42,30 +42,30 @@ import { getTestParser } from '../../fixtures/workspace_fixture.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
+/** What one process run received: its argv beside the run's context. */
+type Request = Context & { argv: readonly string[] }
+
 class ProcessProbe extends Runtime implements ProcessExecutor {
   readonly [PROCESS_EXECUTOR] = true as const
   name = 'probe'
-  requests: ProcessExecution[] = []
+  requests: Request[] = []
   constructor(options: RuntimeOptions = {}) {
     super(options, [EXTERNAL_COMMANDS])
   }
-  runProcess(request: ProcessExecution): Promise<RunResult> {
-    this.requests.push(request)
-    return Promise.resolve({
-      stdout: request.stdin ?? ENC.encode('GPU ready\nother\n'),
-      stderr: null,
-      exitCode: 0,
-    })
+  async runProcess(_e: unknown, _p: PathSpec[], argv: string[], ctx: Context): Promise<RunResult> {
+    this.requests.push({ ...ctx, argv })
+    const stdin = ctx.stdin === null ? null : await materialize(ctx.stdin)
+    return { stdout: stdin ?? ENC.encode('GPU ready\nother\n'), stderr: null, exitCode: 0 }
   }
 }
 
 class StreamingProbe extends ProcessProbe implements StreamingProcess {
   readonly [STREAMING_PROCESS] = true as const
-  streams: StreamExecution[] = []
+  streams: Request[] = []
 
-  async runStream(request: StreamExecution): Promise<RunResult> {
-    this.streams.push(request)
-    await request.output(ENC.encode(request.env.TOKEN ?? 'unset'))
+  async runStream(_e: unknown, _p: PathSpec[], argv: string[], ctx: Context, out: OutputFn) {
+    this.streams.push({ ...ctx, argv })
+    await out(ENC.encode(ctx.env?.TOKEN ?? 'unset'))
     return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
   }
 }
@@ -73,13 +73,13 @@ class StreamingProbe extends ProcessProbe implements StreamingProcess {
 class DelayedProcessProbe extends ProcessProbe {
   aborted = false
 
-  override async runProcess(request: ProcessExecution): Promise<RunResult> {
-    this.requests.push(request)
+  override async runProcess(_e: unknown, _p: PathSpec[], argv: string[], ctx: Context) {
+    this.requests.push({ ...ctx, argv })
     try {
-      await sleep(150, request.signal)
+      await sleep(150, ctx.signal)
       return { stdout: ENC.encode('completed\n'), stderr: null, exitCode: 0 }
     } catch (err) {
-      this.aborted = request.signal?.aborted ?? false
+      this.aborted = ctx.signal?.aborted ?? false
       throw err
     }
   }
@@ -107,7 +107,7 @@ describe('external program capture', () => {
       expect(DEC.decode((await ws.shell('cat /out')).stdout)).toBe('GPU ready\n')
       expect(probe.requests).toHaveLength(1)
       expect(probe.requests[0]?.argv).toEqual(['native-tool'])
-      expect(DEC.decode(probe.requests[0]?.stdin ?? undefined)).toBe('GPU ready\nother\n')
+      expect(probe.requests[0]?.stdin).toEqual(ENC.encode('GPU ready\nother\n'))
     } finally {
       await ws.close()
     }
@@ -130,9 +130,9 @@ describe('external program capture', () => {
         '',
       ])
       expect(probe.requests[0]?.cwd.virtual).toBe('/work')
-      expect(probe.requests[0]?.env.TOKEN).toBe('one')
+      expect(probe.requests[0]?.env?.TOKEN).toBe('one')
       await ws.shell('native-tool')
-      expect(probe.requests[1]?.env.TOKEN).toBeUndefined()
+      expect(probe.requests[1]?.env?.TOKEN).toBeUndefined()
     } finally {
       await ws.close()
     }
@@ -146,7 +146,7 @@ describe('external program capture', () => {
       const result = await ws.shell('TOKEN=one PATH=/private/bin native-tool | cat')
       expect(result.exitCode).toBe(0)
       expect(DEC.decode(result.stdout)).toBe('one')
-      expect(probe.streams[0]?.env.PATH).toBe('/private/bin')
+      expect(probe.streams[0]?.env?.PATH).toBe('/private/bin')
       expect(probe.streams[0]?.cwd.virtual).toBe('/work')
       expect(DEC.decode((await ws.shell('native-tool')).stdout)).toBe('unset')
     } finally {
@@ -303,8 +303,8 @@ class ShellProbe extends Runtime implements LineExecutor {
   readonly [LINE_EXECUTOR] = true as const
   name = 'shell-probe'
   lines: string[] = []
-  runLine(line: string): Promise<RunResult> {
-    this.lines.push(line)
+  runLine(_e: unknown, _p: PathSpec[], _t: string[], ctx: Context): Promise<RunResult> {
+    this.lines.push(ctx.flags.c as string)
     return Promise.resolve({ stdout: ENC.encode('ok\n'), stderr: null, exitCode: 0 })
   }
 }
@@ -659,7 +659,7 @@ it.each([
 })
 
 class FailingProcess extends ProcessProbe {
-  override runProcess(_request: ProcessExecution): Promise<RunResult> {
+  override runProcess(): Promise<RunResult> {
     return Promise.reject(new Error('provider unavailable'))
   }
 }

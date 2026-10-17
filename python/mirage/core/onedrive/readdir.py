@@ -26,8 +26,7 @@ async def readdir(
     accessor: OneDriveAccessor, path: PathSpec
 ) -> list[FileStat]:
     return await readdir_items(
-        accessor.config,
+        accessor,
         drive_loc(accessor.config, directory_path(path).vfs_path),
         virtual_key(path),
-        session=accessor.pool,
     )

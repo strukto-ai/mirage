@@ -161,13 +161,12 @@ describe('the link resolver', () => {
     expect(isDotWalkError(caught) && caught.code).toBe('ELOOP')
   })
 
-  it('is absent without links or a dispatcher', () => {
+  it('is absent without files or links', () => {
     const [dispatch] = recorder()
     const base: Context = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/') }
-    const vfs = new Files(dispatch, null, table({}))
     expect(linkResolver(base)).toBeNull()
-    expect(linkResolver({ ...base, vfs })).toBeNull()
-    expect(linkResolver({ ...base, vfs, dispatch })?.cwd).toBe('/')
+    expect(linkResolver({ ...base, vfs: new Files(dispatch) })).toBeNull()
+    expect(linkResolver({ ...base, vfs: new Files(dispatch, null, table({})) })?.cwd).toBe('/')
   })
 })
 

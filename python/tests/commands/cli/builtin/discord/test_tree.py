@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.cli.builtin.discord import DISCORD
 from mirage.commands.spec.compile import compile_spec
 from mirage.core.discord.config import DiscordConfig
@@ -37,6 +38,7 @@ def leaf(name: str):
 def test_tree_shape_matches_the_openclaw_vocabulary():
     assert DISCORD.spec.name == "discord"
     assert DISCORD.config_model is DiscordConfig
+    assert DISCORD.accessor is DiscordAccessor
     assert [v.name for v in DISCORD.spec.subcommands] == VERBS
 
 

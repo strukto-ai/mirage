@@ -14,6 +14,7 @@
 
 import git from 'isomorphic-git'
 
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
@@ -474,7 +475,7 @@ async function prune(repo: Repo, adv: Advertisement, specs: readonly Refspec[]):
  * FETCH_HEAD, and prints git's summary to stderr.
  */
 export async function fetch(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

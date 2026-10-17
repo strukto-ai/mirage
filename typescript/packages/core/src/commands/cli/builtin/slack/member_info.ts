@@ -17,18 +17,18 @@ import { getUserProfile } from '../../../../core/slack/users.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { slackAccessor } from '../../../../accessor/slack.ts'
+import type { SlackAccessor } from '../../../../accessor/slack.ts'
 
 const ENC = new TextEncoder()
 
 export async function memberInfo(
-  config: unknown,
+  accessor: SlackAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, ctx.spec)
-  const user = await getUserProfile(slackAccessor(config), fl.asStr('user') ?? '')
+  const user = await getUserProfile(accessor, fl.asStr('user') ?? '')
   const out: ByteSource = ENC.encode(JSON.stringify(user))
   return [out, new IOResult()]
 }

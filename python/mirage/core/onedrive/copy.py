@@ -30,8 +30,7 @@ async def copy(
     """
     config = accessor.config
     await copy_tree(
-        config,
+        accessor,
         drive_loc(config, src.vfs_path),
         drive_loc(config, dst.vfs_path),
-        session=accessor.pool,
     )

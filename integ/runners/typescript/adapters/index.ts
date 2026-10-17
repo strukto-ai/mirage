@@ -2132,13 +2132,13 @@ async function openGitHub(target: Target, options?: OpenOptions): Promise<Open> 
     const vfs = await create(m)
     try {
       try {
-        const current = (await vfs.accessor.transport.get(endpoint)) as { sha?: string }
+        const current = (await vfs.accessor.account.transport.get(endpoint)) as { sha?: string }
         if (current.sha !== undefined) body.sha = current.sha
       } catch (err) {
         // Absent: create it. GitHub refuses a sha for a new file.
         if ((err as { status?: number }).status !== 404) throw err
       }
-      await vfs.accessor.transport.request('PUT', endpoint, body)
+      await vfs.accessor.account.transport.request('PUT', endpoint, body)
     } finally {
       await vfs.close()
     }
@@ -2156,8 +2156,8 @@ async function openGitHub(target: Target, options?: OpenOptions): Promise<Open> 
     const endpoint = `/repos/${owner ?? ''}/${repo ?? ''}/contents/${encoded}`
     const vfs = await create(m)
     try {
-      const current = (await vfs.accessor.transport.get(endpoint)) as { sha: string }
-      await vfs.accessor.transport.request('DELETE', endpoint, {
+      const current = (await vfs.accessor.account.transport.get(endpoint)) as { sha: string }
+      await vfs.accessor.account.transport.request('DELETE', endpoint, {
         message: `integ: delete ${rel}`,
         sha: current.sha,
       })

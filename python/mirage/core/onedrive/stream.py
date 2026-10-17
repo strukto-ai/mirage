@@ -26,11 +26,10 @@ async def read_stream(
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
     async for chunk in stream_item(
-        accessor.config,
+        accessor,
         drive_loc(accessor.config, path.vfs_path),
         path.virtual,
         "onedrive",
         chunk_size,
-        session=accessor.pool,
     ):
         yield chunk

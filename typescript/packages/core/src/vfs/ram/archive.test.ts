@@ -16,7 +16,7 @@ import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { type Context, type Command } from '../../commands/config.ts'
 import { describe, expect, it } from 'vitest'
-import { IOResult, materialize } from '../../io/types.ts'
+import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import { RAMVFS } from './ram.ts'
 import type { NamespaceLinks } from '../../view/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
@@ -73,12 +73,17 @@ function linkTable(entries: Record<string, string>, cycles = false): NamespaceLi
 }
 
 // The session's files over one RAM mount and a link table: the dispatcher
-// answers a stat from the mount itself.
+// answers from the mount itself, which a walk's scan guard never refuses.
 function filesOver(vfs: RAMVFS, links: NamespaceLinks): Files {
   const io = commandIo(vfs)
-  const dispatch: DispatchFn = async (op, path) => {
+  const dispatch: DispatchFn = async (op, path, args = []) => {
     if (op === 'stat') return [await io.stat(vfs.accessor, path), new IOResult()]
     if (op === 'readdir') return [await io.readdir(vfs.accessor, path), new IOResult()]
+    if (op === 'before_full_scan') return [null, new IOResult()]
+    if (op === 'write' && io.write !== undefined) {
+      await io.write(vfs.accessor, path, args[0] as ByteSource)
+      return [null, new IOResult()]
+    }
     throw new Error(`unexpected ${op}`)
   }
   return new Files(dispatch, null, links)

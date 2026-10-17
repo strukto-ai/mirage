@@ -31,6 +31,7 @@ import {
   prettyJson,
   propertyCell,
   usageError,
+  type NtnAccessor,
 } from '../util.ts'
 import { compareCodePoints } from '../../../../../utils/sort.ts'
 
@@ -123,7 +124,7 @@ async function filterBody(
 }
 
 export async function query(
-  config: unknown,
+  accessor: NtnAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -147,7 +148,7 @@ export async function query(
     return usageError(err)
   }
 
-  const transport = notionTransport(config, ctx.flags)
+  const transport = notionTransport(accessor, ctx.flags)
   const dataSource = await resolveSource(transport, ref)
   const result = await queryDataSourcePage(transport, strOf(dataSource, 'id'), body)
   if (fl.asBool('json')) return [prettyJson(result), new IOResult()]

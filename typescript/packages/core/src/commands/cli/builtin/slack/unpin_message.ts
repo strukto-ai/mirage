@@ -17,22 +17,18 @@ import { unpinMessage as unpinMessageCore } from '../../../../core/slack/pins.ts
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { slackAccessor } from '../../../../accessor/slack.ts'
+import type { SlackAccessor } from '../../../../accessor/slack.ts'
 
 const ENC = new TextEncoder()
 
 export async function unpinMessage(
-  config: unknown,
+  accessor: SlackAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, ctx.spec)
-  const result = await unpinMessageCore(
-    slackAccessor(config),
-    fl.asStr('channel') ?? '',
-    fl.asStr('ts') ?? '',
-  )
+  const result = await unpinMessageCore(accessor, fl.asStr('channel') ?? '', fl.asStr('ts') ?? '')
   const out: ByteSource = ENC.encode(JSON.stringify(result))
   return [out, new IOResult()]
 }

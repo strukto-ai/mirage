@@ -12,24 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { LinearAccessor } from '../../../../../accessor/linear.ts'
 import { commentUpdate } from '../../../../../core/linear/client.ts'
 import { normalizeComment, toJsonBytes } from '../../../../../core/linear/normalize.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { linearTransport, textOrStdin } from '../util.ts'
+import { textOrStdin } from '../util.ts'
 
 export async function update(
-  config: unknown,
+  accessor: LinearAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const transport = linearTransport(config)
   const body = await textOrStdin(fl.asStr('body'), ctx.stdin, 'comment body is required')
-  const comment = await commentUpdate(transport, fl.asStr('comment') ?? '', body)
+  const comment = await commentUpdate(accessor.transport, fl.asStr('comment') ?? '', body)
   const issue = comment.issue
   const issueObj =
     issue !== null && typeof issue === 'object' ? (issue as Record<string, unknown>) : null

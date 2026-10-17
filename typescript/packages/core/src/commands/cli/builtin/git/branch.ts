@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { PathSpec } from '../../../../types.ts'
 import git from 'isomorphic-git'
 import { HEAD } from './constants.ts'
@@ -475,7 +476,7 @@ async function listBranches(
  * git answers with its usage.
  */
 export async function branch(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

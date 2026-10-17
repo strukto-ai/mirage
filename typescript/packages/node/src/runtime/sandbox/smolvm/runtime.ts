@@ -37,7 +37,10 @@ import { type CliResult, openCliPipe, runCli } from '../cli.ts'
  * the guest at the host's mount prefixes, the same contract every
  * provider in this family carries.
  */
-export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements ProcessExecutor {
+export class SmolvmRuntime
+  extends RemoteSandbox<SmolvmConfig>
+  implements ProcessExecutor<undefined>
+{
   readonly [PROCESS_EXECUTOR] = true as const
   readonly name = 'smolvm'
 

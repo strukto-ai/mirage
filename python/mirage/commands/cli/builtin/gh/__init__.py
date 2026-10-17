@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh import actions as action_commands
 from mirage.commands.cli.builtin.gh import issue as issue_commands
 from mirage.commands.cli.builtin.gh import pull as pull_commands
@@ -614,7 +615,10 @@ def _workflow() -> CommandSpec:
 
 
 async def _help_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[bytes | None, IOResult]:
     """``gh help [<command>...]``, as cobra answers it.
 
@@ -624,7 +628,7 @@ async def _help_cmd(
     commands and still exits 0.
 
     Args:
-        config (GhConfig): the install's account config.
+        accessor (GitHubAccount): the install's account.
         paths (list[PathSpec]): the path operands.
         texts (list[str]): the words after ``help``.
         ctx (Context): the invocation's context.
@@ -778,4 +782,5 @@ GH = CLI(
         ),
     },
     config_model=GhConfig,
+    accessor=GitHubAccount,
 )

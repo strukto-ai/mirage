@@ -15,7 +15,7 @@
 import { Limit, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-browser'
 import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
 
-import { exerciseCancellation } from './e2b_cancel.ts'
+import { exerciseCancellation, runLine } from './e2b_cancel.ts'
 
 const dec = new TextDecoder()
 
@@ -30,11 +30,10 @@ export async function exercise(config: { sandboxId: string; apiKey: string }): P
     // Concurrent first calls also exercise the shared connection latch.
     const results = await Promise.all(
       Array.from({ length: 6 }, (_, i) =>
-        runtime.runLine(
+        runLine(
+          runtime,
           "python3 -c 'import sys,time,json; s=time.time(); d=sys.stdin.buffer.read(); time.sleep(2); print(json.dumps([s,time.time(),d.hex()]))'",
           new Uint8Array([i]),
-          {},
-          '/home/user',
         ),
       ),
     )
@@ -56,11 +55,10 @@ export async function exercise(config: { sandboxId: string; apiKey: string }): P
       const expected = Array.from(new Uint8Array(digest), (b) =>
         b.toString(16).padStart(2, '0'),
       ).join('')
-      const result = await runtime.runLine(
+      const result = await runLine(
+        runtime,
         "python3 -c 'import sys,hashlib; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'",
         stdin,
-        {},
-        '/home/user',
       )
       check(result.exitCode === 0, dec.decode(result.stderr ?? undefined))
       check(dec.decode(result.stdout).trim() === expected, 'stdin bytes or EOF changed')
@@ -68,11 +66,10 @@ export async function exercise(config: { sandboxId: string; apiKey: string }): P
     checks.push('absent, empty, and 256 KiB binary stdin with EOF')
 
     for (let i = 0; i < 6; i++) {
-      const result = await runtime.runLine(
+      const result = await runLine(
+        runtime,
         'printf out; printf err >&2; exit 7',
         new Uint8Array([1]),
-        {},
-        '/home/user',
       )
       check(result.exitCode === 7, 'lost nonzero exit status')
       check(

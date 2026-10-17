@@ -14,9 +14,9 @@
 
 import json
 
+from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.post import edit_message
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -24,14 +24,14 @@ from mirage.types import PathSpec
 
 
 async def edit(
-    config: DiscordConfig,
+    accessor: DiscordAccessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     result = await edit_message(
-        config,
+        accessor,
         fl.as_str("channel") or "",
         fl.as_str("message") or "",
         fl.as_str("text") or "",

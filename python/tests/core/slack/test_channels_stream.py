@@ -16,13 +16,14 @@ from unittest.mock import patch
 
 import pytest
 
+from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.channels import list_channels_stream
 from mirage.core.slack.config import SlackConfig
 
 
 @pytest.mark.asyncio
 async def test_list_channels_stream_yields_pages():
-    cfg = SlackConfig(token="xoxb-t")
+    acc = SlackAccessor(SlackConfig(token="xoxb-t"))
     pages = [
         {
             "channels": [{"id": "C1"}, {"id": "C2"}],
@@ -32,14 +33,14 @@ async def test_list_channels_stream_yields_pages():
     ]
     calls = []
 
-    async def fake_get(_cfg, method, params=None, token=None, session=None):
+    async def fake_get(_acc, method, params=None):
         assert method == "conversations.list"
         calls.append(dict(params or {}))
         return pages[len(calls) - 1]
 
     with patch("mirage.core.slack.paginate.slack_get", new=fake_get):
         seen = []
-        async for page in list_channels_stream(cfg):
+        async for page in list_channels_stream(acc):
             seen.append(page)
     assert [ch["id"] for ch in seen[0]] == ["C1", "C2"]
     assert [ch["id"] for ch in seen[1]] == ["C3"]

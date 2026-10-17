@@ -15,10 +15,9 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
-from mirage.core.api.client import SessionArg
+from mirage.accessor.slack import SlackAccessor
 from mirage.core.render.json import compact_json_bytes
 from mirage.core.slack.client import slack_get
-from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.paginate import cursor_pages
 
 
@@ -31,44 +30,41 @@ def _is_real_user(m: dict[str, Any]) -> bool:
 
 
 async def list_users_stream(
-    config: SlackConfig, limit: int = 200, session: SessionArg = None
+    accessor: SlackAccessor, limit: int = 200
 ) -> AsyncIterator[list[dict[str, Any]]]:
     """Page-streaming user list; yields filtered humans per page.
 
     Args:
-        config (SlackConfig): Slack credentials.
+        accessor (SlackAccessor): Slack accessor.
         limit (int): max per page.
-        session (SessionArg): pool or live session to ride.
 
     Yields:
         list[dict]: real users in one Slack page (bots, deleted, and
         slackbot are filtered out before yielding).
     """
     async for page in cursor_pages(
-        config,
+        accessor,
         "users.list",
         base_params={"limit": limit},
         items_key="members",
-        session=session,
     ):
         yield [m for m in page if _is_real_user(m)]
 
 
 async def list_users(
-    config: SlackConfig, limit: int = 200, session: SessionArg = None
+    accessor: SlackAccessor, limit: int = 200
 ) -> list[dict[str, Any]]:
     """List workspace users (eager; collects all pages).
 
     Args:
-        config (SlackConfig): Slack credentials.
+        accessor (SlackAccessor): Slack accessor.
         limit (int): max per page.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         list[dict]: user dicts.
     """
     out: list[dict[str, Any]] = []
-    async for page in list_users_stream(config, limit=limit, session=session):
+    async for page in list_users_stream(accessor, limit=limit):
         out.extend(page)
     return out
 
@@ -96,42 +92,35 @@ def user_json_bytes(user: dict[str, Any]) -> bytes:
 
 
 async def get_user_profile(
-    config: SlackConfig, user_id: str, session: SessionArg = None
+    accessor: SlackAccessor, user_id: str
 ) -> dict[str, Any]:
     """Get a single user's profile.
 
     Args:
-        config (SlackConfig): Slack credentials.
+        accessor (SlackAccessor): Slack accessor.
         user_id (str): user ID.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         dict: user info.
     """
-    data = await slack_get(
-        config, "users.info", params={"user": user_id}, session=session
-    )
+    data = await slack_get(accessor, "users.info", params={"user": user_id})
     return data.get("user", {})
 
 
 async def search_users(
-    config: SlackConfig,
-    query: str,
-    limit: int = 200,
-    session: SessionArg = None,
+    accessor: SlackAccessor, query: str, limit: int = 200
 ) -> list[dict[str, Any]]:
     """Search users by name, real name, or email.
 
     Args:
-        config (SlackConfig): Slack credentials.
+        accessor (SlackAccessor): Slack accessor.
         query (str): search query.
         limit (int): max per page.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         list[dict]: matching users.
     """
-    all_users = await list_users(config, limit=limit, session=session)
+    all_users = await list_users(accessor, limit=limit)
     q = query.lower()
     return [
         u

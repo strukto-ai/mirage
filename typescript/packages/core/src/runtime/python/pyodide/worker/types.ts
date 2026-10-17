@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RunArgs, RunResult, BridgeDispatchFn } from '../../../types.ts'
+import type { FlagValue } from '../../../../commands/spec/types.ts'
+import type { Program, RunResult, BridgeDispatchFn } from '../../../types.ts'
 import type { PyodideConfig } from '../config.ts'
 import type { MirageMutation } from '../fs/journal.ts'
 
@@ -28,12 +29,21 @@ export interface VfsRequest {
   classify?: boolean
   raw?: boolean
 }
+/**
+ * One run the main thread hands the worker: the program it resolved, and
+ * what of the run's context the guest reads (its working directory,
+ * environment, switches and limit). A PathSpec crosses as its fields,
+ * which structured clone keeps and the worker rebuilds.
+ */
 export interface ExecuteRequest {
   kind: 'execute'
   config: PyodideConfig
   prefixes: string[]
-  args: Omit<RunArgs, 'cwd' | 'signal'> & { cwd?: string }
-  cwd?: string
+  program: Program
+  cwd: string
+  env: Record<string, string>
+  flags: Readonly<Record<string, FlagValue>>
+  timeoutSeconds?: number
   interruptBuffer?: SharedArrayBuffer
 }
 export type WorkerResult =

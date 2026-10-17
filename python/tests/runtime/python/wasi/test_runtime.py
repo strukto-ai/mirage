@@ -19,10 +19,11 @@ from pathlib import Path
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.commands.config import Context
 from mirage.runtime.python import WasiRuntime
 from mirage.runtime.python.wasi.config import WasiConfig
 from mirage.runtime.python.wasi.runtime import WASI_HOME_ENV, _stdlib_mount
-from mirage.runtime.types import RunArgs
+from mirage.runtime.types import Program, RunResult
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
 
@@ -38,6 +39,18 @@ live = pytest.mark.skipif(
     _build_dir() is None,
     reason=f"{WASI_HOME_ENV} does not point at a CPython WASI build",
 )
+
+
+def _args(code: str, env: dict[str, str] | None = None, **fields):
+    return Program(code=code, **fields), env
+
+
+async def _run(rt: WasiRuntime, program: Program, **fields) -> RunResult:
+    return await rt.interpret(await rt.engine(), program, Context(**fields))
+
+
+async def _execute(runtime: WasiRuntime, code: str, **fields) -> RunResult:
+    return await runtime.execute([], [], Context(flags={"c": code}, **fields))
 
 
 def test_missing_build_dir_raises_hint(monkeypatch):
@@ -115,14 +128,14 @@ async def test_a_mount_beside_the_stdlib_runs():
     ("args", "exit_code", "stdout", "stderr"),
     [
         pytest.param(
-            RunArgs(code="class A:\n    x = 41\nprint(A.x + 1)"),
+            _args(code="class A:\n    x = 41\nprint(A.x + 1)"),
             0,
             b"42\n",
             None,
             id="full-cpython",
         ),
         pytest.param(
-            RunArgs(
+            _args(
                 code="import os, sys\n"
                 "print(sys.argv[1:])\n"
                 "print(sys.stdin.read().strip().upper())\n"
@@ -137,38 +150,38 @@ async def test_a_mount_beside_the_stdlib_runs():
             id="argv-stdin-env",
         ),
         pytest.param(
-            RunArgs(code="import sys; sys.exit(7)"),
+            _args(code="import sys; sys.exit(7)"),
             7,
             b"",
             None,
             id="exit-code",
         ),
         pytest.param(
-            RunArgs(code="1 / 0"), 1, b"", b"ZeroDivisionError", id="traceback"
+            _args(code="1 / 0"), 1, b"", b"ZeroDivisionError", id="traceback"
         ),
         pytest.param(
-            RunArgs(code="open('/etc/passwd')"),
+            _args(code="open('/etc/passwd')"),
             1,
             b"",
             b"FileNotFoundError",
             id="host-files-invisible",
         ),
         pytest.param(
-            RunArgs(code="import socket; socket.socket()"),
+            _args(code="import socket; socket.socket()"),
             1,
             b"",
             b"OSError",
             id="network-invisible",
         ),
         pytest.param(
-            RunArgs(code="import os; print(os.path.exists('/data'))"),
+            _args(code="import os; print(os.path.exists('/data'))"),
             0,
             b"False\n",
             None,
             id="no-mounts-without-dispatch",
         ),
         pytest.param(
-            RunArgs(
+            _args(
                 code="\ntry:\n"
                 "    open('/python.wasm', 'w')\n"
                 "except PermissionError:\n"
@@ -182,7 +195,8 @@ async def test_a_mount_beside_the_stdlib_runs():
     ],
 )
 def test_wasi_runs_a_program(args, exit_code, stdout, stderr):
-    result = asyncio.run(WasiRuntime().run(args))
+    program, env = args
+    result = asyncio.run(_run(WasiRuntime(), program, env=env))
     assert (result.exit_code, result.stdout) == (exit_code, stdout)
     if stderr is None:
         assert result.stderr is None
@@ -212,14 +226,14 @@ async def test_wasi_python3_command_end_to_end():
 async def test_wasi_cancellation_stops_the_run():
     rt = WasiRuntime()
     hot = "n = 0\nwhile True:\n    n = n + 1"
-    task = asyncio.ensure_future(rt.run(RunArgs(code=hot)))
+    task = asyncio.ensure_future(_run(rt, Program(code=hot)))
     await asyncio.sleep(0.5)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
     # The epoch bump traps the run; a healthy follow-up run proves the
     # runtime survived and the worker thread was reclaimed.
-    result = await rt.run(RunArgs(code="print('alive')"))
+    result = await _run(rt, Program(code="print('alive')"))
     assert result.exit_code == 0
     assert result.stdout == b"alive\n"
 
@@ -227,8 +241,8 @@ async def test_wasi_cancellation_stops_the_run():
 @live
 def test_wasi_reuses_compiled_module():
     rt = WasiRuntime()
-    first = asyncio.run(rt.run(RunArgs(code="print(1)")))
-    second = asyncio.run(rt.run(RunArgs(code="print(2)")))
+    first = asyncio.run(_run(rt, Program(code="print(1)")))
+    second = asyncio.run(_run(rt, Program(code="print(2)")))
     assert (first.stdout, second.stdout) == (b"1\n", b"2\n")
     root = _build_dir()
     assert root is not None
@@ -275,10 +289,10 @@ def test_max_memory_must_be_a_size():
 @pytest.mark.asyncio
 async def test_max_memory_caps_a_run():
     rt = WasiRuntime(config={"max_memory": "64M"})
-    big = await rt.run(RunArgs(code="x = bytearray(100 * 1024 * 1024)"))
+    big = await _run(rt, Program(code="x = bytearray(100 * 1024 * 1024)"))
     assert big.exit_code == 1
     assert big.stderr is not None and b"MemoryError" in big.stderr
-    small = await rt.run(RunArgs(code="print(1)"))
+    small = await _run(rt, Program(code="print(1)"))
     assert (small.exit_code, small.stdout) == (0, b"1\n")
 
 
@@ -286,7 +300,7 @@ async def test_max_memory_caps_a_run():
 @pytest.mark.asyncio
 async def test_max_memory_below_the_interpreters_start_says_so():
     rt = WasiRuntime(config={"max_memory": "8M"})
-    result = await rt.run(RunArgs(code="print(1)"))
+    result = await _run(rt, Program(code="print(1)"))
     assert result.exit_code == 1
     assert result.stderr is not None
     assert b"cannot start within max_memory" in result.stderr
@@ -294,7 +308,7 @@ async def test_max_memory_below_the_interpreters_start_says_so():
 
 @live
 @pytest.mark.asyncio
-async def test_cwd_inherits_context_and_explicit_cwd_wins():
+async def test_a_bound_run_takes_the_callers_cwd_not_the_sessions():
     runtime = WasiRuntime()
     ws = Workspace(
         {"/data": RAMVFS()},
@@ -308,23 +322,21 @@ async def test_cwd_inherits_context_and_explicit_cwd_wins():
             )
         ).exit_code == 0
         code = "import os; print(os.getcwd())"
-        assert (await runtime.run(RunArgs(code=code))).stdout == b"/data\n"
-        explicit = await runtime.run(
-            RunArgs(
-                code="print(open('item').read(), end='')",
-                cwd=PathSpec.from_str_path("/data/sub"),
-            )
+        assert (await _execute(runtime, code)).stdout == b"/\n"
+        explicit = await _execute(
+            runtime,
+            "print(open('item').read(), end='')",
+            cwd=PathSpec.from_str_path("/data/sub"),
         )
         assert explicit.stdout == b"child\n"
-        bad = await runtime.run(
-            RunArgs(
-                code="print('must not run')",
-                cwd=PathSpec.from_str_path("/missing"),
-            )
+        bad = await _execute(
+            runtime,
+            "print('must not run')",
+            cwd=PathSpec.from_str_path("/missing"),
         )
         assert bad.exit_code == 1
         assert bad.stdout == b""
         assert b"FileNotFoundError" in bad.stderr
-        assert (await runtime.run(RunArgs(code=code))).stdout == b"/data\n"
+        assert (await _execute(runtime, code)).stdout == b"/\n"
     finally:
         await ws.close()

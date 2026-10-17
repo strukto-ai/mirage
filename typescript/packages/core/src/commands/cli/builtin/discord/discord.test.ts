@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compileSpec } from '../../../spec/compile.ts'
-import { describe, expect, it, vi } from 'vitest'
-import type * as DiscordAccessorModule from '../../../../accessor/discord.ts'
+import { describe, expect, it } from 'vitest'
+import { DiscordAccessor, discordAccessor } from '../../../../accessor/discord.ts'
 import type {
   DiscordMethod,
   DiscordResponse,
@@ -60,10 +60,7 @@ class FakeTransport implements DiscordTransport {
   }
 }
 
-vi.mock('../../../../accessor/discord.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof DiscordAccessorModule>()
-  return { ...actual, discordAccessor: () => new actual.DiscordAccessor(new FakeTransport()) }
-})
+const ACCESSOR = new DiscordAccessor(new FakeTransport())
 
 function unwrap(result: CommandFnResult): [ByteSource | null, IOResult] {
   if (result === null) throw new Error('expected a result tuple')
@@ -87,6 +84,7 @@ describe('discord tree', () => {
   it('matches the OpenClaw vocabulary and registers itself', () => {
     expect(DISCORD.spec.subcommands.map((v) => v.name)).toEqual(VERBS)
     expect(cliSpecFor('discord')).toBe(DISCORD)
+    expect(DISCORD.accessor).toBe(discordAccessor)
   })
 
   it('classifies writers and keeps --answer repeatable', () => {
@@ -105,14 +103,14 @@ describe('discord tree', () => {
 describe('discord verbs', () => {
   it('send forwards --reply-to as a message reference', async () => {
     CALLS.length = 0
-    await send({}, [], [], context({ flags: { channel: 'C1', text: 're', reply_to: 'M0' } }))
+    await send(ACCESSOR, [], [], context({ flags: { channel: 'C1', text: 're', reply_to: 'M0' } }))
     expect(CALLS[0]?.body).toEqual({ content: 're', message_reference: { message_id: 'M0' } })
   })
 
   it('read sorts oldest-first', async () => {
     CALLS.length = 0
     RESPONSE = [{ id: '20' }, { id: '10' }]
-    const [out] = unwrap(await read({}, [], [], context({ flags: { channel: 'C1' } })))
+    const [out] = unwrap(await read(ACCESSOR, [], [], context({ flags: { channel: 'C1' } })))
     expect(CALLS[0]?.params).toEqual({ limit: 20 })
     expect(
       (JSON.parse(DEC.decode(out as Uint8Array)) as { id: string }[]).map((m) => m.id),
@@ -124,7 +122,7 @@ describe('discord verbs', () => {
     CALLS.length = 0
     RESPONSE = null
     const [out] = unwrap(
-      await deleteVerb({}, [], [], context({ flags: { channel: 'C1', message: 'M1' } })),
+      await deleteVerb(ACCESSOR, [], [], context({ flags: { channel: 'C1', message: 'M1' } })),
     )
     expect(CALLS[0]?.method).toBe('DELETE')
     expect(JSON.parse(DEC.decode(out as Uint8Array))).toEqual({ ok: true })
@@ -134,7 +132,7 @@ describe('discord verbs', () => {
   it('thread-create starts from a message when given', async () => {
     CALLS.length = 0
     await threadCreate(
-      {},
+      ACCESSOR,
       [],
       [],
       context({ flags: { channel: 'C1', name: 'topic', message: 'M1' } }),
@@ -145,7 +143,7 @@ describe('discord verbs', () => {
   it('poll shapes the poll object with defaults', async () => {
     CALLS.length = 0
     await poll(
-      {},
+      ACCESSOR,
       [],
       [],
       context({ flags: { channel: 'C1', question: 'Lunch?', answer: ['A', 'B'] } }),

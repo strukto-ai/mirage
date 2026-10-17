@@ -13,12 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { BaseVFS } from '../base.ts'
-import { GitHubAccessor } from '../../accessor/github.ts'
+import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 
-import {
-  HttpGitHubTransport,
-  fetchRepoInfo as fetchGitHubRepoInfo,
-} from '../../core/github/client.ts'
+import { fetchRepoInfo as fetchGitHubRepoInfo } from '../../core/github/client.ts'
 
 import {
   buildTreeMap as githubBuildTreeMap,
@@ -97,20 +94,22 @@ export class GitHubVFS extends BaseVFS {
   }
 
   static async create(config: GitHubConfig): Promise<GitHubVFS> {
-    const transportOpts: { token: string; baseUrl?: string } = { token: config.token }
-    if (config.baseUrl !== undefined) transportOpts.baseUrl = config.baseUrl
-    const transport = new HttpGitHubTransport(transportOpts)
-    const repoInfo = await fetchGitHubRepoInfo(transport, config.owner, config.repo)
+    const account = new GitHubAccount(
+      config.baseUrl === undefined
+        ? { token: config.token }
+        : { token: config.token, baseUrl: config.baseUrl },
+    )
+    const repoInfo = await fetchGitHubRepoInfo(account.transport, config.owner, config.repo)
     const ref = config.ref ?? repoInfo.default_branch
     const { tree, truncated, sha } = await fetchGitHubTree(
-      transport,
+      account.transport,
       config.owner,
       config.repo,
       ref,
     )
     const treeMap = githubBuildTreeMap(tree)
     const accessor = new GitHubAccessor({
-      transport,
+      account,
       owner: config.owner,
       repo: config.repo,
       ref,

@@ -12,21 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from dataclasses import replace
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.general.interpreter import (
-    CPYTHON_ARGV0,
+    exec_refusal,
     not_bound,
-    resolve_source,
-    run_code,
+    run_output,
     runtime_version,
 )
 from mirage.commands.config import Context, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import CommandOutput
 from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.source import script_operand
+from mirage.runtime.types import CommandRuntime
 from mirage.types import PathSpec
 
 
@@ -36,37 +38,20 @@ async def _python3(
     texts: list[str],
     ctx: Context,
 ) -> CommandOutput:
-    label = ctx.command or "python3"
-    if not isinstance(ctx.runtime, LanguageRuntime):
-        return not_bound(label, ctx.runtime_unavailable)
+    label = (ctx.spec.name if ctx.spec is not None else "") or "python3"
+    placement = ctx.runtime or CommandRuntime()
+    runtime = placement.bound
+    if not isinstance(runtime, LanguageRuntime):
+        return not_bound(label, placement.unavailable)
     fl = FlagView(ctx.flags, spec=SPECS["python3"])
     if fl.as_bool("version"):
-        return await runtime_version(ctx.runtime, ctx.env)
-    error, prepared = await resolve_source(
-        label,
-        paths,
-        texts,
-        fl.as_str("c"),
-        ctx.stdin,
-        ctx.dispatch,
-        ctx.cwd,
-        ctx.exec_allowed,
-        fl.as_str("m"),
-        CPYTHON_ARGV0,
-        fl.as_bool("x"),
-        exec_path_allowed=ctx.exec_path_allowed,
-    )
-    if error is not None or prepared is None:
-        assert error is not None
-        return error
-    # Keyed by CPython's own letter, which is how mirage.runtime.python
-    # .flags reads them; the one long switch is keyed by its canonical
-    # spelling, having no letter. -u and -q are absent because mirage
-    # buffers every stream and prints no banner, so no engine can
-    # differ on them, and -x is absent because it selects source rather
-    # than configuring an interpreter, so resolve_source answered it
-    # above.
-    init_flags: dict[str, Any] = {
+        return await runtime_version(runtime, ctx.env)
+    # The runtime's switches, keyed by CPython's own letter, which is how
+    # mirage.runtime.python.flags reads them; the one long switch is
+    # keyed by its canonical spelling, having no letter. -u and -q are
+    # absent because mirage buffers every stream and prints no banner,
+    # so no engine can differ on them.
+    switches: dict[str, FlagValue] = {
         "b": fl.as_int("b") or 0,
         "B": fl.as_bool("B"),
         "E": fl.as_bool("E"),
@@ -77,15 +62,22 @@ async def _python3(
         "S": fl.as_bool("S"),
         "W": fl.as_list("W"),
         "X": fl.as_list("X"),
-        "check_hash_based_pycs": fl.as_str("check_hash_based_pycs"),
+        "x": fl.as_bool("x"),
     }
-    return await run_code(
-        label,
-        prepared,
-        ctx.env,
-        init_flags,
-        ctx.runtime,
-        cwd=ctx.cwd,
+    for key, value in (
+        ("c", fl.as_str("c")),
+        ("m", fl.as_str("m")),
+        ("check_hash_based_pycs", fl.as_str("check_hash_based_pycs")),
+    ):
+        if value is not None:
+            switches[key] = value
+    refusal = exec_refusal(
+        label, script_operand(paths, texts, switches, ctx.cwd), placement
+    )
+    if refusal is not None:
+        return refusal
+    return run_output(
+        await runtime.execute(paths, texts, replace(ctx, flags=switches))
     )
 
 

@@ -16,12 +16,13 @@ import json
 
 import pytest
 
+from mirage.accessor.linear import LinearAccessor
 from mirage.commands.cli.builtin.linear import reads
 from mirage.commands.config import Context
 from mirage.core.linear.config import LinearConfig
 from mirage.io.types import materialize
 
-CONFIG = LinearConfig(api_key="lin_api_test")
+ACCESSOR = LinearAccessor(LinearConfig(api_key="lin_api_test"))
 
 TEAM = {"id": "team-1", "key": "ENG", "name": "Engineering"}
 
@@ -32,7 +33,10 @@ async def _json(out):
 
 @pytest.mark.asyncio
 async def test_team_list_filters_config_team_ids(monkeypatch):
-    async def fake_list_teams(config):
+    accessor = LinearAccessor(LinearConfig(api_key="k", team_ids=["team-2"]))
+
+    async def fake_list_teams(handle):
+        assert handle is accessor
         return [{"id": "team-1"}, {"id": "team-2"}]
 
     def fake_normalize(team):
@@ -40,8 +44,7 @@ async def test_team_list_filters_config_team_ids(monkeypatch):
 
     monkeypatch.setitem(reads.__dict__, "list_teams", fake_list_teams)
     monkeypatch.setitem(reads.__dict__, "normalize_team", fake_normalize)
-    config = LinearConfig(api_key="k", team_ids=["team-2"])
-    out, _io = await reads.team_list(config, [], [], Context())
+    out, _io = await reads.team_list(accessor, [], [], Context())
     assert await _json(out) == [{"team_id": "team-2"}]
 
 
@@ -49,11 +52,11 @@ async def test_team_list_filters_config_team_ids(monkeypatch):
 async def test_issue_get_resolves_issue_keys(monkeypatch):
     calls = []
 
-    async def fake_resolve(config, issue_key=None, issue_id=None):
+    async def fake_resolve(accessor, issue_key=None, issue_id=None):
         calls.append(issue_key)
         return "issue-uuid"
 
-    async def fake_get_issue(config, issue_id):
+    async def fake_get_issue(accessor, issue_id):
         return {"id": issue_id}
 
     def fake_normalize(issue):
@@ -66,7 +69,7 @@ async def test_issue_get_resolves_issue_keys(monkeypatch):
     )
     monkeypatch.setitem(reads.__dict__, "get_issue", fake_get_issue)
     monkeypatch.setitem(reads.__dict__, "normalize_issue", fake_normalize)
-    out, _io = await reads.issue_get(CONFIG, [], ["ENG-42"], Context())
+    out, _io = await reads.issue_get(ACCESSOR, [], ["ENG-42"], Context())
     assert calls == ["ENG-42"]
     assert (await _json(out))["issue_id"] == "issue-uuid"
 
@@ -74,20 +77,20 @@ async def test_issue_get_resolves_issue_keys(monkeypatch):
 @pytest.mark.asyncio
 async def test_issue_list_requires_team(monkeypatch):
     with pytest.raises(ValueError, match="--team is required"):
-        await reads.issue_list(CONFIG, [], [], Context())
+        await reads.issue_list(ACCESSOR, [], [], Context())
 
 
 @pytest.mark.asyncio
 async def test_search_takes_flag_or_operand(monkeypatch):
     queries = []
 
-    async def fake_search(config, query):
+    async def fake_search(accessor, query):
         queries.append(query)
         return [{"issue_key": "ENG-1"}]
 
     monkeypatch.setitem(reads.__dict__, "search_issues", fake_search)
-    await reads.search(CONFIG, [], ["login bug"], Context())
-    await reads.search(CONFIG, [], [], Context(flags={"query": "crash"}))
+    await reads.search(ACCESSOR, [], ["login bug"], Context())
+    await reads.search(ACCESSOR, [], [], Context(flags={"query": "crash"}))
     assert queries == ["login bug", "crash"]
     with pytest.raises(ValueError, match="query is required"):
-        await reads.search(CONFIG, [], [], Context())
+        await reads.search(ACCESSOR, [], [], Context())

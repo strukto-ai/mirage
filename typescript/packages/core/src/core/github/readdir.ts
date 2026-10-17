@@ -54,10 +54,10 @@ export async function readdir(
   const expression = rel === '' ? accessor.ref : `${accessor.ref}:${rel}`
   let rows: Awaited<ReturnType<typeof fetchDirTree>>
   try {
-    rows = await fetchDirTree(accessor.transport, accessor.owner, accessor.repo, expression)
+    rows = await fetchDirTree(accessor.account.transport, accessor.owner, accessor.repo, expression)
   } catch (err) {
     if (rel === '' || !(err instanceof GitHubApiError) || !DEFER_STATUSES.has(err.status)) throw err
-    await fetchHead(accessor.transport, accessor.owner, accessor.repo, accessor.ref)
+    await fetchHead(accessor.account.transport, accessor.owner, accessor.repo, accessor.ref)
     throw enoent(path.virtual)
   }
   return new DirListing({ entries: rows.map((row) => rowOf(makeTreeEntry(row), row.path)) })

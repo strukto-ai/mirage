@@ -19,6 +19,7 @@ import pytest
 from pydantic import BaseModel
 
 from mirage import CLI, Context, Workspace
+from mirage.accessor.base import NOOPAccessor
 from mirage.commands.cli.specs import register_cli_spec, unregister_cli_spec
 from mirage.commands.cli.types import CLIHandler
 from mirage.commands.spec.types import Argument, CommandSpec, WordKind
@@ -37,10 +38,11 @@ class TokenConfig(BaseModel):
     token: str
 
 
-async def send(config: TokenConfig, paths, texts, ctx: Context):
+async def send(accessor: NOOPAccessor, paths, texts, ctx: Context):
     body = " ".join(texts)
     to = ctx.flags.get("to")
-    return f"sent[{config.token}] to={to}: {body}\n".encode(), IOResult()
+    token = accessor.config.token
+    return f"sent[{token}] to={to}: {body}\n".encode(), IOResult()
 
 
 def make_tree() -> CLI:
@@ -183,7 +185,7 @@ async def test_leaf_usage_error_exits_2(ws):
 @pytest.mark.asyncio
 async def test_unregister_returns_the_name_to_127(ws):
     ws.register_cli("sl", make_tree(), {"token": "t"})
-    ws.unregister_cli("sl")
+    await ws.unregister_cli("sl")
     code, _, err = await run(ws, "sl message send -t x hi")
     assert code == 127
     assert b"sl: command not found" in err
@@ -230,8 +232,8 @@ async def test_yaml_cli_reference_form_installs(tmp_path):
         "from pydantic import BaseModel\n\n\n"
         "class TokenConfig(BaseModel):\n"
         "    token: str\n\n\n"
-        "async def send(config: TokenConfig, paths, texts, ctx: Context):\n"
-        "    return f'sent[{config.token}]\\n'.encode(), IOResult()\n\n\n"
+        "async def send(accessor, paths, texts, ctx: Context):\n"
+        "    return f'sent[{accessor.config.token}]\\n'.encode(), IOResult()\n\n\n"
         "TREE = CLI(\n"
         "    spec=CommandSpec(name='slackish',\n"
         "                     subcommands=(CommandSpec(name='send'),)),\n"

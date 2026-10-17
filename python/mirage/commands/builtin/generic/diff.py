@@ -9,7 +9,8 @@ from mirage.commands.builtin.constants import INTMAX
 from mirage.commands.builtin.diff_format import ed_script, normal_diff
 from mirage.commands.builtin.utils.formatting import full_iso_time
 from mirage.commands.builtin.utils.lines import split_lines_keepends
-from mirage.commands.builtin.utils.links import links_of
+from mirage.commands.builtin.utils.links import dispatch_of, links_of
+from mirage.commands.builtin.utils.paths import vfs_stat_path
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
     stdin_bytes,
@@ -618,8 +619,8 @@ async def diff_generic(
         flags=parse_flags(ctx.flags),
         stdin=ctx.stdin,
         argv=ctx.argv,
-        stat_path=ctx.stat_path,
+        stat_path=vfs_stat_path(ctx.vfs),
         zone=zone_from_env(ctx.env),
-        dispatch=ctx.dispatch,
+        dispatch=dispatch_of(ctx),
         links=links_of(ctx),
     )

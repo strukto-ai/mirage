@@ -16,6 +16,7 @@ import json
 
 import pytest
 
+from mirage.accessor.linear import LinearAccessor
 from mirage.commands.cli.builtin.linear.comment.add import add as comment_add
 from mirage.commands.cli.builtin.linear.issue.add_label import add_label
 from mirage.commands.cli.builtin.linear.issue.create import create
@@ -26,7 +27,7 @@ from mirage.commands.config import Context
 from mirage.core.linear.config import LinearConfig
 from mirage.io.types import materialize
 
-CONFIG = LinearConfig(api_key="lin_api_test")
+ACCESSOR = LinearAccessor(LinearConfig(api_key="lin_api_test"))
 
 
 async def _json(out):
@@ -35,10 +36,10 @@ async def _json(out):
 
 @pytest.mark.asyncio
 async def test_create_resolves_team_and_reads_stdin(monkeypatch):
-    async def fake_resolve_team(config, token):
+    async def fake_resolve_team(accessor, token):
         return {"id": "team-1", "key": token}
 
-    async def fake_issue_create(config, *, team_id, title, description):
+    async def fake_issue_create(accessor, *, team_id, title, description):
         return {
             "id": "i1",
             "team_id": team_id,
@@ -53,7 +54,7 @@ async def test_create_resolves_team_and_reads_stdin(monkeypatch):
     monkeypatch.setitem(create.__globals__, "issue_create", fake_issue_create)
     monkeypatch.setitem(create.__globals__, "normalize_issue", fake_normalize)
     out, _io = await create(
-        CONFIG,
+        ACCESSOR,
         [],
         [],
         Context(
@@ -67,16 +68,16 @@ async def test_create_resolves_team_and_reads_stdin(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_transition_resolves_state_name(monkeypatch):
-    async def fake_resolve_issue(config, token):
+    async def fake_resolve_issue(accessor, token):
         return "issue-uuid"
 
-    async def fake_list_teams(config):
+    async def fake_list_teams(accessor):
         return [
             {"states": {"nodes": [{"id": "state-2", "name": "In Review"}]}}
         ]
 
     async def fake_issue_update(
-        config, *, issue_id, title, description, state_id
+        accessor, *, issue_id, title, description, state_id
     ):
         return {"id": issue_id, "state_id": state_id}
 
@@ -97,18 +98,18 @@ async def test_transition_resolves_state_name(monkeypatch):
         resolve_state.__globals__, "list_teams", fake_list_teams
     )
     out, _io = await transition(
-        CONFIG, [], ["ENG-42"], Context(flags={"state_name": "In Review"})
+        ACCESSOR, [], ["ENG-42"], Context(flags={"state_name": "In Review"})
     )
     assert (await _json(out))["state_id"] == "state-2"
 
 
 @pytest.mark.asyncio
 async def test_set_priority_forwards_int(monkeypatch):
-    async def fake_resolve_issue(config, token):
+    async def fake_resolve_issue(accessor, token):
         return "issue-uuid"
 
     async def fake_issue_update(
-        config, *, issue_id, title, description, priority
+        accessor, *, issue_id, title, description, priority
     ):
         return {"id": issue_id, "priority": priority}
 
@@ -125,28 +126,28 @@ async def test_set_priority_forwards_int(monkeypatch):
         set_priority.__globals__, "normalize_issue", fake_normalize
     )
     out, _io = await set_priority(
-        CONFIG, [], ["ENG-42"], Context(flags={"priority": "2"})
+        ACCESSOR, [], ["ENG-42"], Context(flags={"priority": "2"})
     )
     assert (await _json(out))["priority"] == 2
 
 
 @pytest.mark.asyncio
 async def test_add_label_resolves_label_name(monkeypatch):
-    async def fake_resolve_issue(config, token):
+    async def fake_resolve_issue(accessor, token):
         return "issue-uuid"
 
-    async def fake_get_issue(config, issue_id):
+    async def fake_get_issue(accessor, issue_id):
         return {
             "team": {"id": "team-1"},
             "labels": {"nodes": [{"id": "lbl-old"}]},
         }
 
-    async def fake_list_team_labels(config, team_id):
+    async def fake_list_team_labels(accessor, team_id):
         assert team_id == "team-1"
         return [{"id": "lbl-bug", "name": "bug"}]
 
     async def fake_issue_update(
-        config, *, issue_id, title, description, label_ids
+        accessor, *, issue_id, title, description, label_ids
     ):
         return {"id": issue_id, "label_ids": label_ids}
 
@@ -168,25 +169,25 @@ async def test_add_label_resolves_label_name(monkeypatch):
         resolve_label.__globals__, "list_team_labels", fake_list_team_labels
     )
     out, _io = await add_label(
-        CONFIG, [], ["ENG-42"], Context(flags={"label_name": "bug"})
+        ACCESSOR, [], ["ENG-42"], Context(flags={"label_name": "bug"})
     )
     assert (await _json(out))["label_ids"] == ["lbl-old", "lbl-bug"]
 
 
 @pytest.mark.asyncio
 async def test_set_project_resolves_project_name(monkeypatch):
-    async def fake_resolve_issue(config, token):
+    async def fake_resolve_issue(accessor, token):
         return "issue-uuid"
 
-    async def fake_get_issue(config, issue_id):
+    async def fake_get_issue(accessor, issue_id):
         return {"team": {"id": "team-1"}}
 
-    async def fake_list_team_projects(config, team_id):
+    async def fake_list_team_projects(accessor, team_id):
         assert team_id == "team-1"
         return [{"id": "prj-search", "name": "Search"}]
 
     async def fake_issue_update(
-        config, *, issue_id, title, description, project_id
+        accessor, *, issue_id, title, description, project_id
     ):
         return {"id": issue_id, "project_id": project_id}
 
@@ -210,18 +211,18 @@ async def test_set_project_resolves_project_name(monkeypatch):
         fake_list_team_projects,
     )
     out, _io = await set_project(
-        CONFIG, [], ["ENG-42"], Context(flags={"project_name": "Search"})
+        ACCESSOR, [], ["ENG-42"], Context(flags={"project_name": "Search"})
     )
     assert (await _json(out))["project_id"] == "prj-search"
 
 
 @pytest.mark.asyncio
 async def test_comment_add_requires_body(monkeypatch):
-    async def fake_resolve_issue(config, token):
+    async def fake_resolve_issue(accessor, token):
         return "issue-uuid"
 
     monkeypatch.setitem(
         comment_add.__globals__, "resolve_issue", fake_resolve_issue
     )
     with pytest.raises(ValueError, match="comment body is required"):
-        await comment_add(CONFIG, [], ["ENG-42"], Context())
+        await comment_add(ACCESSOR, [], ["ENG-42"], Context())

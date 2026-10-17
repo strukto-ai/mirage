@@ -17,7 +17,8 @@ from typing import Any
 
 import aiohttp
 
-from mirage.core.api.client import SessionArg, api_request
+from mirage.accessor.trello import TrelloAccessor
+from mirage.core.api.client import api_request
 from mirage.vfs.secrets import reveal_secret
 from mirage.vfs.trello.config import TrelloConfig
 
@@ -53,156 +54,129 @@ def _error_of(
 
 
 async def _request(
-    config: TrelloConfig,
+    accessor: TrelloAccessor,
     method: str,
     path: str,
     *,
     params: dict[str, Any] | None = None,
     json_body: dict[str, Any] | None = None,
-    session: SessionArg = None,
 ) -> dict[str, Any] | list[Any]:
-    url = f"{config.base_url}{path}"
-    merged = {**_auth_params(config), **(params or {})}
+    url = f"{accessor.config.base_url}{path}"
+    merged = {**_auth_params(accessor.config), **(params or {})}
     data: dict[str, Any] | list[Any] = await api_request(
         method,
         url,
         error_of=partial(_error_of, path=path),
         params=merged,
         json_body=json_body,
-        session=session,
+        session=accessor.pool,
     )
     return data
 
 
 async def _get(
-    config: TrelloConfig,
-    path: str,
-    params: dict[str, Any] | None = None,
-    session: SessionArg = None,
+    accessor: TrelloAccessor, path: str, params: dict[str, Any] | None = None
 ) -> dict[str, Any] | list[Any]:
-    return await _request(config, "GET", path, params=params, session=session)
+    return await _request(accessor, "GET", path, params=params)
 
 
 async def _post(
-    config: TrelloConfig,
-    path: str,
-    params: dict[str, Any] | None = None,
-    session: SessionArg = None,
+    accessor: TrelloAccessor, path: str, params: dict[str, Any] | None = None
 ) -> dict[str, Any] | list[Any]:
-    return await _request(config, "POST", path, params=params, session=session)
+    return await _request(accessor, "POST", path, params=params)
 
 
 async def _put(
-    config: TrelloConfig,
-    path: str,
-    params: dict[str, Any] | None = None,
-    session: SessionArg = None,
+    accessor: TrelloAccessor, path: str, params: dict[str, Any] | None = None
 ) -> dict[str, Any] | list[Any]:
-    return await _request(config, "PUT", path, params=params, session=session)
+    return await _request(accessor, "PUT", path, params=params)
 
 
 async def _delete(
-    config: TrelloConfig,
-    path: str,
-    params: dict[str, Any] | None = None,
-    session: SessionArg = None,
+    accessor: TrelloAccessor, path: str, params: dict[str, Any] | None = None
 ) -> dict[str, Any] | list[Any]:
-    return await _request(
-        config, "DELETE", path, params=params, session=session
-    )
+    return await _request(accessor, "DELETE", path, params=params)
 
 
-async def list_workspaces(
-    config: TrelloConfig, session: SessionArg = None
-) -> list[dict[str, Any]]:
-    result = await _get(config, "/members/me/organizations", session=session)
+async def list_workspaces(accessor: TrelloAccessor) -> list[dict[str, Any]]:
+    result = await _get(accessor, "/members/me/organizations")
     return result if isinstance(result, list) else []
 
 
 async def list_workspace_boards(
-    config: TrelloConfig, workspace_id: str, session: SessionArg = None
+    accessor: TrelloAccessor, workspace_id: str
 ) -> list[dict[str, Any]]:
     result = await _get(
-        config,
+        accessor,
         f"/organizations/{workspace_id}/boards",
         params={"filter": "open"},
-        session=session,
     )
     return result if isinstance(result, list) else []
 
 
-async def get_board(
-    config: TrelloConfig, board_id: str, session: SessionArg = None
-) -> dict[str, Any]:
-    result = await _get(config, f"/boards/{board_id}", session=session)
+async def get_board(accessor: TrelloAccessor, board_id: str) -> dict[str, Any]:
+    result = await _get(accessor, f"/boards/{board_id}")
     if not isinstance(result, dict):
         raise TrelloAPIError(f"unexpected response for board {board_id}")
     return result
 
 
 async def list_board_lists(
-    config: TrelloConfig, board_id: str, session: SessionArg = None
+    accessor: TrelloAccessor, board_id: str
 ) -> list[dict[str, Any]]:
     result = await _get(
-        config,
-        f"/boards/{board_id}/lists",
-        params={"filter": "open"},
-        session=session,
+        accessor, f"/boards/{board_id}/lists", params={"filter": "open"}
     )
     return result if isinstance(result, list) else []
 
 
-async def get_list(
-    config: TrelloConfig, list_id: str, session: SessionArg = None
-) -> dict[str, Any]:
-    result = await _get(config, f"/lists/{list_id}", session=session)
+async def get_list(accessor: TrelloAccessor, list_id: str) -> dict[str, Any]:
+    result = await _get(accessor, f"/lists/{list_id}")
     if not isinstance(result, dict):
         raise TrelloAPIError(f"unexpected response for list {list_id}")
     return result
 
 
 async def list_board_members(
-    config: TrelloConfig, board_id: str, session: SessionArg = None
+    accessor: TrelloAccessor, board_id: str
 ) -> list[dict[str, Any]]:
-    result = await _get(config, f"/boards/{board_id}/members", session=session)
+    result = await _get(accessor, f"/boards/{board_id}/members")
     return result if isinstance(result, list) else []
 
 
 async def list_board_labels(
-    config: TrelloConfig, board_id: str, session: SessionArg = None
+    accessor: TrelloAccessor, board_id: str
 ) -> list[dict[str, Any]]:
-    result = await _get(config, f"/boards/{board_id}/labels", session=session)
+    result = await _get(accessor, f"/boards/{board_id}/labels")
     return result if isinstance(result, list) else []
 
 
 async def list_list_cards(
-    config: TrelloConfig, list_id: str, session: SessionArg = None
+    accessor: TrelloAccessor, list_id: str
 ) -> list[dict[str, Any]]:
     result = await _get(
-        config,
+        accessor,
         f"/lists/{list_id}/cards",
         params={
             "members": "true",
             "member_fields": "id,username,fullName",
         },
-        session=session,
     )
     return result if isinstance(result, list) else []
 
 
 async def search_cards(
-    config: TrelloConfig, query: str, limit: int, session: SessionArg = None
+    accessor: TrelloAccessor, query: str, limit: int
 ) -> list[dict[str, Any]]:
     """The cards Trello's search names for ``query``, ids only.
 
     Args:
-        config (TrelloConfig): the account.
+        accessor (TrelloAccessor): the account.
         query (str): the words searched for.
         limit (int): the most cards answered.
-        session (SessionArg): the session to reuse.
     """
     result = await _get(
-        config,
+        accessor,
         "/search",
         params={
             "query": query,
@@ -211,7 +185,6 @@ async def search_cards(
             "cards_limit": limit,
             "partial": "false",
         },
-        session=session,
     )
     cards = result.get("cards") if isinstance(result, dict) else None
     if not isinstance(cards, list) or not all(
@@ -222,17 +195,14 @@ async def search_cards(
     return cards
 
 
-async def get_card(
-    config: TrelloConfig, card_id: str, session: SessionArg = None
-) -> dict[str, Any]:
+async def get_card(accessor: TrelloAccessor, card_id: str) -> dict[str, Any]:
     result = await _get(
-        config,
+        accessor,
         f"/cards/{card_id}",
         params={
             "members": "true",
             "member_fields": "id,username,fullName",
         },
-        session=session,
     )
     if not isinstance(result, dict):
         raise TrelloAPIError(f"unexpected response for card {card_id}")
@@ -240,36 +210,32 @@ async def get_card(
 
 
 async def list_card_comments(
-    config: TrelloConfig, card_id: str, session: SessionArg = None
+    accessor: TrelloAccessor, card_id: str
 ) -> list[dict[str, Any]]:
     result = await _get(
-        config,
-        f"/cards/{card_id}/actions",
-        params={"filter": "commentCard"},
-        session=session,
+        accessor, f"/cards/{card_id}/actions", params={"filter": "commentCard"}
     )
     return result if isinstance(result, list) else []
 
 
 async def card_create(
-    config: TrelloConfig,
+    accessor: TrelloAccessor,
     *,
     list_id: str,
     name: str,
     desc: str | None = None,
-    session: SessionArg = None,
 ) -> dict[str, Any]:
     params: dict[str, str] = {"idList": list_id, "name": name}
     if desc:
         params["desc"] = desc
-    result = await _post(config, "/cards", params=params, session=session)
+    result = await _post(accessor, "/cards", params=params)
     if not isinstance(result, dict):
         raise TrelloAPIError("unexpected response from card create")
-    return await get_card(config, result["id"], session=session)
+    return await get_card(accessor, result["id"])
 
 
 async def card_update(
-    config: TrelloConfig,
+    accessor: TrelloAccessor,
     *,
     card_id: str,
     name: str | None = None,
@@ -277,7 +243,6 @@ async def card_update(
     closed: bool | None = None,
     due: str | None = None,
     due_complete: bool | None = None,
-    session: SessionArg = None,
 ) -> dict[str, Any]:
     params: dict[str, str] = {}
     if name is not None:
@@ -292,54 +257,31 @@ async def card_update(
         params["dueComplete"] = str(due_complete).lower()
     if not params:
         raise ValueError("no updates provided")
-    await _put(config, f"/cards/{card_id}", params=params, session=session)
-    return await get_card(config, card_id, session=session)
+    await _put(accessor, f"/cards/{card_id}", params=params)
+    return await get_card(accessor, card_id)
 
 
 async def card_move(
-    config: TrelloConfig,
-    *,
-    card_id: str,
-    list_id: str,
-    session: SessionArg = None,
+    accessor: TrelloAccessor, *, card_id: str, list_id: str
 ) -> dict[str, Any]:
-    await _put(
-        config,
-        f"/cards/{card_id}",
-        params={"idList": list_id},
-        session=session,
-    )
-    return await get_card(config, card_id, session=session)
+    await _put(accessor, f"/cards/{card_id}", params={"idList": list_id})
+    return await get_card(accessor, card_id)
 
 
 async def card_assign(
-    config: TrelloConfig,
-    *,
-    card_id: str,
-    member_id: str,
-    session: SessionArg = None,
+    accessor: TrelloAccessor, *, card_id: str, member_id: str
 ) -> dict[str, Any]:
     await _post(
-        config,
-        f"/cards/{card_id}/idMembers",
-        params={"value": member_id},
-        session=session,
+        accessor, f"/cards/{card_id}/idMembers", params={"value": member_id}
     )
-    return await get_card(config, card_id, session=session)
+    return await get_card(accessor, card_id)
 
 
 async def comment_create(
-    config: TrelloConfig,
-    *,
-    card_id: str,
-    text: str,
-    session: SessionArg = None,
+    accessor: TrelloAccessor, *, card_id: str, text: str
 ) -> dict[str, Any]:
     result = await _post(
-        config,
-        f"/cards/{card_id}/actions/comments",
-        params={"text": text},
-        session=session,
+        accessor, f"/cards/{card_id}/actions/comments", params={"text": text}
     )
     if not isinstance(result, dict):
         raise TrelloAPIError("unexpected response from comment create")
@@ -347,18 +289,12 @@ async def comment_create(
 
 
 async def comment_update(
-    config: TrelloConfig,
-    *,
-    card_id: str,
-    comment_id: str,
-    text: str,
-    session: SessionArg = None,
+    accessor: TrelloAccessor, *, card_id: str, comment_id: str, text: str
 ) -> dict[str, Any]:
     result = await _put(
-        config,
+        accessor,
         f"/cards/{card_id}/actions/{comment_id}/comments",
         params={"text": text},
-        session=session,
     )
     if not isinstance(result, dict):
         raise TrelloAPIError("unexpected response from comment update")
@@ -366,29 +302,16 @@ async def comment_update(
 
 
 async def card_add_label(
-    config: TrelloConfig,
-    *,
-    card_id: str,
-    label_id: str,
-    session: SessionArg = None,
+    accessor: TrelloAccessor, *, card_id: str, label_id: str
 ) -> dict[str, Any]:
     await _post(
-        config,
-        f"/cards/{card_id}/idLabels",
-        params={"value": label_id},
-        session=session,
+        accessor, f"/cards/{card_id}/idLabels", params={"value": label_id}
     )
-    return await get_card(config, card_id, session=session)
+    return await get_card(accessor, card_id)
 
 
 async def card_remove_label(
-    config: TrelloConfig,
-    *,
-    card_id: str,
-    label_id: str,
-    session: SessionArg = None,
+    accessor: TrelloAccessor, *, card_id: str, label_id: str
 ) -> dict[str, Any]:
-    await _delete(
-        config, f"/cards/{card_id}/idLabels/{label_id}", session=session
-    )
-    return await get_card(config, card_id, session=session)
+    await _delete(accessor, f"/cards/{card_id}/idLabels/{label_id}")
+    return await get_card(accessor, card_id)

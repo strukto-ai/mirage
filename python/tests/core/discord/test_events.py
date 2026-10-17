@@ -58,7 +58,7 @@ def _hook(monkeypatch) -> tuple[DiscordEventHook, list[str]]:
         "/channels/555": {"id": "555", "name": "voice", "type": 2},
     }
 
-    async def fake_get(config, endpoint, params=None, session=None):
+    async def fake_get(accessor, endpoint, params=None):
         calls.append(endpoint)
         if endpoint not in objects:
             raise aiohttp.ClientResponseError(

@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from dulwich.index import IndexEntry
 from dulwich.objects import ObjectID
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.constants import (
     EXECUTABLE,
     OWNER_EXECUTE,
@@ -331,7 +332,7 @@ async def stage_tracked(
 
 
 async def add(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Stage working-tree content into the index.
 
@@ -345,7 +346,7 @@ async def add(
     too, ``-u`` only what the index already holds.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context; git reads its repository

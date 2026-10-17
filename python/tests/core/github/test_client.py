@@ -18,6 +18,7 @@ import pytest
 import pytest_asyncio
 from aiohttp import web
 
+from mirage.accessor.github import GitHubAccount
 from mirage.core.github.client import (
     GitHubApiError,
     GitHubConnectionError,
@@ -27,7 +28,7 @@ from mirage.core.github.client import (
     github_url,
     graphql_url,
 )
-from mirage.core.github.config import GitHubConfig
+from mirage.core.github.config import GhConfig, GitHubConfig
 
 
 def test_github_headers_contains_auth():
@@ -120,24 +121,28 @@ async def base_url():
     await runner.cleanup()
 
 
+def _account(base_url: str) -> GitHubAccount:
+    return GitHubAccount(GhConfig(token="t", base_url=base_url))
+
+
+@pytest_asyncio.fixture()
+async def account(base_url):
+    async with _account(base_url) as account:
+        yield account
+
+
 @pytest.mark.asyncio
-async def test_request_puts_params_on_the_query_and_no_body_on_a_get(base_url):
+async def test_request_puts_params_on_the_query_and_no_body_on_a_get(account):
     await github_request(
-        "t",
-        "GET",
-        "/repos/o/r/git/trees/main",
-        params={"recursive": "1"},
-        base_url=base_url,
+        account, "GET", "/repos/o/r/git/trees/main", params={"recursive": "1"}
     )
     assert SEEN[0]["query"] == {"recursive": "1"}
     assert SEEN[0]["body"] == ""
 
 
 @pytest.mark.asyncio
-async def test_request_sends_a_body_as_json(base_url):
-    await github_request(
-        "t", "PATCH", "/repos/o/r", {"name": "after"}, base_url=base_url
-    )
+async def test_request_sends_a_body_as_json(account):
+    await github_request(account, "PATCH", "/repos/o/r", {"name": "after"})
     assert SEEN[0]["method"] == "PATCH"
     assert SEEN[0]["body"] == '{"name": "after"}'
     assert "application/json" in (SEEN[0]["content_type"] or "")
@@ -146,15 +151,15 @@ async def test_request_sends_a_body_as_json(base_url):
 # Real gh sends nothing for a fieldless call; an empty JSON object plus a
 # content type is a different request, and some endpoints read it as one.
 @pytest.mark.asyncio
-async def test_request_sends_no_body_when_there_is_nothing_to_send(base_url):
-    await github_request("t", "DELETE", "/repos/o/r", base_url=base_url)
+async def test_request_sends_no_body_when_there_is_nothing_to_send(account):
+    await github_request(account, "DELETE", "/repos/o/r")
     assert SEEN[0]["body"] == ""
     assert SEEN[0]["content_type"] is None
 
 
 @pytest.mark.asyncio
-async def test_request_sends_an_explicit_json_null(base_url):
-    await github_request("t", "POST", "/repos/o/r", None, base_url=base_url)
+async def test_request_sends_an_explicit_json_null(account):
+    await github_request(account, "POST", "/repos/o/r", None)
     assert SEEN[0]["body"] == "null"
     assert "application/json" in (SEEN[0]["content_type"] or "")
 
@@ -162,32 +167,23 @@ async def test_request_sends_an_explicit_json_null(base_url):
 # The path arrives from a command line and is used verbatim: a brace in it
 # is a brace, never a format placeholder that eats the segment it sits in.
 @pytest.mark.asyncio
-async def test_request_does_not_format_expand_the_path(base_url):
-    await github_request(
-        "t", "GET", "/repos/o/r/contents/{tmpl}", base_url=base_url
-    )
+async def test_request_does_not_format_expand_the_path(account):
+    await github_request(account, "GET", "/repos/o/r/contents/{tmpl}")
     assert SEEN[0]["path"] == "/repos/o/r/contents/{tmpl}"
 
 
 @pytest.mark.asyncio
-async def test_request_decodes_an_empty_response_to_none(base_url):
+async def test_request_decodes_an_empty_response_to_none(account):
     REPLY.update({"status": 204, "body": ""})
-    assert (
-        await github_request("t", "DELETE", "/repos/o/r", base_url=base_url)
-        is None
-    )
+    assert await github_request(account, "DELETE", "/repos/o/r") is None
 
 
 @pytest.mark.asyncio
 async def test_request_response_retains_metadata_and_overrides_headers(
-    base_url,
+    account,
 ):
     response = await github_request_response(
-        "t",
-        "GET",
-        "/repos/o/r",
-        base_url=base_url,
-        headers={"accept": "text/plain"},
+        account, "GET", "/repos/o/r", headers={"accept": "text/plain"}
     )
     assert SEEN[0]["accept"] == "text/plain"
     assert response.status == 200
@@ -196,10 +192,10 @@ async def test_request_response_retains_metadata_and_overrides_headers(
 
 
 @pytest.mark.asyncio
-async def test_request_raises_with_githubs_own_wording_and_status(base_url):
+async def test_request_raises_with_githubs_own_wording_and_status(account):
     REPLY.update({"status": 404, "body": '{"message":"Not Found"}'})
     with pytest.raises(GitHubApiError, match="Not Found") as excinfo:
-        await github_request("t", "GET", "/repos/o/r", base_url=base_url)
+        await github_request(account, "GET", "/repos/o/r")
     assert excinfo.value.status == 404
 
 
@@ -224,16 +220,12 @@ async def test_request_raises_with_githubs_own_wording_and_status(base_url):
     ],
 )
 async def test_request_error_preserves_wire_body_and_request_url(
-    base_url, body, data, message
+    account, base_url, body, data, message
 ):
     REPLY.update({"status": 422, "body": body})
     with pytest.raises(GitHubApiError) as caught:
         await github_request(
-            "t",
-            "GET",
-            "/search/issues",
-            params={"q": "bad query"},
-            base_url=base_url,
+            account, "GET", "/search/issues", params={"q": "bad query"}
         )
     error = caught.value
     assert str(error) == message
@@ -266,17 +258,11 @@ def test_graphql_url_pairs_with_the_rest_base_as_gh_does(base, url):
 @pytest.mark.asyncio
 async def test_graphql_goes_outside_an_enterprise_rest_base(base_url):
     # A slash-led `/graphql` is a REST path, as `gh api /graphql` is in gh.
-    await github_request(
-        "t",
-        "POST",
-        "graphql",
-        {"query": "{ viewer { login } }"},
-        base_url=base_url + "/api/v3",
-    )
-    await github_request(
-        "t", "GET", "/repos/o/r", base_url=base_url + "/api/v3"
-    )
-    await github_request("t", "GET", "/graphql", base_url=base_url + "/api/v3")
+    async with _account(base_url + "/api/v3") as account:
+        query = {"query": "{ viewer { login } }"}
+        await github_request(account, "POST", "graphql", query)
+        await github_request(account, "GET", "/repos/o/r")
+        await github_request(account, "GET", "/graphql")
     assert [(seen["method"], seen["path"]) for seen in SEEN] == [
         ("POST", "/api/graphql"),
         ("GET", "/api/v3/repos/o/r"),
@@ -286,16 +272,16 @@ async def test_graphql_goes_outside_an_enterprise_rest_base(base_url):
 
 # `gh api -i` prints a failing response's headers as it prints any other's.
 @pytest.mark.asyncio
-async def test_request_error_carries_the_response_headers(base_url):
+async def test_request_error_carries_the_response_headers(account):
     REPLY.update({"status": 404, "body": '{"message":"Not Found"}'})
     with pytest.raises(GitHubApiError) as caught:
-        await github_request("t", "GET", "/repos/o/r", base_url=base_url)
+        await github_request(account, "GET", "/repos/o/r")
     assert caught.value.headers["x-page"] == "next"
     assert caught.value.headers["content-type"].startswith("application/json")
 
 
 @pytest.mark.asyncio
-async def test_request_hands_a_binary_body_back_as_bytes(base_url):
+async def test_request_hands_a_binary_body_back_as_bytes(account):
     REPLY.update(
         {
             "status": 200,
@@ -304,22 +290,18 @@ async def test_request_hands_a_binary_body_back_as_bytes(base_url):
         }
     )
     assert (
-        await github_request(
-            "t", "GET", "/repos/o/r/actions/runs/1/logs", base_url=base_url
-        )
+        await github_request(account, "GET", "/repos/o/r/actions/runs/1/logs")
         == b"PK\x05\x06\xff"
     )
 
 
 @pytest.mark.asyncio
-async def test_request_reads_a_text_body_as_text(base_url):
+async def test_request_reads_a_text_body_as_text(account):
     REPLY.update(
         {"status": 200, "body": b"line one\n", "content_type": "text/plain"}
     )
     assert (
-        await github_request(
-            "t", "GET", "/repos/o/r/actions/jobs/1/logs", base_url=base_url
-        )
+        await github_request(account, "GET", "/repos/o/r/actions/jobs/1/logs")
         == "line one\n"
     )
 
@@ -336,14 +318,11 @@ def _closed_port() -> int:
 @pytest.mark.asyncio
 async def test_a_refused_connection_is_named_as_go_names_it():
     port = _closed_port()
-    with pytest.raises(GitHubConnectionError) as caught:
-        await github_request(
-            "t",
-            "GET",
-            "/repos/o/r",
-            params={"per_page": "1"},
-            base_url=f"http://127.0.0.1:{port}",
-        )
+    async with _account(f"http://127.0.0.1:{port}") as account:
+        with pytest.raises(GitHubConnectionError) as caught:
+            await github_request(
+                account, "GET", "/repos/o/r", params={"per_page": "1"}
+            )
     assert str(caught.value) == (
         f'Get "http://127.0.0.1:{port}/repos/o/r?per_page=1": '
         f"dial tcp 127.0.0.1:{port}: connect: connection refused"
@@ -352,14 +331,9 @@ async def test_a_refused_connection_is_named_as_go_names_it():
 
 @pytest.mark.asyncio
 async def test_a_host_that_does_not_resolve_is_named_as_gh_names_it():
-    with pytest.raises(GitHubConnectionError) as caught:
-        await github_request(
-            "t",
-            "POST",
-            "/repos/o/r/issues",
-            {},
-            base_url="http://nowhere.invalid",
-        )
+    async with _account("http://nowhere.invalid") as account:
+        with pytest.raises(GitHubConnectionError) as caught:
+            await github_request(account, "POST", "/repos/o/r/issues", {})
     assert str(caught.value) == (
         "error connecting to nowhere.invalid\n"
         "check your internet connection or https://githubstatus.com"

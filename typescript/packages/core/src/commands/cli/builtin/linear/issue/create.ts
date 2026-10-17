@@ -12,28 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { LinearAccessor } from '../../../../../accessor/linear.ts'
 import { issueCreate, resolveTeam } from '../../../../../core/linear/client.ts'
 import { normalizeIssue, toJsonBytes } from '../../../../../core/linear/normalize.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { linearTransport, textOrStdin } from '../util.ts'
+import { textOrStdin } from '../util.ts'
 
 export async function create(
-  config: unknown,
+  accessor: LinearAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const transport = linearTransport(config)
-  const team = await resolveTeam(transport, fl.asStr('team') ?? '')
+  const team = await resolveTeam(accessor.transport, fl.asStr('team') ?? '')
   let description: string | null = null
   if (fl.asStr('description') !== undefined || ctx.stdin !== null) {
     description = await textOrStdin(fl.asStr('description'), ctx.stdin, 'description is required')
   }
-  const issue = await issueCreate(transport, {
+  const issue = await issueCreate(accessor.transport, {
     teamId: typeof team.id === 'string' ? team.id : '',
     title: fl.asStr('title') ?? '',
     description,

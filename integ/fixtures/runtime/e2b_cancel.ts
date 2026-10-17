@@ -12,15 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { LineExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import type { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
+import { PathSpec } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 
 const dec = new TextDecoder()
 
+/** Run one raw line on a sandbox runtime from /home/user. */
+export function runLine(
+  runtime: LineExecutor<undefined>,
+  line: string,
+  stdin: Uint8Array | null = null,
+) {
+  const ctx = { stdin, flags: { c: line }, env: {}, cwd: PathSpec.fromStrPath('/home/user') }
+  return runtime.runLine(undefined, [], [], ctx)
+}
+
 async function waitForRemote(runtime: E2BRuntime, command: string): Promise<void> {
   const deadline = performance.now() + 10_000
   while (performance.now() < deadline) {
-    const result = await runtime.runLine(command, null, {}, '/home/user')
+    const result = await runLine(runtime, command)
     if (result.exitCode === 0) return
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
@@ -44,7 +56,7 @@ export async function exerciseCancellation(
     )
     try {
       await waitForRemote(runtime, `test -s ${path}`)
-      const survivor = runtime.runLine('sleep 1; printf survivor', null, {}, '/home/user')
+      const survivor = runLine(runtime, 'sleep 1; printf survivor')
       if (mode === 'caller') abort.abort()
       const result = await outcome
       if (mode === 'caller' ? result.error !== 'AbortError' : result.code !== 124) {
@@ -56,11 +68,9 @@ export async function exerciseCancellation(
     } finally {
       abort.abort()
       await outcome
-      await runtime.runLine(
+      await runLine(
+        runtime,
         `if test -s ${path}; then kill -9 $(cat ${path}) 2>/dev/null || true; fi; rm -f ${path}`,
-        null,
-        {},
-        '/home/user',
       )
     }
   }

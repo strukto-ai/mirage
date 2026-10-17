@@ -18,6 +18,7 @@ from urllib.parse import urlencode
 
 import pytest
 
+from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh.actions import (
     run_view_cmd,
     workflow_view_cmd,
@@ -31,7 +32,7 @@ from mirage.core.github.paginate import github_pages
 from mirage.io.types import materialize
 from mirage.types import PathSpec
 
-CONFIG = GhConfig(token="t", repo="o/r")
+ACCOUNT = GitHubAccount(GhConfig(token="t", repo="o/r"))
 RUN = "/repos/o/r/actions/runs/7"
 # Each `METHOD path` answers its own reply, or fails with it when it is an
 # error; every call is recorded with its query.
@@ -51,14 +52,7 @@ def _patch(monkeypatch):
     }
 
     async def fake_request(
-        token,
-        method,
-        path,
-        body=None,
-        params=None,
-        *,
-        base_url=None,
-        headers=None,
+        account, method, path, body=None, params=None, *, headers=None
     ):
         query = f"?{urlencode(params)}" if params else ""
         CALLS.append(f"{method} {path}{query}")
@@ -80,8 +74,8 @@ def _patch(monkeypatch):
 
 def _args(
     texts, flags=None
-) -> tuple[GhConfig, list[PathSpec], list[str], Context]:
-    return CONFIG, [], list(texts), Context(flags=flags or {})
+) -> tuple[GitHubAccount, list[PathSpec], list[str], Context]:
+    return ACCOUNT, [], list(texts), Context(flags=flags or {})
 
 
 def _zip(entries: list[tuple[str, str]]) -> bytes:

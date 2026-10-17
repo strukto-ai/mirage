@@ -57,11 +57,7 @@ async def read_stream(
 
     with refusals_denied(path, REFUSED_STATUSES):
         async for chunk in hub_stream(
-            accessor.token,
-            url,
-            chunk_size,
-            session=accessor.pool,
-            on_response=stamp,
+            accessor.account, url, chunk_size, on_response=stamp
         ):
             if rec is not None:
                 rec.bytes += len(chunk)

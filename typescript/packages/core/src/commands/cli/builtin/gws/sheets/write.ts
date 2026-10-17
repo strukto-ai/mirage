@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FlagView } from '../../../../../commands/spec/flag_view.ts'
-import { TokenManager } from '../../../../../core/google/client.ts'
-import type { GoogleConfig } from '../../../../../core/google/config.ts'
+import type { GoogleApiAccessor } from '../../../../../accessor/google_api.ts'
 import { updateValues } from '../../../../../core/gsheets/write.ts'
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../../commands/config.ts'
@@ -34,14 +33,14 @@ export function valuesJsonFromFlags(fl: FlagView): string {
 }
 
 export async function write(
-  config: unknown,
+  accessor: GoogleApiAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   const result = await updateValues(
-    new TokenManager(config as GoogleConfig),
+    accessor.tokenManager,
     fl.asStr('spreadsheet') ?? '',
     fl.asStr('range') ?? '',
     valuesJsonFromFlags(fl),

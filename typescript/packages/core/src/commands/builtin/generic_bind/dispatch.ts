@@ -22,7 +22,7 @@ import { eisdir } from '../../../errors/fs.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { currentCaller, runWithCaller, type Caller } from '../../../context/session_context.ts'
 import type { FollowOperands, MountView } from '../../../view/types.ts'
-import type { Files } from '../../../workspace/files.ts'
+import { Files } from '../../../workspace/files.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -145,11 +145,11 @@ export async function runDispatch(
       flags: rebased,
       mountPrefix: '',
       cwd: PathSpec.fromStrPath(cwd),
-      dispatch,
+      vfs:
+        vfs ??
+        new Files(dispatch, null, null, () => null, { follow: follow ?? null, ledger: false }),
       argv,
       ...(signal === undefined ? {} : { signal }),
-      ...(vfs === undefined ? {} : { vfs }),
-      ...(follow === undefined ? {} : { followOperands: follow }),
     },
   )
   if (result === null) return [null, new IOResult()]

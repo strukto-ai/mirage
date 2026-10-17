@@ -15,6 +15,7 @@
 import asyncio
 from dataclasses import replace
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import read_stdin_async
 from mirage.commands.cli.builtin.git.dates import date_clock
 from mirage.commands.cli.builtin.git.errors import (
@@ -75,7 +76,7 @@ def quote_style(fl: FlagView) -> QuoteStyle:
 
 
 async def for_each_ref(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Format the repository's references, as git's ref-filter does.
 
@@ -84,7 +85,7 @@ async def for_each_ref(
     and each is printed through ``--format``.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the optional ref patterns.
         ctx (Context): the line's context, with its options.

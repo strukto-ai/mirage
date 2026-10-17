@@ -28,6 +28,7 @@ import { edit } from './pages/edit.ts'
 import { get } from './pages/get.ts'
 import { trash } from './pages/trash.ts'
 import { whoami } from './whoami.ts'
+import { ntnAccessor } from './util.ts'
 
 // Operand names are upstream's, verbatim: they are what the refusal for a
 // missing one prints, so they are part of the grammar rather than
@@ -176,4 +177,5 @@ export const NTN = new CLI({
     whoami: new CLIHandler({ fn: guarded(whoami) }),
   },
   configModel: NotionConfigSchema,
+  accessor: ntnAccessor,
 })

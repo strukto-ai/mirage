@@ -99,9 +99,7 @@ class DiscordEventHook:
         Args:
             endpoint (str): The path under the API root.
         """
-        data = await discord_get(
-            self._accessor.config, endpoint, session=self._accessor.pool
-        )
+        data = await discord_get(self._accessor, endpoint)
         return data if isinstance(data, dict) else {}
 
     async def _guild_dir(self, guild_id: str) -> str | None:

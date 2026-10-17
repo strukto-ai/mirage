@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import ANY, AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -90,7 +90,7 @@ async def test_read_jsonl(accessor):
 
     assert result == history_bytes
     mock_hist.assert_called_once_with(
-        accessor.config, "C001", "2023-11-14", accessor.time_range, session=ANY
+        accessor, "C001", "2023-11-14", accessor.time_range
     )
 
 
@@ -140,11 +140,7 @@ async def test_read_file_blob_pushes_the_window_down(accessor):
         )
     assert data == b"1.4 f"
     mock_dl.assert_called_once_with(
-        accessor.config,
-        "https://files.slack.com/x/report.pdf",
-        5,
-        5,
-        session=ANY,
+        accessor, "https://files.slack.com/x/report.pdf", 5, 5
     )
 
 

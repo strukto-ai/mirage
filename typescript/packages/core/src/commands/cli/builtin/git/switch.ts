@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { PathSpec } from '../../../../types.ts'
 
 import { IOResult } from '../../../../io/types.ts'
@@ -88,7 +89,7 @@ export function expectedKind(known: ReadonlyMap<string, string>, name: string): 
  * detached HEAD is the state an agent loses commits in.
  */
 export async function switchBranch(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

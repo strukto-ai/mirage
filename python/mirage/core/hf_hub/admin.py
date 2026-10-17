@@ -14,6 +14,7 @@
 
 from typing import Any
 
+from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.core.hf_hub.client import (
     HfHubError,
     hub_get,
@@ -22,7 +23,6 @@ from mirage.core.hf_hub.client import (
     repo_url,
     rev_segment,
 )
-from mirage.core.hf_hub.config import HfConfig
 from mirage.core.hf_hub.constants import API_SEGMENTS, HTTP_CONFLICT
 from mirage.types import JsonValue
 
@@ -47,7 +47,7 @@ def split_repo_id(repo_id: str) -> tuple[str | None, str]:
 
 
 async def create_repo(
-    config: HfConfig,
+    account: HfAccountAccessor,
     repo_id: str,
     repo_type: str = "model",
     private: bool = False,
@@ -58,7 +58,7 @@ async def create_repo(
     """Create a repository on the Hub.
 
     Args:
-        config (HfConfig): the install's configuration.
+        account (HfAccountAccessor): the install's account.
         repo_id (str): "namespace/name", or a bare name for your own.
         repo_type (str): "model", "dataset" or "space".
         private (bool): whether the repository starts private.
@@ -86,26 +86,26 @@ async def create_repo(
         body["sdk"] = space_sdk
     if resource_group_id:
         body["resourceGroupId"] = resource_group_id
-    url = f"{config.endpoint.rstrip('/')}/api/repos/create"
+    url = f"{account.endpoint.rstrip('/')}/api/repos/create"
     try:
-        data = await hub_post(config.token, url, body)
+        data = await hub_post(account, url, body)
     except HfHubError as err:
         if not exist_ok or err.status != HTTP_CONFLICT:
             raise
-        return {"url": repo_url(config.endpoint, repo_type, repo_id)}
+        return {"url": repo_url(account.endpoint, repo_type, repo_id)}
     return data if isinstance(data, dict) else {}
 
 
 def repo_api_url(
-    config: HfConfig, repo_type: str, repo_id: str, suffix: str
+    account: HfAccountAccessor, repo_type: str, repo_id: str, suffix: str
 ) -> str:
     """The /api URL for a repository the CLI named on the line."""
     segment = API_SEGMENTS[repo_type]
-    return f"{config.endpoint.rstrip('/')}/api/{segment}/{repo_id}{suffix}"
+    return f"{account.endpoint.rstrip('/')}/api/{segment}/{repo_id}{suffix}"
 
 
 async def create_tag(
-    config: HfConfig,
+    account: HfAccountAccessor,
     repo_id: str,
     tag: str,
     repo_type: str = "model",
@@ -115,7 +115,7 @@ async def create_tag(
     """Tag a revision of a repository.
 
     Args:
-        config (HfConfig): the install's configuration.
+        account (HfAccountAccessor): the install's account.
         repo_id (str): "namespace/name".
         tag (str): the tag to create.
         repo_type (str): "model", "dataset" or "space".
@@ -126,28 +126,31 @@ async def create_tag(
     if message is not None:
         body["message"] = message
     url = repo_api_url(
-        config, repo_type, repo_id, f"/tag/{rev_segment(revision)}"
+        account, repo_type, repo_id, f"/tag/{rev_segment(revision)}"
     )
-    await hub_post(config.token, url, body)
+    await hub_post(account, url, body)
 
 
 async def delete_tag(
-    config: HfConfig, repo_id: str, tag: str, repo_type: str = "model"
+    account: HfAccountAccessor,
+    repo_id: str,
+    tag: str,
+    repo_type: str = "model",
 ) -> None:
     """Remove a tag from a repository.
 
     Args:
-        config (HfConfig): the install's configuration.
+        account (HfAccountAccessor): the install's account.
         repo_id (str): "namespace/name".
         tag (str): the tag to remove.
         repo_type (str): "model", "dataset" or "space".
     """
-    url = repo_api_url(config, repo_type, repo_id, f"/tag/{rev_segment(tag)}")
-    await hub_request(config.token, "DELETE", url, None)
+    url = repo_api_url(account, repo_type, repo_id, f"/tag/{rev_segment(tag)}")
+    await hub_request(account, "DELETE", url, None)
 
 
 async def list_tags(
-    config: HfConfig, repo_id: str, repo_type: str = "model"
+    account: HfAccountAccessor, repo_id: str, repo_type: str = "model"
 ) -> list[str]:
     """Every tag on a repository.
 
@@ -155,15 +158,15 @@ async def list_tags(
     there is no tag listing of its own.
 
     Args:
-        config (HfConfig): the install's configuration.
+        account (HfAccountAccessor): the install's account.
         repo_id (str): "namespace/name".
         repo_type (str): "model", "dataset" or "space".
 
     Returns:
         list[str]: the tag names, in the Hub's own order.
     """
-    url = repo_api_url(config, repo_type, repo_id, "/refs")
-    data: JsonValue = await hub_get(config.token, url)
+    url = repo_api_url(account, repo_type, repo_id, "/refs")
+    data: JsonValue = await hub_get(account, url)
     rows = data.get("tags") if isinstance(data, dict) else None
     return [
         str(row["name"])

@@ -28,7 +28,7 @@ from mirage.runtime.workspace import WorkspaceRuntime
 
 # The builtin runtimes by name. The command -> runtime mapping is
 # derived from each class's captures, never hand-maintained.
-NAMED: dict[str, type[Runtime]] = {
+NAMED: dict[str, type[Runtime[Any]]] = {
     cls.name: cls
     for cls in (
         MontyRuntime,
@@ -59,7 +59,7 @@ SANDBOX_MODULES: dict[str, str] = {
 BUILTIN_RUNTIMES: frozenset[str] = frozenset({*NAMED, *SANDBOX_MODULES})
 
 
-def register_runtime(name: str, cls: type[Runtime]) -> None:
+def register_runtime(name: str, cls: type[Runtime[Any]]) -> None:
     """Register a host's runtime class under a config name.
 
     Host-side only, like ``register_vfs`` and ``register_cli_spec``:
@@ -115,7 +115,7 @@ TS_ONLY_HINTS: dict[str, str] = {
 }
 
 
-def build_runtime(name: str, **options: Any) -> Runtime:
+def build_runtime(name: str, **options: Any) -> Runtime[Any]:
     """Construct a runtime by name, failing loud on unknown names.
 
     Args:
@@ -142,8 +142,8 @@ def build_runtime(name: str, **options: Any) -> Runtime:
 
 
 def runtime_bindings_for(
-    entries: list[Runtime], name: str
-) -> dict[str, Runtime]:
+    entries: list[Runtime[Any]], name: str
+) -> dict[str, Runtime[Any]]:
     """Resolve an explicit runtime name into a binding override map.
 
     Naming a runtime places a line's captured stages on it without
@@ -171,7 +171,7 @@ def runtime_bindings_for(
     )
 
 
-def bind_commands(entries: list[Runtime]) -> dict[str, Runtime]:
+def bind_commands(entries: list[Runtime[Any]]) -> dict[str, Runtime[Any]]:
     """Resolve the ordered world into a command -> runtime binding map.
 
     A command binds to the FIRST entry that captures it; a default workspace
@@ -186,7 +186,7 @@ def bind_commands(entries: list[Runtime]) -> dict[str, Runtime]:
     Raises:
         ValueError: duplicate entry names.
     """
-    bindings: dict[str, Runtime] = {}
+    bindings: dict[str, Runtime[Any]] = {}
     seen: set[str] = set()
     for entry in entries:
         if "*" in entry.captures and not isinstance(entry, LineExecutorMixin):
@@ -205,8 +205,8 @@ def bind_commands(entries: list[Runtime]) -> dict[str, Runtime]:
 
 
 def whole_line_runtime(
-    bindings: Mapping[str, Runtime | None],
-) -> LineExecutorMixin | None:
+    bindings: Mapping[str, Runtime[Any] | None],
+) -> LineExecutorMixin[Any] | None:
     """The runtime that runs this entire line, if any.
 
     Only an explicit "*" capture claims a whole line. Named captures
@@ -224,7 +224,7 @@ def whole_line_runtime(
     return None
 
 
-def catch_all(entries: list[Runtime]) -> Runtime | None:
+def catch_all(entries: list[Runtime[Any]]) -> Runtime[Any] | None:
     """The runtime that serves commands no entry captures, if any.
 
     That is the world's WorkspaceRuntime, unless it declares captures (then

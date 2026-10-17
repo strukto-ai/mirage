@@ -28,6 +28,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     require_op,
 )
 from mirage.commands.builtin.utils.links import (
+    dispatch_of,
     links_of,
     mounts_of,
     serves,
@@ -153,7 +154,7 @@ async def cp(
         copies=(
             transfer_links_of(
                 links,
-                ctx.dispatch,
+                ctx.vfs.dispatch,
                 cwd,
                 session_visibility(),
                 partial(
@@ -162,11 +163,11 @@ async def cp(
                     ctx.mount_prefix,
                 ),
             )
-            if links is not None and ctx.dispatch is not None
+            if links is not None and ctx.vfs is not None
             else None
         ),
         stdin=ctx.stdin,
-        dispatch=ctx.dispatch,
+        dispatch=dispatch_of(ctx),
     )
 
 

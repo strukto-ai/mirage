@@ -15,8 +15,10 @@
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import fields
+from typing import Any
 
 from mirage.commands.builtin.utils.limit import guard_output, run_with_timeout
+from mirage.commands.config import Context
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
 from mirage.policy import (
@@ -31,7 +33,6 @@ from mirage.policy import (
 from mirage.policy.types import RouteContext
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
-from mirage.runtime.types import ShellRequest
 from mirage.types import Limit, PathSpec, Producer
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.session import SessionState, env_snapshot
@@ -40,7 +41,7 @@ from mirage.workspace.workspace.utils import command_name
 
 
 async def run_whole_line(
-    runtime: LineExecutorMixin,
+    runtime: LineExecutorMixin[Any],
     command: str,
     stdin: ByteSource | None,
     session: SessionState,
@@ -91,12 +92,15 @@ async def run_whole_line(
     try:
         result = await run_with_timeout(
             runtime.execute(
-                ShellRequest(
-                    line=command,
+                [],
+                [],
+                Context(
+                    flags={"c": command},
                     stdin=data,
                     env=env_snapshot(session),
                     cwd=PathSpec.from_str_path(session.cwd),
-                )
+                ),
+                kind="line",
             ),
             timeout,
             name,

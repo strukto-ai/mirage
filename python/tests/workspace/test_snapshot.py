@@ -532,9 +532,9 @@ class _CliCfg(BaseModel):
     channel: str = "general"
 
 
-async def _cli_echo(config, paths, texts, ctx: Context):
+async def _cli_echo(accessor, paths, texts, ctx: Context):
     return (
-        f"tok={config.token.get_secret_value()}\n".encode(),
+        f"tok={accessor.config.token.get_secret_value()}\n".encode(),
         IOResult(),
     )
 
@@ -616,9 +616,9 @@ class _NestedCfg(BaseModel):
     auth: _NestedAuth
 
 
-async def _nested_echo(config, paths, texts, ctx: Context):
+async def _nested_echo(accessor, paths, texts, ctx: Context):
     return (
-        f"tok={config.auth.token.get_secret_value()}\n".encode(),
+        f"tok={accessor.config.auth.token.get_secret_value()}\n".encode(),
         IOResult(),
     )
 

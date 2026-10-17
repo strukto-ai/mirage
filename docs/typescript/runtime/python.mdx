@@ -12,7 +12,7 @@ specific to the TypeScript SDK.
 ## Differences from the Python SDK
 
 - **Monty:** each run executes in a crash-isolated worker. `os.chdir()`
-  raises `RuntimeError`; use `cd` in the shell or `RunArgs.cwd`. `os.stat()`
+  raises `RuntimeError`; use `cd` in the shell or the run's `ctx.cwd`. `os.stat()`
   has only the named fields (`st.st_size`).
 - **QuickJS:** a `std` and `os` shim with the calls the
   [QuickJS](/home/setup/runtime/quickjs) table lists. A write shows to other

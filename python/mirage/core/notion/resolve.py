@@ -19,9 +19,7 @@ async def resolve_row(
         virtual (str): path to name in a refusal.
     """
     try:
-        page = await get_page(
-            accessor.config, match.slots["row_id"], session=accessor.pool
-        )
+        page = await get_page(accessor, match.slots["row_id"])
     except NotionAPIError as exc:
         if exc.status == 404 or exc.code == "validation_error":
             raise enoent(virtual) from exc

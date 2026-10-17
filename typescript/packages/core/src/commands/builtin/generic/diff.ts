@@ -42,7 +42,8 @@ import { fnmatch } from '../../../utils/fnmatch.ts'
 import { shellQuote } from '../../../utils/quote.ts'
 import { fullIsoTime } from '../utils/formatting.ts'
 import { UTC_ZONE, zoneFromEnv, type Zone } from '../../../utils/timezone.ts'
-import { linksOf } from '../utils/links.ts'
+import { linksOf, dispatchOf } from '../utils/links.ts'
+import { vfsStatPath } from '../utils/paths.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -503,7 +504,7 @@ export async function diffGeneric(
       switches: switchWords(ctx.argv ?? [])
         .map((word) => ` ${shellQuote(word)}`)
         .join(''),
-      statPath: ctx.statPath ?? null,
+      statPath: vfsStatPath(ctx.vfs) ?? null,
       zone: zoneFromEnv(ctx.env) ?? UTC_ZONE,
       trouble,
       real: links === undefined ? null : (virtual: string) => links.resolve(virtual),
@@ -541,7 +542,7 @@ export async function diffGeneric(
       const bothDirs =
         (await stat(p0)).type === FileType.DIRECTORY && (await stat(p1)).type === FileType.DIRECTORY
       if (bothDirs) {
-        for (const path of [p0, p1]) await beforeFullScan(ctx.dispatch, path, 'diff')
+        for (const path of [p0, p1]) await beforeFullScan(dispatchOf(ctx), path, 'diff')
         ;[output, differ] = await diffDirs(walk, p0, p1)
       }
     }

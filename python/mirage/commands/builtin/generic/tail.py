@@ -13,6 +13,7 @@ from mirage.commands.builtin.tail_counts import (
     parse_counts,
     parse_seconds,
 )
+from mirage.commands.builtin.utils.links import dispatch_of
 from mirage.commands.builtin.utils.operands import (
     operands_io,
     report_fs_error,
@@ -918,10 +919,10 @@ async def tail_generic(
             # cache and past the stat the command's freshness probe kept:
             # they look for exactly the change neither has yet.
             poll_stat, poll_read, poll_range = stat, stream, read_range
-            if ctx.dispatch is not None:
-                poll_stat = functools.partial(_polled_stat, ctx.dispatch)
-                poll_read = functools.partial(_polled_file, ctx.dispatch)
-                poll_range = functools.partial(_polled_window, ctx.dispatch)
+            if (dispatch := dispatch_of(ctx)) is not None:
+                poll_stat = functools.partial(_polled_stat, dispatch)
+                poll_read = functools.partial(_polled_file, dispatch)
+                poll_range = functools.partial(_polled_window, dispatch)
             return _follow(
                 opened,
                 pending,

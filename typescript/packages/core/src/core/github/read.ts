@@ -37,7 +37,7 @@ export async function read(
 ): Promise<Uint8Array> {
   const sha = blobSha(path, entry)
   const timer = startOp()
-  const data = await fetchBlob(accessor.transport, accessor.owner, accessor.repo, sha)
+  const data = await fetchBlob(accessor.account.transport, accessor.owner, accessor.repo, sha)
   record('read', path.virtual, VFSName.GITHUB, data.length, timer, { fingerprint: sha })
   return data
 }
@@ -56,7 +56,8 @@ export async function* readStream(
 ): AsyncGenerator<Uint8Array, void> {
   const sha = blobSha(path, entry)
   const rec = recordStream('read', path.virtual, VFSName.GITHUB, { fingerprint: sha })
-  for await (const chunk of streamBlob(accessor.transport, accessor.owner, accessor.repo, sha)) {
+  const { account, owner, repo } = accessor
+  for await (const chunk of streamBlob(account.transport, owner, repo, sha)) {
     if (rec !== null) rec.bytes += chunk.byteLength
     yield chunk
   }

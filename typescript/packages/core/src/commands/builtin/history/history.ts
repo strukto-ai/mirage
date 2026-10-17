@@ -56,10 +56,10 @@ async function historyFn(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const observer = accessor.observer
-  if (ctx.sessionId === undefined) {
-    throw new Error("history requires the caller's session id")
+  if (ctx.session === undefined) {
+    throw new Error("history requires the caller's session")
   }
-  const session = ctx.sessionId
+  const session = ctx.session.sessionId
   const fl = new FlagView(ctx.flags, specOf('history'))
   const c = fl.asBool('c')
   const s = fl.asBool('s')

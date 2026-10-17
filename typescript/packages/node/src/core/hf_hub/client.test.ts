@@ -35,6 +35,12 @@ import {
   revSegment,
   stallFetch,
 } from './client.ts'
+import { HfAccountAccessor } from '../../accessor/hf_hub.ts'
+
+/** An anonymous account whose requests give up after `timeoutMs` without progress. */
+function anonymous(timeoutMs = 0): HfAccountAccessor {
+  return new HfAccountAccessor({ endpoint: 'https://huggingface.co' }, timeoutMs)
+}
 
 describe('hubHeaders', () => {
   it('omits Authorization without a token', () => {
@@ -194,27 +200,27 @@ describe('the download wire', () => {
   })
 
   it("hubBytesTagged returns the final hop's etag", async () => {
-    const [data, etag] = await hubBytesTagged(undefined, `${base}/resolve`)
+    const [data, etag] = await hubBytesTagged(anonymous(), `${base}/resolve`)
     expect(new TextDecoder().decode(data)).toBe('0123456789')
     expect(etag).toBe('"final-hop"')
   })
 
   it('hubBytesTagged sends the window', async () => {
-    const [data] = await hubBytesTagged(undefined, `${base}/resolve`, { offset: 2, size: 3 })
+    const [data] = await hubBytesTagged(anonymous(), `${base}/resolve`, { offset: 2, size: 3 })
     expect(new TextDecoder().decode(data)).toBe('234')
     expect(seen.at(-1)?.range).toBe('bytes=2-4')
   })
 
   it('hubBytesTagged trims an ignored range', async () => {
     ignoreRange = true
-    const [data] = await hubBytesTagged(undefined, `${base}/resolve`, { offset: 2, size: 3 })
+    const [data] = await hubBytesTagged(anonymous(), `${base}/resolve`, { offset: 2, size: 3 })
     expect(new TextDecoder().decode(data)).toBe('234')
   })
 
   it('hubStream reports the final headers before the first chunk', async () => {
     const order: string[] = []
     const headers: Record<string, string>[] = []
-    for await (const chunk of hubStream(undefined, `${base}/resolve`, (h) => {
+    for await (const chunk of hubStream(anonymous(), `${base}/resolve`, (h) => {
       order.push('headers')
       headers.push(h)
     }))
@@ -231,7 +237,7 @@ describe('the download wire', () => {
     body = new Uint8Array()
     let calls = 0
     const chunks: Uint8Array[] = []
-    for await (const chunk of hubStream(undefined, `${base}/resolve`, () => {
+    for await (const chunk of hubStream(anonymous(), `${base}/resolve`, () => {
       calls += 1
     }))
       chunks.push(chunk)
@@ -243,7 +249,7 @@ describe('the download wire', () => {
 
   it('hubPost sends a JSON content type', async () => {
     // The live Hub answers a paths-info body without it with 400.
-    await hubPost(undefined, `${base}/post`, { paths: ['a.txt'] })
+    await hubPost(anonymous(), `${base}/post`, { paths: ['a.txt'] })
     expect(seen.at(-1)?.contentType).toBe('application/json')
   })
 })
@@ -319,22 +325,22 @@ describe('stallFetch', () => {
   it('reads a bound of zero or less as none', async () => {
     expect(stallFetch(0)).toBe(hubFetch)
     expect(stallFetch(-1)).toBe(hubFetch)
-    expect(await drain(hubStream(undefined, `${base}/drip`, undefined, 0))).toBe('abcdefgh')
+    expect(await drain(hubStream(anonymous(0), `${base}/drip`))).toBe('abcdefgh')
   })
 
   it('bounds a whole-file read', async () => {
-    const data = await hubBytes(undefined, `${base}/drip`, undefined, STALL_MS)
+    const data = await hubBytes(anonymous(STALL_MS), `${base}/drip`)
     expect(new TextDecoder().decode(data)).toBe('abcdefgh')
-    await expect(hubBytes(undefined, `${base}/stall`, undefined, STALL_MS)).rejects.toMatchObject({
+    await expect(hubBytes(anonymous(STALL_MS), `${base}/stall`)).rejects.toMatchObject({
       name: 'TimeoutError',
     })
   })
 
   it('bounds the streamed read', async () => {
-    expect(await drain(hubStream(undefined, `${base}/drip`, undefined, STALL_MS))).toBe('abcdefgh')
-    await expect(
-      drain(hubStream(undefined, `${base}/stall`, undefined, STALL_MS)),
-    ).rejects.toMatchObject({ name: 'TimeoutError' })
+    expect(await drain(hubStream(anonymous(STALL_MS), `${base}/drip`))).toBe('abcdefgh')
+    await expect(drain(hubStream(anonymous(STALL_MS), `${base}/stall`))).rejects.toMatchObject({
+      name: 'TimeoutError',
+    })
   })
 })
 
@@ -361,19 +367,19 @@ describe('a transport failure', () => {
   }
 
   async function drained(timeoutMs: number): Promise<void> {
-    for await (const chunk of hubStream(undefined, 'http://127.0.0.1:1/x', undefined, timeoutMs)) {
+    for await (const chunk of hubStream(anonymous(timeoutMs), 'http://127.0.0.1:1/x')) {
       expect(chunk).toBeUndefined()
     }
   }
 
   it.each([
-    ['hubGet', () => hubGet(undefined, 'http://127.0.0.1:1/x')],
-    ['hubGet with a bound', () => hubGet(undefined, 'http://127.0.0.1:1/x', undefined, 1000)],
-    ['hubPost', () => hubPost(undefined, 'http://127.0.0.1:1/x', {})],
-    ['hubPostNdjson', () => hubPostNdjson(undefined, 'http://127.0.0.1:1/x', new Uint8Array())],
-    ['hubBytes', () => hubBytes(undefined, 'http://127.0.0.1:1/x')],
-    ['hubBytesTagged', () => hubBytesTagged(undefined, 'http://127.0.0.1:1/x')],
-    ['hubRequest', () => hubRequest(undefined, 'DELETE', 'http://127.0.0.1:1/x', null)],
+    ['hubGet', () => hubGet(anonymous(), 'http://127.0.0.1:1/x')],
+    ['hubGet with a bound', () => hubGet(anonymous(1000), 'http://127.0.0.1:1/x')],
+    ['hubPost', () => hubPost(anonymous(), 'http://127.0.0.1:1/x', {})],
+    ['hubPostNdjson', () => hubPostNdjson(anonymous(), 'http://127.0.0.1:1/x', new Uint8Array())],
+    ['hubBytes', () => hubBytes(anonymous(), 'http://127.0.0.1:1/x')],
+    ['hubBytesTagged', () => hubBytesTagged(anonymous(), 'http://127.0.0.1:1/x')],
+    ['hubRequest', () => hubRequest(anonymous(), 'DELETE', 'http://127.0.0.1:1/x', null)],
     ['hubStream', () => drained(0)],
   ] as [string, () => Promise<unknown>][])('is a connection error from %s', async (_name, call) => {
     const err = await rejected(call)

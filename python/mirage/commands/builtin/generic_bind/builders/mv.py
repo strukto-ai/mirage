@@ -60,11 +60,11 @@ async def mv(
         copies=(
             transfer_links_of(
                 links,
-                ctx.dispatch,
+                ctx.vfs.dispatch,
                 ctx.cwd.virtual if ctx.cwd is not None else "/",
                 session_visibility(),
             )
-            if links is not None and ctx.dispatch is not None
+            if links is not None and ctx.vfs is not None
             else None
         ),
         stdin=ctx.stdin,

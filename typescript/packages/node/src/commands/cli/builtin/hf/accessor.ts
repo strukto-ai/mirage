@@ -16,8 +16,7 @@ import type { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import { yieldBytes } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { HfHubAccessor } from '../../../../accessor/hf_hub.ts'
-import type { HfConfig } from '../../../../core/hf_hub/config.ts'
+import { type HfAccountAccessor, HfHubAccessor } from '../../../../accessor/hf_hub.ts'
 import { API_SEGMENTS, DEFAULT_REVISION } from '../../../../core/hf_hub/constants.ts'
 
 const DEFAULT_REPO_TYPE = 'model'
@@ -32,24 +31,24 @@ export function repoTypeOf(fl: FlagView): string {
 /**
  * A Hub handle for the repository this line named.
  *
- * The CLI builds one per invocation rather than owning a second Hub client:
- * an accessor is a value object here, holding the endpoint, the credential
- * and which repository is being addressed, so `hf` gets the mount's tree walk
- * and commit builder for free. It reaches no mount, which is what keeps this
- * an account CLI. A verb reads paths and sizes, never the per-file commit a
- * mount's mtimes come from, so the walk lists bare.
+ * The CLI builds one per invocation over the install's account rather than
+ * owning a second Hub client: the handle only names which repository is being
+ * addressed and rides the account's credential, origin and request bound, so
+ * `hf` gets the mount's tree walk and commit builder for free. It reaches no
+ * mount, which is what keeps this an account CLI. A verb reads paths and
+ * sizes, never the per-file commit a mount's mtimes come from, so the walk
+ * lists bare.
  */
 export function hubFor(
-  config: HfConfig,
+  account: HfAccountAccessor,
   repoId: string,
   repoType: string,
   revision?: string,
 ): HfHubAccessor {
   return new HfHubAccessor(
+    account,
     {
       repoId,
-      ...(config.token !== undefined ? { token: config.token } : {}),
-      endpoint: config.endpoint,
       revision: revision === undefined || revision === '' ? DEFAULT_REVISION : revision,
       expandCommits: false,
     },
@@ -85,8 +84,8 @@ export function textOut(text: string, stderr = ''): [ByteSource, IOResult] {
  * The Hub answers 401 "Invalid username or password." for an unauthenticated
  * write, which reads as a wrong credential rather than as a missing one.
  */
-export function requireToken(config: HfConfig, what: string): void {
-  if (config.token === undefined || config.token === '') {
+export function requireToken(account: HfAccountAccessor, what: string): void {
+  if (account.token === undefined || account.token === '') {
     throw new UsageError(`${what} requires a token; set \`token\` on the \`hf\` install`)
   }
 }

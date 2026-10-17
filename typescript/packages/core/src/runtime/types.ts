@@ -22,6 +22,24 @@ export interface RuntimeIdentity {
 }
 
 /**
+ * Where an interpreter command (python3, js) runs its code, as the line
+ * placed it, and what policy lets that code start and load. Mirrors Python's
+ * `CommandRuntime`, less its `unavailable`: TypeScript refuses a missing
+ * runtime before the command runs.
+ */
+export interface CommandRuntime {
+  /** The runtime the line bound the command to; absent when none is. */
+  readonly bound?: RuntimeIdentity
+  /** Whether policy lets the command start an interpreter. */
+  readonly execAllowed: boolean
+  /**
+   * Whether policy lets an interpreter load code from a path; absent outside
+   * a workspace, where `execAllowed` decides.
+   */
+  readonly execPathAllowed?: (virtual: string) => boolean
+}
+
+/**
  * The languages a runtime can interpret, one name for both entry points (run
  * and eval). A union, not string, so a typo is a type error instead of
  * a selector that silently matches nothing and reports "no runtime".
@@ -159,46 +177,31 @@ export type PrefixSource = () => string[]
  */
 export type LinkChildrenSource = (directory: string) => Set<string>
 
-/** One interpreter execution request, language-agnostic. */
-export interface RunArgs {
-  code: string
-  args: string[]
+/**
+ * One program a language runtime runs, as it resolved it from its
+ * operands: what the `Context` does not already carry. The runtime reads
+ * the working directory, the environment, the interpreter switches, the
+ * signal and the limit off `ctx`; this is the rest, the source and the
+ * argv it found. Mirrors Python's `Program`.
+ */
+export interface Program {
+  /** The source to run: a script's text, a `-c` payload, the program a `-m` runs, or piped stdin. */
+  readonly code: string
+  /** argv exposed to the program, argv[0] excluded. */
+  readonly args: readonly string[]
   /**
-   * The program's own name, for the argv slot a program reads to prefix
-   * its messages. Set by the CLI script tier (the installed head word,
-   * so a renamed install names itself), absent for the interpreter
-   * commands, which keep their engine's own spelling. A runtime that
-   * assembles argv itself fills slot 0 with it; where a real
-   * interpreter defines that slot (CPython under `-c`) it cannot apply.
+   * argv[0]: the script as typed, `-c` for a CPython payload, the
+   * installed head word of a script CLI; absent leaves the engine's own
+   * spelling. '' is an answer (CPython's for a program piped in with no
+   * operand).
    */
-  prog?: string
-  /** Installed script CLI: expose bare argv and stdin in the program globals. */
-  scriptCli?: boolean
-  env: Record<string, string>
-  /** Virtual working directory for filesystem-aware guest runtimes. */
-  cwd?: PathSpec
-  /** The script file the program was read from, `rawPath` as typed. */
-  scriptPath?: PathSpec
-  stdin: Uint8Array | null
-  /**
-   * Interpreter-level switches parsed by the command's spec (e.g. js
-   * module mode). Each runtime reads its own switches and ignores the
-   * rest.
-   */
-  flags?: Record<string, unknown>
-  /**
-   * Aborted when the command's limit timeout trips, so a runtime
-   * holding external resources (the local subprocess) can reclaim
-   * them. Python needs no equivalent: asyncio cancels the run task
-   * and the runtime cleans up in its CancelledError handler.
-   */
-  signal?: AbortSignal
-  /**
-   * The limit timeout, for engines that execute on the event loop
-   * (quickjs) and must interrupt themselves in-VM: a guest that blocks
-   * the loop also blocks the timer that would abort `signal`.
-   */
-  timeoutSeconds?: number
+  readonly prog?: string
+  /** The input left after any read as source. */
+  readonly stdin: Uint8Array | null
+  /** The script the program was read from, `rawPath` as typed. */
+  readonly scriptPath?: PathSpec
+  /** An installed script CLI, which also finds its argv and stdin as program globals. */
+  readonly scriptCli?: boolean
 }
 
 /** Where a pipe's bytes go: a Node `Writable`, or anything with its two calls. */
@@ -225,44 +228,15 @@ export interface RunResult {
   exitCode: number
 }
 
-/** Language-explicit execution; interpreter switches remain in RunArgs. */
-export interface CodeExecution extends RunArgs {
-  kind: 'code'
-  language: RuntimeLanguage
-}
+/**
+ * What a caller asks of a runtime: run code in its language (`code`), a
+ * whole shell line, `sh -c` with the line in `ctx.flags.c` (`line`), or a
+ * program whose argv is the texts (`process`).
+ */
+export type ExecutionKind = 'code' | 'line' | 'process'
 
-/** A whole shell line interpreted entirely by the selected runtime. */
-export interface ShellRequest {
-  kind: 'shell'
-  line: string
-  cwd: PathSpec
-  env: Record<string, string>
-  stdin: Uint8Array | null
-  signal?: AbortSignal
-}
-
-/** An argv request executed without shell interpretation. */
-export interface ProcessExecution {
-  kind: 'process'
-  argv: readonly [string, ...string[]]
-  cwd: PathSpec
-  env: Record<string, string>
-  stdin: Uint8Array | null
-  signal?: AbortSignal
-}
-
-/** An argv execution with bounded input and an awaited stdout consumer. */
-export interface StreamExecution {
-  kind: 'stream'
-  argv: readonly [string, ...string[]]
-  cwd: PathSpec
-  env: Record<string, string>
-  stdin: ByteSource | null
-  output: (chunk: Uint8Array) => Promise<void>
-  signal?: AbortSignal
-}
-
-export type ExecutionRequest = CodeExecution | ShellRequest | ProcessExecution | StreamExecution
+/** Where a streamed process's output goes, each write awaited before the next is read. */
+export type OutputFn = (chunk: Uint8Array) => Promise<void>
 
 /** Guest APIs for workspace files; policy and backend support still apply per operation. */
 export type FilesystemOperation = 'read' | 'write' | 'list' | 'stat' | 'glob'

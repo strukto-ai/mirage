@@ -15,13 +15,14 @@
 import { fileStreamOp, statOp } from '../../generic/crossmount/utils.ts'
 import { unzipGeneric } from '../../generic/unzip.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import { dispatchOf } from '../../utils/links.ts'
 
 const unzip: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
   const idx = ctx.index ?? undefined
   const write = requireOp(ops.write, 'write')
   const mkdir = requireOp(ops.mkdir, 'mkdir')
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  const dispatch = ctx.dispatch
+  const dispatch = dispatchOf(ctx)
   if (dispatch !== undefined) {
     // Extraction writes wherever cwd or -d says, which need not be
     // this mount, so the functions are dispatch-relayed and each path

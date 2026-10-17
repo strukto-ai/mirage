@@ -35,6 +35,7 @@ from mirage.commands.builtin.sed_script import (
     SedScriptPiece,
     compile_script,
 )
+from mirage.commands.builtin.utils.links import dispatch_of
 from mirage.commands.builtin.utils.operands import (
     materialized_read,
     normalized_read,
@@ -751,7 +752,7 @@ async def sed_generic(
         extended=parsed.extended,
         separate=parsed.separate,
         line_length=parsed.line_length,
-        dispatch=ctx.dispatch,
+        dispatch=dispatch_of(ctx),
         cwd=cwd,
         prefix=ctx.mount_prefix.rstrip("/"),
         utf8=utf8_locale(ctx.env),

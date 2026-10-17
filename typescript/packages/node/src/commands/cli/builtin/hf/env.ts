@@ -15,7 +15,7 @@
 import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { VERSION } from '@struktoai/mirage-core/version'
-import { hfEndpoint, type HfConfig } from '../../../../core/hf_hub/config.ts'
+import type { HfAccountAccessor } from '../../../../accessor/hf_hub.ts'
 import { textOut } from './accessor.ts'
 
 /**
@@ -26,25 +26,24 @@ import { textOut } from './accessor.ts'
  * in a workspace, so this reports the facts that do.
  */
 export function envCmd(
-  config: unknown,
+  accessor: HfAccountAccessor,
   _paths: PathSpec[],
   _texts: string[],
   _ctx: Context,
 ): CommandFnResult {
-  const cfg = config as HfConfig
-  const token = cfg.token !== undefined && cfg.token !== '' ? 'set' : 'not set'
+  const token = accessor.token !== undefined && accessor.token !== '' ? 'set' : 'not set'
   return textOut(
     [
       '- huggingface_hub version: mirage',
       `- mirage version: ${VERSION}`,
-      `- endpoint: ${hfEndpoint(cfg)}`,
+      `- endpoint: ${accessor.endpoint}`,
       `- token: ${token}`,
     ].join('\n') + '\n',
   )
 }
 
 export function versionCmd(
-  _config: unknown,
+  _accessor: HfAccountAccessor,
   _paths: PathSpec[],
   _texts: string[],
   _ctx: Context,

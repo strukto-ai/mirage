@@ -15,16 +15,11 @@
 import { runWithRecording } from '@struktoai/mirage-core/observe/context'
 import { FileStat, FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import * as client from './client.ts'
 import { read, rowToken } from './read.ts'
 import * as repo from './repo.ts'
 import { parseEntry, rowOf } from './tree.ts'
-import { codeOf, ps, rowAt, walking } from './_test_util.ts'
-
-function accessor(): HfHubAccessor {
-  return new HfHubAccessor({ repoId: 'acme/widget' } as never)
-}
+import { codeOf, handle, ps, rowAt, walking } from './_test_util.ts'
 
 const PATH = new PathSpec({ virtual: '/m/m/k.txt', vfsPath: 'm/k.txt', directory: '/m/m/' })
 // The row the listing of /m/m names for k.txt.
@@ -37,21 +32,21 @@ afterEach(() => {
 describe('hf_hub read', () => {
   it('never reaches the network for a path the listing knows is absent', async () => {
     const spy = vi.spyOn(client, 'hubBytesTagged')
-    expect(await codeOf(() => read(accessor(), ps('nope'), {}, null))).toBe('ENOENT')
+    expect(await codeOf(() => read(handle(), ps('nope'), {}, null))).toBe('ENOENT')
     expect(spy).not.toHaveBeenCalled()
   })
 
   it('reports EISDIR for a directory and for the mount root', async () => {
     const folder = new FileStat({ name: 'd', type: FileType.DIRECTORY })
-    expect(await codeOf(() => read(accessor(), ps('d'), {}, folder))).toBe('EISDIR')
-    expect(await codeOf(() => read(accessor(), ps(''), {}, null))).toBe('EISDIR')
+    expect(await codeOf(() => read(handle(), ps('d'), {}, folder))).toBe('EISDIR')
+    expect(await codeOf(() => read(handle(), ps(''), {}, null))).toBe('EISDIR')
   })
 
   it('fetches the resolve url', async () => {
     const spy = vi
       .spyOn(client, 'hubBytesTagged')
       .mockResolvedValue([new TextEncoder().encode('hello'), ''])
-    const data = await read(accessor(), ps('a.txt'), {}, K_ROW)
+    const data = await read(handle(), ps('a.txt'), {}, K_ROW)
     expect(new TextDecoder().decode(data)).toBe('hello')
     expect(spy.mock.calls[0]?.[1]).toBe('https://huggingface.co/acme/widget/resolve/main/a.txt')
     expect(spy.mock.calls[0]?.[2]).toBeUndefined()
@@ -59,7 +54,7 @@ describe('hf_hub read', () => {
 
   it('passes a byte window', async () => {
     const spy = vi.spyOn(client, 'hubBytesTagged').mockResolvedValue([new Uint8Array(2), ''])
-    await read(accessor(), ps('a.txt'), { offset: 0, size: 2 }, K_ROW)
+    await read(handle(), ps('a.txt'), { offset: 0, size: 2 }, K_ROW)
     expect(spy.mock.calls[0]?.[2]).toEqual({ offset: 0, size: 2 })
   })
 })
@@ -68,7 +63,7 @@ describe('hf_hub read', () => {
 describe('hf_hub read record path', () => {
   it('records the virtual path', async () => {
     vi.spyOn(client, 'hubBytesTagged').mockResolvedValue([new TextEncoder().encode('hello'), ''])
-    const [data, records] = await runWithRecording(() => read(accessor(), PATH, {}, K_ROW))
+    const [data, records] = await runWithRecording(() => read(handle(), PATH, {}, K_ROW))
     expect(new TextDecoder().decode(data)).toBe('hello')
     expect(records.map((r) => r.path)).toEqual(['/m/m/k.txt'])
   })
@@ -128,7 +123,7 @@ describe('hf_hub read stamp', () => {
       new TextEncoder().encode('hello'),
       '"oid-k"',
     ])
-    const [, records] = await runWithRecording(() => read(accessor(), PATH, {}, K_ROW))
+    const [, records] = await runWithRecording(() => read(handle(), PATH, {}, K_ROW))
     expect(records.map((r) => r.fingerprint)).toEqual(['oid-k'])
   })
 
@@ -140,7 +135,7 @@ describe('hf_hub read stamp', () => {
       new TextEncoder().encode('newer'),
       '"another-version"',
     ])
-    const [, records] = await runWithRecording(() => read(accessor(), PATH, {}, K_ROW))
+    const [, records] = await runWithRecording(() => read(handle(), PATH, {}, K_ROW))
     expect(records.map((r) => r.fingerprint)).toEqual([null])
   })
 })
@@ -159,7 +154,7 @@ describe('a download the Hub refuses', () => {
   it.each([401, 403])('is permission denied for %i', async (status) => {
     // A gated repo lists its tree but refuses the file itself.
     vi.spyOn(client, 'hubBytesTagged').mockRejectedValue(new client.HfHubError('gated', status))
-    expect(await codeOf(() => read(accessor(), PATH, {}, K_ROW))).toBe('EACCES')
+    expect(await codeOf(() => read(handle(), PATH, {}, K_ROW))).toBe('EACCES')
   })
 
   it('keeps a vanished file a hub error', async () => {
@@ -167,7 +162,7 @@ describe('a download the Hub refuses', () => {
     vi.spyOn(client, 'hubBytesTagged').mockRejectedValue(
       new client.HfHubError('gone', 404, 'EntryNotFound'),
     )
-    const err = await read(accessor(), PATH, {}, K_ROW).catch((e: unknown) => e)
+    const err = await read(handle(), PATH, {}, K_ROW).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(client.HfHubError)
   })
 })

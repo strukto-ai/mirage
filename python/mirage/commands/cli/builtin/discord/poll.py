@@ -14,9 +14,9 @@
 
 import json
 
+from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.post import send_poll
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -24,7 +24,7 @@ from mirage.types import PathSpec
 
 
 async def poll(
-    config: DiscordConfig,
+    accessor: DiscordAccessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
@@ -32,7 +32,7 @@ async def poll(
     fl = FlagView(ctx.flags)
     answers = fl.as_list("answer")
     result = await send_poll(
-        config,
+        accessor,
         fl.as_str("channel") or "",
         fl.as_str("question") or "",
         answers,

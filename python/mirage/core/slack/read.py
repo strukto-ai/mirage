@@ -49,11 +49,7 @@ async def _read_chat(
     await guard_day(accessor, match, path.virtual)
     channel_id = day_channel_id(path, entry, parent)
     return await get_history_jsonl(
-        accessor.config,
-        channel_id,
-        match.slots["day"],
-        accessor.time_range,
-        session=accessor.pool,
+        accessor, channel_id, match.slots["day"], accessor.time_range
     )
 
 
@@ -66,9 +62,7 @@ async def _read_user(
 ) -> bytes:
     if entry is None:
         raise enoent(path.virtual)
-    user = await get_user_profile(
-        accessor.config, str(entry.extra["user_id"]), session=accessor.pool
-    )
+    user = await get_user_profile(accessor, str(entry.extra["user_id"]))
     return user_json_bytes(user)
 
 
@@ -92,9 +86,7 @@ async def _read_blob(
     parent: FileStat | None,
 ) -> bytes:
     url = await _blob_url(accessor, path, entry)
-    return await download_file(
-        accessor.config, url, 0, None, session=accessor.pool
-    )
+    return await download_file(accessor, url, 0, None)
 
 
 async def _read_blob_range(
@@ -107,9 +99,7 @@ async def _read_blob_range(
     size: int | None,
 ) -> bytes:
     url = await _blob_url(accessor, path, entry)
-    return await download_file(
-        accessor.config, url, offset, size, session=accessor.pool
-    )
+    return await download_file(accessor, url, offset, size)
 
 
 read = make_read(
@@ -148,9 +138,7 @@ async def read_stream(
     """
     if detect_scope(path).kind == "file_blob":
         url = await _blob_url(accessor, path, entry)
-        source = download_file_stream(
-            accessor.config, url, session=accessor.pool
-        )
+        source = download_file_stream(accessor, url)
     else:
         source = chunks(await read(accessor, path, entry, parent))
     async with aclosing(source):
@@ -184,12 +172,7 @@ async def _follow_chat(
     channel_id = day_channel_id(path, entry, parent)
     day = match.slots["day"]
     fetch = partial(
-        fetch_messages_for_day,
-        accessor.config,
-        channel_id,
-        day,
-        accessor.time_range,
-        session=accessor.pool,
+        fetch_messages_for_day, accessor, channel_id, day, accessor.time_range
     )
 
     async def after(last: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -206,12 +189,7 @@ def _run_pages(
     accessor: SlackAccessor, channel_id: str, first: str, last: str
 ) -> AsyncGenerator[list[dict[str, Any]], None]:
     return stream_messages_for_day(
-        accessor.config,
-        channel_id,
-        first,
-        accessor.time_range,
-        session=accessor.pool,
-        last_day=last,
+        accessor, channel_id, first, accessor.time_range, last_day=last
     )
 
 

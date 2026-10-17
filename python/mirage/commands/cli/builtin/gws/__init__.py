@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.commands.cli.builtin.gws.api import api_groups, api_handlers
 from mirage.commands.cli.builtin.gws.docs.write import write as docs_write
 from mirage.commands.cli.builtin.gws.gmail.forward import forward
@@ -27,7 +28,18 @@ from mirage.commands.cli.builtin.gws.sheets.read import read as sheets_read
 from mirage.commands.cli.builtin.gws.sheets.write import write as sheets_write
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import Argument, CommandSpec
+from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
+
+
+def google_api_accessor(config: GoogleConfig) -> GoogleApiAccessor:
+    """The install's accessor: one token manager for every line.
+
+    Args:
+        config (GoogleConfig): the install's validated config.
+    """
+    return GoogleApiAccessor(config, TokenManager(config))
+
 
 # The gws program tree, mirroring the official Google Workspace CLI:
 # one passthrough leaf per Discovery method (`gws drive files list`,
@@ -198,4 +210,5 @@ GWS = CLI(
         "gmail triage": CLIHandler(fn=triage),
     },
     config_model=GoogleConfig,
+    accessor=google_api_accessor,
 )

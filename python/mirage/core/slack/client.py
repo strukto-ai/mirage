@@ -19,12 +19,8 @@ from typing import Any
 
 import aiohttp
 
-from mirage.core.api.client import (
-    SessionArg,
-    api_request,
-    api_stream,
-    status_error,
-)
+from mirage.accessor.slack import SlackAccessor
+from mirage.core.api.client import api_request, api_stream, status_error
 from mirage.core.slack.config import SlackConfig
 from mirage.utils.ranges import window_for
 from mirage.vfs.secrets import reveal_secret
@@ -88,47 +84,44 @@ def _checked(method: str, data: Any) -> dict[str, Any]:
 
 
 async def slack_get(
-    config: SlackConfig,
+    accessor: SlackAccessor,
     method: str,
     params: dict[str, Any] | None = None,
-    session: SessionArg = None,
 ) -> dict[str, Any]:
-    url = f"{config.base_url.rstrip('/')}/{method}"
+    url = f"{accessor.config.base_url.rstrip('/')}/{method}"
     data = await api_request(
         "GET",
         url,
         error_of=partial(_error_of, method=method),
-        headers=slack_headers(config, method),
+        headers=slack_headers(accessor.config, method),
         params=params,
-        session=session,
+        session=accessor.pool,
     )
     return _checked(method, data)
 
 
 async def slack_post(
-    config: SlackConfig,
+    accessor: SlackAccessor,
     method: str,
     body: dict[str, Any] | None = None,
-    session: SessionArg = None,
 ) -> dict[str, Any]:
-    url = f"{config.base_url.rstrip('/')}/{method}"
+    url = f"{accessor.config.base_url.rstrip('/')}/{method}"
     data = await api_request(
         "POST",
         url,
         error_of=partial(_error_of, method=method),
-        headers=slack_headers(config, method),
+        headers=slack_headers(accessor.config, method),
         json_body=body or {},
-        session=session,
+        session=accessor.pool,
     )
     return _checked(method, data)
 
 
 async def download_file(
-    config: SlackConfig,
+    accessor: SlackAccessor,
     url: str,
     offset: int = 0,
     size: int | None = None,
-    session: SessionArg = None,
 ) -> bytes:
     """Download a Slack-hosted file blob, optionally only a byte range.
 
@@ -138,43 +131,40 @@ async def download_file(
     ``window_if_unranged`` then trims.
 
     Args:
-        config (SlackConfig): Slack credentials.
+        accessor (SlackAccessor): Slack accessor.
         url (str): Slack file URL (typically url_private_download).
         offset (int): first byte to read.
         size (int | None): how many bytes, or None for the rest.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         bytes: raw file content.
     """
-    headers = {"Authorization": f"Bearer {reveal_secret(config.token)}"}
+    token = reveal_secret(accessor.config.token)
     data: bytes = await api_request(
         "GET",
         url,
         error_of=status_error,
-        headers=headers,
+        headers={"Authorization": f"Bearer {token}"},
         read="bytes",
         window=window_for(offset, size),
-        session=session,
+        session=accessor.pool,
     )
     return data
 
 
 def download_file_stream(
-    config: SlackConfig,
-    url: str,
-    session: SessionArg = None,
+    accessor: SlackAccessor, url: str
 ) -> AsyncGenerator[bytes, None]:
     """Stream an attachment with bounded reads and response cleanup.
 
     Args:
-        config (SlackConfig): Slack credentials.
+        accessor (SlackAccessor): Slack accessor.
         url (str): attachment download URL.
-        session (SessionArg): pool or live session to borrow.
     """
+    token = reveal_secret(accessor.config.token)
     return api_stream(
         url,
         error_of=status_error,
-        headers={"Authorization": f"Bearer {reveal_secret(config.token)}"},
-        session=session,
+        headers={"Authorization": f"Bearer {token}"},
+        session=accessor.pool,
     )

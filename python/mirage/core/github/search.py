@@ -15,10 +15,8 @@
 import logging
 from dataclasses import dataclass
 
-from mirage.accessor.github import GitHubAccessor
-from mirage.core.api.client import SessionArg
+from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.core.github.client import github_get, github_request_response
-from mirage.core.github.config import GhConfig, GitHubConfig
 from mirage.core.github.constants import (
     SCOPE_ERROR,
     SCOPE_WARN,
@@ -46,12 +44,11 @@ class SearchResult:
 
 
 async def search_code(
-    config: GitHubConfig,
+    account: GitHubAccount,
     owner: str,
     repo: str,
     query: str,
     path_filter: str | None = None,
-    session: SessionArg = None,
 ) -> tuple[list[SearchResult], bool]:
     """Search one repository's code for a literal, and say if that is all.
 
@@ -64,12 +61,12 @@ async def search_code(
     never a missed file.
 
     Args:
-        config (GitHubConfig): GitHub API config.
+        account (GitHubAccount): the mount's account, whose pool the
+            search rides.
         owner (str): Repository owner.
         repo (str): Repository name.
         query (str): Literal search pattern.
         path_filter (str | None): Repo-relative directory to search under.
-        session (SessionArg): the mount's session pool.
 
     Returns:
         tuple[list[SearchResult], bool]: this repository's hits, and whether
@@ -79,11 +76,9 @@ async def search_code(
     if path_filter:
         q += f" path:{path_filter}"
     data = await github_get(
-        config.token,
+        account,
         "/search/code",
         params={"q": q, "per_page": str(SEARCH_PAGE_SIZE)},
-        base_url=config.base_url,
-        session=session,
     )
     items = data.get("items") or []
     total = data.get("total_count")
@@ -117,8 +112,9 @@ async def narrow_paths(
 
     Args:
         accessor (GitHubAccessor): backend handle: the repository, its
-            recursive tree, and the session pool each search rides so it
-            reuses the mount's connections instead of opening a session.
+            recursive tree, and the account whose pool each search rides
+            so it reuses the mount's connections instead of opening a
+            session.
         query (str): literal search query.
         paths (list[PathSpec]): scope paths, possibly mount-prefixed.
 
@@ -136,12 +132,11 @@ async def narrow_paths(
         path_filter = key.strip("/")
         try:
             results, truncated = await search_code(
-                accessor.config,
+                accessor.account,
                 accessor.owner,
                 accessor.repo,
                 query=query,
                 path_filter=path_filter or None,
-                session=accessor.pool,
             )
         except Exception as exc:
             logger.debug(
@@ -261,7 +256,7 @@ async def before_full_scan(
 
 
 async def search(
-    config: GhConfig,
+    account: GitHubAccount,
     kind: str,
     query: str,
     limit: int,
@@ -271,7 +266,7 @@ async def search(
     """Fetch a bounded REST search, following the server's pagination.
 
     Args:
-        config (GhConfig): account connection.
+        account (GitHubAccount): the token, API base and pool to ride.
         kind (str): REST search resource.
         query (str): GitHub search expression.
         limit (int): maximum rows.
@@ -288,11 +283,10 @@ async def search(
     while len(rows) < limit:
         params["page"] = str(page)
         response = await github_request_response(
-            config.token,
+            account,
             "GET",
             f"/search/{kind}",
             params=params,
-            base_url=config.base_url,
             headers={
                 "Accept": "application/vnd.github.text-match+json"
                 if kind == "code"

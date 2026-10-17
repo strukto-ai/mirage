@@ -17,19 +17,19 @@ import { searchGuild } from '../../../../core/discord/search.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { discordAccessor } from '../../../../accessor/discord.ts'
+import type { DiscordAccessor } from '../../../../accessor/discord.ts'
 
 const ENC = new TextEncoder()
 
 export async function search(
-  config: unknown,
+  accessor: DiscordAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   const results = await searchGuild(
-    discordAccessor(config),
+    accessor,
     fl.asStr('guild') ?? '',
     fl.asStr('query') ?? '',
     fl.asStr('channel') ?? undefined,

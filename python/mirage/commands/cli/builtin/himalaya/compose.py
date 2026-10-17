@@ -12,15 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.util import route
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.email.config import EmailConfig
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def compose(
-    config: EmailConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: EmailAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    return await route(config, FlagView(ctx.flags), ctx.stdin, None, ctx.vfs)
+    return await route(accessor, FlagView(ctx.flags), ctx.stdin, None, ctx.vfs)

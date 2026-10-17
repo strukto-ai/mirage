@@ -18,8 +18,10 @@ import { ContentType, FileStat, FileType } from '../types.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
-import type { BridgeDispatchFn, RunArgs } from './types.ts'
+import type { Runtime } from './base.ts'
+import type { BridgeDispatchFn, RunResult } from './types.ts'
 import { PrefixResolver } from './resolver.ts'
+import { context } from '../workspace/fixtures/context.ts'
 
 interface CountingBridge {
   dispatch: BridgeDispatchFn
@@ -114,8 +116,8 @@ const APPEND_LOOP_PY =
 const APPEND_LOOP_JS =
   "for (let i = 0; i < 8; i++) { const w = std.open('/data/log.txt', 'a'); w.puts('xyz'); w.close() }"
 
-function runArgs(code: string): RunArgs {
-  return { code, args: [], env: {}, stdin: null }
+function run(rt: Runtime, code: string): Promise<RunResult> {
+  return rt.execute([], [], context({ flags: { c: code } }))
 }
 
 // Eight appends of three bytes must ship 24 bytes, not O(n^2). The
@@ -132,8 +134,8 @@ describe('append ships only the deltas', () => {
     async (_name, make, program) => {
       const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
       const rt = make()
-      rt.bind(new WorkspaceBinding(counting.dispatch, new PrefixResolver(() => ['/data/'])))
-      const result = await rt.run(runArgs(program))
+      rt.bind(WorkspaceBinding.overBridge(counting.dispatch, new PrefixResolver(() => ['/data/'])))
+      const result = await run(rt, program)
       await rt.close()
       expect(result.exitCode).toBe(0)
       const dec = new TextDecoder()
@@ -170,9 +172,9 @@ describe('interpreter state belongs to an invocation', () => {
               : "\nraise ValueError('failed')"
             : '')
         try {
-          const first = await engine.run(runArgs(code))
+          const first = await run(engine, code)
           expect(first.exitCode, String(first.stderr)).toBe(Number(fails))
-          const second = await engine.run(runArgs(probe))
+          const second = await run(engine, probe)
           expect(second.exitCode, String(second.stderr)).toBe(0)
           expect(new TextDecoder().decode(second.stdout)).toBe('fresh\nfresh\n')
         } finally {

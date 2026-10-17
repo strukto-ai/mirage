@@ -13,21 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import opendal
-from pydantic import SecretStr
 
-from mirage.accessor.base import SessionAccessor
-from mirage.core.hf_hub.client import stall_timeout
+from mirage.accessor.base import Accessor
+from mirage.accessor.hf_hub import account_of
 from mirage.vfs.hf_buckets.config import HfBucketsConfig
 from mirage.vfs.secrets import reveal_secret
 
 
-class HfBucketsAccessor(SessionAccessor):
+class HfBucketsAccessor(Accessor):
     """A mount onto one Hugging Face bucket.
 
     Listing and writes go through the opendal operator; stat's point lookup
-    and every read go to the Hub over the pool, because the bucket's
-    content token (its xet hash) comes from paths-info and the resolve
-    download, neither of which the binding exposes.
+    and every read go to the Hub through the account the mount builds and
+    closes, because the bucket's content token (its xet hash) comes from
+    paths-info and the resolve download, neither of which the binding
+    exposes.
     """
 
     REPO_TYPE = "bucket"
@@ -37,8 +37,11 @@ class HfBucketsAccessor(SessionAccessor):
         """Args:
         config (HfBucketsConfig): bucket id, credential and key prefix.
         """
-        super().__init__(timeout=stall_timeout(config.timeout))
         self.config = config
+        self.account = account_of(config)
+
+    async def close(self) -> None:
+        await self.account.close()
 
     @property
     def bucket_uri(self) -> str:
@@ -47,10 +50,6 @@ class HfBucketsAccessor(SessionAccessor):
     @property
     def endpoint(self) -> str:
         return self.config.endpoint
-
-    @property
-    def token(self) -> SecretStr | None:
-        return self.config.token
 
     @property
     def key_prefix(self) -> str:

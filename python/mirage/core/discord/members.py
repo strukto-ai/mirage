@@ -15,9 +15,8 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
-from mirage.core.api.client import SessionArg
+from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.client import discord_get
-from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.paginate import after_id_pages
 
 
@@ -26,10 +25,7 @@ def _member_user_id(m: dict[str, Any]) -> str:
 
 
 def list_members_stream(
-    config: DiscordConfig,
-    guild_id: str,
-    page_size: int = 1000,
-    session: SessionArg = None,
+    accessor: DiscordAccessor, guild_id: str, page_size: int = 1000
 ) -> AsyncIterator[list[dict[str, Any]]]:
     """Stream guild members across pages.
 
@@ -37,72 +33,58 @@ def list_members_stream(
     API returns a partial page.
 
     Args:
-        config (DiscordConfig): Discord credentials.
+        accessor (DiscordAccessor): Discord accessor.
         guild_id (str): guild ID.
         page_size (int): per-page limit (Discord caps at 1000).
-        session (SessionArg): pool or live session to ride.
 
     Yields:
         list[dict]: member dicts per page.
     """
     return after_id_pages(
-        config,
+        accessor,
         f"/guilds/{guild_id}/members",
         base_params={},
         last_id_fn=_member_user_id,
         page_size=page_size,
-        session=session,
     )
 
 
 async def list_members(
-    config: DiscordConfig,
-    guild_id: str,
-    page_size: int = 1000,
-    session: SessionArg = None,
+    accessor: DiscordAccessor, guild_id: str, page_size: int = 1000
 ) -> list[dict[str, Any]]:
     """List all guild members (paginated).
 
     Args:
-        config (DiscordConfig): Discord credentials.
+        accessor (DiscordAccessor): Discord accessor.
         guild_id (str): guild ID.
         page_size (int): per-page limit.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         list[dict]: member dicts.
     """
     out: list[dict[str, Any]] = []
-    async for page in list_members_stream(
-        config, guild_id, page_size, session=session
-    ):
+    async for page in list_members_stream(accessor, guild_id, page_size):
         out.extend(page)
     return out
 
 
 async def search_members(
-    config: DiscordConfig,
-    guild_id: str,
-    query: str,
-    limit: int = 100,
-    session: SessionArg = None,
+    accessor: DiscordAccessor, guild_id: str, query: str, limit: int = 100
 ) -> list[dict[str, Any]]:
     """Search guild members by name.
 
     Args:
-        config (DiscordConfig): Discord credentials.
+        accessor (DiscordAccessor): Discord accessor.
         guild_id (str): guild ID.
         query (str): search query.
         limit (int): max results.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         list[dict]: matching members.
     """
     result = await discord_get(
-        config,
+        accessor,
         f"/guilds/{guild_id}/members/search",
         params={"query": query, "limit": limit},
-        session=session,
     )
     return result if isinstance(result, list) else []

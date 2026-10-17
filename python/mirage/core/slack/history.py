@@ -15,33 +15,30 @@
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from mirage.core.api.client import SessionArg
+from mirage.accessor.slack import SlackAccessor
 from mirage.core.render.json import jsonl_bytes
 from mirage.core.slack.client import slack_get
-from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.paginate import cursor_pages
 from mirage.core.time_range import TimeRange
 
 
 async def stream_messages_for_day(
-    config: SlackConfig,
+    accessor: SlackAccessor,
     channel_id: str,
     date_str: str,
     scope: TimeRange,
     limit: int = 200,
-    session: SessionArg = None,
     after: str | None = None,
     last_day: str | None = None,
 ) -> AsyncGenerator[list[dict[str, Any]], None]:
     """Page-streaming history for a channel-day, or a run of days.
 
     Args:
-        config (SlackConfig): Slack credentials.
+        accessor (SlackAccessor): Slack accessor.
         channel_id (str): channel ID.
         date_str (str): date in YYYY-MM-DD format.
         scope (TimeRange): the mount's time scope, clipping the day.
         limit (int): max per page.
-        session (SessionArg): pool or live session to ride.
         after (str | None): only the messages after this ``ts``.
         last_day (str | None): the last day of a run read as one, the
             day itself when None.
@@ -55,7 +52,7 @@ async def stream_messages_for_day(
     if oldest >= latest:
         return
     async for page in cursor_pages(
-        config,
+        accessor,
         "conversations.history",
         base_params={
             "channel": channel_id,
@@ -65,7 +62,6 @@ async def stream_messages_for_day(
             "inclusive": "true",
         },
         items_key="messages",
-        session=session,
     ):
         yield [
             message
@@ -76,21 +72,19 @@ async def stream_messages_for_day(
 
 
 async def fetch_messages_for_day(
-    config: SlackConfig,
+    accessor: SlackAccessor,
     channel_id: str,
     date_str: str,
     scope: TimeRange,
-    session: SessionArg = None,
     after: str | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch all messages for a date as parsed dicts (eager).
 
     Args:
-        config (SlackConfig): Slack credentials.
+        accessor (SlackAccessor): Slack accessor.
         channel_id (str): channel ID.
         date_str (str): date in YYYY-MM-DD format.
         scope (TimeRange): the mount's time scope, clipping the day.
-        session (SessionArg): pool or live session to ride.
         after (str | None): only the messages after this ``ts``.
 
     Returns:
@@ -98,12 +92,7 @@ async def fetch_messages_for_day(
     """
     messages: list[dict[str, Any]] = []
     async for page in stream_messages_for_day(
-        config,
-        channel_id,
-        date_str,
-        scope,
-        session=session,
-        after=after,
+        accessor, channel_id, date_str, scope, after=after
     ):
         messages.extend(page)
     messages.sort(key=lambda m: float(m.get("ts", "0")))
@@ -111,55 +100,42 @@ async def fetch_messages_for_day(
 
 
 async def get_history_jsonl(
-    config: SlackConfig,
-    channel_id: str,
-    date_str: str,
-    scope: TimeRange,
-    session: SessionArg = None,
+    accessor: SlackAccessor, channel_id: str, date_str: str, scope: TimeRange
 ) -> bytes:
     """Fetch channel messages for a specific date as JSONL.
 
     Args:
-        config (SlackConfig): Slack credentials.
+        accessor (SlackAccessor): Slack accessor.
         channel_id (str): channel ID.
         date_str (str): date in YYYY-MM-DD format.
         scope (TimeRange): the mount's time scope, clipping the day.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         bytes: JSONL-encoded messages.
     """
     messages = await fetch_messages_for_day(
-        config, channel_id, date_str, scope, session=session
+        accessor, channel_id, date_str, scope
     )
     return jsonl_bytes(messages)
 
 
 async def fetch_recent_messages(
-    config: SlackConfig,
-    channel_id: str,
-    limit: int = 20,
-    session: SessionArg = None,
+    accessor: SlackAccessor, channel_id: str, limit: int = 20
 ) -> list[dict[str, Any]]:
     """Fetch the most recent messages of a channel (one API page).
 
     Args:
-        config (SlackConfig): Slack credentials.
+        accessor (SlackAccessor): Slack accessor.
         channel_id (str): channel ID.
         limit (int): maximum number of messages.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         list[dict]: messages sorted by ts ascending.
     """
     data = await slack_get(
-        config,
+        accessor,
         "conversations.history",
-        {
-            "channel": channel_id,
-            "limit": limit,
-        },
-        session=session,
+        {"channel": channel_id, "limit": limit},
     )
     messages = data.get("messages")
     items = (

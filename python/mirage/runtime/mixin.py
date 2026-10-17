@@ -13,11 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from abc import ABC, abstractmethod
+from typing import Generic, TypeVar
 
-from mirage.runtime.types import ProcessExecution, RunResult, StreamExecution
+from mirage.commands.config import Context
+from mirage.runtime.types import OutputFn, RunResult
+from mirage.types import PathSpec
+
+E = TypeVar("E")
 
 
-class LineExecutorMixin(ABC):
+class LineExecutorMixin(ABC, Generic[E]):
     """The whole-line capability: a raw command line in, a result out.
 
     A true mixin: no state, no constructor, one method. A Runtime that
@@ -26,6 +31,7 @@ class LineExecutorMixin(ABC):
     world (its own cat, its own grep), the workspace shell never
     splits the line. Only an explicit "*" capture delegates a whole
     workspace line. Named captures receive one safely quoted command.
+
     Interpreter runtimes never inherit
     it: they are the engine inside one command (python3, node), never
     the line. The workspace runtime does not either: a line resolved to
@@ -36,29 +42,56 @@ class LineExecutorMixin(ABC):
 
     @abstractmethod
     async def run_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
+        self, engine: E, paths: list[PathSpec], texts: list[str], ctx: Context
     ) -> RunResult:
-        """Execute one raw command line wholesale.
+        """Execute one raw command line wholesale, ``sh -c`` with it.
 
         Args:
-            line (str): the raw typed line.
-            stdin (bytes | None): bytes piped into the line.
-            env (dict[str, str]): the session environment.
-            cwd (str): the session working directory.
+            engine (E): the runtime's engine.
+            paths (list[PathSpec]): unused; a line names its own paths.
+            texts (list[str]): unused.
+            ctx (Context): the line in ``flags["c"]``, its stdin, the
+                session environment and working directory.
         """
 
 
-class ProcessExecutorMixin(ABC):
+class ProcessExecutorMixin(ABC, Generic[E]):
     """Execute an argv request without shell interpretation."""
 
     @abstractmethod
-    async def run_process(self, request: ProcessExecution) -> RunResult:
-        """Run a process with the request's cwd, environment and stdin."""
+    async def run_process(
+        self, engine: E, paths: list[PathSpec], texts: list[str], ctx: Context
+    ) -> RunResult:
+        """Run the program ``texts`` names, with ``ctx``'s working
+        directory, environment and stdin.
+
+        Args:
+            engine (E): the runtime's engine.
+            paths (list[PathSpec]): unused; argv is words.
+            texts (list[str]): the argv, program first.
+            ctx (Context): the run's context.
+        """
 
 
-class StreamingProcessMixin(ProcessExecutorMixin):
+class StreamingProcessMixin(ProcessExecutorMixin[E]):
     """An argv executor that consumes input and delivers output incrementally."""
 
     @abstractmethod
-    async def run_stream(self, request: StreamExecution) -> RunResult:
-        """Await each output write and return status after the child exits."""
+    async def run_stream(
+        self,
+        engine: E,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+        output: OutputFn,
+    ) -> RunResult:
+        """Await each output write and return status after the child exits.
+
+        Args:
+            engine (E): the runtime's engine.
+            paths (list[PathSpec]): unused; argv is words.
+            texts (list[str]): the argv, program first.
+            ctx (Context): the run's context; its stdin is read as the
+                child consumes it.
+            output (OutputFn): where the child's stdout goes.
+        """

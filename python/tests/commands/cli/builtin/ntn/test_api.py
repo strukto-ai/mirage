@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 
+from mirage.accessor.notion import NotionAccessor
 from mirage.commands.cli.builtin.ntn.api import (
     METHODS,
     InlineRefusal,
@@ -28,7 +29,7 @@ from mirage.io.stream import yield_bytes
 from mirage.io.types import materialize
 from mirage.types import JsonValue
 
-CONFIG = NotionConfig(api_key="secret")
+NOTION = NotionAccessor(NotionConfig(api_key="secret"))
 
 # The three accumulators classify() sorts one input token into.
 Sorted = tuple[dict[str, JsonValue], dict[str, str], dict[str, str]]
@@ -90,7 +91,7 @@ async def test_inline_headers_reach_the_request(monkeypatch):
     seen: dict[str, Any] = {}
 
     async def fake_get(
-        config: NotionConfig,
+        accessor: NotionAccessor,
         path: str,
         params: dict[str, Any] | None = None,
         extra_headers: dict[str, str] | None = None,
@@ -99,7 +100,7 @@ async def test_inline_headers_reach_the_request(monkeypatch):
         return {"ok": True}
 
     monkeypatch.setitem(api.__globals__, "notion_get", fake_get)
-    await api(CONFIG, [], ["v1/search", "X-Foo:bar", "X-Two:baz"], Context())
+    await api(NOTION, [], ["v1/search", "X-Foo:bar", "X-Two:baz"], Context())
     assert seen["headers"] == {"X-Foo": "bar", "X-Two": "baz"}
 
 
@@ -108,7 +109,7 @@ async def test_no_inline_header_sends_none(monkeypatch):
     seen: dict[str, Any] = {}
 
     async def fake_get(
-        config: NotionConfig,
+        accessor: NotionAccessor,
         path: str,
         params: dict[str, Any] | None = None,
         extra_headers: dict[str, str] | None = None,
@@ -117,7 +118,7 @@ async def test_no_inline_header_sends_none(monkeypatch):
         return {"ok": True}
 
     monkeypatch.setitem(api.__globals__, "notion_get", fake_get)
-    await api(CONFIG, [], ["v1/search"], Context())
+    await api(NOTION, [], ["v1/search"], Context())
     assert seen["headers"] is None
 
 
@@ -126,7 +127,7 @@ async def test_malformed_data_matches_upstream_exactly():
     # Probed against ntn 0.21.9: exit 1 with this wording, which is
     # neither python's raw JSONDecodeError nor a generic usage error.
     out, io = await api(
-        CONFIG, [], ["v1/search"], Context(flags={"data": "{"})
+        NOTION, [], ["v1/search"], Context(flags={"data": "{"})
     )
     assert out is None
     assert io.exit_code == 1
@@ -141,7 +142,7 @@ async def test_a_non_object_data_is_sent_rather_than_refused(monkeypatch):
     seen: dict[str, Any] = {}
 
     async def fake_post(
-        config: NotionConfig,
+        accessor: NotionAccessor,
         path: str,
         body: JsonValue = None,
         extra_headers: dict[str, str] | None = None,
@@ -152,7 +153,7 @@ async def test_a_non_object_data_is_sent_rather_than_refused(monkeypatch):
 
     monkeypatch.setitem(METHODS, "POST", fake_post)
     _out, io = await api(
-        CONFIG, [], ["v1/search"], Context(flags={"data": "[]"})
+        NOTION, [], ["v1/search"], Context(flags={"data": "[]"})
     )
     assert io.exit_code == 0
     assert seen["body"] == []
@@ -166,7 +167,7 @@ async def test_an_empty_data_object_still_posts(monkeypatch):
     seen: dict[str, Any] = {}
 
     async def fake_post(
-        config: NotionConfig,
+        accessor: NotionAccessor,
         path: str,
         body: JsonValue = None,
         extra_headers: dict[str, str] | None = None,
@@ -176,14 +177,14 @@ async def test_an_empty_data_object_still_posts(monkeypatch):
         return {"ok": True}
 
     monkeypatch.setitem(METHODS, "POST", fake_post)
-    await api(CONFIG, [], ["v1/search"], Context(flags={"data": "{}"}))
+    await api(NOTION, [], ["v1/search"], Context(flags={"data": "{}"}))
     assert seen["body"] == {}
 
 
 @pytest.mark.asyncio
 async def test_data_and_inline_body_conflict():
     _out, io = await api(
-        CONFIG, [], ["v1/search", "a=1"], Context(flags={"data": "{}"})
+        NOTION, [], ["v1/search", "a=1"], Context(flags={"data": "{}"})
     )
     assert io.exit_code == 5
     assert io.stderr.decode() == (
@@ -199,7 +200,7 @@ async def test_the_pipe_is_a_body_source_and_outranks_data():
     # Upstream names the sources in a fixed order and validates the pipe
     # first, so a malformed pipe wins over a conflict it is part of.
     _out, io = await api(
-        CONFIG,
+        NOTION,
         [],
         ["v1/search"],
         Context(flags={"data": "{}"}, stdin=yield_bytes(b'{"q":1}')),
@@ -214,7 +215,7 @@ async def test_the_pipe_is_a_body_source_and_outranks_data():
 @pytest.mark.asyncio
 async def test_malformed_stdin_is_its_own_exit_one():
     _out, io = await api(
-        CONFIG, [], ["v1/search"], Context(stdin=yield_bytes(b"{"))
+        NOTION, [], ["v1/search"], Context(stdin=yield_bytes(b"{"))
     )
     assert io.exit_code == 1
     assert io.stderr == b"error: Invalid JSON from stdin\n"
@@ -227,7 +228,7 @@ async def test_blank_stdin_is_not_a_body_source(monkeypatch):
     seen: dict[str, Any] = {}
 
     async def fake_post(
-        config: NotionConfig,
+        accessor: NotionAccessor,
         path: str,
         body: JsonValue = None,
         extra_headers: dict[str, str] | None = None,
@@ -238,7 +239,7 @@ async def test_blank_stdin_is_not_a_body_source(monkeypatch):
 
     monkeypatch.setitem(METHODS, "POST", fake_post)
     _out, io = await api(
-        CONFIG,
+        NOTION,
         [],
         ["v1/search"],
         Context(flags={"data": "{}"}, stdin=yield_bytes(b"  \n")),
@@ -250,7 +251,7 @@ async def test_blank_stdin_is_not_a_body_source(monkeypatch):
 @pytest.mark.asyncio
 async def test_an_empty_data_names_its_own_refusal():
     _out, io = await api(
-        CONFIG, [], ["v1/search"], Context(flags={"data": "  "})
+        NOTION, [], ["v1/search"], Context(flags={"data": "  "})
     )
     assert io.exit_code == 5
     assert io.stderr.decode() == (
@@ -262,7 +263,7 @@ async def test_an_empty_data_names_its_own_refusal():
 
 @pytest.mark.asyncio
 async def test_an_inline_refusal_carries_the_hint_and_exits_five():
-    _out, io = await api(CONFIG, [], ["v1/search", "a:={"], Context())
+    _out, io = await api(NOTION, [], ["v1/search", "a:={"], Context())
     assert io.exit_code == 5
     assert io.stderr.decode() == (
         "error: Failed to parse inline request input: invalid JSON value "
@@ -279,7 +280,7 @@ async def test_a_query_parameter_survives_a_non_get(monkeypatch):
     seen: dict[str, Any] = {}
 
     async def fake_post(
-        config: NotionConfig,
+        accessor: NotionAccessor,
         path: str,
         body: JsonValue = None,
         extra_headers: dict[str, str] | None = None,
@@ -289,7 +290,7 @@ async def test_a_query_parameter_survives_a_non_get(monkeypatch):
         return {"ok": True}
 
     monkeypatch.setitem(METHODS, "POST", fake_post)
-    await api(CONFIG, [], ["v1/search", "a=1", "q==2"], Context())
+    await api(NOTION, [], ["v1/search", "a=1", "q==2"], Context())
     assert seen["params"] == {"q": "2"}
 
 
@@ -298,7 +299,7 @@ async def test_body_infers_post_and_output_is_compact(monkeypatch):
     seen: dict[str, Any] = {}
 
     async def fake_post(
-        config: NotionConfig,
+        accessor: NotionAccessor,
         path: str,
         body: JsonValue = None,
         extra_headers: dict[str, str] | None = None,
@@ -312,7 +313,7 @@ async def test_body_infers_post_and_output_is_compact(monkeypatch):
     # real function at import, so patching the module global alone would
     # not be seen.
     monkeypatch.setitem(METHODS, "POST", fake_post)
-    out, _io = await api(CONFIG, [], ["v1/search", "query=x"], Context())
+    out, _io = await api(NOTION, [], ["v1/search", "query=x"], Context())
     assert seen["path"] == "/search"
     assert seen["body"] == {"query": "x"}
     # Compact and key-sorted, the upstream serializer for `ntn api`,
@@ -330,7 +331,7 @@ async def test_delete_is_a_reachable_method(monkeypatch):
     seen: dict[str, Any] = {}
 
     async def fake_delete(
-        config: NotionConfig,
+        accessor: NotionAccessor,
         path: str,
         body: JsonValue = None,
         extra_headers: dict[str, str] | None = None,
@@ -342,7 +343,7 @@ async def test_delete_is_a_reachable_method(monkeypatch):
 
     monkeypatch.setitem(METHODS, "DELETE", fake_delete)
     out, io = await api(
-        CONFIG, [], ["v1/blocks/abc-123"], Context(flags={"method": "delete"})
+        NOTION, [], ["v1/blocks/abc-123"], Context(flags={"method": "delete"})
     )
     assert io.exit_code == 0
     assert seen["path"] == "/blocks/abc-123"

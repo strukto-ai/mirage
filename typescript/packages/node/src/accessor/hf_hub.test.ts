@@ -13,12 +13,29 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { HF_TIMEOUT_MS } from '../vfs/hf_buckets/config.ts'
-import { HfModelsAccessor } from './hf_hub.ts'
+import { HF_TIMEOUT_MS, type HfRepoConfig } from '../vfs/hf_buckets/config.ts'
+import { accountOf, HfAccountAccessor, HfHubAccessor, HfModelsAccessor } from './hf_hub.ts'
+
+function models(config: HfRepoConfig): HfModelsAccessor {
+  return new HfModelsAccessor(accountOf(config), config)
+}
 
 describe('HfHubAccessor', () => {
   it("waits python's 30 seconds without progress unless configured", () => {
-    expect(new HfModelsAccessor({ repoId: 'a/b' }).timeoutMs).toBe(HF_TIMEOUT_MS)
-    expect(new HfModelsAccessor({ repoId: 'a/b', timeoutMs: 5000 }).timeoutMs).toBe(5000)
+    expect(models({ repoId: 'a/b' }).account.timeoutMs).toBe(HF_TIMEOUT_MS)
+    expect(models({ repoId: 'a/b', timeoutMs: 5000 }).account.timeoutMs).toBe(5000)
+  })
+
+  it("rides the mount's own account for its credential and origin", () => {
+    const acc = models({ repoId: 'a/b', token: 't', endpoint: 'https://hub.example' })
+    expect(acc.account.token).toBe('t')
+    expect(acc.endpoint).toBe('https://hub.example')
+  })
+
+  it('borrows the account a CLI install hands it', () => {
+    const account = new HfAccountAccessor({ token: 't', endpoint: 'https://hub.example' })
+    const hub = new HfHubAccessor(account, { repoId: 'a/b' }, 'dataset')
+    expect(hub.account).toBe(account)
+    expect(hub.repoType).toBe('dataset')
   })
 })

@@ -152,7 +152,7 @@ def test_write_classification():
 
 @pytest.mark.asyncio
 async def test_installed_tree_dispatches_pages_create(monkeypatch):
-    async def fake_create(config, body):
+    async def fake_create(accessor, body):
         return {"id": "P1", "object": "page", "parent": body["parent"]}
 
     monkeypatch.setitem(
@@ -170,7 +170,7 @@ async def test_installed_tree_dispatches_pages_create(monkeypatch):
 async def test_page_id_is_taken_from_the_operand(monkeypatch):
     seen = []
 
-    async def fake_update(config, page_id, body):
+    async def fake_update(accessor, page_id, body):
         seen.append((page_id, body))
         return {"id": page_id}
 

@@ -20,7 +20,6 @@ import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { IOResult } from '../../../../io/types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
@@ -121,7 +120,7 @@ it.each([
         if (op === 'read' && (path.virtual.endsWith('.pack') || path.virtual.endsWith('.idx'))) {
           reads.set(path.virtual, (reads.get(path.virtual) ?? 0) + 1)
         }
-        return [await vfs.dispatch(op, path, args, kwargs), new IOResult()]
+        return vfs.dispatch(op, path, args, kwargs)
       }),
       location,
     ),

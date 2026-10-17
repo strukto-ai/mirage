@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { visiblePath, repoRelative, under as inside } from './pathspec.ts'
 import { type PathSpec, FileType } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
@@ -351,7 +352,7 @@ async function apply(
  * an add.
  */
 export async function mv(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

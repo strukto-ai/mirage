@@ -15,12 +15,47 @@
 import { Accessor } from '@struktoai/mirage-core/accessor/index'
 import { VFSName } from '@struktoai/mirage-core/types'
 import * as kp from '@struktoai/mirage-core/utils/key_prefix'
-import { HF_ENDPOINT, HF_TIMEOUT_MS, type HfRepoConfig } from '../vfs/hf_buckets/config.ts'
+import {
+  HF_ENDPOINT,
+  HF_TIMEOUT_MS,
+  type HfBucketsConfig,
+  type HfRepoConfig,
+} from '../vfs/hf_buckets/config.ts'
+import { hfEndpoint, type HfConfig } from '../core/hf_hub/config.ts'
 import { DEFAULT_REVISION } from '../core/hf_hub/constants.ts'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 
 /**
- * A mount onto one Hugging Face Hub repository.
+ * One Hub account: credential, origin and the bound its requests run under.
+ * The `hf` CLI's install accessor and the account a repository handle
+ * borrows; a mount builds its own with `accountOf`.
+ */
+export class HfAccountAccessor extends Accessor {
+  constructor(
+    readonly config: HfConfig,
+    /** How long one Hub request may go without progress. */
+    readonly timeoutMs: number = HF_TIMEOUT_MS,
+  ) {
+    super()
+  }
+
+  get token(): string | undefined {
+    return this.config.token
+  }
+
+  get endpoint(): string {
+    return hfEndpoint(this.config)
+  }
+}
+
+/** The account a repository or bucket mount builds and owns. */
+export function accountOf(config: HfRepoConfig | HfBucketsConfig): HfAccountAccessor {
+  const { token, endpoint = HF_ENDPOINT, timeoutMs } = config
+  return new HfAccountAccessor(token === undefined ? { endpoint } : { token, endpoint }, timeoutMs)
+}
+
+/**
+ * One Hugging Face Hub repository, over an account it borrows.
  *
  * The Hub's listing endpoint is recursive, so one paged walk is the mount's
  * entire listing, which the mount keeps; every stat and read after it is
@@ -32,6 +67,7 @@ import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
  */
 export class HfHubAccessor extends Accessor {
   constructor(
+    readonly account: HfAccountAccessor,
     readonly config: HfRepoConfig,
     private readonly kind = 'model',
     readonly vfsName: VFSName = VFSName.HF_MODELS,
@@ -48,16 +84,7 @@ export class HfHubAccessor extends Accessor {
   }
 
   get endpoint(): string {
-    return this.config.endpoint ?? HF_ENDPOINT
-  }
-
-  get token(): string | undefined {
-    return this.config.token
-  }
-
-  /** How long one Hub request may go without progress. */
-  get timeoutMs(): number {
-    return this.config.timeoutMs ?? HF_TIMEOUT_MS
+    return this.account.endpoint
   }
 
   /**
@@ -103,19 +130,19 @@ export class HfHubAccessor extends Accessor {
 }
 
 export class HfModelsAccessor extends HfHubAccessor {
-  constructor(config: HfRepoConfig) {
-    super(config, 'model', VFSName.HF_MODELS)
+  constructor(account: HfAccountAccessor, config: HfRepoConfig) {
+    super(account, config, 'model', VFSName.HF_MODELS)
   }
 }
 
 export class HfDatasetsAccessor extends HfHubAccessor {
-  constructor(config: HfRepoConfig) {
-    super(config, 'dataset', VFSName.HF_DATASETS)
+  constructor(account: HfAccountAccessor, config: HfRepoConfig) {
+    super(account, config, 'dataset', VFSName.HF_DATASETS)
   }
 }
 
 export class HfSpacesAccessor extends HfHubAccessor {
-  constructor(config: HfRepoConfig) {
-    super(config, 'space', VFSName.HF_SPACES)
+  constructor(account: HfAccountAccessor, config: HfRepoConfig) {
+    super(account, config, 'space', VFSName.HF_SPACES)
   }
 }

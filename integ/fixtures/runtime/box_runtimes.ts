@@ -16,17 +16,19 @@
 // stripping (`runtimes: [{name: ./box_runtimes.ts:EchoBox}]`), so it uses
 // only erasable syntax: no enums, no parameter properties.
 import {
+  type Context,
   LanguageRuntime,
   LINE_EXECUTOR,
   type LineExecutor,
-  type RunArgs,
+  type PathSpec,
+  type Program,
   type RunResult,
   Runtime,
 } from '@struktoai/mirage-node'
 
 const ENC = new TextEncoder()
 
-export class EchoBox extends Runtime implements LineExecutor {
+export class EchoBox extends Runtime<undefined> implements LineExecutor<undefined> {
   readonly [LINE_EXECUTOR] = true as const
   readonly name = 'echobox'
 
@@ -34,12 +36,18 @@ export class EchoBox extends Runtime implements LineExecutor {
     super(options, ['nvidia-smi'], [])
   }
 
-  runLine(line: string): Promise<RunResult> {
+  runLine(
+    _engine: undefined,
+    _paths: PathSpec[],
+    _texts: string[],
+    ctx: Context,
+  ): Promise<RunResult> {
+    const line = ctx.flags.c as string
     return Promise.resolve({ stdout: ENC.encode(`box:${line}\n`), stderr: null, exitCode: 0 })
   }
 }
 
-export class ShoutPython extends LanguageRuntime {
+export class ShoutPython extends LanguageRuntime<undefined> {
   readonly name = 'shout'
   readonly language = 'python' as const
 
@@ -47,9 +55,9 @@ export class ShoutPython extends LanguageRuntime {
     super(options, ['python3', 'python'], [])
   }
 
-  run(args: RunArgs): Promise<RunResult> {
+  interpret(_engine: undefined, program: Program, _ctx: Context): Promise<RunResult> {
     return Promise.resolve({
-      stdout: ENC.encode(`${args.code.toUpperCase()}\n`),
+      stdout: ENC.encode(`${program.code.toUpperCase()}\n`),
       stderr: null,
       exitCode: 0,
     })

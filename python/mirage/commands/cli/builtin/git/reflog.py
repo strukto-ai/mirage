@@ -15,6 +15,7 @@
 import asyncio
 import posixpath
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.discover import is_bare
 from mirage.commands.cli.builtin.git.errors import GitError
@@ -199,12 +200,12 @@ async def _named_log(
 
 
 async def reflog(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Read a ref's log newest first through the dispatcher.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the optional show verb and ref.
         ctx (Context): the line's context, with the entry limit.

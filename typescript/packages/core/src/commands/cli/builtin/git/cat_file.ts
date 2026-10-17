@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import git, { Errors } from 'isomorphic-git'
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { readStdinAsync } from '../../../builtin/utils/stream.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -173,7 +174,7 @@ async function* batchLines(
  * 2.50.1.
  */
 export async function catFile(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

@@ -16,17 +16,18 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.channels import list_channels
 from mirage.core.discord.config import DiscordConfig
 
 
 @pytest.fixture
-def config():
-    return DiscordConfig(token="test-bot-token")
+def accessor():
+    return DiscordAccessor(DiscordConfig(token="test-bot-token"))
 
 
 @pytest.mark.asyncio
-async def test_list_channels(config):
+async def test_list_channels(accessor):
     mock_data = [
         {"id": "C001", "name": "general", "type": 0},
         {"id": "C002", "name": "announcements", "type": 5},
@@ -38,19 +39,17 @@ async def test_list_channels(config):
         new_callable=AsyncMock,
         return_value=mock_data,
     ) as mock_get:
-        result = await list_channels(config, "G001")
+        result = await list_channels(accessor, "G001")
 
     assert len(result) == 3
     assert result[0]["name"] == "general"
     assert result[1]["name"] == "announcements"
     assert result[2]["name"] == "forum"
-    mock_get.assert_called_once_with(
-        config, "/guilds/G001/channels", session=None
-    )
+    mock_get.assert_called_once_with(accessor, "/guilds/G001/channels")
 
 
 @pytest.mark.asyncio
-async def test_list_channels_filters_voice(config):
+async def test_list_channels_filters_voice(accessor):
     mock_data = [
         {"id": "C001", "name": "voice-chat", "type": 2},
         {"id": "C002", "name": "stage", "type": 13},
@@ -60,6 +59,6 @@ async def test_list_channels_filters_voice(config):
         new_callable=AsyncMock,
         return_value=mock_data,
     ):
-        result = await list_channels(config, "G001")
+        result = await list_channels(accessor, "G001")
 
     assert len(result) == 0

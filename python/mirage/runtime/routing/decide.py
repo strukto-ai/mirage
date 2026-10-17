@@ -12,14 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.types import Language
 
 
 def runtime_for_language(
-    entries: list[Runtime], language: Language
-) -> LanguageRuntime | None:
+    entries: list[Runtime[Any]], language: Language
+) -> LanguageRuntime[Any] | None:
     """The world's interpreter for a script CLI.
 
     The first entry whose ``run`` speaks the language wins. There is no

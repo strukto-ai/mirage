@@ -18,6 +18,7 @@ import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { contentOrStdin, notionTransport, prettyJson, usageError } from '../util.ts'
+import type { NtnAccessor } from '../util.ts'
 
 const ENC = new TextEncoder()
 const PARENT_KEYS: Record<string, string> = {
@@ -38,7 +39,7 @@ function parseParent(spec: string): Record<string, unknown> {
 }
 
 export async function create(
-  config: unknown,
+  accessor: NtnAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
@@ -54,7 +55,7 @@ export async function create(
   } catch (err) {
     return usageError(err)
   }
-  const page = await createPageRaw(notionTransport(config, ctx.flags), body)
+  const page = await createPageRaw(notionTransport(accessor, ctx.flags), body)
   if (fl.asBool('json')) return [prettyJson(page), new IOResult()]
   const id = typeof page.id === 'string' ? page.id : ''
   return [ENC.encode(`${id}\n`), new IOResult()]

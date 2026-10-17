@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { GitHubAccount } from '../../../../accessor/github.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -26,7 +27,6 @@ import {
   camel,
   csvValues,
   ghBool,
-  ghTransport,
   listLimit,
   repoFor,
   textOut,
@@ -78,14 +78,14 @@ function listText(rows: Record<string, unknown>[]): string {
 }
 
 export async function listCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   const rows = (
-    await listReleases(ghTransport(config), repoFor(config, fl), listLimit(fl, 30, null))
+    await listReleases(accessor.transport, repoFor(accessor, fl), listLimit(fl, 30, null))
   ).map(release)
   const latest = rows.find((row) => !row.isDraft && !row.isPrerelease)
   if (latest !== undefined) latest.isLatest = true
@@ -93,7 +93,7 @@ export async function listCmd(
 }
 
 export async function viewCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -101,8 +101,8 @@ export async function viewCmd(
   const fl = new FlagView(ctx.flags)
   const tag = texts[0] ?? ''
   if (tag === '') throw new Error('a release tag is required')
-  const transport = ghTransport(config)
-  const ref = repoFor(config, fl)
+  const transport = accessor.transport
+  const ref = repoFor(accessor, fl)
   const row = release(await getRelease(transport, ref, tag))
   if (csvValues([fl.asStr('json') ?? '']).includes('isLatest')) {
     const latest = await getLatestRelease(transport, ref)
@@ -114,7 +114,7 @@ export async function viewCmd(
 }
 
 export async function createCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -132,6 +132,6 @@ export async function createCmd(
   }
   const target = fl.asNonEmpty('target')
   if (target !== undefined) body.target_commitish = target
-  const created = release(await createRelease(ghTransport(config), repoFor(config, fl), body))
+  const created = release(await createRelease(accessor.transport, repoFor(accessor, fl), body))
   return textOut(`${textValue(created.url)}\n`)
 }

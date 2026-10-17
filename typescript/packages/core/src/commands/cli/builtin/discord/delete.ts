@@ -17,18 +17,18 @@ import { deleteMessage } from '../../../../core/discord/post.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { discordAccessor } from '../../../../accessor/discord.ts'
+import type { DiscordAccessor } from '../../../../accessor/discord.ts'
 
 const ENC = new TextEncoder()
 
 export async function deleteVerb(
-  config: unknown,
+  accessor: DiscordAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  await deleteMessage(discordAccessor(config), fl.asStr('channel') ?? '', fl.asStr('message') ?? '')
+  await deleteMessage(accessor, fl.asStr('channel') ?? '', fl.asStr('message') ?? '')
   const out: ByteSource = ENC.encode(JSON.stringify({ ok: true }))
   return [out, new IOResult()]
 }

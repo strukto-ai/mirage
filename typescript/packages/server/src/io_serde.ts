@@ -246,5 +246,5 @@ export async function customAnswer(
 ): Promise<JsonValue> {
   if (CALLS.has(name)) throw new CallArgsError(`${name} is not a custom VFS function`)
   const { path, kwargs } = customArgs(params)
-  return { value: toJson(await session.vfs.dispatch(name, path, [], kwargs)) }
+  return { value: toJson((await session.vfs.dispatch(name, path, [], kwargs))[0]) }
 }

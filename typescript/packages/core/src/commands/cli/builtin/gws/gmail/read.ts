@@ -14,8 +14,7 @@
 
 import { FlagView } from '../../../../../commands/spec/flag_view.ts'
 import { getMessageProcessed } from '../../../../../core/gmail/messages.ts'
-import { TokenManager } from '../../../../../core/google/client.ts'
-import type { GoogleConfig } from '../../../../../core/google/config.ts'
+import type { GoogleApiAccessor } from '../../../../../accessor/google_api.ts'
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../../commands/config.ts'
 import type { PathSpec } from '../../../../../types.ts'
@@ -23,16 +22,13 @@ import type { PathSpec } from '../../../../../types.ts'
 const ENC = new TextEncoder()
 
 export async function read(
-  config: unknown,
+  accessor: GoogleApiAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const processed = await getMessageProcessed(
-    new TokenManager(config as GoogleConfig),
-    fl.asStr('id') ?? '',
-  )
+  const processed = await getMessageProcessed(accessor.tokenManager, fl.asStr('id') ?? '')
   const out: ByteSource = ENC.encode(JSON.stringify(processed))
   return [out, new IOResult()]
 }

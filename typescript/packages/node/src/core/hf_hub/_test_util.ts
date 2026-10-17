@@ -22,7 +22,8 @@ import { type FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 import { vi } from 'vitest'
-import { HfHubAccessor } from '../../accessor/hf_hub.ts'
+import { accountOf, HfHubAccessor } from '../../accessor/hf_hub.ts'
+import type { HfRepoConfig } from '../../vfs/hf_buckets/config.ts'
 import * as client from './client.ts'
 import { readdir } from './readdir.ts'
 
@@ -560,10 +561,16 @@ export const ROWS = [
   { type: 'directory', oid: 'tree-d', size: 0, path: 'd' },
 ]
 
+/** A handle on `acme/widget` over an account of its own, as a mount builds. */
+export function handle(config: Partial<HfRepoConfig> = {}, kind?: string): HfHubAccessor {
+  const repo: HfRepoConfig = { repoId: 'acme/widget', ...config }
+  return new HfHubAccessor(accountOf(repo), repo, kind)
+}
+
 /** An accessor whose tree walk answers `rows` locally. */
 export function walking(rows: unknown[] = ROWS): HfHubAccessor {
   vi.spyOn(client, 'hubGetResponse').mockResolvedValue(page(rows))
-  return new HfHubAccessor({ repoId: 'acme/widget' } as never)
+  return handle()
 }
 
 /**

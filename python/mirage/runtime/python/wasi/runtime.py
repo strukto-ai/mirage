@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, ClassVar
 
-from mirage.runtime.binding import RuntimeContext
+from mirage.commands.config import Context
 from mirage.runtime.config import RuntimeConfig, memory_limit, resolve_home
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.python.base import PythonRuntime
@@ -25,7 +25,7 @@ from mirage.runtime.python.flags import init_argv
 from mirage.runtime.python.wasi.config import WasiConfig
 from mirage.runtime.types import (
     FilesystemOperation,
-    RunArgs,
+    Program,
     RunResult,
     RuntimeReach,
 )
@@ -64,7 +64,7 @@ def _stdlib_mount(prefixes: Sequence[str]) -> str | None:
     )
 
 
-class WasiRuntime(PythonRuntime):
+class WasiRuntime(PythonRuntime[WasmExecution]):
     """Run Python code on a WASI CPython under wasmtime, in-process.
 
     Full CPython (classes, complete stdlib, real `sys`) inside a wasm
@@ -129,17 +129,21 @@ class WasiRuntime(PythonRuntime):
             raise FileNotFoundError(
                 f"no lib/python3.* under {self._root}; {_BUILD_HINT}"
             )
-        self._execution = WasmExecution(
+
+    async def open_engine(self) -> WasmExecution:
+        return WasmExecution(
             self._root / "python.wasm",
             "python3",
             memory_limit(self.config.max_memory),
         )
 
-    async def run(
-        self, args: RunArgs, context: RuntimeContext | None = None
+    async def close_engine(self, engine: WasmExecution) -> None:
+        await engine.close()
+
+    async def interpret(
+        self, engine: WasmExecution, program: Program, ctx: Context
     ) -> RunResult:
-        context = context or self._capture_context()
-        files = RuntimeFiles.of(context)
+        files = RuntimeFiles.of(ctx, self._binding)
         hiding = _stdlib_mount(files.prefixes()) if files is not None else None
         if hiding is not None:
             return RunResult(
@@ -157,42 +161,44 @@ class WasiRuntime(PythonRuntime):
         fs = WasmView(str(self._root), files)
         # The guest sees the mounts, so the script's own directory heads
         # sys.path, as it does on CPython.
-        source = prepare_source(args, search_path=True)
-        cwd = args.cwd or (context.ctx.cwd if context is not None else None)
+        cwd = ctx.cwd
+        source = prepare_source(program, cwd, search_path=True)
         filename = (
-            main_filename(args)
-            or (args.prog if args.script_cli else None)
+            main_filename(program, cwd)
+            or (program.prog if program.script_cli else None)
             or "<string>"
         )
-        if source == args.code:
-            source = f"exec(compile({args.code!r}, {filename!r}, 'exec'), globals())"
-        preamble = (
-            "" if cwd is None else f"__import__('os').chdir({cwd.virtual!r})\n"
-        )
+        if source == program.code:
+            source = f"exec(compile({program.code!r}, {filename!r}, 'exec'), globals())"
+        preamble = f"__import__('os').chdir({cwd.virtual!r})\n"
         source = (
             f"__import__('linecache').cache[{filename!r}] = "
-            f"({len(args.code)}, None, {args.code.splitlines(keepends=True)!r}, "
+            f"({len(program.code)}, None, "
+            f"{program.code.splitlines(keepends=True)!r}, "
             f"{filename!r})\n"
             "__import__('sys').excepthook = (lambda hook: lambda t, v, tb: "
             "hook(t, v, tb) if tb is None or tb.tb_frame.f_back is not None "
             "else hook(t, v.with_traceback(tb.tb_next), tb.tb_next))"
             "(__import__('sys').excepthook)\n" + preamble + source
         )
-        # sys.argv becomes [prog, *args.args], matching the local runtime.
-        stdout, stderr, exit_code = await self._execution.run(
-            argv=["python", *init_argv(args.flags), "-c", source, *args.args],
-            stdin=args.stdin,
+        # sys.argv becomes [prog, *program.args], matching the local runtime.
+        stdout, stderr, exit_code = await engine.run(
+            argv=[
+                "python",
+                *init_argv(ctx.flags),
+                "-c",
+                source,
+                *program.args,
+            ],
+            stdin=program.stdin,
             # The build directory is the prefix, so the stdlib is found
             # under /lib on its own and a session's PYTHONPATH only adds
             # to sys.path, as on CPython.
             env=[
-                *args.env.items(),
+                *(ctx.env or {}).items(),
                 ("PYTHONHOME", "/"),
                 ("PYTHONDONTWRITEBYTECODE", "1"),
             ],
             fs=fs,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
-
-    async def close(self) -> None:
-        await self._execution.close()

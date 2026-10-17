@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { HEAD, TERMINATED_KINDS } from './constants.ts'
 import { dateClock, parseDateMode, showDate } from './dates.ts'
 import { Decoration, type DateMode, type GitObject, type MailmapEntry } from './types.ts'
@@ -145,7 +146,7 @@ async function tagBlock(repo: Repo, oid: string, flags: ShowFlags): Promise<[str
  * that changes nothing they name prints nothing at all.
  */
 export async function show(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -230,7 +231,7 @@ export async function show(
  * to the paths they name.
  */
 export async function diffTree(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

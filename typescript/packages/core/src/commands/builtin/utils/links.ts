@@ -14,12 +14,12 @@
 
 import { chunks } from '../../../io/cooperative.ts'
 import type { Context } from '../../config.ts'
-import type { LinkView, MountView } from '../../../view/types.ts'
+import type { FollowOperands, LinkView, MountView } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { FileStat } from '../../../types.ts'
 import { PathSpec } from '../../../types.ts'
 import { eloop, isEnoent, isEnotdir } from '../../../errors/fs.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import type { ByteSource } from '../../../io/types.ts'
 import { pathVisible } from '../../../utils/hidden.ts'
 import { CycleError, posixNormpath, resolvePath } from '../../../utils/path.ts'
 import { normDir, ownerPrefix, rstripSlash } from '../../../utils/slash.ts'
@@ -194,10 +194,6 @@ export function landingRoot(mounts: MountView, links: LinkView | null, virtual: 
 export function linkView(files: Files | undefined): LinkView | undefined {
   const table = files?.links ?? null
   if (files === undefined || table === null) return undefined
-  const dispatch: DispatchFn = async (op, path, args, kwargs) => [
-    await files.dispatch(op, path, args, kwargs),
-    new IOResult(),
-  ]
   return {
     statAt: (path: string) => (files.isVisible(path) ? table.linkStatAt(path) : null),
     subtree: (directory: string) =>
@@ -207,7 +203,8 @@ export function linkView(files: Files | undefined): LinkView | undefined {
     exists: async (path: string) => {
       try {
         return (
-          (await resolvePathStat(dispatch, PathSpec.fromStrPath(path, undefined, '/'))) !== null
+          (await resolvePathStat(files.dispatch, PathSpec.fromStrPath(path, undefined, '/'))) !==
+          null
         )
       } catch (err) {
         console.debug(`link probe at ${path} failed: ${String(err)}`)
@@ -289,13 +286,23 @@ export function linksOf(ctx: Context): LinkView | undefined {
  * Python's mounts_of.
  */
 export function mountsOf(ctx: Context): MountView | undefined {
-  return mountView(ctx.vfs, ctx.io === undefined && ctx.dispatch !== undefined)
+  return mountView(ctx.vfs, ctx.io === undefined && ctx.vfs !== undefined)
 }
 
 /** The link resolver an invocation carries: null outside a workspace.
  * Mirrors Python's link_resolver. */
 export function linkResolver(ctx: Context): LinkResolver | null {
   const links = linksOf(ctx)
-  if (links === undefined || ctx.dispatch === undefined) return null
-  return new LinkResolver(links, ctx.dispatch, ctx.cwd.virtual)
+  if (links === undefined || ctx.vfs === undefined) return null
+  return new LinkResolver(links, ctx.vfs.dispatch, ctx.cwd.virtual)
+}
+
+/** The dispatcher a command's files run on. Mirrors Python's dispatch_of. */
+export function dispatchOf(ctx: Context): DispatchFn | undefined {
+  return ctx.vfs?.dispatch
+}
+
+/** The line's operand resolution its files carry. Mirrors Python's follow_of. */
+export function followOf(ctx: Context): FollowOperands | undefined {
+  return ctx.vfs?.follow ?? undefined
 }

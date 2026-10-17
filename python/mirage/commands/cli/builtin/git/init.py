@@ -1,6 +1,7 @@
 import errno
 from collections.abc import Sequence
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.constants import DEFAULT_BRANCH
 from mirage.commands.cli.builtin.git.discover import discover
 from mirage.commands.cli.builtin.git.errors import (
@@ -76,7 +77,7 @@ def named_gitdir(fl: FlagView, texts: Sequence[str]) -> PathSpec:
 
 
 async def init(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Initialize through the dispatcher, preserving an existing repository.
 
@@ -89,7 +90,7 @@ async def init(
     ``objects`` where git stops at its first template directory.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the optional directory.
         ctx (Context): the line's context, with the initialization flags.

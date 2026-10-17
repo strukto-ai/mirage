@@ -15,6 +15,7 @@
 import asyncio
 import posixpath
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.errors import (
     AmbiguousArgumentError,
     EmptyPathspecError,
@@ -47,7 +48,7 @@ from mirage.types import PathSpec
 
 
 async def ls_files(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """List index paths, including conflict stages when requested.
 
@@ -57,7 +58,7 @@ async def ls_files(
     subdirectory prints ``../README.md``).
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the pathspecs.
         ctx (Context): the line's context.
@@ -103,12 +104,12 @@ async def ls_files(
 
 
 async def ls_tree(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """List tree metadata without reading file contents.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the tree-ish, then the paths to list.
         ctx (Context): the line's context.

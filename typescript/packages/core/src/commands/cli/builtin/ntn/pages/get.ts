@@ -18,12 +18,12 @@ import { extractTitle } from '../../../../../core/notion/normalize.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { firstText, notionTransport, prettyJson, usageError } from '../util.ts'
+import { firstText, notionTransport, prettyJson, usageError, type NtnAccessor } from '../util.ts'
 
 const ENC = new TextEncoder()
 
 export async function get(
-  config: unknown,
+  accessor: NtnAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -35,7 +35,7 @@ export async function get(
   } catch (err) {
     return usageError(err)
   }
-  const transport = notionTransport(config, ctx.flags)
+  const transport = notionTransport(accessor, ctx.flags)
   // Both calls happen either way: the body comes from the markdown endpoint
   // and the title heading the frontmatter only exists on the page object.
   const rendered = await getPageMarkdown(transport, pageId)

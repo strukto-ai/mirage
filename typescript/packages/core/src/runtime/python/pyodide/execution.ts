@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import source from '../../../generated/pyodide.ts'
-import type { RunArgs } from '../../types.ts'
+import type { FlagValue } from '../../../commands/spec/types.ts'
 import type { PyodideInterface } from './loader.ts'
 import type { XattrOp } from './fs/types.ts'
 
@@ -45,10 +45,14 @@ export type XattrCall = (
 
 const NO_XATTRS: XattrCall = () => JSON.stringify({ code: 'ENOTSUP' })
 
-type ExecutionRequest = Pick<RunArgs, 'code' | 'env' | 'stdin'> & {
+interface ExecutionRequest {
+  code: string
+  env: Record<string, string>
+  stdin: Uint8Array | null
   argv: string[]
   cwd: string
-  flags: NonNullable<RunArgs['flags']>
+  // The run's interpreter switches (`ctx.flags`).
+  flags: Readonly<Record<string, FlagValue>>
   script_cli: boolean
   // What CPython names the program (mainFilename), null for none.
   filename: string | null

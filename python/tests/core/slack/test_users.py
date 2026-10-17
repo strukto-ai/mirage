@@ -16,17 +16,18 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.users import get_user_profile, list_users, search_users
 
 
 @pytest.fixture
-def config():
-    return SlackConfig(token="xoxb-test-token")
+def accessor():
+    return SlackAccessor(SlackConfig(token="xoxb-test-token"))
 
 
 @pytest.mark.asyncio
-async def test_list_users(config):
+async def test_list_users(accessor):
     mock_data = {
         "ok": True,
         "members": [
@@ -52,7 +53,7 @@ async def test_list_users(config):
         new_callable=AsyncMock,
         return_value=mock_data,
     ):
-        result = await list_users(config)
+        result = await list_users(accessor)
 
     assert len(result) == 2
     names = [u["name"] for u in result]
@@ -64,7 +65,7 @@ async def test_list_users(config):
 
 
 @pytest.mark.asyncio
-async def test_search_users(config):
+async def test_search_users(accessor):
     mock_data = {
         "ok": True,
         "members": [
@@ -91,14 +92,14 @@ async def test_search_users(config):
         new_callable=AsyncMock,
         return_value=mock_data,
     ):
-        result = await search_users(config, "alice")
+        result = await search_users(accessor, "alice")
 
     assert len(result) == 1
     assert result[0]["name"] == "alice"
 
 
 @pytest.mark.asyncio
-async def test_search_users_by_email(config):
+async def test_search_users_by_email(accessor):
     mock_data = {
         "ok": True,
         "members": [
@@ -125,14 +126,14 @@ async def test_search_users_by_email(config):
         new_callable=AsyncMock,
         return_value=mock_data,
     ):
-        result = await search_users(config, "bob@example")
+        result = await search_users(accessor, "bob@example")
 
     assert len(result) == 1
     assert result[0]["name"] == "bob"
 
 
 @pytest.mark.asyncio
-async def test_get_user_profile(config):
+async def test_get_user_profile(accessor):
     mock_data = {
         "ok": True,
         "user": {
@@ -147,7 +148,7 @@ async def test_get_user_profile(config):
         new_callable=AsyncMock,
         return_value=mock_data,
     ):
-        result = await get_user_profile(config, "U001")
+        result = await get_user_profile(accessor, "U001")
 
     assert result["id"] == "U001"
     assert result["name"] == "alice"

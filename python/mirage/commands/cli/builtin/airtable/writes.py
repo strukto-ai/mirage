@@ -39,7 +39,6 @@ from mirage.core.airtable.client import (
     list_tables,
     update_records,
 )
-from mirage.core.airtable.config import AirtableConfig
 from mirage.core.airtable.constants import COMPUTED_TYPES, LINE_KEYS
 from mirage.core.airtable.normalize import (
     as_row,
@@ -149,10 +148,9 @@ async def landed(
 
 
 async def _record_create(
-    config: AirtableConfig,
+    accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
-    accessor: AirtableAccessor,
     fl: FlagView,
 ) -> Outcome:
     no_operands(texts)
@@ -168,7 +166,7 @@ async def _record_create(
         cells = [row["fields"] for row in rows]
     else:
         raise UsageError("--fields or records on stdin are required")
-    base_id = scoped_base(config, fl.as_str("base") or "")
+    base_id = scoped_base(accessor.config, fl.as_str("base") or "")
     if rows:
         cells = await writable(accessor, base_id, table, cells)
     batches = create_records(
@@ -178,10 +176,9 @@ async def _record_create(
 
 
 async def _record_update(
-    config: AirtableConfig,
+    accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
-    accessor: AirtableAccessor,
     fl: FlagView,
 ) -> Outcome:
     record_id = optional_operand(texts)
@@ -203,7 +200,7 @@ async def _record_update(
         cells = [row["fields"] for row in rows]
     else:
         raise UsageError("RECORD --fields or records on stdin are required")
-    base_id = scoped_base(config, fl.as_str("base") or "")
+    base_id = scoped_base(accessor.config, fl.as_str("base") or "")
     if rows:
         cells = await writable(accessor, base_id, table, cells)
     batches = update_records(
@@ -217,10 +214,9 @@ async def _record_update(
 
 
 async def _record_delete(
-    config: AirtableConfig,
+    accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
-    accessor: AirtableAccessor,
     fl: FlagView,
 ) -> Outcome:
     if texts:
@@ -232,7 +228,7 @@ async def _record_delete(
         record_ids = [row["record_id"] for row in rows]
     else:
         raise UsageError("RECORD or records on stdin are required")
-    base_id = scoped_base(config, fl.as_str("base") or "")
+    base_id = scoped_base(accessor.config, fl.as_str("base") or "")
     batches = delete_records(
         accessor, base_id, fl.as_str("table") or "", record_ids
     )
@@ -240,10 +236,9 @@ async def _record_delete(
 
 
 async def _comment_add(
-    config: AirtableConfig,
+    accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
-    accessor: AirtableAccessor,
     fl: FlagView,
 ) -> Outcome:
     record_id = one_operand(texts, "RECORD")
@@ -255,7 +250,7 @@ async def _comment_add(
         text = piped[:-1] if piped.endswith("\n") else piped
     if not text:
         raise UsageError("the comment text is empty")
-    base_id = scoped_base(config, fl.as_str("base") or "")
+    base_id = scoped_base(accessor.config, fl.as_str("base") or "")
     comment = await create_comment(
         accessor, base_id, fl.as_str("table") or "", record_id, text
     )

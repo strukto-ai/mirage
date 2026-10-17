@@ -18,6 +18,7 @@ from email.policy import default as default_policy
 
 import pytest
 
+from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya import compose
 from mirage.commands.cli.builtin.himalaya import util as util_module
 from mirage.commands.config import Context
@@ -26,8 +27,10 @@ from mirage.io.types import IOResult, materialize
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
-CONFIG = EmailConfig(
-    imap_host="h", smtp_host="h", username="me@example.com", password="p"
+EMAIL = EmailAccessor(
+    EmailConfig(
+        imap_host="h", smtp_host="h", username="me@example.com", password="p"
+    )
 )
 
 FILES = {"/scratch/note.txt": b"the note body\n"}
@@ -49,12 +52,12 @@ def files_with_note() -> Files:
 def sent(monkeypatch):
     seen: dict = {}
 
-    async def fake_deliver(config, raw, save=None):
+    async def fake_deliver(accessor, raw, save=None):
         seen["raw"] = raw
         seen["save"] = save
         return BytesParser(policy=default_policy).parsebytes(raw), ""
 
-    async def fake_save(config, raw, folder=None):
+    async def fake_save(accessor, raw, folder=None):
         if seen.get("refuse"):
             raise ValueError(f"{folder}: [TRYCREATE] No such mailbox")
         seen["saved"] = (raw, folder)
@@ -68,7 +71,7 @@ def sent(monkeypatch):
 @pytest.mark.asyncio
 async def test_compose_writes_mime_to_stdout_without_send(sent):
     out, io = await compose(
-        CONFIG,
+        EMAIL,
         [],
         [],
         Context(flags={"to": "a@b.com", "subject": "Hi", "body": "yo"}),
@@ -87,7 +90,7 @@ async def test_compose_writes_mime_to_stdout_without_send(sent):
 @pytest.mark.asyncio
 async def test_send_flag_pushes_through_smtp_and_reports_json(sent):
     out, io = await compose(
-        CONFIG,
+        EMAIL,
         [],
         [],
         Context(
@@ -111,7 +114,7 @@ async def test_send_flag_pushes_through_smtp_and_reports_json(sent):
 @pytest.mark.asyncio
 async def test_recipients_accept_repeats_and_comma_lists(sent):
     out, _ = await compose(
-        CONFIG,
+        EMAIL,
         [],
         [],
         Context(
@@ -133,7 +136,7 @@ async def test_recipients_accept_repeats_and_comma_lists(sent):
 @pytest.mark.asyncio
 async def test_body_falls_back_to_stdin(sent):
     out, _ = await compose(
-        CONFIG,
+        EMAIL,
         [],
         [],
         Context(flags={"to": "a@x", "subject": "Hi"}, stdin=b"piped body"),
@@ -147,7 +150,7 @@ async def test_body_falls_back_to_stdin(sent):
 @pytest.mark.asyncio
 async def test_from_flag_overrides_the_account_username(sent):
     out, _ = await compose(
-        CONFIG,
+        EMAIL,
         [],
         [],
         Context(flags={"to": "a@x", "body": "yo", "from": "x@y"}),
@@ -162,14 +165,14 @@ async def test_from_flag_overrides_the_account_username(sent):
 async def test_compose_without_a_recipient_is_refused(sent):
     with pytest.raises(ValueError, match="no recipient"):
         await compose(
-            CONFIG, [], [], Context(flags={"subject": "Hi", "body": "yo"})
+            EMAIL, [], [], Context(flags={"subject": "Hi", "body": "yo"})
         )
 
 
 @pytest.mark.asyncio
 async def test_attach_reads_through_the_dispatcher_into_multipart(sent):
     out, io = await compose(
-        CONFIG,
+        EMAIL,
         [],
         [],
         Context(
@@ -203,7 +206,7 @@ async def test_attach_of_a_missing_file_names_the_path(sent):
         r"No such file or directory",
     ):
         await compose(
-            CONFIG,
+            EMAIL,
             [],
             [],
             Context(
@@ -221,7 +224,7 @@ async def test_attach_of_a_missing_file_names_the_path(sent):
 async def test_attach_outside_a_workspace_is_refused(sent):
     with pytest.raises(ValueError, match="needs a workspace"):
         await compose(
-            CONFIG,
+            EMAIL,
             [],
             [],
             Context(
@@ -237,7 +240,7 @@ async def test_attach_outside_a_workspace_is_refused(sent):
 @pytest.mark.asyncio
 async def test_save_rides_along_to_the_delivery(sent):
     await compose(
-        CONFIG,
+        EMAIL,
         [],
         [],
         Context(
@@ -255,7 +258,7 @@ async def test_save_rides_along_to_the_delivery(sent):
 @pytest.mark.asyncio
 async def test_save_without_send_files_the_message_and_sends_nothing(sent):
     out, io = await compose(
-        CONFIG,
+        EMAIL,
         [],
         [],
         Context(
@@ -285,7 +288,7 @@ async def test_a_refused_save_without_send_fails_loudly(sent):
     sent["refuse"] = True
     with pytest.raises(ValueError, match="Drafts: .*TRYCREATE"):
         await compose(
-            CONFIG,
+            EMAIL,
             [],
             [],
             Context(

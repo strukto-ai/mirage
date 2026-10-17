@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { ProcessExecution } from '@struktoai/mirage-core/runtime/types'
+import type { Context } from '@struktoai/mirage-core/commands/config'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SandlockRuntime } from './runtime.ts'
 
@@ -29,8 +29,14 @@ interface Capture {
   stdin: string
 }
 
-function request(argv: ProcessExecution['argv'], cwd = '/'): ProcessExecution {
-  return { kind: 'process', argv, cwd: PathSpec.fromStrPath(cwd), env: {}, stdin: null }
+function execute(
+  runtime: SandlockRuntime,
+  argv: readonly string[],
+  cwd = '/',
+  ctx: Partial<Context> = {},
+) {
+  const run = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath(cwd), ...ctx }
+  return runtime.execute([], argv, run, { kind: 'process' })
 }
 
 describe.skipIf(process.platform === 'win32')('SandlockRuntime', () => {
@@ -69,8 +75,7 @@ else {
       },
     })
     const argv = ['node', 'a b', '$(echo literal)', '', '--flag'] as const
-    const result = await runtime.execute({
-      ...request(argv, dir),
+    const result = await execute(runtime, argv, dir, {
       env: { E: 'request', LD_PRELOAD: '/guest-only.so' },
       stdin: new TextEncoder().encode('input\n'),
     })
@@ -92,13 +97,12 @@ else {
 
   it('keeps shell interpretation explicit', async () => {
     const runtime = new SandlockRuntime()
-    const result = await runtime.execute({
-      kind: 'shell',
-      line: 'node --version | cat',
-      cwd: PathSpec.fromStrPath(dir),
-      env: {},
-      stdin: null,
-    })
+    const result = await runtime.execute(
+      [],
+      [],
+      { stdin: null, flags: { c: 'node --version | cat' }, cwd: PathSpec.fromStrPath(dir) },
+      { kind: 'line' },
+    )
     const data = JSON.parse(DEC.decode(result.stdout)) as Capture
     expect(data.argv.slice(-4)).toEqual(['--', '/bin/sh', '-c', 'node --version | cat'])
   })
@@ -119,21 +123,17 @@ else {
 
   it('reports an absent CLI', async () => {
     await rm(join(dir, 'sandlock'))
-    await expect(new SandlockRuntime().execute(request(['node']))).rejects.toThrow(
-      'sandlock CLI on PATH',
-    )
+    await expect(execute(new SandlockRuntime(), ['node'])).rejects.toThrow('sandlock CLI on PATH')
   })
 
   it('rejects empty argv', async () => {
-    await expect(
-      new SandlockRuntime().execute(request([] as unknown as ProcessExecution['argv'])),
-    ).rejects.toThrow('argv must not be empty')
+    await expect(execute(new SandlockRuntime(), [])).rejects.toThrow('argv must not be empty')
   })
 
   it('cancels the CLI', async () => {
     const controller = new AbortController()
     const runtime = new SandlockRuntime()
-    const running = runtime.execute({ ...request(['wait']), signal: controller.signal })
+    const running = execute(runtime, ['wait'], '/', { signal: controller.signal })
     const checked = expect(running).rejects.toMatchObject({ name: 'AbortError' })
     controller.abort()
     await checked

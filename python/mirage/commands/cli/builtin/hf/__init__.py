@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.commands.cli.builtin.hf import auth as auth_commands
 from mirage.commands.cli.builtin.hf import env as env_commands
 from mirage.commands.cli.builtin.hf import files as files_commands
@@ -315,4 +316,5 @@ HF = CLI(
         "version": CLIHandler(fn=env_commands.version_cmd),
     },
     config_model=HfConfig,
+    accessor=HfAccountAccessor,
 )

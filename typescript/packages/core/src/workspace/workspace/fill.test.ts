@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { CLIHandler } from '../../commands/cli/types.ts'
+import type { Context } from '../../commands/config.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
@@ -29,7 +30,7 @@ import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import type { ResolvedSecret } from '../../secrets/types.ts'
 import { VarAttr } from '../../shell/variable.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { MountMode } from '../../types.ts'
+import { MountMode, type PathSpec } from '../../types.ts'
 import type { Action, CommandContext, Policy } from '../../policy/index.ts'
 import { parseSessionProfile, type SessionProfile } from '../../policy/profile.ts'
 import type { RouteContext } from '../../policy/types.ts'
@@ -135,14 +136,9 @@ class NiceBox extends Runtime implements LineExecutor {
     super({ captures: ['nice'] })
   }
 
-  runLine(
-    _line: string,
-    _stdin: Uint8Array | null,
-    env: Record<string, string>,
-    _cwd: string,
-  ): Promise<RunResult> {
+  runLine(_e: unknown, _p: PathSpec[], _t: string[], ctx: Context): Promise<RunResult> {
     return Promise.resolve({
-      stdout: new TextEncoder().encode(`${String(env.TOKEN)}\n`),
+      stdout: new TextEncoder().encode(`${String(ctx.env?.TOKEN)}\n`),
       stderr: null,
       exitCode: 0,
     })

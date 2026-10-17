@@ -16,6 +16,7 @@ import json
 
 import pytest
 
+from mirage.accessor.notion import NotionAccessor
 from mirage.commands.cli.builtin.ntn.api import api
 from mirage.commands.cli.builtin.ntn.auth.token import token
 from mirage.commands.cli.builtin.ntn.datasources.query import query
@@ -24,13 +25,14 @@ from mirage.commands.cli.builtin.ntn.pages.create import create
 from mirage.commands.cli.builtin.ntn.pages.edit import edit
 from mirage.commands.cli.builtin.ntn.pages.get import get
 from mirage.commands.cli.builtin.ntn.pages.trash import trash
+from mirage.commands.cli.builtin.ntn.util import notion_transport
 from mirage.commands.cli.builtin.ntn.whoami import whoami, whoami_row
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.core.notion.config import NotionConfig
 from mirage.io.types import materialize
 
-CONFIG = NotionConfig(api_key="secret")
+NOTION = NotionAccessor(NotionConfig(api_key="secret"))
 
 USER_OWNED = {
     "id": "ID",
@@ -73,10 +75,10 @@ async def _text(out):
 
 @pytest.mark.asyncio
 async def test_pages_get_renders_markdown_with_frontmatter(monkeypatch):
-    async def fake_markdown(config, page_id):
+    async def fake_markdown(accessor, page_id):
         return {"object": "page_markdown", "markdown": "# Body\n"}
 
-    async def fake_page(config, page_id):
+    async def fake_page(accessor, page_id):
         return {
             "id": page_id,
             "properties": {
@@ -89,10 +91,10 @@ async def test_pages_get_renders_markdown_with_frontmatter(monkeypatch):
 
     monkeypatch.setitem(get.__globals__, "get_page_markdown", fake_markdown)
     monkeypatch.setitem(get.__globals__, "get_page", fake_page)
-    out, _io = await get(CONFIG, [], ["P1"], Context())
+    out, _io = await get(NOTION, [], ["P1"], Context())
     assert await _text(out) == "---\ntitle: Doc\n---\n\n# Body\n"
 
-    out, _io = await get(CONFIG, [], ["P1"], Context(flags={"json": True}))
+    out, _io = await get(NOTION, [], ["P1"], Context(flags={"json": True}))
     payload = await _json(out)
     assert payload["markdown"]["object"] == "page_markdown"
     assert payload["page"]["id"] == "P1"
@@ -101,20 +103,20 @@ async def test_pages_get_renders_markdown_with_frontmatter(monkeypatch):
 @pytest.mark.asyncio
 async def test_pages_get_needs_a_positional_id():
     with pytest.raises(UsageError, match="page id is required"):
-        await get(CONFIG, [], [], Context())
+        await get(NOTION, [], [], Context())
 
 
 @pytest.mark.asyncio
 async def test_pages_create_posts_markdown_and_prints_the_id(monkeypatch):
     calls = []
 
-    async def fake_create(config, body):
+    async def fake_create(accessor, body):
         calls.append(body)
         return {"id": "NEW"}
 
     monkeypatch.setitem(create.__globals__, "create_page", fake_create)
     out, _io = await create(
-        CONFIG,
+        NOTION,
         [],
         [],
         Context(flags={"content": "# Hi", "parent": "page:root"}),
@@ -127,7 +129,7 @@ async def test_pages_create_posts_markdown_and_prints_the_id(monkeypatch):
 async def test_pages_create_maps_every_parent_kind(monkeypatch):
     calls = []
 
-    async def fake_create(config, body):
+    async def fake_create(accessor, body):
         calls.append(body["parent"])
         return {"id": "NEW"}
 
@@ -137,7 +139,7 @@ async def test_pages_create_maps_every_parent_kind(monkeypatch):
         ("data-source:S1", {"data_source_id": "S1"}),
     ):
         await create(
-            CONFIG, [], [], Context(flags={"content": "#", "parent": spec})
+            NOTION, [], [], Context(flags={"content": "#", "parent": spec})
         )
     assert calls == [{"database_id": "D1"}, {"data_source_id": "S1"}]
 
@@ -146,7 +148,7 @@ async def test_pages_create_maps_every_parent_kind(monkeypatch):
 async def test_pages_create_refuses_a_malformed_parent():
     with pytest.raises(UsageError, match="--parent must be"):
         await create(
-            CONFIG, [], [], Context(flags={"content": "#", "parent": "nope:X"})
+            NOTION, [], [], Context(flags={"content": "#", "parent": "nope:X"})
         )
 
 
@@ -154,7 +156,7 @@ async def test_pages_create_refuses_a_malformed_parent():
 async def test_pages_edit_replaces_the_body(monkeypatch):
     calls = []
 
-    async def fake_replace(config, page_id, markdown):
+    async def fake_replace(accessor, page_id, markdown):
         calls.append((page_id, markdown))
         return {"object": "page_markdown"}
 
@@ -162,7 +164,7 @@ async def test_pages_edit_replaces_the_body(monkeypatch):
         edit.__globals__, "replace_page_markdown", fake_replace
     )
     out, _io = await edit(
-        CONFIG, [], ["P1"], Context(flags={"content": "# New"})
+        NOTION, [], ["P1"], Context(flags={"content": "# New"})
     )
     assert calls == [("P1", "# New")]
     assert await _text(out) == "P1\n"
@@ -172,32 +174,32 @@ async def test_pages_edit_replaces_the_body(monkeypatch):
 async def test_pages_trash_refuses_without_yes(monkeypatch):
     calls = []
 
-    async def fake_update(config, page_id, body):
+    async def fake_update(accessor, page_id, body):
         calls.append((page_id, body))
         return {"id": page_id}
 
     monkeypatch.setitem(trash.__globals__, "update_page", fake_update)
-    out, io = await trash(CONFIG, [], ["P2"], Context())
+    out, io = await trash(NOTION, [], ["P2"], Context())
     assert out is None
     assert io.exit_code == 1
     assert "non-interactive" in (await materialize(io.stderr)).decode()
     assert calls == []
 
-    _out, io = await trash(CONFIG, [], ["P2"], Context(flags={"yes": True}))
+    _out, io = await trash(NOTION, [], ["P2"], Context(flags={"yes": True}))
     assert calls == [("P2", {"in_trash": True})]
     assert (await materialize(io.stderr)).decode() == "✔ Page trashed\n"
 
 
 @pytest.mark.asyncio
 async def test_datasources_resolve_lists_stubs(monkeypatch):
-    async def fake_database(config, database_id):
+    async def fake_database(accessor, database_id):
         return {"data_sources": [{"id": "S1", "name": "Tasks"}]}
 
     monkeypatch.setitem(resolve.__globals__, "get_database", fake_database)
-    out, _io = await resolve(CONFIG, [], ["D1"], Context())
+    out, _io = await resolve(NOTION, [], ["D1"], Context())
     assert await _text(out) == "S1\tTasks\n"
 
-    out, _io = await resolve(CONFIG, [], ["D1"], Context(flags={"json": True}))
+    out, _io = await resolve(NOTION, [], ["D1"], Context(flags={"json": True}))
     assert (await _json(out))["data_sources"][0]["name"] == "Tasks"
 
 
@@ -205,7 +207,7 @@ async def test_datasources_resolve_lists_stubs(monkeypatch):
 async def test_datasources_query_sorts_columns_by_name(monkeypatch):
     calls = []
 
-    async def fake_source(config, source_id):
+    async def fake_source(accessor, source_id):
         return {
             "id": source_id,
             "properties": {
@@ -214,7 +216,7 @@ async def test_datasources_query_sorts_columns_by_name(monkeypatch):
             },
         }
 
-    async def fake_query(config, source_id, body):
+    async def fake_query(accessor, source_id, body):
         calls.append((source_id, body))
         return {
             "results": [
@@ -237,7 +239,7 @@ async def test_datasources_query_sorts_columns_by_name(monkeypatch):
         query.__globals__, "query_data_source_page", fake_query
     )
     out, _io = await query(
-        CONFIG,
+        NOTION,
         [],
         ["S1"],
         Context(flags={"limit": 5, "sort": ["Priority desc"]}),
@@ -261,7 +263,7 @@ async def test_datasources_query_takes_columns_from_the_rows(monkeypatch):
     # the schema prints narrower. A row created from Markdown alone holds
     # only its title column, and on its own it prints as `<id>\t<title>`
     # rather than as one title among blanks.
-    async def fake_source(config, source_id):
+    async def fake_source(accessor, source_id):
         return {
             "id": source_id,
             "properties": {
@@ -270,7 +272,7 @@ async def test_datasources_query_takes_columns_from_the_rows(monkeypatch):
             },
         }
 
-    async def fake_query(config, source_id, body):
+    async def fake_query(accessor, source_id, body):
         return {
             "results": [
                 {
@@ -290,23 +292,23 @@ async def test_datasources_query_takes_columns_from_the_rows(monkeypatch):
     monkeypatch.setitem(
         query.__globals__, "query_data_source_page", fake_query
     )
-    out, _io = await query(CONFIG, [], ["S1"], Context(flags={}))
+    out, _io = await query(NOTION, [], ["S1"], Context(flags={}))
     assert await _text(out) == "R2\tRow page\n"
 
 
 @pytest.mark.asyncio
 async def test_datasources_query_reports_the_next_cursor(monkeypatch):
-    async def fake_source(config, source_id):
+    async def fake_source(accessor, source_id):
         return {"id": source_id, "properties": {}}
 
-    async def fake_query(config, source_id, body):
+    async def fake_query(accessor, source_id, body):
         return {"results": [], "has_more": True, "next_cursor": "7"}
 
     monkeypatch.setitem(query.__globals__, "get_data_source", fake_source)
     monkeypatch.setitem(
         query.__globals__, "query_data_source_page", fake_query
     )
-    _out, io = await query(CONFIG, [], ["S1"], Context())
+    _out, io = await query(NOTION, [], ["S1"], Context())
     assert (await materialize(io.stderr)).decode() == (
         "\nMore results available. Use --start-cursor 7 to continue.\n"
     )
@@ -318,16 +320,16 @@ async def test_datasources_query_follows_a_database_id(monkeypatch):
 
     seen = []
 
-    async def fake_source(config, source_id):
+    async def fake_source(accessor, source_id):
         seen.append(source_id)
         if source_id == "D1":
             raise NotionAPIError("missing", status=404)
         return {"id": source_id, "properties": {}}
 
-    async def fake_database(config, database_id):
+    async def fake_database(accessor, database_id):
         return {"data_sources": [{"id": "S1"}]}
 
-    async def fake_query(config, source_id, body):
+    async def fake_query(accessor, source_id, body):
         return {"results": [], "has_more": False}
 
     monkeypatch.setitem(query.__globals__, "get_data_source", fake_source)
@@ -335,23 +337,31 @@ async def test_datasources_query_follows_a_database_id(monkeypatch):
     monkeypatch.setitem(
         query.__globals__, "query_data_source_page", fake_query
     )
-    await query(CONFIG, [], ["D1"], Context())
+    await query(NOTION, [], ["D1"], Context())
     assert seen == ["D1", "S1"]
+
+
+def test_notion_transport_applies_the_line_version():
+    assert notion_transport(NOTION, Context()) is NOTION
+    flags = {"notion_version": "2099-01-01"}
+    pinned = notion_transport(NOTION, Context(flags=flags))
+    assert pinned.config.api_version == "2099-01-01"
+    assert pinned.pool is NOTION.pool
 
 
 @pytest.mark.asyncio
 async def test_auth_token_prints_the_configured_key():
-    out, _io = await token(CONFIG, [], [], Context())
+    out, _io = await token(NOTION, [], [], Context())
     assert await _text(out) == "secret\n"
 
 
 @pytest.mark.asyncio
 async def test_whoami_renders_the_row(monkeypatch):
-    async def fake_self(config):
+    async def fake_self(accessor):
         return WORKSPACE_OWNED
 
     monkeypatch.setitem(whoami.__globals__, "get_self", fake_self)
-    out, _io = await whoami(CONFIG, [], [], Context())
+    out, _io = await whoami(NOTION, [], [], Context())
     assert await _text(out) == (
         "ID\tNAME\tbot\t\tWSID\tWSNAME\tWSID\tWSNAME\tworkspace\n"
     )
@@ -370,12 +380,12 @@ async def test_api_infers_method_and_strips_the_version_prefix(monkeypatch):
     gets = []
     posts = []
 
-    async def fake_get(config, path, params=None, extra_headers=None):
+    async def fake_get(accessor, path, params=None, extra_headers=None):
         gets.append((path, params))
         return {"ok": True}
 
     async def fake_post(
-        config, path, body=None, extra_headers=None, params=None
+        accessor, path, body=None, extra_headers=None, params=None
     ):
         posts.append((path, body))
         return {"ok": True}
@@ -385,9 +395,9 @@ async def test_api_infers_method_and_strips_the_version_prefix(monkeypatch):
     monkeypatch.setitem(
         api.__globals__, "METHODS", {"GET": fake_get, "POST": fake_post}
     )
-    await api(CONFIG, [], ["v1/users/me"], Context())
-    await api(CONFIG, [], ["v1/search", "query=Roadmap"], Context())
-    await api(CONFIG, [], ["v1/blocks/B1/children", "page_size==1"], Context())
+    await api(NOTION, [], ["v1/users/me"], Context())
+    await api(NOTION, [], ["v1/search", "query=Roadmap"], Context())
+    await api(NOTION, [], ["v1/blocks/B1/children", "page_size==1"], Context())
     assert gets[0] == ("/users/me", None)
     assert posts[0] == ("/search", {"query": "Roadmap"})
     assert gets[1] == ("/blocks/B1/children", {"page_size": "1"})
@@ -398,7 +408,7 @@ async def test_api_builds_nested_bodies(monkeypatch):
     posts = []
 
     async def fake_post(
-        config, path, body=None, extra_headers=None, params=None
+        accessor, path, body=None, extra_headers=None, params=None
     ):
         posts.append(body)
         return {"ok": True}
@@ -406,7 +416,7 @@ async def test_api_builds_nested_bodies(monkeypatch):
     monkeypatch.setitem(api.__globals__, "notion_post", fake_post)
     monkeypatch.setitem(api.__globals__, "METHODS", {"POST": fake_post})
     await api(
-        CONFIG,
+        NOTION,
         [],
         ["v1/pages", "parent[page_id]=root", "archived:=true"],
         Context(),
@@ -416,9 +426,9 @@ async def test_api_builds_nested_bodies(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_api_prints_compact_sorted_json(monkeypatch):
-    async def fake_get(config, path, params=None, extra_headers=None):
+    async def fake_get(accessor, path, params=None, extra_headers=None):
         return {"b": 1, "a": {"d": 2, "c": 3}}
 
     monkeypatch.setitem(api.__globals__, "notion_get", fake_get)
-    out, _io = await api(CONFIG, [], ["v1/users/me"], Context())
+    out, _io = await api(NOTION, [], ["v1/users/me"], Context())
     assert await _text(out) == '{"a":{"c":3,"d":2},"b":1}\n'

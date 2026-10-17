@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, expect, it, vi } from 'vitest'
-import { GitHubAccessor } from '../../accessor/github.ts'
+import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 import type { GitHubTransport } from './client.ts'
 import { tree } from './stat.ts'
 import type { TreeEntry } from './tree_entry.ts'
@@ -87,9 +87,9 @@ it.each([
   ['/readme.txt', { a: true }, '7\t/readme.txt\n'],
 ])('du %s %o sums the tree it reads once', async (operand, flags, expected) => {
   const accessor = new GitHubAccessor({
-    transport: {
+    account: new GitHubAccount({ token: 't' }, {
       get: () => Promise.resolve({ tree: Object.values(TREE), truncated: false }),
-    } as unknown as GitHubTransport,
+    } as unknown as GitHubTransport),
     owner: 'o',
     repo: 'r',
     ref: 'main',

@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RunArgs } from '../types.ts'
+import type { PathSpec } from '../../types.ts'
+import type { Program } from '../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
 // argv[0] for the two entry points that do not read it off the command line.
@@ -30,16 +31,21 @@ const STDIN_FILENAME = '<stdin>'
  * or `<stdin>` for either stdin spelling. A payload, a module and a script
  * CLI come through no file. Pinned on CPython 3.13.5; mirrors Python's
  * main_filename.
+ *
+ * @param program the run, whose `scriptPath` and `prog` say which entry
+ *   point the source came through.
+ * @param cwd the working directory a relative script is made absolute
+ *   against.
  */
-export function mainFilename(args: RunArgs): string | null {
-  const script = args.scriptPath
+export function mainFilename(program: Program, cwd: PathSpec | null): string | null {
+  const script = program.scriptPath
   if (script === undefined) {
-    return args.prog === '' || args.prog === STDIN_ARGV0 ? STDIN_FILENAME : null
+    return program.prog === '' || program.prog === STDIN_ARGV0 ? STDIN_FILENAME : null
   }
   const typed = script.rawPath !== '' ? script.rawPath : script.virtual
   if (typed.startsWith('/')) return typed
-  if (args.cwd === undefined) return script.virtual
-  return `${rstripSlash(args.cwd.virtual)}/${typed}`
+  if (cwd === null) return script.virtual
+  return `${rstripSlash(cwd.virtual)}/${typed}`
 }
 
 /**
@@ -51,27 +57,32 @@ export function mainFilename(args: RunArgs): string | null {
  * name with what CPython's file adapter binds. It also binds the script-CLI
  * contract before compiling the unmodified program. Mirrors Python's
  * prepare_source.
+ *
+ * @param program the run. A `prog` of none or "-c" with no script file
+ *   means a payload, which CPython already reports correctly and which
+ *   passes through untouched.
+ * @param cwd the working directory the script is named against.
  */
-export function prepareSource(args: RunArgs): string {
-  const filename = mainFilename(args)
+export function prepareSource(program: Program, cwd: PathSpec | null): string {
+  const filename = mainFilename(program, cwd)
   if (
-    args.scriptCli !== true &&
+    program.scriptCli !== true &&
     filename === null &&
-    (args.prog ?? PAYLOAD_ARGV0) === PAYLOAD_ARGV0
+    (program.prog ?? PAYLOAD_ARGV0) === PAYLOAD_ARGV0
   ) {
-    return args.code
+    return program.code
   }
   // JSON string literals are also Python string literals; encode twice so
   // Python's JSON decoder, not its source parser, handles source escapes.
-  const source = `__import__('json').loads(${JSON.stringify(JSON.stringify(args.code))})`
-  const prog = JSON.stringify(args.prog ?? PAYLOAD_ARGV0)
+  const source = `__import__('json').loads(${JSON.stringify(JSON.stringify(program.code))})`
+  const prog = JSON.stringify(program.prog ?? PAYLOAD_ARGV0)
   const name = JSON.stringify(
-    filename ?? (args.prog !== undefined && args.prog !== '' ? args.prog : '<string>'),
+    filename ?? (program.prog !== undefined && program.prog !== '' ? program.prog : '<string>'),
   )
   const lines = [`__import__('sys').argv[0] = ${prog}`]
   if (filename !== null) lines.push(`__file__ = ${JSON.stringify(filename)}`, '__cached__ = None')
-  if (args.scriptCli === true) {
-    const stdin = args.stdin === null ? 'None' : "__import__('sys').stdin.buffer.read()"
+  if (program.scriptCli === true) {
+    const stdin = program.stdin === null ? 'None' : "__import__('sys').stdin.buffer.read()"
     lines.push(
       "argv = list(__import__('sys').argv)",
       `stdin = ${stdin}`,

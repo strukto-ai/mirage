@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ExecutionRequest, RunResult } from '../../../runtime/types.ts'
+import type { Context } from '../../../commands/config.ts'
+import type { ExecutionKind, OutputFn, RunResult } from '../../../runtime/types.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { hasAborted, mergeSignals } from '../../../utils/abort.ts'
@@ -74,19 +75,16 @@ export async function runExternal(
   const execute = async () => {
     const input = stdin === null ? null : await materialize(stdin)
     runSignal?.throwIfAborted()
-    const common = {
+    const ctx: Context = {
+      stdin: input,
+      flags: {},
       cwd: PathSpec.fromStrPath(session.cwd),
       env: envSnapshot(session),
-      stdin: input,
       ...(runSignal !== undefined ? { signal: runSignal } : {}),
     }
-    return executeProgram(
-      runtime,
-      argv.name,
-      isProcessExecutor(runtime)
-        ? { kind: 'process', argv: argv.tokens, ...common }
-        : { kind: 'shell', line: command, ...common },
-    )
+    return isProcessExecutor(runtime)
+      ? executeProgram(runtime, argv.name, argv.tokens, ctx, { kind: 'process' })
+      : executeProgram(runtime, argv.name, [], { ...ctx, flags: { c: command } }, { kind: 'line' })
   }
   try {
     const result = await runWithTimeout(execute(), timeout, argv.name)
@@ -147,15 +145,13 @@ function streamExternal(
   const execute = async (): Promise<void> => {
     try {
       const result = await runWithTimeout(
-        executeProgram(runtime, argv.name, {
-          kind: 'stream',
-          argv: argv.tokens,
-          cwd,
-          env,
-          stdin,
-          output: (chunk) => pipe.write(chunk),
-          signal: runSignal,
-        }),
+        executeProgram(
+          runtime,
+          argv.name,
+          argv.tokens,
+          { stdin, flags: {}, cwd, env, signal: runSignal },
+          { kind: 'process', output: (chunk) => pipe.write(chunk) },
+        ),
         timeout,
         argv.name,
       )
@@ -203,18 +199,29 @@ function streamExternal(
   return [new OutputStream(scope.stream(output()), close), io, node]
 }
 
+/**
+ * Keep an ordinary launch failure within the command that caused it.
+ *
+ * @param runtime the runtime the line routed to.
+ * @param name the program's name, for a launch failure's message.
+ * @param texts the argv, or nothing for a line.
+ * @param ctx the run's context.
+ * @param opts a process or a line, and where a streamed process writes.
+ */
 async function executeProgram(
   runtime: Runtime,
   name: string,
-  request: ExecutionRequest,
+  texts: readonly string[],
+  ctx: Context,
+  opts: { kind: ExecutionKind; output?: OutputFn },
 ): Promise<RunResult> {
   try {
-    return await runtime.execute(request)
+    return await runtime.execute([], texts, ctx, opts)
   } catch (error) {
     if (
       error instanceof CommandTimeoutError ||
       (error instanceof Error && error.name === 'AbortError') ||
-      ('signal' in request && hasAborted(request.signal))
+      hasAborted(ctx.signal)
     )
       throw error
     return {

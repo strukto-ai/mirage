@@ -17,7 +17,6 @@ import { RAMFileCacheStore } from '@struktoai/mirage-core/cache/file/ram'
 import type { Evicted } from '@struktoai/mirage-core/cache/index/config'
 import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import { IndexView } from '@struktoai/mirage-core/cache/index/view'
-import { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { HfHubError } from './client.ts'
 import {
   collect,
@@ -38,6 +37,7 @@ import { keepListing } from '@struktoai/mirage-core/workspace/mount/listing'
 import * as client from './client.ts'
 import * as repo from './repo.ts'
 import type { TreeEntry } from './tree_entry.ts'
+import { handle } from './_test_util.ts'
 
 // Every accessor here points at the real Hub, so the head a refill asks for
 // before its walk is answered locally: '' by default, which walks the branch
@@ -45,10 +45,6 @@ import type { TreeEntry } from './tree_entry.ts'
 beforeEach(() => {
   vi.spyOn(repo, 'headCommit').mockResolvedValue('')
 })
-
-function accessor(config: Record<string, unknown> = {}): HfHubAccessor {
-  return new HfHubAccessor({ repoId: 'acme/widget', ...config } as never)
-}
 
 function fileRow(path: string, size = 10, extra: Record<string, unknown> = {}) {
   return { type: 'file', oid: `oid-${path}`, size, path, ...extra }
@@ -114,17 +110,17 @@ describe('nextCursor', () => {
 
 describe('treeUrl', () => {
   it('appends the key prefix without its trailing slash', () => {
-    expect(treeUrl(accessor())).toContain('/api/models/acme/widget/tree/main')
-    const prefixed = accessor({ keyPrefix: 'sub/dir/' })
+    expect(treeUrl(handle())).toContain('/api/models/acme/widget/tree/main')
+    const prefixed = handle({ keyPrefix: 'sub/dir/' })
     expect(prefixed.keyPrefix).toBe('sub/dir/')
     expect(treeUrl(prefixed)).toContain('/tree/main/sub/dir')
   })
 
   it('takes the revision it is given', () => {
     const head = 'c'.repeat(40)
-    expect(treeUrl(accessor(), head)).toMatch(new RegExp(`/tree/${head}$`))
-    expect(treeUrl(accessor())).toMatch(/\/tree\/main$/)
-    expect(treeUrl(accessor({ keyPrefix: 'sub/dir/' }), head)).toMatch(
+    expect(treeUrl(handle(), head)).toMatch(new RegExp(`/tree/${head}$`))
+    expect(treeUrl(handle())).toMatch(/\/tree\/main$/)
+    expect(treeUrl(handle({ keyPrefix: 'sub/dir/' }), head)).toMatch(
       new RegExp(`/tree/${head}/sub/dir$`),
     )
   })
@@ -132,7 +128,7 @@ describe('treeUrl', () => {
   it('encodes a revision holding a slash', () => {
     // Unencoded, `feature/foo` names revision `feature` and subtree `foo`,
     // so the mount reads the wrong location or appears empty.
-    expect(treeUrl(accessor({ revision: 'feature/foo' }))).toContain('/tree/feature%2Ffoo')
+    expect(treeUrl(handle({ revision: 'feature/foo' }))).toContain('/tree/feature%2Ffoo')
   })
 })
 
@@ -159,7 +155,7 @@ describe('fetchTree', () => {
       .mockResolvedValue(
         page([{ ...fileRow('a.txt'), lastCommit: { id: 'c', date: '2025-01-01T00:00:00.000Z' } }]),
       )
-    const tree = await fetchTree(accessor())
+    const tree = await fetchTree(handle())
     expect(spy).toHaveBeenCalledTimes(1)
     expect(spy.mock.calls[0]?.[2]?.expand).toBe('true')
     expect(tree.get('a.txt')?.lastModified).toBe('2025-01-01T00:00:00.000Z')
@@ -173,7 +169,7 @@ describe('fetchTree', () => {
       .spyOn(client, 'hubGetResponse')
       .mockResolvedValueOnce(page([fileRow('a.txt')], 'https://h/p2'))
       .mockResolvedValueOnce(page([fileRow('a.txt'), fileRow('b.txt')]))
-    const tree = await fetchTree(accessor())
+    const tree = await fetchTree(handle())
     expect(spy).toHaveBeenCalledTimes(2)
     expect(spy.mock.calls[1]?.[2]?.expand).toBe('false')
     expect([...tree.keys()].sort()).toEqual(['a.txt', 'b.txt'])
@@ -185,7 +181,7 @@ describe('fetchTree', () => {
       .spyOn(client, 'hubGetResponse')
       .mockResolvedValueOnce(page([fileRow('a.txt')], 'https://h/p2'))
       .mockResolvedValueOnce(page([fileRow('b.txt')]))
-    const tree = await fetchTree(accessor({ expandCommits: true }))
+    const tree = await fetchTree(handle({ expandCommits: true }))
     expect(spy.mock.calls[1]?.[1]).toBe('https://h/p2')
     // The cursor URL carries the whole query already.
     expect(spy.mock.calls[1]?.[2]).toBeUndefined()
@@ -195,7 +191,7 @@ describe('fetchTree', () => {
 
   it('forced bare never expands', async () => {
     const spy = vi.spyOn(client, 'hubGetResponse').mockResolvedValue(page([fileRow('a.txt')]))
-    await fetchTree(accessor({ expandCommits: false }))
+    await fetchTree(handle({ expandCommits: false }))
     expect(spy).toHaveBeenCalledTimes(1)
     expect(spy.mock.calls[0]?.[2]?.expand).toBe('false')
     spy.mockRestore()
@@ -208,7 +204,7 @@ describe('fetchTree', () => {
     const spy = vi
       .spyOn(client, 'hubGetResponse')
       .mockRejectedValue(new HfHubError('nope', 404, 'EntryNotFound'))
-    expect((await fetchTree(accessor())).size).toBe(0)
+    expect((await fetchTree(handle())).size).toBe(0)
     spy.mockRestore()
   })
 
@@ -223,7 +219,7 @@ describe('fetchTree', () => {
     const spy = vi
       .spyOn(client, 'hubGetResponse')
       .mockRejectedValue(new HfHubError('nope', status, code))
-    await expect(fetchTree(accessor())).rejects.toBeInstanceOf(HfHubError)
+    await expect(fetchTree(handle())).rejects.toBeInstanceOf(HfHubError)
     spy.mockRestore()
   })
 
@@ -233,7 +229,7 @@ describe('fetchTree', () => {
       .spyOn(client, 'hubGetResponse')
       .mockResolvedValueOnce(page([fileRow('a.txt')], 'https://h/p2'))
       .mockRejectedValueOnce(new HfHubError('gone', 404, 'EntryNotFound'))
-    await expect(fetchTree(accessor({ expandCommits: false }))).rejects.toBeInstanceOf(HfHubError)
+    await expect(fetchTree(handle({ expandCommits: false }))).rejects.toBeInstanceOf(HfHubError)
     spy.mockRestore()
   })
 
@@ -245,7 +241,7 @@ describe('fetchTree', () => {
       .spyOn(client, 'hubGetResponse')
       .mockResolvedValueOnce(page([fileRow('a.txt')], 'https://h/p2'))
       .mockRejectedValueOnce(new HfHubError('gone', 404, 'EntryNotFound'))
-    await expect(fetchTree(accessor({ expandCommits: true }))).rejects.toBeInstanceOf(HfHubError)
+    await expect(fetchTree(handle({ expandCommits: true }))).rejects.toBeInstanceOf(HfHubError)
     spy.mockRestore()
   })
 
@@ -256,13 +252,13 @@ describe('fetchTree', () => {
       .spyOn(client, 'hubGetResponse')
       .mockResolvedValueOnce(page([fileRow('a.txt')], 'https://h/p2'))
       .mockRejectedValueOnce(new HfHubError('gone', 404, 'EntryNotFound'))
-    expect((await fetchTree(accessor())).size).toBe(0)
+    expect((await fetchTree(handle())).size).toBe(0)
     spy.mockRestore()
   })
 
   it('rethrows a real failure', async () => {
     const spy = vi.spyOn(client, 'hubGetResponse').mockRejectedValue(new HfHubError('boom', 500))
-    await expect(fetchTree(accessor())).rejects.toThrow('boom')
+    await expect(fetchTree(handle())).rejects.toThrow('boom')
     spy.mockRestore()
   })
 })
@@ -328,7 +324,7 @@ describe('fetchTree page ceiling', () => {
     const spy = vi
       .spyOn(client, 'hubGetResponse')
       .mockResolvedValue(page([fileRow('a.txt')], 'https://h/next'))
-    await expect(fetchTree(accessor())).rejects.toThrow(/listing exceeds/)
+    await expect(fetchTree(handle())).rejects.toThrow(/listing exceeds/)
     spy.mockRestore()
   })
 })
@@ -339,7 +335,7 @@ describe('pathsInfoUrl', () => {
     ['dataset', 'datasets'],
     ['space', 'spaces'],
   ])('names the %s repo type', (kind, segment) => {
-    const acc = new HfHubAccessor({ repoId: 'acme/widget' } as never, kind)
+    const acc = handle({}, kind)
     expect(pathsInfoUrl(acc)).toBe(
       `https://huggingface.co/api/${segment}/acme/widget/paths-info/main`,
     )
@@ -348,7 +344,7 @@ describe('pathsInfoUrl', () => {
   it('encodes a revision and carries no prefix', () => {
     // The prefix belongs in the requested path, not the route: the route's
     // trailing segment is the whole revision.
-    const acc = accessor({ revision: 'refs/pr/1', keyPrefix: 'sub/dir' })
+    const acc = handle({ revision: 'refs/pr/1', keyPrefix: 'sub/dir' })
     expect(pathsInfoUrl(acc)).toBe(
       'https://huggingface.co/api/models/acme/widget/paths-info/refs%2Fpr%2F1',
     )
@@ -360,13 +356,13 @@ describe('fetchPath', () => {
     // Only an empty list says the path is missing; any other shape is an
     // answer the client cannot read, and must not become absence.
     const spy = vi.spyOn(client, 'hubPost').mockResolvedValue({ error: 'unexpected' })
-    await expect(fetchPath(accessor(), 'a.txt')).rejects.toBeInstanceOf(client.HfHubError)
+    await expect(fetchPath(handle(), 'a.txt')).rejects.toBeInstanceOf(client.HfHubError)
     spy.mockRestore()
   })
 
   it('reads an empty list as absence', async () => {
     const spy = vi.spyOn(client, 'hubPost').mockResolvedValue([])
-    expect((await fetchPath(accessor(), 'a.txt')).size).toBe(0)
+    expect((await fetchPath(handle(), 'a.txt')).size).toBe(0)
     spy.mockRestore()
   })
 
@@ -375,7 +371,7 @@ describe('fetchPath', () => {
       { ...fileRow('a.txt'), oid: 'decoy' },
       { ...fileRow('sub/dir/a.txt'), oid: 'real' },
     ])
-    const found = await fetchPath(accessor({ keyPrefix: 'sub/dir' }), 'a.txt')
+    const found = await fetchPath(handle({ keyPrefix: 'sub/dir' }), 'a.txt')
     expect((spy.mock.calls[0]?.[2] as { paths: string[] }).paths).toEqual(['sub/dir/a.txt'])
     expect([...found.keys()]).toEqual(['a.txt'])
     expect(found.get('a.txt')?.oid).toBe('real')
@@ -388,7 +384,7 @@ describe('fetchPath', () => {
     [false, false],
   ])('expands only when asked (%s)', async (expand, sent) => {
     const spy = vi.spyOn(client, 'hubPost').mockResolvedValue([])
-    await fetchPath(accessor({ expandCommits: expand }), 'a.txt')
+    await fetchPath(handle(expand === undefined ? {} : { expandCommits: expand }), 'a.txt')
     expect((spy.mock.calls[0]?.[2] as { expand: boolean }).expand).toBe(sent)
     spy.mockRestore()
   })
@@ -422,7 +418,7 @@ describe('a relisting reports what left the repository', () => {
         },
       },
     )
-    const acc = accessor()
+    const acc = handle()
     const root = new PathSpec({ virtual: '/m', directory: '/m', vfsPath: '' })
     const spy = vi
       .spyOn(client, 'hubGetResponse')

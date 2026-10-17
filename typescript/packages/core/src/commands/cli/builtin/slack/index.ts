@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { slackAccessor } from '../../../../accessor/slack.ts'
 import { CommandSpec } from '../../../spec/types.ts'
 import { CLI } from '../../types.ts'
 import { CLIHandler } from '../../types.ts'
@@ -134,4 +135,5 @@ export const SLACK = new CLI({
     search: new CLIHandler({ fn: search }),
   },
   configModel: SlackConfigSchema,
+  accessor: slackAccessor,
 })

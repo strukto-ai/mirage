@@ -14,31 +14,24 @@
 
 from urllib.parse import quote
 
-from mirage.core.api.client import SessionArg
+from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.client import discord_put
-from mirage.core.discord.config import DiscordConfig
 
 
 async def add_reaction(
-    config: DiscordConfig,
-    channel_id: str,
-    message_id: str,
-    emoji: str,
-    session: SessionArg = None,
+    accessor: DiscordAccessor, channel_id: str, message_id: str, emoji: str
 ) -> None:
     """Add a reaction to a message.
 
     Args:
-        config (DiscordConfig): Discord credentials.
+        accessor (DiscordAccessor): Discord accessor.
         channel_id (str): channel ID.
         message_id (str): message ID.
         emoji (str): emoji name or unicode.
-        session (SessionArg): pool or live session to ride.
     """
     encoded = quote(emoji, safe="")
     await discord_put(
-        config,
+        accessor,
         f"/channels/{channel_id}/messages"
         f"/{message_id}/reactions/{encoded}/@me",
-        session=session,
     )

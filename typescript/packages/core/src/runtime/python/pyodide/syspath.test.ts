@@ -17,10 +17,16 @@ import { describe, expect, it } from 'vitest'
 import { PrefixResolver } from '../../resolver.ts'
 import { PathSpec } from '../../../types.ts'
 import { PyodideRuntime } from './runtime.ts'
-import type { BridgeDispatchFn } from '../../types.ts'
+import type { BridgeDispatchFn, Program } from '../../types.ts'
+import { context } from '../../../workspace/fixtures/context.ts'
 
 const EMPTY_MOUNT: BridgeDispatchFn = (op) =>
   Promise.resolve(op === 'readdir' ? [] : new Uint8Array())
+
+/** Run `program` at `/` with an empty env and empty stdin. */
+function interpret(rt: PyodideRuntime, program: Partial<Program> & { code: string }) {
+  return rt.interpret(undefined, { args: [], stdin: new Uint8Array(), ...program }, context())
+}
 
 function decode(bytes: Uint8Array | null | undefined): string {
   return bytes ? new TextDecoder().decode(bytes) : ''
@@ -29,8 +35,8 @@ function decode(bytes: Uint8Array | null | undefined): string {
 describe('PyodideRuntime sysPath', () => {
   it('reports a glob that matched nothing on the run stderr', async () => {
     const rt = new PyodideRuntime({ config: { sysPath: ['/ram/*.whl'] } })
-    rt.bind(new WorkspaceBinding(EMPTY_MOUNT, new PrefixResolver(() => ['/ram/'])))
-    const result = await rt.run({ code: 'print(1)', args: [], env: {}, stdin: new Uint8Array() })
+    rt.bind(WorkspaceBinding.overBridge(EMPTY_MOUNT, new PrefixResolver(() => ['/ram/'])))
+    const result = await interpret(rt, { code: 'print(1)' })
     expect(decode(result.stderr)).toContain('/ram/*.whl')
     expect(decode(result.stderr)).toContain('matched nothing')
     // A misconfigured path is a warning, not a failure: the program ran.
@@ -41,10 +47,9 @@ describe('PyodideRuntime sysPath', () => {
 
   it('reports a missing glob in each fresh command interpreter', async () => {
     const rt = new PyodideRuntime({ config: { sysPath: ['/ram/*.whl'] } })
-    rt.bind(new WorkspaceBinding(EMPTY_MOUNT, new PrefixResolver(() => ['/ram/'])))
-    const args = { code: 'print(1)', args: [], env: {}, stdin: new Uint8Array() }
-    await rt.run(args)
-    const second = await rt.run(args)
+    rt.bind(WorkspaceBinding.overBridge(EMPTY_MOUNT, new PrefixResolver(() => ['/ram/'])))
+    await interpret(rt, { code: 'print(1)' })
+    const second = await interpret(rt, { code: 'print(1)' })
     expect(decode(second.stderr)).toContain('matched nothing')
     await rt.close()
   }, 60_000)
@@ -53,13 +58,8 @@ describe('PyodideRuntime sysPath', () => {
     // Only a glob can silently expand to nothing; a literal entry is on
     // sys.path exactly as configured, which is what CPython does too.
     const rt = new PyodideRuntime({ config: { sysPath: ['/ram/vendor'] } })
-    rt.bind(new WorkspaceBinding(EMPTY_MOUNT, new PrefixResolver(() => ['/ram/'])))
-    const result = await rt.run({
-      code: `import sys; print('/ram/vendor' in sys.path)`,
-      args: [],
-      env: {},
-      stdin: new Uint8Array(),
-    })
+    rt.bind(WorkspaceBinding.overBridge(EMPTY_MOUNT, new PrefixResolver(() => ['/ram/'])))
+    const result = await interpret(rt, { code: `import sys; print('/ram/vendor' in sys.path)` })
     expect(decode(result.stderr)).not.toContain('matched nothing')
     expect(decode(result.stdout)).toContain('True')
     await rt.close()
@@ -72,12 +72,9 @@ describe('PyodideRuntime sysPath', () => {
     'puts CPython first entry ahead of a configured one: %s',
     async (_, script, head) => {
       const rt = new PyodideRuntime({ config: { sysPath: ['/ram/vendor'] } })
-      rt.bind(new WorkspaceBinding(EMPTY_MOUNT, new PrefixResolver(() => ['/ram/'])))
-      const result = await rt.run({
+      rt.bind(WorkspaceBinding.overBridge(EMPTY_MOUNT, new PrefixResolver(() => ['/ram/'])))
+      const result = await interpret(rt, {
         code: 'import sys; print(sys.path[:2])',
-        args: [],
-        env: {},
-        stdin: new Uint8Array(),
         ...(script
           ? {
               prog: '/ram/app/s.py',

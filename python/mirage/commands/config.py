@@ -29,12 +29,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, CommandOutput, IOResult
 from mirage.process.view import ProcessView
-from mirage.runtime.types import (
-    DispatchFn,
-    ExecPathFn,
-    RuntimeIdentity,
-    ShellFn,
-)
+from mirage.runtime.types import CommandRuntime, ShellFn
 from mirage.types import Limit, PathSpec
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 from mirage.vfs.constants import DEFAULT_MAX_DU_ENTRIES
@@ -69,10 +64,8 @@ from mirage.vfs.types import (
 from mirage.view.types import (
     FollowOperands,
     LinkTargetStat,
-    ReaddirPath,
     SessionAccess,
     SessionView,
-    StatPath,
 )
 from mirage.workspace.files import Files
 
@@ -152,13 +145,14 @@ class Context:
     """Everything a handler gets besides its handle and its operands.
 
     A command handler is ``fn(accessor, paths, texts, ctx)`` and a CLI
-    leaf ``fn(config, paths, texts, ctx)``: the same ``ctx``, the facts a
+    leaf too, with the install's accessor: the same ``ctx``, the facts a
     runtime execution takes too. Files are reached through ``vfs``, the
     session's files, which judge every call at the workspace dispatcher,
-    as ``session.vfs`` and a policy's ``ctx.vfs`` do. A handler reads the
-    fields it needs and ignores the rest; the workspace builds one per
-    command or CLI, and ``Mount.run_command`` adds what only the mount
-    knows (``mount_prefix``, ``index``, ``io``).
+    as ``session.vfs`` and a policy's ``ctx.vfs`` do; the session through
+    ``session``. A handler reads the fields it needs and ignores the rest;
+    the workspace builds one per command or CLI, and ``Mount.run_command``
+    adds what only the mount knows (``spec``, ``mount_prefix``, ``index``,
+    ``io``).
 
     Args:
         stdin (ByteSource | None): Piped standard input, if any.
@@ -171,7 +165,8 @@ class Context:
             diagnostic that quotes one (``cmp: missing operand after
             '-s'``). Empty when a line runs split per operand or per
             mount.
-        spec (CommandSpec | None): The resolved grammar.
+        spec (CommandSpec | None): The resolved grammar; its ``name`` is
+            the command's.
         vfs (Files | None): The session's files, run as the line's
             session: reads, writes, links, and where the mounts are.
         session (SessionView | None): The live session, with policy
@@ -179,31 +174,12 @@ class Context:
         processes (ProcessView | None): The session's processes.
         shell (ShellFn | None): Run a nested line in the calling
             session, as ``sh -c`` would (awk's pipes and ``system()``).
-        access (SessionAccess | None): The calling session's access and
-            shell settings.
         mount_prefix (str): The prefix of the mount running the command.
-        command (str | None): The command name the mount runs.
         index (IndexCacheStore): The mount's index cache.
         io (CommandIO | None): The mount's backend table, built from its
             VFS; None outside a mount.
-        dispatch (DispatchFn | None): The workspace op dispatcher.
-        session_id (str | None): The calling session.
-        exec_allowed (bool): Whether policy lets the command start an
-            interpreter.
-        exec_path_allowed (ExecPathFn | None): Whether policy lets an
-            interpreter load code from a path; None outside a
-            workspace, where ``exec_allowed`` decides.
-        runtime (RuntimeIdentity | None): The runtime an interpreter runs
-            in.
-        runtime_unavailable (str | None): Why the requested runtime is
-            missing. Python only; TypeScript refuses earlier.
-        follow_operands (FollowOperands | None): The line's pathname
-            resolution of its operands, which a glob's matches take as
-            typed words would.
-        stat_path (StatPath | None): Stat one path through the
-            dispatcher, which may land on another mount.
-        readdir_path (ReaddirPath | None): List one directory through
-            the dispatcher, for a walk that crosses a mount.
+        runtime (CommandRuntime | None): Where an interpreter command
+            runs its code, and what policy lets that code start and load.
     """
 
     stdin: ByteSource | None = None
@@ -216,20 +192,10 @@ class Context:
     session: SessionView | None = None
     processes: ProcessView | None = None
     shell: ShellFn | None = None
-    access: SessionAccess | None = None
     mount_prefix: str = ""
-    command: str | None = None
     index: IndexCacheStore = NULL_INDEX
     io: CommandIO | None = None
-    dispatch: DispatchFn | None = None
-    session_id: str | None = None
-    exec_allowed: bool = True
-    exec_path_allowed: ExecPathFn | None = None
-    runtime: RuntimeIdentity | None = None
-    runtime_unavailable: str | None = None
-    follow_operands: FollowOperands | None = None
-    stat_path: StatPath | None = None
-    readdir_path: ReaddirPath | None = None
+    runtime: CommandRuntime | None = None
 
 
 CommandFnResult = CommandOutput | None

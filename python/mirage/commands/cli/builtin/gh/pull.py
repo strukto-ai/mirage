@@ -15,6 +15,7 @@
 from dataclasses import replace
 from typing import Any
 
+from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh.accessor import (
     body_value,
     camel,
@@ -55,7 +56,6 @@ from mirage.commands.cli.builtin.gh.shape import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.github.config import GhConfig
 from mirage.core.github.pull import (
     PullListFilter,
     comment_pull,
@@ -335,7 +335,7 @@ _STATES = {
 
 
 async def _viewed_pull(
-    config: GhConfig, ref: RepoRef, number: int, fields: list[str]
+    accessor: GitHubAccount, ref: RepoRef, number: int, fields: list[str]
 ) -> Node:
     """One pull request as ``gh pr view --json`` reads it: the fields
     asked for in one query, plus the ``id`` and ``number`` gh adds for its
@@ -345,7 +345,7 @@ async def _viewed_pull(
     shortcut.
 
     Args:
-        config (GhConfig): the install's configuration.
+        accessor (GitHubAccount): the install's account.
         ref (RepoRef): the repository.
         number (int): the pull request.
         fields (list[str]): the ``--json`` fields.
@@ -353,14 +353,14 @@ async def _viewed_pull(
     if all(field == "number" for field in fields):
         return {"number": number}
     node = await pull_request_fields(
-        config,
+        accessor,
         ref,
         number,
         selection(PULL_FIELD_TABLE, [*fields, "id", "number"], True),
     )
 
     async def fetch(select: str, cursor: str | None) -> Node:
-        return await pull_request_fields(config, ref, number, select, cursor)
+        return await pull_request_fields(accessor, ref, number, select, cursor)
 
     return await read_rest(PULL_FIELD_TABLE, node, fields, fetch)
 
@@ -427,15 +427,18 @@ def _view_text(row: dict[str, Any]) -> str:
 
 
 def _target(
-    config: GhConfig, texts: list[str], fl: FlagView
+    accessor: GitHubAccount, texts: list[str], fl: FlagView
 ) -> tuple[RepoRef, int]:
     return repo_number(
-        config, fl, texts[0] if texts else None, "pull request", "pull"
+        accessor, fl, texts[0] if texts else None, "pull request", "pull"
     )
 
 
 async def list_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """``gh pr list``. With ``--json`` it asks GraphQL for exactly the
     fields named, the way gh's PullRequestList does, so every field gh
@@ -443,7 +446,7 @@ async def list_cmd(
     listing.
 
     Args:
-        config (GhConfig): the install's account config.
+        accessor (GitHubAccount): the install's account.
         paths (list[PathSpec]): the path operands.
         texts (list[str]): the text operands.
         ctx (Context): the parsed flags and context.
@@ -453,8 +456,8 @@ async def list_cmd(
     fields = json_fields(fl, PR_FIELDS)
     if fields is not None:
         answers = await list_pull_request_fields(
-            config,
-            repo_for(config, fl),
+            accessor,
+            repo_for(accessor, fl),
             PullListFilter(
                 _STATES.get(wanted, ("OPEN",)),
                 fl.as_nonempty("base"),
@@ -485,8 +488,8 @@ async def list_cmd(
         else None
     )
     values = await list_pulls(
-        config,
-        repo_for(config, fl),
+        accessor,
+        repo_for(accessor, fl),
         params,
         list_limit(fl, 30, PR_INVALID_LIMIT),
         include=include,
@@ -496,28 +499,31 @@ async def list_cmd(
 
 
 async def view_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """``gh pr view``. With ``--json`` it reads the fields named over
     GraphQL, as gh does (see _viewed_pull); the text view reads the REST
     object, and ``-c`` its comments.
 
     Args:
-        config (GhConfig): the install's account config.
+        accessor (GitHubAccount): the install's account.
         paths (list[PathSpec]): the path operands.
         texts (list[str]): the text operands.
         ctx (Context): the parsed flags and context.
     """
     fl = FlagView(ctx.flags)
-    ref, number = _target(config, texts, fl)
+    ref, number = _target(accessor, texts, fl)
     fields = json_fields(fl, PR_FIELDS)
     if fields is not None:
-        node = await _viewed_pull(config, ref, number, fields)
+        node = await _viewed_pull(accessor, ref, number, fields)
         return await typed_out(
             exported_node(PULL_FIELD_TABLE, node, fields), fl, "", PR_FIELDS
         )
-    row = _pull(await get_pull(config, ref, number))
-    comments = await comments_for(config, fl, ref, number)
+    row = _pull(await get_pull(accessor, ref, number))
+    comments = await comments_for(accessor, fl, ref, number)
     return await typed_out(
         row,
         fl,
@@ -529,7 +535,10 @@ async def view_cmd(
 
 
 async def create_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     required = {name: fl.as_str(name) for name in ("title", "head", "base")}
@@ -547,12 +556,15 @@ async def create_cmd(
         "draft": gh_bool(fl, "draft"),
         "maintainer_can_modify": not gh_bool(fl, "no_maintainer_edit"),
     }
-    created = _pull(await create_pull(config, repo_for(config, fl), body))
+    created = _pull(await create_pull(accessor, repo_for(accessor, fl), body))
     return text_out(f"{created.get('url', '')}\n")
 
 
 async def edit_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     body: dict[str, JsonValue] = {}
@@ -565,13 +577,16 @@ async def edit_cmd(
         body["body"] = text
     if not body:
         raise ValueError("no pull request fields to edit")
-    ref, number = _target(config, texts, fl)
-    edited = _pull(await edit_pull(config, ref, number, body))
+    ref, number = _target(accessor, texts, fl)
+    edited = _pull(await edit_pull(accessor, ref, number, body))
     return text_out(f"{edited.get('url', '')}\n")
 
 
 async def merge_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     methods = [
@@ -589,17 +604,20 @@ async def merge_cmd(
         body["commit_message"] = message
     if fl.as_str("match_head_commit") is not None:
         body["sha"] = fl.as_str("match_head_commit") or ""
-    ref, number = _target(config, texts, fl)
-    await merge_pull(config, ref, number, body)
+    ref, number = _target(accessor, texts, fl)
+    await merge_pull(accessor, ref, number, body)
     return text_out(f"✓ Merged pull request {ref.owner}/{ref.repo}#{number}\n")
 
 
 async def close_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    ref, number = _target(config, texts, fl)
-    edited = _pull(await edit_pull(config, ref, number, {"state": "closed"}))
+    ref, number = _target(accessor, texts, fl)
+    edited = _pull(await edit_pull(accessor, ref, number, {"state": "closed"}))
     return text_out(
         f"✓ Closed pull request {ref.owner}/{ref.repo}#{number} "
         f"({edited.get('title', '')})\n"
@@ -607,21 +625,27 @@ async def close_cmd(
 
 
 async def comment_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     body = await body_value(ctx, fl, required=True)
-    ref, number = _target(config, texts, fl)
-    comment = _pull(await comment_pull(config, ref, number, body or ""))
+    ref, number = _target(accessor, texts, fl)
+    comment = _pull(await comment_pull(accessor, ref, number, body or ""))
     return text_out(f"{comment.get('url', '')}\n")
 
 
 async def diff_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    ref, number = _target(config, texts, fl)
-    value = await diff_pull(config, ref, number)
+    ref, number = _target(accessor, texts, fl)
+    value = await diff_pull(accessor, ref, number)
     if gh_bool(fl, "name_only"):
         return text_out("".join(f"{name}\n" for name in _changed_names(value)))
     return text_out(value if value.endswith("\n") else f"{value}\n")
@@ -658,11 +682,14 @@ def _check(value: dict[str, Any]) -> dict[str, Any]:
 
 
 async def checks_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    ref, number = _target(config, texts, fl)
-    rows = [_check(value) for value in await pull_checks(config, ref, number)]
+    ref, number = _target(accessor, texts, fl)
+    rows = list(map(_check, await pull_checks(accessor, ref, number)))
     human = "".join(
         f"{row.get('name', '')}\t{row.get('state', '')}\t"
         f"{row.get('link', '')}\n"

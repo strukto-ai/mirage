@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.post import (
     delete_message,
@@ -24,7 +25,7 @@ from mirage.core.discord.post import (
     send_poll,
 )
 
-CONFIG = DiscordConfig(token="bot-token")
+ACCESSOR = DiscordAccessor(DiscordConfig(token="bot-token"))
 
 
 @pytest.mark.asyncio
@@ -34,9 +35,9 @@ async def test_send_message_posts_content():
         new_callable=AsyncMock,
         return_value={"id": "M1"},
     ) as post:
-        await send_message(CONFIG, "C1", "hello")
+        await send_message(ACCESSOR, "C1", "hello")
     post.assert_awaited_once_with(
-        CONFIG, "/channels/C1/messages", {"content": "hello"}, session=None
+        ACCESSOR, "/channels/C1/messages", {"content": "hello"}
     )
 
 
@@ -47,15 +48,14 @@ async def test_send_message_with_reference():
         new_callable=AsyncMock,
         return_value={"id": "M2"},
     ) as post:
-        await send_message(CONFIG, "C1", "re", "M1")
+        await send_message(ACCESSOR, "C1", "re", "M1")
     post.assert_awaited_once_with(
-        CONFIG,
+        ACCESSOR,
         "/channels/C1/messages",
         {
             "content": "re",
             "message_reference": {"message_id": "M1"},
         },
-        session=None,
     )
 
 
@@ -66,9 +66,9 @@ async def test_edit_message_patches_content():
         new_callable=AsyncMock,
         return_value={"id": "M1"},
     ) as patch_fn:
-        await edit_message(CONFIG, "C1", "M1", "edited")
+        await edit_message(ACCESSOR, "C1", "M1", "edited")
     patch_fn.assert_awaited_once_with(
-        CONFIG, "/channels/C1/messages/M1", {"content": "edited"}, session=None
+        ACCESSOR, "/channels/C1/messages/M1", {"content": "edited"}
     )
 
 
@@ -77,10 +77,8 @@ async def test_delete_message_deletes():
     with patch(
         "mirage.core.discord.post.discord_delete", new_callable=AsyncMock
     ) as delete_fn:
-        await delete_message(CONFIG, "C1", "M1")
-    delete_fn.assert_awaited_once_with(
-        CONFIG, "/channels/C1/messages/M1", session=None
-    )
+        await delete_message(ACCESSOR, "C1", "M1")
+    delete_fn.assert_awaited_once_with(ACCESSOR, "/channels/C1/messages/M1")
 
 
 @pytest.mark.asyncio
@@ -91,7 +89,7 @@ async def test_send_poll_shapes_the_poll_object():
         return_value={"id": "M3"},
     ) as post:
         await send_poll(
-            CONFIG,
+            ACCESSOR,
             "C1",
             "Lunch?",
             ["Pizza", "Sushi"],

@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 import pytest
 
-from mirage.accessor.onedrive import OneDriveConfig
+from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.core.msgraph.client import GraphError
 from mirage.core.msgraph.events import DeltaTarget, GraphDeltaHook
 from mirage.types import FileChangeKind, PathSpec
@@ -26,6 +26,7 @@ from mirage.types import FileChangeKind, PathSpec
 DRIVE = "https://graph.test/drives/d"
 ROOT = PathSpec.from_str_path("/m", vfs_path="")
 NEW = "2026-10-01T00:00:00Z"
+ONEDRIVE = OneDriveAccessor(OneDriveConfig(access_token="t"))
 
 
 class FakeDrive:
@@ -37,10 +38,9 @@ class FakeDrive:
 
     async def get(
         self,
-        config: OneDriveConfig,
+        accessor: OneDriveAccessor,
         url: str,
         params: dict[str, str] | None = None,
-        session: None = None,
     ) -> dict[str, Any]:
         if url.endswith("/root/delta"):
             return {"value": [], "@odata.deltaLink": "L0"}
@@ -75,7 +75,7 @@ def hook(folder: str = "") -> GraphDeltaHook:
     async def targets(root: PathSpec) -> list[DeltaTarget]:
         return [DeltaTarget(drive=DRIVE, folder=folder, virtual="/m")]
 
-    return GraphDeltaHook(OneDriveConfig(access_token="t"), None, targets)
+    return GraphDeltaHook(ONEDRIVE, targets)
 
 
 async def pulls(fake: FakeDrive, target: GraphDeltaHook, n: int) -> list:
@@ -221,7 +221,7 @@ async def test_the_drives_a_root_covers_are_found_again_each_read():
 
     fake = FakeDrive({})
     fake.pages = [[], [], []]
-    target = GraphDeltaHook(OneDriveConfig(access_token="t"), None, targets)
+    target = GraphDeltaHook(ONEDRIVE, targets)
     added, renamed, gone = await pulls(fake, target, 3)
     assert pairs(added) == [(FileChangeKind.CREATE, "/m/Two")]
     assert pairs(renamed) == [

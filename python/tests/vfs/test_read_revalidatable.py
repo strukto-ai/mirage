@@ -1491,9 +1491,9 @@ def test_the_contract_goes_red_on_msgraph_stamping_another_kind(monkeypatch):
     # write, so the contract must call the entry stale.
     capture = drive_ops.capture_item_metadata
 
-    async def etag_instead(config, loc, *args, **kwargs):
-        _ctag, revision, url = await capture(config, loc, *args, **kwargs)
-        item = await drive_ops.graph_get(config, loc.item())
+    async def etag_instead(accessor, loc, *args, **kwargs):
+        _ctag, revision, url = await capture(accessor, loc, *args, **kwargs)
+        item = await drive_ops.graph_get(accessor, loc.item())
         return item["eTag"], revision, url
 
     with _fake("onedrive", "root", SEED, monkeypatch) as fake:

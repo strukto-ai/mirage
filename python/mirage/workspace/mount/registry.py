@@ -15,7 +15,7 @@
 import asyncio
 import errno
 from collections.abc import Callable
-from typing import Protocol
+from typing import Any, Protocol
 from weakref import WeakValueDictionary
 
 from mirage.cache.file.mixin import FileCacheMixin
@@ -115,7 +115,7 @@ class MountRegistry:
         # add_runtime/remove_runtime. The dispatcher injects the
         # bound runtime only for commands that have one, so it cannot
         # tell python3 from grep.
-        self.runtime_bindings: dict[str, Runtime] = {}
+        self.runtime_bindings: dict[str, Runtime[Any]] = {}
         # The world's workspace runtime. Catch-all when its captures are
         # empty; explicit captures make unclaimed commands an admission
         # failure (126).
@@ -124,7 +124,7 @@ class MountRegistry:
         # selects an interpreter from it (a runtime: pin or the
         # script's language), which the bindings dict cannot answer:
         # an entry behind another capturer never binds a command.
-        self.runtime_entries: list[Runtime] = []
+        self.runtime_entries: list[Runtime[Any]] = []
         self.command_limits: dict[str, Limit] = {}
         # Why a command that SOME runtime class captures has no live
         # binding: default-world entries that failed to build (missing

@@ -126,7 +126,7 @@ _SCOPED = TrelloAccessor(
 )
 
 
-async def _on_board_out(config, ident, session=None):
+async def _on_board_out(accessor, ident):
     return {"id": ident, "idBoard": "b_out"}
 
 

@@ -1,11 +1,24 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { Context } from '../../../commands/config.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
+import { context } from '../../../workspace/fixtures/context.ts'
 import { WorkspaceBinding } from '../../binding.ts'
 import { PrefixResolver } from '../../resolver.ts'
+import type { RunResult } from '../../types.ts'
 import { PyodideExecution } from './execution.ts'
 import { PyodideRuntime } from './runtime.ts'
 import type * as FailingCleanup from './fixtures/failing_cleanup.ts'
 import type * as Capability from './fixtures/capability.ts'
+
+/** Run `code` at `/`; pyodide has no engine, so the run queues at the call. */
+function interpret(
+  rt: PyodideRuntime,
+  code: string,
+  stdin: Uint8Array | null = null,
+  extra: Partial<Context> = {},
+): Promise<RunResult> {
+  return rt.interpret(undefined, { code, args: [], stdin }, context(extra))
+}
 
 describe('PyodideRuntime host initializer', () => {
   it('declares process reach only when a host initializer is configured', () => {
@@ -26,12 +39,11 @@ describe('PyodideRuntime host initializer', () => {
     })
     try {
       for (let i = 0; i < 2; i++) {
-        const result = await rt.run({
-          code: 'from _test_capability import add; print(add(3, 4))',
-          args: [],
-          env: {},
-          stdin: new Uint8Array(),
-        })
+        const result = await interpret(
+          rt,
+          'from _test_capability import add; print(add(3, 4))',
+          new Uint8Array(),
+        )
         expect(result.exitCode).toBe(0)
         expect(new TextDecoder().decode(result.stdout)).toBe('7\n')
         expect(module.installs).toBe(i + 1)
@@ -54,20 +66,14 @@ describe('PyodideRuntime host initializer', () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
       if (mode === 'worker') {
         rt.bind(
-          new WorkspaceBinding(
+          WorkspaceBinding.overBridge(
             () => Promise.reject(new Error('unexpected filesystem operation')),
             new PrefixResolver(() => []),
           ),
         )
       }
       try {
-        const timedOut = rt.run({
-          code: 'while True: pass',
-          args: [],
-          env: {},
-          stdin: null,
-          timeoutSeconds: 0.05,
-        })
+        const timedOut = interpret(rt, 'while True: pass', null, { timeoutSeconds: 0.05 })
         await expect(timedOut).rejects.toBeInstanceOf(CommandTimeoutError)
         await expect(timedOut).rejects.toMatchObject({ command: 'pyodide', seconds: 0.05 })
         if (mode === 'inline')
@@ -103,7 +109,7 @@ describe('PyodideRuntime host initializer', () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
       const rt = new PyodideRuntime({ config: { initModule: ref.href } })
       try {
-        await expect(rt.run({ code: '42', args: [], env: {}, stdin: null })).rejects.toBe(primary)
+        await expect(interpret(rt, '42')).rejects.toBe(primary)
         expect(primary.stack).toBe(stack)
         if (mode !== 'mutable') expect(primary.cause).toBe(prior)
         else {
@@ -128,7 +134,7 @@ describe('PyodideRuntime host initializer', () => {
     module.configure('async')
     const rt = new PyodideRuntime({ config: { initModule: ref.href } })
     try {
-      const result = rt.run({ code: 'print(42)', args: [], env: {}, stdin: null })
+      const result = interpret(rt, 'print(42)')
       await expect(result).rejects.toBe(module.failure)
       expect(module.disposals).toBe(1)
     } finally {

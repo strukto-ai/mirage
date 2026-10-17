@@ -73,7 +73,6 @@ async function ranOver(
     stdin: null,
     flags: { compact_output: true, ...flags },
     cwd: PathSpec.fromStrPath('/'),
-    vfs: { kind: 'ram' } as never,
   } as Context
   const specs = paths.map((path) => PathSpec.fromStrPath(path))
   const result = await jqGeneric(specs, [program], ctx, stream)
@@ -465,7 +464,6 @@ describe('jq flag-file readers', () => {
         [option]: option === 'from_file' ? path : ['x', path],
       },
       cwd: PathSpec.fromStrPath('/d'),
-      vfs: { kind: 'ram' } as never,
     } as Context
     const result = await jqGeneric([], ['$x'], ctx, read)
     if (result === null) throw new Error('jq returned no result')
@@ -484,7 +482,6 @@ describe('jq flag-file readers', () => {
           stdin: streamed ? yieldBytes(stdin) : stdin,
           flags: { [option]: option === 'from_file' ? path : ['x', path] },
           cwd: PathSpec.fromStrPath('/'),
-          vfs: { kind: 'ram' } as never,
         } as Context
         const paths =
           operand === null
@@ -589,7 +586,6 @@ describe("jq's option loop", () => {
       stdin: null,
       flags: parsedFlags(...words),
       cwd: PathSpec.fromStrPath('/'),
-      vfs: { kind: 'ram' } as never,
     } as Context
     const result = await jqGeneric([], [], ctx, read)
     if (result === null) throw new Error('jq returned no result')
@@ -642,7 +638,6 @@ describe('jqGeneric over malformed input', () => {
         stdin: null,
         flags,
         cwd: PathSpec.fromStrPath('/'),
-        vfs: { kind: 'ram' } as never,
       } as Context
       const result = await jqGeneric([PathSpec.fromStrPath('/d/live.json')], [program], ctx, () =>
         live(text),

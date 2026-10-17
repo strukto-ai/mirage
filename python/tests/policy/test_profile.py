@@ -1310,9 +1310,8 @@ class _Box(Runtime, LineExecutorMixin):
     def __init__(self) -> None:
         self.lines: list[str] = []
 
-    async def run_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-    ) -> RunResult:
+    async def run_line(self, engine, paths, texts, ctx) -> RunResult:
+        line = ctx.flags["c"]
         self.lines.append(line)
         return RunResult(
             stdout=b"box:" + line.encode(), stderr=None, exit_code=0
@@ -2542,13 +2541,14 @@ async def _zap(store, paths: list[PathSpec], texts: list[str], ctx: Context):
     # A host command that removes or moves a name through the dispatcher
     # it is handed, the way a custom command reaches a mount.
     target = PathSpec.from_str_path("/data/alias/secret")
+    assert ctx.vfs is not None
     try:
         if texts and texts[0] == "rename":
-            await ctx.dispatch(
+            await ctx.vfs.dispatch(
                 "rename", target, dst=PathSpec.from_str_path("/data/moved")
             )
         else:
-            await ctx.dispatch("unlink", target)
+            await ctx.vfs.dispatch("unlink", target)
     except OSError as exc:
         return None, IOResult(
             exit_code=1, stderr=f"zap: {exc.strerror}\n".encode()

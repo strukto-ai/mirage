@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.accessor.hf_hub import HfHubAccessor
+from mirage.accessor.hf_hub import HfHubAccessor, account_of
 from mirage.core.api.client import ApiResponse
 from mirage.core.hf_hub.tree import parse_entry
 from mirage.types import PathSpec
@@ -26,6 +26,9 @@ from mirage.vfs.hf_buckets.config import HfRepoConfig
 class FakeAccessor(HfHubAccessor):
     REPO_TYPE = "model"
     VFS_NAME = "hf_models"
+
+    def __init__(self, config: HfRepoConfig) -> None:
+        super().__init__(account_of(config), config)
 
 
 @pytest.fixture(autouse=True)

@@ -20,7 +20,7 @@ import pytest_asyncio
 from aiohttp import web
 from pydantic import SecretStr
 
-from mirage.core.api.client import SessionPool
+from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.core.hf_hub.client import (
     HfHubError,
     _error_of,
@@ -33,8 +33,8 @@ from mirage.core.hf_hub.client import (
     quote_path,
     resolve_url,
     rev_segment,
-    stall_timeout,
 )
+from mirage.core.hf_hub.config import HfConfig
 from mirage.utils.ranges import ByteWindow
 
 
@@ -222,33 +222,39 @@ async def hub_url():
     await runner.cleanup()
 
 
+@pytest_asyncio.fixture()
+async def account():
+    async with HfAccountAccessor(HfConfig()) as account:
+        yield account
+
+
 @pytest.mark.asyncio
-async def test_hub_bytes_tagged_returns_the_final_hops_etag(hub_url):
-    data, etag = await hub_bytes_tagged(None, hub_url + "/resolve")
+async def test_hub_bytes_tagged_returns_the_final_hops_etag(hub_url, account):
+    data, etag = await hub_bytes_tagged(account, hub_url + "/resolve")
     assert (data, etag) == (b"0123456789", '"final-hop"')
 
 
 @pytest.mark.asyncio
-async def test_hub_bytes_tagged_sends_the_window(hub_url):
+async def test_hub_bytes_tagged_sends_the_window(hub_url, account):
     data, _ = await hub_bytes_tagged(
-        None, hub_url + "/resolve", ByteWindow(2, 3)
+        account, hub_url + "/resolve", ByteWindow(2, 3)
     )
     assert data == b"234"
     assert SEEN[-1]["range"] == "bytes=2-4"
 
 
 @pytest.mark.asyncio
-async def test_hub_bytes_tagged_trims_an_ignored_range(hub_url):
+async def test_hub_bytes_tagged_trims_an_ignored_range(hub_url, account):
     SERVE["ignore_range"] = True
     data, _ = await hub_bytes_tagged(
-        None, hub_url + "/resolve", ByteWindow(2, 3)
+        account, hub_url + "/resolve", ByteWindow(2, 3)
     )
     assert data == b"234"
 
 
 @pytest.mark.asyncio
 async def test_hub_stream_reports_the_final_headers_before_the_first_chunk(
-    hub_url,
+    hub_url, account
 ):
     order: list[str] = []
     seen: list[dict] = []
@@ -258,7 +264,7 @@ async def test_hub_stream_reports_the_final_headers_before_the_first_chunk(
         seen.append(dict(headers))
 
     async for chunk in hub_stream(
-        None, hub_url + "/resolve", 4, on_response=on_response
+        account, hub_url + "/resolve", 4, on_response=on_response
     ):
         order.append(chunk.decode())
     assert order == ["headers", "0123", "4567", "89"]
@@ -268,13 +274,13 @@ async def test_hub_stream_reports_the_final_headers_before_the_first_chunk(
 
 
 @pytest.mark.asyncio
-async def test_hub_stream_reports_headers_for_an_empty_file(hub_url):
+async def test_hub_stream_reports_headers_for_an_empty_file(hub_url, account):
     SERVE["body"] = b""
     calls: list[dict] = []
     chunks = [
         c
         async for c in hub_stream(
-            None, hub_url + "/resolve", 4, on_response=calls.append
+            account, hub_url + "/resolve", 4, on_response=calls.append
         )
     ]
     # An empty file yields no chunk, so a callback fired lazily on the
@@ -284,9 +290,9 @@ async def test_hub_stream_reports_headers_for_an_empty_file(hub_url):
 
 
 @pytest.mark.asyncio
-async def test_hub_post_sends_a_json_content_type(hub_url):
+async def test_hub_post_sends_a_json_content_type(hub_url, account):
     # The live Hub answers a paths-info body without it with 400.
-    await hub_post(None, hub_url + "/post", {"paths": ["a.txt"]})
+    await hub_post(account, hub_url + "/post", {"paths": ["a.txt"]})
     assert SEEN[-1]["content_type"] == "application/json"
 
 
@@ -294,56 +300,24 @@ def test_quote_path_encodes_each_segment_without_a_leading_slash():
     assert quote_path("/a dir/f#1.txt") == "a%20dir/f%231.txt"
 
 
-def test_stall_timeout_bounds_progress_not_the_whole_request():
-    bound = stall_timeout(5)
-    assert (bound.total, bound.sock_connect, bound.sock_read) == (None, 5, 5)
-
-
-@pytest.mark.parametrize("seconds", [0, -1])
-def test_a_bound_of_zero_or_less_is_none(seconds):
-    bound = stall_timeout(seconds)
-    assert (bound.total, bound.sock_connect, bound.sock_read) == (
-        None,
-        None,
-        None,
-    )
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("seconds", [0, -1])
 async def test_a_download_under_no_bound_is_not_cut_off(hub_url, seconds):
-    pool = SessionPool(timeout=stall_timeout(seconds))
-    try:
-        chunks = [
-            c
-            async for c in hub_stream(None, hub_url + "/drip", 2, session=pool)
-        ]
-    finally:
-        await pool.close()
+    async with HfAccountAccessor(HfConfig(), timeout=seconds) as account:
+        chunks = [c async for c in hub_stream(account, hub_url + "/drip", 2)]
     assert b"".join(chunks) == b"abcdefgh"
 
 
 @pytest.mark.asyncio
 async def test_a_download_that_keeps_flowing_outlives_the_bound(hub_url):
-    pool = SessionPool(timeout=stall_timeout(STALL))
-    try:
-        chunks = [
-            c
-            async for c in hub_stream(None, hub_url + "/drip", 2, session=pool)
-        ]
-    finally:
-        await pool.close()
+    async with HfAccountAccessor(HfConfig(), timeout=STALL) as account:
+        chunks = [c async for c in hub_stream(account, hub_url + "/drip", 2)]
     assert b"".join(chunks) == b"abcdefgh"
 
 
 @pytest.mark.asyncio
 async def test_a_download_that_stops_flowing_fails_at_the_bound(hub_url):
-    pool = SessionPool(timeout=stall_timeout(STALL))
-    try:
+    async with HfAccountAccessor(HfConfig(), timeout=STALL) as account:
         with pytest.raises(asyncio.TimeoutError):
-            async for _ in hub_stream(
-                None, hub_url + "/stall", 2, session=pool
-            ):
+            async for _ in hub_stream(account, hub_url + "/stall", 2):
                 pass
-    finally:
-        await pool.close()

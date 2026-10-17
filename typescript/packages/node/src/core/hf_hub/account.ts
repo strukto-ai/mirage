@@ -12,13 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { HfAccountAccessor } from '../../accessor/hf_hub.ts'
 import { hubGet } from './client.ts'
-import { hfEndpoint, type HfConfig } from './config.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 
-/** Who the configured token belongs to. */
-export async function whoami(config: HfConfig): Promise<Record<string, unknown>> {
-  const url = `${rstripSlash(hfEndpoint(config))}/api/whoami-v2`
-  const data = await hubGet(config.token, url)
+/** Who the account's token belongs to. */
+export async function whoami(account: HfAccountAccessor): Promise<Record<string, unknown>> {
+  const url = `${rstripSlash(account.endpoint)}/api/whoami-v2`
+  const data = await hubGet(account, url)
   return typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : {}
 }

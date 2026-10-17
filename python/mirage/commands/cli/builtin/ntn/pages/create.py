@@ -12,15 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.notion import NotionAccessor
 from mirage.commands.cli.builtin.ntn.util import (
     content_or_stdin,
-    notion_config,
+    notion_transport,
     pretty_json,
 )
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.pages import create_page
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -52,7 +52,10 @@ def parse_parent(spec: str) -> dict[str, JsonValue]:
 
 
 async def create(
-    config: NotionConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: NotionAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     markdown = await content_or_stdin(fl.as_str("content"), ctx.stdin)
@@ -62,7 +65,7 @@ async def create(
     parent = fl.as_str("parent")
     if parent:
         body["parent"] = parse_parent(parent)
-    page = await create_page(notion_config(config, ctx), body)
+    page = await create_page(notion_transport(accessor, ctx), body)
     if fl.as_bool("json"):
         return yield_bytes(pretty_json(page)), IOResult()
     return yield_bytes(f"{page.get('id', '')}\n".encode()), IOResult()

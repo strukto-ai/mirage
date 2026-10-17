@@ -1,3 +1,4 @@
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { PathSpec, FileType } from '../../../../types.ts'
 
 import { IOResult } from '../../../../io/types.ts'
@@ -63,7 +64,7 @@ function namedGitdir(fl: FlagView, texts: readonly string[]): PathSpec {
  * directory.
  */
 export async function init(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

@@ -665,10 +665,11 @@ async def test_close_refuses_lifecycle_changes_but_allows_runtime_drain(
             lambda: ws.set_mount_mode("/m", MountMode.READ),
             lambda: ws.add_runtime(runtime),
             lambda: ws.register_cli("late", spec),
-            lambda: ws.unregister_cli("held"),
         ):
             with pytest.raises(RuntimeError, match="Workspace is closed"):
                 mutate()
+        with pytest.raises(RuntimeError, match="Workspace is closed"):
+            await ws.unregister_cli("held")
         with pytest.raises(RuntimeError, match="Workspace is closed"):
             await ws.unmount("/m")
         with pytest.raises(RuntimeError, match="Workspace is closed"):

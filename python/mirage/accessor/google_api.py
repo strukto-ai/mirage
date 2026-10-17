@@ -23,3 +23,7 @@ class GoogleApiAccessor(Accessor):
     ) -> None:
         self.config = config
         self.token_manager = token_manager
+
+    async def close(self) -> None:
+        """Drain the token manager's connection pool. Idempotent."""
+        await self.token_manager.close()

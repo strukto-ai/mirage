@@ -20,6 +20,7 @@ from decimal import Decimal
 from typing import Any
 from urllib.parse import urlsplit
 
+from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh.constants import (
     CONNECT_HINT,
     GITHUB_HOST,
@@ -30,7 +31,6 @@ from mirage.commands.config import Context
 from mirage.commands.errors import PartialOutputError, UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.core.github.config import GhConfig
 from mirage.core.github.constants import API_BASE
 from mirage.core.github.repo import RepoRef, parse_repo, repo_host
 from mirage.core.jq import JqHalt, JqRun, jq_raised, jq_run
@@ -40,7 +40,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue, PathSpec
 
 
-def check_host(config: GhConfig, host: str | None) -> None:
+def check_host(accessor: GitHubAccount, host: str | None) -> None:
     """Refuse a repository on a host this install cannot reach.
 
     Real gh sends the request to whatever host a repository argument
@@ -51,7 +51,7 @@ def check_host(config: GhConfig, host: str | None) -> None:
     of the same name.
 
     Args:
-        config (GhConfig): the install's configuration.
+        accessor (GitHubAccount): the install's account.
         host (str | None): the host the argument named, if any.
 
     Raises:
@@ -62,27 +62,28 @@ def check_host(config: GhConfig, host: str | None) -> None:
     host = host.lower()
     if host == GITHUB_HOST or host.endswith(f".{GITHUB_HOST}"):
         return
-    if config.base_url and urlsplit(config.base_url).hostname == host:
+    base = accessor.config.base_url
+    if base and urlsplit(base).hostname == host:
         return
     raise ValueError(f"error connecting to {host}\n{CONNECT_HINT}")
 
 
-def web_origin(config: GhConfig) -> str:
+def web_origin(accessor: GitHubAccount) -> str:
     """The origin the install's GitHub serves its pages and git from:
     github.com for GitHub's own API, else the API host's own origin, as a
     GitHub Enterprise server and a local stand-in serve them.
 
     Args:
-        config (GhConfig): the install's configuration.
+        accessor (GitHubAccount): the install's account.
     """
-    base = config.base_url
+    base = accessor.config.base_url
     if base is None or base.rstrip("/") == API_BASE:
         return f"https://{GITHUB_HOST}"
     parts = urlsplit(base)
     return f"{parts.scheme}://{parts.netloc}"
 
 
-def gh_repo(config: GhConfig, spec: str | None) -> RepoRef:
+def gh_repo(accessor: GitHubAccount, spec: str | None) -> RepoRef:
     """The repository a line is about.
 
     The operand when it named one, the install's own otherwise. Real gh
@@ -90,7 +91,7 @@ def gh_repo(config: GhConfig, spec: str | None) -> RepoRef:
     equivalent of, so the config carries it.
 
     Args:
-        config (GhConfig): the install's configuration.
+        accessor (GitHubAccount): the install's account.
         spec (str | None): the repository the line named, if any.
 
     Returns:
@@ -99,13 +100,13 @@ def gh_repo(config: GhConfig, spec: str | None) -> RepoRef:
     Raises:
         ValueError: neither the line nor the install named one.
     """
-    named = spec if spec else config.repo
+    named = spec if spec else accessor.config.repo
     if not named:
         raise ValueError(
             "no repository given; pass one or set `repo` on the install"
         )
     ref = parse_repo(named)
-    check_host(config, repo_host(named))
+    check_host(accessor, repo_host(named))
     return ref
 
 
@@ -151,9 +152,9 @@ def gh_bool(fl: FlagView, name: str) -> bool:
     return fl.as_bool(name) or fl.as_str(name) == "true"
 
 
-def repo_for(config: GhConfig, fl: FlagView) -> RepoRef:
+def repo_for(accessor: GitHubAccount, fl: FlagView) -> RepoRef:
     """Resolve a typed verb's shared `-R/--repo` target."""
-    return gh_repo(config, fl.as_str("repo"))
+    return gh_repo(accessor, fl.as_str("repo"))
 
 
 def list_limit(
@@ -178,7 +179,7 @@ def list_limit(
 
 
 def repo_number(
-    config: GhConfig,
+    accessor: GitHubAccount,
     fl: FlagView,
     value: str | None,
     label: str,
@@ -187,13 +188,13 @@ def repo_number(
     """Resolve a numeric subject or a full GitHub subject URL atomically."""
     raw = value or ""
     if raw.isdigit():
-        return repo_for(config, fl), int(raw)
+        return repo_for(accessor, fl), int(raw)
     match = re.fullmatch(
         r"https?://[^/]+/([^/]+)/([^/]+)/(issues|pull)/(\d+)/?", raw
     )
     if match is None or match.group(3) != url_kind:
         raise ValueError(f"a {label} number is required")
-    check_host(config, urlsplit(raw).hostname)
+    check_host(accessor, urlsplit(raw).hostname)
     return parse_repo(f"{match.group(1)}/{match.group(2)}"), int(
         match.group(4)
     )

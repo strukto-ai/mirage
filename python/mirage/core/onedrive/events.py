@@ -38,4 +38,4 @@ def build_delta_hook(accessor: OneDriveAccessor) -> DeltaHook:
             )
         ]
 
-    return GraphDeltaHook(config, accessor.pool, targets)
+    return GraphDeltaHook(accessor, targets)

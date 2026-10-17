@@ -22,7 +22,6 @@ from mirage.commands.cli.builtin.himalaya.query import (
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.email.client import fetch_headers, list_message_uids
-from mirage.core.email.config import EmailConfig
 from mirage.core.email.render import envelopes_json_bytes
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -32,22 +31,21 @@ DEFAULT_PAGE_SIZE = 25
 
 
 async def list_envelopes(
-    config: EmailConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: EmailAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     mailbox = fl.as_str("mailbox", "INBOX")
     page, page_size = page_window(
         fl.as_int("page", 1),
         fl.as_int("page_size", DEFAULT_PAGE_SIZE),
-        config.max_messages,
+        accessor.config.max_messages,
     )
-    budget = uid_budget(page, page_size, (), config.max_messages)
-    accessor = EmailAccessor(config)
-    try:
-        uids = await list_message_uids(accessor, mailbox, "ALL", budget)
-        headers = await fetch_headers(accessor, mailbox, uids) if uids else []
-    finally:
-        await accessor.close()
+    budget = uid_budget(page, page_size, (), accessor.config.max_messages)
+    uids = await list_message_uids(accessor, mailbox, "ALL", budget)
+    headers = await fetch_headers(accessor, mailbox, uids) if uids else []
     page_of = page_slice(sort_headers(headers, ()), page, page_size)
     out = envelopes_json_bytes(page_of)
     return yield_bytes(out), IOResult()

@@ -14,12 +14,12 @@
 
 import functools
 import logging
+from typing import Any
 
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import CommandSpec, FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
-from mirage.context.session_context import session_access
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
@@ -27,7 +27,7 @@ from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
-from mirage.runtime.types import DispatchFn
+from mirage.runtime.types import CommandRuntime, DispatchFn
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
@@ -41,7 +41,6 @@ from mirage.workspace.mount import (
     MountRegistry,
 )
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.mount.namespace.probe import path_readdir, path_stat
 from mirage.workspace.session import env_snapshot, session_view
 from mirage.workspace.types import ExecuteLine, ExecutionNode
 
@@ -84,8 +83,8 @@ def admission_denial(cmd_name: str) -> IOResult:
 def line_runtime_for(
     cmd_name: str,
     registry: MountRegistry,
-    routing: RouteDecision[Runtime] | None,
-) -> tuple[Runtime | None, IOResult | None]:
+    routing: RouteDecision[Runtime[Any]] | None,
+) -> tuple[Runtime[Any] | None, IOResult | None]:
     """Resolve a command against the line's routing decision.
 
     With no decision, the workspace's static bindings apply. With one,
@@ -221,7 +220,7 @@ async def run_on_mount(
     stdin: ByteSource | None = None,
     resolve_hint: PathSpec | None = None,
     mount: MountEntry | None = None,
-    routing_decision: RouteDecision[Runtime] | None = None,
+    routing_decision: RouteDecision[Runtime[Any]] | None = None,
     argv: tuple[str, ...] = (),
     execute_fn: ExecuteLine | None = None,
     follow: FollowOperands | None = None,
@@ -275,20 +274,6 @@ async def run_on_mount(
     if cmd_name == "find":
         flag_kwargs = scalar_find_flags(flag_kwargs)
 
-    # A traversal command's start point is statted through the dispatcher
-    # so a start point under another mount answers (`find -L` follows a
-    # link across mounts before the command ever runs).
-    stat_path = (
-        functools.partial(path_stat, dispatch)
-        if dispatch is not None
-        else None
-    )
-    readdir_path = (
-        functools.partial(path_readdir, dispatch)
-        if dispatch is not None
-        else None
-    )
-
     line_runtime, denial = line_runtime_for(
         cmd_name, registry, routing_decision
     )
@@ -302,17 +287,16 @@ async def run_on_mount(
             texts,
             flag_kwargs,
             Context(
-                access=session_access(session),
                 stdin=stdin,
                 cwd=PathSpec.from_str_path(session.cwd),
-                dispatch=dispatch,
                 vfs=Files(
                     registry.mount_rows(),
                     dispatch,
                     links=namespace,
                     visibility=lambda _session: session.visibility,
+                    follow=follow,
+                    ledger=False,
                 ),
-                session_id=session.session_id,
                 env=env_snapshot(session),
                 session=session_view(
                     session,
@@ -322,13 +306,12 @@ async def run_on_mount(
                 processes=registry.process_view(session)
                 if registry.process_view is not None
                 else None,
-                exec_allowed=registry.is_exec_allowed(),
-                exec_path_allowed=registry.exec_allowed_at,
-                runtime=line_runtime,
-                runtime_unavailable=registry.runtime_unavailable.get(cmd_name),
-                follow_operands=follow,
-                stat_path=stat_path,
-                readdir_path=readdir_path,
+                runtime=CommandRuntime(
+                    bound=line_runtime,
+                    unavailable=registry.runtime_unavailable.get(cmd_name),
+                    exec_allowed=registry.is_exec_allowed(),
+                    exec_path_allowed=registry.exec_allowed_at,
+                ),
                 shell=(
                     functools.partial(
                         run_nested_line, execute_fn, session.session_id

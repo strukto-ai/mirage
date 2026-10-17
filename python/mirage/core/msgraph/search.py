@@ -17,9 +17,9 @@ from urllib.parse import quote
 
 import aiohttp
 
-from mirage.core.api.client import SessionArg
+from mirage.accessor.onedrive import OneDriveAccessor
+from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.core.msgraph.client import GraphError, graph_list
-from mirage.core.msgraph.config import MsGraphConfig
 from mirage.core.msgraph.drive import DriveLoc, iter_tree
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mounted_path
@@ -28,10 +28,9 @@ logger = logging.getLogger(__name__)
 
 
 async def files_containing(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     scopes: list[tuple[PathSpec, DriveLoc]],
     text: str,
-    session: SessionArg = None,
 ) -> list[PathSpec] | None:
     """The files under each scope Graph search names.
 
@@ -45,20 +44,17 @@ async def files_containing(
     differently (``foo.bar``), or a recent write.
 
     Args:
-        config (MsGraphConfig): Graph config.
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         scopes (list[tuple[PathSpec, DriveLoc]]): each directory walked,
             with the drive item it searches from.
         text (str): the whole word searched for.
-        session (SessionArg): pool or live session to ride.
     """
     quoted = quote(text.replace("'", "''"), safe="!*'()")
     found: list[PathSpec] = []
     try:
         for directory, loc in scopes:
             files: dict[str, list[PathSpec]] = {}
-            async for virt, item, is_dir in iter_tree(
-                config, loc, session=session
-            ):
+            async for virt, item, is_dir in iter_tree(accessor, loc):
                 if is_dir:
                     continue
                 if not item.get("id"):
@@ -67,10 +63,9 @@ async def files_containing(
                     mounted_path(directory, f"/{virt}")
                 )
             items = await graph_list(
-                config,
+                accessor,
                 loc.item(f"/search(q='{quoted}')"),
                 params={"$select": "id"},
-                session=session,
             )
             for item in items:
                 found.extend(files.get(item.get("id", ""), []))

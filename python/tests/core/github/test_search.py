@@ -16,9 +16,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.accessor.github import GitHubAccessor
+from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.core.api.client import ApiResponse
-from mirage.core.github.config import GhConfig, GitHubConfig
+from mirage.core.github.config import GhConfig
 from mirage.core.github.search import (
     SearchResult,
     files_containing,
@@ -37,8 +37,8 @@ from tests.fixtures.github_api import FakeGitHub, blob_sha, serve
 
 
 @pytest.fixture
-def config():
-    return GitHubConfig(token="ghp_test")
+def account():
+    return GitHubAccount(GhConfig(token="ghp_test"))
 
 
 def _item(path: str, full_name: str | int | None) -> dict:
@@ -64,79 +64,75 @@ _SMALL_TREE = {"src/a.py": _blob("src/a.py", 10)}
 
 
 def _accessor(
-    config: GitHubConfig, tree: dict[str, TreeEntry]
+    account: GitHubAccount, tree: dict[str, TreeEntry]
 ) -> GitHubAccessor:
-    return GitHubAccessor(config, "acme", "proj", "main", "main", tree=tree)
+    return GitHubAccessor(account, "acme", "proj", "main", "main", tree=tree)
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
-async def test_search_code_basic(mock_get, config):
+async def test_search_code_basic(mock_get, account):
     mock_get.return_value = _body(
         [
             _item("src/main.py", "acme/proj") | {"sha": "aaa"},
             _item("src/utils.py", "acme/proj") | {"sha": "bbb"},
         ]
     )
-    result, truncated = await search_code(config, "acme", "proj", "import os")
+    result, truncated = await search_code(account, "acme", "proj", "import os")
     assert len(result) == 2
     assert result[0] == SearchResult(path="src/main.py", sha="aaa")
     assert truncated is False
     mock_get.assert_awaited_once_with(
-        config.token,
+        account,
         "/search/code",
         params={"q": "import os repo:acme/proj", "per_page": "100"},
-        base_url=None,
-        session=None,
     )
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
-async def test_search_code_empty_results(mock_get, config):
+async def test_search_code_empty_results(mock_get, account):
     mock_get.return_value = _body([])
-    result = await search_code(config, "acme", "proj", "nonexistent")
+    result = await search_code(account, "acme", "proj", "nonexistent")
     assert result == ([], False)
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
-async def test_search_code_with_path_filter(mock_get, config):
+async def test_search_code_with_path_filter(mock_get, account):
     mock_get.return_value = _body([_item("src/main.py", "acme/proj")])
-    await search_code(config, "acme", "proj", "import os", path_filter="src/")
+    await search_code(account, "acme", "proj", "import os", path_filter="src/")
     mock_get.assert_awaited_once_with(
-        config.token,
+        account,
         "/search/code",
         params={"q": "import os repo:acme/proj path:src/", "per_page": "100"},
-        base_url=None,
-        session=None,
     )
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
 async def test_narrow_paths_strips_leading_slash_in_filter(
-    mock_search, config
+    mock_search, account
 ):
     mock_search.return_value = (
         [SearchResult(path="src/main.py", sha="aaa")],
         False,
     )
     paths = [PathSpec(vfs_path="src", virtual="/src", directory="/src")]
-    await narrow_paths(_accessor(config, _SMALL_TREE), "import", paths)
+    await narrow_paths(_accessor(account, _SMALL_TREE), "import", paths)
     _, kwargs = mock_search.await_args
     assert kwargs["path_filter"] == "src"
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
-async def test_narrow_paths_root_uses_no_filter(mock_search, config):
+async def test_narrow_paths_root_uses_no_filter(mock_search, account):
     mock_search.return_value = (
         [SearchResult(path="src/main.py", sha="aaa")],
         False,
     )
     paths = [PathSpec(vfs_path="", virtual="/", directory="/")]
-    await narrow_paths(_accessor(config, _SMALL_TREE), "import", paths)
+    await narrow_paths(_accessor(account, _SMALL_TREE), "import", paths)
     _, kwargs = mock_search.await_args
     assert kwargs["path_filter"] is None
 
@@ -144,7 +140,7 @@ async def test_narrow_paths_root_uses_no_filter(mock_search, config):
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
 async def test_narrow_paths_normalizes_results_with_leading_slash(
-    mock_search, config
+    mock_search, account
 ):
     mock_search.return_value = (
         [
@@ -158,7 +154,7 @@ async def test_narrow_paths_normalizes_results_with_leading_slash(
             vfs_path=mount_key("/gh", "/gh"), virtual="/gh", directory="/gh"
         )
     ]
-    out = await narrow_paths(_accessor(config, _SMALL_TREE), "import", paths)
+    out = await narrow_paths(_accessor(account, _SMALL_TREE), "import", paths)
     assert [p.virtual for p in out] == ["/gh/src/main.py", "/gh/src/utils.py"]
     assert [p.vfs_path for p in out] == ["src/main.py", "src/utils.py"]
 
@@ -166,13 +162,13 @@ async def test_narrow_paths_normalizes_results_with_leading_slash(
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
 async def test_narrow_paths_voids_the_narrowing_on_error(
-    mock_search, config, caplog
+    mock_search, account, caplog
 ):
     mock_search.side_effect = RuntimeError("boom")
     paths = [PathSpec(vfs_path="src", virtual="/src", directory="/src")]
     with caplog.at_level("DEBUG"):
         out = await narrow_paths(
-            _accessor(config, _SMALL_TREE), "import", paths
+            _accessor(account, _SMALL_TREE), "import", paths
         )
     assert out is None
     assert "falling back to per-file scan" in caplog.text
@@ -180,28 +176,30 @@ async def test_narrow_paths_voids_the_narrowing_on_error(
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
-async def test_narrow_paths_forwards_the_session_pool(mock_get, config):
-    # The mount's grep push-down passes its accessor pool; a search that
-    # dropped it opened an aiohttp session per code-search request.
+async def test_narrow_paths_rides_the_mount_account(mock_get, account):
+    # The mount's grep push-down rides its accessor's account, and so its
+    # pool, rather than opening an aiohttp session per code search.
     mock_get.return_value = _body([])
-    accessor = _accessor(config, {})
+    accessor = _accessor(account, {})
     await narrow_paths(accessor, "needle", [PathSpec.from_str_path("/")])
-    assert mock_get.await_args.kwargs["session"] is accessor.pool
+    assert mock_get.await_args.args[0] is accessor.account
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
-async def test_search_code_asks_for_the_largest_page(mock_get, config):
+async def test_search_code_asks_for_the_largest_page(mock_get, account):
     # The default page is 30 rows, and a first page read as the whole answer
     # silently narrows grep to 30 files.
     mock_get.return_value = _body([])
-    await search_code(config, "acme", "proj", "needle")
+    await search_code(account, "acme", "proj", "needle")
     assert mock_get.await_args.kwargs["params"]["per_page"] == "100"
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
-async def test_search_code_keeps_only_the_mounted_repository(mock_get, config):
+async def test_search_code_keeps_only_the_mounted_repository(
+    mock_get, account
+):
     # The pattern is sent verbatim, so a qualifier inside it can rescope the
     # search; a fork shares the repository name and a prefix is not a match.
     mock_get.return_value = _body(
@@ -213,7 +211,7 @@ async def test_search_code_keeps_only_the_mounted_repository(mock_get, config):
             _item("src/a.py", "acme/proj-fork"),
         ]
     )
-    results, _ = await search_code(config, "acme", "proj", "needle")
+    results, _ = await search_code(account, "acme", "proj", "needle")
     assert results == [SearchResult(path="src/a.py", sha="src/a.py")]
 
 
@@ -227,10 +225,10 @@ async def test_search_code_keeps_only_the_mounted_repository(mock_get, config):
 )
 @patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
 async def test_search_code_compares_the_repository_case_insensitively(
-    mock_get, full_name, owner, repo, config
+    mock_get, full_name, owner, repo, account
 ):
     mock_get.return_value = _body([_item("src/a.py", full_name)])
-    results, _ = await search_code(config, owner, repo, "needle")
+    results, _ = await search_code(account, owner, repo, "needle")
     assert [r.path for r in results] == ["src/a.py"]
 
 
@@ -247,12 +245,12 @@ async def test_search_code_compares_the_repository_case_insensitively(
 )
 @patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
 async def test_search_code_drops_an_item_that_names_no_repository(
-    mock_get, item, config
+    mock_get, item, account
 ):
     # Nothing vouches for such an item, and dropping it must not raise: a
     # raise inside narrow_paths voids the whole narrowing.
     mock_get.return_value = _body([item])
-    results, _ = await search_code(config, "acme", "proj", "needle")
+    results, _ = await search_code(account, "acme", "proj", "needle")
     assert results == []
 
 
@@ -273,46 +271,50 @@ async def test_search_code_drops_an_item_that_names_no_repository(
 )
 @patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
 async def test_search_code_reports_an_answer_that_is_not_the_whole_set(
-    mock_get, body, truncated, config
+    mock_get, body, truncated, account
 ):
     # Only an answer that says it is complete, with a count no larger than
     # the rows it carries, is the whole set; anything else is truncated.
     mock_get.return_value = {**body, "items": [_item("src/a.py", "acme/proj")]}
-    _, got = await search_code(config, "acme", "proj", "needle")
+    _, got = await search_code(account, "acme", "proj", "needle")
     assert got is truncated
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
-async def test_search_code_reads_null_items_as_no_rows(mock_get, config):
+async def test_search_code_reads_null_items_as_no_rows(mock_get, account):
     mock_get.return_value = {
         "total_count": 0,
         "incomplete_results": False,
         "items": None,
     }
-    assert await search_code(config, "acme", "proj", "needle") == ([], False)
+    assert await search_code(account, "acme", "proj", "needle") == ([], False)
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
 async def test_search_code_judges_completeness_before_filtering(
-    mock_get, config
+    mock_get, account
 ):
     # total_count counts every row the search matched, foreign ones too.
     mock_get.return_value = _body(
         [_item("src/a.py", "acme/proj"), _item("src/b.py", "other/x")]
     )
-    results, truncated = await search_code(config, "acme", "proj", "needle")
+    results, truncated = await search_code(account, "acme", "proj", "needle")
     assert [r.path for r in results] == ["src/a.py"]
     assert truncated is False
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
-async def test_narrow_paths_truncated_answer_returns_none(mock_search, config):
+async def test_narrow_paths_truncated_answer_returns_none(
+    mock_search, account
+):
     mock_search.return_value = ([SearchResult(path="src/a.py", sha="a")], True)
     out = await narrow_paths(
-        _accessor(config, _SMALL_TREE), "needle", [PathSpec.from_str_path("/")]
+        _accessor(account, _SMALL_TREE),
+        "needle",
+        [PathSpec.from_str_path("/")],
     )
     assert out is None
 
@@ -320,7 +322,7 @@ async def test_narrow_paths_truncated_answer_returns_none(mock_search, config):
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
 async def test_narrow_paths_stops_at_the_first_truncated_scope(
-    mock_search, config
+    mock_search, account
 ):
     # Code search is rate limited; a narrowing already void asks nothing more.
     mock_search.return_value = ([], True)
@@ -328,7 +330,7 @@ async def test_narrow_paths_stops_at_the_first_truncated_scope(
         PathSpec(vfs_path="src", virtual="/src", directory="/src"),
         PathSpec(vfs_path="docs", virtual="/docs", directory="/docs"),
     ]
-    out = await narrow_paths(_accessor(config, _SMALL_TREE), "needle", scopes)
+    out = await narrow_paths(_accessor(account, _SMALL_TREE), "needle", scopes)
     assert out is None
     assert mock_search.await_count == 1
 
@@ -336,7 +338,7 @@ async def test_narrow_paths_stops_at_the_first_truncated_scope(
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
 async def test_narrow_paths_a_failed_scope_voids_the_others(
-    mock_search, config
+    mock_search, account
 ):
     # A scope whose search failed contributes nothing, so the hits of the
     # scopes that did answer are not the whole set either.
@@ -348,14 +350,14 @@ async def test_narrow_paths_a_failed_scope_voids_the_others(
         PathSpec(vfs_path="src", virtual="/src", directory="/src"),
         PathSpec(vfs_path="docs", virtual="/docs", directory="/docs"),
     ]
-    out = await narrow_paths(_accessor(config, _SMALL_TREE), "needle", scopes)
+    out = await narrow_paths(_accessor(account, _SMALL_TREE), "needle", scopes)
     assert out is None
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
 async def test_narrow_paths_adds_the_files_search_never_indexes(
-    mock_search, config
+    mock_search, account
 ):
     # Code search skips files at or over the limit, so a
     # trusted narrowing has to read them itself; one that is also a hit is
@@ -370,7 +372,7 @@ async def test_narrow_paths_adds_the_files_search_never_indexes(
             False,
         )
         out = await narrow_paths(
-            _accessor(config, tree), "needle", [PathSpec.from_str_path("/")]
+            _accessor(account, tree), "needle", [PathSpec.from_str_path("/")]
         )
         assert out is not None
         assert [p.virtual for p in out] == ["/src/a.py", "/src/big.bin"]
@@ -379,7 +381,7 @@ async def test_narrow_paths_adds_the_files_search_never_indexes(
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
 async def test_narrow_paths_adds_big_files_only_from_the_scope(
-    mock_search, config
+    mock_search, account
 ):
     # A big file elsewhere would put lines from outside the operand in the
     # output.
@@ -393,7 +395,7 @@ async def test_narrow_paths_adds_big_files_only_from_the_scope(
         False,
     )
     out = await narrow_paths(
-        _accessor(config, tree),
+        _accessor(account, tree),
         "needle",
         [PathSpec(vfs_path="src", virtual="/src", directory="/src")],
     )
@@ -404,12 +406,12 @@ async def test_narrow_paths_adds_big_files_only_from_the_scope(
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
 async def test_narrow_paths_big_files_do_not_rescue_a_truncated_answer(
-    mock_search, config
+    mock_search, account
 ):
     mock_search.return_value = ([], True)
     tree = {"src/big.bin": _blob("src/big.bin", SEARCH_LIMIT)}
     out = await narrow_paths(
-        _accessor(config, tree), "needle", [PathSpec.from_str_path("/")]
+        _accessor(account, tree), "needle", [PathSpec.from_str_path("/")]
     )
     assert out is None
 
@@ -430,7 +432,7 @@ async def test_rest_search_paginates_and_clips_the_final_page(monkeypatch):
 
     monkeypatch.setitem(search.__globals__, "github_request_response", request)
     rows = await search(
-        GhConfig(token="test"),
+        GitHubAccount(GhConfig(token="test")),
         "issues",
         "repo:acme/proj",
         102,
@@ -665,14 +667,14 @@ async def _load_truncated(accessor: GitHubAccessor) -> None:
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
 async def test_files_containing_judges_the_tree_it_loads(
-    mock_search, config, monkeypatch
+    mock_search, account, monkeypatch
 ):
     # A cold mount learns its tree is truncated only once it loads it.
     monkeypatch.setattr(
         "mirage.core.github.search.ensure_tree", _load_truncated
     )
     monkeypatch.setattr("mirage.core.github.search.SCOPE_WARN", 0)
-    accessor = _accessor(config, {})
+    accessor = _accessor(account, {})
     out = await files_containing(
         accessor, "needle", [PathSpec.from_str_path("/")]
     )

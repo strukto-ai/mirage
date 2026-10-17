@@ -7,6 +7,7 @@ from dulwich.config import ConfigFile
 from dulwich.refs import DictRefsContainer
 from dulwich.repo import BaseRepo
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.bre import (
     BreError,
     PosixSyntax,
@@ -117,7 +118,7 @@ async def repo_config(ctx: Context, fl: FlagView) -> ConfigFile:
 
 
 async def remote(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     try:
@@ -303,7 +304,7 @@ def _merge_base_ids(
 
 
 async def merge_base(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     try:
@@ -332,7 +333,7 @@ async def merge_base(
 
 
 async def config(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     if len(texts) > 1:
@@ -438,7 +439,7 @@ def _show_refs(repo: BaseRepo, patterns: tuple[str, ...]) -> bytes:
 
 
 async def show_ref(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     try:
         check_switches(ctx, texts)
@@ -459,7 +460,7 @@ def _revisions(
 
 
 async def rev_list(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     try:
@@ -483,7 +484,7 @@ async def rev_list(
 
 
 async def version(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     return f"git version {__version__} (Mirage)\n".encode(), IOResult()
 
@@ -630,7 +631,7 @@ def _short_width(value: FlagValue, fallback: int) -> int:
 
 
 async def rev_parse(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Resolve revisions supplied to rev-parse.
 
@@ -641,7 +642,7 @@ async def rev_parse(
     refusal into a bare exit 1.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context.

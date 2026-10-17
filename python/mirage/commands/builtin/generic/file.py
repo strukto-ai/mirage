@@ -13,6 +13,7 @@ from mirage.commands.builtin.utils.operands import (
     operand_stat,
 )
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.builtin.utils.paths import vfs_stat_path
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -204,6 +205,6 @@ async def file_generic(
         b=parsed.brief,
         i=parsed.mime,
         links=links_of(ctx),
-        stat_path=ctx.stat_path,
+        stat_path=vfs_stat_path(ctx.vfs),
         mounts=mounts_of(ctx),
     )

@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compileSpec } from '../../../spec/compile.ts'
-import { describe, expect, it, vi } from 'vitest'
-import type * as UtilModule from './util.ts'
+import { describe, expect, it } from 'vitest'
+import { LinearAccessor } from '../../../../accessor/linear.ts'
 import type { LinearTransport } from '../../../../core/linear/client.ts'
 import { cliSpecFor } from '../../specs.ts'
 import type { CommandFnResult } from '../../../config.ts'
@@ -44,10 +44,7 @@ class FakeTransport implements LinearTransport {
   }
 }
 
-vi.mock('./util.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof UtilModule>()
-  return { ...actual, linearTransport: () => new FakeTransport() }
-})
+const ACCESSOR = new LinearAccessor(new FakeTransport())
 
 function unwrap(result: CommandFnResult): [ByteSource | null, IOResult] {
   if (result === null) throw new Error('expected a result tuple')
@@ -113,14 +110,13 @@ describe('linear tree', () => {
 })
 
 describe('linear verbs', () => {
-  it('team list filters by config.teamIds', async () => {
+  it('team list filters by the accessor teamIds', async () => {
     GRAPHQL.length = 0
     RESPONDER = () => ({
       teams: { nodes: [TEAM, { id: 'team-2', key: 'OPS' }], pageInfo: NO_MORE },
     })
-    const [out] = unwrap(
-      await reads.teamList({ apiKey: 'k', teamIds: ['team-2'] }, [], [], context()),
-    )
+    const scoped = new LinearAccessor(new FakeTransport(), { teamIds: ['team-2'] })
+    const [out] = unwrap(await reads.teamList(scoped, [], [], context()))
     const rows = JSON.parse(DEC.decode(out as Uint8Array)) as { team_id: string }[]
     expect(rows.map((r) => r.team_id)).toEqual(['team-2'])
   })
@@ -134,7 +130,7 @@ describe('linear verbs', () => {
     }
     const [out] = unwrap(
       await create(
-        { apiKey: 'k' },
+        ACCESSOR,
         [],
         [],
         context({
@@ -169,7 +165,7 @@ describe('linear verbs', () => {
         },
       }
     }
-    await addLabel({ apiKey: 'k' }, [], ['ENG-42'], context({ flags: { label_name: 'bug' } }))
+    await addLabel(ACCESSOR, [], ['ENG-42'], context({ flags: { label_name: 'bug' } }))
     const update = GRAPHQL.find((c) => c.query.includes('issueUpdate'))
     expect(update?.variables).toEqual({
       id: 'i-1',
@@ -193,12 +189,7 @@ describe('linear verbs', () => {
       }
       return { issue: { id: 'i-1', identifier: 'ENG-42', team: { id: 'team-1' } } }
     }
-    await setProject(
-      { apiKey: 'k' },
-      [],
-      ['ENG-42'],
-      context({ flags: { project_name: 'Search' } }),
-    )
+    await setProject(ACCESSOR, [], ['ENG-42'], context({ flags: { project_name: 'Search' } }))
     const update = GRAPHQL.find((c) => c.query.includes('issueUpdate'))
     expect(update?.variables).toEqual({
       id: 'i-1',
@@ -209,11 +200,11 @@ describe('linear verbs', () => {
   it('search takes the flag or the operand', async () => {
     GRAPHQL.length = 0
     RESPONDER = () => ({ searchIssues: { nodes: [{ id: 'i-1', identifier: 'ENG-1' }] } })
-    await reads.search({ apiKey: 'k' }, [], ['login bug'], context())
-    await reads.search({ apiKey: 'k' }, [], [], context({ flags: { query: 'crash' } }))
+    await reads.search(ACCESSOR, [], ['login bug'], context())
+    await reads.search(ACCESSOR, [], [], context({ flags: { query: 'crash' } }))
     expect(GRAPHQL[0]?.variables).toMatchObject({ term: 'login bug' })
     expect(GRAPHQL[1]?.variables).toMatchObject({ term: 'crash' })
-    await expect(reads.search({ apiKey: 'k' }, [], [], context())).rejects.toThrow(
+    await expect(reads.search(ACCESSOR, [], [], context())).rejects.toThrow(
       'a search query is required',
     )
   })

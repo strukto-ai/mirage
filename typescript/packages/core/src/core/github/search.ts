@@ -42,7 +42,7 @@ export async function narrowPaths(
     let answer: GitHubCodeSearch
     try {
       answer = await searchCode(
-        accessor.transport,
+        accessor.account.transport,
         accessor.owner,
         accessor.repo,
         query,

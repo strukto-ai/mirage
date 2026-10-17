@@ -19,6 +19,7 @@ from collections.abc import AsyncIterator
 from dulwich.objects import Commit, ObjectID, ShaFile, Tag, Tree
 from dulwich.repo import BaseRepo
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import read_stdin_async
 from mirage.commands.cli.builtin.git.constants import (
     GITLINK,
@@ -174,14 +175,14 @@ async def _batch_lines(
 
 
 async def cat_file(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """``git cat-file``: an object's type, size, existence or content, for one
     name, a ``<type> <object>`` pair or each stdin line under ``--batch``.
     Pinned against git 2.50.1.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context.

@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 from urllib.parse import urlsplit
 
+from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh.accessor import (
     gh_bool,
     jq_lines,
@@ -28,7 +29,6 @@ from mirage.commands.config import Context
 from mirage.commands.errors import PartialOutputError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.client import GitHubApiError, github_request_response
-from mirage.core.github.config import GhConfig
 from mirage.core.github.constants import GRAPHQL_PATH
 from mirage.core.github.placeholder import expand
 from mirage.io.types import ByteSource, IOResult
@@ -150,16 +150,16 @@ def _set_field(fields: dict[str, Any], key: str, value: Any) -> None:
 
 
 async def _field_value(
-    config: GhConfig, ctx: Context, value: str
+    accessor: GitHubAccount, ctx: Context, value: str
 ) -> JsonValue:
-    expanded = expand(value, config)
+    expanded = expand(value, accessor.config)
     if expanded.startswith("@"):
         return (await read_cli_file(ctx, expanded[1:], "--field")).decode()
     return typed(expanded)
 
 
 async def _fields(
-    config: GhConfig, ctx: Context, fl: FlagView
+    accessor: GitHubAccount, ctx: Context, fl: FlagView
 ) -> dict[str, Any]:
     fields: dict[str, Any] = {}
     for pair in fl.as_list("raw_field"):
@@ -170,7 +170,7 @@ async def _fields(
         landed = (
             value
             if value is _EMPTY_ARRAY
-            else await _field_value(config, ctx, str(value))
+            else await _field_value(accessor, ctx, str(value))
         )
         _set_field(fields, key, landed)
     return fields
@@ -234,14 +234,17 @@ def _next_path(link: str | None, base_url: str | None) -> str | None:
 
 
 async def api(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """Execute the supported, noninteractive `gh api` surface."""
     fl = FlagView(ctx.flags)
     endpoint = texts[0] if texts else ""
     if not endpoint:
         raise ValueError("an API endpoint is required")
-    fields = await _fields(config, ctx, fl)
+    fields = await _fields(accessor, ctx, fl)
     input_body = await _input_body(ctx, fl)
     has_input = fl.raw("input") is not None
     # An explicit empty -X keeps gh's own branch, where fields ride the
@@ -250,7 +253,7 @@ async def api(
     method = fl.as_str("method", "POST" if fields or has_input else "GET")
     upper = method.upper()
     wire = upper or "GET"
-    path = expand(endpoint, config)
+    path = expand(endpoint, accessor.config)
     if path != GRAPHQL_PATH and not path.startswith("/"):
         path = f"/{path}"
 
@@ -277,21 +280,19 @@ async def api(
         try:
             if has_input or body is not None:
                 response = await github_request_response(
-                    config.token,
+                    accessor,
                     wire,
                     current,
                     body,
                     request_params,
-                    base_url=config.base_url,
                     headers=_request_headers(fl) or None,
                 )
             else:
                 response = await github_request_response(
-                    config.token,
+                    accessor,
                     wire,
                     current,
                     params=request_params,
-                    base_url=config.base_url,
                     headers=_request_headers(fl) or None,
                 )
         except GitHubApiError as exc:
@@ -320,7 +321,7 @@ async def api(
         pages.append(_Printed(response.data, head))
         first = False
         current = (
-            _next_path(response.headers.get("link"), config.base_url)
+            _next_path(response.headers.get("link"), accessor.config.base_url)
             if gh_bool(fl, "paginate")
             else None
         )

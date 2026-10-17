@@ -18,32 +18,33 @@
 # entry point every sandbox provider uses) and answers with the raw line, so a
 # case can see exactly what reached it. ShoutPython is an interpreter
 # (the entry point python3 and node use): the workspace splits the line, hands
-# the captured stage's code to run(), and gets it back upper-cased. The
+# the captured stage's code to interpret(), and gets it back upper-cased. The
 # TypeScript twins beside this file must behave identically, because the
 # point of the ref form is that one deployment runs on both hosts.
 
-from mirage import (LanguageRuntime, LineExecutorMixin, RunArgs, RunResult,
-                    Runtime)
+from mirage import (Context, LanguageRuntime, LineExecutorMixin, PathSpec,
+                    Program, RunResult, Runtime)
 
 
-class EchoBox(Runtime, LineExecutorMixin):
+class EchoBox(Runtime[None], LineExecutorMixin[None]):
     name = "echobox"
     captures = ("nvidia-smi", )
 
-    async def run_line(self, line: str, stdin: bytes | None,
-                       env: dict[str, str], cwd: str) -> RunResult:
-        return RunResult(stdout=f"box:{line}\n".encode(),
+    async def run_line(self, engine: None, paths: list[PathSpec],
+                       texts: list[str], ctx: Context) -> RunResult:
+        return RunResult(stdout=f"box:{ctx.flags['c']}\n".encode(),
                          stderr=None,
                          exit_code=0)
 
 
-class ShoutPython(LanguageRuntime):
+class ShoutPython(LanguageRuntime[None]):
     name = "shout"
     language = "python"
     captures = ("python3", "python")
 
-    async def run(self, args: RunArgs, context=None) -> RunResult:
-        return RunResult(stdout=f"{args.code.upper()}\n".encode(),
+    async def interpret(self, engine: None, program: Program,
+                        ctx: Context) -> RunResult:
+        return RunResult(stdout=f"{program.code.upper()}\n".encode(),
                          stderr=None,
                          exit_code=0)
 

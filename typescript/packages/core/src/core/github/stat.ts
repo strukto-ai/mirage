@@ -100,7 +100,7 @@ async function walked(accessor: GitHubAccessor, rel: string): Promise<FileStat |
   let sha = accessor.ref
   const names = rel.split('/')
   for (const [depth, name] of names.entries()) {
-    const rows = await fetchDirTree(accessor.transport, accessor.owner, accessor.repo, sha)
+    const rows = await fetchDirTree(accessor.account.transport, accessor.owner, accessor.repo, sha)
     const found = rows.find((row) => row.path === name)
     if (found === undefined) return null
     if (depth === names.length - 1) return rowOf(makeTreeEntry(found), name)
@@ -128,7 +128,7 @@ async function rootVersion(
 ): Promise<string | null> {
   if (!(index instanceof ListingCheckStore)) return null
   try {
-    return await fetchHead(accessor.transport, accessor.owner, accessor.repo, accessor.ref)
+    return await fetchHead(accessor.account.transport, accessor.owner, accessor.repo, accessor.ref)
   } catch (err) {
     // An answer that refuses the head is no answer about the version, the
     // way pointRow reads a refusal; anything else propagates.

@@ -22,6 +22,7 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from mirage.commands.config import Context
 from mirage.context.session_context import (
     bind_caller,
     current_caller,
@@ -60,7 +61,7 @@ from mirage.runtime.constants import SCRIPT_EVAL_TIMEOUT_SECONDS
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.script import script_engine
-from mirage.runtime.types import CodeExecution, DispatchFn
+from mirage.runtime.types import DispatchFn
 from mirage.types import JsonValue, PathSpec
 
 logger = logging.getLogger(__name__)
@@ -251,7 +252,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         self._dispatch = dispatch
         self._resolver = resolver
         self._engines: dict[
-            tuple[str, str], tuple[LanguageRuntime, asyncio.Lock]
+            tuple[str, str], tuple[LanguageRuntime[Any], asyncio.Lock]
         ] = {}
 
     async def pre_execute(
@@ -416,15 +417,17 @@ class ScriptPolicy(Policy, SessionScopedMixin):
             async with lock:
                 result = await asyncio.wait_for(
                     engine.execute(
-                        CodeExecution(
-                            language=entry.script.language,
-                            code=entry.script.source,
-                            args=[],
+                        [],
+                        [],
+                        Context(
+                            flags={
+                                "c": entry.script.source,
+                                **PROGRAM_FLAGS.get(entry.runtime, {}),
+                            },
                             cwd=PathSpec.from_str_path(cwd),
                             env={CTX_ENV: payload},
                             stdin=payload.encode(),
-                            flags=dict(PROGRAM_FLAGS.get(entry.runtime, {})),
-                        )
+                        ),
                     ),
                     timeout=SCRIPT_EVAL_TIMEOUT_SECONDS,
                 )
@@ -445,7 +448,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
 
     def _engine(
         self, entry: ProfileScript
-    ) -> tuple[LanguageRuntime, asyncio.Lock]:
+    ) -> tuple[LanguageRuntime[Any], asyncio.Lock]:
         """The policy's own runtime for one program and the lock its runs
         take, built on first use and shared by every program naming the
         same runtime and settings: two runs on one runtime would

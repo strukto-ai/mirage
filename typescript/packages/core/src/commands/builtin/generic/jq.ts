@@ -608,8 +608,8 @@ export async function jqGeneric(
   // invocation's own stdin and `-` is a file named `-`.
   const readFlagFile = (path: PathSpec): Promise<Uint8Array> => {
     if (isStdin(path, false)) return materialize(readInput(path))
-    if (ctx.dispatch === undefined) return materialize(stream(path))
-    return readProgramFile('jq', path, ctx.dispatch)
+    if (ctx.vfs === undefined) return materialize(stream(path))
+    return readProgramFile('jq', path, ctx.vfs.dispatch)
   }
   // jq reads its options before its program, so a refused option is reported
   // before an -f file is read.

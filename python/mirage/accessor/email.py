@@ -63,8 +63,8 @@ class EmailAccessor(Accessor):
     async def close(self) -> None:
         """Log out and drop the cached IMAP connection.
 
-        Safe to call when no connection was ever opened; CLI verbs call
-        this in a finally so a per-command accessor never leaks a socket.
+        Safe to call when no connection was ever opened; the owning
+        mount or himalaya install calls it once.
         """
         if self._imap is not None and self._imap.alive:
             await self._imap.logout()

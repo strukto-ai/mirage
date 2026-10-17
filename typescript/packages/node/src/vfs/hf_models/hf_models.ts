@@ -14,7 +14,7 @@
 
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { VFSName } from '@struktoai/mirage-core/types'
-import { HfModelsAccessor } from '../../accessor/hf_hub.ts'
+import { accountOf, HfModelsAccessor } from '../../accessor/hf_hub.ts'
 import { assertHfRepoRef } from '../hf_buckets/config.ts'
 import { HfHubVFS } from '../hf_hub/base.ts'
 import { type HfModelsConfig, type HfModelsConfigRedacted, redactHfModelsConfig } from './config.ts'
@@ -42,7 +42,7 @@ export class HfModelsVFS extends HfHubVFS {
       delete cfg.keyPrefix
     }
     this.config = cfg
-    this.accessor = new HfModelsAccessor(this.config)
+    this.accessor = new HfModelsAccessor(accountOf(this.config), this.config)
   }
 
   getState(): Promise<HfModelsVFSState> {

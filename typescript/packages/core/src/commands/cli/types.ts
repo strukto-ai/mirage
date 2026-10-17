@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { type Accessor, NOOPAccessor } from '../../accessor/base.ts'
 import type { Limit, PathSpec } from '../../types.ts'
 import { type ScriptSource } from '../../runtime/types.ts'
 import type { CommandFnResult, Context } from '../config.ts'
@@ -21,21 +22,24 @@ import { compareCodePoints } from '../../utils/sort.ts'
 
 import { CommandSpec, type CommandSpecInit, type FlagValue } from '../spec/types.ts'
 
-/**
- * A leaf callback: the validated account config (null without a configModel),
- * the operands, and the same `Context` a command gets.
- */
-export type CLIVerbFn = (
-  config: unknown,
+/** A leaf callback: the install's accessor, the operands and the `Context` a command gets. */
+export type CLIVerbFn<A extends Accessor = Accessor> = (
+  accessor: A,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ) => Promise<CommandFnResult> | CommandFnResult
 
+/** Builds an install's accessor from its validated config. */
+export type CLIAccessorFn = (config: unknown) => Accessor
+
+const noopAccessor = (config: unknown): Accessor => new NOOPAccessor(config)
+
 export type CLIConfigModel = ZodObject<ZodRawShape> | ((input: Record<string, unknown>) => unknown)
 
 export interface CLIHandlerInit {
-  fn?: CLIVerbFn | null
+  // `never` accepts a leaf typed for any accessor.
+  fn?: CLIVerbFn<never> | null
   write?: boolean
   limit?: Limit | null
 }
@@ -47,7 +51,7 @@ export class CLIHandler {
   readonly limit: Limit | null
 
   constructor(init: CLIHandlerInit = {}) {
-    this.fn = init.fn ?? null
+    this.fn = (init.fn ?? null) as CLIVerbFn | null
     this.write = init.write ?? false
     this.limit = init.limit ?? null
     Object.freeze(this)
@@ -58,6 +62,8 @@ export interface CLIInit {
   spec: CommandSpec
   handlers?: Readonly<Record<string, CLIHandler>>
   configModel?: CLIConfigModel | null
+  /** Builds the install's accessor once per install; a `NOOPAccessor` by default. */
+  accessor?: CLIAccessorFn
   script?: ScriptSource | null
   runtime?: string | null
 }
@@ -68,6 +74,7 @@ export class CLI {
   readonly handlers: Readonly<Record<string, CLIHandler>>
 
   readonly configModel: CLIConfigModel | null
+  readonly accessor: CLIAccessorFn
   readonly script: ScriptSource | null
   readonly runtime: string | null
 
@@ -76,6 +83,7 @@ export class CLI {
     this.script = init.script ?? null
     this.runtime = init.runtime ?? null
     this.configModel = init.configModel ?? null
+    this.accessor = init.accessor ?? noopAccessor
     const handlers = { ...init.handlers }
     if (this.script !== null) {
       handlers[''] ??= new CLIHandler()
@@ -98,6 +106,11 @@ function validateCli(cli: CLI): void {
     }
     if (cli.configModel !== null) {
       throw new Error(`cli '${name}': script config is opaque; it cannot declare configModel`)
+    }
+    if (cli.accessor !== noopAccessor) {
+      throw new Error(
+        `cli '${name}': a script reaches its service itself; it cannot declare accessor`,
+      )
     }
     if (Object.values(cli.handlers).some((handler) => handler.fn !== null)) {
       throw new Error(`cli '${name}': a node takes fn or script, not both`)

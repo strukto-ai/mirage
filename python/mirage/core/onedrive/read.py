@@ -33,11 +33,10 @@ async def read(
         size (int | None): window length, or None for the rest.
     """
     return await read_item(
-        accessor.config,
+        accessor,
         drive_loc(accessor.config, path.vfs_path),
         path.virtual,
         "onedrive",
         offset=offset,
         size=size,
-        session=accessor.pool,
     )

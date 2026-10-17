@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.commands.cli.builtin.hf.accessor import (
     hub_for,
     repo_type_of,
@@ -23,7 +24,6 @@ from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.hf_hub.client import repo_url
 from mirage.core.hf_hub.commit import commit
-from mirage.core.hf_hub.config import HfConfig
 from mirage.core.hf_hub.constants import EMPTY_COMMIT_WARNING
 from mirage.core.hf_hub.repo import head_commit
 from mirage.core.hf_hub.tree import deletions_for, fetch_tree, repo_files
@@ -32,7 +32,10 @@ from mirage.types import PathSpec
 
 
 async def delete_cmd(
-    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: HfAccountAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """Delete the files a set of glob patterns matches, in one commit.
 
@@ -44,32 +47,27 @@ async def delete_cmd(
     revision already points at.
     """
     require_operands(texts, ["repo_id", "patterns"])
-    require_token(config, "repo-files delete")
+    require_token(accessor, "repo-files delete")
     fl = FlagView(ctx.flags)
     repo_id, *patterns = list(texts)
     stderr = ""
-    async with hub_for(
-        config, repo_id, repo_type_of(fl), fl.as_str("revision")
-    ) as accessor:
-        deletions = deletions_for(
-            repo_files(await fetch_tree(accessor)), patterns
-        )
-        reply = await commit(
-            accessor,
-            deletions=deletions,
-            message=fl.as_str("commit_message")
-            or f"Delete files {' '.join(patterns)} with mirage",
-            description=fl.as_str("commit_description") or "",
-            create_pr=bool(fl.as_bool("create_pr")),
-        )
-        if reply is None:
-            home = repo_url(config.endpoint, accessor.repo_type, repo_id)
-            url = f"{home}/commit/{await head_commit(accessor)}"
-            stderr = EMPTY_COMMIT_WARNING
-        else:
-            reported = reply.get("commitUrl")
-            url = reported if isinstance(reported, str) else ""
-
+    hub = hub_for(accessor, repo_id, repo_type_of(fl), fl.as_str("revision"))
+    deletions = deletions_for(repo_files(await fetch_tree(hub)), patterns)
+    reply = await commit(
+        hub,
+        deletions=deletions,
+        message=fl.as_str("commit_message")
+        or f"Delete files {' '.join(patterns)} with mirage",
+        description=fl.as_str("commit_description") or "",
+        create_pr=bool(fl.as_bool("create_pr")),
+    )
+    if reply is None:
+        home = repo_url(hub.endpoint, hub.repo_type, repo_id)
+        url = f"{home}/commit/{await head_commit(hub)}"
+        stderr = EMPTY_COMMIT_WARNING
+    else:
+        reported = reply.get("commitUrl")
+        url = reported if isinstance(reported, str) else ""
     return text_out(
         f"Files correctly deleted from repo. Commit: {url}.\n", stderr
     )

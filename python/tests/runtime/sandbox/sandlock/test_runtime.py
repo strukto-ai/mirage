@@ -20,9 +20,9 @@ import sys
 import pytest
 
 from mirage import RAMVFS, Workspace
+from mirage.commands.config import Context
 from mirage.runtime.sandbox.sandlock import SandlockRuntime
 from mirage.runtime.table import build_runtime
-from mirage.runtime.types import ProcessExecution
 from mirage.types import PathSpec
 
 
@@ -40,6 +40,10 @@ def cli(tmp_path, monkeypatch):
     return tmp_path
 
 
+def _cwd(path) -> Context:
+    return Context(cwd=PathSpec.from_str_path(str(path)))
+
+
 @pytest.mark.asyncio
 async def test_argv_environment_cwd_and_stdin_reach_cli(cli, monkeypatch):
     monkeypatch.setenv("MIRAGE_HOST_ONLY", "must-not-inherit")
@@ -52,14 +56,12 @@ async def test_argv_environment_cwd_and_stdin_reach_cli(cli, monkeypatch):
         }
     )
     argv = ("node", "a b", "$(echo literal)", "", "--flag")
-    result = await runtime.execute(
-        ProcessExecution(
-            argv=argv,
-            cwd=PathSpec.from_str_path(str(cli)),
-            stdin=b"input\n",
-            env={"E": "request", "LD_PRELOAD": "/guest-only.so"},
-        )
+    ctx = Context(
+        cwd=PathSpec.from_str_path(str(cli)),
+        stdin=b"input\n",
+        env={"E": "request", "LD_PRELOAD": "/guest-only.so"},
     )
+    result = await runtime.execute([], list(argv), ctx, kind="process")
     assert result.exit_code == 0
     data = json.loads(result.stdout)
     args = data["argv"]
@@ -107,16 +109,14 @@ async def test_missing_cli_fails_loud(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
     with pytest.raises(FileNotFoundError, match="sandlock CLI on PATH"):
         await SandlockRuntime().execute(
-            ProcessExecution(argv=("node",), cwd=PathSpec.from_str_path("/"))
+            [], ["node"], Context(), kind="process"
         )
 
 
 @pytest.mark.asyncio
 async def test_empty_argv_is_refused():
     with pytest.raises(ValueError, match="argv must not be empty"):
-        await SandlockRuntime().execute(
-            ProcessExecution(argv=(), cwd=PathSpec.from_str_path("/"))
-        )
+        await SandlockRuntime().execute([], [], Context(), kind="process")
 
 
 @pytest.mark.asyncio
@@ -124,12 +124,7 @@ async def test_cancellation_reaps_the_cli(cli):
     runtime = SandlockRuntime()
     with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(
-            runtime.execute(
-                ProcessExecution(
-                    argv=("wait",), cwd=PathSpec.from_str_path(str(cli))
-                )
-            ),
-            0.1,
+            runtime.execute([], ["wait"], _cwd(cli), kind="process"), 0.1
         )
     assert not runtime._children
 
@@ -138,11 +133,7 @@ async def test_cancellation_reaps_the_cli(cli):
 async def test_close_reaps_an_active_cli(cli):
     runtime = SandlockRuntime()
     task = asyncio.create_task(
-        runtime.execute(
-            ProcessExecution(
-                argv=("wait",), cwd=PathSpec.from_str_path(str(cli))
-            )
-        )
+        runtime.execute([], ["wait"], _cwd(cli), kind="process")
     )
     async with asyncio.timeout(2):
         while not runtime._children:

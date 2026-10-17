@@ -17,14 +17,13 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { EmailAccessor } from '../../../../accessor/email.ts'
+import type { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchMessage, fetchRawMessage } from '../../../../core/email/client.ts'
-import type { EmailConfig } from '../../../../core/email/config.ts'
 import { messageJsonBytes } from '../../../../core/email/render.ts'
 import { firstText } from './util.ts'
 
 export async function read(
-  config: unknown,
+  accessor: EmailAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -32,18 +31,13 @@ export async function read(
   const fl = new FlagView(ctx.flags)
   const uid = firstText(texts, 'message id')
   const mailbox = fl.asStr('mailbox', 'INBOX')
-  const accessor = new EmailAccessor(config as EmailConfig)
-  try {
-    if (fl.asBool('raw')) {
-      const raw: ByteSource = await fetchRawMessage(accessor, mailbox, uid)
-      return [raw, new IOResult()]
-    }
-    const processed = await fetchMessage(accessor, mailbox, uid)
-    // The same renderer the mount serves, so `message read` and `cat`
-    // of the .email.json cannot drift apart.
-    const out: ByteSource = messageJsonBytes(processed)
-    return [out, new IOResult()]
-  } finally {
-    await accessor.close()
+  if (fl.asBool('raw')) {
+    const raw: ByteSource = await fetchRawMessage(accessor, mailbox, uid)
+    return [raw, new IOResult()]
   }
+  const processed = await fetchMessage(accessor, mailbox, uid)
+  // The same renderer the mount serves, so `message read` and `cat`
+  // of the .email.json cannot drift apart.
+  const out: ByteSource = messageJsonBytes(processed)
+  return [out, new IOResult()]
 }

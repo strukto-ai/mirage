@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { LinkView, StatPath } from '../../../view/types.ts'
+import type { LinkView, ReaddirPath, StatPath } from '../../../view/types.ts'
+import type { Files } from '../../../workspace/files.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { FileStat, FileType, LINK_TARGET_KEY, PathSpec, type StatFn } from '../../../types.ts'
@@ -89,9 +90,31 @@ export function dispatchStat(dispatch: DispatchFn): StatFn {
   }
 }
 
+function statThrough(files: Files, path: string | PathSpec): Promise<FileStat | null> {
+  return resolvePathStat(files.dispatch, PathSpec.fromStrPath(path, undefined, '/'))
+}
+
+async function readdirThrough(files: Files, path: string): Promise<string[]> {
+  const [entries] = await files.dispatch('readdir', PathSpec.fromStrPath(path, undefined, '/'))
+  return entries as string[]
+}
+
+// Stat one path through the session's files, null when absent, wherever it
+// lives (`find -L` crosses mounts); undefined outside a workspace. Mirrors
+// Python's vfs_stat_path.
+export function vfsStatPath(files: Files | undefined): StatPath | undefined {
+  return files === undefined ? undefined : (path) => statThrough(files, path)
+}
+
+// List one directory through the session's files, for a walk that crosses a
+// mount; undefined outside a workspace. Mirrors Python's vfs_readdir_path.
+export function vfsReaddirPath(files: Files | undefined): ReaddirPath | undefined {
+  return files === undefined ? undefined : (path) => readdirThrough(files, path)
+}
+
 // A dispatcher lookup in the shape a chain walk reads. StatPath answers
 // null for a miss, while dotRefusal and its kin read a stat that throws, so
-// a command that holds only the lookup (`ctx.statPath`) wraps it here.
+// a command that holds only the lookup (`vfsStatPath`) wraps it here.
 // Mirrors Python's stat_or_enoent.
 export function statOrEnoent(statPath: StatPath): StatFn {
   return async (path: PathSpec) => {
@@ -309,14 +332,6 @@ export async function dotRefusal(
     if (exists && !isDir) return creates ? eexist(path) : dotWalkError(path, 'ENOTDIR')
   }
   return null
-}
-
-// Resolve a script operand (absolute or cwd-relative) to a fully-resolved
-// PathSpec, the way python3/js locate a mounted script before running it.
-// The spelling as typed rides along in rawPath, which is the name an
-// interpreter gives its program.
-export function resolveScript(name: string, cwd: string): PathSpec {
-  return PathSpec.fromStrPath(name, undefined, cwd)
 }
 
 // Resolve a file a transfer reads or writes (curl -o, wget -O) against the

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { GitHubAccount } from '../../../../accessor/github.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { GitHubApiError } from '../../../../core/github/client.ts'
 import { search } from '../../../../core/github/search.ts'
@@ -47,7 +48,7 @@ describe('search qualifiers match native gh', () => {
     const handler = searchHandlers()[`search ${leaf?.name ?? ''}`]
     if (!leaf || !handler?.fn) throw new Error('missing search handler')
     await handler.fn(
-      { token: 't' },
+      new GitHubAccount({ token: 't' }),
       [],
       ['two words'],
       context({
@@ -91,7 +92,7 @@ describe('a failed search reads as gh words it', () => {
     if (!leaf || !handler?.fn) throw new Error('missing search handler')
     const fn = handler.fn
     const result = await fn(
-      { token: 't' },
+      new GitHubAccount({ token: 't' }),
       [],
       ['needle'],
       context({

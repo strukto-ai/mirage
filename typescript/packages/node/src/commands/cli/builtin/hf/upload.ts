@@ -20,10 +20,10 @@ import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { fsStrerror, isEnotdir, isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { shellQuote } from '@struktoai/mirage-core/utils/quote'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
+import type { HfAccountAccessor } from '../../../../accessor/hf_hub.ts'
 import { createRepo } from '../../../../core/hf_hub/admin.ts'
 import { repoUrl } from '../../../../core/hf_hub/client.ts'
 import { commit, type Addition } from '../../../../core/hf_hub/commit.ts'
-import type { HfConfig } from '../../../../core/hf_hub/config.ts'
 import {
   DEFAULT_COMMIT_MESSAGE,
   DEFAULT_IGNORE_PATTERNS,
@@ -121,14 +121,13 @@ export function inRepoBase(value: string): string {
 
 /** Upload a workspace file or folder to a repository, as one commit. */
 export async function uploadCmd(
-  config: unknown,
+  accessor: HfAccountAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const cfg = config as HfConfig
   requireOperands(texts, ['repo_id'])
-  requireToken(cfg, 'upload')
+  requireToken(accessor, 'upload')
   const fl = new FlagView(ctx.flags)
   const vfs = ctx.vfs
   if (vfs === undefined) {
@@ -184,12 +183,12 @@ export async function uploadCmd(
   // Upstream creates the repository if it is missing and ignores --private
   // when it already exists, so the flag picks the visibility of one this line
   // brings into being rather than changing an existing repository's.
-  await createRepo(cfg, repoId, {
+  await createRepo(accessor, repoId, {
     repoType,
     private: fl.asBool('private'),
     existOk: true,
   })
-  const accessor = hubFor(cfg, repoId, repoType, fl.asStr('revision'))
+  const hub = hubFor(accessor, repoId, repoType, fl.asStr('revision'))
   // For a folder the --delete patterns match the repo's files under
   // `path_in_repo`, and a file this commit re-adds is not deleted first. A
   // commit that would change nothing is skipped, with upstream's create_commit
@@ -197,12 +196,12 @@ export async function uploadCmd(
   const added = new Set(additions.map((add) => add.path))
   const doomed =
     collected.fromDir && deletions.length > 0
-      ? deletionsFor(repoFiles(await fetchTree(accessor)), deletions, base).filter(
+      ? deletionsFor(repoFiles(await fetchTree(hub)), deletions, base).filter(
           (path) => !added.has(path),
         )
       : []
   const message = fl.asStr('commit_message')
-  const reply = await commit(accessor, {
+  const reply = await commit(hub, {
     additions,
     deletions: doomed,
     message: message === undefined || message === '' ? DEFAULT_COMMIT_MESSAGE : message,
@@ -210,7 +209,7 @@ export async function uploadCmd(
     createPr: fl.asBool('create_pr'),
   })
   if (reply === undefined) warnings += EMPTY_COMMIT_WARNING
-  const home = repoUrl(cfg.endpoint, accessor.repoType, repoId)
-  const url = rstripSlash(`${home}/tree/${accessor.revision}/${base}`)
+  const home = repoUrl(hub.endpoint, hub.repoType, repoId)
+  const url = rstripSlash(`${home}/tree/${hub.revision}/${base}`)
   return textOut(`${url}\n`, warnings)
 }

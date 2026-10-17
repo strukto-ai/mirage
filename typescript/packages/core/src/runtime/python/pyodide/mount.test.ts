@@ -15,9 +15,15 @@
 import { WorkspaceBinding } from '../../binding.ts'
 import { describe, expect, it } from 'vitest'
 import { PyodideRuntime } from './runtime.ts'
-import type { BridgeDispatchFn } from '../../types.ts'
+import type { BridgeDispatchFn, RunResult } from '../../types.ts'
 import { ContentType, FileStat, FileType } from '../../../types.ts'
 import { PrefixResolver } from '../../resolver.ts'
+import { context } from '../../../workspace/fixtures/context.ts'
+
+/** Run `code` at `/` with empty stdin. */
+function interpret(rt: PyodideRuntime, code: string): Promise<RunResult> {
+  return rt.interpret(undefined, { code, args: [], stdin: new Uint8Array() }, context())
+}
 
 function makeBridge(): {
   dispatch: BridgeDispatchFn
@@ -91,20 +97,10 @@ describe('PyodideRuntime mount visibility', () => {
     const { dispatch, calls } = makeBridge()
     const mounts: string[] = ['/ram/']
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => mounts)))
-    await rt.run({
-      code: 'pass',
-      args: [],
-      env: {},
-      stdin: new Uint8Array(),
-    })
+    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => mounts)))
+    await interpret(rt, 'pass')
     mounts.length = 0
-    await rt.run({
-      code: `with open('/ram/x.txt', 'wb') as f: f.write(b'nope')`,
-      args: [],
-      env: {},
-      stdin: new Uint8Array(),
-    })
+    await interpret(rt, `with open('/ram/x.txt', 'wb') as f: f.write(b'nope')`)
     expect(calls.filter((c) => c.op === 'write')).toHaveLength(0)
     await rt.close()
   }, 60_000)
@@ -114,20 +110,10 @@ describe('PyodideRuntime mount visibility', () => {
     files.set('/ram/lazy.txt', new TextEncoder().encode('lazy'))
     const mounts: string[] = []
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => mounts)))
-    await rt.run({
-      code: 'pass',
-      args: [],
-      env: {},
-      stdin: new Uint8Array(),
-    })
+    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => mounts)))
+    await interpret(rt, 'pass')
     mounts.push('/ram/')
-    const result = await rt.run({
-      code: `with open('/ram/lazy.txt') as f: print(f.read())`,
-      args: [],
-      env: {},
-      stdin: new Uint8Array(),
-    })
+    const result = await interpret(rt, `with open('/ram/lazy.txt') as f: print(f.read())`)
     expect(new TextDecoder().decode(result.stdout)).toContain('lazy')
     expect(calls.filter((c) => c.op === 'readdir')).toEqual([])
     await rt.close()
@@ -143,18 +129,13 @@ describe('PyodideRuntime mount visibility', () => {
     const warn = console.warn
     console.warn = (msg: unknown) => warnings.push(String(msg))
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/'])))
+    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/'])))
     try {
-      const result = await rt.run({
-        code: `open('/out.txt', 'wb').write(b'data')`,
-        args: [],
-        env: {},
-        stdin: new Uint8Array(),
-      })
+      const result = await interpret(rt, `open('/out.txt', 'wb').write(b'data')`)
       expect(result.exitCode).toBe(0)
       expect(calls.filter((c) => c.op === 'write')).toHaveLength(0)
       expect(warnings.some((w) => w.includes("cannot serve a mount at '/'"))).toBe(true)
-      await rt.run({ code: 'pass', args: [], env: {}, stdin: new Uint8Array() })
+      await interpret(rt, 'pass')
       expect(warnings.filter((w) => w.includes('cannot serve a mount'))).toHaveLength(2)
     } finally {
       console.warn = warn
@@ -167,14 +148,9 @@ describe('PyodideRuntime mount visibility', () => {
     async (prefix) => {
       const { dispatch, calls } = makeBridge()
       const rt = new PyodideRuntime()
-      rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => [prefix])))
+      rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => [prefix])))
       try {
-        const result = await rt.run({
-          code: 'print(1)',
-          args: [],
-          env: {},
-          stdin: new Uint8Array(),
-        })
+        const result = await interpret(rt, 'print(1)')
         expect(result.exitCode).toBe(126)
         expect(result.stdout).toEqual(new Uint8Array())
         expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe(
@@ -191,9 +167,9 @@ describe('PyodideRuntime mount visibility', () => {
   it('a mount beside the stdlib under /lib leaves the run alone', async () => {
     const { dispatch } = makeBridge()
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/lib/app/'])))
+    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/lib/app/'])))
     try {
-      const result = await rt.run({ code: 'print(1)', args: [], env: {}, stdin: new Uint8Array() })
+      const result = await interpret(rt, 'print(1)')
       expect(result.exitCode).toBe(0)
       expect(new TextDecoder().decode(result.stdout)).toBe('1\n')
     } finally {
@@ -211,13 +187,8 @@ describe('PyodideRuntime mount visibility', () => {
       return Promise.resolve([])
     }
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/ram/'])))
-    const result = await rt.run({
-      code: `with open('/ram/out.txt', 'wb') as f: f.write(b'data')`,
-      args: [],
-      env: {},
-      stdin: new Uint8Array(),
-    })
+    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/ram/'])))
+    const result = await interpret(rt, `with open('/ram/out.txt', 'wb') as f: f.write(b'data')`)
     expect(result.exitCode).toBe(1)
     const stderr = new TextDecoder().decode(result.stderr ?? new Uint8Array())
     expect(stderr).toContain("OSError: [Errno 69] Read-only file system: '/ram/out.txt'")
@@ -227,12 +198,7 @@ describe('PyodideRuntime mount visibility', () => {
 
   it('runtime without bridge still runs Python without the shim', async () => {
     const rt = new PyodideRuntime({})
-    const result = await rt.run({
-      code: 'print("hello")',
-      args: [],
-      env: {},
-      stdin: new Uint8Array(),
-    })
+    const result = await interpret(rt, 'print("hello")')
     expect(new TextDecoder().decode(result.stdout)).toContain('hello')
     expect(result.exitCode).toBe(0)
     await rt.close()
@@ -250,17 +216,15 @@ describe('PyodideRuntime mount visibility', () => {
       return Promise.resolve(undefined)
     }
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/ram/'])))
-    const result = await rt.run({
-      code: [
+    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/ram/'])))
+    const result = await interpret(
+      rt,
+      [
         'import os',
         "open('/ram/tmp.txt', 'wb').write(b'new')",
         "os.rename('/ram/tmp.txt', '/ram/final.txt')",
       ].join('\n'),
-      args: [],
-      env: {},
-      stdin: new Uint8Array(),
-    })
+    )
     // The rename must not run: its prerequisite create never landed, and
     // the open that asked for it failed, so the program stopped there.
     expect(attempted.filter((c) => c.startsWith('rename'))).toHaveLength(0)
@@ -290,13 +254,8 @@ describe('PyodideRuntime mount visibility', () => {
       return Promise.resolve(undefined)
     }
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/ram/'])))
-    const result = await rt.run({
-      code: `open('/ram/log.txt', 'a').write('tail')`,
-      args: [],
-      env: {},
-      stdin: new Uint8Array(),
-    })
+    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/ram/'])))
+    const result = await interpret(rt, `open('/ram/log.txt', 'a').write('tail')`)
     expect(writes).toHaveLength(0)
     // The refusal reaches the guest at the call site now, rather than
     // surfacing after the run as a failed replay.
@@ -323,13 +282,8 @@ describe('PyodideRuntime writes', () => {
       return undefined
     }
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/ram/'])))
-    const result = await rt.run({
-      code: `with open('/ram/out.txt', 'wb') as f: f.write(b'landed')`,
-      args: [],
-      env: {},
-      stdin: new Uint8Array(),
-    })
+    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/ram/'])))
+    const result = await interpret(rt, `with open('/ram/out.txt', 'wb') as f: f.write(b'landed')`)
     expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe('')
     expect(result.exitCode).toBe(0)
     const mutations = calls.filter((c) => c.op === 'create' || c.op === 'pwrite')
@@ -354,9 +308,10 @@ describe('PyodideRuntime writes', () => {
       return undefined
     }
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/ram/'])))
-    const result = await rt.run({
-      code: [
+    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/ram/'])))
+    const result = await interpret(
+      rt,
+      [
         'import os',
         "os.mkdir('/ram/box')",
         "open('/ram/box/f.txt', 'wb').write(b'hi')",
@@ -364,10 +319,7 @@ describe('PyodideRuntime writes', () => {
         "os.remove('/ram/box/g.txt')",
         "os.rmdir('/ram/box')",
       ].join('\n'),
-      args: [],
-      env: {},
-      stdin: new Uint8Array(),
-    })
+    )
     expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe('')
     expect(result.exitCode).toBe(0)
     const mutations = calls.filter((c) => c.op !== 'read' && c.op !== 'readdir' && c.op !== 'stat')
@@ -423,15 +375,13 @@ describe('PyodideRuntime writes', () => {
       return undefined
     }
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/ram/'])))
-    await rt.run({ code: 'pass', args: [], env: {}, stdin: new Uint8Array() })
+    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/ram/'])))
+    await interpret(rt, 'pass')
     files.set('/ram/log.txt', new TextEncoder().encode('a'))
-    const result = await rt.run({
-      code: `\nfor part in ['b', 'c']:\n    with open('/ram/log.txt', 'a') as f:\n        f.write(part)\n`,
-      args: [],
-      env: {},
-      stdin: new Uint8Array(),
-    })
+    const result = await interpret(
+      rt,
+      `\nfor part in ['b', 'c']:\n    with open('/ram/log.txt', 'a') as f:\n        f.write(part)\n`,
+    )
     expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe('')
     expect(result.exitCode).toBe(0)
     expect(new TextDecoder().decode(files.get('/ram/log.txt') ?? new Uint8Array())).toBe('abc')

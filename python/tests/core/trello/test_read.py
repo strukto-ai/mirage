@@ -149,9 +149,7 @@ async def test_a_board_outside_board_ids_is_absent_on_every_surface():
         TrelloConfig(api_key="key", api_token="token", board_ids=["b1"])
     )
     get_board = AsyncMock(
-        side_effect=lambda config, board_id, session: {"b1": B1, "b2": B2}[
-            board_id
-        ]
+        side_effect=lambda accessor, board_id: {"b1": B1, "b2": B2}[board_id]
     )
     get_card = AsyncMock(return_value={"id": "c9", "name": "Payroll"})
     ws = _mounted(accessor)

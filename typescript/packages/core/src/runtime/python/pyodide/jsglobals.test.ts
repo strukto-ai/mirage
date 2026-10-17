@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { PathSpec } from '../../../types.ts'
 import { PyodideRuntime } from './runtime.ts'
 
 // The runtime declares reach='workspace', meaning the workspace bridge is the
@@ -32,12 +33,11 @@ flags.append("fetch=" + str(hasattr(js, "fetch")))
 flags.append("require=" + str(hasattr(js, "require")))
 print(",".join(flags))
 `
-    const result = await rt.run({
-      code: probe,
-      args: [],
-      env: {},
-      stdin: new Uint8Array(),
-    })
+    const result = await rt.interpret(
+      undefined,
+      { code: probe, args: [], stdin: new Uint8Array() },
+      { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), env: {} },
+    )
     const decode = (b: Uint8Array | string | null): string =>
       typeof b === 'string' ? b : new TextDecoder().decode(b ?? new Uint8Array())
     expect(decode(result.stderr)).toBe('')

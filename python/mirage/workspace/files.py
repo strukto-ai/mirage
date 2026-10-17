@@ -28,7 +28,7 @@ from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec, Visibility
 from mirage.utils.hidden import leads_hidden, path_visible
 from mirage.utils.path import norm, norm_dir, owner_prefix
-from mirage.view.types import NamespaceLinks, SessionBind
+from mirage.view.types import FollowOperands, NamespaceLinks, SessionBind
 from mirage.workspace.types import MountRow
 
 
@@ -91,6 +91,10 @@ class Files:
     the session to run as when no line is already running, and the
     line's session wins when one is, which is what keeps a handler
     reaching the dispatcher from widening the view it was given.
+
+    A command's own files (its ``Context.vfs``) keep no ledger: calls go
+    straight to the dispatcher, which does the line's accounting. They
+    carry the line's operand resolution (``follow``) for its globs.
     """
 
     def __init__(
@@ -103,6 +107,8 @@ class Files:
         bind: SessionBind | None = None,
         records: list[OpRecord] | None = None,
         visibility: Callable[[str | None], Visibility | None] | None = None,
+        follow: FollowOperands | None = None,
+        ledger: bool = True,
     ) -> None:
         self._mounts: list[MountRow] = []
         self.set_mounts(mounts)
@@ -112,6 +118,8 @@ class Files:
         self._dispatch = dispatch
         self._bind = bind
         self._visibility = visibility
+        self._follow = follow
+        self._ledger = ledger
         self.records: list[OpRecord] = records if records is not None else []
 
     @property
@@ -143,6 +151,24 @@ class Files:
             bind=self._bind,
             records=self.records,
             visibility=self._visibility,
+        )
+        derived._mounts = self._mounts
+        return derived
+
+    def _over(self, dispatch: DispatchFn) -> "Files":
+        """The same files over another dispatcher, keeping no ledger.
+
+        Args:
+            dispatch (DispatchFn): the dispatcher the calls go to.
+        """
+        derived = Files(
+            [],
+            dispatch,
+            session_id=self._session_id,
+            links=self._links,
+            visibility=self._visibility,
+            follow=self._follow,
+            ledger=False,
         )
         derived._mounts = self._mounts
         return derived
@@ -377,13 +403,16 @@ class Files:
         """``Workspace.dispatch`` as this facade runs it: as its session,
         and recorded on ``records``. The dispatcher ``RuntimeFiles`` drives for
         a ``with ws:`` block, which is a facade caller like FUSE. The
-        IOResult is empty: a facade op's account is its record.
+        IOResult is empty: a facade op's account is its record; without a
+        ledger the dispatcher's own answer passes through.
 
         Args:
             name (str): the function's name (read, write, stat, ...).
             path (PathSpec): the virtual path.
             **kwargs: the function's arguments, by its own names.
         """
+        if not self._ledger:
+            return await self._dispatch(name, path, **kwargs)
         return await self._call(name, path, **kwargs), IOResult()
 
     async def _call(
@@ -411,9 +440,12 @@ class Files:
                 is already running; None uses this facade's own.
             **kwargs: op arguments, by the op function's names.
         """
+        typed = PathSpec.from_str_path(path, cwd="/")
+        if not self._ledger:
+            answer, _ = await self._dispatch(op, typed, **kwargs)
+            return answer
         timer = start_op()
         report = OpReport()
-        typed = PathSpec.from_str_path(path, cwd="/")
         seen: list[str] = []
 
         async def run() -> tuple[Any, Any]:

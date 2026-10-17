@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { PathSpec } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
@@ -137,7 +138,7 @@ async function setSymbolic(
  * and its log, never HEAD, and `-q` does not quiet its refusal.
  */
 export async function symbolicRef(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

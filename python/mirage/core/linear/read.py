@@ -65,9 +65,7 @@ async def _read_member(
     parent: FileStat | None,
 ) -> bytes:
     member_id = match.slots["member_id"]
-    users = await list_team_members(
-        accessor.config, match.slots["team_id"], session=accessor.pool
-    )
+    users = await list_team_members(accessor, match.slots["team_id"])
     for user in users:
         if user.get("id") == member_id:
             return to_json_bytes(normalize_user(user))
@@ -81,9 +79,7 @@ async def _read_issue_json(
     entry: FileStat | None,
     parent: FileStat | None,
 ) -> bytes:
-    issue = await get_issue(
-        accessor.config, match.slots["issue_id"], session=accessor.pool
-    )
+    issue = await get_issue(accessor, match.slots["issue_id"])
     return to_json_bytes(normalize_issue(issue))
 
 
@@ -95,11 +91,9 @@ async def _read_comments(
     parent: FileStat | None,
 ) -> bytes:
     issue_id = match.slots["issue_id"]
-    issue = await get_issue(accessor.config, issue_id, session=accessor.pool)
+    issue = await get_issue(accessor, issue_id)
     norm_issue = normalize_issue(issue)
-    comments = await list_issue_comments(
-        accessor.config, issue_id, session=accessor.pool
-    )
+    comments = await list_issue_comments(accessor, issue_id)
     rows = [
         normalize_comment(
             comment, issue_id=issue_id, issue_key=norm_issue.get("issue_key")
@@ -118,14 +112,10 @@ async def _read_project(
 ) -> bytes:
     team_id = match.slots["team_id"]
     project_id = match.slots["project_id"]
-    teams = await list_teams(accessor.config, session=accessor.pool)
+    teams = await list_teams(accessor)
     team = next((item for item in teams if item.get("id") == team_id), {})
-    projects = await list_team_projects(
-        accessor.config, team_id, session=accessor.pool
-    )
-    team_issues = await list_team_issues(
-        accessor.config, team_id, session=accessor.pool
-    )
+    projects = await list_team_projects(accessor, team_id)
+    team_issues = await list_team_issues(accessor, team_id)
     for project in projects:
         if project.get("id") == project_id:
             project_issues = project_issue_rows(team_issues, project_id)
@@ -149,9 +139,7 @@ async def _read_cycle(
     parent: FileStat | None,
 ) -> bytes:
     team_id = match.slots["team_id"]
-    cycles = await list_team_cycles(
-        accessor.config, team_id, session=accessor.pool
-    )
+    cycles = await list_team_cycles(accessor, team_id)
     for cycle in cycles:
         if cycle.get("id") == match.slots["cycle_id"]:
             return to_json_bytes(normalize_cycle(cycle, team_id=team_id))
@@ -165,9 +153,7 @@ async def _read_document(
     entry: FileStat | None,
     parent: FileStat | None,
 ) -> bytes:
-    documents = await list_team_documents(
-        accessor.config, match.slots["team_id"], session=accessor.pool
-    )
+    documents = await list_team_documents(accessor, match.slots["team_id"])
     for document in documents:
         if document.get("id") == match.slots["document_id"]:
             return to_json_bytes(normalize_document(document))

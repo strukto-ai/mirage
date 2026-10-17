@@ -22,6 +22,7 @@ import { materialize } from '@struktoai/mirage-core/io/types'
 import { yieldBytes } from '@struktoai/mirage-core/io/stream'
 import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
 import type { CommandSpec, FlagValue } from '@struktoai/mirage-core/commands/spec/types'
+import { HfAccountAccessor } from '../../../../accessor/hf_hub.ts'
 import type { HfConfig } from '../../../../core/hf_hub/config.ts'
 import { HfHubError } from '../../../../core/hf_hub/client.ts'
 import { Absence } from '../../../../core/hf_hub/repo.ts'
@@ -78,9 +79,9 @@ function args(
   config: HfConfig = CONFIG,
   vfs?: Files,
   stdin?: string,
-): [HfConfig, PathSpec[], string[], Context] {
+): [HfAccountAccessor, PathSpec[], string[], Context] {
   return [
-    config,
+    new HfAccountAccessor(config),
     [],
     texts,
     {
@@ -450,8 +451,8 @@ describe('where an upload lands', () => {
   }) as never)
 
   const additions = async (local: string, ...inRepo: string[]): Promise<string[]> => {
-    const [config, , texts, ctx] = args(['acme/widget', ...inRepo], {}, CONFIG, vfs)
-    await uploadCmd(config, [PathSpec.fromStrPath(local)], texts, ctx)
+    const [account, , texts, ctx] = args(['acme/widget', ...inRepo], {}, CONFIG, vfs)
+    await uploadCmd(account, [PathSpec.fromStrPath(local)], texts, ctx)
     const call = commitMock.mock.calls[0]?.[1] as { additions: { path: string }[] }
     return call.additions.map((add) => add.path)
   }

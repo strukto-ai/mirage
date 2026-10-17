@@ -119,7 +119,7 @@ async def test_installed_tree_composes_mime_without_sending():
 async def test_the_write_alias_reaches_compose(monkeypatch):
     sent = {}
 
-    async def fake_deliver(config, raw, save=None):
+    async def fake_deliver(accessor, raw, save=None):
         sent["raw"] = raw
         return BytesParser(policy=default_policy).parsebytes(raw), ""
 
@@ -225,11 +225,11 @@ def mailbox(monkeypatch):
     async def fetch_headers(accessor, folder, uids):
         return [headers[uid] for uid in uids]
 
-    async def save(config, raw, folder=None):
+    async def save(accessor, raw, folder=None):
         file(folder or "Sent", raw)
         return folder or "Sent"
 
-    async def deliver(config, raw, save=None):
+    async def deliver(accessor, raw, save=None):
         if save is not None:
             file(save, raw)
         return BytesParser(policy=default_policy).parsebytes(raw), ""

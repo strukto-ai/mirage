@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
+from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.history import (
     fetch_messages_for_day,
@@ -26,7 +27,7 @@ from mirage.core.time_range import TimeRange
 
 @pytest.mark.asyncio
 async def test_stream_messages_for_day_applies_day_bounds_and_yields_pages():
-    cfg = SlackConfig(token="xoxb-t")
+    acc = SlackAccessor(SlackConfig(token="xoxb-t"))
     pages = [
         {
             "messages": [{"ts": "1778371201.0", "text": "a"}],
@@ -39,7 +40,7 @@ async def test_stream_messages_for_day_applies_day_bounds_and_yields_pages():
     ]
     calls = []
 
-    async def fake_get(_cfg, method, params=None, token=None, session=None):
+    async def fake_get(_acc, method, params=None):
         assert method == "conversations.history"
         calls.append(dict(params or {}))
         return pages[len(calls) - 1]
@@ -47,7 +48,7 @@ async def test_stream_messages_for_day_applies_day_bounds_and_yields_pages():
     with patch("mirage.core.slack.paginate.slack_get", new=fake_get):
         seen = []
         async for page in stream_messages_for_day(
-            cfg, "C1", "2026-05-10", TimeRange()
+            acc, "C1", "2026-05-10", TimeRange()
         ):
             seen.append(page)
 
@@ -62,7 +63,7 @@ async def test_stream_messages_for_day_applies_day_bounds_and_yields_pages():
 
 @pytest.mark.asyncio
 async def test_fetch_messages_for_day_collects_and_sorts_across_pages():
-    cfg = SlackConfig(token="xoxb-t")
+    acc = SlackAccessor(SlackConfig(token="xoxb-t"))
     pages = [
         {
             "messages": [{"ts": "1778371203.0"}, {"ts": "1778371201.0"}],
@@ -75,14 +76,14 @@ async def test_fetch_messages_for_day_collects_and_sorts_across_pages():
     ]
     calls = {"n": 0}
 
-    async def fake_get(_cfg, _method, params=None, token=None, session=None):
+    async def fake_get(_acc, _method, params=None):
         page = pages[calls["n"]]
         calls["n"] += 1
         return page
 
     with patch("mirage.core.slack.paginate.slack_get", new=fake_get):
         result = await fetch_messages_for_day(
-            cfg, "C1", "2026-05-10", TimeRange()
+            acc, "C1", "2026-05-10", TimeRange()
         )
 
     assert [m["ts"] for m in result] == [

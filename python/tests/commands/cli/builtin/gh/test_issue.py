@@ -16,6 +16,7 @@ import json
 
 import pytest
 
+from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh.issue import (
     ISSUE_FIELDS,
     list_cmd,
@@ -27,7 +28,7 @@ from mirage.core.github.issue import IssueListFilter, IssueSelections
 from mirage.io.types import materialize
 from mirage.types import PathSpec
 
-CONFIG = GhConfig(token="t")
+ACCOUNT = GitHubAccount(GhConfig(token="t"))
 
 # Every field `gh issue view --json` and `gh issue list --json` accept in
 # gh 2.85.
@@ -56,9 +57,9 @@ GH_FIELDS = [
 ]
 
 
-def _args(flags) -> tuple[GhConfig, list[PathSpec], list[str], Context]:
+def _args(flags) -> tuple[GitHubAccount, list[PathSpec], list[str], Context]:
     return (
-        CONFIG,
+        ACCOUNT,
         [],
         ["4"],
         Context(argv=(), flags={"repo": "o/r", **flags}, stdin=None, vfs=None),

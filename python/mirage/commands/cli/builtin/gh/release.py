@@ -14,6 +14,7 @@
 
 from typing import Any
 
+from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh.accessor import (
     body_value,
     camel,
@@ -26,7 +27,6 @@ from mirage.commands.cli.builtin.gh.accessor import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.github.config import GhConfig
 from mirage.core.github.release import (
     create_release,
     get_latest_release,
@@ -82,13 +82,16 @@ def _list_text(rows: list[dict[str, Any]]) -> str:
 
 
 async def list_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     rows = [
         _release(value)
         for value in await list_releases(
-            config, repo_for(config, fl), list_limit(fl, 30, None)
+            accessor, repo_for(accessor, fl), list_limit(fl, 30, None)
         )
     ]
     latest = next(
@@ -105,16 +108,19 @@ async def list_cmd(
 
 
 async def view_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     tag = texts[0] if texts else ""
     if not tag:
         raise ValueError("a release tag is required")
-    ref = repo_for(config, fl)
-    row = _release(await get_release(config, ref, tag))
+    ref = repo_for(accessor, fl)
+    row = _release(await get_release(accessor, ref, tag))
     if "isLatest" in csv_values([fl.as_str("json") or ""]):
-        latest = await get_latest_release(config, ref)
+        latest = await get_latest_release(accessor, ref)
         latest_row = _release(latest) if latest is not None else {}
         row["isLatest"] = latest_row.get("tagName") == row.get("tagName")
     human = (
@@ -128,7 +134,10 @@ async def view_cmd(
 
 
 async def create_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     tag = texts[0] if texts else ""
@@ -147,6 +156,6 @@ async def create_cmd(
     if target is not None:
         body["target_commitish"] = target
     created = _release(
-        await create_release(config, repo_for(config, fl), body)
+        await create_release(accessor, repo_for(accessor, fl), body)
     )
     return text_out(f"{created.get('url', '')}\n")

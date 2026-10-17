@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { GitHubAccessor } from '../../accessor/github.ts'
+import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
 import { ContentType, type FileStat, FileType, PathSpec } from '../../types.ts'
 import { entryAt } from '../../workspace/fixtures/handed.ts'
@@ -141,7 +141,10 @@ describe('the gate check', () => {
       return Promise.resolve({ tree: rows[segment] ?? [], truncated: false })
     })
     const accessor = new GitHubAccessor({
-      transport: { get, request: vi.fn() } as unknown as GitHubTransport,
+      account: new GitHubAccount({ token: 't' }, {
+        get,
+        request: vi.fn(),
+      } as unknown as GitHubTransport),
       owner: 'o',
       repo: 'r',
       ref: 'main',

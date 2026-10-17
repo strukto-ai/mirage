@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { AirtableAccessor } from '../../../../accessor/airtable.ts'
+import type { AirtableAccessor } from '../../../../accessor/airtable.ts'
 import type { AirtableConfig } from '../../../../core/airtable/config.ts'
 import type { Row } from '../../../../core/airtable/normalize.ts'
 import { materialize, type ByteSource } from '../../../../io/types.ts'
@@ -25,10 +25,9 @@ import type { CLIVerbFn } from '../../types.ts'
 const DEC = new TextDecoder()
 
 export type Verb = (
-  config: AirtableConfig,
+  accessor: AirtableAccessor,
   texts: string[],
   ctx: Context,
-  accessor: AirtableAccessor,
   fl: FlagView,
 ) => Promise<CommandFnResult>
 
@@ -95,13 +94,12 @@ export async function stdinText(stdin: ByteSource): Promise<string> {
 }
 
 /**
- * Run one verb on its own accessor. A verb never names itself: the CLI may
- * be installed under any head word, so a refusal is left to the executor,
+ * Run one verb on the install's accessor, which outlives the line: the
+ * workspace closes it with the install. A verb never names itself: the CLI
+ * may be installed under any head word, so a refusal is left to the executor,
  * which prefixes it with the words the line was typed under.
  */
-export function run(verb: Verb): CLIVerbFn {
-  return (config, _paths, texts, ctx): Promise<CommandFnResult> => {
-    const cfg = config as AirtableConfig
-    return verb(cfg, texts, ctx, new AirtableAccessor(cfg), new FlagView(ctx.flags, ctx.spec))
-  }
+export function run(verb: Verb): CLIVerbFn<AirtableAccessor> {
+  return (accessor, _paths, texts, ctx): Promise<CommandFnResult> =>
+    verb(accessor, texts, ctx, new FlagView(ctx.flags, ctx.spec))
 }

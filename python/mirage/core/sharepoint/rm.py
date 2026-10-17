@@ -25,7 +25,5 @@ async def rm_r(accessor: SharePointAccessor, path: PathSpec) -> None:
     if resolved.drive_id is None or resolved.item_path is None:
         return
     await graph_delete(
-        accessor.config,
-        drive_loc(accessor.config, resolved, path.vfs_path).item(),
-        session=accessor.pool,
+        accessor, drive_loc(accessor.config, resolved, path.vfs_path).item()
     )

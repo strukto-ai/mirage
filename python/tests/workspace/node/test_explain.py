@@ -890,9 +890,8 @@ class _LineBox(Runtime, LineExecutorMixin):
     def __init__(self) -> None:
         self.lines: list[str] = []
 
-    async def run_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-    ) -> RunResult:
+    async def run_line(self, engine, paths, texts, ctx) -> RunResult:
+        line = ctx.flags["c"]
         self.lines.append(line)
         return RunResult(
             stdout=b"box:" + line.encode(), stderr=None, exit_code=0

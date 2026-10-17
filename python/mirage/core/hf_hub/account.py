@@ -14,20 +14,20 @@
 
 from typing import Any
 
+from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.core.hf_hub.client import hub_get
-from mirage.core.hf_hub.config import HfConfig
 from mirage.types import JsonValue
 
 
-async def whoami(config: HfConfig) -> dict[str, Any]:
-    """Who the configured token belongs to.
+async def whoami(account: HfAccountAccessor) -> dict[str, Any]:
+    """Who the account's token belongs to.
 
     Args:
-        config (HfConfig): the install's configuration.
+        account (HfAccountAccessor): the install's account.
 
     Returns:
         dict[str, Any]: the decoded /whoami-v2 object.
     """
-    url = f"{config.endpoint.rstrip('/')}/api/whoami-v2"
-    data: JsonValue = await hub_get(config.token, url)
+    url = f"{account.endpoint.rstrip('/')}/api/whoami-v2"
+    data: JsonValue = await hub_get(account, url)
     return data if isinstance(data, dict) else {}

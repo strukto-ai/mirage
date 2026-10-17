@@ -42,6 +42,7 @@ import { quoteText } from '../../quote.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
+import { dispatchOf } from '../utils/links.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 type Stat = (p: PathSpec) => Promise<FileStat>
@@ -713,7 +714,7 @@ export async function tailGeneric(
     // stat the command's freshness probe kept: they look for exactly the
     // change neither has yet.
     const first = stdinStream(backend, ctx.stdin)
-    const dispatch = ctx.dispatch
+    const dispatch = dispatchOf(ctx)
     const polled =
       dispatch === undefined
         ? { stream: first, stat, readRange }

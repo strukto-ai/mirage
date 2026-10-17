@@ -50,9 +50,9 @@ async def history_cmd(
     s = fl.as_bool("s")
     p = fl.as_bool("p")
     observer = accessor.observer
-    if ctx.session_id is None:
-        raise ValueError("history requires the caller's session id")
-    session = ctx.session_id
+    if ctx.session is None:
+        raise ValueError("history requires the caller's session")
+    session = ctx.session.session_id
     if c:
         await observer.log_clear(session=session)
     if d is not None:

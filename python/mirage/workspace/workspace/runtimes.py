@@ -14,6 +14,7 @@
 
 import asyncio
 from collections.abc import Mapping
+from typing import Any
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
@@ -50,14 +51,16 @@ class Runtimes:
     ) -> None:
         self._registry = registry
         self._binding = binding
-        self._entries: list[Runtime] = []
+        self._entries: list[Runtime[Any]] = []
         self._retiring: dict[int, asyncio.Task[None]] = {}
 
     @property
-    def entries(self) -> list[Runtime]:
+    def entries(self) -> list[Runtime[Any]]:
         return self._entries
 
-    def resolve(self, runtimes: list[Runtime | str] | None) -> list[Runtime]:
+    def resolve(
+        self, runtimes: list[Runtime[Any] | str] | None
+    ) -> list[Runtime[Any]]:
         """Build and wire the ordered entries.
 
         Name strings become no-option instances and every instance gets
@@ -73,7 +76,7 @@ class Runtimes:
             runtimes (list[Runtime | str] | None): user entries, or
                 None for the default set.
         """
-        entries: list[Runtime] = []
+        entries: list[Runtime[Any]] = []
         if runtimes is None:
             for name in DEFAULT_ENTRIES:
                 try:
@@ -100,7 +103,7 @@ class Runtimes:
         self._install(entries, bindings)
         return entries
 
-    def add(self, runtime: Runtime | str) -> Runtime:
+    def add(self, runtime: Runtime[Any] | str) -> Runtime[Any]:
         """Append an entry to the ordered list.
 
         The entry lands last, so it never steals a command an earlier
@@ -166,7 +169,7 @@ class Runtimes:
             )
 
     def _install(
-        self, entries: list[Runtime], bindings: dict[str, Runtime]
+        self, entries: list[Runtime[Any]], bindings: dict[str, Runtime[Any]]
     ) -> None:
         self._entries = entries
         self._registry.runtime_entries = entries
@@ -181,8 +184,8 @@ class Runtimes:
         )
 
     def whole_line(
-        self, decision: RouteDecision[Runtime] | None
-    ) -> LineExecutorMixin | None:
+        self, decision: RouteDecision[Runtime[Any]] | None
+    ) -> LineExecutorMixin[Any] | None:
         """The entry taking this whole line, None for the executor.
 
         An entry inheriting LineExecutorMixin takes the raw line when
@@ -198,7 +201,7 @@ class Runtimes:
             isinstance(entry, LineExecutorMixin) for entry in self._entries
         ):
             return None
-        bindings: Mapping[str, Runtime | None] = (
+        bindings: Mapping[str, Runtime[Any] | None] = (
             decision.bindings
             if decision is not None
             else self._registry.runtime_bindings
@@ -206,6 +209,6 @@ class Runtimes:
         return whole_line_runtime(bindings)
 
 
-async def _retire(entry: Runtime) -> None:
+async def _retire(entry: Runtime[Any]) -> None:
     await entry.retire()
     await entry.close()

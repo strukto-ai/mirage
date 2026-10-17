@@ -12,11 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from collections.abc import Mapping
+
+from mirage.commands.spec.types import FlagValue
 
 # The interpreter-init switches, keyed by CPython's own letter. These
 # configure the interpreter rather than selecting what it runs, so they
-# ride in RunArgs.flags and each engine answers the ones it can. `-u`
+# ride in ctx.flags and each engine answers the ones it can. `-u`
 # and `-q` are deliberately absent: mirage buffers every stream and
 # prints no banner, so they are structural no-ops in every runtime
 # rather than something one engine honors and another does not.
@@ -58,7 +60,25 @@ X_EFFECTS: frozenset[str] = frozenset(
 )
 
 
-def init_argv(flags: dict[str, Any]) -> list[str]:
+def _count(value: FlagValue | None) -> int:
+    """A counted switch's level; 0 when absent.
+
+    Args:
+        value (FlagValue | None): the switch's value.
+    """
+    return value if isinstance(value, int) else 0
+
+
+def _words(value: FlagValue | None) -> list[str]:
+    """A repeated switch's values; none when absent.
+
+    Args:
+        value (FlagValue | None): the switch's value.
+    """
+    return [str(item) for item in value] if isinstance(value, list) else []
+
+
+def init_argv(flags: Mapping[str, FlagValue]) -> list[str]:
     """CPython command-line switches for one run's interpreter flags.
 
     For the engines that spawn a real interpreter, honoring these is
@@ -67,28 +87,29 @@ def init_argv(flags: dict[str, Any]) -> list[str]:
     which CPython reads exactly as ``-OO``.
 
     Args:
-        flags (dict[str, Any]): the run's RunArgs.flags bag.
+        flags (Mapping[str, FlagValue]): the run's interpreter switches
+            (``ctx.flags``).
     """
     argv: list[str] = []
     for key in BOOL_FLAGS:
         if flags.get(key):
             argv.append(f"-{key}")
     for key in COUNT_FLAGS:
-        argv.extend([f"-{key}"] * int(flags.get(key) or 0))
+        argv.extend([f"-{key}"] * _count(flags.get(key)))
     for key in LIST_FLAGS:
-        for value in flags.get(key) or []:
+        for value in _words(flags.get(key)):
             argv.extend([f"-{key}", value])
     for key, spelling in VALUE_FLAGS.items():
-        value = flags.get(key)
-        if value:
+        setting = flags.get(key)
+        if setting:
             # CPython parses this one by hand and rejects --opt=value,
             # so it goes back as two words whatever the user typed.
-            argv.extend([spelling, str(value)])
+            argv.extend([spelling, str(setting)])
     return argv
 
 
 def unhonored(
-    flags: dict[str, Any],
+    flags: Mapping[str, FlagValue],
     honored: tuple[str, ...] = (),
 ) -> list[str]:
     """The init switches on a line that this engine did not act on.
@@ -101,7 +122,8 @@ def unhonored(
     all.
 
     Args:
-        flags (dict[str, Any]): the run's RunArgs.flags bag.
+        flags (Mapping[str, FlagValue]): the run's interpreter switches
+            (``ctx.flags``).
         honored (tuple[str, ...]): the letters this engine does act on.
     """
     present: list[str] = []
@@ -116,15 +138,15 @@ def unhonored(
     # Reported per name rather than per letter: an engine can honor what
     # -X means for sys._xoptions and still not act on the handful of
     # names CPython gives a real effect.
-    for value in flags.get("X") or []:
-        opt_name = str(value).split("=")[0]
+    for value in _words(flags.get("X")):
+        opt_name = value.split("=")[0]
         if opt_name in X_EFFECTS and f"X:{opt_name}" not in honored:
             present.append(f"-X {opt_name}")
     return present
 
 
 def unhonored_notice(
-    flags: dict[str, Any],
+    flags: Mapping[str, FlagValue],
     runtime_name: str,
     honored: tuple[str, ...] = (),
 ) -> bytes:
@@ -136,7 +158,8 @@ def unhonored_notice(
     visible instead of being found later.
 
     Args:
-        flags (dict[str, Any]): the run's RunArgs.flags bag.
+        flags (Mapping[str, FlagValue]): the run's interpreter switches
+            (``ctx.flags``).
         runtime_name (str): the engine's registry name, for the message.
         honored (tuple[str, ...]): the letters this engine does act on.
     """

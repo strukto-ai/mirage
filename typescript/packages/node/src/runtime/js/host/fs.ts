@@ -344,7 +344,8 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     this.files = new RuntimeFiles(
       workspaceBridge(async (name, path, args, kwargs) => {
         try {
-          return await ws.vfs.dispatch(name, path, args, kwargs)
+          const [value] = await ws.vfs.dispatch(name, path, args, kwargs)
+          return value
         } catch (err) {
           if (classify(err) !== null) throw err
           // An op that fails with no condition (an upstream 502 a REST

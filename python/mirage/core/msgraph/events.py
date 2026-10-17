@@ -21,14 +21,14 @@ from functools import partial
 from http import HTTPStatus
 from typing import Any
 
-from mirage.core.api.client import SessionArg
+from mirage.accessor.onedrive import OneDriveAccessor
+from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.core.msgraph.client import (
     GraphError,
     encoded_path,
     graph_get,
     id_segment,
 )
-from mirage.core.msgraph.config import MsGraphConfig
 from mirage.core.msgraph.drive import parent_id
 from mirage.events.delta import (
     changes_under,
@@ -84,18 +84,15 @@ class GraphDeltaHook:
 
     def __init__(
         self,
-        config: MsGraphConfig,
-        session: SessionArg,
+        accessor: OneDriveAccessor | SharePointAccessor,
         targets: Callable[[PathSpec], Awaitable[list[DeltaTarget]]],
     ) -> None:
         """Args:
-        config (MsGraphConfig): The account's Graph config.
-        session (SessionArg): The pool requests ride.
+        accessor (OneDriveAccessor | SharePointAccessor): The account.
         targets (Callable[[PathSpec], Awaitable[list[DeltaTarget]]]):
             The drives a delta pull on a root reads.
         """
-        self._config = config
-        self._session = session
+        self._accessor = accessor
         self._targets = targets
 
     async def pull(self, root: PathSpec, checkpoint: str | None) -> Delta:
@@ -257,7 +254,7 @@ class GraphDeltaHook:
         items: dict[str, dict[str, Any]] = {}
         url = link
         while True:
-            data = await graph_get(self._config, url, session=self._session)
+            data = await graph_get(self._accessor, url)
             for item in data.get("value", []):
                 if isinstance(item, dict) and isinstance(item.get("id"), str):
                     items.pop(item["id"], None)
@@ -273,10 +270,7 @@ class GraphDeltaHook:
             drive (str): The drive's Graph URL.
         """
         data = await graph_get(
-            self._config,
-            f"{drive}/root/delta",
-            params={"token": "latest"},
-            session=self._session,
+            self._accessor, f"{drive}/root/delta", params={"token": "latest"}
         )
         return str(data["@odata.deltaLink"])
 
@@ -296,10 +290,7 @@ class GraphDeltaHook:
         )
         try:
             data = await graph_get(
-                self._config,
-                url,
-                params={"$select": "id"},
-                session=self._session,
+                self._accessor, url, params={"$select": "id"}
             )
         except GraphError as exc:
             if exc.status != HTTPStatus.NOT_FOUND:
@@ -318,10 +309,9 @@ class GraphDeltaHook:
         """
         try:
             item = await graph_get(
-                self._config,
+                self._accessor,
                 f"{drive}/items/{id_segment(folder_id)}",
                 params={"$select": "id,name,parentReference,root"},
-                session=self._session,
             )
         except GraphError as exc:
             if exc.status != HTTPStatus.NOT_FOUND:

@@ -17,13 +17,13 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import { IOResult, materialize } from '@struktoai/mirage-core/io/types'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import type { EmailConfig } from '../../../../core/email/config.ts'
+import type { EmailAccessor } from '../../../../accessor/email.ts'
 import { deliver } from './deliver.ts'
 
 const ENC = new TextEncoder()
 
 export async function send(
-  config: unknown,
+  accessor: EmailAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -42,7 +42,7 @@ export async function send(
     throw new Error('no message provided: pass it as an argument or pipe it via standard input')
   }
   const fl = new FlagView(ctx.flags)
-  const { parsed, warning } = await deliver(config as EmailConfig, raw, fl.asStr('save') ?? null)
+  const { parsed, warning } = await deliver(accessor, raw, fl.asStr('save') ?? null)
   const result = {
     status: 'sent',
     to: parsed.to

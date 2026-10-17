@@ -13,13 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { CommandSpec } from '../commands/spec/types.ts'
 import { CLIHandler } from '../commands/cli/types.ts'
+import type { Context } from '../commands/config.ts'
 
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { DEFAULT_COMMAND_LIMITS } from '../policy/builtin/output_cap.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
-import type { RunArgs, RunResult } from '../runtime/types.ts'
+import type { Program, RunResult } from '../runtime/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { Limit, MountMode } from '../types.ts'
@@ -36,9 +37,9 @@ class SignalProbeRuntime extends LanguageRuntime {
     super({ captures: ['python3', 'python'] })
   }
 
-  run(args: RunArgs): Promise<RunResult> {
+  interpret(_engine: unknown, _program: Program, ctx: Context): Promise<RunResult> {
     return new Promise((resolve) => {
-      args.signal?.addEventListener('abort', () => {
+      ctx.signal?.addEventListener('abort', () => {
         this.aborted = true
         resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 1 })
       })

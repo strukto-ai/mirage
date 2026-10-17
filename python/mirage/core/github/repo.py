@@ -17,14 +17,12 @@ from dataclasses import dataclass
 from typing import Any, cast
 from urllib.parse import urlsplit
 
-from mirage.accessor.github import GitHubAccessor
-from mirage.core.api.client import SessionArg
+from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.core.github.client import (
     GitHubApiError,
     github_get,
     github_request,
 )
-from mirage.core.github.config import GhConfig, GitHubConfig
 from mirage.core.github.constants import GRAPHQL_PATH
 from mirage.core.github.paginate import github_pages
 from mirage.types import JsonValue
@@ -37,15 +35,10 @@ class RepoRef:
 
 
 async def fetch_default_branch(
-    config: GitHubConfig, owner: str, repo: str, session: SessionArg = None
+    account: GitHubAccount, owner: str, repo: str
 ) -> str:
     data = await github_get(
-        config.token,
-        "/repos/{owner}/{repo}",
-        base_url=config.base_url,
-        owner=owner,
-        repo=repo,
-        session=session,
+        account, "/repos/{owner}/{repo}", owner=owner, repo=repo
     )
     return data["default_branch"]
 
@@ -71,7 +64,7 @@ async def ensure_default_branch(
     async with accessor.branch_lock:
         if accessor.default_branch is None:
             accessor.default_branch = await fetch_default_branch(
-                accessor.config, accessor.owner, accessor.repo, accessor.pool
+                accessor.account, accessor.owner, accessor.repo
             )
         return accessor.default_branch
 
@@ -203,33 +196,28 @@ def parse_repo(spec: str) -> RepoRef:
     return RepoRef(owner=parts[-2], repo=parts[-1])
 
 
-async def login(config: GhConfig) -> str:
+async def login(account: GitHubAccount) -> str:
     """The authenticated account's login name.
 
     Args:
-        config (GhConfig): the install's configuration.
+        account (GitHubAccount): the token, API base and pool to ride.
 
     Returns:
         str: the login, empty when the account reports none.
     """
-    me = await github_request(
-        config.token, "GET", "/user", base_url=config.base_url
-    )
+    me = await github_request(account, "GET", "/user")
     name = me.get("login") if isinstance(me, dict) else None
     return name if isinstance(name, str) else ""
 
 
-async def view_repo(config: GhConfig, ref: RepoRef) -> JsonValue:
+async def view_repo(account: GitHubAccount, ref: RepoRef) -> JsonValue:
     return await github_request(
-        config.token,
-        "GET",
-        f"/repos/{ref.owner}/{ref.repo}",
-        base_url=config.base_url,
+        account, "GET", f"/repos/{ref.owner}/{ref.repo}"
     )
 
 
 async def graphql_data(
-    config: GhConfig, query: str, variables: dict[str, JsonValue]
+    account: GitHubAccount, query: str, variables: dict[str, JsonValue]
 ) -> dict[str, Any]:
     """Run one GraphQL query and return its data, refusing the way gh does.
 
@@ -238,16 +226,12 @@ async def graphql_data(
     name 'o/r'. (repository)``.
 
     Args:
-        config (GhConfig): the install's configuration.
+        account (GitHubAccount): the token, API base and pool to ride.
         query (str): the GraphQL document.
         variables (dict[str, JsonValue]): its variables.
     """
     response = await github_request(
-        config.token,
-        "POST",
-        GRAPHQL_PATH,
-        {"query": query, "variables": variables},
-        base_url=config.base_url,
+        account, "POST", GRAPHQL_PATH, {"query": query, "variables": variables}
     )
     payload = (
         cast(dict[str, Any], response) if isinstance(response, dict) else {}
@@ -265,19 +249,19 @@ async def graphql_data(
 
 
 async def repository_fields(
-    config: GhConfig, ref: RepoRef, selection: str
+    account: GitHubAccount, ref: RepoRef, selection: str
 ) -> dict[str, Any]:
     """The selected fields of one repository, over GraphQL, as gh reads
     them for ``repo view --json``: one query naming only what was asked
     for.
 
     Args:
-        config (GhConfig): the install's configuration.
+        account (GitHubAccount): the token, API base and pool to ride.
         ref (RepoRef): the repository.
         selection (str): the GraphQL selection inside ``repository { }``.
     """
     data = await graphql_data(
-        config,
+        account,
         "query RepositoryInfo($owner: String!, $name: String!) {\n"
         f"    repository(owner: $owner, name: $name) {{{selection}}}\n  }}",
         {"owner": ref.owner, "name": ref.repo},
@@ -287,7 +271,7 @@ async def repository_fields(
 
 
 async def list_repository_fields(
-    config: GhConfig, owner: str | None, limit: int, selection: str
+    account: GitHubAccount, owner: str | None, limit: int, selection: str
 ) -> list[dict[str, Any]]:
     """The selected fields of an owner's repositories, over GraphQL, as gh
     reads them for ``repo list --json``: the owner's own, most recently
@@ -295,7 +279,7 @@ async def list_repository_fields(
     means the viewer.
 
     Args:
-        config (GhConfig): the install's configuration.
+        account (GitHubAccount): the token, API base and pool to ride.
         owner (str | None): the user or organization, or the viewer.
         limit (int): how many repositories at most.
         selection (str): the GraphQL selection for each repository.
@@ -328,7 +312,7 @@ async def list_repository_fields(
             variables["owner"] = owner
         if cursor is not None:
             variables["endCursor"] = cursor
-        data = await graphql_data(config, query, variables)
+        data = await graphql_data(account, query, variables)
         owner_node = data.get("repositoryOwner") or {}
         page = owner_node.get("repositories") or {}
         rows.extend(page.get("nodes") or [])
@@ -340,11 +324,11 @@ async def list_repository_fields(
     return rows[:limit]
 
 
-async def read_readme(config: GhConfig, ref: RepoRef) -> str | None:
+async def read_readme(account: GitHubAccount, ref: RepoRef) -> str | None:
     """The repository's README as text, or None when it has none.
 
     Args:
-        config (GhConfig): the install's configuration.
+        account (GitHubAccount): the token, API base and pool to ride.
         ref (RepoRef): the repository.
 
     Returns:
@@ -352,10 +336,7 @@ async def read_readme(config: GhConfig, ref: RepoRef) -> str | None:
     """
     try:
         data = await github_request(
-            config.token,
-            "GET",
-            f"/repos/{ref.owner}/{ref.repo}/readme",
-            base_url=config.base_url,
+            account, "GET", f"/repos/{ref.owner}/{ref.repo}/readme"
         )
     except GitHubApiError as exc:
         if exc.status == 404:
@@ -370,56 +351,47 @@ async def read_readme(config: GhConfig, ref: RepoRef) -> str | None:
 
 
 async def fork_repo(
-    config: GhConfig, ref: RepoRef, body: dict[str, JsonValue] | None = None
+    account: GitHubAccount,
+    ref: RepoRef,
+    body: dict[str, JsonValue] | None = None,
 ) -> JsonValue:
     """Fork a repository.
 
     Args:
-        config (GhConfig): the install.
+        account (GitHubAccount): the token, API base and pool to ride.
         ref (RepoRef): the repository to fork.
         body (dict[str, JsonValue] | None): the request's ``name``,
             ``organization`` and ``default_branch_only``.
     """
     return await github_request(
-        config.token,
-        "POST",
-        f"/repos/{ref.owner}/{ref.repo}/forks",
-        body or {},
-        base_url=config.base_url,
+        account, "POST", f"/repos/{ref.owner}/{ref.repo}/forks", body or {}
     )
 
 
 async def edit_repo(
-    config: GhConfig, ref: RepoRef, body: dict[str, JsonValue]
+    account: GitHubAccount, ref: RepoRef, body: dict[str, JsonValue]
 ) -> JsonValue:
     """Change a repository's settings: the one PATCH ``gh repo edit`` sends.
 
     Args:
-        config (GhConfig): the install's configuration.
+        account (GitHubAccount): the token, API base and pool to ride.
         ref (RepoRef): the repository.
         body (dict[str, JsonValue]): the settings to change.
     """
     return await github_request(
-        config.token,
-        "PATCH",
-        f"/repos/{ref.owner}/{ref.repo}",
-        body,
-        base_url=config.base_url,
+        account, "PATCH", f"/repos/{ref.owner}/{ref.repo}", body
     )
 
 
-async def repo_topics(config: GhConfig, ref: RepoRef) -> list[str]:
+async def repo_topics(account: GitHubAccount, ref: RepoRef) -> list[str]:
     """A repository's topics, which GitHub keeps and replaces as one list.
 
     Args:
-        config (GhConfig): the install's configuration.
+        account (GitHubAccount): the token, API base and pool to ride.
         ref (RepoRef): the repository.
     """
     data = await github_request(
-        config.token,
-        "GET",
-        f"/repos/{ref.owner}/{ref.repo}/topics",
-        base_url=config.base_url,
+        account, "GET", f"/repos/{ref.owner}/{ref.repo}/topics"
     )
     names = data.get("names") if isinstance(data, dict) else None
     return (
@@ -430,59 +402,49 @@ async def repo_topics(config: GhConfig, ref: RepoRef) -> list[str]:
 
 
 async def set_repo_topics(
-    config: GhConfig, ref: RepoRef, names: list[str]
+    account: GitHubAccount, ref: RepoRef, names: list[str]
 ) -> JsonValue:
     return await github_request(
-        config.token,
+        account,
         "PUT",
         f"/repos/{ref.owner}/{ref.repo}/topics",
         {"names": cast(JsonValue, names)},
-        base_url=config.base_url,
     )
 
 
-async def delete_repo(config: GhConfig, ref: RepoRef) -> JsonValue:
+async def delete_repo(account: GitHubAccount, ref: RepoRef) -> JsonValue:
     return await github_request(
-        config.token,
-        "DELETE",
-        f"/repos/{ref.owner}/{ref.repo}",
-        base_url=config.base_url,
+        account, "DELETE", f"/repos/{ref.owner}/{ref.repo}"
     )
 
 
-async def rename_repo(config: GhConfig, ref: RepoRef, name: str) -> JsonValue:
+async def rename_repo(
+    account: GitHubAccount, ref: RepoRef, name: str
+) -> JsonValue:
     return await github_request(
-        config.token,
-        "PATCH",
-        f"/repos/{ref.owner}/{ref.repo}",
-        {"name": name},
-        base_url=config.base_url,
+        account, "PATCH", f"/repos/{ref.owner}/{ref.repo}", {"name": name}
     )
 
 
 async def list_repos(
-    config: GhConfig, owner: str | None, limit: int
+    account: GitHubAccount, owner: str | None, limit: int
 ) -> list[dict[str, Any]]:
     path = "/user/repos"
     if owner is not None:
-        account = await github_request(
-            config.token, "GET", f"/users/{owner}", base_url=config.base_url
-        )
-        kind = account.get("type") if isinstance(account, dict) else None
+        user = await github_request(account, "GET", f"/users/{owner}")
+        kind = user.get("type") if isinstance(user, dict) else None
         prefix = "orgs" if kind == "Organization" else "users"
         path = f"/{prefix}/{owner}/repos"
     return await github_pages(
-        config, path, params={"sort": "pushed"}, limit=limit
+        account, path, params={"sort": "pushed"}, limit=limit
     )
 
 
 async def create_repo(
-    config: GhConfig, owner: str | None, body: dict[str, JsonValue]
+    account: GitHubAccount, owner: str | None, body: dict[str, JsonValue]
 ) -> JsonValue:
     personal = owner is None
     if owner is not None:
-        personal = owner.casefold() == (await login(config)).casefold()
+        personal = owner.casefold() == (await login(account)).casefold()
     path = "/user/repos" if personal else f"/orgs/{owner}/repos"
-    return await github_request(
-        config.token, "POST", path, body, base_url=config.base_url
-    )
+    return await github_request(account, "POST", path, body)

@@ -12,15 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.notion import NotionAccessor
 from mirage.commands.cli.builtin.ntn.util import (
     content_or_stdin,
     first_text,
-    notion_config,
+    notion_transport,
     pretty_json,
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.pages import replace_page_markdown
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -28,7 +28,10 @@ from mirage.types import PathSpec
 
 
 async def edit(
-    config: NotionConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: NotionAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     page_id = first_text(texts, "page id")
@@ -37,7 +40,7 @@ async def edit(
     # `--json` is for; printing the id under it would throw the response
     # away on the one flag that asks for it.
     edited = await replace_page_markdown(
-        notion_config(config, ctx), page_id, markdown
+        notion_transport(accessor, ctx), page_id, markdown
     )
     if fl.as_bool("json"):
         return yield_bytes(pretty_json(edited)), IOResult()

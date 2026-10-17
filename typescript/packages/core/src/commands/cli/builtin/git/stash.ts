@@ -1,4 +1,5 @@
 import git from 'isomorphic-git'
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
@@ -14,7 +15,7 @@ import { fatal } from './util.ts'
 
 /** Read the same newest-first stash reflog that real Git writes. */
 export async function stashList(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -39,7 +40,7 @@ export async function stashList(
 
 /** Compare the saved working tree with the stash's first parent, never current HEAD. */
 export async function stashShow(
-  config: unknown,
+  accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -83,7 +84,7 @@ export async function stashShow(
       )
     )
       flags.stat = true
-    return await diff(config, paths, [parent, oid], { ...ctx, flags })
+    return await diff(accessor, paths, [parent, oid], { ...ctx, flags })
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
     throw err

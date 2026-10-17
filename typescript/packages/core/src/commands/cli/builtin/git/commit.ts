@@ -14,6 +14,7 @@
 
 import git from 'isomorphic-git'
 
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { isEexist } from '../../../../errors/fs.ts'
 import type { SessionView } from '../../../../view/types.ts'
@@ -205,7 +206,7 @@ async function buildCommit(
  * writes no merge commits, so an unmerged index is refused with or without `-a`.
  */
 export async function commit(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

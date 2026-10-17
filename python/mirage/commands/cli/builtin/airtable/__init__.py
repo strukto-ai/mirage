@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.airtable import AirtableAccessor
 from mirage.commands.cli.builtin.airtable import reads, writes
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import Argument, CommandSpec
@@ -204,4 +205,5 @@ AIRTABLE = CLI(
         "comment add": CLIHandler(fn=writes.comment_add, write=True),
     },
     config_model=AirtableConfig,
+    accessor=AirtableAccessor,
 )

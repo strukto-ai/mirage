@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Accessor } from '../../accessor/base.ts'
 import type { CLI } from '../../commands/cli/types.ts'
 
 /**
@@ -21,10 +22,11 @@ import type { CLI } from '../../commands/cli/types.ts'
  * installations of the same spec under different names (two accounts)
  * are two independent entries whose help and errors attribute to their
  * installed head. `config` is the installation's validated configModel
- * output, handed to every leaf fn; null when the spec declares none.
+ * output, null when the spec declares none; every leaf fn gets `accessor`.
  */
 export interface CLIInstall {
   readonly name: string
   readonly cli: CLI
   readonly config: unknown
+  readonly accessor: Accessor
 }

@@ -14,67 +14,48 @@
 
 from typing import Any
 
-from mirage.core.api.client import SessionArg
+from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.client import slack_get, slack_post
-from mirage.core.slack.config import SlackConfig
 
 
 async def add_reaction(
-    config: SlackConfig,
-    channel_id: str,
-    timestamp: str,
-    reaction: str,
-    session: SessionArg = None,
+    accessor: SlackAccessor, channel_id: str, timestamp: str, reaction: str
 ) -> dict[str, Any]:
     """Add a reaction to a message.
 
     Args:
-        config (SlackConfig): Slack credentials.
+        accessor (SlackAccessor): Slack accessor.
         channel_id (str): channel ID.
         timestamp (str): message ts.
         reaction (str): emoji name (without colons).
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         dict: API response.
     """
     return await slack_post(
-        config,
+        accessor,
         "reactions.add",
-        {
-            "channel": channel_id,
-            "timestamp": timestamp,
-            "name": reaction,
-        },
-        session=session,
+        {"channel": channel_id, "timestamp": timestamp, "name": reaction},
     )
 
 
 async def get_reactions(
-    config: SlackConfig,
-    channel_id: str,
-    timestamp: str,
-    session: SessionArg = None,
+    accessor: SlackAccessor, channel_id: str, timestamp: str
 ) -> dict[str, Any]:
     """Get the reactions on a message.
 
     Args:
-        config (SlackConfig): Slack credentials.
+        accessor (SlackAccessor): Slack accessor.
         channel_id (str): channel ID.
         timestamp (str): message ts.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         dict: the message item with its reactions array.
     """
     data = await slack_get(
-        config,
+        accessor,
         "reactions.get",
-        {
-            "channel": channel_id,
-            "timestamp": timestamp,
-        },
-        session=session,
+        {"channel": channel_id, "timestamp": timestamp},
     )
     message = data.get("message")
     return message if isinstance(message, dict) else {}

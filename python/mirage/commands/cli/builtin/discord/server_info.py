@@ -14,24 +14,24 @@
 
 import json
 
+from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.discord.client import discord_get
-from mirage.core.discord.config import DiscordConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def server_info(
-    config: DiscordConfig,
+    accessor: DiscordAccessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     guild = fl.as_str("guild") or ""
-    result = await discord_get(config, f"/guilds/{guild}")
+    result = await discord_get(accessor, f"/guilds/{guild}")
     out = json.dumps(
         result, ensure_ascii=False, separators=(",", ":")
     ).encode()

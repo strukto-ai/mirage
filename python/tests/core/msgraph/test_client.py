@@ -2,6 +2,7 @@ import pytest
 from aioresponses import aioresponses
 from yarl import URL
 
+from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.core.msgraph.client import (
     GraphError,
     _retry_after,
@@ -19,8 +20,8 @@ from mirage.core.msgraph.config import MsGraphConfig
 _ROOT = "https://graph.microsoft.com/v1.0/me/drive/root"
 
 
-def _cfg(**kw) -> MsGraphConfig:
-    return MsGraphConfig(access_token="tok", **kw)
+def _accessor(**kw) -> OneDriveAccessor:
+    return OneDriveAccessor(OneDriveConfig(access_token="tok", **kw))
 
 
 @pytest.mark.parametrize(
@@ -86,7 +87,7 @@ def test_headers_carry_the_bearer_token(token, expected):
 async def test_graph_get_returns_parsed_json():
     with aioresponses() as m:
         m.get(_ROOT, payload={"id": "01ABC", "name": "root"})
-        result = await graph_get(_cfg(), _ROOT)
+        result = await graph_get(_accessor(), _ROOT)
     assert result["id"] == "01ABC"
 
 
@@ -99,7 +100,7 @@ async def test_graph_get_raises_grapherror_with_status():
             payload={"error": {"code": "itemNotFound", "message": "nope"}},
         )
         with pytest.raises(GraphError) as exc:
-            await graph_get(_cfg(), _ROOT)
+            await graph_get(_accessor(), _ROOT)
     assert exc.value.status == 404
     assert exc.value.code == "itemNotFound"
 
@@ -110,7 +111,7 @@ async def test_graph_post_monitor_requires_location_header():
     with aioresponses() as m:
         m.post(url, status=202, payload={})
         with pytest.raises(GraphError) as exc:
-            await graph_post_monitor(_cfg(), url)
+            await graph_post_monitor(_accessor(), url)
     assert exc.value.code == "missingMonitor"
 
 
@@ -123,7 +124,7 @@ async def test_graph_list_follows_odata_nextlink():
             payload={"value": [{"id": "a"}], "@odata.nextLink": page2},
         )
         m.get(page2, payload={"value": [{"id": "b"}]})
-        items = await graph_list(_cfg(), _ROOT + "/children")
+        items = await graph_list(_accessor(), _ROOT + "/children")
     assert [i["id"] for i in items] == ["a", "b"]
 
 
@@ -132,7 +133,7 @@ async def test_graph_get_bytes_returns_raw_content():
     url = _ROOT + ":/a.txt:/content"
     with aioresponses() as m:
         m.get(url, body=b"hello bytes")
-        data = await graph_get_bytes(_cfg(), url)
+        data = await graph_get_bytes(_accessor(), url)
     assert data == b"hello bytes"
 
 
@@ -141,7 +142,7 @@ async def test_request_retries_on_429_then_succeeds():
     with aioresponses() as m:
         m.get(_ROOT, status=429, headers={"Retry-After": "0"})
         m.get(_ROOT, payload={"id": "ok"})
-        result = await graph_get(_cfg(), _ROOT)
+        result = await graph_get(_accessor(), _ROOT)
     assert result["id"] == "ok"
 
 
@@ -151,7 +152,7 @@ async def test_request_gives_up_after_max_retries():
         for _ in range(3):
             m.get(_ROOT, status=429, headers={"Retry-After": "0"})
         with pytest.raises(GraphError) as exc:
-            await graph_get(_cfg(max_retries=2), _ROOT)
+            await graph_get(_accessor(max_retries=2), _ROOT)
     assert exc.value.status == 429
 
 
@@ -170,7 +171,8 @@ async def test_401_refreshes_callable_token_once_then_succeeds():
             payload={"error": {"code": "InvalidAuthenticationToken"}},
         )
         m.get(_ROOT, payload={"id": "ok"})
-        result = await graph_get(MsGraphConfig(access_token=provider), _ROOT)
+        accessor = OneDriveAccessor(OneDriveConfig(access_token=provider))
+        result = await graph_get(accessor, _ROOT)
     assert result["id"] == "ok"
     assert calls["n"] == 2
 
@@ -180,7 +182,7 @@ async def test_401_with_static_token_does_not_retry():
     with aioresponses() as m:
         m.get(_ROOT, status=401, payload={"error": {"code": "x"}})
         with pytest.raises(GraphError) as exc:
-            await graph_get(_cfg(), _ROOT)
+            await graph_get(_accessor(), _ROOT)
     assert exc.value.status == 401
 
 
@@ -206,7 +208,9 @@ async def test_graph_batch_sends_relative_urls_and_answers_in_order():
                 ]
             },
         )
-        answers = await graph_batch(_cfg(graph_base_url=api), urls + [urls[0]])
+        answers = await graph_batch(
+            _accessor(graph_base_url=api), urls + [urls[0]]
+        )
         sent = m.requests[("POST", URL(f"{api}/$batch"))][0].kwargs["json"]
     assert sent == {
         "requests": [

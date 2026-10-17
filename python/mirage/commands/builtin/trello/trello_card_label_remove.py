@@ -42,7 +42,6 @@ async def trello_card_label_remove(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags, spec=SPEC)
-    config = accessor.config
     card_id = fl.as_str("card_id")
     if not card_id:
         raise ValueError("--card_id is required")
@@ -54,7 +53,7 @@ async def trello_card_label_remove(
     require_mount_writable()
     await require_card(accessor, card_id)
     card = await card_remove_label(
-        config, card_id=card_id, label_id=label_id, session=accessor.pool
+        accessor, card_id=card_id, label_id=label_id
     )
     return yield_bytes(
         json.dumps(

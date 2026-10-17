@@ -18,6 +18,7 @@ import { tmpdir, userInfo } from 'node:os'
 import type * as Os from 'node:os'
 import { join } from 'node:path'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
+import { PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it, vi } from 'vitest'
 import { SSHRuntime } from './runtime.ts'
 import type { Ssh2Sdk } from './sdk.ts'
@@ -247,13 +248,14 @@ describe('SSHRuntime cancellation', () => {
 
 it('reconnects after the previous client closes', async () => {
   const runtime = new SdkFakeRuntime({ config: { host: 'box' } })
-  await runtime.runLine('true', null, {}, '/')
+  const ctx = { stdin: null, flags: { c: 'true' }, cwd: PathSpec.fromStrPath('/') }
+  await runtime.runLine(undefined, [], [], ctx)
   const first = made.at(-1)
   if (first === undefined) throw new Error('no SSH client')
-  await runtime.runLine('true', null, {}, '/')
+  await runtime.runLine(undefined, [], [], ctx)
   expect(made.at(-1)).toBe(first)
   first.end()
-  await runtime.runLine('true', null, {}, '/')
+  await runtime.runLine(undefined, [], [], ctx)
   expect(made.at(-1)).not.toBe(first)
   await runtime.close()
 })

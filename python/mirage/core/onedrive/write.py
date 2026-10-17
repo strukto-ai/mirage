@@ -24,12 +24,7 @@ async def write(
     accessor: OneDriveAccessor, path: PathSpec, data: bytes
 ) -> None:
     timer = start_op()
-    await write_item(
-        accessor.config,
-        drive_loc(accessor.config, path.vfs_path),
-        data,
-        session=accessor.pool,
-    )
+    await write_item(accessor, drive_loc(accessor.config, path.vfs_path), data)
     record("write", path.virtual, "onedrive", len(data), timer)
 
 
@@ -38,9 +33,6 @@ async def write_stream(
 ) -> None:
     timer = start_op()
     size = await write_item_stream(
-        accessor.config,
-        drive_loc(accessor.config, path.vfs_path),
-        data,
-        session=accessor.pool,
+        accessor, drive_loc(accessor.config, path.vfs_path), data
     )
     record("write", path.virtual, "onedrive", size, timer)

@@ -95,19 +95,22 @@ same PR.
   field only when POSIX and argparse both already have the concept, named
   after theirs. The same grammar describes built-ins and CLI trees.
 - **CLIs (`CLI`)** are the agent's tools, dispatched by name. An account
-  CLI declares a `config_model` and consults no mount; `git` declares none
-  and reads its repository through `ctx.vfs`. `register_cli` is host-side
-  only; there is no install builtin. A CLI that mimics a real program is
-  gated against that program (`integ/ntn_conformance.ts`).
+  CLI declares a `config_model` and an `accessor` (its service client, built
+  once per install) and consults no mount; `git` declares neither, gets a
+  `NOOPAccessor` and reads its repository through `ctx.vfs`. `register_cli`
+  is host-side only; there is no install builtin. A CLI that mimics a real
+  program is gated against that program (`integ/ntn_conformance.ts`).
 - **Mount configs** are one snake_case block with one config loader per
   language, `build_vfs` and `buildVfs` (`parseConfigWithSchema`). Field sets
   are gated by live VFS manifests and `integ/config/`.
 - **YAML keys**, the `mirage` CLI output, the server API and the agent
   adapters are public. A TypeScript API change gets a changeset.
-- **Handlers** take `(accessor, paths, texts, ctx)`; a CLI leaf takes
-  `(config, paths, texts, ctx)`, the same `Context`. Read flags through a
-  spec-bound `FlagView`, never raw. Generics own flag interpretation and parse
-  once into a frozen struct; backend wrappers are wiring only.
+- **Handlers** take `(accessor, paths, texts, ctx)`; a CLI leaf takes the
+  same, with its install's accessor, and a runtime
+  `(engine, paths, texts, ctx)`: one `Context`, files only at `ctx.vfs`.
+  Read flags through a spec-bound `FlagView`, never raw. Generics own flag
+  interpretation and parse once into a frozen struct; backend wrappers are
+  wiring only.
 
 ## Design
 
@@ -174,10 +177,11 @@ parser, before classification.
 
 `commands/cli/`: a `CLI` binds a `CommandSpec` tree to `CLIHandler` entries
 keyed by canonical leaf path, plus account config or script/runtime settings.
-A `CLIInstall` supplies the installed name and validated account. A leaf is
-`fn(config, paths, texts, ctx)` with the `Context` commands and runtimes get;
-`ctx.vfs` (the session's `Files`) is the only way to a mount, `ctx.session`
-the live session. `man`, `--help`, `type -t` and
+A `CLIInstall` supplies the installed name, validated account and the
+accessor `CLI.accessor` built from it (closed when the install goes). A leaf
+is `fn(accessor, paths, texts, ctx)` with the `Context` commands and runtimes
+get; `ctx.vfs` (the session's `Files`) is the only way to a mount,
+`ctx.session` the live session. `man`, `--help`, `type -t` and
 `which` derive from the spec. `ntn` is the worked example (CLAP voice, a
 serde_json-faithful scanner, exit 1 for a bad body and 5 for a bad line).
 
@@ -191,11 +195,16 @@ builtins `mount_root`, `output_cap`, `permissions`. `observe/`: a hidden
 
 ### Runtimes
 
-`runtime/`: `Runtime`, `RuntimeConfig`, `EvaluatorMixin`, reach
-`workspace | process | remote`. `WorkspaceRuntime` (default) runs inside
-mirage; `MontyRuntime` and wasm run in-process; `SSHRuntime` and
-`DaytonaRuntime` run remote. `RuntimeVFS` bridges a guest's file ops back to
-the dispatcher.
+`runtime/`: `Runtime`, `RuntimeConfig`, reach
+`workspace | process | remote`. A runtime is generic over its engine
+(`open_engine`, once per install) and runs
+`execute(paths, texts, ctx, kind=)`: code in its language
+(`LanguageRuntime.run` resolves the program, `interpret` runs it), a whole
+line (`run_line`, `sh -c` with `ctx.flags["c"]`) or a process (`run_process`,
+argv in `texts`). `WorkspaceRuntime` (default) runs inside mirage;
+`MontyRuntime` and wasm run in-process; `SSHRuntime` and `DaytonaRuntime` run
+remote. `RuntimeFiles` bridges a guest's file ops back to the dispatcher
+through `ctx.vfs`.
 
 ### FUSE and FSKit
 

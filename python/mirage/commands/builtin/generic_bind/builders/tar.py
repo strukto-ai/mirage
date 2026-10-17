@@ -30,6 +30,7 @@ from mirage.commands.builtin.generic_bind.archive_io import (
     relay_is_dir_of,
     walk_of,
 )
+from mirage.commands.builtin.utils.links import dispatch_of
 from mirage.commands.config import CommandIO, Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -48,12 +49,12 @@ async def tar(
         raise ValueError("tar: missing operand")
     resolved = await ops.resolve_glob(accessor, paths, ctx.index)
     fl = FlagView(ctx.flags, spec=SPECS["tar"])
-    if ctx.dispatch is not None and not fl.as_bool("create"):
+    if ctx.vfs is not None and not fl.as_bool("create"):
         # -t reads and -x writes wherever cwd or -C says, which needs
         # not be this mount, so both run on dispatch-relayed calls and
         # each path routes to the mount that owns it. Only -c stays on
         # the accessor: its planner walks this mount's tree.
-        prim = transfer_primitives(ctx.dispatch)
+        prim = transfer_primitives(ctx.vfs.dispatch)
         return await tar_generic(
             resolved,
             list(texts),
@@ -62,14 +63,14 @@ async def tar(
             prim["write"],
             prim["mkdir"],
             prim["stat"],
-            walk_of(ops, accessor, ctx.index, ctx.dispatch, "tar"),
-            relay_is_dir_of(ctx.dispatch),
+            walk_of(ops, accessor, ctx.index, ctx.vfs.dispatch, "tar"),
+            relay_is_dir_of(ctx.vfs.dispatch),
             relay=True,
         )
     # Archive output follows links even when the member scan preserves them.
     archive_write = (
-        transfer_primitives(ctx.dispatch)["write"]
-        if ctx.dispatch is not None
+        transfer_primitives(ctx.vfs.dispatch)["write"]
+        if ctx.vfs is not None
         else partial(require_op(ops, Operation.WRITE), accessor)
     )
     return await tar_generic(
@@ -80,7 +81,7 @@ async def tar(
         archive_write,
         partial(require_op(ops, Operation.MKDIR), accessor),
         bound_op(ops.stat, accessor, ctx.index),
-        walk_of(ops, accessor, ctx.index, ctx.dispatch, "tar"),
+        walk_of(ops, accessor, ctx.index, dispatch_of(ctx), "tar"),
         is_dir_of(ops, accessor, ctx.index),
     )
 

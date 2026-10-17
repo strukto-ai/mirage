@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { startPoint, checkSwitches, configSection, fatal, verbUsage } from './util.ts'
 import { PathSpec, FileType } from '../../../../types.ts'
 
@@ -90,7 +91,7 @@ export function remoteHead(
  * config.
  */
 export async function clone(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

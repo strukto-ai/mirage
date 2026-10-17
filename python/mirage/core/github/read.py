@@ -16,28 +16,17 @@ import base64
 from collections.abc import AsyncIterator
 from contextlib import aclosing
 
-from mirage.accessor.github import GitHubAccessor
-from mirage.core.api.client import SessionArg
+from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.core.github.client import blob_path, github_get, stream_blob
-from mirage.core.github.config import GitHubConfig
 from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record, record_stream, start_op
 from mirage.types import FileStat, FileType, PathSpec, VFSName
 
 
 async def read_bytes(
-    config: GitHubConfig,
-    owner: str,
-    repo: str,
-    sha: str,
-    session: SessionArg = None,
+    account: GitHubAccount, owner: str, repo: str, sha: str
 ) -> bytes:
-    data = await github_get(
-        config.token,
-        blob_path(owner, repo, sha),
-        base_url=config.base_url,
-        session=session,
-    )
+    data = await github_get(account, blob_path(owner, repo, sha))
     return base64.b64decode(data["content"])
 
 
@@ -70,7 +59,7 @@ async def read(
     sha = _blob_sha(path_spec, entry)
     timer = start_op()
     data = await read_bytes(
-        accessor.config, accessor.owner, accessor.repo, sha, accessor.pool
+        accessor.account, accessor.owner, accessor.repo, sha
     )
     record(
         "read",
@@ -109,13 +98,7 @@ async def read_stream(
         "read", path_spec.virtual, VFSName.GITHUB, fingerprint=sha
     )
     async with aclosing(
-        stream_blob(
-            accessor.config,
-            accessor.owner,
-            accessor.repo,
-            sha,
-            accessor.pool,
-        )
+        stream_blob(accessor.account, accessor.owner, accessor.repo, sha)
     ) as source:
         async for chunk in source:
             if rec is not None:

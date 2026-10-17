@@ -16,8 +16,8 @@ import json
 
 import pytest
 
+from mirage.commands.config import Context
 from mirage.runtime.sandbox.smolvm import SmolvmRuntime
-from mirage.runtime.types import ProcessExecution, ShellRequest
 from mirage.types import PathSpec
 
 
@@ -126,14 +126,9 @@ async def test_process_preserves_argv_and_shares_the_shell_connection():
         config={"machine": "vm", "env": {"E": "config"}}
     )
     argv = ("node", "a b", "$(echo literal)", "", "--flag")
-    result = await runtime.execute(
-        ProcessExecution(
-            argv=argv,
-            cwd=PathSpec.from_str_path("/work"),
-            env={"E": "request"},
-            stdin=b"input",
-        )
-    )
+    work = PathSpec.from_str_path("/work")
+    ctx = Context(cwd=work, env={"E": "request"}, stdin=b"input")
+    result = await runtime.execute([], list(argv), ctx, kind="process")
     assert result.stdout == b"out:--flag"
     assert result.stderr == b"warn"
     assert runtime.calls[-1] == (
@@ -152,9 +147,8 @@ async def test_process_preserves_argv_and_shares_the_shell_connection():
         ],
         b"input",
     )
-    await runtime.execute(
-        ShellRequest(line="pwd", cwd=PathSpec.from_str_path("/work"))
-    )
+    line = Context(flags={"c": "pwd"}, cwd=work)
+    await runtime.execute([], [], line, kind="line")
     assert sum(args[1] == "status" for args, _ in runtime.calls) == 1
     assert runtime.capabilities.process and runtime.capabilities.shell
     assert runtime.capabilities.filesystem == ()
@@ -164,12 +158,8 @@ async def test_process_preserves_argv_and_shares_the_shell_connection():
 async def test_process_refuses_a_stopped_vm_and_empty_argv():
     runtime = FakeSmolvmRuntime(state="stopped", config={"machine": "vm"})
     with pytest.raises(ValueError, match="argv must not be empty"):
-        await runtime.execute(
-            ProcessExecution(argv=(), cwd=PathSpec.from_str_path("/"))
-        )
+        await runtime.execute([], [], Context(), kind="process")
     assert not runtime.calls
     with pytest.raises(RuntimeError, match="not running"):
-        await runtime.execute(
-            ProcessExecution(argv=("node",), cwd=PathSpec.from_str_path("/"))
-        )
+        await runtime.execute([], ["node"], Context(), kind="process")
     assert len(runtime.calls) == 1

@@ -3,7 +3,7 @@ import { createRequire } from 'node:module'
 import { afterEach, beforeAll, expect, it, vi } from 'vitest'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
-import { GitHubApiError } from '../../../../core/github/client.ts'
+import { GitHubApiError, HttpGitHubTransport } from '../../../../core/github/client.ts'
 import * as repo from '../../../../core/github/repo.ts'
 import { GH } from './index.ts'
 
@@ -34,6 +34,20 @@ it.each([
     expect(text).toContain('account alice (Mirage configuration)')
     expect(text).not.toContain('secret-never-print')
     expect(login).toHaveBeenCalledOnce()
+  } finally {
+    await ws.close()
+  }
+})
+it('rides the one account the install built on every line', async () => {
+  const login = vi.spyOn(repo, 'login').mockResolvedValue('alice')
+  const ws = new Workspace({}, { shellParser: parser })
+  ws.registerCli('gh', GH, { token: 't' })
+  try {
+    await ws.shell('gh auth status')
+    await ws.shell('gh auth status')
+    const [first, second] = login.mock.calls.map(([transport]) => transport)
+    expect(first).toBeInstanceOf(HttpGitHubTransport)
+    expect(first).toBe(second)
   } finally {
     await ws.close()
   }

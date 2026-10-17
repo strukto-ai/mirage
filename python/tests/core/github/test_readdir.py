@@ -17,9 +17,9 @@ import asyncio
 import aiohttp
 import pytest
 
-from mirage.accessor.github import GitHubAccessor
+from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.core.github.client import GitHubApiError
-from mirage.core.github.config import GitHubConfig
+from mirage.core.github.config import GhConfig
 from mirage.core.github.readdir import readdir
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.types import DirListing, FileType, PathSpec
@@ -47,11 +47,11 @@ def tree():
 
 @pytest.fixture
 def accessor(tree, monkeypatch) -> GitHubAccessor:
-    async def fetch_tree(config, owner, repo, ref, session=None):
+    async def fetch_tree(account, owner, repo, ref):
         return dict(tree), False, "HEAD1"
 
     monkeypatch.setattr("mirage.core.github.tree.fetch_tree", fetch_tree)
-    return GitHubAccessor(GitHubConfig(token="t"), "o", "r", "main")
+    return GitHubAccessor(GitHubAccount(GhConfig(token="t")), "o", "r", "main")
 
 
 def _spec(rel: str) -> PathSpec:
@@ -85,13 +85,14 @@ async def test_each_listing_is_versioned_by_its_own_trees_head(
     heads = ["HEAD1", "HEAD2"]
     landed = asyncio.Event()
 
-    async def fetch_tree(config, owner, repo, ref, session=None):
+    async def fetch_tree(account, owner, repo, ref):
         head = heads.pop(0)
         await landed.wait()
         return dict(tree), False, head
 
     monkeypatch.setattr("mirage.core.github.tree.fetch_tree", fetch_tree)
-    shared = GitHubAccessor(GitHubConfig(token="t"), "o", "r", "main")
+    account = GitHubAccount(GhConfig(token="t"))
+    shared = GitHubAccessor(account, "o", "r", "main")
     both = asyncio.gather(
         readdir(shared, _spec("src")), readdir(shared, _spec(""))
     )
@@ -126,7 +127,7 @@ async def test_readdir_refuses_what_is_no_folder(accessor):
 
 def _truncated(gh: FakeGitHub) -> GitHubAccessor:
     return GitHubAccessor(
-        GitHubConfig(token="t", base_url=gh.url),
+        GitHubAccount(GhConfig(token="t", base_url=gh.url)),
         "o",
         "r",
         "main",
@@ -203,9 +204,8 @@ async def test_the_truncated_walk_refuses_a_directory_github_cut_short():
 async def test_readdir_reports_a_folder_the_fresh_tree_dropped_as_missing():
     files = {"docs/a.txt": b"a", "top.txt": b"t"}
     with serve(FakeGitHub(files=files)) as gh:
-        accessor = GitHubAccessor(
-            GitHubConfig(token="t", base_url=gh.url), "o", "r", "main"
-        )
+        account = GitHubAccount(GhConfig(token="t", base_url=gh.url))
+        accessor = GitHubAccessor(account, "o", "r", "main")
         del gh.files["docs/a.txt"]
         with pytest.raises(FileNotFoundError):
             await readdir(

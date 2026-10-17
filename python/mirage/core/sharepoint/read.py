@@ -34,11 +34,10 @@ async def read(
     """
     resolved = await resolve_item(accessor, path)
     return await read_item(
-        accessor.config,
+        accessor,
         drive_loc(accessor.config, resolved, path.vfs_path),
         path.virtual,
         "sharepoint",
         offset=offset,
         size=size,
-        session=accessor.pool,
     )

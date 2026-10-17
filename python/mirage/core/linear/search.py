@@ -118,9 +118,7 @@ async def _named(
     named: dict[str, set[str]] = {}
     try:
         for word in sorted({word for words in asked for word in words}):
-            nodes = await search_issues(
-                accessor.config, word, SEARCH_LIMIT, session=accessor.pool
-            )
+            nodes = await search_issues(accessor, word, SEARCH_LIMIT)
             if len(nodes) >= SEARCH_LIMIT:
                 return None
             named[word] = {str(node.get("id")) for node in nodes}

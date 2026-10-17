@@ -103,7 +103,7 @@ async def _walked(accessor: GitHubAccessor, rel: str) -> FileStat | None:
     names = rel.split("/")
     for depth, name in enumerate(names):
         rows = await fetch_dir_tree(
-            accessor.config, accessor.owner, accessor.repo, sha, accessor.pool
+            accessor.account, accessor.owner, accessor.repo, sha
         )
         found = next((row for row in rows if row.path == name), None)
         if found is None:
@@ -171,11 +171,10 @@ async def _root_version(
         return None
     try:
         return await fetch_head(
-            accessor.config,
+            accessor.account,
             accessor.owner,
             accessor.repo,
             await ensure_ref(accessor),
-            accessor.pool,
         )
     except aiohttp.ClientResponseError as exc:
         log.debug(

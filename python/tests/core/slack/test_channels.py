@@ -16,17 +16,18 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.channels import list_channels, list_dms
 from mirage.core.slack.config import SlackConfig
 
 
 @pytest.fixture
-def config():
-    return SlackConfig(token="xoxb-test-token")
+def accessor():
+    return SlackAccessor(SlackConfig(token="xoxb-test-token"))
 
 
 @pytest.mark.asyncio
-async def test_list_channels(config):
+async def test_list_channels(accessor):
     mock_data = {
         "ok": True,
         "channels": [
@@ -40,7 +41,7 @@ async def test_list_channels(config):
         new_callable=AsyncMock,
         return_value=mock_data,
     ) as mock_get:
-        result = await list_channels(config)
+        result = await list_channels(accessor)
 
     assert len(result) == 2
     assert result[0]["name"] == "general"
@@ -54,7 +55,7 @@ async def test_list_channels(config):
 
 
 @pytest.mark.asyncio
-async def test_list_channels_pagination(config):
+async def test_list_channels_pagination(accessor):
     page1 = {
         "ok": True,
         "channels": [{"id": "C001", "name": "general"}],
@@ -70,7 +71,7 @@ async def test_list_channels_pagination(config):
         new_callable=AsyncMock,
         side_effect=[page1, page2],
     ) as mock_get:
-        result = await list_channels(config)
+        result = await list_channels(accessor)
 
     assert len(result) == 2
     assert mock_get.call_count == 2
@@ -79,7 +80,7 @@ async def test_list_channels_pagination(config):
 
 
 @pytest.mark.asyncio
-async def test_list_dms(config):
+async def test_list_dms(accessor):
     mock_data = {
         "ok": True,
         "channels": [{"id": "D001", "user": "U001"}],
@@ -90,7 +91,7 @@ async def test_list_dms(config):
         new_callable=AsyncMock,
         return_value=mock_data,
     ) as mock_get:
-        result = await list_dms(config)
+        result = await list_dms(accessor)
 
     assert len(result) == 1
     assert result[0]["id"] == "D001"

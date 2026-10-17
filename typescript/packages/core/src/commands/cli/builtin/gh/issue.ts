@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { GitHubAccount } from '../../../../accessor/github.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -32,7 +33,6 @@ import {
   camel,
   csvValues,
   ghBool,
-  ghTransport,
   jsonFields,
   listLimit,
   repoFor,
@@ -143,8 +143,8 @@ function viewText(row: Record<string, unknown>): string {
   return `title:\t${textValue(row.title)}\nstate:\t${textValue(row.state).toUpperCase()}\nauthor:\t${textValue(author?.login)}\nlabels:\t${labels(row)}\n--\n${textValue(row.body)}\n`
 }
 
-function target(config: unknown, texts: string[], fl: FlagView) {
-  return repoNumber(config, fl, texts[0], 'issue', 'issues')
+function target(accessor: GitHubAccount, texts: string[], fl: FlagView) {
+  return repoNumber(accessor, fl, texts[0], 'issue', 'issues')
 }
 
 /**
@@ -153,7 +153,7 @@ function target(config: unknown, texts: string[], fl: FlagView) {
  * in gh's own shape; the text view reads the REST listing.
  */
 export async function listCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
@@ -166,8 +166,8 @@ export async function listCmd(
   const fields = jsonFields(fl, ISSUE_FIELDS)
   if (fields !== null) {
     const rows = await listIssueFields(
-      ghTransport(config),
-      repoFor(config, fl),
+      accessor.transport,
+      repoFor(accessor, fl),
       { states: STATES[state] ?? ['OPEN'], assignee, author, labels: labelValues },
       listLimit(fl, 30),
       selection(ISSUE_FIELD_TABLE, fields, false),
@@ -184,8 +184,8 @@ export async function listCmd(
   if (author !== undefined) params.creator = author
   if (labelValues.length > 0) params.labels = labelValues.join(',')
   const values = await listIssues(
-    ghTransport(config),
-    repoFor(config, fl),
+    accessor.transport,
+    repoFor(accessor, fl),
     params,
     listLimit(fl, 30),
   )
@@ -199,20 +199,20 @@ export async function listCmd(
  * its comments.
  */
 export async function viewCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const [ref, number] = target(config, texts, fl)
+  const [ref, number] = target(accessor, texts, fl)
   const fields = jsonFields(fl, ISSUE_FIELDS)
   if (fields !== null) {
-    const node = await viewedIssue(ghTransport(config), ref, number, fields)
+    const node = await viewedIssue(accessor.transport, ref, number, fields)
     return typedOut(exportedNode(ISSUE_FIELD_TABLE, node, fields), fl, '', ISSUE_FIELDS)
   }
-  const row = issue(await getIssue(ghTransport(config), ref, number))
-  const comments = await commentsFor(config, fl, ref, number)
+  const row = issue(await getIssue(accessor.transport, ref, number))
+  const comments = await commentsFor(accessor, fl, ref, number)
   return typedOut(
     row,
     fl,
@@ -222,7 +222,7 @@ export async function viewCmd(
 }
 
 export async function createCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
@@ -236,19 +236,19 @@ export async function createCmd(
   const assignees = csvValues(fl.asList('assignee'))
   if (labelValues.length > 0) body.labels = labelValues
   if (assignees.length > 0) body.assignees = assignees
-  const created = issue(await createIssue(ghTransport(config), repoFor(config, fl), body))
+  const created = issue(await createIssue(accessor.transport, repoFor(accessor, fl), body))
   return textOut(`${textValue(created.url)}\n`)
 }
 
 export async function editCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const transport = ghTransport(config)
-  const [ref, number] = target(config, texts, fl)
+  const transport = accessor.transport
+  const [ref, number] = target(accessor, texts, fl)
   const body: Record<string, unknown> = {}
   const title = fl.asStr('title')
   const text = await bodyValue(ctx, fl)
@@ -288,14 +288,14 @@ export async function editCmd(
 }
 
 async function state(
-  config: unknown,
+  accessor: GitHubAccount,
   texts: string[],
   ctx: Context,
   next: 'open' | 'closed',
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const [ref, number] = target(config, texts, fl)
-  const edited = issue(await editIssue(ghTransport(config), ref, number, { state: next }))
+  const [ref, number] = target(accessor, texts, fl)
+  const edited = issue(await editIssue(accessor.transport, ref, number, { state: next }))
   const verb = next === 'closed' ? 'Closed' : 'Reopened'
   return textOut(
     `✓ ${verb} issue ${ref.owner}/${ref.repo}#${String(number)} (${textValue(edited.title)})\n`,
@@ -303,44 +303,44 @@ async function state(
 }
 
 export async function closeCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  return state(config, texts, ctx, 'closed')
+  return state(accessor, texts, ctx, 'closed')
 }
 
 export async function reopenCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  return state(config, texts, ctx, 'open')
+  return state(accessor, texts, ctx, 'open')
 }
 
 export async function commentCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   const body = await bodyValue(ctx, fl, { required: true })
-  const [ref, number] = target(config, texts, fl)
-  const comment = issue(await commentIssue(ghTransport(config), ref, number, body ?? ''))
+  const [ref, number] = target(accessor, texts, fl)
+  const comment = issue(await commentIssue(accessor.transport, ref, number, body ?? ''))
   return textOut(`${textValue(comment.url)}\n`)
 }
 
 export async function commentsFor(
-  config: unknown,
+  accessor: GitHubAccount,
   fl: FlagView,
   ref: { owner: string; repo: string },
   number: number,
 ): Promise<Record<string, unknown>[] | null> {
   if (!ghBool(fl, 'comments')) return null
-  const rows = await issueComments(ghTransport(config), ref, number)
+  const rows = await issueComments(accessor.transport, ref, number)
   return rows.map((row) => ({
     ...row,
     author: row.author ?? { login: '' },

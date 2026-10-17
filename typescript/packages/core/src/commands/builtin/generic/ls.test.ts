@@ -174,7 +174,8 @@ describe('structure-only directories', () => {
   }
   // Files whose mount table holds the given mounts: a nested mount's root
   // (whose listing belongs to another backend) stops -R, while a directory
-  // the namespace merely owes children is still descended.
+  // the namespace merely owes children is still descended. Each run is a
+  // mount's own, through its table (`io`), so those roots are boundaries.
   const nothing: DispatchFn = () => Promise.resolve([null, new IOResult()])
   const owing = (...prefixes: string[]): Files =>
     new Files(nothing, null, null, () => null, { prefixes: () => prefixes })
@@ -187,6 +188,7 @@ describe('structure-only directories', () => {
       {
         flags: { recursive: true },
         cwd: PathSpec.fromStrPath('/'),
+        io: {},
         vfs: owing('/ghost/deep/lnk/'),
       } as never,
       missing,
@@ -204,10 +206,12 @@ describe('structure-only directories', () => {
       {
         flags: { classify: true },
         cwd: PathSpec.fromStrPath('/'),
+        io: {},
         vfs: owing('/ghost/deep/'),
       } as never,
       missing,
       missing,
+      null,
     )
     expect(result?.[1].exitCode).toBe(LS_OK)
     expect(DEC.decode(result?.[0] as Uint8Array)).toBe('deep/\n')
@@ -429,13 +433,12 @@ describe('dot entries respect mount boundaries', () => {
                 }),
             ),
           )
-          const options = ctx({ all: true, args_l: true })
-          if (namespace) options.statPath = statPath
           const result = await lsGeneric(
             [new PathSpec({ virtual: directory, directory, vfsPath: subdir ? 'sub' : '' })],
-            options,
+            ctx({ all: true, args_l: true }),
             read,
             backendStat,
+            namespace ? statPath : null,
           )
           expect(result?.[1].exitCode).toBe(0)
           expect(result?.[1].stderr).toBeNull()

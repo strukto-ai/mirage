@@ -45,7 +45,7 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import type { WorkspaceBinding } from '../runtime/binding.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
 import type { MountResolver } from '../runtime/resolver.ts'
-import type { RunArgs, RunResult } from '../runtime/types.ts'
+import type { RunResult } from '../runtime/types.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { Mount } from './mount/spec.ts'
@@ -1097,7 +1097,7 @@ class ResolverProbe extends LanguageRuntime {
     super.bind(binding)
     this.resolver = binding.resolver
   }
-  run(_args: RunArgs): Promise<RunResult> {
+  interpret(): Promise<RunResult> {
     return Promise.resolve({ stdout: new Uint8Array(), stderr: new Uint8Array(), exitCode: 0 })
   }
 }

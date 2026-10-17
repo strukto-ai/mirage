@@ -14,42 +14,35 @@
 
 from typing import Any
 
-from mirage.core.api.client import SessionArg
+from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.client import discord_post
-from mirage.core.discord.config import DiscordConfig
 
 
 async def create_thread(
-    config: DiscordConfig,
+    accessor: DiscordAccessor,
     channel_id: str,
     name: str,
     message_id: str | None = None,
-    session: SessionArg = None,
 ) -> dict[str, Any]:
     """Create a thread, either from a message or standalone.
 
     Args:
-        config (DiscordConfig): Discord credentials.
+        accessor (DiscordAccessor): Discord accessor.
         channel_id (str): parent channel ID.
         name (str): thread name.
         message_id (str | None): start the thread from this message.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         dict: the created thread channel.
     """
     if message_id:
         return await discord_post(
-            config,
+            accessor,
             f"/channels/{channel_id}/messages/{message_id}/threads",
             {"name": name},
-            session=session,
         )
     # Standalone threads must state a type: the API otherwise defaults
     # to PRIVATE_THREAD, which needs extra permissions. 11 = PUBLIC_THREAD.
     return await discord_post(
-        config,
-        f"/channels/{channel_id}/threads",
-        {"name": name, "type": 11},
-        session=session,
+        accessor, f"/channels/{channel_id}/threads", {"name": name, "type": 11}
     )

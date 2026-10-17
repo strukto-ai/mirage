@@ -26,7 +26,7 @@ from mirage.runtime.sandbox.smolvm.constants import (
 from mirage.runtime.types import RunResult, SandboxPipe
 
 
-class SmolvmRuntime(RemoteSandbox, ProcessExecutorMixin):
+class SmolvmRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
     """A microVM the user runs as a whole-line runtime.
 
     You start the machine yourself; mirage only connects to it and

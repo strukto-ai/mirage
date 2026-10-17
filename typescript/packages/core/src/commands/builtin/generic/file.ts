@@ -34,6 +34,7 @@ import { CycleError } from '../../../utils/path.ts'
 import { hasAborted } from '../../../utils/abort.ts'
 import { formatRecords } from '../utils/output.ts'
 import { linksOf, mountsOf } from '../utils/links.ts'
+import { vfsStatPath } from '../utils/paths.ts'
 
 const ENC = new TextEncoder()
 
@@ -123,7 +124,7 @@ export async function fileGeneric(
         continue
       }
     }
-    const s = await operandStat(p, stat, ctx.statPath, mountsOf(ctx), linksOf(ctx))
+    const s = await operandStat(p, stat, vfsStatPath(ctx.vfs), mountsOf(ctx), linksOf(ctx))
     if (s.type === FileType.DIRECTORY) {
       lines.push(formatFileResult(p.rawPath, FileType.DIRECTORY, brief, mime))
       continue

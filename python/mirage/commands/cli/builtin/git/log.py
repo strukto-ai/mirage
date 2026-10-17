@@ -18,6 +18,7 @@ from dataclasses import replace
 from dulwich.objects import Commit
 from dulwich.repo import BaseRepo
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.constants import (
     HEAD,
     TEMPLATE_KINDS,
@@ -244,12 +245,12 @@ def _graphed(
 
 
 async def log(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Show commit logs.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context; git reads its repository

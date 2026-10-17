@@ -19,10 +19,8 @@ from urllib.parse import quote
 
 import aiohttp
 
-from mirage.accessor.github import GitHubAccessor
-from mirage.core.api.client import SessionArg
+from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.core.github.client import GitHubApiError, github_get
-from mirage.core.github.config import GitHubConfig
 from mirage.core.github.constants import DEFER_STATUSES
 from mirage.core.github.repo import ensure_ref
 from mirage.core.github.tree_entry import TreeEntry
@@ -65,11 +63,10 @@ def _parse_tree_response(
 
 
 async def fetch_tree(
-    config: GitHubConfig,
+    account: GitHubAccount,
     owner: str,
     repo: str,
     ref: str,
-    session: SessionArg = None,
 ) -> tuple[dict[str, TreeEntry], bool, str | None]:
     """Fetch the recursive tree of ``ref``, and the head it answered at.
 
@@ -78,11 +75,10 @@ async def fetch_tree(
     2026-09-30), so the rows and the version come from one response.
 
     Args:
-        config (GitHubConfig): token and base URL.
+        account (GitHubAccount): the token, API base and pool to ride.
         owner (str): repository owner.
         repo (str): repository name.
         ref (str): the ref the mount reads.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         tuple[dict[str, TreeEntry], bool, str | None]: the rows keyed by
@@ -90,11 +86,9 @@ async def fetch_tree(
         commit sha, or None when the response names none.
     """
     data = await github_get(
-        config.token,
+        account,
         "/repos/{owner}/{repo}/git/trees/{ref}",
         params={"recursive": "1"},
-        base_url=config.base_url,
-        session=session,
         owner=owner,
         repo=repo,
         ref=quote(ref, safe=""),
@@ -103,11 +97,10 @@ async def fetch_tree(
 
 
 async def fetch_head(
-    config: GitHubConfig,
+    account: GitHubAccount,
     owner: str,
     repo: str,
     ref: str,
-    session: SessionArg = None,
 ) -> str | None:
     """Ask which commit ``ref`` resolves to, with one shallow request.
 
@@ -115,21 +108,18 @@ async def fetch_head(
     recursive one, at a fraction of the size.
 
     Args:
-        config (GitHubConfig): token and base URL.
+        account (GitHubAccount): the token, API base and pool to ride.
         owner (str): repository owner.
         repo (str): repository name.
         ref (str): the ref the mount reads.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         str | None: the head commit sha, or None when the response names
         none.
     """
     data = await github_get(
-        config.token,
+        account,
         "/repos/{owner}/{repo}/git/trees/{ref}",
-        base_url=config.base_url,
-        session=session,
         owner=owner,
         repo=repo,
         ref=quote(ref, safe=""),
@@ -138,20 +128,18 @@ async def fetch_head(
 
 
 async def fetch_dir_page(
-    config: GitHubConfig,
+    account: GitHubAccount,
     owner: str,
     repo: str,
     tree_sha: str,
-    session: SessionArg = None,
 ) -> tuple[list[TreeEntry], bool]:
     """Fetch one directory's tree (non-recursive), and whether GitHub cut it.
 
     Args:
-        config (GitHubConfig): token and base URL.
+        account (GitHubAccount): the token, API base and pool to ride.
         owner (str): repository owner.
         repo (str): repository name.
         tree_sha (str): a raw tree sha, ref, or ``{ref}:{dir}`` expression.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         tuple[list[TreeEntry], bool]: the rows, submodule gitlinks
@@ -162,10 +150,8 @@ async def fetch_dir_page(
             as an empty directory.
     """
     data = await github_get(
-        config.token,
+        account,
         "/repos/{owner}/{repo}/git/trees/{tree_sha}",
-        base_url=config.base_url,
-        session=session,
         owner=owner,
         repo=repo,
         tree_sha=quote(tree_sha, safe=""),
@@ -192,11 +178,10 @@ async def fetch_dir_page(
 
 
 async def fetch_dir_tree(
-    config: GitHubConfig,
+    account: GitHubAccount,
     owner: str,
     repo: str,
     tree_sha: str,
-    session: SessionArg = None,
 ) -> list[TreeEntry]:
     """Fetch a single directory's whole tree (non-recursive).
 
@@ -206,11 +191,10 @@ async def fetch_dir_tree(
     as absent, which a ``read: fresh`` probe or a drift check takes as gone.
 
     Args:
-        config (GitHubConfig): token and base URL.
+        account (GitHubAccount): the token, API base and pool to ride.
         owner (str): repository owner.
         repo (str): repository name.
         tree_sha (str): the directory's tree sha, or a ref for the root.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         list[TreeEntry]: the rows, submodule gitlinks excluded.
@@ -218,9 +202,7 @@ async def fetch_dir_tree(
     Raises:
         GitHubApiError: GitHub truncated the listing, or sent no tree.
     """
-    entries, truncated = await fetch_dir_page(
-        config, owner, repo, tree_sha, session
-    )
+    entries, truncated = await fetch_dir_page(account, owner, repo, tree_sha)
     if truncated:
         raise GitHubApiError(
             f"GitHub truncated the tree listing of {owner}/{repo} {tree_sha}",
@@ -255,11 +237,10 @@ async def point_row(
     expression = f"{ref}:{parent}" if parent else ref
     try:
         rows, truncated = await fetch_dir_page(
-            accessor.config,
+            accessor.account,
             accessor.owner,
             accessor.repo,
             expression,
-            accessor.pool,
         )
     except aiohttp.ClientResponseError as exc:
         if exc.status not in DEFER_STATUSES:
@@ -386,7 +367,7 @@ async def refresh_tree(
     """
     ref = await ensure_ref(accessor)
     tree, truncated, head = await fetch_tree(
-        accessor.config, accessor.owner, accessor.repo, ref, accessor.pool
+        accessor.account, accessor.owner, accessor.repo, ref
     )
     reseat_tree(accessor, tree, truncated, head)
     return None if truncated else (tree, head)

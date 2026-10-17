@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from mirage import (
     CLI,
     RAMVFS,
+    Accessor,
     Argument,
     CLIHandler,
     CommandSpec,
@@ -44,9 +45,9 @@ class Incident:
     acknowledged_by: str | None = None
 
 
-# A real CLI would construct its service client from config. This
-# deterministic service keeps the example runnable without credentials or
-# network access while preserving the same per-account semantics.
+# The service behind the CLI. A deterministic one keeps the example runnable
+# without credentials or network access while preserving the same
+# per-account semantics.
 INCIDENTS: dict[str, dict[str, Incident]] = {
     "engineering": {
         "INC-101": Incident("Database latency"),
@@ -57,10 +58,23 @@ INCIDENTS: dict[str, dict[str, Incident]] = {
 }
 
 
+class PagerAccessor(Accessor):
+    """The service client one install builds once from its config and every
+    leaf takes first. A real CLI would open its connection here; the
+    workspace closes it when the install goes."""
+
+    def __init__(self, config: PagerConfig) -> None:
+        self.config = config
+        self.incidents = INCIDENTS[config.account]
+
+
 async def list_incidents(
-    config: PagerConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: PagerAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[bytes, IOResult]:
-    incidents = INCIDENTS[config.account]
+    incidents = accessor.incidents
     wanted = set(texts)
     status = FlagView(ctx.flags, ctx.spec).as_str("state")
     lines = []
@@ -77,7 +91,8 @@ async def list_incidents(
             else f"acknowledged-by={incident.acknowledged_by}"
         )
         lines.append(
-            f"[{config.account}] {incident_id} {state} {incident.summary}"
+            f"[{accessor.config.account}] {incident_id} {state} "
+            f"{incident.summary}"
         )
     return ("\n".join(lines) + ("\n" if lines else "")).encode(), IOResult()
 
@@ -87,20 +102,25 @@ async def list_incidents(
 # awaits is not made async for the executor's sake, and one that raises
 # before any await is refused exactly like one that raises after.
 def acknowledge(
-    config: PagerConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: PagerAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[bytes | None, IOResult]:
     if not texts:
         raise ValueError("INCIDENT_ID is required")
     incident_id = texts[0]
     by = FlagView(ctx.flags, ctx.spec).as_str("by")
-    incident = INCIDENTS[config.account].get(incident_id)
+    incident = accessor.incidents.get(incident_id)
     if incident is None:
         return None, IOResult(
             exit_code=1,
             stderr=f"pager: unknown incident {incident_id}\n".encode(),
         )
     incident.acknowledged_by = by
-    message = f"[{config.account}] acknowledged {incident_id} by {by}\n"
+    message = (
+        f"[{accessor.config.account}] acknowledged {incident_id} by {by}\n"
+    )
     return message.encode(), IOResult()
 
 
@@ -136,6 +156,7 @@ PAGER = CLI(
         "ack": CLIHandler(fn=acknowledge, write=True),
     },
     config_model=PagerConfig,
+    accessor=PagerAccessor,
 )
 
 

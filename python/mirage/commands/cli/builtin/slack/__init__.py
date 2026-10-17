@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.slack import SlackAccessor
 from mirage.commands.cli.builtin.slack.emoji_list import emoji_list
 from mirage.commands.cli.builtin.slack.list_members import list_members
 from mirage.commands.cli.builtin.slack.list_pins import list_pins
@@ -152,4 +153,5 @@ SLACK = CLI(
         "search": CLIHandler(fn=search),
     },
     config_model=SlackConfig,
+    accessor=SlackAccessor,
 )

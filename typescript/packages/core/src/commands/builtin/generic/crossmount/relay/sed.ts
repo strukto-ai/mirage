@@ -4,6 +4,7 @@ import type { FlagValue } from '../../../../spec/types.ts'
 import { sedGeneric } from '../../sed.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import { crossOpts, fileStreamOp, flatten } from '../utils.ts'
+import { Files } from '../../../../../workspace/files.ts'
 
 /**
  * GNU sed 4.9 keeps filenames and file boundaries for F and -s, and
@@ -32,7 +33,7 @@ export async function runSed(
         ...crossOpts(bag),
         stdin,
         cwd: PathSpec.fromStrPath(cwd),
-        dispatch,
+        vfs: new Files(dispatch, null, null, () => null, { ledger: false }),
         argv,
         ...(env !== undefined ? { env } : {}),
       },

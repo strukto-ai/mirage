@@ -600,7 +600,7 @@ def _rebase_code_ref(ref: str, base: Path) -> str:
     return f"{base / source}:{attr}"
 
 
-def _runtime_class(ref: str) -> type[Runtime]:
+def _runtime_class(ref: str) -> type[Runtime[Any]]:
     """Load the ``Runtime`` subclass a ``source:Class`` reference names.
 
     The runtime twin of the ``vfs:`` and ``cli:`` reference forms:
@@ -624,7 +624,7 @@ def _runtime_class(ref: str) -> type[Runtime]:
 
 def _build_runtime_entries(
     entries: list[str | dict[str, Any]],
-) -> list["Runtime | str"]:
+) -> list["Runtime[Any] | str"]:
     """Turn config runtime entries into workspace runtime entries.
 
     Args:
@@ -637,7 +637,7 @@ def _build_runtime_entries(
         ValueError: a map entry without a name, or a reference that is
             not a ``Runtime`` subclass.
     """
-    out: list[Runtime | str] = []
+    out: list[Runtime[Any] | str] = []
     for entry in entries:
         if isinstance(entry, str):
             out.append(_runtime_class(entry)() if ":" in entry else entry)

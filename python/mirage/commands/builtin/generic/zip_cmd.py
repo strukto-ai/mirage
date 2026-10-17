@@ -18,7 +18,7 @@ from mirage.commands.builtin.generic.archive.zip_update import (
     read_archive,
     update_archive,
 )
-from mirage.commands.builtin.utils.links import links_of, mounts_of
+from mirage.commands.builtin.utils.links import links_of, mount_view
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import Context
@@ -517,5 +517,5 @@ async def zip_generic(
         y=parsed.store_links,
         x=list(parsed.exclude) or None,
         links=links_of(ctx),
-        mounts=mounts_of(ctx),
+        mounts=mount_view(ctx.vfs),
     )

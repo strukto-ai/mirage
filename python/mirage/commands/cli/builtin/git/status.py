@@ -14,6 +14,7 @@
 
 from dataclasses import dataclass
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.branch import branch_upstream
 from mirage.commands.cli.builtin.git.changes import collect
 from mirage.commands.cli.builtin.git.errors import GitError, NoWorkspaceError
@@ -159,7 +160,7 @@ async def render_report(
 
 
 async def status(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Show the working tree status.
 
@@ -169,7 +170,7 @@ async def status(
     of those two answers, or a path neither side knows about.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context; git reads its repository

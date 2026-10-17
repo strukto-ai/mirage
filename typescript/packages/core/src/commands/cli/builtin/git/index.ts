@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { CommandSpec } from '../../../spec/types.ts'
 import { CLI } from '../../types.ts'
 import { CLIHandler } from '../../types.ts'
@@ -515,7 +516,7 @@ const BRANCH_OPTIONS = [
  * in a browser works exactly as one mounted over disk.
  */
 function helpCmd(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

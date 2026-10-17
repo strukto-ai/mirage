@@ -38,9 +38,9 @@ const mv: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
     (src, dst) => {
       refuseReveal(src, dst, ops.access)
     },
-    links === undefined || ctx.dispatch === undefined
+    links === undefined || ctx.vfs === undefined
       ? undefined
-      : transferLinksOf(links, ctx.dispatch, ctx.cwd.virtual, ctx.vfs?.vis() ?? undefined),
+      : transferLinksOf(links, ctx.vfs.dispatch, ctx.cwd.virtual, ctx.vfs.vis() ?? undefined),
     ctx.stdin,
     mounts === undefined ? undefined : (p: string) => mounts.isRoot(p),
   )

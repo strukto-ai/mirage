@@ -49,7 +49,7 @@ async def _run(name: str, accessor: TrelloAccessor, texts: list[str]) -> bytes:
     return await entry.runner(accessor, texts, FlagView({}, spec=entry.spec))
 
 
-async def _on_board_out(config, ident, session=None):
+async def _on_board_out(accessor, ident):
     return {"id": ident, "idBoard": "b_out"}
 
 

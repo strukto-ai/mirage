@@ -12,60 +12,82 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Context } from '../commands/config.ts'
+import type { PathSpec } from '../types.ts'
 import { Runtime } from './base.ts'
-import { UnsupportedExecutionError } from './errors.ts'
-import type {
-  ExecutionRequest,
-  RunArgs,
-  RunResult,
-  RuntimeLanguage,
-  RuntimeCapabilities,
-} from './types.ts'
-import type { RuntimeContext } from './binding.ts'
+import { type Argv0Rules, resolveProgram } from './source.ts'
+import type { Program, RunResult, RuntimeLanguage, RuntimeCapabilities } from './types.ts'
 
 /**
  * A runtime that interprets one language's code inside a command.
  *
  * The engine inside a single command (python3, node): the workspace
- * splits the line, and a captured stage's code lands here as run().
+ * splits the line, and a captured stage's operands land here as run().
  * Never the whole line; that is LineExecutor's entry point.
  *
  * The language it interprets is declared once, on its language tier
  * (PythonRuntime, JsRuntime), and a script CLI finds its interpreter by
  * it (runtimeForLanguage).
  *
- * A host adapter receives data, namespace and gated session views through
- * WorkspaceBinding and its per-execution RuntimeContext. Guests receive
- * only RunArgs.env,
- * a copy whose writes do not mutate the Mirage session; the adapter must
- * explicitly use the gated SessionView for any intended session write.
+ * run() resolves the program from the operands the way a real
+ * interpreter does (`-c` in `ctx.flags`, else the script operand read
+ * through `ctx.vfs`, else piped stdin) and hands it to interpret(). A
+ * guest sees `ctx.env`, a copy whose writes do not mutate the Mirage
+ * session; an adapter that means to write the session uses `ctx.session`.
  */
-export abstract class LanguageRuntime extends Runtime {
+export abstract class LanguageRuntime<E = unknown> extends Runtime<E> {
+  /**
+   * The head words of this language's interpreter commands, the first
+   * naming a program run with no command of its own.
+   */
+  static readonly commands: readonly string[] = []
   abstract readonly language: RuntimeLanguage
+  /** What this interpreter calls itself where no file names the program. */
+  readonly argv0Rules: Argv0Rules = {}
 
   override get capabilities(): RuntimeCapabilities {
     return { ...super.capabilities, languages: [this.language] }
   }
 
-  protected override async executeRequest(
-    request: ExecutionRequest,
-    context?: RuntimeContext,
+  /**
+   * Resolve the program from the operands, then interpret it.
+   *
+   * @param engine the install's engine.
+   * @param paths the script operand, if any.
+   * @param texts the program's argv.
+   * @param ctx the run's context.
+   */
+  override async run(
+    engine: E,
+    paths: PathSpec[],
+    texts: string[],
+    ctx: Context,
   ): Promise<RunResult> {
-    if (request.kind === 'code') {
-      if (request.language !== this.language)
-        throw new UnsupportedExecutionError(
-          `${this.name}: ${request.language} execution is unsupported`,
-        )
-      return this.executeCode(request, context)
-    }
-    return super.executeRequest(request, context)
+    const named = ctx.spec?.name ?? ''
+    const label =
+      named !== '' ? named : ((this.constructor as typeof LanguageRuntime).commands[0] ?? this.name)
+    const program = await resolveProgram(
+      paths,
+      texts,
+      ctx,
+      label,
+      this.argv0Rules,
+      (name, shown) => this.moduleCode(name, shown),
+      this.name,
+    )
+    if ('exitCode' in program) return program
+    return this.interpret(engine, program, ctx)
   }
 
-  protected executeCode(args: RunArgs, context?: RuntimeContext): Promise<RunResult> {
-    return this.run(
-      args.cwd === undefined && context !== undefined ? { ...args, cwd: context.ctx.cwd } : args,
-      context,
-    )
+  /**
+   * The program `-m name` runs; null where this runtime cannot run a
+   * module.
+   *
+   * @param _name the module.
+   * @param _label the command name a not-found message uses.
+   */
+  moduleCode(_name: string, _label: string): string | null {
+    return null
   }
 
   /** Report the bound interpreter's version. */
@@ -89,6 +111,11 @@ export abstract class LanguageRuntime extends Runtime {
    * do not carry over from earlier commands or evaluator sessions.
    * The adapter owns engine reuse; this does not reset workspace
    * state or undo external effects.
+   *
+   * @param engine the install's engine.
+   * @param program the source and argv to run.
+   * @param ctx the run's context: working directory, environment,
+   *   switches, files, signal and limit.
    */
-  abstract run(args: RunArgs, context?: RuntimeContext): Promise<RunResult>
+  abstract interpret(engine: E, program: Program, ctx: Context): Promise<RunResult>
 }

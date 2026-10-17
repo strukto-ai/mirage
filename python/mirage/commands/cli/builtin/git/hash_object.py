@@ -18,6 +18,7 @@ import re
 
 from dulwich.objects import Blob, Commit, ShaFile, Tag, Tree
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import read_stdin_async
 from mirage.commands.cli.builtin.git.constants import OBJECT_TYPES
 from mirage.commands.cli.builtin.git.errors import (
@@ -142,7 +143,7 @@ async def _content(vfs: Files, base: PathSpec, name: str) -> bytes:
 
 
 async def hash_object(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """``git hash-object``: the id content would be stored under, read from
     each FILE, ``--stdin`` or ``--stdin-paths``. Another type than blob is
@@ -150,7 +151,7 @@ async def hash_object(
     ``-w`` writes the object. Pinned against git 2.50.1.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context.

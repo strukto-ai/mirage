@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from dulwich.objects import Blob
 from dulwich.repo import BaseRepo
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.grep_pattern import compile_pattern
 from mirage.commands.builtin.types import RegexSyntax
 from mirage.commands.builtin.utils.bre import (
@@ -237,12 +238,12 @@ def search_entries(repo: BaseRepo, name: str) -> Tree:
 
 
 async def grep(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Search tracked working files, index blobs, or named historical trees.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the pattern, revisions and pathspecs.
         ctx (Context): the line's context.

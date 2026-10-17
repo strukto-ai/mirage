@@ -13,11 +13,29 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from './base.ts'
-import type { GitHubTransport } from '../core/github/client.ts'
+import { HttpGitHubTransport, type GitHubTransport } from '../core/github/client.ts'
+import type { GhConfig } from '../core/github/config.ts'
 import type { TreeEntry } from '../core/github/tree_entry.ts'
 
-export class GitHubAccessor extends Accessor {
+/**
+ * One GitHub account: token, API base and the transport its calls ride. A gh
+ * install's accessor, and the account a github mount holds.
+ */
+export class GitHubAccount extends Accessor {
   readonly transport: GitHubTransport
+
+  constructor(
+    readonly config: GhConfig,
+    transport?: GitHubTransport,
+  ) {
+    super()
+    this.transport = transport ?? new HttpGitHubTransport(config)
+  }
+}
+
+/** A github mount's repository, reached through the account it holds. */
+export class GitHubAccessor extends Accessor {
+  readonly account: GitHubAccount
   readonly owner: string
   readonly repo: string
   readonly ref: string
@@ -33,7 +51,7 @@ export class GitHubAccessor extends Accessor {
   treeVersion: string | null
 
   constructor(opts: {
-    transport: GitHubTransport
+    account: GitHubAccount
     owner: string
     repo: string
     ref: string
@@ -43,7 +61,7 @@ export class GitHubAccessor extends Accessor {
     treeVersion?: string | null
   }) {
     super()
-    this.transport = opts.transport
+    this.account = opts.account
     this.owner = opts.owner
     this.repo = opts.repo
     this.ref = opts.ref

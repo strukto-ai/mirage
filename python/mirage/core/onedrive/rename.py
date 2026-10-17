@@ -23,8 +23,7 @@ async def rename(
 ) -> None:
     config = accessor.config
     await rename_replace(
-        config,
+        accessor,
         drive_loc(config, src.vfs_path),
         drive_loc(config, dst.vfs_path),
-        session=accessor.pool,
     )

@@ -56,7 +56,7 @@ class Sandbox extends Runtime implements ProcessExecutor {
 class HostPython extends PythonRuntime implements ProcessExecutor {
   readonly [PROCESS_EXECUTOR] = true as const
   readonly name = 'host-python'
-  run(): Promise<RunResult> {
+  interpret(): Promise<RunResult> {
     return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
   }
   runProcess(): Promise<RunResult> {
@@ -142,10 +142,10 @@ describe('lookup', () => {
     expect(lookup('prog', session, ws.registry)).toBe(Consumer.FUNCTION)
   })
 
-  it('an unregistered CLI routes UNKNOWN', () => {
+  it('an unregistered CLI routes UNKNOWN', async () => {
     const { session, ws } = fixture()
     ws.registerCli('prog', cliTree())
-    ws.unregisterCli('prog')
+    await ws.unregisterCli('prog')
     expect(lookup('prog', session, ws.registry)).toBe(Consumer.UNKNOWN)
   })
 

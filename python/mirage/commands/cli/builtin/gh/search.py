@@ -3,6 +3,7 @@ import re
 from functools import partial
 from typing import Any
 
+from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh.accessor import (
     csv_values,
     gh_bool,
@@ -26,7 +27,6 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.core.github.client import GitHubApiError
-from mirage.core.github.config import GhConfig
 from mirage.core.github.search import search
 from mirage.io.types import CommandOutput, IOResult
 from mirage.types import PathSpec
@@ -187,7 +187,7 @@ def _search_error(exc: GitHubApiError, query: str) -> str:
 
 async def search_cmd(
     kind: str,
-    config: GhConfig,
+    accessor: GitHubAccount,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
@@ -210,7 +210,7 @@ async def search_cmd(
     query = _query(kind, texts, fl)
     try:
         values = await search(
-            config,
+            accessor,
             {"repos": "repositories", "prs": "issues"}.get(kind, kind),
             query,
             limit,

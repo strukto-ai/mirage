@@ -80,18 +80,14 @@ export async function runWholeLine(
   const runSignal = mergeSignals(signal, deadline?.signal)
   let result: RunResult
   try {
-    result = await runWithTimeout(
-      runtime.execute({
-        kind: 'shell',
-        line: command,
-        stdin: data,
-        env: envSnapshot(session),
-        cwd: PathSpec.fromStrPath(session.cwd),
-        ...(runSignal === undefined ? {} : { signal: runSignal }),
-      }),
-      timeout,
-      name,
-    )
+    const ctx = {
+      flags: { c: command },
+      stdin: data,
+      env: envSnapshot(session),
+      cwd: PathSpec.fromStrPath(session.cwd),
+      ...(runSignal === undefined ? {} : { signal: runSignal }),
+    }
+    result = await runWithTimeout(runtime.execute([], [], ctx, { kind: 'line' }), timeout, name)
   } catch (err) {
     if (signal?.aborted) throw makeAbortError()
     if (isControlFlowError(err)) throw err

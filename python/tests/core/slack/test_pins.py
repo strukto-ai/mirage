@@ -16,10 +16,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.pins import list_pins, pin_message, unpin_message
 
-CONFIG = SlackConfig(token="xoxb-test")
+ACCESSOR = SlackAccessor(SlackConfig(token="xoxb-test"))
 
 
 @pytest.mark.asyncio
@@ -29,15 +30,14 @@ async def test_pin_message_posts_pins_add():
         new_callable=AsyncMock,
         return_value={"ok": True},
     ) as post:
-        result = await pin_message(CONFIG, "C001", "111.222")
+        result = await pin_message(ACCESSOR, "C001", "111.222")
     post.assert_awaited_once_with(
-        CONFIG,
+        ACCESSOR,
         "pins.add",
         {
             "channel": "C001",
             "timestamp": "111.222",
         },
-        session=None,
     )
     assert result == {"ok": True}
 
@@ -49,15 +49,14 @@ async def test_unpin_message_posts_pins_remove():
         new_callable=AsyncMock,
         return_value={"ok": True},
     ) as post:
-        await unpin_message(CONFIG, "C001", "111.222")
+        await unpin_message(ACCESSOR, "C001", "111.222")
     post.assert_awaited_once_with(
-        CONFIG,
+        ACCESSOR,
         "pins.remove",
         {
             "channel": "C001",
             "timestamp": "111.222",
         },
-        session=None,
     )
 
 
@@ -71,10 +70,8 @@ async def test_list_pins_returns_items():
             "items": [{"type": "message"}],
         },
     ) as get:
-        items = await list_pins(CONFIG, "C001")
-    get.assert_awaited_once_with(
-        CONFIG, "pins.list", {"channel": "C001"}, session=None
-    )
+        items = await list_pins(ACCESSOR, "C001")
+    get.assert_awaited_once_with(ACCESSOR, "pins.list", {"channel": "C001"})
     assert items == [{"type": "message"}]
 
 
@@ -85,4 +82,4 @@ async def test_list_pins_tolerates_missing_items():
         new_callable=AsyncMock,
         return_value={"ok": True},
     ):
-        assert await list_pins(CONFIG, "C001") == []
+        assert await list_pins(ACCESSOR, "C001") == []

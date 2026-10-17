@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { visibleEntries, matched, repoRelative, under as inside } from './pathspec.ts'
 import git from 'isomorphic-git'
 
@@ -139,7 +140,7 @@ export async function sourceTree(
  * "make it match the source" means for it. Pinned against git 2.50.1.
  */
 export async function restore(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

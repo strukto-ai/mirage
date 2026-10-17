@@ -419,7 +419,7 @@ Implement only the operations the backend supports, as pure functions over the a
 
 Each may also take the handed `entry` and `parent`.
 
-Every client call passes `session=accessor.pool` (or takes the accessor, as Jaeger's does); without it `api_request` opens a fresh session per request. `tests/commands/test_client_calls_pass_session.py` fails a call that omits it.
+Client functions take the accessor and pass `session=accessor.pool` to `api_request`; without it `api_request` opens a fresh session per request.
 
 A hierarchy backend writes its tree once, as `SCOPES` in `core/<name>/scope.py`, and builds the three operations from it: `make_readdir(detect_scope, listers=...)`, `make_stat(detect_scope, guards=...)` and `make_read(detect_scope, readers, parented=True)`. The kit holds these rules, and a new backend keeps them:
 

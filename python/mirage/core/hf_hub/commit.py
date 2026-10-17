@@ -153,7 +153,7 @@ async def preupload(
         }
         if gitignore is not None:
             body["gitIgnore"] = gitignore
-        data = await hub_post(accessor.token, url, body, session=accessor.pool)
+        data = await hub_post(accessor.account, url, body)
         rows = data.get("files") if isinstance(data, dict) else None
         for row in rows if isinstance(rows, list) else []:
             if isinstance(row, dict):
@@ -262,10 +262,6 @@ async def commit(
     body = payload(adds, deletions or [], message, description)
     params = {"create_pr": "1"} if create_pr else None
     data = await hub_post_ndjson(
-        accessor.token,
-        commit_url(accessor, revision),
-        body,
-        params,
-        session=accessor.pool,
+        accessor.account, commit_url(accessor, revision), body, params
     )
     return data if isinstance(data, dict) else {}

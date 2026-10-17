@@ -66,21 +66,19 @@ async def readdir(
         raise enotdir(path.virtual)
     try:
         rows = await fetch_dir_tree(
-            accessor.config,
+            accessor.account,
             accessor.owner,
             accessor.repo,
             f"{ref}:{rel}" if rel else ref,
-            accessor.pool,
         )
     except aiohttp.ClientResponseError as exc:
         if not rel or exc.status not in DEFER_STATUSES:
             raise
         await fetch_head(
-            accessor.config,
+            accessor.account,
             accessor.owner,
             accessor.repo,
             ref,
-            accessor.pool,
         )
         raise enoent(path.virtual) from exc
     return DirListing(entries=[row_of(row, row.path) for row in rows])

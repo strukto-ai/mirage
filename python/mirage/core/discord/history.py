@@ -15,9 +15,8 @@
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from mirage.core.api.client import SessionArg
+from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.client import discord_get
-from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.paginate import after_id_pages
 from mirage.core.render.json import jsonl_bytes
 from mirage.core.time_range import TimeRange
@@ -35,12 +34,11 @@ def snowflake_at(seconds: float) -> int:
 
 
 async def stream_messages_for_day(
-    config: DiscordConfig,
+    accessor: DiscordAccessor,
     channel_id: str,
     date_str: str,
     scope: TimeRange,
     page_size: int = 100,
-    session: SessionArg = None,
     after: str | None = None,
     last_day: str | None = None,
 ) -> AsyncGenerator[list[dict[str, Any]], None]:
@@ -51,12 +49,11 @@ async def stream_messages_for_day(
     end-of-day snowflake.
 
     Args:
-        config (DiscordConfig): Discord credentials.
+        accessor (DiscordAccessor): Discord accessor.
         channel_id (str): channel ID.
         date_str (str): YYYY-MM-DD.
         scope (TimeRange): the mount's time scope, clipping the day.
         page_size (int): per-page limit (Discord caps at 100).
-        session (SessionArg): pool or live session to ride.
         after (str | None): only the messages after this id.
         last_day (str | None): the last day of a run read as one, the
             day itself when None.
@@ -72,14 +69,13 @@ async def stream_messages_for_day(
     before_int = snowflake_at(end)
     floor = max(0, first - 1, int(after) if after is not None else 0)
     async for page in after_id_pages(
-        config,
+        accessor,
         f"/channels/{channel_id}/messages",
         base_params={},
         last_id_fn=lambda m: m["id"],
         page_size=page_size,
         start_after=str(floor),
         newest_first=True,
-        session=session,
     ):
         in_range = [m for m in page if first <= int(m["id"]) < before_int]
         if in_range:
@@ -89,23 +85,21 @@ async def stream_messages_for_day(
 
 
 async def list_messages_for_day(
-    config: DiscordConfig,
+    accessor: DiscordAccessor,
     channel_id: str,
     date_str: str,
     scope: TimeRange,
     page_size: int = 100,
-    session: SessionArg = None,
     after: str | None = None,
 ) -> list[dict[str, Any]]:
     """List all messages for a channel-day (eager).
 
     Args:
-        config (DiscordConfig): Discord credentials.
+        accessor (DiscordAccessor): Discord accessor.
         channel_id (str): channel ID.
         date_str (str): YYYY-MM-DD.
         scope (TimeRange): the mount's time scope, clipping the day.
         page_size (int): per-page limit.
-        session (SessionArg): pool or live session to ride.
         after (str | None): only the messages after this id.
 
     Returns:
@@ -113,13 +107,7 @@ async def list_messages_for_day(
     """
     out: list[dict[str, Any]] = []
     async for page in stream_messages_for_day(
-        config,
-        channel_id,
-        date_str,
-        scope,
-        page_size,
-        session=session,
-        after=after,
+        accessor, channel_id, date_str, scope, page_size, after=after
     ):
         out.extend(page)
     out.sort(key=lambda m: int(m["id"]))
@@ -127,52 +115,40 @@ async def list_messages_for_day(
 
 
 async def get_history_jsonl(
-    config: DiscordConfig,
-    channel_id: str,
-    date_str: str,
-    scope: TimeRange,
-    session: SessionArg = None,
+    accessor: DiscordAccessor, channel_id: str, date_str: str, scope: TimeRange
 ) -> bytes:
     """Fetch channel messages for a date as JSONL.
 
     Args:
-        config (DiscordConfig): Discord credentials.
+        accessor (DiscordAccessor): Discord accessor.
         channel_id (str): channel ID.
         date_str (str): date in YYYY-MM-DD format.
         scope (TimeRange): the mount's time scope, clipping the day.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         bytes: JSONL-encoded messages.
     """
     messages = await list_messages_for_day(
-        config, channel_id, date_str, scope, session=session
+        accessor, channel_id, date_str, scope
     )
     return jsonl_bytes(messages)
 
 
 async def fetch_recent_messages(
-    config: DiscordConfig,
-    channel_id: str,
-    limit: int = 20,
-    session: SessionArg = None,
+    accessor: DiscordAccessor, channel_id: str, limit: int = 20
 ) -> list[dict[str, Any]]:
     """Fetch the most recent messages of a channel (one API page).
 
     Args:
-        config (DiscordConfig): Discord credentials.
+        accessor (DiscordAccessor): Discord accessor.
         channel_id (str): channel ID.
         limit (int): maximum number of messages (Discord caps at 100).
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         list[dict]: messages sorted oldest-first.
     """
     page = await discord_get(
-        config,
-        f"/channels/{channel_id}/messages",
-        {"limit": limit},
-        session=session,
+        accessor, f"/channels/{channel_id}/messages", {"limit": limit}
     )
     items = (
         [m for m in page if isinstance(m, dict)]

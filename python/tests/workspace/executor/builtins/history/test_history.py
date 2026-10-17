@@ -40,6 +40,7 @@ class FakeRegistry:
     def __init__(self, mount=None):
         self.mount = mount
         self.io = IOConfig()
+        self.policies = None
 
     def try_mount_for(self, prefix):
         return self.mount
@@ -139,7 +140,8 @@ async def test_history_routes_flags_and_operands_to_the_view_mount():
     assert texts == ["echo hi"]
     assert flags == {"s": True}
     assert context.cwd.virtual == "/"
-    assert context.session_id == "test"
+    assert context.session is not None
+    assert context.session.session_id == "test"
     assert stream == b"1  ls\n"
     assert io.exit_code == 0
     assert node.command == "history"

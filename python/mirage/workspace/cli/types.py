@@ -12,10 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pydantic import BaseModel
 
+from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.cli.types import CLI
 from mirage.types import JsonValue
 
@@ -34,12 +35,15 @@ class CLIInstall:
             first argument of ``register_cli``).
         cli (CLI): the program tree the head dispatches into.
         config (BaseModel | dict[str, JsonValue] | None): the
-            installation's validated ``config_model`` instance, handed
-            to every leaf ``fn``; a script spec has no model, so its
-            mapping passes through as-is (the program consumes it);
-            None without either.
+            installation's validated ``config_model`` instance; a script
+            spec has no model, so its mapping passes through as-is (the
+            program consumes it); None without either.
+        accessor (Accessor): what ``cli.accessor`` built from
+            ``config`` at install, handed to every leaf ``fn``; closed
+            when the install goes.
     """
 
     name: str
     cli: CLI
     config: "BaseModel | dict[str, JsonValue] | None" = None
+    accessor: Accessor = field(default_factory=NOOPAccessor)

@@ -22,7 +22,7 @@ vi.mock('./client.ts', async () => {
   return { ...actual, searchCode: vi.fn() }
 })
 
-import { GitHubAccessor } from '../../accessor/github.ts'
+import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 import { PathSpec } from '../../types.ts'
 import * as client from './client.ts'
 import { SCOPE_WARN } from './constants.ts'
@@ -47,7 +47,7 @@ function makeAccessor(tree: Record<string, TreeEntry>): GitHubAccessor {
     },
   }
   return new GitHubAccessor({
-    transport,
+    account: new GitHubAccount({ token: 't' }, transport),
     owner: 'acme',
     repo: 'proj',
     ref: 'main',

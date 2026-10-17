@@ -43,6 +43,7 @@ import {
 import { SED_LINE_LENGTH, SedMachine, type SedFileContent, type SedInput } from '../sed_exec.ts'
 import { byteView, decodeText, encodeText, fromByteView, utf8Locale } from '../../../shell/bytes.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
+import { dispatchOf } from '../utils/links.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 type Write = (p: PathSpec, data: ByteSource) => Promise<void>
@@ -64,7 +65,7 @@ function scriptFiles(ctx: Context, stream: Stream, write: Write): ScriptFiles {
   const prefix = ctx.mountPrefix !== undefined ? rstripSlash(ctx.mountPrefix) : ''
   const spec = (name: string): PathSpec => {
     const resolved = resolvePath(name, ctx.cwd.virtual)
-    if (ctx.dispatch !== undefined) return PathSpec.fromStrPath(name, undefined, ctx.cwd)
+    if (ctx.vfs !== undefined) return PathSpec.fromStrPath(name, undefined, ctx.cwd)
     const slash = resolved.lastIndexOf('/')
     return new PathSpec({
       virtual: resolved,
@@ -73,7 +74,7 @@ function scriptFiles(ctx: Context, stream: Stream, write: Write): ScriptFiles {
       vfsPath: mountKey(resolved, prefix),
     })
   }
-  const dispatch = ctx.dispatch
+  const dispatch = dispatchOf(ctx)
   const caller = currentCaller()
   const open = (name: string): AsyncIterable<Uint8Array> =>
     dispatch === undefined ? stream(spec(name)) : callerStream(dispatch, caller, spec(name))

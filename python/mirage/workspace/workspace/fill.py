@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Mapping, Sequence
+from typing import Any
 
 from mirage.commands.cli.walk import invoked_env_names, supplied_env_names
 from mirage.runtime.base import Runtime
@@ -163,8 +164,8 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
 
 def guest_bound(
     nodes: Sequence[TSNodeLike],
-    decision: RouteDecision[Runtime] | None,
-    static_bindings: Mapping[str, Runtime | None],
+    decision: RouteDecision[Runtime[Any]] | None,
+    static_bindings: Mapping[str, Runtime[Any] | None],
 ) -> bool:
     """Whether any of the line's commands runs on a guest runtime.
 

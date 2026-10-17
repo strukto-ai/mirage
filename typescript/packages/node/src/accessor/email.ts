@@ -70,7 +70,7 @@ export class EmailAccessor extends Accessor {
     }
   }
 
-  async close(): Promise<void> {
+  override async close(): Promise<void> {
     if (this.clientPromise === null) return
     try {
       const c = await this.clientPromise

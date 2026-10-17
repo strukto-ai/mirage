@@ -87,5 +87,5 @@ async def test_read_page_json(vfs):
 async def test_search(vfs):
     from mirage.core.notion.pages import search_pages
 
-    results = await search_pages(vfs.config, query="", page_size=5)
+    results = await search_pages(vfs.accessor, query="", page_size=5)
     assert isinstance(results, list)

@@ -14,9 +14,9 @@
 
 import json
 
+from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.history import fetch_recent_messages
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -24,14 +24,14 @@ from mirage.types import PathSpec
 
 
 async def read(
-    config: DiscordConfig,
+    accessor: DiscordAccessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     messages = await fetch_recent_messages(
-        config,
+        accessor,
         fl.as_str("channel") or "",
         fl.as_int("limit", 20),
     )

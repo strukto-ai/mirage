@@ -9,6 +9,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
+from mirage.workspace.files import Files
 
 
 async def _resolved(paths: list[PathSpec]) -> list[PathSpec]:
@@ -54,7 +55,7 @@ async def run_sed(
             flags=flags,
             stdin=stdin,
             cwd=PathSpec.from_str_path(cwd),
-            dispatch=dispatch,
+            vfs=Files([], dispatch, ledger=False),
             env=env,
             argv=argv,
         ),

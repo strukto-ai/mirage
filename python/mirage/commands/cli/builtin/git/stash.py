@@ -2,6 +2,7 @@ import asyncio
 import re
 from dataclasses import replace
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.diff import diff
 from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.io import read_optional
@@ -15,12 +16,12 @@ from mirage.types import PathSpec
 
 
 async def stash_list(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """List the stash reflog newest first, including stashes from real Git.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context.
@@ -42,12 +43,12 @@ async def stash_list(
 
 
 async def stash_show(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Show a stash's working tree against its first parent, not HEAD.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the optional stash selector.
         ctx (Context): the line's context, with the diff options.
@@ -90,7 +91,7 @@ async def stash_show(
         ):
             flags["stat"] = True
         return await diff(
-            config,
+            accessor,
             paths,
             [commit.parents[0].decode(), commit.id.decode()],
             replace(ctx, flags=flags),

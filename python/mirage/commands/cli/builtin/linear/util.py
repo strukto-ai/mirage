@@ -14,13 +14,13 @@
 
 import re
 
+from mirage.accessor.linear import LinearAccessor
 from mirage.core.linear.client import (
     list_team_labels,
     list_team_projects,
     list_teams,
     resolve_issue_id,
 )
-from mirage.core.linear.config import LinearConfig
 from mirage.io.types import ByteSource, materialize
 
 ISSUE_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*-[0-9]+$")
@@ -32,30 +32,30 @@ def first_text(texts: list[str], label: str) -> str:
     return texts[0]
 
 
-async def resolve_issue(config: LinearConfig, token: str) -> str:
+async def resolve_issue(accessor: LinearAccessor, token: str) -> str:
     """Resolve an issue operand: an ENG-42 key or a raw ID.
 
     Args:
-        config (LinearConfig): Linear credentials.
+        accessor (LinearAccessor): the install's Linear handle.
         token (str): issue key or ID as typed.
 
     Returns:
         str: the issue's ID.
     """
     if ISSUE_KEY_RE.match(token):
-        return await resolve_issue_id(config, issue_key=token)
+        return await resolve_issue_id(accessor, issue_key=token)
     return token
 
 
 async def resolve_state_id(
-    config: LinearConfig,
+    accessor: LinearAccessor,
     state_id: str | None,
     state_name: str | None,
 ) -> str:
     """Resolve a workflow state from its ID or its display name.
 
     Args:
-        config (LinearConfig): Linear credentials.
+        accessor (LinearAccessor): the install's Linear handle.
         state_id (str | None): state ID, taken verbatim.
         state_name (str | None): state name, looked up across teams.
 
@@ -66,7 +66,7 @@ async def resolve_state_id(
         return state_id
     if not state_name:
         raise ValueError("--state-id or --state-name is required")
-    teams = await list_teams(config)
+    teams = await list_teams(accessor)
     for team in teams:
         for state in (team.get("states") or {}).get("nodes", []):
             if state.get("name") == state_name:
@@ -75,7 +75,7 @@ async def resolve_state_id(
 
 
 async def resolve_label_id(
-    config: LinearConfig,
+    accessor: LinearAccessor,
     team_id: str,
     label_id: str | None,
     label_name: str | None,
@@ -83,7 +83,7 @@ async def resolve_label_id(
     """Resolve a label from its ID or its display name.
 
     Args:
-        config (LinearConfig): Linear credentials.
+        accessor (LinearAccessor): the install's Linear handle.
         team_id (str): the issue's team, scoping the name lookup.
         label_id (str | None): label ID, taken verbatim.
         label_name (str | None): label name, looked up on the team.
@@ -95,14 +95,14 @@ async def resolve_label_id(
         return label_id
     if not label_name:
         raise ValueError("--label or --label-name is required")
-    for label in await list_team_labels(config, team_id):
+    for label in await list_team_labels(accessor, team_id):
         if label.get("name") == label_name:
             return label["id"]
     raise FileNotFoundError(label_name)
 
 
 async def resolve_project_id(
-    config: LinearConfig,
+    accessor: LinearAccessor,
     team_id: str,
     project_id: str | None,
     project_name: str | None,
@@ -110,7 +110,7 @@ async def resolve_project_id(
     """Resolve a project from its ID or its display name.
 
     Args:
-        config (LinearConfig): Linear credentials.
+        accessor (LinearAccessor): the install's Linear handle.
         team_id (str): the issue's team, scoping the name lookup.
         project_id (str | None): project ID, taken verbatim.
         project_name (str | None): project name, looked up on the team.
@@ -122,7 +122,7 @@ async def resolve_project_id(
         return project_id
     if not project_name:
         raise ValueError("--project or --project-name is required")
-    for project in await list_team_projects(config, team_id):
+    for project in await list_team_projects(accessor, team_id):
         if project.get("name") == project_name:
             return project["id"]
     raise FileNotFoundError(project_name)

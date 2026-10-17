@@ -18,8 +18,11 @@ import type { WorkspaceBinding, RuntimeContext } from './binding.ts'
 import { LanguageRuntime } from './language.ts'
 import { LINE_EXECUTOR } from './mixin.ts'
 import { UnsupportedExecutionError } from './errors.ts'
-import type { RunArgs, RunResult } from './types.ts'
+import type { DispatchFn, ExecutionKind, Program, RunResult } from './types.ts'
 import { RuntimeFiles } from './files.ts'
+import type { Context } from '../commands/config.ts'
+import { getCurrentSessionFor, runWithSession } from '../context/session_context.ts'
+import { materialize } from '../io/types.ts'
 import { linkView, mountView } from '../commands/builtin/utils/links.ts'
 import { MontyRuntime } from './python/monty/runtime.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
@@ -27,6 +30,7 @@ import { QuickJsRuntime } from './js/quickjs/runtime.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import { getTestParser } from '../workspace/fixtures/workspace_fixture.ts'
+import { context } from '../workspace/fixtures/context.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import type { Policy } from '../policy/base.ts'
 import type { Action, SessionContext } from '../policy/types.ts'
@@ -38,33 +42,32 @@ function required<T>(value: T | null | undefined): T {
 
 const enc = new TextEncoder()
 const dec = new TextDecoder()
+
 class Probe extends LanguageRuntime {
   readonly name = 'probe'
   readonly language = 'python' as const
   override readonly reach = 'workspace' as const
-  readonly contexts: RuntimeContext[] = []
-  protected override executeCode(request: RunArgs, context?: RuntimeContext): Promise<RunResult> {
-    if (context !== undefined) this.contexts.push(context)
-    return super.executeCode(request, context)
-  }
-  run(args: RunArgs): Promise<RunResult> {
-    return Promise.resolve({ stdout: enc.encode(args.code), stderr: null, exitCode: 0 })
+  readonly contexts: Context[] = []
+  interpret(_engine: unknown, program: Program, ctx: Context): Promise<RunResult> {
+    this.contexts.push(ctx)
+    return Promise.resolve({ stdout: enc.encode(program.code), stderr: null, exitCode: 0 })
   }
 }
 class ShellProbe extends Runtime {
   readonly name = 'shell-probe'
   readonly [LINE_EXECUTOR] = true as const
-  runLine(
-    command: string,
-    stdin: Uint8Array | null,
-    _env: Record<string, string>,
-    cwd: string,
+  async runLine(
+    _engine: unknown,
+    _paths: PathSpec[],
+    _texts: string[],
+    ctx: Context,
   ): Promise<RunResult> {
-    return Promise.resolve({
-      stdout: enc.encode(command + ':' + cwd + dec.decode(stdin ?? new Uint8Array())),
+    const stdin = ctx.stdin === null ? new Uint8Array() : await materialize(ctx.stdin)
+    return {
+      stdout: enc.encode(`${ctx.flags.c as string}:${ctx.cwd.virtual}${dec.decode(stdin)}`),
       stderr: null,
       exitCode: 0,
-    })
+    }
   }
 }
 class DenySecret implements Policy {
@@ -98,7 +101,9 @@ describe('execution bindings', () => {
         this.context = binding.capture()
         this.prefixes = binding.resolver.prefixes()
         this.links = [...binding.resolver.linkChildren('/data')]
-        this.read = binding.dispatch('read', '/data/file')
+        this.read = required(binding.dispatch)('read', PathSpec.fromStrPath('/data/file')).then(
+          ([value]) => value,
+        )
       }
     }
     const runtime = new EagerProbe()
@@ -116,24 +121,18 @@ describe('execution bindings', () => {
     }
   })
 
-  it('declares capabilities and refuses unsupported kinds and languages', async () => {
+  it('declares capabilities and refuses unsupported kinds', async () => {
     const language = new Probe(),
       native = new ShellProbe()
-    const code = {
-      kind: 'code',
-      language: 'python',
-      code: 'hello',
-      args: [],
-      env: {},
-      stdin: null,
-    } as const
-    const shell = {
-      kind: 'shell',
-      line: 'echo hello',
-      cwd: PathSpec.fromStrPath('/work'),
-      stdin: enc.encode('!'),
-      env: {},
-    } as const
+    const work = PathSpec.fromStrPath('/work')
+    type Request = [string[], Context, ExecutionKind]
+    const code: Request = [[], context({ flags: { c: 'hello' } }), 'code']
+    const shell: Request = [
+      [],
+      context({ flags: { c: 'echo hello' }, cwd: work, stdin: enc.encode('!') }),
+      'line',
+    ]
+    const process: Request = [['echo', 'hello'], context({ cwd: work }), 'process']
     expect(language.capabilities.languages).toEqual(['python'])
     expect(language.capabilities.reach).toBe('workspace')
     expect(language.capabilities.shell).toBe(false)
@@ -141,24 +140,16 @@ describe('execution bindings', () => {
     expect(native.capabilities.process).toBe(false)
     expect(language.capabilities.filesystem).toEqual([])
     expect(native.capabilities.filesystem).toEqual([])
-    expect(dec.decode((await language.execute({ ...code, args: [] })).stdout)).toBe('hello')
-    expect(dec.decode((await native.execute(shell)).stdout)).toBe('echo hello:/work!')
-    await expect(language.execute(shell)).rejects.toBeInstanceOf(UnsupportedExecutionError)
-    await expect(native.execute({ ...code, args: [] })).rejects.toBeInstanceOf(
-      UnsupportedExecutionError,
-    )
-    await expect(language.execute({ ...code, args: [], language: 'js' })).rejects.toBeInstanceOf(
-      UnsupportedExecutionError,
-    )
-    await expect(
-      native.execute({
-        kind: 'process',
-        argv: ['echo', 'hello'],
-        cwd: shell.cwd,
-        env: {},
-        stdin: null,
-      }),
-    ).rejects.toBeInstanceOf(UnsupportedExecutionError)
+    const execute = (runtime: Runtime, [texts, ctx, kind]: Request) =>
+      runtime.execute([], texts, ctx, { kind })
+    expect(dec.decode((await execute(language, code)).stdout)).toBe('hello')
+    expect(dec.decode((await execute(native, shell)).stdout)).toBe('echo hello:/work!')
+    for (const [runtime, request] of [
+      [language, shell],
+      [native, code],
+      [native, process],
+    ] as const)
+      await expect(execute(runtime, request)).rejects.toBeInstanceOf(UnsupportedExecutionError)
   })
 
   it('retains session permissions and gated writes after capture', async () => {
@@ -169,10 +160,10 @@ describe('execution bindings', () => {
       const context = ws.runtimeContext('agent'),
         other = ws.runtimeContext()
       expect(required(mountView(context.ctx.vfs)).visibleDescendants('/')).not.toContain('/secret')
-      await expect(context.dispatch('read', '/secret/a')).rejects.toThrow()
-      expect(dec.decode((await other.dispatch('read', '/secret/a')) as Uint8Array)).toBe(
-        'private\n',
-      )
+      const secret = PathSpec.fromStrPath('/secret/a')
+      await expect(required(context.ctx.vfs).dispatch('read', secret)).rejects.toThrow()
+      const [answer] = await required(other.ctx.vfs).dispatch('read', secret)
+      expect(dec.decode(answer as Uint8Array)).toBe('private\n')
       await required(context.ctx.session).set('PUBLIC', 'agent')
       expect(required(context.ctx.session).get('PUBLIC')).toBe('agent')
       expect(required(other.ctx.session).get('PUBLIC')).toBeNull()
@@ -205,7 +196,7 @@ describe('execution bindings', () => {
       expect(required(linkView(context.ctx.vfs)).resolve('/data/link')).toBe('/data/a')
       ws.addMount('/data/nested', new RAMVFS(), MountMode.EXEC)
       expect(context.resolver.ownerOf('/data/nested/a')).toBe('/data/nested/')
-      const vfs = new RuntimeFiles(context.dispatch, context.resolver)
+      const vfs = required(context.scope.call(() => RuntimeFiles.of(context.ctx, context.binding)))
       expect(dec.decode(await vfs.read('/data/link'))).toBe('shared\n')
       expect((await vfs.stat('/data/a')).mode & 0o777).toBe(0o600)
     } finally {
@@ -213,27 +204,13 @@ describe('execution bindings', () => {
     }
   })
 
-  it('refuses a foreign context or sharing an instance across workspaces', async () => {
+  it('refuses sharing an instance across workspaces', async () => {
     const runtime = new Probe()
     const first = await world([runtime]),
       second = await world()
     try {
-      const request = {
-        kind: 'code',
-        language: 'python',
-        code: 'ok',
-        args: [],
-        env: {},
-        stdin: null,
-      } as const
-      expect(
-        dec.decode(
-          (await runtime.execute({ ...request, args: [] }, first.runtimeContext())).stdout,
-        ),
-      ).toBe('ok')
-      await expect(
-        runtime.execute({ ...request, args: [] }, second.runtimeContext()),
-      ).rejects.toThrow('another binding')
+      const ok = await runtime.execute([], [], context({ flags: { c: 'ok' } }))
+      expect(dec.decode(ok.stdout)).toBe('ok')
       expect(() => second.addRuntime(runtime)).toThrow('another workspace')
     } finally {
       await first.close()
@@ -259,38 +236,34 @@ it.each([
       await ws.shell('echo shared > /data/file; ln -s /data/file /data/link')
       ws.createSession('one')
       ws.createSession('two')
-      const calls: string[][] = [[], []]
+      const calls: Record<string, string[]> = { one: [], two: [] }
+      // The program's own calls reach the dispatcher as the session each
+      // run launched under, however the two interleave.
+      const dispatcher = (ws as unknown as { dispatcher: { dispatch: DispatchFn } }).dispatcher
+      const dispatch = dispatcher.dispatch
+      dispatcher.dispatch = (op, path, ...rest) => {
+        const session = getCurrentSessionFor(ws.sessionManager)?.sessionId ?? ''
+        calls[session]?.push(`${op}:${path.virtual}`)
+        return dispatch(op, path, ...rest)
+      }
+      const code =
+        runtime.language === 'js'
+          ? "const f = std.open('/data/link', 'r'); std.out.puts(f.readAsString()); f.close()"
+          : "print(open('/data/link').read(), end='')"
       const results = await Promise.all(
-        ['one', 'two'].map((session, index) => {
-          const captured = ws.runtimeContext(session)
-          const context: RuntimeContext = {
-            ...captured,
-            dispatch: (...args) => {
-              required(calls[index]).push(`${args[0]}:${args[1]}`)
-              return captured.dispatch(...args)
-            },
-          }
-          return runtime.execute(
-            {
-              kind: 'code',
-              language: runtime.language,
-              code:
-                runtime.language === 'js'
-                  ? "const f = std.open('/data/link', 'r'); std.out.puts(f.readAsString()); f.close()"
-                  : "print(open('/data/link').read(), end='')",
-              args: [],
-              env: {},
-              stdin: null,
-            },
-            context,
-          )
-        }),
+        ['one', 'two'].map((session) =>
+          runWithSession(
+            ws.getSession(session),
+            () => runtime.execute([], [], context({ flags: { c: code } })),
+            { owner: ws.sessionManager },
+          ),
+        ),
       )
       for (const result of results) {
         expect(result.exitCode, dec.decode(result.stderr ?? new Uint8Array())).toBe(0)
         expect(dec.decode(result.stdout)).toBe('shared\n')
       }
-      for (const entries of calls)
+      for (const entries of Object.values(calls))
         expect(entries.some((entry) => /^read:\/data\/(file|link)$/.test(entry))).toBe(true)
     } finally {
       await ws.close()
@@ -308,12 +281,12 @@ it('command execution supplies its active workspace context', async () => {
     const result = await ws.shell('python3 -c hello', { sessionId: 'agent' })
     expect(dec.decode(result.stdout)).toBe('hello')
     const captured = required(runtime.contexts.at(-1))
-    expect(captured.ctx.cwd.virtual).toBe('/data')
-    expect(captured.ctx.env?.PUBLIC).toBe('agent')
-    expect(required(captured.ctx.session).get('PUBLIC')).toBe('agent')
+    expect(captured.cwd.virtual).toBe('/data')
+    expect(captured.env?.PUBLIC).toBe('agent')
+    expect(required(captured.session).get('PUBLIC')).toBe('agent')
     await ws.shell('python3 -c other')
-    expect(required(runtime.contexts.at(-1)).ctx.env?.PUBLIC).toBeUndefined()
-    expect(required(captured.ctx.session).get('PUBLIC')).toBe('agent')
+    expect(required(runtime.contexts.at(-1)).env?.PUBLIC).toBeUndefined()
+    expect(required(captured.session).get('PUBLIC')).toBe('agent')
   } finally {
     await ws.close()
   }

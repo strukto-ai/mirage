@@ -28,6 +28,7 @@ from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
+from mirage.workspace.files import Files
 
 
 def _ok(
@@ -56,7 +57,8 @@ def _run(
 ) -> tuple[bytes, object]:
     base = cwd or "/"
     spec = PathSpec(virtual=base, directory=base, vfs_path="", resolved=False)
-    ctx = Context(dispatch=dispatch, cwd=spec, flags=flags)
+    vfs = Files([], dispatch, ledger=False) if dispatch is not None else None
+    ctx = Context(vfs=vfs, cwd=spec, flags=flags)
     body, io = asyncio.run(wget(NOOPAccessor(), [], list(texts), ctx))
     if body is None:
         return b"", io

@@ -17,6 +17,7 @@ import time
 
 from dulwich.refs import DictRefsContainer
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.commit import identity
 from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import (
@@ -190,7 +191,7 @@ async def set_symbolic(
 
 
 async def symbolic_ref(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """``git symbolic-ref``: read, change or delete a symbolic ref.
 
@@ -203,7 +204,7 @@ async def symbolic_ref(
     2.47.3.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context.

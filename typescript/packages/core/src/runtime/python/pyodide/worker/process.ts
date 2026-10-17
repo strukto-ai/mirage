@@ -1,8 +1,8 @@
 import type { ChildProcess } from '../../../../process/child.ts'
-import { RuntimeFiles } from '../../../files.ts'
+import type { RuntimeFiles } from '../../../files.ts'
 import { resolvePath } from '../../../../utils/path.ts'
 import { classify } from '../../../../errors/index.ts'
-import type { RuntimeContext } from '../../../binding.ts'
+import type { Context } from '../../../../commands/config.ts'
 import { PipeClosed } from '../../../../shell/errors.ts'
 import { PathSpec } from '../../../../types.ts'
 import { decodeBase64, encodeBase64 } from '../../../../utils/base64.ts'
@@ -126,7 +126,14 @@ export class GuestProcessTable {
   private readonly children = new Map<number, GuestChild>()
   private closed = false
   private readonly owned = new Set<ChildProcess>()
-  constructor(private readonly context: RuntimeContext) {}
+  /**
+   * @param ctx the run's context, whose processes the guest's children join.
+   * @param files the run's file adapter, which finds a program to spawn.
+   */
+  constructor(
+    private readonly ctx: Context,
+    private readonly files: RuntimeFiles,
+  ) {}
 
   async call(payload: string): Promise<string> {
     try {
@@ -166,8 +173,8 @@ export class GuestProcessTable {
       return {}
     }
     if (request.op === 'resolve' || request.op === 'spawn') {
-      if (request.op === 'spawn') this.context.ctx.processes?.checkSpawn()
-      const files = RuntimeFiles.of(this.context)
+      if (request.op === 'spawn') this.ctx.processes?.checkSpawn()
+      const files = this.files
       const head = request.argv?.[0]
       if (typeof head !== 'string' || !head)
         throw Object.assign(new Error('empty executable'), { code: 'ENOENT' })
@@ -203,7 +210,7 @@ export class GuestProcessTable {
         throw Object.assign(new Error(`not a directory: ${cwd}`), { code: 'ENOTDIR' })
       request.argv = [found, ...(request.argv ?? []).slice(1)]
 
-      if (this.context.ctx.processes?.spawn === undefined)
+      if (this.ctx.processes?.spawn === undefined)
         throw new Error('runtime has no process spawn entry point')
       if (
         !Array.isArray(request.argv) ||
@@ -214,7 +221,7 @@ export class GuestProcessTable {
       if (typeof request.cwd !== 'string' || !request.cwd.startsWith('/'))
         throw new Error('invalid cwd')
       if (this.closed) throw new Error('guest invocation has ended')
-      const child = this.context.ctx.processes.spawn({
+      const child = this.ctx.processes.spawn({
         argv: request.argv,
         cwd: PathSpec.fromStrPath(request.cwd),
         env: request.env ?? {},

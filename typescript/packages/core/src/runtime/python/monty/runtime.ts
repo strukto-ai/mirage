@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Context } from '../../../commands/config.ts'
 import { PythonRuntime } from '../base.ts'
-import type { RunArgs, RunResult } from '../../types.ts'
+import type { Program, RunResult } from '../../types.ts'
 import { memoryLimit, type RuntimeOptions } from '../../config.ts'
 import { RuntimeFiles } from '../../files.ts'
-import { unhonoredNotice, type InitFlags } from '../flags.ts'
+import { unhonoredNotice } from '../flags.ts'
 import type { MontyConfig } from './config.ts'
 import { MontyExecution } from './execution.ts'
 
@@ -43,7 +44,7 @@ import { MontyExecution } from './execution.ts'
  * refuses class inheritance, method decorators and `yield` — use the
  * pyodide runtime for a program that needs those.
  */
-export class MontyRuntime extends PythonRuntime {
+export class MontyRuntime extends PythonRuntime<MontyExecution> {
   readonly name = 'monty'
   protected override readonly versionSuffix = ' (monty)'
   // The interpreter is an in-process guest with no host syscalls: its
@@ -57,12 +58,18 @@ export class MontyRuntime extends PythonRuntime {
   override readonly runsModules = false
   declare config: MontyConfig
   private readonly maxMemory: number | null
-  private readonly execution: MontyExecution
 
   constructor(options: RuntimeOptions<MontyConfig> = {}) {
     super(options, ['maxMemory'] satisfies (keyof MontyConfig)[])
     this.maxMemory = memoryLimit(this.config.maxMemory)
-    this.execution = new MontyExecution(this.maxMemory)
+  }
+
+  protected override openEngine(): Promise<MontyExecution> {
+    return Promise.resolve(new MontyExecution(this.maxMemory))
+  }
+
+  protected override closeEngine(engine: MontyExecution): Promise<void> {
+    return engine.close()
   }
 
   /**
@@ -73,20 +80,18 @@ export class MontyRuntime extends PythonRuntime {
    * act on here even though every real-CPython engine honors them. The
    * notice rides on stderr and the program's own exit code stands.
    *
-   * Args:
-   *   args: the execution request.
+   * @param engine the install's worker pool.
+   * @param program the source and argv to run.
+   * @param ctx the run's context.
    */
-  async run(args: RunArgs, context = this.captureContext()): Promise<RunResult> {
-    const notice = unhonoredNotice((args.flags ?? {}) as InitFlags, this.name)
-    const execution =
-      (context?.ctx.processes?.depth ?? 0) > 0 ? new MontyExecution(this.maxMemory) : this.execution
+  async interpret(engine: MontyExecution, program: Program, ctx: Context): Promise<RunResult> {
+    const notice = unhonoredNotice(ctx.flags, this.name)
+    // A nested call must not queue behind a parent holding this pool.
+    const execution = (ctx.processes?.depth ?? 0) > 0 ? new MontyExecution(this.maxMemory) : engine
     const result = await execution
-      .run(
-        args.cwd === undefined && context !== undefined ? { ...args, cwd: context.ctx.cwd } : args,
-        RuntimeFiles.of(context),
-      )
+      .run(program, ctx, RuntimeFiles.of(ctx, this.binding))
       .finally(async () => {
-        if (execution !== this.execution) await execution.close()
+        if (execution !== engine) await execution.close()
       })
     if (notice.length === 0) return result
     const stderr = result.stderr ?? new Uint8Array()
@@ -94,9 +99,5 @@ export class MontyRuntime extends PythonRuntime {
     merged.set(notice, 0)
     merged.set(stderr, notice.length)
     return { ...result, stderr: merged }
-  }
-
-  override close(): Promise<void> {
-    return this.execution.close()
   }
 }

@@ -196,12 +196,13 @@ def test_a_link_the_router_followed_can_vanish_before_its_turn():
     assert not resolver.vanished(_spec("/data/t.gz", "t.gz"))
 
 
-def test_an_invocation_without_links_or_an_entry_point_has_no_link_resolver():
+def test_an_invocation_without_files_or_links_has_no_link_resolver():
     files = Files([], _Dispatch(), links=_Table({}))
     assert link_resolver(Context()) is None
-    assert link_resolver(Context(vfs=files)) is None
-    resolver = link_resolver(Context(vfs=files, dispatch=_Dispatch()))
+    assert link_resolver(Context(vfs=Files([], _Dispatch()))) is None
+    resolver = link_resolver(Context(vfs=files))
     assert resolver is not None and resolver.cwd == "/"
+    assert resolver.dispatch == files.dispatch
 
 
 @pytest.mark.asyncio

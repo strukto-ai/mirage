@@ -19,7 +19,7 @@ import { treeWalk } from '../../utils/tree.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { rekey } from '../../../../utils/key_prefix.ts'
 import { cpGeneric, parseFlags } from '../../generic/cp.ts'
-import { serves, typedLink, linksOf, mountsOf } from '../../utils/links.ts'
+import { serves, typedLink, linksOf, mountsOf, dispatchOf } from '../../utils/links.ts'
 import type { GenericCommand } from '../adapter.ts'
 import type { CommandIO } from '../../../config.ts'
 import { requireOp, resolveGlobOf } from '../adapter.ts'
@@ -110,13 +110,13 @@ export const BUILDER: GenericCommand = {
       undefined,
       (p: PathSpec) => ops.readdir(accessor, p, idx),
       links === null ? undefined : (p: PathSpec) => typedLink(links, p, cwd),
-      links === null || ctx.dispatch === undefined
+      links === null || ctx.vfs === undefined
         ? undefined
-        : transferLinksOf(links, ctx.dispatch, cwd, ctx.vfs?.vis() ?? undefined, (virtual) =>
+        : transferLinksOf(links, ctx.vfs.dispatch, cwd, ctx.vfs.vis() ?? undefined, (virtual) =>
             serves(mountsOf(ctx), ctx.mountPrefix ?? '', virtual),
           ),
       ctx.stdin,
-      ctx.dispatch,
+      dispatchOf(ctx),
     )
   },
 }

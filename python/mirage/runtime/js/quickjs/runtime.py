@@ -17,14 +17,14 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, ClassVar
 
-from mirage.runtime.binding import RuntimeContext
+from mirage.commands.config import Context
 from mirage.runtime.config import HomeConfig, RuntimeConfig, resolve_home
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.js.quickjs.execution import cwd_preamble
 from mirage.runtime.types import (
     FilesystemOperation,
-    RunArgs,
+    Program,
     RunResult,
     RuntimeReach,
 )
@@ -45,7 +45,7 @@ _BUILD_HINT = (
 )
 
 
-class QuickJsRuntime(JsRuntime):
+class QuickJsRuntime(JsRuntime[WasmExecution]):
     """Run JavaScript on a WASI quickjs-ng under wasmtime, in-process.
 
     A bare modern JS engine (ES2023 syntax, ES modules, `JSON`, regex,
@@ -103,10 +103,16 @@ class QuickJsRuntime(JsRuntime):
             raise FileNotFoundError(
                 f"no {_WASM_NAME} under {root}; {_BUILD_HINT}"
             )
-        self._execution = WasmExecution(self._wasm, "js")
+
+    async def open_engine(self) -> WasmExecution:
+        return WasmExecution(self._wasm, "js")
+
+    async def close_engine(self, engine: WasmExecution) -> None:
+        await engine.close()
 
     async def version(self, env: dict[str, str]) -> RunResult:
-        stdout, stderr, exit_code = await self._execution.run(
+        engine = await self.engine()
+        stdout, stderr, exit_code = await engine.run(
             ["qjs", "--version"], None, list(env.items()), WasmView()
         )
         if exit_code == 0:
@@ -114,10 +120,9 @@ class QuickJsRuntime(JsRuntime):
             stdout = f"JavaScript (quickjs-ng {version})\n".encode()
         return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
 
-    async def run(
-        self, args: RunArgs, context: RuntimeContext | None = None
+    async def interpret(
+        self, engine: WasmExecution, program: Program, ctx: Context
     ) -> RunResult:
-        context = context or self._capture_context()
         # --std exposes the std/os globals (stdin via std.in); -m selects
         # ES-module mode for .mjs sources, and --script names classic mode
         # for the rest, since qjs takes -e source for a module unless told
@@ -126,7 +131,7 @@ class QuickJsRuntime(JsRuntime):
         argv = [
             "qjs",
             "--std",
-            "-m" if args.flags.get("module") else "--script",
+            "-m" if ctx.flags.get("module") else "--script",
         ]
         # A named program takes scriptArgs[0], the slot qjs fills with a
         # script's path when it runs a file; unnamed -e leaves the args
@@ -139,26 +144,23 @@ class QuickJsRuntime(JsRuntime):
         # silently flips module mode. qjs consumes the `--` itself and
         # starts scriptArgs after it, and the -e branch still wins over
         # any filename (quickjs-ng v0.15.1 qjs.c).
-        named = [args.prog] if args.prog else []
-        cwd = args.cwd or (context.ctx.cwd if context is not None else None)
-        source = args.code
-        if cwd is not None and cwd.virtual != "/":
+        named = [program.prog] if program.prog else []
+        cwd = ctx.cwd
+        source = program.code
+        if cwd.virtual != "/":
             # Evaluate scripts separately so their directive prologue still
             # controls strict mode. Modules are already strict.
-            if args.flags.get("module") and source.startswith("#!"):
+            if ctx.flags.get("module") and source.startswith("#!"):
                 source = "//" + source[2:]
-            if not args.flags.get("module"):
+            if not ctx.flags.get("module"):
                 source = f"std.evalScript({json.dumps(source)});"
             source = cwd_preamble(cwd) + source
-        argv += ["-e", source, "--", *named, *args.args]
-        fs = WasmView(files=RuntimeFiles.of(context))
-        stdout, stderr, exit_code = await self._execution.run(
+        argv += ["-e", source, "--", *named, *program.args]
+        fs = WasmView(files=RuntimeFiles.of(ctx, self._binding))
+        stdout, stderr, exit_code = await engine.run(
             argv=argv,
-            stdin=args.stdin,
-            env=list(args.env.items()),
+            stdin=program.stdin,
+            env=list((ctx.env or {}).items()),
             fs=fs,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
-
-    async def close(self) -> None:
-        await self._execution.close()

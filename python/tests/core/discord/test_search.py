@@ -15,6 +15,7 @@
 import asyncio
 from unittest.mock import AsyncMock, patch
 
+from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.search import search_guild
 
@@ -23,8 +24,8 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def _config():
-    return DiscordConfig(token="test-token")
+def _accessor():
+    return DiscordAccessor(DiscordConfig(token="test-token"))
 
 
 def _make_search_response(messages, total=None):
@@ -42,7 +43,7 @@ def test_search_returns_messages():
         new_callable=AsyncMock,
         return_value=_make_search_response(msgs),
     ):
-        results = _run(search_guild(_config(), "G1", "hello"))
+        results = _run(search_guild(_accessor(), "G1", "hello"))
     assert len(results) == 2
     assert results[0]["id"] == "100"
     assert results[1]["id"] == "200"
@@ -55,7 +56,9 @@ def test_search_with_channel_filter():
         new_callable=AsyncMock,
         return_value=_make_search_response(msgs),
     ) as mock:
-        results = _run(search_guild(_config(), "G1", "test", channel_id="C1"))
+        results = _run(
+            search_guild(_accessor(), "G1", "test", channel_id="C1")
+        )
     assert len(results) == 1
     call_params = mock.call_args[1].get("params") or mock.call_args[0][2]
     assert call_params["channel_id"] == "C1"
@@ -68,7 +71,7 @@ def test_search_empty_results():
         new_callable=AsyncMock,
         return_value={"messages": [], "total_results": 0},
     ):
-        results = _run(search_guild(_config(), "G1", "nonexistent"))
+        results = _run(search_guild(_accessor(), "G1", "nonexistent"))
     assert results == []
 
 
@@ -82,7 +85,7 @@ def test_search_sorted_oldest_first():
         new_callable=AsyncMock,
         return_value=_make_search_response(msgs),
     ):
-        results = _run(search_guild(_config(), "G1", "hello"))
+        results = _run(search_guild(_accessor(), "G1", "hello"))
     assert results[0]["id"] == "100"
     assert results[1]["id"] == "500"
 
@@ -97,7 +100,7 @@ def test_search_respects_limit():
         new_callable=AsyncMock,
         return_value=_make_search_response(msgs, total=10),
     ):
-        results = _run(search_guild(_config(), "G1", "msg", limit=3))
+        results = _run(search_guild(_accessor(), "G1", "msg", limit=3))
     assert len(results) == 3
 
 
@@ -123,5 +126,5 @@ def test_search_paginates():
         new_callable=AsyncMock,
         side_effect=responses,
     ):
-        results = _run(search_guild(_config(), "G1", "msg", limit=100))
+        results = _run(search_guild(_accessor(), "G1", "msg", limit=100))
     assert len(results) == 30

@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.accessor.github import GitHubAccount
 from mirage.core.github.config import GhConfig
 from mirage.core.github.issue import (
     IssueListFilter,
@@ -27,6 +28,8 @@ from mirage.core.github.issue import (
     list_issues,
 )
 from mirage.core.github.repo import RepoRef
+
+ACCOUNT = GitHubAccount(GhConfig(token="t"))
 
 
 @pytest.mark.asyncio
@@ -42,9 +45,7 @@ async def test_list_issues_filters_pull_requests(monkeypatch):
         ]
 
     monkeypatch.setitem(list_issues.__globals__, "github_pages", pages)
-    rows = await list_issues(
-        GhConfig(token="t"), RepoRef("o", "r"), {"state": "all"}, 7
-    )
+    rows = await list_issues(ACCOUNT, RepoRef("o", "r"), {"state": "all"}, 7)
 
     assert rows == [{"number": 1}]
     path, params, limit, include = calls[0]
@@ -60,12 +61,12 @@ async def test_direct_issue_verbs_reject_pull_request_numbers(
 ):
     calls = []
 
-    async def request(token, method, path, *args, base_url=None):
+    async def request(account, method, path, *args):
         calls.append((method, path))
         return {"number": 4, "pull_request": {"url": "x"}}
 
     monkeypatch.setitem(get_issue.__globals__, "github_request", request)
-    config = GhConfig(token="t")
+    config = ACCOUNT
     ref = RepoRef("o", "r")
 
     with pytest.raises(ValueError, match="pull request, not an issue"):
@@ -83,7 +84,7 @@ async def test_direct_issue_verbs_reject_pull_request_numbers(
 async def test_comments_follow_graphql_cursors(monkeypatch):
     cursors = []
 
-    async def request(token, method, path, body, *, base_url):
+    async def request(account, method, path, body):
         cursor = body["variables"]["cursor"]
         cursors.append(cursor)
         assert (method, path) == ("POST", "graphql")
@@ -110,7 +111,7 @@ async def test_comments_follow_graphql_cursors(monkeypatch):
         }
 
     monkeypatch.setitem(issue_comments.__globals__, "github_request", request)
-    rows = await issue_comments(GhConfig(token="t"), RepoRef("o", "r"), 1)
+    rows = await issue_comments(ACCOUNT, RepoRef("o", "r"), 1)
     assert rows == [{"body": "first"}, {"body": "second"}]
     assert cursors == [None, "next"]
 
@@ -125,7 +126,7 @@ async def test_comments_report_graphql_errors(monkeypatch):
 
     monkeypatch.setitem(issue_comments.__globals__, "github_request", request)
     with pytest.raises(ValueError, match="Could not resolve repository"):
-        await issue_comments(GhConfig(token="t"), RepoRef("o", "r"), 1)
+        await issue_comments(ACCOUNT, RepoRef("o", "r"), 1)
 
 
 class GraphQL:
@@ -155,7 +156,7 @@ async def test_issue_fields_ask_for_the_number_as_an_issue_or_a_pull(
     monkeypatch.setitem(issue_fields.__globals__, "graphql_data", graphql)
 
     node = await issue_fields(
-        GhConfig(token="t"),
+        ACCOUNT,
         RepoRef("o", "r"),
         4,
         IssueSelections("title,isPinned", "title"),
@@ -178,7 +179,7 @@ async def test_issue_fields_leave_an_empty_half_out_and_page_by_cursor(
     monkeypatch.setitem(issue_fields.__globals__, "graphql_data", graphql)
 
     await issue_fields(
-        GhConfig(token="t"),
+        ACCOUNT,
         RepoRef("o", "r"),
         4,
         IssueSelections(
@@ -211,7 +212,7 @@ async def test_issue_fields_refuse_an_answer_with_no_issue(
 
     with pytest.raises(ValueError, match=message):
         await issue_fields(
-            GhConfig(token="t"),
+            ACCOUNT,
             RepoRef("o", "r"),
             4,
             IssueSelections("title", "title"),
@@ -239,7 +240,7 @@ async def test_issue_listing_pages_newest_first_to_the_limit(monkeypatch):
     monkeypatch.setitem(list_issue_fields.__globals__, "graphql_data", graphql)
 
     rows = await list_issue_fields(
-        GhConfig(token="t"),
+        ACCOUNT,
         RepoRef("o", "r"),
         IssueListFilter(("OPEN", "CLOSED"), author="me", labels=("bug",)),
         3,
@@ -274,7 +275,7 @@ async def test_issue_listing_refuses_disabled_issues(monkeypatch):
         ValueError, match="the 'o/r' repository has disabled issues"
     ):
         await list_issue_fields(
-            GhConfig(token="t"),
+            ACCOUNT,
             RepoRef("o", "r"),
             IssueListFilter(("OPEN",)),
             30,
@@ -288,7 +289,7 @@ async def test_issue_listing_asks_nothing_for_a_zero_limit(monkeypatch):
     monkeypatch.setitem(list_issue_fields.__globals__, "graphql_data", graphql)
 
     rows = await list_issue_fields(
-        GhConfig(token="t"),
+        ACCOUNT,
         RepoRef("o", "r"),
         IssueListFilter(("OPEN",)),
         0,

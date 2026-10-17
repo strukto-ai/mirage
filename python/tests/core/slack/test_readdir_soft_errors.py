@@ -27,24 +27,24 @@ from tests.fixtures.mounted import Mounted
 
 
 @pytest.fixture
-def config():
-    return SlackConfig(token="xoxb-test")
+def accessor():
+    return SlackAccessor(SlackConfig(token="xoxb-test"))
 
 
 @pytest.mark.asyncio
-async def test_latest_message_ts_returns_none_on_not_in_channel(config):
+async def test_latest_message_ts_returns_none_on_not_in_channel(accessor):
     err = RuntimeError(
         "Slack API error (conversations.history): not_in_channel"
     )
     with patch(
         "mirage.core.slack.readdir.slack_get", new=AsyncMock(side_effect=err)
     ):
-        result = await _latest_message_ts(config, "C_INACCESSIBLE")
+        result = await _latest_message_ts(accessor, "C_INACCESSIBLE")
     assert result is None
 
 
 @pytest.mark.asyncio
-async def test_latest_message_ts_returns_none_on_missing_scope(config):
+async def test_latest_message_ts_returns_none_on_missing_scope(accessor):
     err = RuntimeError(
         "Slack API error (conversations.history): missing_scope "
         "(needed: channels:history; provided: channels:read)"
@@ -52,39 +52,38 @@ async def test_latest_message_ts_returns_none_on_missing_scope(config):
     with patch(
         "mirage.core.slack.readdir.slack_get", new=AsyncMock(side_effect=err)
     ):
-        result = await _latest_message_ts(config, "C_NO_SCOPE")
+        result = await _latest_message_ts(accessor, "C_NO_SCOPE")
     assert result is None
 
 
 @pytest.mark.asyncio
-async def test_latest_message_ts_reraises_unrelated_errors(config):
+async def test_latest_message_ts_reraises_unrelated_errors(accessor):
     err = RuntimeError("Slack API error (conversations.history): rate_limited")
     with patch(
         "mirage.core.slack.readdir.slack_get", new=AsyncMock(side_effect=err)
     ):
         with pytest.raises(RuntimeError, match="rate_limited"):
-            await _latest_message_ts(config, "C1")
+            await _latest_message_ts(accessor, "C1")
 
 
 @pytest.mark.asyncio
-async def test_day_listing_seals_empty_dir_on_not_in_channel(config):
+async def test_day_listing_seals_empty_dir_on_not_in_channel(accessor):
     err = RuntimeError(
         "Slack API error (conversations.history): not_in_channel"
     )
-    accessor = SlackAccessor(config=config)
     channels_page = {
         "channels": [{"id": "C_INACCESSIBLE", "name": "foo", "created": 1}],
         "response_metadata": {"next_cursor": ""},
     }
 
-    async def fake_get(_cfg, method, params=None, token=None, session=None):
+    async def fake_get(_accessor, method, params=None):
         if method == "conversations.list":
             return channels_page
         if method == "conversations.history":
             raise err
         raise AssertionError(f"unexpected {method}")
 
-    async def fake_history(_cfg, channel_id, date_str, _scope, session=None):
+    async def fake_history(_accessor, channel_id, date_str, _scope):
         raise err
 
     day = "/slack/channels/foo__C_INACCESSIBLE/2026-05-10"
@@ -105,9 +104,8 @@ async def test_day_listing_seals_empty_dir_on_not_in_channel(config):
 
 
 @pytest.mark.asyncio
-async def test_readdir_channel_inaccessible_yields_no_dates(config):
+async def test_readdir_channel_inaccessible_yields_no_dates(accessor):
     """Full integration: ls /slack/channels/inaccessible/ → no dates."""
-    accessor = SlackAccessor(config=config)
     channels_page = {
         "channels": [
             {"id": "C_INACCESSIBLE", "name": "private", "created": 1}
@@ -118,7 +116,7 @@ async def test_readdir_channel_inaccessible_yields_no_dates(config):
         "Slack API error (conversations.history): not_in_channel"
     )
 
-    async def fake_get(_cfg, method, params=None, token=None, session=None):
+    async def fake_get(_accessor, method, params=None):
         if method == "conversations.list":
             return channels_page
         if method == "conversations.history":
@@ -150,22 +148,21 @@ async def test_readdir_channel_inaccessible_yields_no_dates(config):
 
 
 @pytest.mark.asyncio
-async def test_a_soft_error_day_is_a_window(config):
+async def test_a_soft_error_day_is_a_window(accessor):
     # An empty day from not_in_channel is not the backend saying the day's
     # messages are gone, so it must not evict what an earlier listing held.
     err = RuntimeError(
         "Slack API error (conversations.history): not_in_channel"
     )
-    accessor = SlackAccessor(config=config)
     channels_page = {
         "channels": [{"id": "C_INACCESSIBLE", "name": "foo", "created": 1}],
         "response_metadata": {"next_cursor": ""},
     }
 
-    async def fake_get(_cfg, method, params=None, token=None, session=None):
+    async def fake_get(_accessor, method, params=None):
         return channels_page
 
-    async def fake_history(_cfg, channel_id, date_str, _scope, session=None):
+    async def fake_history(_accessor, channel_id, date_str, _scope):
         raise err
 
     day = "/slack/channels/foo__C_INACCESSIBLE/2026-05-10"
@@ -196,10 +193,9 @@ async def _soft_day_listing(_accessor, _channel_id, _day):
 
 
 @pytest.mark.asyncio
-async def test_a_soft_error_files_listing_is_a_window_too(config):
+async def test_a_soft_error_files_listing_is_a_window_too(accessor):
     # Reached when the files listing was evicted but the day survived; a
     # soft error there must not evict the attachments it listed before.
-    accessor = SlackAccessor(config=config)
     own = FileStat(
         name="files", type=FileType.DIRECTORY, extra={"channel_id": "C1"}
     )

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { context } from '../../../workspace/fixtures/context.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { PyodideRuntime } from './runtime.ts'
 import { WATCH_INTERVAL_MS, watchMemory } from './watchdog.ts'
@@ -80,7 +81,8 @@ describe('pyodide maxMemory', { timeout: 120_000 }, () => {
   it('caps a run outside a workspace too', async () => {
     const rt = new PyodideRuntime({ config: { maxMemory: 64 * 1024 * 1024 } })
     try {
-      const run = (code: string) => rt.run({ code, args: [], env: {}, stdin: null })
+      const run = (code: string) =>
+        rt.interpret(undefined, { code, args: [], stdin: null }, context())
       const big = await run('x = bytearray(200 * 1024 * 1024)')
       expect(big.exitCode).toBe(1)
       expect(DEC.decode(big.stderr ?? new Uint8Array())).toContain(

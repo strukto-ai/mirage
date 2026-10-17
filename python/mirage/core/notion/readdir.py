@@ -46,7 +46,7 @@ DATA_SOURCE = entry_stat("data_source_id", FileType.DIRECTORY)
 async def _list_pages_root(
     accessor: NotionAccessor, match: ScopeMatch
 ) -> list[FileStat]:
-    pages = await search_pages(accessor.config, session=accessor.pool)
+    pages = await search_pages(accessor)
     return [
         PAGE(
             page_segment_name(page),
@@ -66,17 +66,13 @@ async def _list_databases_root(
     # retrieve, because only the database object carries the title and
     # url this directory is named and rendered from.
     seen: list[str] = []
-    for data_source in await search_data_sources(
-        accessor.config, session=accessor.pool
-    ):
+    for data_source in await search_data_sources(accessor):
         owner = data_source.get("parent", {}).get("database_id", "")
         if owner and owner not in seen:
             seen.append(owner)
     rows = []
     for database_id in seen:
-        database = await get_database(
-            accessor.config, database_id, session=accessor.pool
-        )
+        database = await get_database(accessor, database_id)
         rows.append(
             DATABASE(
                 database_segment_name(database),
@@ -91,9 +87,7 @@ async def _list_page(
     accessor: NotionAccessor, match: ScopeMatch, entry: FileStat
 ) -> list[FileStat]:
     page_id = match.slots.get("page_id") or match.slots["row_id"]
-    blocks = await list_block_children(
-        accessor.config, page_id, session=accessor.pool
-    )
+    blocks = await list_block_children(accessor, page_id)
     # page.json renders from get_page plus the *recursive* block tree
     # while this listing only holds one level of children, so sizing it
     # here would cost an extra call pair per page. It stays size-unknown
@@ -119,9 +113,7 @@ async def _list_database(
     accessor: NotionAccessor, match: ScopeMatch, entry: FileStat
 ) -> list[FileStat]:
     database_id = match.slots["database_id"]
-    database = await get_database(
-        accessor.config, database_id, session=accessor.pool
-    )
+    database = await get_database(accessor, database_id)
     # database.json renders the database object this listing already
     # fetched, so its exact size is free here.
     rows = [
@@ -147,9 +139,7 @@ async def _list_data_source(
     accessor: NotionAccessor, match: ScopeMatch, entry: FileStat
 ) -> DirListing:
     data_source_id = match.slots["data_source_id"]
-    data_source = await get_data_source(
-        accessor.config, data_source_id, session=accessor.pool
-    )
+    data_source = await get_data_source(accessor, data_source_id)
     # The rows are one file, not one directory each: a query answers a
     # hundred rows' cells a call, while a row directory costs calls of its
     # own to enter, so a walk over a table stays a walk over its pages of

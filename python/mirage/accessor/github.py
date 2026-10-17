@@ -14,15 +14,43 @@
 
 import asyncio
 
-from mirage.accessor.base import SessionAccessor
-from mirage.core.github.config import GitHubConfig
+from mirage.accessor.base import Accessor, SessionAccessor
+from mirage.core.github.config import GhConfig
 from mirage.core.github.tree_entry import TreeEntry
 
 
-class GitHubAccessor(SessionAccessor):
+class GitHubAccount(SessionAccessor):
+    """One GitHub account: token, API base and the pool its calls ride.
+
+    A gh install's accessor, and the account a github mount holds.
+
+    Args:
+        config (GhConfig): the token and API base; a gh install's also
+            names its default repository and branch.
+    """
+
+    def __init__(self, config: GhConfig) -> None:
+        super().__init__()
+        self.config = config
+
+
+class GitHubAccessor(Accessor):
+    """A github mount's repository, reached through the account it holds.
+
+    Args:
+        account (GitHubAccount): the account, closed with the mount.
+        owner (str): the repository's owner.
+        repo (str): the repository.
+        ref (str | None): the pinned ref; None follows the default branch.
+        default_branch (str | None): None until fetched.
+        tree (dict[str, TreeEntry] | None): the recursive tree, None
+            until fetched.
+        truncated (bool): whether GitHub truncated that tree.
+    """
+
     def __init__(
         self,
-        config: GitHubConfig,
+        account: GitHubAccount,
         owner: str,
         repo: str,
         ref: str | None = None,
@@ -30,8 +58,7 @@ class GitHubAccessor(SessionAccessor):
         tree: dict[str, TreeEntry] | None = None,
         truncated: bool = False,
     ) -> None:
-        super().__init__()
-        self.config = config
+        self.account = account
         self.owner = owner
         self.repo = repo
         # None until resolved: an unpinned mount follows the repository's
@@ -66,3 +93,6 @@ class GitHubAccessor(SessionAccessor):
         # or sha-less response). Every listing out of the tree carries it
         # as its version.
         self.tree_version: str | None = None
+
+    async def close(self) -> None:
+        await self.account.close()

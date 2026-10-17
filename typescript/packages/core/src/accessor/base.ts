@@ -14,6 +14,14 @@
 
 export class Accessor {
   [key: string]: unknown
+
+  /** Release what this accessor holds, when it holds anything. */
+  close?(): Promise<void>
 }
 
-export class NOOPAccessor extends Accessor {}
+/** The accessor of a mount or CLI with no client of its own. */
+export class NOOPAccessor extends Accessor {
+  constructor(readonly config: unknown = null) {
+    super()
+  }
+}

@@ -17,6 +17,7 @@ import shutil
 from collections.abc import Sequence
 from typing import Any
 
+from mirage.commands.config import Context
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin, StreamingProcessMixin
@@ -31,11 +32,13 @@ from mirage.runtime.sandbox.sandlock.constants import (
     SANDLOCK_CLI_HINT,
     SYSTEM_READABLE,
 )
-from mirage.runtime.types import ProcessExecution, RunResult, StreamExecution
+from mirage.runtime.types import OutputFn, RunResult
 from mirage.types import PathSpec
 
 
-class SandlockRuntime(Runtime, LineExecutorMixin, StreamingProcessMixin):
+class SandlockRuntime(
+    Runtime[None], LineExecutorMixin[None], StreamingProcessMixin[None]
+):
     """Run native commands through the Linux Sandlock CLI.
 
     Paths are native paths. Workspace files require an existing filesystem
@@ -73,47 +76,58 @@ class SandlockRuntime(Runtime, LineExecutorMixin, StreamingProcessMixin):
         return argv
 
     async def run_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
+        self,
+        engine: None,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
     ) -> RunResult:
-        return await self.run_process(
-            ProcessExecution(
-                argv=("/bin/sh", "-c", line),
-                cwd=PathSpec.from_str_path(cwd),
-                env=env,
-                stdin=stdin,
-            )
+        line = ctx.flags.get("c")
+        return await self._run_process(
+            ["/bin/sh", "-c", line if isinstance(line, str) else ""], ctx, None
         )
 
-    async def run_process(self, request: ProcessExecution) -> RunResult:
-        return await self._run_process(request)
+    async def run_process(
+        self,
+        engine: None,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+    ) -> RunResult:
+        return await self._run_process(texts, ctx, None)
 
-    async def run_stream(self, request: StreamExecution) -> RunResult:
-        return await self._run_process(request)
+    async def run_stream(
+        self,
+        engine: None,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+        output: OutputFn,
+    ) -> RunResult:
+        return await self._run_process(texts, ctx, output)
 
     async def _run_process(
-        self, request: ProcessExecution | StreamExecution
+        self, argv: list[str], ctx: Context, output: OutputFn | None
     ) -> RunResult:
-        refusal = cwd_refusal(request.argv[0], request.cwd.virtual)
+        refusal = cwd_refusal(argv[0], ctx.cwd.virtual)
         if refusal is not None:
             return refusal
         cli = shutil.which("sandlock")
         if cli is None:
             raise FileNotFoundError(SANDLOCK_CLI_HINT)
-        argv = ["run", *self.policy_argv(), "--clean-env"]
-        for key, value in {**self.config.env, **request.env}.items():
-            argv += ["--env", f"{key}={value}"]
+        wrapper = ["run", *self.policy_argv(), "--clean-env"]
+        for key, value in {**self.config.env, **(ctx.env or {})}.items():
+            wrapper += ["--env", f"{key}={value}"]
         # Variables belong to the confined child, never the wrapper's loader.
         stdout, stderr, code = await run_cli(
             cli,
             None,
-            [*argv, "--", *request.argv],
-            request.stdin,
-            cwd=request.cwd.virtual,
+            [*wrapper, "--", *argv],
+            ctx.stdin,
+            cwd=ctx.cwd.virtual,
             env={},
             children=self._children,
-            output=request.output
-            if isinstance(request, StreamExecution)
-            else None,
+            output=output,
         )
         return RunResult(stdout=stdout, stderr=stderr or None, exit_code=code)
 

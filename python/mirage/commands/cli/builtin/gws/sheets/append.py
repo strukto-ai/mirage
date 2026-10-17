@@ -14,11 +14,10 @@
 
 import json
 
+from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.commands.cli.builtin.gws.sheets.write import values_json_from_flags
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.google.client import TokenManager
-from mirage.core.google.config import GoogleConfig
 from mirage.core.gsheets.write import append_values
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -26,16 +25,18 @@ from mirage.types import PathSpec
 
 
 async def append(
-    config: GoogleConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GoogleApiAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    async with TokenManager(config) as tm:
-        result = await append_values(
-            tm,
-            fl.as_str("spreadsheet") or "",
-            fl.as_str("range", "A1"),
-            values_json_from_flags(fl),
-        )
+    result = await append_values(
+        accessor.token_manager,
+        fl.as_str("spreadsheet") or "",
+        fl.as_str("range", "A1"),
+        values_json_from_flags(fl),
+    )
     out = json.dumps(
         result, ensure_ascii=False, separators=(",", ":")
     ).encode()

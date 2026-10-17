@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { headEntries, stagedEntries, workEntries } from './changes.ts'
 import { readIndex, refuseUnresolved } from './index_file.ts'
 import { commitEntries, treeEntries, type TreeEntry } from './tree.ts'
@@ -87,7 +88,7 @@ async function sides(
  * every format shows only the paths they name.
  */
 export async function diff(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

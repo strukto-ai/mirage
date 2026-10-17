@@ -23,9 +23,23 @@ from pathlib import Path
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.commands.config import Context
 from mirage.runtime.python import LocalRuntime
-from mirage.runtime.types import ProcessExecution, RunArgs
+from mirage.runtime.types import Program, RunResult
 from mirage.types import PathSpec
+
+
+def _args(code: str, env: dict[str, str] | None = None, **fields):
+    return Program(code=code, **fields), env
+
+
+async def _run(runtime: LocalRuntime, program: Program, **fields) -> RunResult:
+    return await runtime.interpret(None, program, Context(**fields))
+
+
+def _process(runtime: LocalRuntime, argv, cwd, stdin: bytes | None = None):
+    ctx = Context(cwd=PathSpec.from_str_path(str(cwd)), env={}, stdin=stdin)
+    return runtime.run_process(None, [], list(argv), ctx)
 
 
 @pytest.mark.asyncio
@@ -50,11 +64,10 @@ async def test_filesystem_operations(tmp_path, program, expected):
     )
     runtime = LocalRuntime()
     try:
-        result = await runtime.run(
-            RunArgs(
-                code=fixture.read_text(),
-                env={"MIRAGE_TEST_ROOT": str(tmp_path)},
-            )
+        result = await _run(
+            runtime,
+            Program(code=fixture.read_text()),
+            env={"MIRAGE_TEST_ROOT": str(tmp_path)},
         )
         assert result.exit_code == 0, result.stderr
         assert result.stdout.decode() == expected
@@ -67,17 +80,17 @@ async def test_filesystem_operations(tmp_path, program, expected):
     ("args", "exit_code", "stdout", "stderr"),
     [
         pytest.param(
-            RunArgs(code="print(21 * 2)"), 0, b"42\n", None, id="print"
+            _args(code="print(21 * 2)"), 0, b"42\n", None, id="print"
         ),
         pytest.param(
-            RunArgs(code="import sys; print(sys.argv[1:])", args=["a", "b"]),
+            _args(code="import sys; print(sys.argv[1:])", args=["a", "b"]),
             0,
             b"['a', 'b']\n",
             None,
             id="argv",
         ),
         pytest.param(
-            RunArgs(
+            _args(
                 code="import os; print(os.environ['MY_VAR'])",
                 env={"MY_VAR": "v1"},
             ),
@@ -87,7 +100,7 @@ async def test_filesystem_operations(tmp_path, program, expected):
             id="env-is-the-sessions",
         ),
         pytest.param(
-            RunArgs(
+            _args(
                 code="import sys; print(sys.stdin.read().upper())",
                 stdin=b"hello",
             ),
@@ -97,12 +110,13 @@ async def test_filesystem_operations(tmp_path, program, expected):
             id="stdin",
         ),
         pytest.param(
-            RunArgs(code="1/0"), 1, b"", b"ZeroDivisionError", id="traceback"
+            _args(code="1/0"), 1, b"", b"ZeroDivisionError", id="traceback"
         ),
     ],
 )
 def test_local_runs_on_the_host_interpreter(args, exit_code, stdout, stderr):
-    result = asyncio.run(LocalRuntime().run(args))
+    program, env = args
+    result = asyncio.run(_run(LocalRuntime(), program, env=env))
     assert (result.exit_code, result.stdout) == (exit_code, stdout)
     if stderr is None:
         assert result.stderr is None
@@ -116,8 +130,9 @@ def test_local_runs_on_the_host_interpreter(args, exit_code, stdout, stderr):
 def test_script_cli_stdin_is_not_embedded_in_process_argv(stdin):
     runtime = LocalRuntime()
     result = asyncio.run(
-        runtime.run(
-            RunArgs(
+        _run(
+            runtime,
+            Program(
                 code=(
                     "from __future__ import annotations\n"
                     "import sys\nprint(argv)\n"
@@ -128,7 +143,7 @@ def test_script_cli_stdin_is_not_embedded_in_process_argv(stdin):
                 args=["one"],
                 script_cli=True,
                 stdin=stdin,
-            )
+            ),
         )
     )
     assert result.exit_code == 0
@@ -145,14 +160,15 @@ async def test_the_program_gets_none_of_the_host_environment(monkeypatch):
     monkeypatch.setenv("MIRAGE_TEST_HOST_ONLY", "host")
     runtime = LocalRuntime(config={"env": {"MIRAGE_TEST_CONFIG": "config"}})
     try:
-        result = await runtime.run(
-            RunArgs(
+        result = await _run(
+            runtime,
+            Program(
                 code=(
                     "import os; print(os.environ.get('MIRAGE_TEST_HOST_ONLY'),"
                     " os.environ['MIRAGE_TEST_CONFIG'], os.environ['MY_VAR'])"
-                ),
-                env={"MY_VAR": "session"},
-            )
+                )
+            ),
+            env={"MY_VAR": "session"},
         )
     finally:
         await runtime.close()
@@ -189,14 +205,7 @@ async def test_a_captured_program_runs_on_the_host(
 ):
     runtime = LocalRuntime(captures=["python3", "@external"])
     try:
-        result = await runtime.run_process(
-            ProcessExecution(
-                argv=argv,
-                cwd=PathSpec.from_str_path(cwd),
-                env={},
-                stdin=b"hi",
-            )
-        )
+        result = await _process(runtime, argv, cwd, b"hi")
     finally:
         await runtime.close()
     assert (result.exit_code, result.stdout, result.stderr) == (
@@ -221,14 +230,7 @@ async def test_a_program_found_through_a_relative_path_entry_runs_elsewhere(
     monkeypatch.chdir(tmp_path)
     runtime = LocalRuntime(captures=["@external"])
     try:
-        result = await runtime.run_process(
-            ProcessExecution(
-                argv=("mirage-probe",),
-                cwd=PathSpec.from_str_path(str(work)),
-                env={},
-                stdin=None,
-            )
-        )
+        result = await _process(runtime, ["mirage-probe"], work)
     finally:
         await runtime.close()
     assert (result.exit_code, result.stdout) == (0, b"probe\n")
@@ -241,14 +243,7 @@ async def test_a_program_named_by_a_relative_path_runs_from_the_cwd(tmp_path):
     tool.chmod(0o755)
     runtime = LocalRuntime(captures=["@external"])
     try:
-        result = await runtime.run_process(
-            ProcessExecution(
-                argv=("./mirage-tool",),
-                cwd=PathSpec.from_str_path(str(tmp_path)),
-                env={},
-                stdin=None,
-            )
-        )
+        result = await _process(runtime, ["./mirage-tool"], tmp_path)
     finally:
         await runtime.close()
     assert (result.exit_code, result.stdout) == (0, b"tool\n")
@@ -270,14 +265,7 @@ async def test_a_program_path_that_cannot_run_answers_as_the_shell(
     (tmp_path / "sub").mkdir()
     runtime = LocalRuntime(captures=["@external"])
     try:
-        result = await runtime.run_process(
-            ProcessExecution(
-                argv=(name,),
-                cwd=PathSpec.from_str_path(str(tmp_path)),
-                env={},
-                stdin=None,
-            )
-        )
+        result = await _process(runtime, [name], tmp_path)
     finally:
         await runtime.close()
     assert (result.exit_code, result.stderr) == (exit_code, stderr)
@@ -294,14 +282,7 @@ async def test_a_program_path_follows_dot_dot_past_a_symlink(tmp_path):
     (work / "link").symlink_to(tmp_path / "opt" / "build")
     runtime = LocalRuntime(captures=["@external"])
     try:
-        result = await runtime.run_process(
-            ProcessExecution(
-                argv=("link/../mirage-tool",),
-                cwd=PathSpec.from_str_path(str(work)),
-                env={},
-                stdin=None,
-            )
-        )
+        result = await _process(runtime, ["link/../mirage-tool"], work)
     finally:
         await runtime.close()
     assert (result.exit_code, result.stdout) == (0, b"opt\n")
@@ -317,14 +298,7 @@ async def test_a_program_that_cannot_start_fails_as_the_shell_would(
     runtime = LocalRuntime(captures=["@external"])
     monkeypatch.setenv("PATH", str(tmp_path))
     try:
-        result = await runtime.run_process(
-            ProcessExecution(
-                argv=("mirage-broken",),
-                cwd=PathSpec.from_str_path(str(tmp_path)),
-                env={},
-                stdin=None,
-            )
-        )
+        result = await _process(runtime, ["mirage-broken"], tmp_path)
     finally:
         await runtime.close()
     assert (result.exit_code, result.stderr) == (
@@ -411,7 +385,7 @@ async def test_read_only_version_does_not_run_startup_code(tmp_path):
         refused = await ws.shell("python -c 'pass'", env=env)
         assert refused.exit_code == 126
         assert not marker.exists()
-        control = await runtime.run(RunArgs(code="pass", env=env))
+        control = await _run(runtime, Program(code="pass"), env=env)
         assert control.exit_code == 0
         assert marker.read_text() == "ran"
     finally:
@@ -422,7 +396,7 @@ async def test_read_only_version_does_not_run_startup_code(tmp_path):
 async def test_local_cancellation_kills_subprocess():
     runtime = LocalRuntime()
     task = asyncio.ensure_future(
-        runtime.run(RunArgs(code="import time; time.sleep(30)"))
+        _run(runtime, Program(code="import time; time.sleep(30)"))
     )
     await asyncio.sleep(0.3)
     start = time.monotonic()
@@ -452,7 +426,7 @@ TRACEBACK_CASES = json.loads(
 async def test_user_tracebacks_match_cpython(case):
     runtime = LocalRuntime()
     try:
-        result = await runtime.run(RunArgs(code=case["code"]))
+        result = await _run(runtime, Program(code=case["code"]))
         assert result.exit_code == 1
         native = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -471,7 +445,7 @@ async def test_user_tracebacks_match_cpython(case):
 async def test_close_kills_an_interpreter_still_running():
     runtime = LocalRuntime()
     run = asyncio.create_task(
-        runtime.run(RunArgs(code="import time; time.sleep(30)"))
+        _run(runtime, Program(code="import time; time.sleep(30)"))
     )
     while not runtime._children:
         await asyncio.sleep(0.01)
@@ -495,7 +469,7 @@ def test_close_leaves_a_blocked_loops_child_to_that_loop():
 
     async def start_then_block():
         run = asyncio.ensure_future(
-            runtime.run(RunArgs(code="import time; time.sleep(30)"))
+            _run(runtime, Program(code="import time; time.sleep(30)"))
         )
         while not runtime._children:
             await asyncio.sleep(0.01)

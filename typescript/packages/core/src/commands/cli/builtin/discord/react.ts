@@ -17,19 +17,19 @@ import { addReaction } from '../../../../core/discord/react.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { discordAccessor } from '../../../../accessor/discord.ts'
+import type { DiscordAccessor } from '../../../../accessor/discord.ts'
 
 const ENC = new TextEncoder()
 
 export async function react(
-  config: unknown,
+  accessor: DiscordAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   await addReaction(
-    discordAccessor(config),
+    accessor,
     fl.asStr('channel') ?? '',
     fl.asStr('message') ?? '',
     fl.asStr('emoji') ?? '',

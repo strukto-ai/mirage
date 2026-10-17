@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { PathSpec } from '../../../../types.ts'
 import git from 'isomorphic-git'
 
@@ -167,7 +168,7 @@ export async function buildTag(
  * imply a listing the way `-n` does, so their operands are patterns.
  */
 export async function tag(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

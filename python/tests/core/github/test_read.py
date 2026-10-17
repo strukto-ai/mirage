@@ -17,9 +17,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.accessor.github import GitHubAccessor
+from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.cache.index.ram import ListingCheckStore
-from mirage.core.github.config import GitHubConfig
+from mirage.core.github.config import GhConfig
 from mirage.core.github.read import read, read_bytes, read_stream
 from mirage.core.github.readdir import readdir
 from mirage.core.github.stat import stat
@@ -30,26 +30,26 @@ from tests.fixtures.handed import entry_at
 
 
 @pytest.fixture
-def config():
-    return GitHubConfig(token="ghp_test")
+def account():
+    return GitHubAccount(GhConfig(token="ghp_test"))
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.read.github_get", new_callable=AsyncMock)
-async def test_read_bytes_utf8(mock_get, config):
+async def test_read_bytes_utf8(mock_get, account):
     content = b"hello world"
     mock_get.return_value = {"content": base64.b64encode(content).decode()}
-    result = await read_bytes(config, "acme", "proj", "sha123")
+    result = await read_bytes(account, "acme", "proj", "sha123")
     assert result == content
     assert result.decode("utf-8") == "hello world"
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.read.github_get", new_callable=AsyncMock)
-async def test_read_bytes_binary(mock_get, config):
+async def test_read_bytes_binary(mock_get, account):
     content = bytes(range(256))
     mock_get.return_value = {"content": base64.b64encode(content).decode()}
-    result = await read_bytes(config, "acme", "proj", "sha456")
+    result = await read_bytes(account, "acme", "proj", "sha456")
     assert result == content
 
 
@@ -76,7 +76,7 @@ async def test_a_read_without_a_file_row_asks_nothing(rel, entry, error):
 
 def _served(gh: FakeGitHub) -> GitHubAccessor:
     return GitHubAccessor(
-        GitHubConfig(token="t", base_url=gh.url), "o", "r", "main"
+        GitHubAccount(GhConfig(token="t", base_url=gh.url)), "o", "r", "main"
     )
 
 

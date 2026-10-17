@@ -16,6 +16,7 @@ import posixpath
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.errors import (
     GitError,
     MoveOverlapError,
@@ -440,12 +441,12 @@ async def apply(
 
 
 async def mv(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Move or rename a file or directory, and stage the move.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context; git reads its repository

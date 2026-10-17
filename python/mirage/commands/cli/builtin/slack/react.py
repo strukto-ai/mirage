@@ -14,9 +14,9 @@
 
 import json
 
+from mirage.accessor.slack import SlackAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.react import add_reaction
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -24,11 +24,14 @@ from mirage.types import PathSpec
 
 
 async def react(
-    config: SlackConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: SlackAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags, ctx.spec)
     result = await add_reaction(
-        config,
+        accessor,
         fl.as_str("channel") or "",
         fl.as_str("ts") or "",
         fl.as_str("emoji") or "",

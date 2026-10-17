@@ -15,7 +15,7 @@ from mirage.commands.errors import FindParseError
 from mirage.core.generic.find import walk_find
 from mirage.core.generic.find_eval import FindArgs, Name, Not, Or
 from mirage.errors.types import CommandTimeoutError
-from mirage.io.types import materialize
+from mirage.io.types import IOResult, materialize
 from mirage.types import (
     ContentType,
     FileStat,
@@ -23,6 +23,7 @@ from mirage.types import (
     FindType,
     PathSpec,
 )
+from mirage.workspace.files import Files
 
 
 async def find_walk_generic(*args, **kwargs):
@@ -406,6 +407,21 @@ def _file_spec(virtual: str = "/mnt/a.txt", key: str = "a.txt") -> PathSpec:
     )
 
 
+def _files(stat_path) -> Files | None:
+    """Files that stat through ``stat_path`` and miss everything else."""
+    if stat_path is None:
+        return None
+
+    async def dispatch(name: str, path: PathSpec, /, **_kw):
+        if name == "stat":
+            found = await stat_path(path)
+            if found is not None:
+                return found, IOResult()
+        raise FileNotFoundError(path.virtual)
+
+    return Files([], dispatch, ledger=False)
+
+
 def _stat_path(stat: FileStat | None):
     async def fn(_virtual: str) -> FileStat | None:
         return stat
@@ -428,7 +444,7 @@ async def _walk(
     return await find_walk_generic(
         paths,
         list(texts),
-        Context(flags=flags, stat_path=stat_path),
+        Context(flags=flags, vfs=_files(stat_path)),
         readdir=readdir,
         stat=stat,
     )
@@ -702,7 +718,7 @@ async def test_walk_selection_preserves_newlines_before_rendering():
     _, io = await find_walk_generic(
         [_file_spec(virtual="/mnt", key="")],
         ["-type", "f"],
-        Context(stat_path=_stat_map(stats)),
+        Context(vfs=_files(_stat_map(stats))),
         readdir=AsyncMock(return_value=["/mnt/a\nb"]),
         stat=AsyncMock(side_effect=lambda path, *_: stats[path.virtual]),
     )
@@ -718,7 +734,7 @@ async def test_start_point_streams_before_the_walk():
         return_value=FileStat(name="remote", type=FileType.DIRECTORY)
     )
     out, _ = await stream_walk_find(
-        [root], [], Context(stat_path=probe), readdir=readdir, stat=readdir
+        [root], [], Context(vfs=_files(probe)), readdir=readdir, stat=readdir
     )
     assert await anext(out) == b"/remote\n"
     await out.aclose()

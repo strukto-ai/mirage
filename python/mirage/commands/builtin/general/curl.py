@@ -188,9 +188,11 @@ async def _read_at(
     try:
         if name == "-":
             return await materialize(ctx.stdin)
-        if ctx.dispatch is None:
+        if ctx.vfs is None:
             raise OperationNotSupportedError("no filesystem dispatcher")
-        content, _ = await ctx.dispatch("read", resolve_target(name, ctx.cwd))
+        content, _ = await ctx.vfs.dispatch(
+            "read", resolve_target(name, ctx.cwd)
+        )
         return await materialize(content)
     except WALK_ERRORS as exc:
         detail = "" if silent else f"curl: Failed to open {name}\n"
@@ -375,8 +377,8 @@ async def _write_named(
     """Write a ``-D`` or ``-o`` file through the dispatcher.
 
     Args:
-        ctx (Context): the command's context; without a dispatcher there
-            is nothing to write through.
+        ctx (Context): the command's context; without a file handle
+            there is nothing to write through.
         target (PathSpec | str): the file as the line named it.
         data (bytes): what the file holds.
         quiet (bool): ``-s`` without ``-S``, which silences the failure.
@@ -384,10 +386,12 @@ async def _write_named(
     Returns:
         bytes | None: None once written, else the failure's stderr.
     """
-    if ctx.dispatch is None:
+    if ctx.vfs is None:
         return None
     try:
-        await ctx.dispatch("write", resolve_target(target, ctx.cwd), data=data)
+        await ctx.vfs.dispatch(
+            "write", resolve_target(target, ctx.cwd), data=data
+        )
     # WALK_ERRORS is the shared recoverable set (every filesystem error
     # plus the ValueError store backends raise for "not a directory"), so
     # a missing parent cannot escape the way it did when this caught only

@@ -19,7 +19,6 @@ import pytest
 from mirage.commands.builtin.utils.paths import (
     default_paths,
     resolve_path_stat,
-    resolve_script,
 )
 from mirage.io import IOResult
 from mirage.types import FileStat, FileType, PathSpec
@@ -52,26 +51,6 @@ def _spec(virtual: str) -> PathSpec:
     return PathSpec(
         virtual=virtual, directory=virtual, vfs_path=virtual.strip("/")
     )
-
-
-def test_resolve_script_absolute_is_normalized():
-    spec = resolve_script("/data/../data/run.py", _spec("/cwd"))
-    assert spec.virtual == "/data/run.py"
-    assert spec.vfs_path == "data/run.py"
-    assert spec.directory == "/data/"
-    assert spec.resolved is True
-
-
-def test_resolve_script_relative_joins_cwd():
-    spec = resolve_script("sub/run.mjs", _spec("/data"))
-    assert spec.virtual == "/data/sub/run.mjs"
-    assert spec.directory == "/data/sub/"
-
-
-def test_resolve_script_without_cwd_resolves_against_root():
-    spec = resolve_script("run.py", None)
-    assert spec.virtual == "/run.py"
-    assert spec.directory == "/"
 
 
 def test_non_empty_paths_pass_through():

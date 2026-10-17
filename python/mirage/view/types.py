@@ -156,6 +156,8 @@ class SessionView:
     command or CLI opts in by reading it, and one that never reads it
     cannot write the session. ``env`` stays the snapshot. ``cwd`` is the
     session's working directory, the one an operand resolves against.
+    ``session_id`` names the session, and ``access`` reads its access
+    and shell settings (hides, umask, shell options) as they stand.
     """
 
     get: EnvGet
@@ -166,6 +168,8 @@ class SessionView:
     is_readonly: EnvIsReadonly
     profile: ProfileName
     cwd: Callable[[], str]
+    session_id: str
+    access: "Callable[[], SessionAccess]"
 
 
 @dataclass(frozen=True)

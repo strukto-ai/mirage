@@ -41,6 +41,4 @@ async def files_containing(
             return None
         loc = drive_loc(accessor.config, resolved, directory.vfs_path)
         scopes.append((directory, loc))
-    return await graph_files(
-        accessor.config, scopes, text, session=accessor.pool
-    )
+    return await graph_files(accessor, scopes, text)

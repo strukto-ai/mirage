@@ -1215,7 +1215,7 @@ def test_hidden_home_reads_as_unset_everywhere():
 
 def test_guest_env_omits_hidden_vars():
     # The guest copy-out is env_snapshot too, so a hidden var never
-    # reaches RunArgs.env however the runtime assembles its environ.
+    # reaches a runtime's ctx.env however it assembles its environ.
     ws = _hidden_vars_ws()
     sess = ws.get_session("agent")
     snap = env_snapshot(sess)

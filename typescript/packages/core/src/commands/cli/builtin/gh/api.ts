@@ -12,16 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { GitHubAccount } from '../../../../accessor/github.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { expand } from '../../../../core/github/placeholder.ts'
-import type { GhConfig } from '../../../../core/github/config.ts'
 import { GRAPHQL_PATH } from '../../../../core/github/constants.ts'
 import { GitHubApiError, type GitHubResponse } from '../../../../core/github/client.ts'
 import { PartialOutputError } from '../../../errors.ts'
-import { ghBool, ghTransport, jqLines, readCliFile } from './accessor.ts'
+import { ghBool, jqLines, readCliFile } from './accessor.ts'
 import { HTTP_REASONS } from './constants.ts'
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
@@ -125,8 +125,8 @@ function setField(fields: Record<string, unknown>, key: string, value: unknown):
   put(fields, keyParts(key), value)
 }
 
-async function fieldValue(config: unknown, ctx: Context, value: string): Promise<Json> {
-  const expanded = expand(value, config as GhConfig)
+async function fieldValue(accessor: GitHubAccount, ctx: Context, value: string): Promise<Json> {
+  const expanded = expand(value, accessor.config)
   if (expanded.startsWith('@')) {
     return new TextDecoder().decode(await readCliFile(ctx, expanded.slice(1), '--field'))
   }
@@ -134,7 +134,7 @@ async function fieldValue(config: unknown, ctx: Context, value: string): Promise
 }
 
 async function fields(
-  config: unknown,
+  accessor: GitHubAccount,
   ctx: Context,
   fl: FlagView,
 ): Promise<Record<string, unknown>> {
@@ -145,7 +145,7 @@ async function fields(
   }
   for (const pair of fl.asList('field')) {
     const [key, value] = split(pair, true)
-    setField(result, key, value === EMPTY_ARRAY ? value : await fieldValue(config, ctx, value))
+    setField(result, key, value === EMPTY_ARRAY ? value : await fieldValue(accessor, ctx, value))
   }
   return result
 }
@@ -203,7 +203,7 @@ function nextPath(link: string | undefined, baseUrl: string | undefined): string
 }
 
 export async function api(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -211,7 +211,7 @@ export async function api(
   const fl = new FlagView(ctx.flags)
   const endpoint = texts[0] ?? ''
   if (endpoint === '') throw new Error('an API endpoint is required')
-  const values = await fields(config, ctx, fl)
+  const values = await fields(accessor, ctx, fl)
   const input = await inputBody(ctx, fl)
   const hasInput = fl.raw('input') !== undefined
   // An explicit empty -X keeps gh's own branch, where fields ride the body as
@@ -220,7 +220,7 @@ export async function api(
   const method = fl.asStr('method', Object.keys(values).length > 0 || hasInput ? 'POST' : 'GET')
   const upper = method.toUpperCase()
   const wire = upper === '' ? 'GET' : upper
-  const expanded = expand(endpoint, config as GhConfig)
+  const expanded = expand(endpoint, accessor.config)
   const path =
     expanded === GRAPHQL_PATH ? expanded : expanded.startsWith('/') ? expanded : `/${expanded}`
 
@@ -242,7 +242,7 @@ export async function api(
 
   const pages: Printed[] = []
   const include = ghBool(fl, 'include')
-  const transport = ghTransport(config)
+  const transport = accessor.transport
   let current: string | undefined = path
   let first = true
   while (current !== undefined) {
@@ -288,7 +288,7 @@ export async function api(
     pages.push({ data: response.data, head })
     first = false
     current = ghBool(fl, 'paginate')
-      ? nextPath(response.headers.link, (config as GhConfig).baseUrl)
+      ? nextPath(response.headers.link, accessor.config.baseUrl)
       : undefined
   }
 

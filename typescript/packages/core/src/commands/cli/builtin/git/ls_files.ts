@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -43,7 +44,7 @@ import { checkSwitches, fatal, startPoint, verbUsage } from './util.ts'
  * `../README.md`).
  */
 export async function lsFiles(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -87,7 +88,7 @@ export async function lsFiles(
 
 /** List tree metadata without reading file contents. */
 export async function lsTree(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

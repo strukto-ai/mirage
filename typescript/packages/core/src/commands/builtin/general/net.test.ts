@@ -22,6 +22,7 @@ import type { DispatchFn } from '../../../runtime/types.ts'
 import type { Context } from '../../config.ts'
 import { GENERAL_CURL } from './curl.ts'
 import { GENERAL_WGET } from './wget.ts'
+import { Files } from '../../../workspace/files.ts'
 
 const DEC = new TextDecoder()
 const HTML = '<html><body><h1>Local Test Page</h1></body></html>'
@@ -63,7 +64,7 @@ async function runWget(
   }
   const result = await cmd.fn(vfs.accessor, [] as PathSpec[], [url], {
     ...ctx({ flags }),
-    dispatch,
+    vfs: new Files(dispatch, null, null, () => null, { ledger: false }),
   })
   if (result === null) throw new Error('null result')
   const [out, io] = result

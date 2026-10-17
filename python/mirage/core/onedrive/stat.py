@@ -39,9 +39,7 @@ async def stat(accessor: OneDriveAccessor, path: PathSpec) -> FileStat:
         # expose it as extra, like every other folder (see entry_stat).
         try:
             item = await graph_get(
-                accessor.config,
-                drive_loc(accessor.config, "").item(),
-                session=accessor.pool,
+                accessor, drive_loc(accessor.config, "").item()
             )
         except GraphError as exc:
             if exc.status == 404:
@@ -57,10 +55,7 @@ async def stat(accessor: OneDriveAccessor, path: PathSpec) -> FileStat:
             },
         )
     return await stat_item(
-        accessor.config,
-        drive_loc(accessor.config, path.vfs_path),
-        path.virtual,
-        session=accessor.pool,
+        accessor, drive_loc(accessor.config, path.vfs_path), path.virtual
     )
 
 
@@ -85,12 +80,10 @@ async def tree(
     config = accessor.config
     loc = drive_loc(config, path.vfs_path)
     if await _drive_type(accessor) == "personal":
-        found = await delta_tree(config, loc, session=accessor.pool)
+        found = await delta_tree(accessor, loc)
         if found is not None:
             return found
-    return await batch_tree(
-        config, loc, virtual_key(path), session=accessor.pool
-    )
+    return await batch_tree(accessor, loc, virtual_key(path))
 
 
 async def _drive_type(accessor: OneDriveAccessor) -> str:
@@ -103,10 +96,9 @@ async def _drive_type(accessor: OneDriveAccessor) -> str:
     if accessor.drive_type is None:
         try:
             drive = await graph_get(
-                accessor.config,
+                accessor,
                 drive_base(accessor.config),
                 params={"$select": "driveType"},
-                session=accessor.pool,
             )
         except GraphError as exc:
             logger.debug("onedrive drive type unanswered: %s", exc)

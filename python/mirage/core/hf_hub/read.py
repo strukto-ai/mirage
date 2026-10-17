@@ -108,9 +108,7 @@ async def read(
     )
     timer = start_op()
     with refusals_denied(path, REFUSED_STATUSES):
-        data, etag = await hub_bytes_tagged(
-            accessor.token, url, window, session=accessor.pool
-        )
+        data, etag = await hub_bytes_tagged(accessor.account, url, window)
     record(
         "read",
         path.virtual,

@@ -19,14 +19,8 @@ import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/index.ts'
 import { IOResult, type ByteSource } from '../io/types.ts'
 import type { Limit, PathSpec, WalkProbe } from '../types.ts'
-import type { DispatchFn, RuntimeIdentity, ShellFn } from '../runtime/types.ts'
-import type {
-  SessionAccess,
-  FollowOperands,
-  ReaddirPath,
-  SessionView,
-  StatPath,
-} from '../view/types.ts'
+import type { CommandRuntime, ShellFn } from '../runtime/types.ts'
+import type { SessionAccess, FollowOperands, SessionView } from '../view/types.ts'
 import type { TargetStat } from '../utils/glob_walk.ts'
 import type {
   CopyOp,
@@ -127,14 +121,14 @@ export interface CommandIO<A extends Accessor = Accessor> {
 /**
  * Everything a handler gets besides its handle and its operands.
  *
- * A command handler is `fn(accessor, paths, texts, ctx)` and a CLI leaf
- * `fn(config, paths, texts, ctx)`: the same `ctx`, the facts a runtime
- * execution takes too. Files are reached through `vfs`, the session's files,
- * which judge every call at the workspace dispatcher, as `session.vfs` and a
- * policy's `ctx.vfs` do. A handler reads the fields it needs and ignores the
- * rest; the workspace builds one per command or CLI, and `Mount.runCommand`
- * adds what only the mount knows (`mountPrefix`, `index`, `io`). Mirrors
- * Python's `Context`.
+ * A command handler is `fn(accessor, paths, texts, ctx)` and a CLI leaf too,
+ * with the install's accessor: the same `ctx`, the facts a runtime execution
+ * takes too. Files are reached through `vfs`, the session's files, which
+ * judge every call at the workspace dispatcher, as `session.vfs` and a
+ * policy's `ctx.vfs` do; the session through `session`. A handler reads the
+ * fields it needs and ignores the rest; the workspace builds one per command
+ * or CLI, and `Mount.runCommand` adds what only the mount knows (`spec`,
+ * `mountPrefix`, `index`, `io`). Mirrors Python's `Context`.
  */
 export interface Context {
   /** Piped standard input, if any. */
@@ -151,7 +145,7 @@ export interface Context {
    * operand or per mount.
    */
   argv?: readonly string[]
-  /** The resolved grammar. */
+  /** The resolved grammar; its `name` is the command's. */
   spec?: CommandSpec
   /** The session's files, run as the line's session. */
   vfs?: Files
@@ -162,37 +156,17 @@ export interface Context {
   /** Run a nested line in the calling session, as `sh -c` would (awk's pipes and `system()`). */
   shell?: ShellFn
   admission?: EntryGate | null
-  access?: SessionAccess
   /** The prefix of the mount running the command. */
   mountPrefix?: string
-  /** The name the command was invoked as. */
-  command?: string
   /** The mount's index cache. */
   index?: IndexCacheStore | null
   /** The command table of the mount running the command. */
   io?: CommandIO
-  /** The workspace op dispatcher. */
-  dispatch?: DispatchFn
-  /** The calling session. */
-  sessionId?: string
-  /** Whether policy lets the command start an interpreter. */
-  execAllowed?: boolean
   /**
-   * Whether policy lets an interpreter load code from a path; absent outside
-   * a workspace, where `execAllowed` decides.
+   * Where an interpreter command runs its code, and what policy lets that
+   * code start and load.
    */
-  execPathAllowed?: (virtual: string) => boolean
-  /** The runtime an interpreter runs in. */
-  runtime?: RuntimeIdentity
-  /**
-   * The line's pathname resolution of its operands, which a glob's matches
-   * take as typed words would.
-   */
-  followOperands?: FollowOperands
-  /** Stat one path through the dispatcher, which may land on another mount. */
-  statPath?: StatPath
-  /** List one directory through the dispatcher, for a walk that crosses a mount. */
-  readdirPath?: ReaddirPath
+  runtime?: CommandRuntime
   signal?: AbortSignal
   timeoutSeconds?: number
 }

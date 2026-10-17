@@ -20,7 +20,8 @@ import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { describe, expect, it } from 'vitest'
 import { QuickJsRuntime } from './runtime.ts'
 import { PrefixResolver } from '../../resolver.ts'
-import type { BridgeDispatchFn, RunArgs } from '../../types.ts'
+import type { BridgeDispatchFn, RunResult } from '../../types.ts'
+import { context } from '../../../workspace/fixtures/context.ts'
 
 const DEC = new TextDecoder()
 
@@ -51,8 +52,8 @@ function makeStatProbeBridge(statCode: string, content: string): StatProbeBridge
   return { dispatch, ops }
 }
 
-function runArgs(code: string): RunArgs {
-  return { code, args: [], env: {}, stdin: null }
+async function run(rt: QuickJsRuntime, code: string): Promise<RunResult> {
+  return rt.interpret(await rt.engine(), { code, args: [], stdin: null }, context())
 }
 
 const OPEN_APPEND_JS = `const f = std.open('/data/f.txt', 'a');
@@ -68,8 +69,8 @@ describe('quickjs std.open reads stat failures', () => {
   it('a non-absence stat failure refuses the open and mutates nothing', async () => {
     const bridge = makeStatProbeBridge('EIO', 'precious')
     const rt = new QuickJsRuntime()
-    rt.bind(new WorkspaceBinding(bridge.dispatch, new PrefixResolver(() => ['/data/'])))
-    const result = await rt.run(runArgs(OPEN_APPEND_JS))
+    rt.bind(WorkspaceBinding.overBridge(bridge.dispatch, new PrefixResolver(() => ['/data/'])))
+    const result = await run(rt, OPEN_APPEND_JS)
     await rt.close()
     expect(result.exitCode).toBe(0)
     expect(DEC.decode(result.stdout)).toBe('refused\n')
@@ -82,8 +83,8 @@ describe('quickjs std.open reads stat failures', () => {
   it('a confirmed absence still lets a create-capable mode establish', async () => {
     const bridge = makeStatProbeBridge('ENOENT', '')
     const rt = new QuickJsRuntime()
-    rt.bind(new WorkspaceBinding(bridge.dispatch, new PrefixResolver(() => ['/data/'])))
-    const result = await rt.run(runArgs(OPEN_APPEND_JS))
+    rt.bind(WorkspaceBinding.overBridge(bridge.dispatch, new PrefixResolver(() => ['/data/'])))
+    const result = await run(rt, OPEN_APPEND_JS)
     await rt.close()
     expect(result.exitCode).toBe(0)
     expect(DEC.decode(result.stdout)).toBe('opened\n')

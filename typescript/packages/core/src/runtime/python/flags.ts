@@ -12,9 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { FlagValue } from '../../commands/spec/types.ts'
+
 // The interpreter-init switches, keyed by CPython's own letter. These
 // configure the interpreter rather than selecting what it runs, so they
-// ride in RunArgs.flags and each engine answers the ones it can. `-u`
+// ride in the run's `ctx.flags` and each engine answers the ones it can. `-u`
 // and `-q` are deliberately absent: mirage buffers every stream and
 // prints no banner, so they are structural no-ops in every runtime
 // rather than something one engine honors and another does not.
@@ -54,19 +56,24 @@ const X_EFFECTS: ReadonlySet<string> = new Set([
   'warn_default_encoding',
 ])
 
-/** One run's interpreter-init switches, as the command parsed them. */
-export interface InitFlags {
-  b?: number
-  B?: boolean
-  E?: boolean
-  I?: boolean
-  P?: boolean
-  s?: boolean
-  S?: boolean
-  O?: number
-  W?: readonly string[]
-  X?: readonly string[]
-  check_hash_based_pycs?: string | null
+/**
+ * A counted switch's level; 0 when absent.
+ *
+ * @param value the switch's value.
+ */
+function count(value: FlagValue | undefined): number {
+  return typeof value === 'number' ? value : 0
+}
+
+/**
+ * A repeated switch's values; none when absent.
+ *
+ * @param value the switch's value.
+ */
+function words(value: FlagValue | undefined): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => (typeof item === 'string' ? item : item.virtual))
+    : []
 }
 
 /**
@@ -77,28 +84,24 @@ export interface InitFlags {
  * rather than taking a number, so level 2 is `-O -O`, which CPython reads
  * exactly as `-OO`. Mirrors Python's init_argv.
  *
- * Args:
- *   flags: the run's RunArgs.flags bag.
+ * @param flags the run's interpreter switches (`ctx.flags`).
  */
-export function initArgv(flags: InitFlags): string[] {
-  const bag = flags as Readonly<Record<string, unknown>>
+export function initArgv(flags: Readonly<Record<string, FlagValue>>): string[] {
   const argv: string[] = []
   for (const key of BOOL_FLAGS) {
-    if (bag[key] === true) argv.push(`-${key}`)
+    if (flags[key] === true) argv.push(`-${key}`)
   }
   for (const key of COUNT_FLAGS) {
-    const count = Number(bag[key] ?? 0)
-    for (let i = 0; i < count; i++) argv.push(`-${key}`)
+    for (let i = 0; i < count(flags[key]); i++) argv.push(`-${key}`)
   }
   for (const key of LIST_FLAGS) {
-    const values = bag[key]
-    for (const value of Array.isArray(values) ? values : []) argv.push(`-${key}`, String(value))
+    for (const value of words(flags[key])) argv.push(`-${key}`, value)
   }
   for (const [key, spelling] of Object.entries(VALUE_FLAGS)) {
-    const value = bag[key]
+    const setting = flags[key]
     // CPython parses this one by hand and rejects --opt=value, so it
     // goes back as two words whatever the user typed.
-    if (typeof value === 'string' && value !== '') argv.push(spelling, value)
+    if (typeof setting === 'string' && setting !== '') argv.push(spelling, setting)
   }
   return argv
 }
@@ -112,26 +115,28 @@ export function initArgv(flags: InitFlags): string[] {
  * subset, by CPython letter; the default is none, which is the honest
  * answer for an engine that is not CPython at all.
  *
- * Args:
- *   flags: the run's RunArgs.flags bag.
- *   honored: the letters this engine does act on.
+ * @param flags the run's interpreter switches (`ctx.flags`).
+ * @param honored the letters this engine does act on.
  */
-function unhonored(flags: InitFlags, honored: readonly string[]): string[] {
+function unhonored(
+  flags: Readonly<Record<string, FlagValue>>,
+  honored: readonly string[],
+): string[] {
   const present: string[] = []
   for (const key of [...BOOL_FLAGS, ...COUNT_FLAGS, ...LIST_FLAGS]) {
     if (honored.includes(key)) continue
-    const value = flags[key as keyof InitFlags]
-    const set = Array.isArray(value) ? value.length > 0 : value === true || Number(value) > 0
+    const value = flags[key]
+    const set = Array.isArray(value) ? value.length > 0 : value === true || count(value) > 0
     if (set) present.push(`-${key}`)
   }
   for (const [key, spelling] of Object.entries(VALUE_FLAGS)) {
     if (honored.includes(key)) continue
-    if (flags[key as keyof InitFlags]) present.push(spelling)
+    if (flags[key]) present.push(spelling)
   }
   // Reported per name rather than per letter: an engine can honor what
   // -X means for sys._xoptions and still not act on the handful of
   // names CPython gives a real effect.
-  for (const value of flags.X ?? []) {
+  for (const value of words(flags.X)) {
     const optName = value.split('=')[0] ?? ''
     if (X_EFFECTS.has(optName) && !honored.includes(`X:${optName}`)) {
       present.push(`-X ${optName}`)
@@ -148,13 +153,12 @@ function unhonored(flags: InitFlags, honored: readonly string[]): string[] {
  * other runtime keeps working here, while the difference stays visible
  * instead of being found later.
  *
- * Args:
- *   flags: the run's RunArgs.flags bag.
- *   runtimeName: the engine's registry name, for the message.
- *   honored: the letters this engine does act on.
+ * @param flags the run's interpreter switches (`ctx.flags`).
+ * @param runtimeName the engine's registry name, for the message.
+ * @param honored the letters this engine does act on.
  */
 export function unhonoredNotice(
-  flags: InitFlags,
+  flags: Readonly<Record<string, FlagValue>>,
   runtimeName: string,
   honored: readonly string[] = [],
 ): Uint8Array {

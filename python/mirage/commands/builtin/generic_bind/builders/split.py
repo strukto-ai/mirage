@@ -84,8 +84,8 @@ async def split(
     # need not be this mount, so a dispatcher routes each write to the
     # mount that owns it.
     write_bytes = (
-        transfer_primitives(ctx.dispatch)["write"]
-        if ctx.dispatch is not None
+        transfer_primitives(ctx.vfs.dispatch)["write"]
+        if ctx.vfs is not None
         else partial(require_op(ops, Operation.WRITE), accessor)
     )
     return await generic_split(

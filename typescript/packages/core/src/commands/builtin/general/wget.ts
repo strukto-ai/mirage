@@ -109,10 +109,10 @@ async function wget(
   // An error status still creates the destination, empty, the way GNU wget
   // truncates the -O target before it learns the response code.
   const data = isHttpError(resp) ? new Uint8Array() : resp.body
-  if (ctx.dispatch !== undefined) {
+  if (ctx.vfs !== undefined) {
     const scope = resolveTarget(target, ctx.cwd.virtual)
     try {
-      await ctx.dispatch('write', scope, [data])
+      await ctx.vfs.dispatch('write', scope, [data])
     } catch (err) {
       if (!isWalkError(err)) throw err
       // GNU wget opens the -O file before it fetches and answers a refused

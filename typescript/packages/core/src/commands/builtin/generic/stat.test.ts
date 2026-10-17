@@ -33,6 +33,8 @@ import { parseSessionProfile } from '../../../policy/profile.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { statGeneric } from './stat.ts'
+import { Files } from '../../../workspace/files.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 
 const MTIME = '2026-01-02T15:30:45Z'
 const MTIME_SHOWN = '2026-01-02 15:30:45.000000000 +0000'
@@ -232,25 +234,20 @@ describe('stat -c directive formatting', () => {
   })
 
   it('counts a quota in 1K blocks under -f', async () => {
+    const capacity = {
+      state: CapacityState.QUOTA,
+      total: 40960,
+      used: 16384,
+      available: 12288,
+      inodes: 100,
+      inodesUsed: 40,
+      inodesFree: 50,
+    }
+    const dispatch: DispatchFn = () => Promise.resolve([['disk', capacity], new IOResult()])
     const quota = {
       ...ctx('%T %S %b %f %a %c %d %i %5l|'),
       flags: { format: '%T %S %b %f %a %c %d %i %5l|', file_system: true },
-      dispatch: () =>
-        Promise.resolve([
-          [
-            'disk',
-            {
-              state: CapacityState.QUOTA,
-              total: 40960,
-              used: 16384,
-              available: 12288,
-              inodes: 100,
-              inodesUsed: 40,
-              inodesFree: 50,
-            },
-          ],
-          new IOResult(),
-        ]),
+      vfs: new Files(dispatch, null, null, () => null, { ledger: false }),
     } as unknown as Context
     const result = await statGeneric([PathSpec.fromStrPath('/data/f.txt')], quota, () =>
       Promise.resolve(fs()),

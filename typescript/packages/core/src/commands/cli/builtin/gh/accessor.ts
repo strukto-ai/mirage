@@ -12,12 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  GITHUB_API_BASE,
-  HttpGitHubTransport,
-  type GitHubTransport,
-} from '../../../../core/github/client.ts'
-import type { GhConfig } from '../../../../core/github/config.ts'
+import type { GitHubAccount } from '../../../../accessor/github.ts'
+import { GITHUB_API_BASE } from '../../../../core/github/client.ts'
 import { parseRepo, repoHost, type RepoRef } from '../../../../core/github/repo.ts'
 import { jqRaised, jqRun, type JqRun } from '../../../../core/jq/index.ts'
 import { PartialOutputError, UsageError } from '../../../errors.ts'
@@ -32,13 +28,6 @@ import { CONNECT_HINT, GITHUB_HOST, GOJQ_RAISED, INVALID_LIMIT } from './constan
 
 const ENC = new TextEncoder()
 
-export function ghTransport(config: unknown): GitHubTransport {
-  const cfg = config as GhConfig
-  const opts: { token: string; baseUrl?: string } = { token: cfg.token }
-  if (cfg.baseUrl !== undefined) opts.baseUrl = cfg.baseUrl
-  return new HttpGitHubTransport(opts)
-}
-
 /**
  * Refuse a repository on a host this install cannot reach. Real gh sends the
  * request to whatever host a repository argument names; this one answers
@@ -47,11 +36,11 @@ export function ghTransport(config: unknown): GitHubTransport {
  * in gh's words (pinned against gh 2.85.0) rather than asking its own host for
  * a repository of the same name.
  */
-export function checkHost(config: unknown, host: string | null): void {
+export function checkHost(accessor: GitHubAccount, host: string | null): void {
   if (host === null) return
   const name = host.toLowerCase()
   if (name === GITHUB_HOST || name.endsWith(`.${GITHUB_HOST}`)) return
-  const base = (config as GhConfig).baseUrl
+  const base = accessor.config.baseUrl
   if (base !== undefined && URL.canParse(base) && new URL(base).hostname === name) return
   throw new Error(`error connecting to ${name}\n${CONNECT_HINT}`)
 }
@@ -61,8 +50,8 @@ export function checkHost(config: unknown, host: string | null): void {
  * for GitHub's own API, else the API host's own origin, as a GitHub Enterprise
  * server and a local stand-in serve them.
  */
-export function webOrigin(config: GhConfig): string {
-  const base = config.baseUrl
+export function webOrigin(accessor: GitHubAccount): string {
+  const base = accessor.config.baseUrl
   if (base === undefined || base.replace(/\/+$/, '') === GITHUB_API_BASE) {
     return `https://${GITHUB_HOST}`
   }
@@ -74,13 +63,13 @@ export function webOrigin(config: GhConfig): string {
  * install's own otherwise. gh resolves this from the current git remote,
  * which a workspace has no equivalent of, so the config carries it.
  */
-export function ghRepo(config: unknown, spec: string | undefined): RepoRef {
-  const named = spec ?? (config as GhConfig).repo
+export function ghRepo(accessor: GitHubAccount, spec: string | undefined): RepoRef {
+  const named = spec ?? accessor.config.repo
   if (named === undefined || named === '') {
     throw new Error('no repository given; pass one or set `repo` on the install')
   }
   const ref = parseRepo(named)
-  checkHost(config, repoHost(named))
+  checkHost(accessor, repoHost(named))
   return ref
 }
 
@@ -134,22 +123,22 @@ export function listLimit(
   return value
 }
 
-export function repoFor(config: unknown, fl: FlagView): RepoRef {
-  return ghRepo(config, fl.asStr('repo') ?? undefined)
+export function repoFor(accessor: GitHubAccount, fl: FlagView): RepoRef {
+  return ghRepo(accessor, fl.asStr('repo') ?? undefined)
 }
 
 export function repoNumber(
-  config: unknown,
+  accessor: GitHubAccount,
   fl: FlagView,
   value: string | undefined,
   label: string,
   urlKind: 'issues' | 'pull',
 ): [RepoRef, number] {
   const raw = value ?? ''
-  if (/^\d+$/.test(raw)) return [repoFor(config, fl), Number(raw)]
+  if (/^\d+$/.test(raw)) return [repoFor(accessor, fl), Number(raw)]
   const match = /^https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)\/?$/.exec(raw)
   if (match?.[3] !== urlKind) throw new Error(`a ${label} number is required`)
-  checkHost(config, new URL(raw).hostname)
+  checkHost(accessor, new URL(raw).hostname)
   return [parseRepo(`${match[1] ?? ''}/${match[2] ?? ''}`), Number(match[4])]
 }
 

@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ProcessExecution, RunResult, RuntimeIdentity, StreamExecution } from './types.ts'
+import type { Context } from '../commands/config.ts'
+import type { PathSpec } from '../types.ts'
+import type { OutputFn, RunResult, RuntimeIdentity } from './types.ts'
 
 /**
  * The nominal line-executor brand (python's LineExecutorMixin
@@ -34,17 +36,19 @@ export const LINE_EXECUTOR: unique symbol = Symbol.for('mirage.lineExecutor')
  * does not either: a line resolved to workspace runs on the workspace
  * executor inline, so there is no delegate to call.
  */
-export interface LineExecutor {
+export interface LineExecutor<E = unknown> {
   readonly [LINE_EXECUTOR]: true
 
-  /** Execute one raw command line wholesale. */
-  runLine(
-    line: string,
-    stdin: Uint8Array | null,
-    env: Record<string, string>,
-    cwd: string,
-    signal?: AbortSignal,
-  ): Promise<RunResult>
+  /**
+   * Execute one raw command line wholesale, `sh -c` with it.
+   *
+   * @param engine the runtime's engine.
+   * @param paths unused; a line names its own paths.
+   * @param texts unused.
+   * @param ctx the line in `flags.c`, its stdin, the session environment
+   *   and working directory, the signal that stops it.
+   */
+  runLine(engine: E, paths: PathSpec[], texts: string[], ctx: Context): Promise<RunResult>
 }
 
 /** Whether this runtime carries the whole-line capability. */
@@ -55,10 +59,18 @@ export function isLineExecutor<T extends RuntimeIdentity>(runtime: T): runtime i
 /** The nominal argv-executor brand (Python's ProcessExecutorMixin). */
 export const PROCESS_EXECUTOR: unique symbol = Symbol.for('mirage.processExecutor')
 
-export interface ProcessExecutor {
+export interface ProcessExecutor<E = unknown> {
   readonly [PROCESS_EXECUTOR]: true
-  /** Execute argv without shell interpretation. */
-  runProcess(request: ProcessExecution): Promise<RunResult>
+  /**
+   * Run the program `texts` names without shell interpretation, with
+   * `ctx`'s working directory, environment and stdin.
+   *
+   * @param engine the runtime's engine.
+   * @param paths unused; argv is words.
+   * @param texts the argv, program first.
+   * @param ctx the run's context.
+   */
+  runProcess(engine: E, paths: PathSpec[], texts: string[], ctx: Context): Promise<RunResult>
 }
 
 export function isProcessExecutor<T extends RuntimeIdentity>(
@@ -70,9 +82,24 @@ export function isProcessExecutor<T extends RuntimeIdentity>(
 /** An argv executor that consumes input and delivers output incrementally. */
 export const STREAMING_PROCESS: unique symbol = Symbol.for('mirage.streamingProcess')
 
-export interface StreamingProcess extends ProcessExecutor {
+export interface StreamingProcess<E = unknown> extends ProcessExecutor<E> {
   readonly [STREAMING_PROCESS]: true
-  runStream(request: StreamExecution): Promise<RunResult>
+  /**
+   * Await each output write and return status after the child exits.
+   *
+   * @param engine the runtime's engine.
+   * @param paths unused; argv is words.
+   * @param texts the argv, program first.
+   * @param ctx the run's context; its stdin is read as the child consumes it.
+   * @param output where the child's stdout goes.
+   */
+  runStream(
+    engine: E,
+    paths: PathSpec[],
+    texts: string[],
+    ctx: Context,
+    output: OutputFn,
+  ): Promise<RunResult>
 }
 
 export function isStreamingProcess<T extends RuntimeIdentity>(

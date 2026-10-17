@@ -33,7 +33,7 @@ from mirage.utils.path import (
     resolve_path,
 )
 from mirage.view.namespace_view import namespace_names
-from mirage.view.types import LinkView, MountView
+from mirage.view.types import FollowOperands, LinkView, MountView
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
 
@@ -446,9 +446,7 @@ def mounts_of(ctx: Context) -> MountView | None:
     Args:
         ctx (Context): the invocation's context.
     """
-    return mount_view(
-        ctx.vfs, crossing=ctx.io is None and ctx.dispatch is not None
-    )
+    return mount_view(ctx.vfs, crossing=ctx.io is None and ctx.vfs is not None)
 
 
 def link_resolver(ctx: Context) -> LinkResolver | None:
@@ -458,15 +456,35 @@ def link_resolver(ctx: Context) -> LinkResolver | None:
         ctx (Context): the invocation's context.
     """
     links = links_of(ctx)
-    if links is None or ctx.dispatch is None:
+    if links is None or ctx.vfs is None:
         return None
     return LinkResolver(
-        links=links, dispatch=ctx.dispatch, cwd=ctx.cwd.virtual
+        links=links, dispatch=ctx.vfs.dispatch, cwd=ctx.cwd.virtual
     )
+
+
+def dispatch_of(ctx: Context) -> DispatchFn | None:
+    """The dispatcher a command's files run on; None outside a workspace.
+
+    Args:
+        ctx (Context): the invocation's context.
+    """
+    return ctx.vfs.dispatch if ctx.vfs is not None else None
+
+
+def follow_of(ctx: Context) -> FollowOperands | None:
+    """The line's operand resolution its files carry; None outside a line.
+
+    Args:
+        ctx (Context): the invocation's context.
+    """
+    return ctx.vfs._follow if ctx.vfs is not None else None
 
 
 __all__ = [
     "LinkResolver",
+    "dispatch_of",
+    "follow_of",
     "link_location",
     "link_resolver",
     "link_view",

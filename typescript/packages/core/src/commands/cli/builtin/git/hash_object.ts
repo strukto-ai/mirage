@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import git from 'isomorphic-git'
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { fsStrerror, isEacces, isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import { sha1Hex } from '../../../../utils/hash.ts'
@@ -123,7 +124,7 @@ async function content(vfs: Files, base: PathSpec, name: string): Promise<Uint8A
  * Pinned against git 2.50.1.
  */
 export async function hashObject(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

@@ -19,7 +19,7 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { fsStrerror, isEnotdir, isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { mimeTypeFor } from '@struktoai/mirage-core/utils/filetype'
 import { parseRfc822, type ParsedRfc822 } from '../../../../core/email/_parse.ts'
-import type { EmailConfig } from '../../../../core/email/config.ts'
+import type { EmailAccessor } from '../../../../accessor/email.ts'
 import { build, readBody, splitAddresses, type Attachment, type Source } from './builder.ts'
 import { deliver, saveSentCopy } from './deliver.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
@@ -89,7 +89,7 @@ async function loadAttachments(
  * 5322 bytes go to stdout, so a composer chain can pick them up.
  */
 export async function route(
-  config: EmailConfig,
+  accessor: EmailAccessor,
   fl: FlagView,
   stdin: ByteSource | null,
   source: Source | null,
@@ -97,7 +97,7 @@ export async function route(
 ): Promise<CommandFnResult> {
   const raw = build(
     {
-      sender: fl.asStr('from', config.username),
+      sender: fl.asStr('from', accessor.config.username),
       to: splitAddresses(fl.asList('to')),
       cc: splitAddresses(fl.asList('cc')),
       bcc: splitAddresses(fl.asList('bcc')),
@@ -114,7 +114,7 @@ export async function route(
     // --save without --send files the message and sends nothing, so a
     // refused APPEND means nothing happened at all and may fail loudly:
     // there is no delivered message a retry could duplicate.
-    const folder = await saveSentCopy(config, raw, save)
+    const folder = await saveSentCopy(accessor, raw, save)
     const filed = await parseRfc822(raw)
     const saved = {
       status: 'saved',
@@ -124,7 +124,7 @@ export async function route(
     }
     return [ENC.encode(JSON.stringify(saved)) as ByteSource, new IOResult()]
   }
-  const { parsed, warning } = await deliver(config, raw, save)
+  const { parsed, warning } = await deliver(accessor, raw, save)
   const result = {
     status: 'sent',
     to: addressList(parsed.to),

@@ -176,8 +176,8 @@ async function readAt(
 ): Promise<Uint8Array> {
   try {
     if (name === '-') return await materialize(ctx.stdin ?? null)
-    if (ctx.dispatch === undefined) throw enotsup('unavailable', 'read', name)
-    const [content] = await ctx.dispatch('read', resolveTarget(name, ctx.cwd.virtual), [])
+    if (ctx.vfs === undefined) throw enotsup('unavailable', 'read', name)
+    const [content] = await ctx.vfs.dispatch('read', resolveTarget(name, ctx.cwd.virtual), [])
     return await materialize(content as ByteSource)
   } catch (err) {
     if (!isWalkError(err)) throw err
@@ -317,7 +317,7 @@ export function said(quiet: boolean, text: string): Uint8Array {
 }
 
 // Write a -D or -o file through the dispatcher: null once written (or with no
-// dispatcher to write through), else the failure's stderr. Mirrors Python's
+// file handle to write through), else the failure's stderr. Mirrors Python's
 // _write_named.
 async function writeNamed(
   ctx: Context,
@@ -325,9 +325,9 @@ async function writeNamed(
   data: Uint8Array,
   quiet: boolean,
 ): Promise<Uint8Array | null> {
-  if (ctx.dispatch === undefined) return null
+  if (ctx.vfs === undefined) return null
   try {
-    await ctx.dispatch('write', resolveTarget(target, ctx.cwd.virtual), [data])
+    await ctx.vfs.dispatch('write', resolveTarget(target, ctx.cwd.virtual), [data])
   } catch (err) {
     if (!isWalkError(err)) throw err
     return said(quiet, writeFailure(target instanceof PathSpec ? target.virtual : target, err))

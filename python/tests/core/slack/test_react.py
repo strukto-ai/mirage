@@ -16,10 +16,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.react import add_reaction, get_reactions
 
-CONFIG = SlackConfig(token="xoxb-test")
+ACCESSOR = SlackAccessor(SlackConfig(token="xoxb-test"))
 
 
 @pytest.mark.asyncio
@@ -29,16 +30,15 @@ async def test_add_reaction_posts_reactions_add():
         new_callable=AsyncMock,
         return_value={"ok": True},
     ) as post:
-        await add_reaction(CONFIG, "C001", "111.222", "shipit")
+        await add_reaction(ACCESSOR, "C001", "111.222", "shipit")
     post.assert_awaited_once_with(
-        CONFIG,
+        ACCESSOR,
         "reactions.add",
         {
             "channel": "C001",
             "timestamp": "111.222",
             "name": "shipit",
         },
-        session=None,
     )
 
 
@@ -53,14 +53,13 @@ async def test_get_reactions_returns_the_message_item():
             "message": message,
         },
     ) as get:
-        result = await get_reactions(CONFIG, "C001", "111.222")
+        result = await get_reactions(ACCESSOR, "C001", "111.222")
     get.assert_awaited_once_with(
-        CONFIG,
+        ACCESSOR,
         "reactions.get",
         {
             "channel": "C001",
             "timestamp": "111.222",
         },
-        session=None,
     )
     assert result == message

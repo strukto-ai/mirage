@@ -30,9 +30,9 @@ export class DiscordAccessor extends Accessor {
 }
 
 /**
- * The accessor the `discord` CLI's verbs reach the API through, built from
- * the install's config. Python's verbs hand the config to core directly;
- * here core takes an accessor.
+ * The `discord` CLI's accessor factory: the registry builds one per install
+ * from its validated config, so every verb of that install rides one
+ * transport. Python passes `DiscordAccessor` itself.
  */
 export function discordAccessor(config: unknown): DiscordAccessor {
   const cfg = config as DiscordConfig

@@ -5,6 +5,7 @@ from dulwich.errors import ChecksumMismatch
 from dulwich.objects import Commit, ObjectID, ShaFile, Tag, Tree
 from dulwich.repo import BaseRepo
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.constants import GITLINK
 from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.index_file import read_index
@@ -209,12 +210,12 @@ def check(
 
 
 async def fsck(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Check the mounted repository without invoking host Git.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context, with the repository and fsck

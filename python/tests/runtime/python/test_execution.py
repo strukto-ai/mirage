@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from mirage.runtime.python.execution import main_filename, prepare_source
-from mirage.runtime.types import RunArgs
+from mirage.runtime.types import Program
 from mirage.types import PathSpec
 
 
@@ -35,18 +35,14 @@ def _run(
     prog: str | None = None,
     script: PathSpec | None = None,
     cwd: str | None = None,
-) -> RunArgs:
-    return RunArgs(
-        code=code,
-        prog=prog,
-        script_path=script,
-        cwd=None if cwd is None else PathSpec.from_str_path(cwd),
-    )
+) -> tuple[Program, PathSpec | None]:
+    program = Program(code=code, prog=prog, script_path=script)
+    return program, None if cwd is None else PathSpec.from_str_path(cwd)
 
 
 @pytest.mark.parametrize("prog", [None, "-c"])
 def test_a_payload_passes_through_untouched(prog):
-    assert prepare_source(_run(prog=prog)) == "print(1)"
+    assert prepare_source(*_run(prog=prog)) == "print(1)"
 
 
 @pytest.mark.parametrize(
@@ -63,12 +59,12 @@ def test_a_script_is_named_as_typed_against_the_cwd(raw, cwd, name):
     # CPython 3.13.5: absolute against the working directory, never
     # normalized, whatever the spelling.
     script = _script(raw, "/w/s.py")
-    assert main_filename(_run(prog=raw, script=script, cwd=cwd)) == name
+    assert main_filename(*_run(prog=raw, script=script, cwd=cwd)) == name
 
 
 def test_a_script_sets_argv0_file_and_compiles_under_its_own_name():
     script = _script("s.py", "/w/s.py")
-    out = prepare_source(_run(prog="s.py", script=script, cwd="/w"))
+    out = prepare_source(*_run(prog="s.py", script=script, cwd="/w"))
     assert "argv[0] = 's.py'" in out
     assert "__file__ = '/w/s.py'" in out
     assert "'/w/s.py', 'exec'" in out
@@ -76,14 +72,14 @@ def test_a_script_sets_argv0_file_and_compiles_under_its_own_name():
 
 @pytest.mark.parametrize("prog", ["", "-"])
 def test_both_stdin_entry_points_compile_as_stdin(prog):
-    out = prepare_source(_run(prog=prog))
+    out = prepare_source(*_run(prog=prog))
     assert "'<stdin>', 'exec'" in out
     assert "__file__ = '<stdin>'" in out
     assert f"argv[0] = {prog!r}" in out
 
 
 def test_a_module_names_no_file():
-    out = prepare_source(_run(prog="json.tool"))
+    out = prepare_source(*_run(prog="json.tool"))
     assert "'json.tool', 'exec'" in out
     assert "__file__" not in out
 
@@ -92,7 +88,7 @@ def test_the_preamble_binds_only_what_the_file_adapter_binds():
     ns: dict[str, Any] = {}
     script = _script("/s.py", "/s.py")
     exec(
-        prepare_source(_run("names = sorted(globals())", "/s.py", script)), ns
+        prepare_source(*_run("names = sorted(globals())", "/s.py", script)), ns
     )
     # Read at the program's first statement, so it is what the program
     # starts with: the preamble imported sys without binding it.
@@ -103,15 +99,15 @@ def test_the_preamble_binds_only_what_the_file_adapter_binds():
 def test_the_script_directory_heads_sys_path_only_when_asked():
     script = _script("/w/app/s.py", "/w/app/s.py")
     run = _run(prog="/w/app/s.py", script=script)
-    assert "sys').path[0]" not in prepare_source(run)
-    assert "safe_path" in prepare_source(run, search_path=True)
+    assert "sys').path[0]" not in prepare_source(*run)
+    assert "safe_path" in prepare_source(*run, search_path=True)
     assert "sys').path[0]" not in prepare_source(
-        _run(prog="-"), search_path=True
+        *_run(prog="-"), search_path=True
     )
 
 
 def test_a_quote_in_the_program_survives_the_round_trip():
     ns: dict[str, Any] = {}
     script = _script("/s.py", "/s.py")
-    exec(prepare_source(_run("v = 'it\\'s \"quoted\"'", "/s.py", script)), ns)
+    exec(prepare_source(*_run("v = 'it\\'s \"quoted\"'", "/s.py", script)), ns)
     assert ns["v"] == 'it\'s "quoted"'

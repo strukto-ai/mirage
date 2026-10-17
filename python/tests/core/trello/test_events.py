@@ -43,21 +43,21 @@ def _root() -> PathSpec:
 def _hook(monkeypatch, **config) -> tuple[TrelloEventHook, list[str]]:
     calls: list[str] = []
 
-    async def fake_workspaces(config, session=None):
+    async def fake_workspaces(accessor):
         calls.append("workspaces")
         return [{"id": "w1", "displayName": "Acme"}]
 
-    async def fake_board(config, board_id, session=None):
+    async def fake_board(accessor, board_id):
         calls.append(f"board {board_id}")
         return {"id": board_id, "idOrganization": "w1"}
 
-    async def fake_card(config, card_id, session=None):
+    async def fake_card(accessor, card_id):
         calls.append(f"card {card_id}")
         if card_id != "c1":
             raise TrelloAPIError("not found", status=404)
         return {**CARD, "idList": "l1"}
 
-    async def fake_list(config, list_id, session=None):
+    async def fake_list(accessor, list_id):
         calls.append(f"list {list_id}")
         return dict(TODO)
 

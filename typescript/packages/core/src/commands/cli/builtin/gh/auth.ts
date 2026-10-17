@@ -1,23 +1,23 @@
 import { GitHubApiError } from '../../../../core/github/client.ts'
-import type { GhConfig } from '../../../../core/github/config.ts'
+import type { GitHubAccount } from '../../../../accessor/github.ts'
 import { login } from '../../../../core/github/repo.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { ghTransport, webOrigin } from './accessor.ts'
+import { webOrigin } from './accessor.ts'
 
 /** Check the resolved config secret, whose original environment/file source is not retained. */
 export async function status(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   _texts: string[],
   _ctx: Context,
 ): Promise<CommandFnResult> {
-  const host = new URL(webOrigin(config as GhConfig)).hostname
+  const host = new URL(webOrigin(accessor)).hostname
   let account: string
   try {
-    account = await login(ghTransport(config))
+    account = await login(accessor.transport)
   } catch (err) {
     if (!(err instanceof GitHubApiError) || ![401, 403].includes(err.status)) throw err
     return [
@@ -51,14 +51,13 @@ export async function status(
  * every gh verb reads it, and is never printed. Mirrors Python's token.
  */
 export function token(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
 ): CommandFnResult {
   const host =
-    new FlagView(ctx.flags).asNonEmpty('hostname') ??
-    new URL(webOrigin(config as GhConfig)).hostname
+    new FlagView(ctx.flags).asNonEmpty('hostname') ?? new URL(webOrigin(accessor)).hostname
   return [
     null,
     new IOResult({

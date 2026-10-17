@@ -16,60 +16,85 @@ from abc import abstractmethod
 from dataclasses import replace
 from typing import ClassVar
 
+from mirage.commands.config import Context
 from mirage.runtime.base import Runtime
-from mirage.runtime.binding import RuntimeContext
-from mirage.runtime.errors import UnsupportedExecutionError
+from mirage.runtime.mixin import E
+from mirage.runtime.source import Argv0Rules, resolve_program
 from mirage.runtime.types import (
-    CodeExecution,
-    ExecutionRequest,
     Language,
-    RunArgs,
+    Program,
     RunResult,
     RuntimeCapabilities,
 )
+from mirage.types import PathSpec
 
 
-class LanguageRuntime(Runtime):
+class LanguageRuntime(Runtime[E]):
     """A runtime that interprets one language's code inside a command.
 
     The engine inside a single command (python3, node): the workspace
-    splits the line, and a captured stage's code lands here as run().
+    splits the line, and a captured stage's operands land here as run().
     Never the whole line; that is LineExecutorMixin's entry point.
 
     The language it interprets is declared once, on its language tier
     (PythonRuntime, JsRuntime), and a script CLI finds its interpreter
     by it (runtime_for_language).
 
-    A host adapter receives data, namespace and gated session views through
-    WorkspaceBinding and its per-execution RuntimeContext. Guests receive
-    only RunArgs.env,
-    a copy whose writes do not mutate the Mirage session; the adapter must
-    explicitly use the gated SessionView for any intended session write.
+    run() resolves the program from the operands the way a real
+    interpreter does (``-c`` in ``ctx.flags``, else the script operand
+    read through ``ctx.vfs``, else piped stdin) and hands it to
+    interpret(). A guest sees ``ctx.env``, a copy whose writes do not
+    mutate the Mirage session; an adapter that means to write the
+    session uses ``ctx.session``.
     """
 
     language: ClassVar[Language]
+    # The head words of this language's interpreter commands, the first
+    # naming a program run with no command of its own.
+    commands: ClassVar[tuple[str, ...]] = ()
+    # What this interpreter calls itself where no file names the program.
+    argv0_rules: ClassVar[Argv0Rules] = Argv0Rules()
 
     @property
     def capabilities(self) -> RuntimeCapabilities:
         return replace(super().capabilities, languages=(self.language,))
 
-    async def _execute(
-        self, request: ExecutionRequest, context: RuntimeContext | None
+    async def run(
+        self, engine: E, paths: list[PathSpec], texts: list[str], ctx: Context
     ) -> RunResult:
-        if isinstance(request, CodeExecution):
-            if request.language != self.language:
-                raise UnsupportedExecutionError(
-                    f"{self.name}: {request.language} execution is unsupported"
-                )
-            return await self._execute_code(request, context)
-        return await super()._execute(request, context)
+        """Resolve the program from the operands, then interpret it.
 
-    async def _execute_code(
-        self, args: RunArgs, context: RuntimeContext | None
-    ) -> RunResult:
-        if args.cwd is None and context is not None:
-            args = replace(args, cwd=context.ctx.cwd)
-        return await self.run(args, context)
+        Args:
+            engine (E): the install's engine.
+            paths (list[PathSpec]): the script operand, if any.
+            texts (list[str]): the program's argv.
+            ctx (Context): the run's context.
+        """
+        label = (ctx.spec.name if ctx.spec is not None else "") or (
+            self.commands[0] if self.commands else self.name
+        )
+        program = await resolve_program(
+            paths,
+            texts,
+            ctx,
+            label,
+            self.argv0_rules,
+            self.module_code,
+            self.name,
+        )
+        if isinstance(program, RunResult):
+            return program
+        return await self.interpret(engine, program, ctx)
+
+    def module_code(self, name: str, label: str) -> str | None:
+        """The program ``-m name`` runs; None where this runtime cannot
+        run a module.
+
+        Args:
+            name (str): the module.
+            label (str): the command name a not-found message uses.
+        """
+        return None
 
     async def version(self, env: dict[str, str]) -> RunResult:
         """Report the bound interpreter's version.
@@ -84,8 +109,8 @@ class LanguageRuntime(Runtime):
         )
 
     @abstractmethod
-    async def run(
-        self, args: RunArgs, context: RuntimeContext | None = None
+    async def interpret(
+        self, engine: E, program: Program, ctx: Context
     ) -> RunResult:
         """Execute one program and return its captured outcome.
 
@@ -96,6 +121,8 @@ class LanguageRuntime(Runtime):
         state or undo external effects.
 
         Args:
-            args (RunArgs): the execution request.
-            context (RuntimeContext | None): the caller's workspace view.
+            engine (E): the install's engine.
+            program (Program): the source and argv to run.
+            ctx (Context): the run's context: working directory,
+                environment, switches, files.
         """

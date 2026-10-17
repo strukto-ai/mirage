@@ -37,8 +37,7 @@ async def stat(accessor: SharePointAccessor, path: PathSpec) -> FileStat:
         )
     require_item(path, resolved)
     return await stat_item(
-        accessor.config,
+        accessor,
         drive_loc(accessor.config, resolved, path.vfs_path),
         path.virtual,
-        session=accessor.pool,
     )

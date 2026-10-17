@@ -14,6 +14,7 @@
 
 import { splitGeneric } from '../../generic/split.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import { dispatchOf } from '../../utils/links.ts'
 
 const split: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
   const idx = ctx.index ?? undefined
@@ -22,7 +23,7 @@ const split: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
   // The pieces go to the prefix, or `x` in the working directory, which
   // need not be this mount, so a dispatcher routes each write to the mount
   // that owns it. Mirrors the Python builder.
-  const dispatch = ctx.dispatch
+  const dispatch = dispatchOf(ctx)
   return splitGeneric(
     resolved,
     ctx,

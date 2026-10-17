@@ -16,27 +16,28 @@ from unittest.mock import patch
 
 import pytest
 
+from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.paginate import cursor_pages
 
 
 @pytest.mark.asyncio
 async def test_cursor_pages_walks_until_empty_cursor():
-    cfg = SlackConfig(token="xoxb-t")
+    acc = SlackAccessor(SlackConfig(token="xoxb-t"))
     pages = [
         {"items": [1, 2], "response_metadata": {"next_cursor": "cur1"}},
         {"items": [3], "response_metadata": {"next_cursor": ""}},
     ]
     calls = []
 
-    async def fake_get(_cfg, _method, params=None, token=None, session=None):
+    async def fake_get(_acc, _method, params=None):
         calls.append(dict(params or {}))
         return pages[len(calls) - 1]
 
     with patch("mirage.core.slack.paginate.slack_get", new=fake_get):
         result = []
         async for page in cursor_pages(
-            cfg,
+            acc,
             "conversations.list",
             base_params={"types": "x", "limit": 100},
             items_key="items",
@@ -49,7 +50,7 @@ async def test_cursor_pages_walks_until_empty_cursor():
 
 @pytest.mark.asyncio
 async def test_cursor_pages_propagates_cancellation():
-    cfg = SlackConfig(token="xoxb-t")
+    acc = SlackAccessor(SlackConfig(token="xoxb-t"))
     pages = [
         {"items": [1], "response_metadata": {"next_cursor": "cur1"}},
         {"items": [2], "response_metadata": {"next_cursor": "cur2"}},
@@ -57,13 +58,13 @@ async def test_cursor_pages_propagates_cancellation():
     ]
     calls = []
 
-    async def fake_get(_cfg, _method, params=None, token=None, session=None):
+    async def fake_get(_acc, _method, params=None):
         calls.append(dict(params or {}))
         return pages[len(calls) - 1]
 
     with patch("mirage.core.slack.paginate.slack_get", new=fake_get):
         gen = cursor_pages(
-            cfg,
+            acc,
             "conversations.list",
             base_params={"limit": 1},
             items_key="items",

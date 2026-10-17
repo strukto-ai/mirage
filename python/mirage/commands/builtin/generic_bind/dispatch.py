@@ -211,9 +211,7 @@ async def run_dispatch(
         flags=rebased,
         stdin=stdin,
         cwd=PathSpec(virtual=cwd, directory=cwd, vfs_path=cwd.strip("/")),
-        vfs=vfs,
-        dispatch=dispatch,
-        follow_operands=follow,
+        vfs=vfs or Files([], dispatch, follow=follow, ledger=False),
         argv=argv,
     )
     io_ops = replace(

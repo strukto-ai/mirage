@@ -14,7 +14,7 @@
 
 import logging
 
-from mirage.accessor.hf_hub import HfHubAccessor
+from mirage.accessor.hf_hub import HfAccountAccessor, HfHubAccessor
 from mirage.commands.cli.builtin.hf.accessor import (
     hub_for,
     repo_type_of,
@@ -36,7 +36,6 @@ from mirage.core.hf_hub.cache import (
     snapshot_path,
 )
 from mirage.core.hf_hub.client import HfHubError, hub_bytes, resolve_url
-from mirage.core.hf_hub.config import HfConfig
 from mirage.core.hf_hub.constants import (
     ABSENT_STATUSES,
     GLOB_CHARS,
@@ -149,7 +148,7 @@ async def write_file(
         accessor.revision,
         repo_path,
     )
-    data = await hub_bytes(accessor.token, url, session=accessor.pool)
+    data = await hub_bytes(accessor.account, url)
     target = local_dir.join(repo_path)
     await ensure_dir(vfs, target.parent)
     await vfs.write(target, data)
@@ -245,7 +244,7 @@ async def cache_file(
             accessor.revision,
             entry.path,
         )
-        data = await hub_bytes(accessor.token, url, session=accessor.pool)
+        data = await hub_bytes(accessor.account, url)
         await ensure_dir(vfs, blob.parent)
         await vfs.write(blob, data)
     link = snapshot_path(cache_dir, folder, sha, entry.path)
@@ -391,7 +390,10 @@ async def refuse_absent(accessor: HfHubAccessor, names: list[str]) -> None:
 
 
 async def download_cmd(
-    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: HfAccountAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """Download files from a repository into the workspace.
 
@@ -424,48 +426,44 @@ async def download_cmd(
         refuse_variadic(names, "--include", include)
     if exclude:
         refuse_variadic(names, "--exclude", exclude)
-    async with hub_for(
-        config, repo_id, repo_type_of(fl), fl.as_str("revision")
-    ) as accessor:
-        try:
-            tree = await fetch_tree(accessor)
-        except HfHubError as exc:
-            # A refused walk names the same three absences an empty one
-            # does; refuse_absent asks the Hub which it was, in upstream's
-            # own words. Anything else is a real failure and propagates.
-            if exc.status not in ABSENT_STATUSES:
-                raise
-            logger.debug("hf download tree refused: %s", exc)
-            tree = {}
-        wanted = selected(tree, names, include, exclude)
-        if not wanted:
-            await refuse_absent(accessor, names)
-        workers = fl.as_int("max_workers", MAX_DOWNLOAD_WORKERS)
-        if workers < 1:
-            # Upstream fetches one named file without a pool and hands any
-            # other download to a thread pool, which refuses a size under 1.
-            if len(names) != 1 or names[0].endswith("/"):
-                raise UsageError(MAX_WORKERS_REFUSAL, 1)
-            workers = 1
-        if local_dir:
-            # A named local directory downloads straight into it, with no
-            # cache in between; that is what upstream does too, which is why
-            # --force-download only means anything in cache mode.
-            base = local_dir.virtual
-            written = await fetch_all(
-                ctx.vfs, accessor, wanted, local_dir, workers
-            )
-        else:
-            base, written = await fetch_into_cache(
-                ctx.vfs,
-                accessor,
-                tree,
-                wanted,
-                cache_dir or PathSpec.from_str_path("/"),
-                bool(fl.as_bool("force_download")),
-                workers,
-            )
-        if fl.as_bool("quiet"):
-            return text_out(f"{base}\n")
-        body = "".join(f"{path}\n" for path in written)
-        return text_out(f"{body}{base}\n")
+    hub = hub_for(accessor, repo_id, repo_type_of(fl), fl.as_str("revision"))
+    try:
+        tree = await fetch_tree(hub)
+    except HfHubError as exc:
+        # A refused walk names the same three absences an empty one
+        # does; refuse_absent asks the Hub which it was, in upstream's
+        # own words. Anything else is a real failure and propagates.
+        if exc.status not in ABSENT_STATUSES:
+            raise
+        logger.debug("hf download tree refused: %s", exc)
+        tree = {}
+    wanted = selected(tree, names, include, exclude)
+    if not wanted:
+        await refuse_absent(hub, names)
+    workers = fl.as_int("max_workers", MAX_DOWNLOAD_WORKERS)
+    if workers < 1:
+        # Upstream fetches one named file without a pool and hands any
+        # other download to a thread pool, which refuses a size under 1.
+        if len(names) != 1 or names[0].endswith("/"):
+            raise UsageError(MAX_WORKERS_REFUSAL, 1)
+        workers = 1
+    if local_dir:
+        # A named local directory downloads straight into it, with no
+        # cache in between; that is what upstream does too, which is why
+        # --force-download only means anything in cache mode.
+        base = local_dir.virtual
+        written = await fetch_all(ctx.vfs, hub, wanted, local_dir, workers)
+    else:
+        base, written = await fetch_into_cache(
+            ctx.vfs,
+            hub,
+            tree,
+            wanted,
+            cache_dir or PathSpec.from_str_path("/"),
+            bool(fl.as_bool("force_download")),
+            workers,
+        )
+    if fl.as_bool("quiet"):
+        return text_out(f"{base}\n")
+    body = "".join(f"{path}\n" for path in written)
+    return text_out(f"{body}{base}\n")

@@ -17,7 +17,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { ProcessExecution } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { describe, expect, it } from 'vitest'
 import type { SmolvmConfig } from './config.ts'
@@ -174,25 +173,23 @@ it('preserves argv through execute and shares the shell connection', async () =>
   const runtime = makeRuntime({ config: { machine: 'vm', env: { E: 'config' } } })
   const argv = ['node', 'a b', '$(echo literal)', '', '--flag'] as const
   const stdin = ENC.encode('input')
-  const result = await runtime.execute({
-    kind: 'process',
+  const result = await runtime.execute(
+    [],
     argv,
-    cwd: PathSpec.fromStrPath('/work'),
-    env: { E: 'request' },
-    stdin,
-  })
+    { stdin, flags: {}, cwd: PathSpec.fromStrPath('/work'), env: { E: 'request' } },
+    { kind: 'process' },
+  )
   expect(DEC.decode(result.stdout)).toBe('out:--flag')
   expect(runtime.calls.at(-1)).toEqual([
     ['machine', 'exec', '--name', 'vm', '-i', '-w', '/work', '-e', 'E=request', '--', ...argv],
     stdin,
   ])
-  await runtime.execute({
-    kind: 'shell',
-    line: 'pwd',
-    cwd: PathSpec.fromStrPath('/work'),
-    env: {},
-    stdin: null,
-  })
+  await runtime.execute(
+    [],
+    [],
+    { stdin: null, flags: { c: 'pwd' }, cwd: PathSpec.fromStrPath('/work') },
+    { kind: 'line' },
+  )
   expect(runtime.calls.filter(([args]) => args[1] === 'status')).toHaveLength(1)
   expect(runtime.capabilities).toMatchObject({ process: true, shell: true, filesystem: [] })
 })
@@ -200,15 +197,10 @@ it('preserves argv through execute and shares the shell connection', async () =>
 it('refuses empty argv and a stopped VM before executing', async () => {
   const runtime = makeRuntime()
   runtime.state = 'stopped'
-  const request = {
-    kind: 'process' as const,
-    argv: [] as unknown as ProcessExecution['argv'],
-    cwd: PathSpec.fromStrPath('/'),
-    env: {},
-    stdin: null,
-  }
-  await expect(runtime.execute(request)).rejects.toThrow('argv must not be empty')
+  const ctx = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/') }
+  const opts = { kind: 'process' } as const
+  await expect(runtime.execute([], [], ctx, opts)).rejects.toThrow('argv must not be empty')
   expect(runtime.calls).toHaveLength(0)
-  await expect(runtime.execute({ ...request, argv: ['node'] })).rejects.toThrow('not running')
+  await expect(runtime.execute([], ['node'], ctx, opts)).rejects.toThrow('not running')
   expect(runtime.calls).toHaveLength(1)
 })

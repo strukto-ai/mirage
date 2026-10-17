@@ -15,23 +15,20 @@
 import asyncio
 import os
 import threading
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from mirage import (
-    CodeExecution,
     MountMode,
     PathSpec,
-    ProcessExecution,
     RunResult,
     Runtime,
-    ShellRequest,
     UnsupportedExecutionError,
     Workspace,
 )
 from mirage.commands.builtin.utils.links import link_view
+from mirage.commands.config import Context
 from mirage.context import (
     get_current_session,
     get_current_session_for,
@@ -63,21 +60,20 @@ class Probe(LanguageRuntime):
         super().__init__()
         self.contexts = []
 
-    async def _execute_code(self, request, context):
-        if context is not None:
-            self.contexts.append(context)
-        return await super()._execute_code(request, context)
-
-    async def run(self, args, context=None):
-        return RunResult(stdout=args.code.encode(), stderr=None, exit_code=0)
+    async def interpret(self, engine, program, ctx):
+        self.contexts.append(ctx)
+        return RunResult(
+            stdout=program.code.encode(), stderr=None, exit_code=0
+        )
 
 
 class ShellProbe(Runtime, LineExecutorMixin):
     name = "shell-probe"
 
-    async def run_line(self, command, stdin, env, cwd):
+    async def run_line(self, engine, paths, texts, ctx):
         return RunResult(
-            stdout=(command + ":" + cwd).encode() + (stdin or b""),
+            stdout=(ctx.flags["c"] + ":" + ctx.cwd.virtual).encode()
+            + (ctx.stdin or b""),
             stderr=None,
             exit_code=0,
         )
@@ -90,13 +86,9 @@ class DenySecret(Policy):
 
 @pytest.mark.asyncio
 async def test_execute_capabilities_and_refusals():
-    code = CodeExecution(language="python", code="hello")
-    shell = ShellRequest(
-        line="echo hello", cwd=PathSpec.from_str_path("/work"), stdin=b"!"
-    )
-    process = ProcessExecution(
-        argv=("echo", "hello"), cwd=PathSpec.from_str_path("/work")
-    )
+    work = PathSpec.from_str_path("/work")
+    code = Context(flags={"c": "hello"})
+    shell = Context(flags={"c": "echo hello"}, cwd=work, stdin=b"!")
     language, native = Probe(), ShellProbe()
     assert language.capabilities.languages == ("python",)
     assert language.capabilities.reach == "workspace"
@@ -104,16 +96,16 @@ async def test_execute_capabilities_and_refusals():
     assert native.capabilities.shell and not native.capabilities.process
     assert language.capabilities.filesystem == ()
     assert native.capabilities.filesystem == ()
-    assert (await language.execute(code)).stdout == b"hello"
-    assert (await native.execute(shell)).stdout == b"echo hello:/work!"
-    for runtime, request in (
-        (language, shell),
-        (native, code),
-        (native, process),
-        (language, CodeExecution(language="js", code="1")),
+    assert (await language.execute([], [], code)).stdout == b"hello"
+    line = await native.execute([], [], shell, kind="line")
+    assert line.stdout == b"echo hello:/work!"
+    for runtime, texts, ctx, kind in (
+        (language, [], shell, "line"),
+        (native, [], code, "code"),
+        (native, ["echo", "hello"], Context(cwd=work), "process"),
     ):
         with pytest.raises(UnsupportedExecutionError):
-            await runtime.execute(request)
+            await runtime.execute([], texts, ctx, kind=kind)
 
 
 @pytest.mark.asyncio
@@ -132,11 +124,11 @@ async def test_callbacks_retain_session_and_gate_after_capture():
         assert "/secret/" not in context.scope.call(
             context.ctx.vfs.mount_prefixes
         )
+        secret = PathSpec.from_str_path("/secret/a")
         with pytest.raises((FileNotFoundError, PermissionError)):
-            await context.dispatch("read", PathSpec.from_str_path("/secret/a"))
-        assert (
-            await other.dispatch("read", PathSpec.from_str_path("/secret/a"))
-        )[0] == b"private\n"
+            await context.ctx.vfs.dispatch("read", secret)
+        data, _ = await other.ctx.vfs.dispatch("read", secret)
+        assert data == b"private\n"
         await context.ctx.session.set("PUBLIC", "agent")
         assert context.ctx.session.get("PUBLIC") == "agent"
         assert other.ctx.session.get("PUBLIC") is None
@@ -178,7 +170,7 @@ async def test_context_keeps_namespace_live_and_matches_native_projection():
         assert context.scope.call(links.resolve, "/data/link") == "/data/a"
         ws.add_mount("/data/nested", RAMVFS(), mode=MountMode.EXEC)
         assert context.resolver.owner_of("/data/nested/a") == "/data/nested/"
-        vfs = RuntimeFiles.of(context)
+        vfs = context.scope.call(RuntimeFiles.of, context.ctx, context.binding)
         mount = MountCore(ws.vfs)
         # Call the sync adapter on a worker to keep its serving loop free.
         guest = await asyncio.to_thread(vfs.read, "/data/link")
@@ -190,16 +182,14 @@ async def test_context_keeps_namespace_live_and_matches_native_projection():
 
 
 @pytest.mark.asyncio
-async def test_binding_prevents_cross_workspace_reuse_and_foreign_context():
+async def test_binding_prevents_cross_workspace_reuse():
     runtime = Probe()
     with Workspace({}, runtimes=[runtime, "workspace"]) as first:
         with Workspace({}) as second:
-            request = CodeExecution(language="python", code="ok")
+            assert first.runtimes()[0] is runtime
             assert (
-                await runtime.execute(request, first.runtime_context())
+                await runtime.execute([], [], Context(flags={"c": "ok"}))
             ).stdout == b"ok"
-            with pytest.raises(ValueError, match="another binding"):
-                await runtime.execute(request, second.runtime_context())
             with pytest.raises(ValueError, match="another workspace"):
                 second.add_runtime(runtime)
 
@@ -217,12 +207,12 @@ async def test_command_execution_supplies_its_active_workspace_context():
         result = await ws.shell("python3 -c hello", session_id="agent")
         assert result.stdout == b"hello"
         captured = runtime.contexts[-1]
-        assert captured.ctx.cwd.virtual == "/data"
-        assert (captured.ctx.env or {})["PUBLIC"] == "agent"
-        assert captured.ctx.session.get("PUBLIC") == "agent"
+        assert captured.cwd.virtual == "/data"
+        assert (captured.env or {})["PUBLIC"] == "agent"
+        assert captured.session.get("PUBLIC") == "agent"
         await ws.shell("python3 -c other")
-        assert "PUBLIC" not in (runtime.contexts[-1].ctx.env or {})
-        assert captured.ctx.session.get("PUBLIC") == "agent"
+        assert "PUBLIC" not in (runtime.contexts[-1].env or {})
+        assert captured.session.get("PUBLIC") == "agent"
 
 
 @pytest.mark.asyncio
@@ -255,35 +245,33 @@ async def test_adapters_use_each_execution_context_for_filesystem_callbacks(
         runtimes=[runtime, "workspace"],
     ) as ws:
         await ws.shell("echo shared > /data/file; ln -s /data/file /data/link")
-        ws.create_session("one")
-        ws.create_session("two")
-        calls = [[], []]
+        one, two = ws.create_session("one"), ws.create_session("two")
+        calls = {"one": [], "two": []}
+        binding = ws._runtime_binding
+        program_dispatch = binding.dispatch
 
-        async def execute(session, entries):
-            captured = ws.runtime_context(session)
+        async def dispatch(op, path, *args, **kwargs):
+            session = get_current_session_for(ws._session_mgr)
+            calls[session.session_id].append(f"{op}:{path.virtual}")
+            return await program_dispatch(op, path, *args, **kwargs)
 
-            async def dispatch(op, path, *args, **kwargs):
-                entries.append(f"{op}:{path.virtual}")
-                return await captured.dispatch(op, path, *args, **kwargs)
+        binding.dispatch = dispatch
 
-            context = replace(captured, dispatch=dispatch)
+        async def execute(session):
+            set_current_session(session, ws._session_mgr)
             code = (
                 "const f = std.open('/data/link', 'r'); "
                 "std.out.puts(f.readAsString()); f.close()"
                 if runtime.language == "js"
                 else "print(open('/data/link').read(), end='')"
             )
-            return await runtime.execute(
-                CodeExecution(language=runtime.language, code=code), context
-            )
+            return await runtime.execute([], [], Context(flags={"c": code}))
 
-        results = await asyncio.gather(
-            execute("one", calls[0]), execute("two", calls[1])
-        )
+        results = await asyncio.gather(execute(one), execute(two))
         for result in results:
             assert result.exit_code == 0, result.stderr
             assert result.stdout == b"shared\n"
-        for entries in calls:
+        for entries in calls.values():
             assert any(
                 entry in ("read:/data/link", "read:/data/file")
                 for entry in entries
@@ -348,7 +336,7 @@ async def test_a_file_adapter_replays_the_launch_session_and_recorder():
     scope = RecordingScope()
     token = set_current_session(sess)
     try:
-        vfs = RuntimeFiles.of(capture_binding(binding))
+        vfs = RuntimeFiles.of(capture_binding(binding).ctx, binding)
     finally:
         reset_current_session(token)
     try:
@@ -362,9 +350,8 @@ async def test_a_file_adapter_replays_the_launch_session_and_recorder():
 @pytest.mark.asyncio
 async def test_context_vfs_of_a_bare_launch_stays_unscoped_and_unrecorded():
     dispatch = SessionSpyDispatch()
-    vfs = RuntimeFiles.of(
-        capture_binding(WorkspaceBinding(dispatch, PrefixResolver(lambda: [])))
-    )
+    binding = WorkspaceBinding(dispatch, PrefixResolver(lambda: []))
+    vfs = RuntimeFiles.of(capture_binding(binding).ctx, binding)
     scope = RecordingScope()
     try:
         await vfs_read_on_a_bare_thread(vfs)

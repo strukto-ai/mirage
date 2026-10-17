@@ -20,6 +20,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh.accessor import (
     camel,
     gh_bool,
@@ -46,7 +47,6 @@ from mirage.core.github.actions import (
     workflow_content,
 )
 from mirage.core.github.client import GitHubApiError, GitHubConnectionError
-from mirage.core.github.config import GhConfig
 from mirage.core.github.repo import RepoRef, view_repo
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, IOResult
@@ -106,7 +106,10 @@ def _workflow(value: JsonValue) -> dict[str, Any]:
 
 
 async def run_list_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     params: dict[str, str] = {}
@@ -124,8 +127,8 @@ async def run_list_cmd(
     rows = [
         _run(value)
         for value in await list_runs(
-            config,
-            repo_for(config, fl),
+            accessor,
+            repo_for(accessor, fl),
             params,
             list_limit(fl, 20),
             fl.as_str("workflow"),
@@ -144,7 +147,10 @@ async def run_list_cmd(
 
 
 async def run_view_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     raw = texts[0] if texts else ""
@@ -154,11 +160,11 @@ async def run_view_cmd(
     failed_only = gh_bool(fl, "log_failed")
     if logs and failed_only:
         raise UsageError("specify only one of --log or --log-failed", 1)
-    ref = repo_for(config, fl)
-    row = _run(await get_run(config, ref, int(raw)))
+    ref = repo_for(accessor, fl)
+    row = _run(await get_run(accessor, ref, int(raw)))
     # `--json` is answered first, as gh's exporter is.
     if (logs or failed_only) and fl.as_str("json") is None:
-        return await _run_log(config, ref, row, failed_only), IOResult()
+        return await _run_log(accessor, ref, row, failed_only), IOResult()
     human = (
         f"title:\t{row.get('displayTitle', '')}\n"
         f"workflow:\t{row.get('workflowName', '')}\n"
@@ -220,9 +226,11 @@ def _entry_for(names: list[str], pattern: str) -> str | None:
     return next((name for name in names if compiled.search(name)), None)
 
 
-async def _api_job_log(config: GhConfig, ref: RepoRef, job_id: int) -> bytes:
+async def _api_job_log(
+    accessor: GitHubAccount, ref: RepoRef, job_id: int
+) -> bytes:
     try:
-        return await job_log(config, ref, job_id)
+        return await job_log(accessor, ref, job_id)
     except GitHubApiError as exc:
         if exc.status == 404:
             raise ValueError(f"log not found: {job_id}") from exc
@@ -230,7 +238,7 @@ async def _api_job_log(config: GhConfig, ref: RepoRef, job_id: int) -> bytes:
 
 
 def _log_segments(
-    config: GhConfig,
+    accessor: GitHubAccount,
     ref: RepoRef,
     jobs: list[dict[str, Any]],
     archive: zipfile.ZipFile,
@@ -245,7 +253,7 @@ def _log_segments(
     ``--log-failed`` keeps only failed jobs and, within them, failed steps.
 
     Args:
-        config (GhConfig): the install's configuration.
+        accessor (GitHubAccount): the install's account.
         ref (RepoRef): the repository.
         jobs (list[dict[str, Any]]): the run's jobs.
         archive (zipfile.ZipFile): the run's log archive.
@@ -306,7 +314,7 @@ def _log_segments(
         job_id = int(job.get("id") or 0)
 
         async def fetch(job_id: int = job_id) -> bytes:
-            return await _api_job_log(config, ref, job_id)
+            return await _api_job_log(accessor, ref, job_id)
 
         segments.append(_LogSegment(title, "UNKNOWN STEP", fetch))
         fetchers += 1
@@ -319,7 +327,10 @@ def _log_segments(
 
 
 async def _run_log(
-    config: GhConfig, ref: RepoRef, row: dict[str, Any], failed_only: bool
+    accessor: GitHubAccount,
+    ref: RepoRef,
+    row: dict[str, Any],
+    failed_only: bool,
 ) -> bytes:
     """``gh run view --log`` and ``--log-failed``.
 
@@ -328,20 +339,20 @@ async def _run_log(
     still going is refused before any log is asked for, in gh's words.
 
     Args:
-        config (GhConfig): the install's configuration.
+        accessor (GitHubAccount): the install's account.
         ref (RepoRef): the repository.
         row (dict[str, Any]): the run, as ``gh run view`` shapes it.
         failed_only (bool): whether this is ``--log-failed``.
     """
     run_id = int(row.get("databaseId") or 0)
-    jobs = await list_jobs(config, ref, run_id)
+    jobs = await list_jobs(accessor, ref, run_id)
     if row.get("status") != "completed":
         raise ValueError(
             f"run {run_id} is still in progress; logs will be "
             "available when it is complete"
         )
     try:
-        data = await run_log_archive(config, ref, run_id)
+        data = await run_log_archive(accessor, ref, run_id)
     except GitHubApiError as exc:
         reason = "log not found" if exc.status == 404 else str(exc)
         raise ValueError(f"failed to get run log: {reason}") from exc
@@ -352,7 +363,7 @@ async def _run_log(
             "failed to get run log: zip: not a valid zip file"
         ) from exc
     printed: list[bytes] = []
-    for segment in _log_segments(config, ref, jobs, archive, failed_only):
+    for segment in _log_segments(accessor, ref, jobs, archive, failed_only):
         try:
             log = await segment.read()
         except (
@@ -371,29 +382,35 @@ async def _run_log(
 
 
 async def run_rerun_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     raw = texts[0] if texts else ""
     if not raw.isdigit():
         raise ValueError("a run ID is required in noninteractive mode")
-    ref = repo_for(config, fl)
+    ref = repo_for(accessor, fl)
     job = fl.as_str("job")
     if job:
         if not job.isdigit():
             raise ValueError("--job expects a numeric job ID")
-        await rerun_job(config, ref, int(job), gh_bool(fl, "debug"))
+        await rerun_job(accessor, ref, int(job), gh_bool(fl, "debug"))
     else:
         suffix = "rerun-failed-jobs" if gh_bool(fl, "failed") else "rerun"
         body: JsonValue = (
             {"enable_debug_logging": True} if gh_bool(fl, "debug") else None
         )
-        await rerun(config, ref, int(raw), suffix, body)
+        await rerun(accessor, ref, int(raw), suffix, body)
     return text_out("")
 
 
 async def workflow_list_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     include = (
@@ -401,10 +418,11 @@ async def workflow_list_cmd(
         if gh_bool(fl, "all")
         else lambda row: row.get("state") == "active"
     )
+    ref = repo_for(accessor, fl)
     rows = [
         _workflow(value)
         for value in await list_workflows(
-            config, repo_for(config, fl), list_limit(fl, 50), include=include
+            accessor, ref, list_limit(fl, 50), include=include
         )
     ]
     human = "".join(
@@ -415,7 +433,10 @@ async def workflow_list_cmd(
 
 
 async def workflow_view_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     workflow = texts[0] if texts else ""
@@ -425,8 +446,8 @@ async def workflow_view_cmd(
     git_ref = fl.as_str("ref") or ""
     if not yaml and git_ref:
         raise UsageError("`--yaml` required when specifying `--ref`", 1)
-    ref = repo_for(config, fl)
-    row = _workflow(await get_workflow(config, ref, workflow))
+    ref = repo_for(accessor, fl)
+    row = _workflow(await get_workflow(accessor, ref, workflow))
     if not yaml:
         human = (
             f"{row.get('name', '')} - {row.get('state', '')}\n"
@@ -434,12 +455,12 @@ async def workflow_view_cmd(
         )
         return text_out(human)
     return await _workflow_yaml(
-        config, ref, str(row.get("path", "")), git_ref
+        accessor, ref, str(row.get("path", "")), git_ref
     ), IOResult()
 
 
 async def _workflow_yaml(
-    config: GhConfig, ref: RepoRef, path: str, git_ref: str
+    accessor: GitHubAccount, ref: RepoRef, path: str, git_ref: str
 ) -> bytes:
     """``gh workflow view --yaml``: the workflow's file.
 
@@ -448,14 +469,14 @@ async def _workflow_yaml(
     file the ref lacks is refused in gh's words.
 
     Args:
-        config (GhConfig): the install's configuration.
+        accessor (GitHubAccount): the install's account.
         ref (RepoRef): the repository.
         path (str): the workflow's file.
         git_ref (str): the ``--ref`` given, or empty.
     """
     base = path.rsplit("/", 1)[-1]
     try:
-        content = await workflow_content(config, ref, path, git_ref or None)
+        content = await workflow_content(accessor, ref, path, git_ref or None)
     except GitHubApiError as exc:
         if exc.status != 404:
             raise ValueError(
@@ -505,16 +526,19 @@ async def _workflow_inputs(ctx: Context, fl: FlagView) -> dict[str, JsonValue]:
 
 
 async def workflow_run_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     workflow = texts[0] if texts else ""
     if not workflow:
         raise ValueError("a workflow ID, name, or filename is required")
-    ref = repo_for(config, fl)
-    branch = fl.as_nonempty("ref") or config.branch
+    ref = repo_for(accessor, fl)
+    branch = fl.as_nonempty("ref") or accessor.config.branch
     if not branch:
-        repo = await view_repo(config, ref)
+        repo = await view_repo(accessor, ref)
         candidate = (
             repo.get("default_branch") if isinstance(repo, dict) else None
         )
@@ -525,5 +549,5 @@ async def workflow_run_cmd(
         "ref": branch,
         "inputs": await _workflow_inputs(ctx, fl),
     }
-    await dispatch_workflow(config, ref, workflow, body)
+    await dispatch_workflow(accessor, ref, workflow, body)
     return text_out("")

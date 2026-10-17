@@ -15,6 +15,7 @@
 import { pathToFileURL } from 'node:url'
 
 import {
+  Accessor,
   CLI,
   CLIHandler,
   CommandSpec,
@@ -37,9 +38,9 @@ interface Incident {
   acknowledgedBy?: string
 }
 
-// A real CLI would construct its service client from config. This
-// deterministic service keeps the example runnable without credentials or
-// network access while preserving the same per-account semantics.
+// The service behind the CLI. A deterministic one keeps the example runnable
+// without credentials or network access while preserving the same per-account
+// semantics.
 const INCIDENTS: Record<PagerConfig['account'], Record<string, Incident>> = {
   engineering: {
     'INC-101': { summary: 'Database latency' },
@@ -51,13 +52,21 @@ const INCIDENTS: Record<PagerConfig['account'], Record<string, Incident>> = {
 
 const enc = new TextEncoder()
 
-function configOf(config: unknown): PagerConfig {
-  // registerCli validates the account before the handler runs.
-  return config as PagerConfig
-}
+/**
+ * The service client one install builds once from its config and every leaf
+ * takes first. A real CLI would open its connection here; the workspace closes
+ * it when the install goes.
+ */
+class PagerAccessor extends Accessor {
+  readonly config: PagerConfig
+  readonly incidents: Record<string, Incident>
 
-function accountIncidents(account: PagerConfig['account']): Record<string, Incident> {
-  return INCIDENTS[account]
+  constructor(config: unknown) {
+    super()
+    // registerCli validates the account before the accessor is built.
+    this.config = config as PagerConfig
+    this.incidents = INCIDENTS[this.config.account]
+  }
 }
 
 // A leaf returns its result directly or as a promise, whichever its body
@@ -65,15 +74,15 @@ function accountIncidents(account: PagerConfig['account']): Record<string, Incid
 // and one that answers from memory are written the same way, and one that
 // throws before any await is refused exactly like one that rejects.
 function listIncidents(
-  config: unknown,
+  accessor: PagerAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const { account } = configOf(config)
+  const { account } = accessor.config
   const wanted = new Set(texts)
   const status = new FlagView(ctx.flags, ctx.spec).asStr('state')
-  const lines = Object.entries(accountIncidents(account))
+  const lines = Object.entries(accessor.incidents)
     .filter(
       ([id, incident]) =>
         (wanted.size === 0 || wanted.has(id)) &&
@@ -94,16 +103,16 @@ function listIncidents(
 }
 
 function acknowledge(
-  config: unknown,
+  accessor: PagerAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): CommandFnResult {
-  const { account } = configOf(config)
+  const { account } = accessor.config
   const incidentId = texts[0]
   const by = new FlagView(ctx.flags, ctx.spec).asStr('by')
   if (incidentId === undefined) throw new Error('INCIDENT_ID is required')
-  const incidents = accountIncidents(account)
+  const incidents = accessor.incidents
   const incident = Object.hasOwn(incidents, incidentId) ? incidents[incidentId] : undefined
   if (incident === undefined) {
     return [
@@ -143,6 +152,7 @@ export const PAGER = new CLI({
     ack: new CLIHandler({ fn: acknowledge, write: true }),
   },
   configModel: PagerConfigSchema,
+  accessor: (config) => new PagerAccessor(config),
 })
 
 async function show(ws: Workspace, line: string, expectedExit = 0): Promise<void> {

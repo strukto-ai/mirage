@@ -16,10 +16,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.emoji import list_emoji
 
-CONFIG = SlackConfig(token="xoxb-test")
+ACCESSOR = SlackAccessor(SlackConfig(token="xoxb-test"))
 
 
 @pytest.mark.asyncio
@@ -32,8 +33,8 @@ async def test_list_emoji_returns_mapping():
             "emoji": {"shipit": "https://emoji/shipit.png"},
         },
     ) as get:
-        emoji = await list_emoji(CONFIG)
-    get.assert_awaited_once_with(CONFIG, "emoji.list", session=None)
+        emoji = await list_emoji(ACCESSOR)
+    get.assert_awaited_once_with(ACCESSOR, "emoji.list")
     assert emoji == {"shipit": "https://emoji/shipit.png"}
 
 
@@ -44,4 +45,4 @@ async def test_list_emoji_tolerates_missing_key():
         new_callable=AsyncMock,
         return_value={"ok": True},
     ):
-        assert await list_emoji(CONFIG) == {}
+        assert await list_emoji(ACCESSOR) == {}

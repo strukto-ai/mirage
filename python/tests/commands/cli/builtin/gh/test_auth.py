@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh import GH, auth
 from mirage.core.github.client import GitHubApiError
 from mirage.workspace import Workspace
@@ -31,6 +32,19 @@ async def test_status_checks_configured_token_without_mounts(
         assert (await result.stdout_str()).startswith(host + "\n")
         assert "secret-never-print" not in await result.stdout_str()
         assert login.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_every_line_rides_the_installs_one_account(monkeypatch):
+    login = AsyncMock(return_value="alice")
+    monkeypatch.setattr(auth, "login", login)
+    with Workspace({}) as ws:
+        ws.register_cli("gh", GH, {"token": "t"})
+        await ws.shell("gh auth status")
+        await ws.shell("gh auth status")
+    first, second = (call.args[0] for call in login.await_args_list)
+    assert isinstance(first, GitHubAccount)
+    assert first is second
 
 
 @pytest.mark.asyncio

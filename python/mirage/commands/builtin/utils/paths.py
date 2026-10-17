@@ -15,6 +15,7 @@
 import posixpath
 from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import dot_walk_error, eexist, eloop, enoent
@@ -31,26 +32,12 @@ from mirage.utils.path import (
     parent,
     resolve_path,
 )
-from mirage.view.types import LinkView, StatPath
+from mirage.view.types import LinkView, ReaddirPath, StatPath
+from mirage.workspace.files import Files
 
 # What an existence probe reads as nothing there: every miss, and a link
 # loop, which the walk reaches nothing through.
 _ABSENT: tuple[type[Exception], ...] = (*MISS_ERRORS, DotWalkLoop)
-
-
-def resolve_script(name: str, cwd: PathSpec | str | None) -> PathSpec:
-    """Resolve a script operand to a fully-resolved PathSpec.
-
-    The spelling as typed rides along in ``raw_path``, which is the name
-    an interpreter gives its program.
-
-    Args:
-        name (str): the script path as typed, absolute or cwd-relative.
-        cwd (PathSpec | str | None): the session working directory as
-            ``Context.cwd`` carries it; None resolves against the
-            root.
-    """
-    return PathSpec.from_str_path(name, cwd=cwd or "/")
 
 
 def resolve_target(o: str | PathSpec, cwd: PathSpec | str | None) -> PathSpec:
@@ -146,12 +133,58 @@ async def resolve_path_stat(
     )
 
 
+async def _stat_through(files: Files, path: str | PathSpec) -> FileStat | None:
+    """``resolve_path_stat`` through the command's files.
+
+    Args:
+        files (Files): the command's files.
+        path (str | PathSpec): absolute virtual path.
+    """
+    return await resolve_path_stat(
+        files.dispatch, PathSpec.from_str_path(path, cwd="/")
+    )
+
+
+async def _readdir_through(files: Files, path: str) -> list[str]:
+    """One directory's entries through the command's files.
+
+    Args:
+        files (Files): the command's files.
+        path (str): absolute virtual path of the directory.
+    """
+    entries, _ = await files.dispatch(
+        "readdir", PathSpec.from_str_path(path, cwd="/")
+    )
+    return list(entries)
+
+
+def vfs_stat_path(files: Files | None) -> StatPath | None:
+    """Stat one path through the command's files, which answer wherever
+    it lives (a ``find -L`` start point may sit on another mount); None
+    outside a workspace.
+
+    Args:
+        files (Files | None): the command's files.
+    """
+    return None if files is None else partial(_stat_through, files)
+
+
+def vfs_readdir_path(files: Files | None) -> ReaddirPath | None:
+    """List one directory through the command's files, for a walk that
+    crosses a mount; None outside a workspace.
+
+    Args:
+        files (Files | None): the command's files.
+    """
+    return None if files is None else partial(_readdir_through, files)
+
+
 async def stat_or_enoent(stat_path: StatPath, path: PathSpec) -> FileStat:
     """A dispatcher lookup in the shape a chain walk reads.
 
     ``StatPath`` answers None for a miss, while :func:`dot_refusal` and
     its kin read a stat that raises, so a command that holds only the
-    lookup (``ctx.stat_path``) binds this with ``functools.partial``.
+    lookup (``vfs_stat_path``) binds this with ``functools.partial``.
 
     Args:
         stat_path (StatPath): dispatcher-backed lookup of one path.

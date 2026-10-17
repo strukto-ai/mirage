@@ -18,23 +18,27 @@ import { VFSName } from '@struktoai/mirage-core/types'
 import * as kp from '@struktoai/mirage-core/utils/key_prefix'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import { loadOptionalPeer } from '../optional_peer.ts'
-import { HF_ENDPOINT, HF_TIMEOUT_MS, type HfBucketsConfig } from '../vfs/hf_buckets/config.ts'
+import { HF_ENDPOINT, type HfBucketsConfig } from '../vfs/hf_buckets/config.ts'
+import { accountOf, type HfAccountAccessor } from './hf_hub.ts'
 
 /**
  * A mount onto one Hugging Face bucket.
  *
  * Listing and writes go through the opendal operator; stat's point lookup and
- * every read go to the Hub directly, because the bucket's content token (its
- * xet hash) comes from paths-info and the resolve download, neither of which
- * the binding exposes.
+ * every read go to the Hub through the account the mount builds, because the
+ * bucket's content token (its xet hash) comes from paths-info and the resolve
+ * download, neither of which the binding exposes.
  */
 export class HfBucketsAccessor extends Accessor {
   readonly repoType: string = 'bucket'
   readonly vfsName: VFSName = VFSName.HF_BUCKETS
   private operatorPromise: Promise<Operator> | null = null
 
+  readonly account: HfAccountAccessor
+
   constructor(public readonly config: HfBucketsConfig) {
     super()
+    this.account = accountOf(config)
   }
 
   get repoId(): string {
@@ -47,15 +51,6 @@ export class HfBucketsAccessor extends Accessor {
 
   get endpoint(): string {
     return this.config.endpoint ?? HF_ENDPOINT
-  }
-
-  get token(): string | undefined {
-    return this.config.token
-  }
-
-  /** How long one Hub request may go without progress. */
-  get timeoutMs(): number {
-    return this.config.timeoutMs ?? HF_TIMEOUT_MS
   }
 
   get keyPrefix(): string {

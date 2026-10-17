@@ -47,6 +47,7 @@ from mirage.commands.builtin.rg_search import (
 from mirage.commands.builtin.utils.constants import STDIN_OPERAND
 from mirage.commands.builtin.utils.links import (
     LinkResolver,
+    dispatch_of,
     link_resolver,
     mounts_of,
 )
@@ -1158,7 +1159,9 @@ async def rg_generic(
     if f.type_list:
         return format_records(type_listing(types.definitions)), IOResult()
     notes: list[str] = []
-    walk = walk_filter(f, types, await ignore_rules(fl, ctx.dispatch, notes))
+    walk = walk_filter(
+        f, types, await ignore_rules(fl, dispatch_of(ctx), notes)
+    )
     pat: re.Pattern[str] | None = None
     if not f.list_files:
         pattern, never_match = await resolve_pattern(

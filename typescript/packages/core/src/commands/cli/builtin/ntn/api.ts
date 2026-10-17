@@ -19,6 +19,7 @@ import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { serdeMessage } from './serde.ts'
 import { compactJson, firstText, notionTransport, rustDebug, usageError } from './util.ts'
+import type { NtnAccessor } from './util.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -147,7 +148,7 @@ function refusal(stderr: string, code: number): CommandFnResult {
 }
 
 export async function api(
-  config: unknown,
+  accessor: NtnAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -224,6 +225,6 @@ export async function api(
   if (Object.keys(params).length > 0) call.query = params
   if (method !== 'GET') call.body = body
   if (Object.keys(headers).length > 0) call.headers = headers
-  const result = await notionTransport(config, ctx.flags).request(call)
+  const result = await notionTransport(accessor, ctx.flags).request(call)
   return [compactJson(result), new IOResult()]
 }

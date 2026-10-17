@@ -20,7 +20,7 @@ from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.types import RuntimeReach
 
 
-class WorkspaceRuntime(Runtime):
+class WorkspaceRuntime(Runtime[Any]):
     """The workspace's built-in command engine as a routing marker.
 
     By default it captures nothing and serves every command no other

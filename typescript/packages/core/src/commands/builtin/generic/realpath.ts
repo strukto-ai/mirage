@@ -226,8 +226,8 @@ export async function realpathGeneric(
   const first = paths[0]
   const prefix = first !== undefined ? mountPrefixOf(first.virtual, first.vfsPath) : ''
   const pathStat: StatFn =
-    ctx.dispatch !== undefined
-      ? dispatchStat(ctx.dispatch)
+    ctx.vfs !== undefined
+      ? dispatchStat(ctx.vfs.dispatch)
       : async (path) =>
           (await stat(
             PathSpec.fromStrPath(path.virtual, mountKey(path.virtual, prefix)),

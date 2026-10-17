@@ -26,6 +26,7 @@ import { fnmatch } from '../../../utils/fnmatch.ts'
 import { formatRecords } from '../utils/output.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { linksOf, mountsOf } from '../utils/links.ts'
+import { vfsReaddirPath, vfsStatPath } from '../utils/paths.ts'
 import { cInt, strtoul } from '../utils/strtol.ts'
 
 const UNOPENABLE_MARK = '  [error opening dir]'
@@ -293,8 +294,8 @@ export async function treeGeneric(
             vfsPath: mountKey(ctx.cwd.virtual, ctx.mountPrefix ?? ''),
           }),
         ]
-  const readdirPath = ctx.readdirPath
-  const statPath = ctx.statPath
+  const readdirPath = vfsReaddirPath(ctx.vfs)
+  const statPath = vfsStatPath(ctx.vfs)
   const links = linksOf(ctx)
   const treeOpts: TreeOpts = {
     showHidden: parsed.showHidden,
@@ -343,8 +344,8 @@ export async function treeGeneric(
     // GNU prints the same inline marker either way; what differs is the
     // count and the status. A non-directory exists, so it is counted and
     // the exit stays 0; a path that is not there is not counted and exits 2.
-    if (ctx.statPath !== undefined) {
-      const start = await ctx.statPath(p)
+    if (statPath !== undefined) {
+      const start = await statPath(p)
       if (start === null) {
         lines[before] = `${label}${UNOPENABLE_MARK}`
         anyError = true

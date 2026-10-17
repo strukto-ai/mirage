@@ -15,9 +15,9 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
-from mirage.accessor.github import GitHubAccessor
+from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.github.config import GitHubConfig
+from mirage.core.github.config import GhConfig, GitHubConfig
 from mirage.core.github.constants import COMMIT_SHA, SCOPE_ERROR
 from mirage.core.github.read import read as _read
 from mirage.core.github.read import read_stream as _read_stream
@@ -140,8 +140,11 @@ class GitHubVFS(BaseVFS):
                 "GitHubVFS requires owner and repo, either as "
                 "constructor kwargs or in GitHubConfig"
             )
+        self.config = config
         self.accessor = GitHubAccessor(
-            config,
+            GitHubAccount(
+                GhConfig(token=config.token, base_url=config.base_url)
+            ),
             owner,
             repo,
             ref,
@@ -232,7 +235,7 @@ class GitHubVFS(BaseVFS):
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(
-            self.accessor.config,
+            self.config,
             owner=self.accessor.owner,
             repo=self.accessor.repo,
             ref=self.accessor.ref,

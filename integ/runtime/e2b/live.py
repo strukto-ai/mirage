@@ -29,7 +29,7 @@ from e2b import AsyncSandbox
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosedError
 
-from mirage import Limit, MountMode, Workspace
+from mirage import Context, Limit, MountMode, PathSpec, Workspace
 from mirage.runtime.sandbox.e2b import E2BRuntime
 from mirage.runtime.sandbox.ssh import SSHRuntime
 from mirage.vfs.ram import RAMVFS
@@ -84,6 +84,17 @@ async def relay(reader, writer, url):
         await writer.wait_closed()
 
 
+def run_line(runtime, line, stdin, env, cwd):
+    """Run one raw line on a sandbox runtime, as a ``*`` capture hands it."""
+    ctx = Context(
+        flags={"c": line},
+        stdin=stdin,
+        env=env,
+        cwd=PathSpec.from_str_path(cwd),
+    )
+    return runtime.run_line(None, [], [], ctx)
+
+
 async def exercise(runtime, label):
     code = (
         "import sys,hashlib; "
@@ -92,7 +103,7 @@ async def exercise(runtime, label):
     line = f"python3 -c {shlex.quote(code)}"
     for data in (None, b"", bytes(range(256)) * 1024):
         result = await asyncio.wait_for(
-            runtime.run_line(line, data, {}, "/home/user"), 30
+            run_line(runtime, line, data, {}, "/home/user"), 30
         )
         assert result.exit_code == 0, result
         assert (
@@ -100,8 +111,12 @@ async def exercise(runtime, label):
             == hashlib.sha256(data or b"").hexdigest()
         ), result
     for _ in range(6):
-        result = await runtime.run_line(
-            "printf out; printf err >&2; exit 7", b"input", {}, "/home/user"
+        result = await run_line(
+            runtime,
+            "printf out; printf err >&2; exit 7",
+            b"input",
+            {},
+            "/home/user",
         )
         assert (result.stdout, result.stderr, result.exit_code) == (
             b"out",
@@ -117,7 +132,7 @@ async def exercise(runtime, label):
     start = time.monotonic()
     results = await asyncio.gather(
         *(
-            runtime.run_line(line, bytes([i]), {}, "/home/user")
+            run_line(runtime, line, bytes([i]), {}, "/home/user")
             for i in range(6)
         )
     )
@@ -133,7 +148,7 @@ async def exercise(runtime, label):
 async def wait_for_remote(runtime, command):
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        result = await runtime.run_line(command, None, {}, "/home/user")
+        result = await run_line(runtime, command, None, {}, "/home/user")
         if result.exit_code == 0:
             return
         await asyncio.sleep(0.1)
@@ -170,8 +185,12 @@ async def exercise_cancellation(runtime):
             try:
                 await wait_for_remote(runtime, f"test -s {path}")
                 survivor = asyncio.create_task(
-                    runtime.run_line(
-                        "sleep 1; printf survivor", None, {}, "/home/user"
+                    run_line(
+                        runtime,
+                        "sleep 1; printf survivor",
+                        None,
+                        {},
+                        "/home/user",
                     )
                 )
                 if mode == "caller":
@@ -193,7 +212,8 @@ async def exercise_cancellation(runtime):
             finally:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
-                await runtime.run_line(
+                await run_line(
+                    runtime,
                     f"if test -s {path}; then kill -9 $(cat {path}) "
                     f"2>/dev/null || true; fi; rm -f {path}",
                     None,
@@ -276,7 +296,7 @@ async def main():
             runtime = SSHRuntime(captures=["python3"], config=cfg)
             await exercise(runtime, "python_ssh")
             conn = runtime._conn
-            await runtime.run_line("true", None, {}, "/home/user")
+            await run_line(runtime, "true", None, {}, "/home/user")
             assert runtime._conn is conn
             passed("python_ssh_connection_reused")
             vfs = SSHVFS(SSHConfig(root="/home/user/work", **cfg))

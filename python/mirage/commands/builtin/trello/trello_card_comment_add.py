@@ -47,7 +47,6 @@ async def trello_card_comment_add(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags, spec=SPEC)
-    config = accessor.config
     card_id = fl.as_str("card_id")
     if not card_id:
         raise ValueError("--card_id is required")
@@ -62,9 +61,7 @@ async def trello_card_comment_add(
     # grant can admit it (a write-granting carve-out names no card).
     require_mount_writable()
     await require_card(accessor, card_id)
-    comment = await comment_create(
-        config, card_id=card_id, text=text, session=accessor.pool
-    )
+    comment = await comment_create(accessor, card_id=card_id, text=text)
     payload = normalize_comment(comment, card_id=card_id)
     return yield_bytes(
         json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()

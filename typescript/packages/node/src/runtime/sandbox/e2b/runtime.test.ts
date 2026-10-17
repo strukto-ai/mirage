@@ -16,12 +16,24 @@ import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../../../workspace.ts'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { Limit, MountMode } from '@struktoai/mirage-core/types'
+import { Limit, MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
 import type { E2bSdk } from '@struktoai/mirage-core/runtime/sandbox/e2b/sdk'
 import { PTY_MARK, PTY_RAW } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import type { Context } from '@struktoai/mirage-core/commands/config'
 
 const DEC = new TextDecoder()
+
+function runLine(
+  rt: E2BRuntime,
+  c: string,
+  stdin: Uint8Array | null,
+  cwd = '/',
+  more: Partial<Context> = {},
+) {
+  const ctx = { stdin, flags: { c }, env: {}, cwd: PathSpec.fromStrPath(cwd), ...more }
+  return rt.runLine(undefined, [], [], ctx)
+}
 
 class FakeExitError extends Error {
   constructor(
@@ -231,7 +243,7 @@ describe('E2BRuntime', () => {
     Uint8Array.from({ length: 256 }, (_, i) => i),
   ])('preserves native input, EOF and the command: %s', async (data) => {
     const runtime = makeRuntime()
-    const result = await runtime.runLine('wc -l | cat', data, { E: '1' }, '/workspace')
+    const result = await runLine(runtime, 'wc -l | cat', data, '/workspace', { env: { E: '1' } })
     expect(result.exitCode).toBe(0)
     expect(DEC.decode(result.stdout)).toBe(Buffer.from(data ?? []).toString('hex'))
     expect(DEC.decode(result.stderr)).toBe('warn')
@@ -271,7 +283,7 @@ describe('E2BRuntime', () => {
     const runtime = makeRuntime()
     const payloads = Array.from({ length: 6 }, (_, i) => new Uint8Array(100).fill(i))
     const results = await Promise.all(
-      payloads.map((data) => runtime.runLine('cat', data, {}, '/workspace')),
+      payloads.map((data) => runLine(runtime, 'cat', data, '/workspace')),
     )
     expect(FakeSandbox.connected).toHaveLength(1)
     expect(results.map((r) => DEC.decode(r.stdout))).toEqual(
@@ -319,9 +331,8 @@ describe('E2B cancellation and validation', () => {
   it('does not connect for an already aborted call', async () => {
     const abort = new AbortController()
     abort.abort()
-    await expect(makeRuntime().runLine('cat', null, {}, '/', abort.signal)).rejects.toMatchObject({
-      name: 'AbortError',
-    })
+    const aborted = runLine(makeRuntime(), 'cat', null, '/', { signal: abort.signal })
+    await expect(aborted).rejects.toMatchObject({ name: 'AbortError' })
     expect(FakeSandbox.connected).toEqual([])
   })
 
@@ -330,9 +341,9 @@ describe('E2B cancellation and validation', () => {
     const connect = vi.spyOn(FakeSandbox, 'connect').mockReturnValue(connection.promise)
     const runtime = makeRuntime()
     const abort = new AbortController()
-    const cancelled = runtime.runLine('sleep', null, {}, '/', abort.signal)
+    const cancelled = runLine(runtime, 'sleep', null, '/', { signal: abort.signal })
     const rejected = expect(cancelled).rejects.toMatchObject({ name: 'AbortError' })
-    const other = runtime.runLine('cat', new Uint8Array([7]), {}, '/')
+    const other = runLine(runtime, 'cat', new Uint8Array([7]))
     abort.abort()
     await rejected
     const sandbox = new FakeSandbox()
@@ -367,7 +378,7 @@ describe('E2B cancellation and validation', () => {
     const abort = new AbortController()
     const added = vi.spyOn(abort.signal, 'addEventListener')
     const removed = vi.spyOn(abort.signal, 'removeEventListener')
-    const cancelled = runtime.runLine('cat', new Uint8Array([1]), {}, '/', abort.signal)
+    const cancelled = runLine(runtime, 'cat', new Uint8Array([1]), '/', { signal: abort.signal })
     const rejected = expect(cancelled).rejects.toMatchObject({ name: 'AbortError' })
     await vi.waitFor(() => {
       expect(send).toHaveBeenCalledOnce()
@@ -382,9 +393,9 @@ describe('E2B cancellation and validation', () => {
   it('stops only the cancelled command and keeps the sandbox usable', async () => {
     const runtime = makeRuntime()
     const abort = new AbortController()
-    const cancelled = runtime.runLine('sleep', null, {}, '/', abort.signal)
+    const cancelled = runLine(runtime, 'sleep', null, '/', { signal: abort.signal })
     const rejected = expect(cancelled).rejects.toMatchObject({ name: 'AbortError' })
-    const other = runtime.runLine('cat', new Uint8Array([9]), {}, '/')
+    const other = runLine(runtime, 'cat', new Uint8Array([9]))
     await vi.waitFor(() => {
       expect(FakeSandbox.last.commands.handles).toHaveLength(2)
     })
@@ -399,7 +410,7 @@ describe('E2B cancellation and validation', () => {
       killed: false,
       disconnected: true,
     })
-    expect((await runtime.runLine('cat', null, {}, '/')).exitCode).toBe(0)
+    expect((await runLine(runtime, 'cat', null)).exitCode).toBe(0)
     expect(FakeSandbox.connected).toHaveLength(1)
   })
 

@@ -15,14 +15,14 @@
 import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
-import type { EmailConfig } from '../../../../core/email/config.ts'
+import type { EmailAccessor } from '../../../../accessor/email.ts'
 import { route } from './util.ts'
 
 export async function compose(
-  config: unknown,
+  accessor: EmailAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  return route(config as EmailConfig, new FlagView(ctx.flags), ctx.stdin, null, ctx.vfs)
+  return route(accessor, new FlagView(ctx.flags), ctx.stdin, null, ctx.vfs)
 }

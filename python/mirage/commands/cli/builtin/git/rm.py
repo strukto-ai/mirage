@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from dulwich.index import IndexEntry
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.changes import (
     DELETED,
     MODIFIED,
@@ -278,7 +279,7 @@ async def clear_worktree(
 
 
 async def rm(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Remove paths from the index, and from the working tree too.
 
@@ -288,7 +289,7 @@ async def rm(
     hand an agent: there is no reflog here to recover a file from.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context; git reads its repository

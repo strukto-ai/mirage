@@ -15,16 +15,13 @@
 import pytest
 
 from mirage.commands.builtin.general.interpreter import (
-    Argv0Rules,
-    Source,
+    exec_refusal,
     not_bound,
-    resolve_source,
-    run_code,
     run_output,
-    skip_first_line,
+    runtime_version,
 )
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.types import RunArgs, RunResult
+from mirage.runtime.types import CommandRuntime, Program, RunResult
 from mirage.types import PathSpec
 
 
@@ -32,99 +29,48 @@ class EchoRuntime(LanguageRuntime):
     name = "echo"
     language = "python"
 
-    def __init__(self, dispatch=None):
-        self.seen: list[RunArgs] = []
-
-    async def run(self, args: RunArgs, context=None) -> RunResult:
-        self.seen.append(args)
-        return RunResult(stdout=args.code.encode(), stderr=None, exit_code=0)
-
-
-async def fake_dispatch(op, path, *args, **kwargs):
-    if path.virtual == "/script.py":
-        return b"print('from-script')", None
-    raise FileNotFoundError(path.virtual)
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+        return RunResult(
+            stdout=program.code.encode(), stderr=None, exit_code=0
+        )
 
 
 def spec(path: str) -> PathSpec:
     return PathSpec(virtual=path, directory="/", resolved=True, vfs_path=path)
 
 
-@pytest.mark.asyncio
-async def test_exec_gate_reports_126():
-    error, prepared = await resolve_source(
-        "python3", [], (), None, None, None, None, False
-    )
-    assert prepared is None
-    assert error is not None
-    _, io = error
+def test_exec_gate_reports_126():
+    refusal = exec_refusal("python3", None, CommandRuntime(exec_allowed=False))
+    assert refusal is not None
+    _, io = refusal
     assert io.exit_code == 126
-    assert b"EXEC mode" in io.stderr
+    assert io.stderr == b"python3: root mount '/' is not in EXEC mode\n"
+
+
+def test_exec_gate_lets_an_allowed_program_run():
+    assert exec_refusal("python3", None, CommandRuntime()) is None
+    assert exec_refusal("python3", spec("/a.py"), CommandRuntime()) is None
+
+
+def test_exec_gate_asks_about_the_script_path():
+    placement = CommandRuntime(
+        exec_allowed=False,
+        exec_path_allowed=lambda path: path.startswith("/bin/"),
+    )
+    assert exec_refusal("python3", spec("/bin/a.py"), placement) is None
+    refusal = exec_refusal("python3", spec("/data/a.py"), placement)
+    assert refusal is not None
+    _, io = refusal
+    assert io.exit_code == 126
+    assert io.stderr == b"python3: /data/a.py: not in EXEC mode\n"
 
 
 @pytest.mark.asyncio
-async def test_payload_wins_and_operands_become_argv():
-    error, prepared = await resolve_source(
-        "python3", [spec("/a.py")], ("x",), "print(1)", None, None, None, True
-    )
-    assert error is None
-    assert prepared == Source(
-        code="print(1)", args=["/a.py", "x"], stdin=None, script_path=None
-    )
-
-
-@pytest.mark.asyncio
-async def test_script_operand_reads_through_dispatch():
-    error, prepared = await resolve_source(
-        "python3",
-        [spec("/script.py")],
-        ("--flag",),
-        None,
-        None,
-        fake_dispatch,
-        None,
-        True,
-    )
-    assert error is None
-    assert prepared is not None
-    assert prepared.code == "print('from-script')"
-    assert prepared.args == ["--flag"]
-    assert prepared.script_path is not None
-
-
-@pytest.mark.asyncio
-async def test_missing_script_reports_no_such_file():
-    error, prepared = await resolve_source(
-        "js", [spec("/nope.js")], (), None, None, fake_dispatch, None, True
-    )
-    assert prepared is None
-    assert error is not None
-    _, io = error
+async def test_runtime_version_without_a_probe_is_unavailable():
+    stdout, io = await runtime_version(EchoRuntime(), None)
+    assert stdout is None
     assert io.exit_code == 1
-    assert b"No such file" in io.stderr
-
-
-@pytest.mark.asyncio
-async def test_no_input_reports_error():
-    error, prepared = await resolve_source(
-        "python3", [], (), None, None, None, None, True
-    )
-    assert prepared is None
-    assert error is not None
-    _, io = error
-    assert b"no input" in io.stderr
-
-
-@pytest.mark.asyncio
-async def test_run_source_uses_bound_runtime_and_flags():
-    runtime = EchoRuntime()
-    prepared = Source(code="hi")
-    stdout, io = await run_code(
-        "js", prepared, {"K": "V"}, {"module": True}, runtime
-    )
-    assert io.exit_code == 0
-    assert runtime.seen[0].flags == {"module": True}
-    assert runtime.seen[0].env == {"K": "V"}
+    assert io.stderr == b"echo: version information unavailable\n"
 
 
 def test_not_bound_reports_recorded_hint():
@@ -155,68 +101,3 @@ def test_run_output_empty_stdout_becomes_no_stream():
     assert stdout is None
     assert io.exit_code == 0
     assert io.stderr is None
-
-
-def test_skip_first_line_empties_the_line_rather_than_dropping_it():
-    # CPython keeps the file's numbering under -x, so a raise on
-    # physical line 2 still reports line 2.
-    assert skip_first_line("junk\nprint(1)\n") == "\nprint(1)\n"
-
-
-def test_skip_first_line_on_a_one_line_file_leaves_nothing():
-    assert skip_first_line("junk") == ""
-
-
-@pytest.mark.asyncio
-async def test_skip_line_applies_to_a_script_operand():
-    _, prepared = await resolve_source(
-        "python3",
-        [spec("/script.py")],
-        (),
-        None,
-        None,
-        fake_dispatch,
-        None,
-        True,
-        None,
-        Argv0Rules(),
-        True,
-    )
-    assert prepared is not None
-    # The fixture script is a single line, so -x leaves nothing of it.
-    assert prepared.code == ""
-
-
-@pytest.mark.asyncio
-async def test_skip_line_leaves_a_payload_alone():
-    # CPython's -x reads the script file; -c, -m and stdin are
-    # untouched by it.
-    _, prepared = await resolve_source(
-        "python3",
-        [],
-        (),
-        "print(1)",
-        None,
-        None,
-        None,
-        True,
-        None,
-        Argv0Rules(),
-        True,
-    )
-    assert prepared is not None
-    assert prepared.code == "print(1)"
-
-
-@pytest.mark.asyncio
-async def test_run_source_passes_virtual_cwd():
-    runtime = EchoRuntime()
-    await run_code(
-        "python3",
-        Source(code="pass"),
-        {},
-        {},
-        runtime,
-        cwd=spec("/data"),
-    )
-    assert runtime.seen[0].cwd == spec("/data")

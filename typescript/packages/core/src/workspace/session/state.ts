@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { sessionAccess } from '../../context/session_context.ts'
 import type { SessionView } from '../../view/types.ts'
 import {
   PolicyDenied,
@@ -63,7 +64,7 @@ import type { SessionState } from './session.ts'
  * The one copy-out of a session's environment.
  *
  * Every tier that hands the env onward as a process view (a command's or
- * CLI's `ctx.env`, guest `RunArgs.env`, the `env` builtin) copies
+ * CLI's or a runtime's `ctx.env`, the `env` builtin) copies
  * through here, so the hidden-vars filter lands on all of them by
  * construction rather than on however many hand-rolled copies someone
  * remembers. The copy keeps the null prototype session records carry.
@@ -1246,6 +1247,8 @@ export function sessionView(
     isReadonly: (name, followRef = true) => envIsReadonly(session, name, followRef),
     profile: () => session.profile,
     cwd: () => session.cwd,
+    sessionId: session.sessionId,
+    access: () => sessionAccess(session),
   }
 }
 

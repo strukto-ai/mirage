@@ -32,7 +32,7 @@ from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python import LocalRuntime, MontyRuntime
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.resolver import MountResolver
-from mirage.runtime.types import RunArgs, RunResult
+from mirage.runtime.types import Program, RunResult
 from mirage.runtime.workspace import WorkspaceRuntime
 
 
@@ -120,14 +120,14 @@ def test_config_vfs_entry_takes_no_options():
 class AlphaRuntime(PythonRuntime):
     name = "alpha"
 
-    async def run(self, args: RunArgs, context=None) -> RunResult:
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
         return RunResult(stdout=b"ran-alpha\n", stderr=None, exit_code=0)
 
 
 class BetaRuntime(PythonRuntime):
     name = "beta"
 
-    async def run(self, args: RunArgs, context=None) -> RunResult:
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
         return RunResult(stdout=b"ran-beta\n", stderr=None, exit_code=0)
 
 
@@ -574,10 +574,9 @@ class LineBox(Runtime, LineExecutorMixin):
     def __init__(self) -> None:
         self.lines: list[tuple[str, bytes | None, str]] = []
 
-    async def run_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-    ) -> RunResult:
-        self.lines.append((line, stdin, cwd))
+    async def run_line(self, engine, paths, texts, ctx) -> RunResult:
+        line = ctx.flags["c"]
+        self.lines.append((line, ctx.stdin, ctx.cwd.virtual))
         return RunResult(
             stdout=b"box:" + line.encode(), stderr=None, exit_code=0
         )
@@ -677,7 +676,7 @@ class ResolverProbe(PythonRuntime):
         super().bind(binding)
         self.resolver = binding.resolver
 
-    async def run(self, args: RunArgs, context=None) -> RunResult:
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 

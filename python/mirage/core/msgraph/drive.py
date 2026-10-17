@@ -23,7 +23,8 @@ from typing import Any, Protocol, TypeVar
 import aiohttp
 
 from mirage.accessor.base import Accessor
-from mirage.core.api.client import SessionArg
+from mirage.accessor.onedrive import OneDriveAccessor
+from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.core.msgraph.client import (
     GraphError,
     cancel_upload,
@@ -41,7 +42,6 @@ from mirage.core.msgraph.client import (
     poll_monitor,
     upload_chunk,
 )
-from mirage.core.msgraph.config import MsGraphConfig
 from mirage.core.msgraph.constants import BATCH_LIMIT
 from mirage.errors.fs import eexist, enoent, enotdir, enotsup, listing_error
 from mirage.io.spool import ByteSpool
@@ -139,10 +139,9 @@ def virtual_key(path: PathSpec) -> str:
 
 
 async def copy_once(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     src: DriveLoc,
     dst: DriveLoc,
-    session: SessionArg = None,
 ) -> tuple[str, str] | None:
     """One Graph copy attempt, surfacing a conflict instead of raising.
 
@@ -153,10 +152,9 @@ async def copy_once(
     merge for folders).
 
     Args:
-        config (MsGraphConfig): Graph config.
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         src (DriveLoc): source item.
         dst (DriveLoc): destination item.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         tuple[str, str] | None: ``(code, message)`` of a failed copy, or
@@ -167,16 +165,12 @@ async def copy_once(
         "parentReference": _parent_reference(src, dst),
     }
     try:
-        monitor = await graph_post_monitor(
-            config, src.item("/copy"), body, session=session
-        )
+        monitor = await graph_post_monitor(accessor, src.item("/copy"), body)
     except GraphError as exc:
         if exc.status == 409 or exc.code == "nameAlreadyExists":
             return exc.code, str(exc)
         raise
-    result = await poll_monitor(
-        monitor, timeout=config.timeout, session=session
-    )
+    result = await poll_monitor(accessor, monitor)
     status = result.get("status")
     if status == "failed":
         err = result.get("error", {}) if isinstance(result, dict) else {}
@@ -192,35 +186,30 @@ async def copy_once(
 
 
 async def copy_tree(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     src: DriveLoc,
     dst: DriveLoc,
-    session: SessionArg = None,
 ) -> None:
-    err = await copy_once(config, src, dst, session=session)
+    err = await copy_once(accessor, src, dst)
     if err is None:
         return
     code, message = err
     if code != "nameAlreadyExists":
         raise GraphError(500, code, message)
-    src_item = await graph_get(config, src.item(), session=session)
-    dst_item = await graph_get(config, dst.item(), session=session)
+    src_item = await graph_get(accessor, src.item())
+    dst_item = await graph_get(accessor, dst.item())
     if "folder" in src_item and "folder" in dst_item:
         # GNU cp -r merges into an existing directory; Graph never merges
         # folders, so recurse per child instead.
-        children = await graph_list(
-            config, src.item("/children"), session=session
-        )
+        children = await graph_list(accessor, src.item("/children"))
         for child in children:
             name = child.get("name", "")
-            await copy_tree(
-                config, src.child(name), dst.child(name), session=session
-            )
+            await copy_tree(accessor, src.child(name), dst.child(name))
         return
     if "folder" in src_item or "folder" in dst_item:
         raise GraphError(409, code, message)
-    await graph_delete(config, dst.item(), session=session)
-    err = await copy_once(config, src, dst, session=session)
+    await graph_delete(accessor, dst.item())
+    err = await copy_once(accessor, src, dst)
     if err is not None:
         raise GraphError(500, err[0], err[1])
 
@@ -241,18 +230,16 @@ class MovedItem:
 
 
 async def rename_replace(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     src: DriveLoc,
     dst: DriveLoc,
-    session: SessionArg = None,
 ) -> MovedItem:
     """Move ``src`` to ``dst``, replacing a file or an empty folder there.
 
     Args:
-        config (MsGraphConfig): Graph credentials and endpoints.
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         src (DriveLoc): the item to move.
         dst (DriveLoc): where it lands.
-        session (SessionArg): the shared HTTP session, if any.
 
     Returns:
         MovedItem: the moved driveItem and whether the move replaced
@@ -261,7 +248,7 @@ async def rename_replace(
     body = _move_body(src, dst)
     replaced_non_file = False
     try:
-        moved = await graph_patch(config, src.item(), body, session=session)
+        moved = await graph_patch(accessor, src.item(), body)
     except GraphError as exc:
         if exc.status != 409 and exc.code != "nameAlreadyExists":
             raise
@@ -270,16 +257,14 @@ async def rename_replace(
         # conflicting file (or empty folder) and retry. A non-empty
         # folder conflict keeps the original error, mirroring mv's
         # "Directory not empty".
-        dst_item = await graph_get(config, dst.item(), session=session)
+        dst_item = await graph_get(accessor, dst.item())
         if "folder" in dst_item:
-            children = await graph_list(
-                config, dst.item("/children"), session=session
-            )
+            children = await graph_list(accessor, dst.item("/children"))
             if children:
                 raise
-        await graph_delete(config, dst.item(), session=session)
+        await graph_delete(accessor, dst.item())
         replaced_non_file = "file" not in dst_item
-        moved = await graph_patch(config, src.item(), body, session=session)
+        moved = await graph_patch(accessor, src.item(), body)
     return MovedItem(
         moved=moved if isinstance(moved, dict) else {},
         replaced_non_file=replaced_non_file,
@@ -287,10 +272,10 @@ async def rename_replace(
 
 
 async def _url_item(
-    config: MsGraphConfig, url: str, session: SessionArg
+    accessor: OneDriveAccessor | SharePointAccessor, url: str
 ) -> dict[str, Any] | None:
     try:
-        return await graph_get(config, url, session=session)
+        return await graph_get(accessor, url)
     except GraphError as exc:
         if exc.status != 404:
             raise
@@ -313,11 +298,10 @@ class FolderTarget:
 
 
 async def create_child_folder(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     parent_url: str,
     name: str,
     target: FolderTarget,
-    session: SessionArg = None,
     exist_ok: bool = True,
 ) -> None:
     """Create one folder, naming a refusal the way mkdir(2) does.
@@ -332,11 +316,10 @@ async def create_child_folder(
     run on a refusal only.
 
     Args:
-        config (MsGraphConfig): Graph config.
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         parent_url (str): the parent's ``/children`` URL.
         name (str): the folder's name.
         target (FolderTarget): the folder, its parent and its name.
-        session (SessionArg): pool or live session to ride.
         exist_ok (bool): a folder already holding the name is success.
     """
     body = {
@@ -345,32 +328,30 @@ async def create_child_folder(
         "@microsoft.graph.conflictBehavior": "fail",
     }
     try:
-        await graph_post(config, parent_url, body, session=session)
+        await graph_post(accessor, parent_url, body)
     except GraphError as exc:
         if exc.status == 409 or exc.code == "nameAlreadyExists":
-            taken = await _url_item(config, target.item, session)
+            taken = await _url_item(accessor, target.item)
             if exist_ok and (taken is None or "folder" in taken):
                 return
             raise eexist(target.virtual) from exc
         if exc.status != 404:
             raise
-        found = await _url_item(config, target.parent, session)
+        found = await _url_item(accessor, target.parent)
         if found is not None and "folder" not in found:
             raise enotdir(target.virtual) from exc
         raise enoent(target.virtual) from exc
 
 
 async def upload_session_write(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     session_url: str,
     data: bytes | ByteSpool,
-    session: SessionArg = None,
 ) -> None:
     created = await graph_post(
-        config,
+        accessor,
         session_url,
         {"item": {"@microsoft.graph.conflictBehavior": "replace"}},
-        session=session,
     )
     upload_url = created["uploadUrl"]
     total = data.size if isinstance(data, ByteSpool) else len(data)
@@ -383,7 +364,7 @@ async def upload_session_write(
                 else data[start : start + UPLOAD_CHUNK]
             )
             result = await upload_chunk(
-                config, upload_url, chunk, start, total, session=session
+                accessor, upload_url, chunk, start, total
             )
             ranges = result.get("nextExpectedRanges") if result else None
             next_start = (
@@ -396,7 +377,7 @@ async def upload_session_write(
             start = next_start
     except BaseException:
         try:
-            await cancel_upload(config, upload_url, session=session)
+            await cancel_upload(accessor, upload_url)
         except Exception:
             logger.debug(
                 "Could not cancel Graph upload session", exc_info=True
@@ -405,32 +386,23 @@ async def upload_session_write(
 
 
 async def write_item_stream(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     loc: DriveLoc,
     data: ByteSource,
-    session: SessionArg = None,
 ) -> int:
     async with ByteSpool() as spool:
         await spool.fill(data)
         if spool.size <= SIMPLE_UPLOAD_MAX:
-            await write_item(
-                config, loc, await spool.read(0, spool.size), session=session
-            )
+            await write_item(accessor, loc, await spool.read(0, spool.size))
         else:
             await upload_session_write(
-                config,
-                loc.item("/createUploadSession"),
-                spool,
-                session=session,
+                accessor, loc.item("/createUploadSession"), spool
             )
         return spool.size
 
 
 async def write_item(
-    config: MsGraphConfig,
-    loc: DriveLoc,
-    data: bytes,
-    session: SessionArg = None,
+    accessor: OneDriveAccessor | SharePointAccessor, loc: DriveLoc, data: bytes
 ) -> None:
     """Replace a drive item's content, creating it and its parents.
 
@@ -438,18 +410,15 @@ async def write_item(
     goes through an upload session.
 
     Args:
-        config (MsGraphConfig): Graph config.
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         loc (DriveLoc): the item to write.
         data (bytes): its new content.
-        session (SessionArg): pool or live session to ride.
     """
     if len(data) <= SIMPLE_UPLOAD_MAX:
-        await graph_put_bytes(
-            config, loc.item("/content"), data, session=session
-        )
+        await graph_put_bytes(accessor, loc.item("/content"), data)
     else:
         await upload_session_write(
-            config, loc.item("/createUploadSession"), data, session=session
+            accessor, loc.item("/createUploadSession"), data
         )
 
 
@@ -509,9 +478,8 @@ def current_version_id(versions: list[dict[str, Any]]) -> str | None:
 
 
 async def capture_item_metadata(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     loc: DriveLoc,
-    session: SessionArg = None,
     versions: bool = True,
 ) -> tuple[str | None, str | None, str | None]:
     """The item's cTag, current version and download URL, in one GET.
@@ -523,16 +491,15 @@ async def capture_item_metadata(
     label old bytes with the new token and serve them as fresh.
 
     Args:
-        config (MsGraphConfig): Graph credentials and endpoint.
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         loc (DriveLoc): the drive item.
-        session (SessionArg): pool or live session to ride.
         versions (bool): also expand the version history for the current
             revision, which only a snapshot needs; without it the revision
             is None. Every shell line records, so only reads outside one
             (FUSE, a runtime's guest, ``ws.vfs``) skip it.
     """
     params = {"$expand": "versions"} if versions else None
-    item = await graph_get(config, loc.item(), params=params, session=session)
+    item = await graph_get(accessor, loc.item(), params=params)
     fingerprint = item.get("cTag")
     revision = current_version_id(item.get("versions", []))
     download_url = item.get("@microsoft.graph.downloadUrl")
@@ -540,13 +507,12 @@ async def capture_item_metadata(
 
 
 async def read_item(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     loc: DriveLoc,
     virtual: str,
     backend: str,
     offset: int = 0,
     size: int | None = None,
-    session: SessionArg = None,
 ) -> bytes:
     pinned = revision_for(virtual)
     window = window_for(offset, size)
@@ -556,23 +522,20 @@ async def read_item(
     try:
         if pinned:
             action = f"/versions/{id_segment(pinned)}/content"
-            data = await graph_get_bytes(
-                config, loc.item(action), window, session=session
-            )
+            data = await graph_get_bytes(accessor, loc.item(action), window)
         else:
             fingerprint, revision, download_url = await capture_item_metadata(
-                config,
+                accessor,
                 loc,
-                session=session,
                 versions=active_recorder() is not None,
             )
             if download_url:
                 data = await graph_get_bytes(
-                    config, download_url, window, auth=False, session=session
+                    accessor, download_url, window, auth=False
                 )
             else:
                 data = await graph_get_bytes(
-                    config, loc.item("/content"), window, session=session
+                    accessor, loc.item("/content"), window
                 )
     except GraphError as exc:
         if exc.status == 404:
@@ -591,12 +554,11 @@ async def read_item(
 
 
 async def stream_item(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     loc: DriveLoc,
     virtual: str,
     backend: str,
     chunk_size: int = 8192,
-    session: SessionArg = None,
 ) -> AsyncIterator[bytes]:
     pinned = revision_for(virtual)
     rec = record_stream("read", virtual, backend)
@@ -612,15 +574,11 @@ async def stream_item(
                 rec.fingerprint,
                 rec.revision,
                 download_url,
-            ) = await capture_item_metadata(
-                config, loc, session=session, versions=True
-            )
+            ) = await capture_item_metadata(accessor, loc, versions=True)
             if download_url:
                 url = download_url
                 auth = False
-        async for chunk in graph_stream(
-            config, url, chunk_size, auth=auth, session=session
-        ):
+        async for chunk in graph_stream(accessor, url, chunk_size, auth=auth):
             if rec is not None:
                 rec.bytes += len(chunk)
             yield chunk
@@ -631,18 +589,16 @@ async def stream_item(
 
 
 async def iter_tree(
-    config: MsGraphConfig,
-    loc: DriveLoc,
-    session: SessionArg = None,
+    accessor: OneDriveAccessor | SharePointAccessor, loc: DriveLoc
 ) -> AsyncIterator[tuple[str, dict[str, Any], bool]]:
-    children = await graph_list(config, loc.item("/children"), session=session)
+    children = await graph_list(accessor, loc.item("/children"))
     for child in children:
         cname = child.get("name", "")
         child_loc = loc.child(cname)
         is_dir = "folder" in child
         yield child_loc.virt, child, is_dir
         if is_dir:
-            async for entry in iter_tree(config, child_loc, session=session):
+            async for entry in iter_tree(accessor, child_loc):
                 yield entry
 
 
@@ -657,9 +613,7 @@ def parent_id(item: dict[str, Any]) -> str:
 
 
 async def delta_tree(
-    config: MsGraphConfig,
-    loc: DriveLoc,
-    session: SessionArg = None,
+    accessor: OneDriveAccessor | SharePointAccessor, loc: DriveLoc
 ) -> dict[str, FileStat] | None:
     """Every item under a folder, each as a listing's stat renders it, from
     one read of Graph's ``/delta`` feed started at that folder.
@@ -681,14 +635,11 @@ async def delta_tree(
     answer as the folders' listings.
 
     Args:
-        config (MsGraphConfig): Graph config.
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         loc (DriveLoc): the folder.
-        session (SessionArg): pool or live session to ride.
     """
     try:
-        top = await graph_get(
-            config, loc.item(), {"$select": "id,folder"}, session=session
-        )
+        top = await graph_get(accessor, loc.item(), {"$select": "id,folder"})
     except GraphError as exc:
         if exc.status != 404:
             raise
@@ -698,7 +649,7 @@ async def delta_tree(
     if "folder" not in top or not isinstance(top_id, str):
         return None
     try:
-        rows = await graph_list(config, loc.item("/delta"), session=session)
+        rows = await graph_list(accessor, loc.item("/delta"))
     except GraphError as exc:
         logger.debug("graph feed of %s left to the walk: %s", loc.path, exc)
         return None
@@ -740,10 +691,9 @@ async def delta_tree(
 
 
 async def batch_tree(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     loc: DriveLoc,
     virtual_key: str,
-    session: SessionArg = None,
 ) -> dict[str, FileStat] | None:
     """Every item under a folder, each as its folder's listing renders it,
     from the folders' listings sent ``BATCH_LIMIT`` to a request through
@@ -761,13 +711,12 @@ async def batch_tree(
     what is there and reports, or skips, each folder on its own.
 
     Args:
-        config (MsGraphConfig): Graph config.
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         loc (DriveLoc): the folder.
         virtual_key (str): its mount-absolute path, which an error names.
-        session (SessionArg): pool or live session to ride.
     """
     found: dict[str, FileStat] = {}
-    rows = await readdir_items(config, loc, virtual_key, session=session)
+    rows = await readdir_items(accessor, loc, virtual_key)
     level = _filed(found, "", loc, rows)
     while level:
         below: list[tuple[str, DriveLoc]] = []
@@ -775,7 +724,7 @@ async def batch_tree(
             chunk = level[start : start + BATCH_LIMIT]
             urls = [folder.item("/children") for _, folder in chunk]
             try:
-                answers = await graph_batch(config, urls, session=session)
+                answers = await graph_batch(accessor, urls)
                 pause = max(
                     (wait for status, _, wait in answers if status != 200),
                     default=0.0,
@@ -783,7 +732,7 @@ async def batch_tree(
                 if pause:
                     await asyncio.sleep(pause)
                 listed = [
-                    await _batch_page(config, url, status, body, session)
+                    await _batch_page(accessor, url, status, body)
                     for url, (status, body, _) in zip(urls, answers)
                 ]
             except (GraphError, aiohttp.ClientError, OSError) as exc:
@@ -799,25 +748,23 @@ async def batch_tree(
 
 
 async def _batch_page(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     url: str,
     status: int,
     body: dict[str, Any],
-    session: SessionArg,
 ) -> list[dict[str, Any]]:
     """A folder's whole listing from its answer in a batch: the page the
     batch held and the pages after it, or the listing asked again on its
     own when the batch did not answer it.
 
     Args:
-        config (MsGraphConfig): Graph config.
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         url (str): the listing's URL.
         status (int): the answer's status.
         body (dict[str, Any]): the answer's body.
-        session (SessionArg): pool or live session to ride.
     """
     if status != 200:
-        return await graph_list(config, url, session=session)
+        return await graph_list(accessor, url)
     value = body.get("value")
     items = [
         item
@@ -826,7 +773,7 @@ async def _batch_page(
     ]
     rest = body.get("@odata.nextLink")
     if isinstance(rest, str):
-        items.extend(await graph_list(config, rest, session=session))
+        items.extend(await graph_list(accessor, rest))
     return items
 
 
@@ -900,7 +847,7 @@ def _placed(
 
 
 async def drive_root_empty(
-    config: MsGraphConfig, loc: DriveLoc, session: SessionArg = None
+    accessor: OneDriveAccessor | SharePointAccessor, loc: DriveLoc
 ) -> bool:
     """Whether a drive item has no children, in one request.
 
@@ -913,35 +860,28 @@ async def drive_root_empty(
     payload this never reads.
 
     Args:
-        config (MsGraphConfig): Graph config.
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         loc (DriveLoc): the folder to probe.
-        session (SessionArg): pool or live session to ride.
     """
     page = await graph_get(
-        config,
-        loc.item("/children"),
-        {"$top": 1, "$select": "id"},
-        session=session,
+        accessor, loc.item("/children"), {"$top": 1, "$select": "id"}
     )
     children = page.get("value")
     return not (isinstance(children, list) and children)
 
 
 async def _item_or_none(
-    config: MsGraphConfig, loc: DriveLoc, path: str, session: SessionArg = None
+    accessor: OneDriveAccessor | SharePointAccessor, loc: DriveLoc, path: str
 ) -> dict[str, Any] | None:
     """One drive item addressed off ``loc``, or None when Graph has none.
 
     Args:
-        config (MsGraphConfig): Graph config.
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         loc (DriveLoc): any loc on the drive being probed.
         path (str): drive path of the item to fetch.
-        session (SessionArg): pool or live session to ride.
     """
     try:
-        return await graph_get(
-            config, loc.item_at(path.strip("/")), session=session
-        )
+        return await graph_get(accessor, loc.item_at(path.strip("/")))
     except GraphError as exc:
         if exc.status == 404:
             return None
@@ -949,37 +889,33 @@ async def _item_or_none(
 
 
 async def _is_file(
-    config: MsGraphConfig, loc: DriveLoc, path: str, session: SessionArg = None
+    accessor: OneDriveAccessor | SharePointAccessor, loc: DriveLoc, path: str
 ) -> bool:
-    item = await _item_or_none(config, loc, path, session=session)
+    item = await _item_or_none(accessor, loc, path)
     return item is not None and "folder" not in item
 
 
 async def _is_dir(
-    config: MsGraphConfig, loc: DriveLoc, path: str, session: SessionArg = None
+    accessor: OneDriveAccessor | SharePointAccessor, loc: DriveLoc, path: str
 ) -> bool:
-    item = await _item_or_none(config, loc, path, session=session)
+    item = await _item_or_none(accessor, loc, path)
     return item is not None and "folder" in item
 
 
 async def readdir_items(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     loc: DriveLoc,
     virtual_key: str,
-    session: SessionArg = None,
 ) -> list[FileStat]:
     """A folder's children, each as ``stat`` answers it.
 
     Args:
-        config (MsGraphConfig): Graph config.
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         loc (DriveLoc): the folder.
         virtual_key (str): its mount-absolute path, which an error names.
-        session (SessionArg): pool or live session to ride.
     """
     try:
-        children = await graph_list(
-            config, loc.item("/children"), session=session
-        )
+        children = await graph_list(accessor, loc.item("/children"))
     except GraphError as exc:
         if exc.status != 404:
             raise
@@ -990,8 +926,8 @@ async def readdir_items(
         raise await listing_error(
             virtual_key,
             loc.path,
-            partial(_is_file, config, loc, session=session),
-            partial(_is_dir, config, loc, session=session),
+            partial(_is_file, accessor, loc),
+            partial(_is_dir, accessor, loc),
         ) from exc
     rows = [entry_stat(child) for child in children]
     rows.sort(key=lambda row: row.name)
@@ -999,21 +935,19 @@ async def readdir_items(
 
 
 async def stat_item(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     loc: DriveLoc,
     virtual: str,
-    session: SessionArg = None,
 ) -> FileStat:
     """One drive item's stat, from Graph.
 
     Args:
-        config (MsGraphConfig): Graph config.
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         loc (DriveLoc): the item.
         virtual (str): its virtual path, which an error names.
-        session (SessionArg): pool or live session to ride.
     """
     try:
-        item = await graph_get(config, loc.item(), session=session)
+        item = await graph_get(accessor, loc.item())
     except GraphError as exc:
         if exc.status == 404:
             raise enoent(virtual)

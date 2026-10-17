@@ -16,6 +16,7 @@ import { WorkspaceBinding } from '../../../binding.ts'
 import { expect, it, vi } from 'vitest'
 import { PyodideRuntime } from '../runtime.ts'
 import { PrefixResolver } from '../../../resolver.ts'
+import { PathSpec } from '../../../../types.ts'
 import type { BridgeDispatchFn } from '../../../types.ts'
 import { PyodideUnavailableError } from '../errors.ts'
 
@@ -49,15 +50,14 @@ it.each(['construction', 'startup'])(
       return Promise.reject(new Error(`unexpected ${op}`))
     }
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/data/'])))
+    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
     try {
       for (let i = 0; i < 2; i++) {
-        const run = rt.run({
-          code: "print(open('/data/one.txt').read())",
-          args: [],
-          env: {},
-          stdin: null,
-        })
+        const run = rt.interpret(
+          undefined,
+          { code: "print(open('/data/one.txt').read())", args: [], stdin: null },
+          { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), env: {} },
+        )
         await expect(run).rejects.toBeInstanceOf(PyodideUnavailableError)
         // What stopped the worker, not the shared-memory hint a host
         // that has shared memory cannot act on.

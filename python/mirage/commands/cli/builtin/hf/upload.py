@@ -15,6 +15,7 @@
 import posixpath
 from operator import attrgetter
 
+from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.commands.cli.builtin.hf.accessor import (
     hub_for,
     repo_type_of,
@@ -29,7 +30,6 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.core.hf_hub.admin import create_repo
 from mirage.core.hf_hub.client import repo_url
 from mirage.core.hf_hub.commit import Addition, commit
-from mirage.core.hf_hub.config import HfConfig
 from mirage.core.hf_hub.constants import (
     DEFAULT_COMMIT_MESSAGE,
     DEFAULT_IGNORE_PATTERNS,
@@ -118,11 +118,14 @@ def in_repo_base(value: str) -> str:
 
 
 async def upload_cmd(
-    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: HfAccountAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """Upload a workspace file or folder to a repository, as one commit."""
     require_operands(texts, ["repo_id"])
-    require_token(config, "upload")
+    require_token(accessor, "upload")
     fl = FlagView(ctx.flags)
     if ctx.vfs is None:
         raise UsageError("hf upload needs a workspace to read from")
@@ -186,41 +189,39 @@ async def upload_cmd(
     # of one this line brings into being rather than changing an
     # existing repository's.
     await create_repo(
-        config,
+        accessor,
         repo_id,
         repo_type,
         private=bool(fl.as_bool("private")),
         exist_ok=True,
     )
-    async with hub_for(
-        config, repo_id, repo_type, fl.as_str("revision")
-    ) as accessor:
-        # For a folder the --delete patterns match the repo's files under
-        # `path_in_repo`, and a file this commit re-adds is not deleted
-        # first. A commit that would change nothing is skipped, with
-        # upstream's create_commit warning.
-        added = {add.path for add in additions}
-        doomed = (
-            [
-                path
-                for path in deletions_for(
-                    repo_files(await fetch_tree(accessor)), deletions, base
-                )
-                if path not in added
-            ]
-            if from_dir and deletions
-            else []
-        )
-        reply = await commit(
-            accessor,
-            additions=additions,
-            deletions=doomed,
-            message=fl.as_str("commit_message") or DEFAULT_COMMIT_MESSAGE,
-            description=fl.as_str("commit_description") or "",
-            create_pr=bool(fl.as_bool("create_pr")),
-        )
-        if reply is None:
-            warnings += EMPTY_COMMIT_WARNING
-        home = repo_url(config.endpoint, accessor.repo_type, repo_id)
-        url = f"{home}/tree/{accessor.revision}/{base}".rstrip("/")
-        return text_out(f"{url}\n", warnings)
+    hub = hub_for(accessor, repo_id, repo_type, fl.as_str("revision"))
+    # For a folder the --delete patterns match the repo's files under
+    # `path_in_repo`, and a file this commit re-adds is not deleted
+    # first. A commit that would change nothing is skipped, with
+    # upstream's create_commit warning.
+    added = {add.path for add in additions}
+    doomed = (
+        [
+            path
+            for path in deletions_for(
+                repo_files(await fetch_tree(hub)), deletions, base
+            )
+            if path not in added
+        ]
+        if from_dir and deletions
+        else []
+    )
+    reply = await commit(
+        hub,
+        additions=additions,
+        deletions=doomed,
+        message=fl.as_str("commit_message") or DEFAULT_COMMIT_MESSAGE,
+        description=fl.as_str("commit_description") or "",
+        create_pr=bool(fl.as_bool("create_pr")),
+    )
+    if reply is None:
+        warnings += EMPTY_COMMIT_WARNING
+    home = repo_url(hub.endpoint, hub.repo_type, repo_id)
+    url = f"{home}/tree/{hub.revision}/{base}".rstrip("/")
+    return text_out(f"{url}\n", warnings)

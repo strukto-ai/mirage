@@ -15,7 +15,8 @@
 import { EXTERNAL_COMMANDS } from '@struktoai/mirage-core/runtime/constants'
 import type { ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { PathSpec } from '@struktoai/mirage-core/types'
+import type { PathSpec } from '@struktoai/mirage-core/types'
+import type { Context } from '@struktoai/mirage-core/commands/config'
 import { Runtime } from '@struktoai/mirage-core/runtime/base'
 import {
   LINE_EXECUTOR,
@@ -25,18 +26,17 @@ import {
   type StreamingProcess,
 } from '@struktoai/mirage-core/runtime/mixin'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type {
-  ProcessExecution,
-  StreamExecution,
-  RunResult,
-} from '@struktoai/mirage-core/runtime/types'
+import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { SANDLOCK_CONFIG_KEYS, type SandlockConfig } from './config.ts'
 import { SANDLOCK_CLI_HINT, SYSTEM_READABLE } from './constants.ts'
 import { closeChildren, cwdRefusal, runCli } from '../cli.ts'
 
 /** Native commands confined by Sandlock; workspace access needs a granted native mount. */
-export class SandlockRuntime extends Runtime implements LineExecutor, StreamingProcess {
+export class SandlockRuntime
+  extends Runtime<undefined>
+  implements LineExecutor<undefined>, StreamingProcess<undefined>
+{
   readonly name = 'sandlock'
   readonly [LINE_EXECUTOR] = true as const
   readonly [PROCESS_EXECUTOR] = true as const
@@ -60,50 +60,58 @@ export class SandlockRuntime extends Runtime implements LineExecutor, StreamingP
   }
 
   runLine(
-    line: string,
-    stdin: Uint8Array | null,
-    env: Record<string, string>,
-    cwd: string,
-    signal?: AbortSignal,
+    _engine: undefined,
+    _paths: PathSpec[],
+    _texts: string[],
+    ctx: Context,
   ): Promise<RunResult> {
-    return this.runProcess({
-      kind: 'process',
-      argv: ['/bin/sh', '-c', line],
-      cwd: PathSpec.fromStrPath(cwd),
-      env,
-      stdin,
-      ...(signal ? { signal } : {}),
-    })
+    const line = ctx.flags.c
+    return this.executeProcess(['/bin/sh', '-c', typeof line === 'string' ? line : ''], ctx)
   }
 
-  runProcess(request: ProcessExecution): Promise<RunResult> {
-    return this.executeProcess(request)
+  runProcess(
+    _engine: undefined,
+    _paths: PathSpec[],
+    texts: string[],
+    ctx: Context,
+  ): Promise<RunResult> {
+    return this.executeProcess(texts, ctx)
   }
 
-  runStream(request: StreamExecution): Promise<RunResult> {
-    return this.executeProcess(request)
+  runStream(
+    _engine: undefined,
+    _paths: PathSpec[],
+    texts: string[],
+    ctx: Context,
+    output: OutputFn,
+  ): Promise<RunResult> {
+    return this.executeProcess(texts, ctx, output)
   }
 
-  private async executeProcess(request: ProcessExecution | StreamExecution): Promise<RunResult> {
-    const refusal = await cwdRefusal(request.argv[0], request.cwd.virtual)
+  private async executeProcess(
+    argv: string[],
+    ctx: Context,
+    output?: OutputFn,
+  ): Promise<RunResult> {
+    const refusal = await cwdRefusal(argv[0] ?? '', ctx.cwd.virtual)
     if (refusal !== null) return refusal
-    request.signal?.throwIfAborted()
-    const argv = ['run', ...this.policyArgv(), '--clean-env']
-    for (const [key, value] of Object.entries({ ...this.config.env, ...request.env }))
-      argv.push('--env', `${key}=${value}`)
-    argv.push('--', ...request.argv)
+    ctx.signal?.throwIfAborted()
+    const wrapper = ['run', ...this.policyArgv(), '--clean-env']
+    for (const [key, value] of Object.entries({ ...this.config.env, ...ctx.env }))
+      wrapper.push('--env', `${key}=${value}`)
+    wrapper.push('--', ...argv)
     // Only host PATH locates the CLI; requested variables go to the confined child.
     const { stdout, stderr, code } = await runCli(
       'sandlock',
       SANDLOCK_CLI_HINT,
-      argv,
-      request.stdin,
+      wrapper,
+      ctx.stdin,
       {
-        cwd: request.cwd.virtual,
+        cwd: ctx.cwd.virtual,
         env: { PATH: process.env.PATH ?? '' },
         children: this.children,
-        ...(request.kind === 'stream' ? { output: request.output } : {}),
-        ...(request.signal !== undefined ? { signal: request.signal } : {}),
+        ...(output !== undefined ? { output } : {}),
+        ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
       },
     )
     return { stdout, stderr: stderr.length > 0 ? stderr : null, exitCode: code }

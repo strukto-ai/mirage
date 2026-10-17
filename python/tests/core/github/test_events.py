@@ -14,18 +14,18 @@
 
 import pytest
 
-from mirage.accessor.github import GitHubAccessor
-from mirage.core.github.config import GitHubConfig
+from mirage.accessor.github import GitHubAccessor, GitHubAccount
+from mirage.core.github.config import GhConfig
 from mirage.core.github.events import GitHubEventHook
 from mirage.types import FileChangeKind, JsonValue, PathSpec
 
-CONFIG = GitHubConfig(token="t")
+ACCOUNT = GitHubAccount(GhConfig(token="t"))
 ROOT = PathSpec(virtual="/gh", directory="/gh", vfs_path="")
 
 
 def _accessor(ref: str | None = "main") -> GitHubAccessor:
     return GitHubAccessor(
-        config=CONFIG,
+        account=ACCOUNT,
         owner="acme",
         repo="proj",
         ref=ref,

@@ -73,9 +73,7 @@ def _answering(etag: str, *payload: bytes):
     """A hub_stream stand-in that reports its headers the way the real one
     does: once, before the first chunk."""
 
-    async def fake(
-        _token, _url, _chunk_size, *, session=None, on_response=None
-    ):
+    async def fake(_account, _url, _chunk_size, *, on_response=None):
         if on_response is not None:
             on_response({"etag": etag})
         for item in payload:
@@ -136,9 +134,7 @@ async def test_stream_with_no_recorder_still_reads(
 
 
 def _refusing(status: int):
-    async def fake(
-        _token, _url, _chunk_size, *, session=None, on_response=None
-    ):
+    async def fake(_account, _url, _chunk_size, *, on_response=None):
         raise HfHubError("gated", status)
         yield b""
 

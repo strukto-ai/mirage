@@ -102,9 +102,7 @@ async def files_containing(
     try:
         named: dict[str, set[str]] = {}
         for word in sorted({word for words in asked for word in words}):
-            cards = await search_cards(
-                accessor.config, word, SEARCH_LIMIT, session=accessor.pool
-            )
+            cards = await search_cards(accessor, word, SEARCH_LIMIT)
             if len(cards) >= SEARCH_LIMIT:
                 return None
             named[word] = {str(card.get("id")) for card in cards}

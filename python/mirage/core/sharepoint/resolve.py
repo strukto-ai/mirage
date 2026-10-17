@@ -70,10 +70,7 @@ async def _site_items(accessor: SharePointAccessor) -> list[dict[str, Any]]:
         "$select": "id,displayName,name,webUrl",
     }
     sites = await graph_list(
-        config,
-        f"{graph_api(config)}/sites",
-        params=params,
-        session=accessor.pool,
+        accessor, f"{graph_api(config)}/sites", params=params
     )
     tenant_host = config.tenant_host
     if tenant_host is None:
@@ -85,12 +82,7 @@ async def _drive_items(
     accessor: SharePointAccessor, site_id: str
 ) -> list[dict[str, Any]]:
     url = f"{graph_api(accessor.config)}/sites/{id_segment(site_id)}/drives"
-    return await graph_list(
-        accessor.config,
-        url,
-        params={"$select": "id,name"},
-        session=accessor.pool,
-    )
+    return await graph_list(accessor, url, params={"$select": "id,name"})
 
 
 async def site_entries(accessor: SharePointAccessor) -> list[tuple[str, str]]:

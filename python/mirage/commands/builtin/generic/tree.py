@@ -7,6 +7,7 @@ from functools import partial
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.builtin.utils.paths import vfs_readdir_path, vfs_stat_path
 from mirage.commands.builtin.utils.strtol import c_int, strtoul
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
@@ -488,8 +489,8 @@ async def tree_generic(
         dirs_only=parsed.dirs_only,
         match_pattern=parsed.match_pattern,
         index=ctx.index,
-        stat_path=ctx.stat_path,
-        readdir_path=ctx.readdir_path,
+        stat_path=vfs_stat_path(ctx.vfs),
+        readdir_path=vfs_readdir_path(ctx.vfs),
         mounts=mounts_of(ctx),
         one_file_system=parsed.one_file_system,
         links=links_of(ctx),

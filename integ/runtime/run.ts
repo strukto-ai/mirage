@@ -52,18 +52,13 @@ import {
   type Policy,
   type RouteContext,
   BaseVFS,
-  type RunResult,
   type RuntimeEntry,
   type FilesystemOperation,
+  type Context,
 } from '@struktoai/mirage-node'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
-import {
-  EXTERNAL_COMMANDS,
-  PROCESS_EXECUTOR,
-  type ProcessExecution,
-  type ProcessExecutor,
-} from '@struktoai/mirage-core'
+import { EXTERNAL_COMMANDS, PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core'
 import type { RuntimeLanguage } from '@struktoai/mirage-core/runtime/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
@@ -204,7 +199,7 @@ interface Suite {
 let s3Seeded = false
 let mongoSeeded = false
 
-class EchoBox extends Runtime implements LineExecutor {
+class EchoBox extends Runtime<undefined> implements LineExecutor<undefined> {
   override readonly reach = 'workspace' as const
   readonly [LINE_EXECUTOR] = true as const
   readonly name = 'echobox'
@@ -213,9 +208,9 @@ class EchoBox extends Runtime implements LineExecutor {
     super(options, ['nvidia-smi'], [])
   }
 
-  runLine(line: string): Promise<RunResult> {
+  runLine(_engine: undefined, _paths: PathSpec[], _texts: string[], ctx: Context) {
     return Promise.resolve({
-      stdout: ENC.encode(`box:${line}\n`),
+      stdout: ENC.encode(`box:${ctx.flags.c as string}\n`),
       stderr: null,
       exitCode: 0,
     })
@@ -227,7 +222,7 @@ class EchoBox extends Runtime implements LineExecutor {
 // unknown-name refusal lists it. The registry suite pins that entry point.
 registerRuntime('echobox', EchoBox)
 
-class ProcessBox extends Runtime implements ProcessExecutor {
+class ProcessBox extends Runtime<undefined> implements ProcessExecutor<undefined> {
   override readonly reach = 'workspace' as const
   readonly [PROCESS_EXECUTOR] = true as const
   readonly name = 'processbox'
@@ -236,9 +231,9 @@ class ProcessBox extends Runtime implements ProcessExecutor {
     super(options, [EXTERNAL_COMMANDS], [])
   }
 
-  runProcess(request: ProcessExecution): Promise<RunResult> {
+  runProcess(_engine: undefined, _paths: PathSpec[], texts: string[]) {
     return Promise.resolve({
-      stdout: ENC.encode(`${JSON.stringify(request.argv)}\n`),
+      stdout: ENC.encode(`${JSON.stringify(texts)}\n`),
       stderr: null,
       exitCode: 0,
     })

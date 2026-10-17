@@ -11,6 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import pytest
 
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import CommandSpec
@@ -21,7 +22,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
-from mirage.runtime.types import ProcessExecution, RunArgs, RunResult
+from mirage.runtime.types import Program, RunResult
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -42,17 +43,17 @@ class _Sandbox(Runtime, ProcessExecutorMixin):
     name = "sandbox"
     captures = ("gcc", EXTERNAL_COMMANDS)
 
-    async def run_process(self, request: ProcessExecution) -> RunResult:
+    async def run_process(self, engine, paths, texts, ctx) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 
 class _HostPython(PythonRuntime, ProcessExecutorMixin):
     name = "host-python"
 
-    async def run(self, args: RunArgs, context=None) -> RunResult:
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
-    async def run_process(self, request: ProcessExecution) -> RunResult:
+    async def run_process(self, engine, paths, texts, ctx) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 
@@ -66,7 +67,7 @@ def _fixture() -> tuple[SessionState, Workspace]:
     return SessionState(session_id="t"), ws
 
 
-async def _noop(config, paths, *texts, **flags):
+async def _noop(accessor, paths, texts, ctx):
     return None, IOResult()
 
 
@@ -136,10 +137,11 @@ def test_function_shadows_installed_cli():
     assert lookup("prog", session, ws._registry) is Consumer.FUNCTION
 
 
-def test_unregistered_cli_routes_unknown():
+@pytest.mark.asyncio
+async def test_unregistered_cli_routes_unknown():
     session, ws = _fixture()
     ws.register_cli("prog", _cli_tree())
-    ws.unregister_cli("prog")
+    await ws.unregister_cli("prog")
     assert lookup("prog", session, ws._registry) is Consumer.UNKNOWN
 
 

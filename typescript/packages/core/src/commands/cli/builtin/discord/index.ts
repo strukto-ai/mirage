@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { discordAccessor } from '../../../../accessor/discord.ts'
 import { CommandSpec } from '../../../spec/types.ts'
 import { CLI } from '../../types.ts'
 import { CLIHandler } from '../../types.ts'
@@ -146,4 +147,5 @@ export const DISCORD = new CLI({
     'server-info': new CLIHandler({ fn: serverInfo }),
   },
   configModel: DiscordConfigSchema,
+  accessor: discordAccessor,
 })

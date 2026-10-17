@@ -16,13 +16,16 @@ import json
 
 import pytest
 
+from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya import search_envelopes
 from mirage.commands.cli.builtin.himalaya.query import QueryError
 from mirage.commands.config import Context
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import materialize
 
-CONFIG = EmailConfig(imap_host="h", smtp_host="h", username="u", password="p")
+EMAIL = EmailAccessor(
+    EmailConfig(imap_host="h", smtp_host="h", username="u", password="p")
+)
 
 HEADERS = {
     "1": {
@@ -67,21 +70,21 @@ def patched(monkeypatch):
 @pytest.mark.asyncio
 async def test_query_tokens_rejoin_before_parsing(patched):
     await search_envelopes(
-        CONFIG, [], ["from", "alice", "and", "subject", "invoice"], Context()
+        EMAIL, [], ["from", "alice", "and", "subject", "invoice"], Context()
     )
     assert patched["criteria"] == '(FROM "alice" SUBJECT "invoice")'
 
 
 @pytest.mark.asyncio
 async def test_no_query_searches_everything(patched):
-    await search_envelopes(CONFIG, [], [], Context())
+    await search_envelopes(EMAIL, [], [], Context())
     assert patched["criteria"] == "ALL"
 
 
 @pytest.mark.asyncio
 async def test_sort_clause_orders_the_results_client_side(patched):
     out, io = await search_envelopes(
-        CONFIG, [], ["order", "by", "subject"], Context()
+        EMAIL, [], ["order", "by", "subject"], Context()
     )
     assert io.exit_code == 0
     data = json.loads(await materialize(out))
@@ -91,7 +94,7 @@ async def test_sort_clause_orders_the_results_client_side(patched):
 @pytest.mark.asyncio
 async def test_mailbox_and_paging_flags_apply(patched):
     out, _ = await search_envelopes(
-        CONFIG,
+        EMAIL,
         [],
         [],
         Context(flags={"mailbox": "Archive", "page": 2, "page_size": 1}),
@@ -104,14 +107,14 @@ async def test_mailbox_and_paging_flags_apply(patched):
 @pytest.mark.asyncio
 async def test_a_bad_query_never_reaches_the_server(patched):
     with pytest.raises(QueryError):
-        await search_envelopes(CONFIG, [], ["sender", "alice"], Context())
+        await search_envelopes(EMAIL, [], ["sender", "alice"], Context())
     assert "criteria" not in patched
 
 
 @pytest.mark.asyncio
 async def test_the_default_order_only_fetches_the_pages_asked_for(patched):
     await search_envelopes(
-        CONFIG,
+        EMAIL,
         [],
         ["subject", "alpha"],
         Context(flags={"page": 2, "page_size": 10}),
@@ -125,15 +128,13 @@ async def test_an_explicit_sort_widens_the_fetch_to_the_account_window(
 ):
     # `order by` is unrelated to arrival order, so the newest N is not
     # enough to know what belongs on page one.
-    await search_envelopes(CONFIG, [], ["order", "by", "subject"], Context())
-    assert patched["budget"] == CONFIG.max_messages
+    await search_envelopes(EMAIL, [], ["order", "by", "subject"], Context())
+    assert patched["budget"] == EMAIL.config.max_messages
 
 
 @pytest.mark.asyncio
 async def test_search_results_are_header_only_like_list(patched):
-    out, _ = await search_envelopes(
-        CONFIG, [], ["subject", "alpha"], Context()
-    )
+    out, _ = await search_envelopes(EMAIL, [], ["subject", "alpha"], Context())
     data = json.loads(await materialize(out))
     assert [d["subject"] for d in data] == ["alpha", "beta"]
     assert all("body_text" not in d and "body_html" not in d for d in data)

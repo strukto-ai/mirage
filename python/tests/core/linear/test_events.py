@@ -38,11 +38,11 @@ def _root() -> PathSpec:
 def _hook(monkeypatch, team_ids=None) -> tuple[LinearEventHook, list[str]]:
     calls: list[str] = []
 
-    async def fake_teams(config, session=None):
+    async def fake_teams(accessor):
         calls.append("teams")
         return [dict(ENG), dict(OPS)]
 
-    async def fake_issue(config, issue_id, session=None):
+    async def fake_issue(accessor, issue_id):
         calls.append(f"issue {issue_id}")
         team = OPS if issue_id == "i1" else ENG
         return {"id": issue_id, "identifier": "ENG-9", "team": dict(team)}

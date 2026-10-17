@@ -72,7 +72,7 @@ export async function read(
   try {
     ;[data, etag] = await refusalsDenied(
       path,
-      () => hubBytesTagged(accessor.token, resolveUrl(accessor, rel), window, accessor.timeoutMs),
+      () => hubBytesTagged(accessor.account, resolveUrl(accessor, rel), window),
       REFUSED_STATUSES,
     )
   } catch (err) {

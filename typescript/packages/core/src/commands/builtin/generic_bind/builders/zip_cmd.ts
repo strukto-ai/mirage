@@ -16,6 +16,7 @@ import type { FileStat, PathSpec } from '../../../../types.ts'
 import { zipGeneric } from '../../generic/zip_cmd.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 import { walkOf } from '../archive_io.ts'
+import { dispatchOf } from '../../utils/links.ts'
 
 const zipCmd: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
   const idx = ctx.index ?? undefined
@@ -25,7 +26,7 @@ const zipCmd: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
     stream: (p) => ops.readStream(accessor, p, idx),
     write: (p, data) => write(accessor, p, data),
     stat: async (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, idx),
-    walk: walkOf(ops, accessor, idx, ctx.dispatch, 'zip'),
+    walk: walkOf(ops, accessor, idx, dispatchOf(ctx), 'zip'),
   })
 }
 

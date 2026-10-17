@@ -39,7 +39,7 @@ async function trelloCardMove(
   if (listId === undefined || listId === '') throw new Error('--list_id is required')
   // A card write is addressed by id, not path, so only the mount-wide
   // grant can admit it (a write-granting carve-out names no card).
-  requireMountWritable(ctx.mountPrefix ?? '', ctx.access)
+  requireMountWritable(ctx.mountPrefix ?? '', ctx.session?.access())
   await requireCard(accessor, cardId)
   await requireList(accessor, listId)
   const card = await cardMove(accessor.transport, cardId, listId)

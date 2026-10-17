@@ -25,6 +25,8 @@ import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { MountEntry } from './mount.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
+import { Files } from '../files.ts'
 
 class StubVFS extends BaseVFS {
   override readonly name = 'ram'
@@ -401,22 +403,22 @@ describe('Mount.runCommand', () => {
     if (plain === undefined || typed === undefined) throw new Error('missing')
     m.register(plain)
     m.register(typed)
-    const statPath = (p: string | PathSpec): Promise<FileStat | null> =>
-      Promise.resolve(
-        (typeof p === 'string' ? p : p.virtual).endsWith('dir.tally')
-          ? new FileStat({ name: typeof p === 'string' ? p : p.virtual, type: FileType.DIRECTORY })
-          : new FileStat({
-              name: typeof p === 'string' ? p : p.virtual,
-              type: FileType.FILE,
-              size: 4,
-            }),
-      )
+    const dispatch: DispatchFn = (name, p) => {
+      expect(name).toBe('stat')
+      return Promise.resolve([
+        p.virtual.endsWith('dir.tally')
+          ? new FileStat({ name: p.virtual, type: FileType.DIRECTORY })
+          : new FileStat({ name: p.virtual, type: FileType.FILE, size: 4 }),
+        new IOResult(),
+      ])
+    }
+    const vfs = new Files(dispatch, null, null, () => null, { ledger: false })
 
-    await m.runCommand('cat', [PathSpec.fromStrPath('/dir.tally')], [], {}, { statPath })
+    await m.runCommand('cat', [PathSpec.fromStrPath('/dir.tally')], [], {}, { vfs })
     expect(fired).toEqual([])
     expect(builtins).toEqual(['/dir.tally'])
 
-    await m.runCommand('cat', [PathSpec.fromStrPath('/file.tally')], [], {}, { statPath })
+    await m.runCommand('cat', [PathSpec.fromStrPath('/file.tally')], [], {}, { vfs })
     expect(fired).toEqual(['/file.tally'])
   })
 

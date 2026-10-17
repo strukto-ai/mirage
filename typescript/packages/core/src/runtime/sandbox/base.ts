@@ -12,11 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Context } from '../../commands/config.ts'
+import { materialize } from '../../io/types.ts'
+import type { PathSpec } from '../../types.ts'
 import { EXTERNAL_COMMANDS } from '../constants.ts'
 import { Runtime } from '../base.ts'
-import type { RuntimeContext } from '../binding.ts'
 import { LINE_EXECUTOR, type LineExecutor } from '../mixin.ts'
-import type { MountType, ProcessExecution, RunResult, SandboxPipe } from '../types.ts'
+import type { MountType, RunResult, SandboxPipe } from '../types.ts'
 import type { RuntimeOptions } from '../config.ts'
 import { abortable } from '../../utils/abort.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -29,6 +31,15 @@ import {
 import { SandboxMounts } from './mounts.ts'
 
 const ENC = new TextEncoder()
+
+/**
+ * The bytes piped into a run, read whole; null when nothing was.
+ *
+ * @param ctx the run's context.
+ */
+async function piped(ctx: Context): Promise<Uint8Array | null> {
+  return ctx.stdin === null ? null : await materialize(ctx.stdin)
+}
 
 /**
  * A runtime that executes programs in a sandbox the user runs.
@@ -51,8 +62,8 @@ const ENC = new TextEncoder()
  * how to reach the sandbox, coerced against the provider's own key list.
  */
 export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
-  extends Runtime
-  implements LineExecutor
+  extends Runtime<undefined>
+  implements LineExecutor<undefined>
 {
   // Lines execute on the provider's machine and act on that machine's
   // world (its filesystem, its network); the workspace gate never sees
@@ -86,12 +97,10 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     )
   }
 
-  protected override servesSession(context: RuntimeContext): boolean {
+  protected override servesSession(restrictedMounts: readonly string[]): boolean {
     return (
       (this.mounts !== null || this.config.mountType != null) &&
-      (context.restrictedMounts ?? []).every(
-        (prefix) => !['', '/dev'].includes(rstripSlash(prefix)),
-      )
+      restrictedMounts.every((prefix) => !['', '/dev'].includes(rstripSlash(prefix)))
     )
   }
 
@@ -102,29 +111,54 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
    * expected to serve the workspace at the same prefixes as the host,
    * so nothing is rewritten. The session environment merges over the
    * config environment.
+   *
+   * @param _engine none; a sandbox keeps its own connection.
+   * @param _paths unused; the line names its paths.
+   * @param _texts unused.
+   * @param ctx the line in `flags.c`, the bytes piped into it, the session
+   *   environment and working directory, the signal that stops it.
    */
   async runLine(
-    line: string,
-    stdin: Uint8Array | null,
-    env: Record<string, string>,
-    cwd: string,
-    signal?: AbortSignal,
+    _engine: undefined,
+    _paths: PathSpec[],
+    _texts: string[],
+    ctx: Context,
   ): Promise<RunResult> {
-    const refusal = await this.prepare(signal)
+    const refusal = await this.prepare(ctx.signal)
     if (refusal !== null) return refusal
-    const merged = { ...this.config.env, ...env }
-    return this.execLine(line, stdin, merged, cwd, signal)
+    const line = ctx.flags.c
+    return this.execLine(
+      typeof line === 'string' ? line : '',
+      await piped(ctx),
+      { ...this.config.env, ...ctx.env },
+      ctx.cwd.virtual,
+      ctx.signal,
+    )
   }
 
-  async runProcess(request: ProcessExecution): Promise<RunResult> {
-    const refusal = await this.prepare(request.signal)
+  /**
+   * Run an argv in the sandbox, connecting once, for a subclass that
+   * declares the argv capability (`ProcessExecutor`).
+   *
+   * @param _engine none; a sandbox keeps its own connection.
+   * @param _paths unused; argv is words.
+   * @param texts the argv, program first.
+   * @param ctx the run's context.
+   */
+  async runProcess(
+    _engine: undefined,
+    _paths: PathSpec[],
+    texts: string[],
+    ctx: Context,
+  ): Promise<RunResult> {
+    const refusal = await this.prepare(ctx.signal)
     if (refusal !== null) return refusal
     return this.execArgv(
-      request.argv,
-      request.stdin,
-      { ...this.config.env, ...request.env },
-      request.cwd.virtual,
-      request.signal,
+      texts,
+      await piped(ctx),
+      { ...this.config.env, ...ctx.env },
+      ctx.cwd.virtual,
+      ctx.signal,
     )
   }
 

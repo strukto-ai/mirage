@@ -284,8 +284,8 @@ async def realpath_generic(
     return await realpath(
         paths,
         stat=(
-            functools.partial(dispatch_stat, ctx.dispatch)
-            if ctx.dispatch is not None
+            functools.partial(dispatch_stat, ctx.vfs.dispatch)
+            if ctx.vfs is not None
             else stat
         ),
         cwd=ctx.cwd.virtual,

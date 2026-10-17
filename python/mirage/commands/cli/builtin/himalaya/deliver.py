@@ -18,7 +18,6 @@ from email.message import Message
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.smtp import send_raw
 from mirage.core.email.client import list_folder_entries, quote_string
-from mirage.core.email.config import EmailConfig
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +56,13 @@ async def resolve_sent_folder(
 
 
 async def save_sent_copy(
-    config: EmailConfig, raw: bytes, folder: str | None = None
+    accessor: EmailAccessor, raw: bytes, folder: str | None = None
 ) -> str:
     """APPEND a message to a mailbox, seen, the way upstream saves one.
 
     Args:
-        config (EmailConfig): the account.
+        accessor (EmailAccessor): the install's account, whose IMAP
+            connection the APPEND rides and stays open after it.
         raw (bytes): the same RFC 5322 bytes SMTP carried.
         folder (str | None): the mailbox --save named. None resolves the
             account's sent mailbox instead.
@@ -73,27 +73,23 @@ async def save_sent_copy(
     Raises:
         ValueError: the server refused the APPEND.
     """
-    accessor = EmailAccessor(config)
-    try:
-        folder = folder or await resolve_sent_folder(
-            accessor, config.sent_folder
+    folder = folder or await resolve_sent_folder(
+        accessor, accessor.config.sent_folder
+    )
+    imap = await accessor.get_imap()
+    response = await imap.append(
+        raw, mailbox=quote_string(folder), flags=SEEN_FLAG
+    )
+    if response.result != "OK":
+        detail = " ".join(
+            line.decode(errors="replace") for line in response.lines
         )
-        imap = await accessor.get_imap()
-        response = await imap.append(
-            raw, mailbox=quote_string(folder), flags=SEEN_FLAG
-        )
-        if response.result != "OK":
-            detail = " ".join(
-                line.decode(errors="replace") for line in response.lines
-            )
-            raise ValueError(f"{folder}: {detail or response.result}")
-    finally:
-        await accessor.close()
+        raise ValueError(f"{folder}: {detail or response.result}")
     return folder
 
 
 async def deliver(
-    config: EmailConfig, raw: bytes, save: str | None = None
+    accessor: EmailAccessor, raw: bytes, save: str | None = None
 ) -> tuple[Message, str]:
     """Send a message over SMTP, then file the sender's own copy.
 
@@ -114,7 +110,7 @@ async def deliver(
     all, precisely because nothing happened yet and failing is safe.
 
     Args:
-        config (EmailConfig): the account.
+        accessor (EmailAccessor): the install's account.
         raw (bytes): the complete RFC 5322 message.
         save (str | None): the mailbox --save named, if any.
 
@@ -122,11 +118,11 @@ async def deliver(
         tuple[Message, str]: the parsed message, and a warning line for
             stderr which is empty when there is nothing to report.
     """
-    message = await send_raw(config, raw)
-    if save is None and not config.save_copy:
+    message = await send_raw(accessor.config, raw)
+    if save is None and not accessor.config.save_copy:
         return message, ""
     try:
-        await save_sent_copy(config, raw, save)
+        await save_sent_copy(accessor, raw, save)
     except Exception as exc:
         # Every failure mode is caught on purpose: the message is
         # already delivered by this point, so no fault of the copy may

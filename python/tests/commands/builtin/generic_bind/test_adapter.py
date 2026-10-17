@@ -838,7 +838,8 @@ async def test_file_size_reads_a_file_whose_size_moved_since_its_listing(
         return FileStat(name="f", type=FileType.FILE, size=now), None
 
     listed = FileStat(name="f", type=FileType.FILE, size=7)
-    bound = file_size(_sized_ops(listed), None, Context(dispatch=dispatch))
+    vfs = Files([], dispatch, ledger=False)
+    bound = file_size(_sized_ops(listed), None, Context(vfs=vfs))
     assert await bound(PathSpec.from_str_path("/f")) == size
     assert asked == [("stat", {"fresh": True})]
 

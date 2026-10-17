@@ -14,7 +14,7 @@
 import { seedVar, setAttr } from '../workspace/session/state.ts'
 import { VarAttr } from '../shell/variable.ts'
 import { afterEach, describe, expect, it } from 'vitest'
-import { Command } from '../commands/config.ts'
+import { Command, type Context } from '../commands/config.ts'
 import { CommandSpec, Argument } from '../commands/spec/types.ts'
 import { runWithSession } from '../context/session_context.ts'
 import { IOResult } from '../io/types.ts'
@@ -2072,12 +2072,8 @@ class Box extends Runtime implements LineExecutor {
     super({ captures: ['*'] })
   }
 
-  runLine(
-    line: string,
-    _stdin: Uint8Array | null,
-    _env: Record<string, string>,
-    _cwd: string,
-  ): Promise<RunResult> {
+  runLine(_e: unknown, _p: PathSpec[], _t: string[], ctx: Context): Promise<RunResult> {
+    const line = ctx.flags.c as string
     this.lines.push(line)
     return Promise.resolve({ stdout: ENC.encode(`box:${line}`), stderr: null, exitCode: 0 })
   }
@@ -2709,7 +2705,7 @@ describe('a dispatched op meets the rule on the path the dispatcher reaches', ()
     vfs: VFSName.RAM,
     fn: async (_accessor, _paths, texts, opts) => {
       const target = PathSpec.fromStrPath('/data/alias/secret')
-      const dispatch = opts.dispatch
+      const dispatch = opts.vfs?.dispatch
       if (dispatch === undefined) throw new Error('no dispatcher')
       try {
         if (texts[0] === 'rename') {

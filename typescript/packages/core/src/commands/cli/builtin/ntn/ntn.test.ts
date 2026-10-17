@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compileSpec } from '../../../spec/compile.ts'
-import { describe, expect, it, vi } from 'vitest'
-import type * as UtilModule from './util.ts'
-import type { RestCall } from '../../../../core/notion/client.ts'
+import { describe, expect, it } from 'vitest'
+import { NotionAccessor } from '../../../../accessor/notion.ts'
+import { HttpNotionTransport, type RestCall } from '../../../../core/notion/client.ts'
 import { cliSpecFor } from '../../specs.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
@@ -26,7 +26,7 @@ import { edit } from './pages/edit.ts'
 import { trash } from './pages/trash.ts'
 import { query } from './datasources/query.ts'
 import { whoamiRow } from './whoami.ts'
-import { propertyCell } from './util.ts'
+import { notionTransport, propertyCell } from './util.ts'
 import { yieldBytes } from '../../../../io/stream.ts'
 import { context } from '../../../../workspace/fixtures/context.ts'
 
@@ -42,22 +42,19 @@ const CALLS: Recorded[] = []
 const REQUESTS: RestCall[] = []
 let RESPONSE: Record<string, unknown> = { id: 'P1' }
 
-class FakeTransport {
-  callTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+class FakeTransport extends HttpNotionTransport {
+  override callTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     CALLS.push({ name, args })
     return Promise.resolve(RESPONSE)
   }
 
-  request(call: RestCall): Promise<Record<string, unknown>> {
+  override request(call: RestCall): Promise<Record<string, unknown>> {
     REQUESTS.push(call)
     return Promise.resolve(RESPONSE)
   }
 }
 
-vi.mock('./util.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof UtilModule>()
-  return { ...actual, notionTransport: () => new FakeTransport() }
-})
+const ACCESSOR = new NotionAccessor(new FakeTransport({ apiKey: 'k' }), { apiKey: 'k' })
 
 function unwrap(result: CommandFnResult): [ByteSource | null, IOResult] {
   if (result === null) throw new Error('expected a result tuple')
@@ -141,10 +138,15 @@ describe('ntn tree', () => {
 })
 
 describe('ntn verbs', () => {
+  it('rides the install transport unless the line overrides the version', () => {
+    expect(notionTransport(ACCESSOR, {})).toBe(ACCESSOR.transport)
+    expect(notionTransport(ACCESSOR, { notion_version: '2099-01-01' })).not.toBe(ACCESSOR.transport)
+  })
+
   it('pages create posts markdown and prints the new id', async () => {
     CALLS.length = 0
     const [out] = unwrap(
-      await create({}, [], [], context({ flags: { content: '# Hi', parent: 'page:root' } })),
+      await create(ACCESSOR, [], [], context({ flags: { content: '# Hi', parent: 'page:root' } })),
     )
     expect(CALLS[0]?.name).toBe('API-post-page')
     expect(CALLS[0]?.args).toEqual({ markdown: '# Hi', parent: { page_id: 'root' } })
@@ -153,15 +155,15 @@ describe('ntn verbs', () => {
 
   it('pages create maps every --parent kind', async () => {
     CALLS.length = 0
-    await create({}, [], [], context({ flags: { content: '#', parent: 'database:D1' } }))
-    await create({}, [], [], context({ flags: { content: '#', parent: 'data-source:S1' } }))
+    await create(ACCESSOR, [], [], context({ flags: { content: '#', parent: 'database:D1' } }))
+    await create(ACCESSOR, [], [], context({ flags: { content: '#', parent: 'data-source:S1' } }))
     expect(CALLS[0]?.args).toMatchObject({ parent: { database_id: 'D1' } })
     expect(CALLS[1]?.args).toMatchObject({ parent: { data_source_id: 'S1' } })
   })
 
   it('pages create refuses a malformed --parent', async () => {
     const [, io] = unwrap(
-      await create({}, [], [], context({ flags: { content: '#', parent: 'nope:X' } })),
+      await create(ACCESSOR, [], [], context({ flags: { content: '#', parent: 'nope:X' } })),
     )
     expect(io.exitCode).toBe(2)
     expect(DEC.decode(io.stderr as Uint8Array)).toBe(
@@ -171,7 +173,7 @@ describe('ntn verbs', () => {
 
   it('pages edit replaces the body through the markdown endpoint', async () => {
     CALLS.length = 0
-    await edit({}, [], ['P1'], context({ flags: { content: '# New' } }))
+    await edit(ACCESSOR, [], ['P1'], context({ flags: { content: '# New' } }))
     expect(CALLS[0]).toEqual({
       name: 'API-patch-page-markdown',
       args: {
@@ -184,14 +186,14 @@ describe('ntn verbs', () => {
 
   it('pages trash refuses without --yes, the way a non-interactive shell sees it', async () => {
     CALLS.length = 0
-    const [, refused] = unwrap(await trash({}, [], ['P2'], context()))
+    const [, refused] = unwrap(await trash(ACCESSOR, [], ['P2'], context()))
     expect(refused.exitCode).toBe(1)
     expect(DEC.decode(refused.stderr as Uint8Array)).toBe(
       'error: Cannot confirm in a non-interactive environment.\n' +
         '  hint: Use --yes to skip the confirmation prompt.\n',
     )
     expect(CALLS.length).toBe(0)
-    const [, done] = unwrap(await trash({}, [], ['P2'], context({ flags: { yes: true } })))
+    const [, done] = unwrap(await trash(ACCESSOR, [], ['P2'], context({ flags: { yes: true } })))
     expect(CALLS[0]).toEqual({ name: 'API-patch-page', args: { in_trash: true, page_id: 'P2' } })
     expect(DEC.decode(done.stderr as Uint8Array)).toBe('✔ Page trashed\n')
   })
@@ -213,7 +215,7 @@ describe('ntn verbs', () => {
       has_more: false,
     }
     const [out] = unwrap(
-      await query({}, [], ['S1'], context({ flags: { limit: 5, sort: ['Priority desc'] } })),
+      await query(ACCESSOR, [], ['S1'], context({ flags: { limit: 5, sort: ['Priority desc'] } })),
     )
     expect(CALLS[0]?.name).toBe('API-retrieve-a-data-source')
     expect(CALLS[1]?.args).toMatchObject({
@@ -240,7 +242,7 @@ describe('ntn verbs', () => {
       ],
       has_more: false,
     }
-    const [out] = unwrap(await query({}, [], ['S1'], context()))
+    const [out] = unwrap(await query(ACCESSOR, [], ['S1'], context()))
     expect(DEC.decode(out as Uint8Array)).toBe('R2\tRow page\n')
     RESPONSE = { id: 'P1' }
   })
@@ -251,7 +253,7 @@ describe('ntn verbs', () => {
   it('api can issue the one delete verb the API has', async () => {
     REQUESTS.length = 0
     const [out] = unwrap(
-      await api({}, [], ['v1/blocks/B1'], context({ flags: { method: 'delete' } })),
+      await api(ACCESSOR, [], ['v1/blocks/B1'], context({ flags: { method: 'delete' } })),
     )
     // No body source on the line, so nothing is invented for one.
     expect(REQUESTS[0]).toEqual({ method: 'DELETE', path: '/blocks/B1' })
@@ -260,9 +262,9 @@ describe('ntn verbs', () => {
 
   it('api infers the method and strips the version prefix from the path', async () => {
     REQUESTS.length = 0
-    await api({}, [], ['v1/users/me'], context())
-    await api({}, [], ['v1/search', 'query=Roadmap'], context())
-    await api({}, [], ['v1/blocks/B1/children', 'page_size==1'], context())
+    await api(ACCESSOR, [], ['v1/users/me'], context())
+    await api(ACCESSOR, [], ['v1/search', 'query=Roadmap'], context())
+    await api(ACCESSOR, [], ['v1/blocks/B1/children', 'page_size==1'], context())
     // No `query` key at all when nothing was asked for, which is what
     // python sends (`params or None`).
     expect(REQUESTS[0]).toEqual({ method: 'GET', path: '/users/me' })
@@ -278,7 +280,7 @@ describe('ntn verbs', () => {
     // `name==value` is a query parameter whatever the method is. The
     // non-GET path used to drop params entirely.
     REQUESTS.length = 0
-    await api({}, [], ['v1/search', 'a=1', 'q==2'], context())
+    await api(ACCESSOR, [], ['v1/search', 'a=1', 'q==2'], context())
     expect(REQUESTS[0]).toEqual({
       method: 'POST',
       path: '/search',
@@ -292,17 +294,17 @@ describe('ntn verbs', () => {
     // `-d '[]'` POSTs the array. mirage used to refuse it as a usage error,
     // so a line the real CLI accepts exited 2 here.
     REQUESTS.length = 0
-    await api({}, [], ['v1/search'], context({ flags: { data: '[]' } }))
+    await api(ACCESSOR, [], ['v1/search'], context({ flags: { data: '[]' } }))
     // `{}` is falsy, and inferring the method from truthiness sent it as a
     // GET. The presence of a body source decides the method, not whether the
     // body has anything in it.
-    await api({}, [], ['v1/search'], context({ flags: { data: '{}' } }))
+    await api(ACCESSOR, [], ['v1/search'], context({ flags: { data: '{}' } }))
     expect(REQUESTS[0]).toEqual({ method: 'POST', path: '/search', body: [] })
     expect(REQUESTS[1]).toEqual({ method: 'POST', path: '/search', body: {} })
   })
 
   it('api refuses conflicting body sources the way upstream does', async () => {
-    const result = await api({}, [], ['v1/search', 'a=1'], context({ flags: { data: '{}' } }))
+    const result = await api(ACCESSOR, [], ['v1/search', 'a=1'], context({ flags: { data: '{}' } }))
     const [, io] = unwrap(result)
     expect(io.exitCode).toBe(5)
     expect(DEC.decode(io.stderr as Uint8Array)).toBe(
@@ -314,7 +316,7 @@ describe('ntn verbs', () => {
   })
 
   it('api refuses a malformed inline input with serde’s words and a hint', async () => {
-    const result = await api({}, [], ['v1/search', 'a:={'], context())
+    const result = await api(ACCESSOR, [], ['v1/search', 'a:={'], context())
     const [, io] = unwrap(result)
     expect(io.exitCode).toBe(5)
     expect(DEC.decode(io.stderr as Uint8Array)).toBe(
@@ -325,7 +327,7 @@ describe('ntn verbs', () => {
   })
 
   it('api names an input with no separator unexpected', async () => {
-    const result = await api({}, [], ['v1/search', 'foo'], context())
+    const result = await api(ACCESSOR, [], ['v1/search', 'foo'], context())
     const [, io] = unwrap(result)
     expect(io.exitCode).toBe(5)
     expect(DEC.decode(io.stderr as Uint8Array)).toContain('unexpected input: "foo"')
@@ -333,12 +335,13 @@ describe('ntn verbs', () => {
 
   it('api reads the pipe as a body source', async () => {
     REQUESTS.length = 0
-    await api({}, [], ['v1/search'], context({ stdin: yieldBytes(ENC.encode('{"q":1}')) }))
+    await api(ACCESSOR, [], ['v1/search'], context({ stdin: yieldBytes(ENC.encode('{"q":1}')) }))
     expect(REQUESTS[0]).toEqual({ method: 'POST', path: '/search', body: { q: 1 } })
   })
 
   it('api refuses a malformed pipe with its own exit 1', async () => {
-    const result = await api({}, [], ['v1/search'], context({ stdin: yieldBytes(ENC.encode('{')) }))
+    const ctx = context({ stdin: yieldBytes(ENC.encode('{')) })
+    const result = await api(ACCESSOR, [], ['v1/search'], ctx)
     const [, io] = unwrap(result)
     expect(io.exitCode).toBe(1)
     expect(DEC.decode(io.stderr as Uint8Array)).toBe('error: Invalid JSON from stdin\n')
@@ -349,7 +352,7 @@ describe('ntn verbs', () => {
     // otherwise report a conflict it never asked for.
     REQUESTS.length = 0
     const result = await api(
-      {},
+      ACCESSOR,
       [],
       ['v1/search'],
       context({ flags: { data: '{}' }, stdin: yieldBytes(ENC.encode('  \n')) }),
@@ -360,7 +363,7 @@ describe('ntn verbs', () => {
   })
 
   it('api names an empty --data in its own words', async () => {
-    const result = await api({}, [], ['v1/search'], context({ flags: { data: '  ' } }))
+    const result = await api(ACCESSOR, [], ['v1/search'], context({ flags: { data: '  ' } }))
     const [, io] = unwrap(result)
     expect(io.exitCode).toBe(5)
     expect(DEC.decode(io.stderr as Uint8Array)).toBe(
@@ -375,36 +378,36 @@ describe('ntn verbs', () => {
     // `X-Foo:bar` as a request header. Recognizing the syntax and then
     // dropping the value is the failure this pins.
     REQUESTS.length = 0
-    await api({}, [], ['v1/search', 'X-Foo:bar', 'X-Two:baz'], context())
+    await api(ACCESSOR, [], ['v1/search', 'X-Foo:bar', 'X-Two:baz'], context())
     expect(REQUESTS[0]?.headers).toEqual({ 'X-Foo': 'bar', 'X-Two': 'baz' })
     // A header value may itself contain colons.
-    await api({}, [], ['v1/search', 'X-Trace:a:b:c'], context())
+    await api(ACCESSOR, [], ['v1/search', 'X-Trace:a:b:c'], context())
     expect(REQUESTS[1]?.headers).toEqual({ 'X-Trace': 'a:b:c' })
   })
 
   it('api omits the header map when no inline header was given', async () => {
     REQUESTS.length = 0
-    await api({}, [], ['v1/users/me'], context())
+    await api(ACCESSOR, [], ['v1/users/me'], context())
     expect(REQUESTS[0]?.headers).toBeUndefined()
   })
 
   it('api refuses malformed --data exactly as upstream does', async () => {
     // Probed against ntn 0.21.9: exit 1 with this wording, which is neither
     // the engine's own parse message nor a generic usage error.
-    const [, io] = unwrap(await api({}, [], ['v1/search'], context({ flags: { data: '{' } })))
+    const [, io] = unwrap(await api(ACCESSOR, [], ['v1/search'], context({ flags: { data: '{' } })))
     expect(io.exitCode).toBe(1)
     expect(DEC.decode(io.stderr as Uint8Array)).toBe('error: Invalid JSON from --data\n')
   })
 
   it('api builds nested bodies from bracket paths and typed assignments', async () => {
     REQUESTS.length = 0
-    await api({}, [], ['v1/pages', 'parent[page_id]=root', 'archived:=true'], context())
+    await api(ACCESSOR, [], ['v1/pages', 'parent[page_id]=root', 'archived:=true'], context())
     expect(REQUESTS[0]?.body).toEqual({ parent: { page_id: 'root' }, archived: true })
   })
 
   it('api prints compact JSON with sorted keys', async () => {
     RESPONSE = { b: 1, a: { d: 2, c: 3 } }
-    const [out] = unwrap(await api({}, [], ['v1/users/me'], context()))
+    const [out] = unwrap(await api(ACCESSOR, [], ['v1/users/me'], context()))
     expect(DEC.decode(out as Uint8Array)).toBe('{"a":{"c":3,"d":2},"b":1}\n')
     RESPONSE = { id: 'P1' }
   })

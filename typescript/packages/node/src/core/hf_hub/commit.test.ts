@@ -13,14 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
-import { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import * as client from './client.ts'
+import { handle } from './_test_util.ts'
 import { COMMIT_CHUNK } from './constants.ts'
 import { LfsRequiredError, commit, commitUrl, payload, preupload } from './commit.ts'
-
-function accessor(): HfHubAccessor {
-  return new HfHubAccessor({ repoId: 'acme/widget' } as never)
-}
 
 function lines(raw: Uint8Array): Record<string, unknown>[] {
   return new TextDecoder()
@@ -42,14 +38,14 @@ afterEach(() => vi.restoreAllMocks())
 
 describe('commitUrl', () => {
   it('targets the mount revision', () => {
-    expect(commitUrl(accessor())).toContain('/api/models/acme/widget/commit/main')
-    expect(commitUrl(accessor(), 'dev')).toContain('/commit/dev')
+    expect(commitUrl(handle())).toContain('/api/models/acme/widget/commit/main')
+    expect(commitUrl(handle(), 'dev')).toContain('/commit/dev')
   })
 
   it('encodes a revision holding a slash', () => {
     // Unencoded, `feature/foo` names revision `feature` and a subtree, so
     // the commit lands somewhere else or not at all.
-    expect(commitUrl(accessor(), 'feature/foo')).toContain('/commit/feature%2Ffoo')
+    expect(commitUrl(handle(), 'feature/foo')).toContain('/commit/feature%2Ffoo')
   })
 })
 
@@ -87,7 +83,7 @@ describe('payload', () => {
 describe('preupload', () => {
   it('sends a sample, not the content', async () => {
     post.mockResolvedValue({ files: [{ path: 'a.txt', uploadMode: 'regular' }] })
-    const modes = await preupload(accessor(), [
+    const modes = await preupload(handle(), [
       { path: 'a.txt', data: new Uint8Array(2000).fill(120) },
     ])
     const body = post.mock.calls[0]?.[2] as { files: { sample: string; size: number }[] }
@@ -107,7 +103,7 @@ describe('preupload', () => {
       data: bytes('x'),
     }))
     additions.push({ path, data: bytes(content) })
-    await preupload(accessor(), additions)
+    await preupload(handle(), additions)
     expect(post).toHaveBeenCalledTimes(2)
     for (const [, , body] of post.mock.calls) {
       if (path === '.gitignore') expect(body).toHaveProperty('gitIgnore', content)
@@ -116,7 +112,7 @@ describe('preupload', () => {
   })
 
   it('asks nothing for no additions', async () => {
-    expect((await preupload(accessor(), [])).size).toBe(0)
+    expect((await preupload(handle(), [])).size).toBe(0)
     expect(post).not.toHaveBeenCalled()
   })
 })
@@ -127,7 +123,7 @@ describe('commit', () => {
     // the file would appear in the tree and every read of it would fail.
     post.mockResolvedValue({ files: [{ path: 'big.bin', uploadMode: 'lfs' }] })
     await expect(
-      commit(accessor(), { additions: [{ path: 'big.bin', data: bytes('x') }] }),
+      commit(handle(), { additions: [{ path: 'big.bin', data: bytes('x') }] }),
     ).rejects.toBeInstanceOf(LfsRequiredError)
     expect(ndjson).not.toHaveBeenCalled()
   })
@@ -135,7 +131,7 @@ describe('commit', () => {
   it('posts ndjson for a regular file', async () => {
     post.mockResolvedValue({ files: [{ path: 'a.txt', uploadMode: 'regular' }] })
     ndjson.mockResolvedValue({ commitOid: 'abc' })
-    const result = await commit(accessor(), {
+    const result = await commit(handle(), {
       additions: [{ path: 'a.txt', data: bytes('hi') }],
     })
     expect(result).toEqual({ commitOid: 'abc' })
@@ -145,7 +141,7 @@ describe('commit', () => {
   it.each([false, true])(
     'skips preupload for a delete-only commit (createPr=%s)',
     async (createPr) => {
-      await commit(accessor(), { deletions: ['a.txt'], createPr })
+      await commit(handle(), { deletions: ['a.txt'], createPr })
       expect(ndjson.mock.calls[0]?.[3]).toEqual(createPr ? { create_pr: '1' } : undefined)
       expect(post).not.toHaveBeenCalled()
     },
@@ -166,7 +162,7 @@ describe('unchanged uploads', () => {
     post.mockResolvedValue({
       files: [{ path: 'same', uploadMode: mode, oid }],
     })
-    expect(await commit(accessor(), { additions: [{ path: 'same', data }] })).toBeUndefined()
+    expect(await commit(handle(), { additions: [{ path: 'same', data }] })).toBeUndefined()
     expect(ndjson).not.toHaveBeenCalled()
   })
 
@@ -189,7 +185,7 @@ describe('unchanged uploads', () => {
         { path: 'ignored', uploadMode: 'lfs', shouldIgnore: true },
       ],
     })
-    await commit(accessor(), {
+    await commit(handle(), {
       additions: paths.map((path) => ({ path, data: bytes('hi') })),
       deletions: ['obsolete'],
     })

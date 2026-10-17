@@ -17,7 +17,8 @@ import { CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 import { registerCliSpec } from '@struktoai/mirage-core/commands/cli/specs'
 import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { Argument } from '@struktoai/mirage-core/commands/spec/index'
-import { EmailConfigSchema } from '../../../../core/email/config.ts'
+import { EmailAccessor } from '../../../../accessor/email.ts'
+import { EmailConfigSchema, type EmailConfig } from '../../../../core/email/config.ts'
 import { compose } from './compose.ts'
 import { forward } from './forward.ts'
 import { listEnvelopes } from './list.ts'
@@ -164,6 +165,7 @@ export const HIMALAYA = new CLI({
     'message forward': new CLIHandler({ fn: forward, write: true }),
   },
   configModel: EmailConfigSchema,
+  accessor: (config) => new EmailAccessor(config as EmailConfig),
 })
 
 registerCliSpec(HIMALAYA)

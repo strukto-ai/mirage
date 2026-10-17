@@ -760,9 +760,9 @@ class EchoBox(Runtime, LineExecutorMixin):
     name = "echobox"
     captures = ("nvidia-smi", )
 
-    async def run_line(self, line, stdin, env, cwd):
-        return RunResult(stdout=f"box:{line}\\n".encode(), stderr=None,
-                         exit_code=0)
+    async def run_line(self, engine, paths, texts, ctx):
+        return RunResult(stdout=f"box:{ctx.flags['c']}\\n".encode(),
+                         stderr=None, exit_code=0)
 
 
 NOT_A_RUNTIME = {"name": "nope"}

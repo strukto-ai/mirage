@@ -14,22 +14,21 @@
 
 import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
 import type { PathSpec } from '@struktoai/mirage-core/types'
+import type { HfAccountAccessor } from '../../../../accessor/hf_hub.ts'
 import { whoami } from '../../../../core/hf_hub/account.ts'
 import { API_BASE } from '../../../../core/hf_hub/constants.ts'
-import { hfEndpoint, type HfConfig } from '../../../../core/hf_hub/config.ts'
 import { requireToken, textOut } from './accessor.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 
 /** Print the account the configured token belongs to. */
 export async function whoamiCmd(
-  config: unknown,
+  accessor: HfAccountAccessor,
   _paths: PathSpec[],
   _texts: string[],
   _ctx: Context,
 ): Promise<CommandFnResult> {
-  const cfg = config as HfConfig
-  requireToken(cfg, 'auth whoami')
-  const account = await whoami(cfg)
+  requireToken(accessor, 'auth whoami')
+  const account = await whoami(accessor)
   const lines = [typeof account.name === 'string' ? account.name : '']
   const orgs = account.orgs
   const members: string[] = []
@@ -55,11 +54,11 @@ export async function whoamiCmd(
   // Upstream prints this whenever the endpoint is not huggingface.co, which
   // for every mirage install is always: the endpoint is the deployment's.
   //
-  // Read through hfEndpoint and not off the config, because that is what the
+  // Read off the account and not the raw config, because that is what the
   // REQUEST used: an empty endpoint means the public Hub there, and comparing
   // the raw value would announce a private endpoint with no origin after it
   // for a request that went to huggingface.co.
-  const endpoint = rstripSlash(hfEndpoint(cfg))
+  const endpoint = rstripSlash(accessor.endpoint)
   if (endpoint !== API_BASE) {
     lines.push(`Authenticated through private endpoint: ${endpoint}`)
   }
@@ -75,15 +74,14 @@ export async function whoamiCmd(
  * hold, and reports nothing when there is none.
  */
 export async function listCmd(
-  config: unknown,
+  accessor: HfAccountAccessor,
   _paths: PathSpec[],
   _texts: string[],
   _ctx: Context,
 ): Promise<CommandFnResult> {
-  const cfg = config as HfConfig
   const rows = ['NAME'.padEnd(20) + ' ' + 'TOKEN']
-  if (cfg.token !== undefined && cfg.token !== '') {
-    const account = await whoami(cfg)
+  if (accessor.token !== undefined && accessor.token !== '') {
+    const account = await whoami(accessor)
     const name = typeof account.name === 'string' ? account.name : 'install'
     rows.push(name.padEnd(20) + ' ' + '*'.repeat(8))
   }

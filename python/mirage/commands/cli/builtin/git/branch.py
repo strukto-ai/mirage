@@ -24,6 +24,7 @@ from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 from dulwich.walk import Walker
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.dates import date_clock
 from mirage.commands.cli.builtin.git.errors import (
@@ -652,7 +653,7 @@ async def _list_branches(
 
 
 async def branch(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """List, create or delete branches.
 
@@ -672,7 +673,7 @@ async def branch(
     with its usage.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context; git reads its repository

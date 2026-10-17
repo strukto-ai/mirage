@@ -54,13 +54,7 @@ export function resolveUrl(accessor: HfBucketsAccessor, rel: string): string {
 export async function fetchRow(accessor: HfBucketsAccessor, key: string): Promise<Row | null> {
   if (stripSlash(key) === '') return null
   const asked = accessor.bucketPath(key)
-  const rows = await hubPost(
-    accessor.token,
-    pathsInfoUrl(accessor),
-    { paths: [asked] },
-    undefined,
-    accessor.timeoutMs,
-  )
+  const rows = await hubPost(accessor.account, pathsInfoUrl(accessor), { paths: [asked] })
   if (!Array.isArray(rows)) {
     throw new HfHubError(`paths-info answered no list for ${asked}`, 0, 'InvalidResponse')
   }

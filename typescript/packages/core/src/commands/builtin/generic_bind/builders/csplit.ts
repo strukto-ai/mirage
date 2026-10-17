@@ -14,6 +14,7 @@
 
 import { csplitGeneric } from '../../generic/csplit.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import { dispatchOf } from '../../utils/links.ts'
 
 const csplit: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
   const idx = ctx.index ?? undefined
@@ -24,7 +25,7 @@ const csplit: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
   // need not be this mount, so a dispatcher routes each write, and the
   // removal of a failed run's pieces, to the mount that owns it. Mirrors
   // the Python builder.
-  const dispatch = ctx.dispatch
+  const dispatch = dispatchOf(ctx)
   return csplitGeneric(
     resolved,
     texts,

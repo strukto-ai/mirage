@@ -31,23 +31,24 @@ import { PythonRuntime } from '../../../runtime/python/base.ts'
 import { Runtime } from '../../../runtime/base.ts'
 import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import { noWorker } from '../../../runtime/python/pyodide/errors.ts'
-import type { RunArgs, RunResult, RuntimeLanguage } from '../../../runtime/types.ts'
+import type { Program, RunResult, RuntimeLanguage } from '../../../runtime/types.ts'
 import { SessionState } from '../../session/session.ts'
 import { dropsMountCaches, handleCli } from './cli.ts'
+import { NOOPAccessor } from '../../../accessor/base.ts'
 
 // Mirrors python/tests/workspace/executor/command/test_cli.py.
 
-const calls: { config: unknown; paths: PathSpec[]; texts: string[]; ctx: Context }[] = []
+const calls: { accessor: NOOPAccessor; paths: PathSpec[]; texts: string[]; ctx: Context }[] = []
 const dec = new TextDecoder()
 
 function send(
-  config: unknown,
+  accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): [Uint8Array, IOResult] {
-  calls.push({ config, paths, texts, ctx })
-  const token = (config as { token: string }).token
+  calls.push({ accessor, paths, texts, ctx })
+  const token = (accessor.config as { token: string }).token
   return [new TextEncoder().encode(`sent[${token}]\n`), new IOResult()]
 }
 
@@ -74,7 +75,11 @@ function makeInstall(name = 'prog'): CLIInstall {
     handlers: { 'message send': new CLIHandler({ fn: send }) },
     configModel: (input) => input,
   })
-  return { name, cli: spec, config: { token: 'tok' } }
+  return installOf(name, spec, { token: 'tok' })
+}
+
+function installOf(name: string, cli: CLI, config: unknown = null): CLIInstall {
+  return { name, cli, config, accessor: new NOOPAccessor(config) }
 }
 
 describe('handleCli', () => {
@@ -87,7 +92,7 @@ describe('handleCli', () => {
     expect(io.exitCode).toBe(0)
     expect(dec.decode(await materialize(stdout))).toBe('sent[tok]\n')
     const inv = calls.pop()
-    expect((inv?.config as { token: string }).token).toBe('tok')
+    expect((inv?.accessor.config as { token: string }).token).toBe('tok')
     expect(inv?.texts).toEqual(['hello', 'world'])
     expect(inv?.ctx.flags.to).toBe('#eng')
     expect(inv?.ctx.flags.verbose).toBe(2)
@@ -95,10 +100,9 @@ describe('handleCli', () => {
     // $PWD is exported, so a CLI subprocess inherits it as bash's would.
     expect(inv?.ctx.env).toEqual({ EDITOR: 'vi', PWD: '/' })
     expect(node.command).toBe('prog -vv message send -t #eng hello world')
-    const pathsInstall: CLIInstall = {
-      name: 'paths',
-      config: { token: 'tok' },
-      cli: new CLI({
+    const pathsInstall = installOf(
+      'paths',
+      new CLI({
         spec: new CommandSpec({
           name: 'paths',
           arguments: [
@@ -114,7 +118,8 @@ describe('handleCli', () => {
         }),
         handlers: { '': new CLIHandler({ fn: send }) },
       }),
-    }
+      { token: 'tok' },
+    )
     for (const words of [['report.txt'], ['prefix', 'report.txt']]) {
       const expectedOutput = words.length > 1 ? 'environment' : 'default'
       const pathSession = new SessionState({
@@ -191,7 +196,7 @@ describe('handleCli', () => {
       }),
       handlers: { '': new CLIHandler({ fn: ownHelp }) },
     })
-    const install: CLIInstall = { name: 'prog', cli: spec, config: null }
+    const install = installOf('prog', spec)
     const [stdout, io] = await handleCli(
       install,
       ['prog', '--help'],
@@ -225,7 +230,7 @@ describe('handleCli', () => {
       spec: new CommandSpec({ name: 'prog', subcommands: [new CommandSpec({ name: 'run' })] }),
       handlers: { run: new CLIHandler({ fn: slow, limit: new Limit({ timeoutSeconds: 0.05 }) }) },
     })
-    const install: CLIInstall = { name: 'prog', cli: spec, config: null }
+    const install = installOf('prog', spec)
     await expect(
       handleCli(install, ['prog', 'run'], new SessionState({ sessionId: 't' })),
     ).rejects.toThrow(/prog run: timed out/)
@@ -252,7 +257,7 @@ describe('handleCli', () => {
       },
       configModel: (input) => input,
     })
-    const install: CLIInstall = { name: 'prog', cli: spec, config: {} }
+    const install = installOf('prog', spec, {})
     await expect(
       handleCli(
         install,
@@ -286,7 +291,7 @@ describe('handleCli', () => {
       },
       configModel: (input) => input,
     })
-    const install: CLIInstall = { name: 'prog', cli: spec, config: {} }
+    const install = installOf('prog', spec, {})
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const unhandled: unknown[] = []
     const onUnhandled = (reason: unknown): void => {
@@ -343,24 +348,24 @@ describe('handleCli', () => {
 class FakePyRuntime extends LanguageRuntime {
   readonly name: string = 'fakepy'
   readonly language: RuntimeLanguage = 'python'
-  seen: RunArgs[] = []
+  seen: (Context & Program)[] = []
   result: RunResult = { stdout: new TextEncoder().encode('ran\n'), stderr: null, exitCode: 0 }
 
-  run(args: RunArgs): Promise<RunResult> {
-    this.seen.push(args)
+  interpret(_engine: unknown, program: Program, ctx: Context): Promise<RunResult> {
+    this.seen.push({ ...ctx, ...program })
     return Promise.resolve(this.result)
   }
 }
 
 class TierPyRuntime extends PythonRuntime {
-  seen: RunArgs[] = []
+  seen: (Context & Program)[] = []
 
   constructor(readonly name: string) {
     super()
   }
 
-  run(args: RunArgs): Promise<RunResult> {
-    this.seen.push(args)
+  interpret(_engine: unknown, program: Program, ctx: Context): Promise<RunResult> {
+    this.seen.push({ ...ctx, ...program })
     return Promise.resolve({ stdout: new TextEncoder().encode('ran\n'), stderr: null, exitCode: 0 })
   }
 }
@@ -370,7 +375,7 @@ class LineBox extends Runtime {
 }
 
 class GonePyRuntime extends FakePyRuntime {
-  override run(): Promise<RunResult> {
+  override interpret(): Promise<RunResult> {
     return Promise.reject(noWorker())
   }
 }
@@ -387,7 +392,7 @@ class FakeJsRuntime extends FakePyRuntime {
 class CrashingRuntime extends FakePyRuntime {
   override readonly name = 'crashpy'
 
-  override run(): Promise<RunResult> {
+  override interpret(): Promise<RunResult> {
     return Promise.reject(new Error('engine exploded'))
   }
 }
@@ -395,10 +400,10 @@ class CrashingRuntime extends FakePyRuntime {
 class SleepingRuntime extends FakePyRuntime {
   override readonly name = 'sleepy'
 
-  override async run(args: RunArgs): Promise<RunResult> {
-    this.seen.push(args)
+  override async interpret(_engine: unknown, program: Program, ctx: Context): Promise<RunResult> {
+    this.seen.push({ ...ctx, ...program })
     await new Promise<void>((resolve) =>
-      args.signal?.addEventListener(
+      ctx.signal?.addEventListener(
         'abort',
         () => {
           resolve()
@@ -423,7 +428,7 @@ function scriptInstall(
     script: new ScriptSource("print('hi')", opts.language ?? 'python'),
     runtime: opts.runtime ?? null,
   })
-  return { name: 'pager', cli: spec, config: opts.config ?? null }
+  return installOf('pager', spec, opts.config ?? null)
 }
 
 describe('handleCli script arm', () => {
@@ -477,20 +482,20 @@ describe('handleCli script arm', () => {
       spec: new CommandSpec({ name: 'pager' }),
       script: new ScriptSource('export const x = 1', 'js', true),
     })
-    const install: CLIInstall = { name: 'pager', cli: spec, config: null }
+    const install = installOf('pager', spec)
     const [, io] = await handleCli(install, ['pager'], new SessionState({ sessionId: 't' }), null, {
       entries: [js],
     })
     expect(io.exitCode).toBe(0)
-    expect(js.seen.pop()?.flags).toEqual({ module: true })
+    expect(js.seen.pop()?.flags.module).toBe(true)
   })
 
-  it('a non-module script sends no flags', async () => {
+  it('a non-module script sends no module flag', async () => {
     const py = new FakePyRuntime()
     await handleCli(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }), null, {
       entries: [py],
     })
-    expect(py.seen.pop()?.flags).toBeUndefined()
+    expect(py.seen.pop()?.flags).toEqual({ c: "print('hi')", scriptCli: true })
   })
 
   it('the env carries MIRAGE_CLI_CONFIG as JSON', async () => {
@@ -523,7 +528,7 @@ describe('handleCli script arm', () => {
     // The program's own name rides argv slot 0, so its messages read
     // 'pager:' and two installs of one program are distinguishable.
     const py = new FakePyRuntime()
-    const install: CLIInstall = { name: 'renamed', cli: scriptInstall().cli, config: null }
+    const install = installOf('renamed', scriptInstall().cli)
     await handleCli(
       install,
       ['renamed', 'report.txt'],
@@ -811,7 +816,7 @@ describe('handleCli script arm', () => {
       handlers: { '': new CLIHandler({ limit: new Limit({ timeoutSeconds: 0.05 }) }) },
       script: new ScriptSource("print('hi')"),
     })
-    const install: CLIInstall = { name: 'pager', cli: spec, config: null }
+    const install = installOf('pager', spec)
     await expect(
       handleCli(install, ['pager'], new SessionState({ sessionId: 't' }), null, {
         entries: [sleepy],
@@ -835,7 +840,7 @@ describe('a leaf that fails after printing', () => {
       },
       configModel: (input) => input,
     })
-    const install: CLIInstall = { name: 'prog', cli: spec, config: { token: 'tok' } }
+    const install = installOf('prog', spec, { token: 'tok' })
     const [stdout, io] = await handleCli(
       install,
       ['prog', 'go'],
@@ -867,7 +872,7 @@ describe('cache drop on a thrown leaf', () => {
       },
       configModel: (input) => input,
     })
-    return { name: 'prog', cli: spec, config: { token: 'tok' } }
+    return installOf('prog', spec, { token: 'tok' })
   }
 
   it('a write leaf that throws still drops caches', async () => {
@@ -944,7 +949,7 @@ it('keeps a custom CLI grammar when it uses Git usage formatting', async () => {
     }),
     handlers: { branch: new CLIHandler({ fn: send }) },
   })
-  const install = { name: 'custom', cli: spec, config: { token: 'tok' } }
+  const install = installOf('custom', spec, { token: 'tok' })
   const [stdout, io] = await handleCli(
     install,
     ['custom', 'branch', '--top'],
@@ -980,7 +985,7 @@ it.each(['success', 'error', 'abort'] as const)(
       },
     })
     await handleCli(
-      { name: 'probe', cli: spec, config: null },
+      installOf('probe', spec),
       ['probe'],
       new SessionState({ sessionId: 's' }),
       null,
@@ -1013,7 +1018,7 @@ it.each([
     }),
     handlers: { run: new CLIHandler({ fn }) },
   })
-  const install: CLIInstall = { name: 'renamed', cli, config: null }
+  const install = installOf('renamed', cli)
   const session = new SessionState({ sessionId: 'arity' })
   const [stdout, io] = await handleCli(install, ['renamed', 'run'], session)
   expect(io.exitCode).toBe(expected)
@@ -1056,7 +1061,7 @@ it.each([null, 1])(
       },
     })
     const [output] = await handleCli(
-      { name: 'writer', cli, config: null },
+      installOf('writer', cli),
       ['writer'],
       new SessionState({ sessionId: 'test' }),
     )

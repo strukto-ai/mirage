@@ -14,22 +14,25 @@
 
 import json
 
+from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.gmail.messages import get_message_processed
-from mirage.core.google.client import TokenManager
-from mirage.core.google.config import GoogleConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def read(
-    config: GoogleConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GoogleApiAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    async with TokenManager(config) as tm:
-        processed = await get_message_processed(tm, fl.as_str("id") or "")
+    processed = await get_message_processed(
+        accessor.token_manager, fl.as_str("id") or ""
+    )
     out = json.dumps(
         processed, ensure_ascii=False, separators=(",", ":")
     ).encode()

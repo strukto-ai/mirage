@@ -23,6 +23,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     require_op,
 )
 from mirage.commands.builtin.generic_bind.archive_io import walk_of
+from mirage.commands.builtin.utils.links import dispatch_of
 from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -45,7 +46,7 @@ async def zip_cmd(
         bound_op(ops.read_stream, accessor, ctx.index),
         partial(require_op(ops, Operation.WRITE), accessor),
         partial(ops.stat, accessor, index=ctx.index),
-        walk_of(ops, accessor, ctx.index, ctx.dispatch, "zip"),
+        walk_of(ops, accessor, ctx.index, dispatch_of(ctx), "zip"),
     )
 
 

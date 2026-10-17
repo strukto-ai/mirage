@@ -14,6 +14,7 @@
 
 import { captureSessionContext } from '../../../context/session_context.ts'
 import { captureExecutionContext } from '../../../execution/context.ts'
+import type { Context } from '../../../commands/config.ts'
 import type { PathSpec } from '../../../types.ts'
 import { ContextScope } from '../../../utils/context_scope.ts'
 import { Activity } from '../../../utils/activity.ts'
@@ -21,9 +22,9 @@ import { asyncContextIsolatesTasks } from '../../../utils/async_context.ts'
 import { ConcurrencyLimiter } from '../../../concurrency/limiter.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { PythonRuntime } from '../base.ts'
-import type { RunArgs, RunResult, RuntimeReach } from '../../types.ts'
+import type { Program, RunResult, RuntimeReach } from '../../types.ts'
 import { memoryLimit, type RuntimeOptions } from '../../config.ts'
-import type { RuntimeContext } from '../../binding.ts'
+import type { WorkspaceBinding } from '../../binding.ts'
 import {
   createPyodideInterrupter,
   type ArmedInterrupt,
@@ -37,7 +38,7 @@ import { createJournal, type MutationJournal } from './fs/journal.ts'
 import { PyodideFs } from './fs/fs.ts'
 import { PyodideExecution } from './execution.ts'
 import { mainFilename } from '../execution.ts'
-import { unhonoredNotice, type InitFlags } from '../flags.ts'
+import { unhonoredNotice } from '../flags.ts'
 import type { FlushFailure, SyncVFS, XattrOp } from './fs/types.ts'
 import { classify } from '../../../errors/index.ts'
 import { resolvePath } from '../../../utils/path.ts'
@@ -166,7 +167,7 @@ export function stripDeniedImports(code: string, denyPackages: ReadonlySet<strin
   )
 }
 
-export class PyodideRuntime extends PythonRuntime {
+export class PyodideRuntime extends PythonRuntime<undefined> {
   readonly name = 'pyodide'
   protected override readonly versionSuffix = ' (pyodide)'
   // The WASM guest's filesystem is the workspace-backed Emscripten FS,
@@ -251,16 +252,23 @@ export class PyodideRuntime extends PythonRuntime {
     }
   }
 
-  async run(args: RunArgs, context = this.captureContext()): Promise<RunResult> {
-    if (args.cwd === undefined && context !== undefined) args = { ...args, cwd: context.ctx.cwd }
+  /**
+   * Run one program on a fresh interpreter: in the worker for a run with
+   * files, in process for one without.
+   *
+   * @param _engine none; each run builds its own interpreter.
+   * @param program the source and argv to run.
+   * @param ctx the run's context.
+   */
+  async interpret(_engine: undefined, program: Program, ctx: Context): Promise<RunResult> {
+    const binding = this.binding
     const execute = async (runtime: PyodideRuntime): Promise<RunResult> =>
-      this.capped(runtime, await runtime.runOne(args, context))
-    if (this.sync === undefined && (context?.ctx.processes?.depth ?? 0) > 0)
+      this.capped(runtime, await runtime.runOne(program, ctx, binding))
+    if (this.sync === undefined && (ctx.processes?.depth ?? 0) > 0)
       return this.withFreshRuntime(execute)
-    const scope =
-      context?.scope ?? new ContextScope([...captureSessionContext(), captureExecutionContext()])
+    const scope = new ContextScope([...captureSessionContext(), captureExecutionContext()])
     return this.schedule(() =>
-      this.withPermit(() => scope.run(() => this.withFreshRuntime(execute)), args.signal),
+      this.withPermit(() => scope.run(() => this.withFreshRuntime(execute)), ctx.signal),
     )
   }
 
@@ -354,10 +362,10 @@ export class PyodideRuntime extends PythonRuntime {
   }
 
   private async closeOne(): Promise<void> {
-    await this.closeEngine()
+    await this.closeInterpreter()
   }
 
-  private async closeEngine(): Promise<void> {
+  private async closeInterpreter(): Promise<void> {
     this.guest?.close()
     this.guest = null
     const dispose = this.disposeModule
@@ -517,9 +525,9 @@ export class PyodideRuntime extends PythonRuntime {
   }
 
   private async ensureWorker(
-    context?: RuntimeContext,
+    files: RuntimeFiles | null,
   ): Promise<PyodideWorkerClient | PyodideUnavailableError | null> {
-    if (this.sync !== undefined || context === undefined || this.pyodide !== null) return null
+    if (this.sync !== undefined || files === null || this.pyodide !== null) return null
     this.worker ??= PyodideWorkerClient.create()
     return this.worker
   }
@@ -740,9 +748,14 @@ export class PyodideRuntime extends PythonRuntime {
     }
   }
 
-  private async runOne(args: RunArgs, context?: RuntimeContext): Promise<RunResult> {
-    this.files = RuntimeFiles.of(context)
-    const hiding = stdlibMount(this.files?.prefixes() ?? [])
+  private async runOne(
+    program: Program,
+    ctx: Context,
+    binding: WorkspaceBinding | null,
+  ): Promise<RunResult> {
+    const files = RuntimeFiles.of(ctx, binding)
+    this.files = files
+    const hiding = stdlibMount(files?.prefixes() ?? [])
     if (hiding !== null) {
       return {
         stdout: new Uint8Array(),
@@ -753,21 +766,24 @@ export class PyodideRuntime extends PythonRuntime {
         exitCode: 126,
       }
     }
-    const worker = await this.ensureWorker(context)
+    const worker = await this.ensureWorker(files)
     if (worker instanceof PyodideUnavailableError) throw worker
-    if (worker !== null && context !== undefined) {
-      const { cwd, signal, ...rest } = args
+    if (worker !== null && files !== null && binding !== null) {
       try {
         return await this.onWorker(() =>
           worker.execute(
             {
               kind: 'execute',
               config: this.config as PyodideConfig,
-              prefixes: context.resolver.prefixes(),
-              args: { ...rest, ...(cwd !== undefined ? { cwd: cwd.virtual } : {}) },
+              prefixes: binding.resolver.prefixes(),
+              program,
+              cwd: ctx.cwd.virtual,
+              env: { ...ctx.env },
+              flags: ctx.flags,
+              ...(ctx.timeoutSeconds !== undefined ? { timeoutSeconds: ctx.timeoutSeconds } : {}),
             },
-            context,
-            signal,
+            ctx,
+            files,
           ),
         )
       } catch (error) {
@@ -779,31 +795,29 @@ export class PyodideRuntime extends PythonRuntime {
         }
       }
     }
-    if (context !== undefined && this.sync === undefined) throw noWorker()
+    if (files !== null && this.sync === undefined) throw noWorker()
     const pyodide = await this.ensureLoaded()
     // Seeding happened inside ensureLoaded; its notices ride out on
     // this run's stderr, beside any flush failure and any init switch
     // this engine could not act on.
     const seedNotices = [
       ...this.takeSeedNotices(),
-      ...decodeNoticeLines(
-        unhonoredNotice((args.flags ?? {}) as InitFlags, this.name, HONORED_FLAGS),
-      ),
+      ...decodeNoticeLines(unhonoredNotice(ctx.flags, this.name, HONORED_FLAGS)),
     ]
-    await this.loadImports(pyodide, args.code)
+    await this.loadImports(pyodide, program.code)
     // sys.argv[0] is the program's own name when the caller has one (a
     // CLI install's head word), else CPython's own -c spelling.
-    const argv = [args.prog ?? '-c', ...args.args]
+    const argv = [program.prog ?? '-c', ...program.args]
     const request = {
-      code: args.code,
+      code: program.code,
       argv,
-      env: { ...args.env },
-      stdin: args.stdin,
-      flags: args.flags ?? {},
-      script_cli: args.scriptCli ?? false,
-      cwd: this.guestCwd(args.cwd),
-      filename: mainFilename(args),
-      script: args.scriptPath !== undefined,
+      env: { ...ctx.env },
+      stdin: program.stdin,
+      flags: ctx.flags,
+      script_cli: program.scriptCli ?? false,
+      cwd: this.guestCwd(ctx.cwd),
+      filename: mainFilename(program, ctx.cwd),
+      script: program.scriptPath !== undefined,
     }
 
     // Deadline trip -> exit 124 via CommandTimeoutError; a kill signal
@@ -816,7 +830,7 @@ export class PyodideRuntime extends PythonRuntime {
     const slot: { armed: ArmedInterrupt | null } = { armed: null }
     const arm = (): void => {
       if (this.interrupter !== null && slot.armed === null) {
-        slot.armed = this.interrupter.arm(args.timeoutSeconds ?? null, args.signal)
+        slot.armed = this.interrupter.arm(ctx.timeoutSeconds ?? null, ctx.signal)
       }
     }
     const disarm = (): void => {
@@ -824,8 +838,8 @@ export class PyodideRuntime extends PythonRuntime {
     }
     try {
       const arr = this.guestModule(pyodide).run(request, arm, disarm)
-      if (slot.armed?.disarm() === 'deadline' && args.timeoutSeconds !== undefined) {
-        throw new CommandTimeoutError(this.name, args.timeoutSeconds)
+      if (slot.armed?.disarm() === 'deadline' && ctx.timeoutSeconds !== undefined) {
+        throw new CommandTimeoutError(this.name, ctx.timeoutSeconds)
       }
       const flushFailures = this.drainMutations()
       return {
@@ -843,8 +857,8 @@ export class PyodideRuntime extends PythonRuntime {
       // marks still flush; failures can only be warned here.
       const deadline = slot.armed?.disarm() === 'deadline'
       for (const notice of [...seedNotices, ...this.drainMutations()]) console.warn(notice)
-      if (deadline && args.timeoutSeconds !== undefined) {
-        throw new CommandTimeoutError(this.name, args.timeoutSeconds)
+      if (deadline && ctx.timeoutSeconds !== undefined) {
+        throw new CommandTimeoutError(this.name, ctx.timeoutSeconds)
       }
       throw err
     } finally {

@@ -15,12 +15,12 @@
 from collections.abc import Callable
 from typing import Any
 
+from mirage.accessor.github import GitHubAccount
 from mirage.core.github.client import github_request
-from mirage.core.github.config import GhConfig
 
 
 async def github_pages(
-    config: GhConfig,
+    account: GitHubAccount,
     path: str,
     *,
     params: dict[str, str] | None = None,
@@ -36,9 +36,7 @@ async def github_pages(
     size = min(100, limit)
     while len(rows) < limit:
         query = {**(params or {}), "per_page": str(size), "page": str(page)}
-        data = await github_request(
-            config.token, "GET", path, params=query, base_url=config.base_url
-        )
+        data = await github_request(account, "GET", path, params=query)
         payload: Any = (
             data.get(key, []) if key and isinstance(data, dict) else data
         )

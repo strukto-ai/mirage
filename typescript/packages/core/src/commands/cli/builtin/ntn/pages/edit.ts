@@ -18,11 +18,12 @@ import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { contentOrStdin, firstText, notionTransport, prettyJson, usageError } from '../util.ts'
+import type { NtnAccessor } from '../util.ts'
 
 const ENC = new TextEncoder()
 
 export async function edit(
-  config: unknown,
+  accessor: NtnAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -39,7 +40,7 @@ export async function edit(
   // The PATCH answers with the page's new markdown, which is what `--json` is
   // for; printing the id under it would throw the response away on the one
   // flag that asks for it.
-  const edited = await replacePageMarkdown(notionTransport(config, ctx.flags), pageId, markdown)
+  const edited = await replacePageMarkdown(notionTransport(accessor, ctx.flags), pageId, markdown)
   if (fl.asBool('json')) return [prettyJson(edited), new IOResult()]
   return [ENC.encode(`${pageId}\n`), new IOResult()]
 }

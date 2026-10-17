@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
+import { HfAccountAccessor } from '../../accessor/hf_hub.ts'
 import { createRepo, createTag, deleteTag, splitRepoId } from './admin.ts'
 import * as client from './client.ts'
-import type { HfConfig } from './config.ts'
 import { API_BASE } from './constants.ts'
 
-const CONFIG: HfConfig = { token: 't', endpoint: API_BASE }
+const ACCOUNT = new HfAccountAccessor({ token: 't', endpoint: API_BASE })
 
 describe('splitRepoId', () => {
   it('takes the two halves apart', () => {
@@ -32,7 +32,7 @@ describe('splitRepoId', () => {
 describe('createRepo', () => {
   it('sends name, organization and type', async () => {
     const post = vi.spyOn(client, 'hubPost').mockResolvedValue({ url: 'https://hf.co/acme/widget' })
-    await createRepo(CONFIG, 'acme/widget', { repoType: 'dataset' })
+    await createRepo(ACCOUNT, 'acme/widget', { repoType: 'dataset' })
     expect(String(post.mock.calls[0]?.[1])).toMatch(/\/api\/repos\/create$/)
     expect(post.mock.calls[0]?.[2]).toEqual({
       name: 'widget',
@@ -44,14 +44,14 @@ describe('createRepo', () => {
 
   it('marks visibility only when private', async () => {
     const post = vi.spyOn(client, 'hubPost').mockResolvedValue({})
-    await createRepo(CONFIG, 'a/b', { private: true })
+    await createRepo(ACCOUNT, 'a/b', { private: true })
     expect((post.mock.calls[0]?.[2] as Record<string, unknown>).visibility).toBe('private')
     post.mockRestore()
   })
 
   it('carries a space sdk', async () => {
     const post = vi.spyOn(client, 'hubPost').mockResolvedValue({})
-    await createRepo(CONFIG, 'a/b', { repoType: 'space', spaceSdk: 'gradio' })
+    await createRepo(ACCOUNT, 'a/b', { repoType: 'space', spaceSdk: 'gradio' })
     expect((post.mock.calls[0]?.[2] as Record<string, unknown>).sdk).toBe('gradio')
     post.mockRestore()
   })
@@ -60,7 +60,7 @@ describe('createRepo', () => {
 describe('tags', () => {
   it('targets the revision when creating', async () => {
     const post = vi.spyOn(client, 'hubPost').mockResolvedValue({})
-    await createTag(CONFIG, 'a/b', 'v1', 'model', 'abc123', 'note')
+    await createTag(ACCOUNT, 'a/b', 'v1', 'model', 'abc123', 'note')
     expect(String(post.mock.calls[0]?.[1])).toMatch(/\/tag\/abc123$/)
     expect(post.mock.calls[0]?.[2]).toEqual({ tag: 'v1', message: 'note' })
     post.mockRestore()
@@ -68,7 +68,7 @@ describe('tags', () => {
 
   it('deletes by tag name', async () => {
     const req = vi.spyOn(client, 'hubRequest').mockResolvedValue(undefined as never)
-    await deleteTag(CONFIG, 'a/b', 'v1')
+    await deleteTag(ACCOUNT, 'a/b', 'v1')
     expect(req.mock.calls[0]?.[1]).toBe('DELETE')
     expect(String(req.mock.calls[0]?.[2])).toMatch(/\/tag\/v1$/)
     req.mockRestore()
@@ -78,14 +78,14 @@ describe('tags', () => {
 describe('revisions holding a slash', () => {
   it('encodes the revision a tag is created on', async () => {
     const post = vi.spyOn(client, 'hubPost').mockResolvedValue({})
-    await createTag(CONFIG, 'a/b', 'v1', 'model', 'feature/foo')
+    await createTag(ACCOUNT, 'a/b', 'v1', 'model', 'feature/foo')
     expect(String(post.mock.calls[0]?.[1])).toMatch(/\/tag\/feature%2Ffoo$/)
     post.mockRestore()
   })
 
   it('encodes the tag being deleted', async () => {
     const req = vi.spyOn(client, 'hubRequest').mockResolvedValue(undefined as never)
-    await deleteTag(CONFIG, 'a/b', 'release/v1')
+    await deleteTag(ACCOUNT, 'a/b', 'release/v1')
     expect(String(req.mock.calls[0]?.[2])).toMatch(/\/tag\/release%2Fv1$/)
     req.mockRestore()
   })

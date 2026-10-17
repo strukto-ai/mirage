@@ -1,17 +1,20 @@
 from urllib.parse import urlsplit
 
+from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh.accessor import web_origin
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.client import GitHubApiError
-from mirage.core.github.config import GhConfig
 from mirage.core.github.repo import login
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
 
 
 async def status(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[bytes | None, IOResult]:
     """Check the configured credential without accessing a mount.
 
@@ -19,14 +22,14 @@ async def status(
     identify that source honestly and never print the credential itself.
 
     Args:
-        config (GhConfig): the configured GitHub account.
+        accessor (GitHubAccount): the install's account.
         paths (list[PathSpec]): the path operands.
         texts (list[str]): the text operands.
         ctx (Context): the invocation's context.
     """
-    host = urlsplit(web_origin(config)).hostname
+    host = urlsplit(web_origin(accessor)).hostname
     try:
-        account = await login(config)
+        account = await login(accessor)
     except GitHubApiError as exc:
         if exc.status not in (401, 403):
             raise
@@ -48,20 +51,23 @@ async def status(
 
 
 async def token(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[bytes | None, IOResult]:
     """``gh auth token``, refused: the token stays in Mirage
     configuration, where every gh verb reads it, and is never printed.
 
     Args:
-        config (GhConfig): the configured GitHub account.
+        accessor (GitHubAccount): the install's account.
         paths (list[PathSpec]): the path operands.
         texts (list[str]): the text operands.
         ctx (Context): the invocation's context; ``--hostname`` rides its flags.
     """
     host = (
         FlagView(ctx.flags).as_nonempty("hostname")
-        or urlsplit(web_origin(config)).hostname
+        or urlsplit(web_origin(accessor)).hostname
     )
     text = (
         f"gh auth token: the token for {host} stays in Mirage "

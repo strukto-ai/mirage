@@ -23,9 +23,10 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutor } from '../../runtime/mixin.ts'
 import type { RunResult } from '../../runtime/types.ts'
+import type { Context } from '../../commands/config.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { registerSecrets } from '../../secrets/registry.ts'
-import { MountMode } from '../../types.ts'
+import { MountMode, type PathSpec } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { Session, Workspace } from '../workspace/workspace.ts'
@@ -173,7 +174,8 @@ class LineBox extends Runtime implements LineExecutor {
     super({ captures: ['*'] })
   }
 
-  runLine(line: string): Promise<RunResult> {
+  runLine(_e: unknown, _p: PathSpec[], _t: string[], ctx: Context): Promise<RunResult> {
+    const line = ctx.flags.c as string
     this.lines.push(line)
     return Promise.resolve({ stdout: ENC.encode(`box:${line}`), stderr: null, exitCode: 0 })
   }

@@ -18,9 +18,11 @@ import { IOResult } from '../../../../io/types.ts'
 import type { CLI, CLIHandler } from '../../types.ts'
 import { NTN } from './index.ts'
 import { GUARDED, HintedAPIError, apiFailure, guarded, sourceHint } from './failure.ts'
+import { ntnAccessor } from './util.ts'
 import { context } from '../../../../workspace/fixtures/context.ts'
 
 const DEC = new TextDecoder()
+const ACCESSOR = ntnAccessor({ apiKey: 'k' })
 
 // Every line here was printed by ntn 0.21.9 against a server returning that
 // status with Notion's own error envelope. The two shapes upstream has for a
@@ -145,7 +147,7 @@ describe('guarded', () => {
     })
     // A verb may return null instead of a pair, so narrow before destructuring:
     // guarded answering null would mean it swallowed the failure.
-    const caught = await wrapped({}, [], [], context())
+    const caught = await wrapped(ACCESSOR, [], [], context())
     if (caught === null) throw new Error('guarded returned no result')
     const [stdout, io] = caught
     expect(stdout).toBeNull()
@@ -155,13 +157,13 @@ describe('guarded', () => {
     const other = guarded(() => {
       throw new TypeError('not an API failure')
     })
-    await expect(other({}, [], [], context())).rejects.toThrow(TypeError)
+    await expect(other(ACCESSOR, [], [], context())).rejects.toThrow(TypeError)
   })
 
   it('returns a successful verb untouched', async () => {
     const ok = new IOResult()
     const wrapped = guarded(() => [null, ok])
-    expect(await wrapped({}, [], [], context())).toEqual([null, ok])
+    expect(await wrapped(ACCESSOR, [], [], context())).toEqual([null, ok])
   })
 })
 

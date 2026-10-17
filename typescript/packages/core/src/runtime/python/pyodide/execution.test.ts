@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { readFileSync } from 'node:fs'
-import { captureBinding, WorkspaceBinding } from '../../binding.ts'
+import { WorkspaceBinding } from '../../binding.ts'
+import type { Context } from '../../../commands/config.ts'
+import type { Program, RunResult } from '../../types.ts'
 import { PyodideWorkerClient } from './worker/client.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
@@ -28,15 +30,23 @@ import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { context } from '../../../workspace/fixtures/context.ts'
+
+/** Run a resolved program; pyodide has no engine, so the run queues at the call. */
+function interpret(
+  rt: PyodideRuntime,
+  program: Partial<Program> & { code: string },
+  extra: Partial<Context> = {},
+): Promise<RunResult> {
+  return rt.interpret(undefined, { args: [], stdin: null, ...program }, context(extra))
+}
+
+/** An empty cwd: the interpreter stays in the directory it started in. */
+const NO_CWD = PathSpec.fromStrPath('')
 
 /** The interpreter's working directory for a run given no cwd. */
 async function defaultCwd(rt: PyodideRuntime): Promise<string> {
-  const result = await rt.run({
-    code: 'import os; print(os.getcwd())',
-    args: [],
-    env: {},
-    stdin: null,
-  })
+  const result = await interpret(rt, { code: 'import os; print(os.getcwd())' }, { cwd: NO_CWD })
   return new TextDecoder().decode(result.stdout).trim()
 }
 
@@ -53,7 +63,7 @@ describe('Pyodide execution lifetime', { timeout: 120_000 }, () => {
     const rt = new PyodideRuntime({ config: { autoLoadFromImports: false } })
     if (mode !== 'inline') {
       rt.bind(
-        new WorkspaceBinding(
+        WorkspaceBinding.overBridge(
           () => Promise.reject(new Error('unexpected filesystem operation')),
           new PrefixResolver(() => []),
         ),
@@ -66,9 +76,9 @@ describe('Pyodide execution lifetime', { timeout: 120_000 }, () => {
     const clean = 'False False False\n'
     const dec = new TextDecoder()
     try {
-      const first = await rt.run({ code: mutate, args: [], env: {}, stdin: null })
+      const first = await interpret(rt, { code: mutate })
       expect(first.exitCode).toBe(0)
-      const next = await rt.run({ code: inspect, args: [], env: {}, stdin: null })
+      const next = await interpret(rt, { code: inspect })
       expect(next.exitCode).toBe(0)
       expect(dec.decode(next.stdout)).toBe(clean)
     } finally {
@@ -90,7 +100,7 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
       const create = vi.spyOn(PyodideWorkerClient, 'create')
       const pending: Promise<unknown>[] = []
       rt.bind(
-        new WorkspaceBinding(
+        WorkspaceBinding.overBridge(
           async (op, path) => {
             if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 5 })
             const read = reads.get(path.slice('/data/'.length))
@@ -104,17 +114,12 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
       )
       const run = (name: string) =>
         runWithSession(new SessionState({ sessionId: name }), () =>
-          rt.run({ code: `print(open('/data/${name}').read())`, args: [], env: {}, stdin: null }),
+          interpret(rt, { code: `print(open('/data/${name}').read())` }),
         )
       try {
         const first = run('one')
         const second = runWithSession(new SessionState({ sessionId: 'two' }), () =>
-          rt.run({
-            code: "open('/data/two').read(); raise ValueError('expected failure')",
-            args: [],
-            env: {},
-            stdin: null,
-          }),
+          interpret(rt, { code: "open('/data/two').read(); raise ValueError('expected failure')" }),
         )
         const third = run('three')
         pending.push(first, second, third)
@@ -181,7 +186,7 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
       const release = gate()
       const rt = new PyodideRuntime({ config: { maxConcurrency: 2 } })
       rt.bind(
-        new WorkspaceBinding(
+        WorkspaceBinding.overBridge(
           async (op, path) => {
             if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 4 })
             if (op !== 'read') throw new Error(`unexpected ${op}: ${path}`)
@@ -199,28 +204,21 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
       const controller = new AbortController()
       const pending: Promise<unknown>[] = []
       try {
-        const other = rt.run({
-          code: "print(open('/data/other').read())",
-          args: [],
-          env: {},
-          stdin: null,
-        })
+        const other = interpret(rt, { code: "print(open('/data/other').read())" })
         pending.push(other)
         await entered.promise
-        const interrupted = rt
-          .run({
+        const interrupted = interpret(
+          rt,
+          {
             code:
               kind === 'abort'
                 ? "open('/data/started').read()\nwhile True: pass"
                 : 'while True: pass',
-            args: [],
-            env: {},
-            stdin: null,
-            ...(kind === 'abort' ? { signal: controller.signal } : { timeoutSeconds: 0.1 }),
-          })
-          .catch((error: unknown) => error)
+          },
+          kind === 'abort' ? { signal: controller.signal } : { timeoutSeconds: 0.1 },
+        ).catch((error: unknown) => error)
         pending.push(interrupted)
-        const next = rt.run({ code: 'print(42)', args: [], env: {}, stdin: null })
+        const next = interpret(rt, { code: 'print(42)' })
         pending.push(next)
         if (kind === 'abort') {
           await started.promise
@@ -713,23 +711,19 @@ sys._xoptions is saved_options and warnings.filters is saved_filters and \
         [null, 'None'],
         [new Uint8Array(), "b''"],
       ] as const) {
-        const result = await rt.run({
+        const result = await interpret(rt, {
           code: 'print(argv); print(stdin)',
           prog: 'pager',
           args: ['one'],
           scriptCli: true,
-          env: {},
           stdin,
         })
         expect(result.exitCode).toBe(0)
         expect(new TextDecoder().decode(result.stdout)).toBe(`['pager', 'one']\n${expected}\n`)
       }
-      const ordinary = await rt.run({
+      const ordinary = await interpret(rt, {
         code: "print('argv' in globals(), 'stdin' in globals())",
         prog: '/work/script.py',
-        args: [],
-        env: {},
-        stdin: null,
       })
       expect(new TextDecoder().decode(ordinary.stdout)).toBe('False False\n')
     } finally {
@@ -743,30 +737,24 @@ describe('Pyodide command cwd', { timeout: 120_000 }, () => {
     const rt = new PyodideRuntime()
     try {
       rt.bind(
-        new WorkspaceBinding(
+        WorkspaceBinding.overBridge(
           () => Promise.reject(new Error('root mount must not be read')),
           new PrefixResolver(() => ['/']),
-          (binding) =>
-            captureBinding(binding, { ctx: { cwd: PathSpec.fromStrPath('/unservable/nested') } }),
         ),
       )
       const before = await defaultCwd(rt)
-      const result = await rt.run({
-        code: 'import os; print(1); print(os.getcwd())',
-        args: [],
-        env: {},
-        stdin: null,
-        cwd: PathSpec.fromStrPath('/unservable/nested'),
-      })
+      const result = await interpret(
+        rt,
+        { code: 'import os; print(1); print(os.getcwd())' },
+        { cwd: PathSpec.fromStrPath('/unservable/nested') },
+      )
       expect(result.exitCode).toBe(0)
       expect(new TextDecoder().decode(result.stdout)).toBe(`1\n${before}\n`)
-      const root = await rt.run({
-        code: 'import os; print(os.getcwd())',
-        args: [],
-        env: {},
-        stdin: null,
-        cwd: PathSpec.fromStrPath('/'),
-      })
+      const root = await interpret(
+        rt,
+        { code: 'import os; print(os.getcwd())' },
+        { cwd: PathSpec.fromStrPath('/') },
+      )
       expect(root.exitCode).toBe(0)
       expect(new TextDecoder().decode(root.stdout)).toBe('/\n')
     } finally {
@@ -777,19 +765,17 @@ describe('Pyodide command cwd', { timeout: 120_000 }, () => {
   it('still rejects a missing cwd on a supported child of a root mount', async () => {
     const rt = new PyodideRuntime()
     rt.bind(
-      new WorkspaceBinding(
+      WorkspaceBinding.overBridge(
         () => Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' })),
         new PrefixResolver(() => ['/', '/data/']),
       ),
     )
     try {
-      const result = await rt.run({
-        code: "print('must not run')",
-        args: [],
-        env: {},
-        stdin: null,
-        cwd: PathSpec.fromStrPath('/data/missing'),
-      })
+      const result = await interpret(
+        rt,
+        { code: "print('must not run')" },
+        { cwd: PathSpec.fromStrPath('/data/missing') },
+      )
       expect(result.exitCode).toBe(1)
       expect(new TextDecoder().decode(result.stdout)).toBe('')
     } finally {
@@ -812,15 +798,13 @@ describe('Pyodide command cwd', { timeout: 120_000 }, () => {
         "import os; os.getcwd = lambda: '/missing-cwd'",
         "import os; del os.getcwd; raise ValueError('expected')",
       ]) {
-        await rt.run({ code, args: [], env: {}, stdin: null, cwd: PathSpec.fromStrPath('/tmp/a') })
+        await interpret(rt, { code }, { cwd: PathSpec.fromStrPath('/tmp/a') })
         expect(await defaultCwd(rt)).toBe(before)
-        const next = await rt.run({
-          code: 'from pathlib import Path; print(Path.cwd())',
-          args: [],
-          env: {},
-          stdin: null,
-          cwd: PathSpec.fromStrPath('/tmp/b'),
-        })
+        const next = await interpret(
+          rt,
+          { code: 'from pathlib import Path; print(Path.cwd())' },
+          { cwd: PathSpec.fromStrPath('/tmp/b') },
+        )
         expect(next.exitCode).toBe(0)
         expect(new TextDecoder().decode(next.stdout)).toBe('/tmp/b\n')
       }
@@ -840,13 +824,13 @@ describe('Pyodide command cwd', { timeout: 120_000 }, () => {
       const before = await defaultCwd(rt)
       const results = await Promise.all(
         ['/tmp/a', '/tmp/b'].map((cwd) =>
-          rt.run({
-            code: "import os; print(os.getcwd()); os.chdir('/tmp'); raise ValueError('expected')",
-            args: [],
-            env: { PWD: '/wrong' },
-            stdin: null,
-            cwd: PathSpec.fromStrPath(cwd),
-          }),
+          interpret(
+            rt,
+            {
+              code: "import os; print(os.getcwd()); os.chdir('/tmp'); raise ValueError('expected')",
+            },
+            { env: { PWD: '/wrong' }, cwd: PathSpec.fromStrPath(cwd) },
+          ),
         ),
       )
       expect(results.map((r) => new TextDecoder().decode(r.stdout))).toEqual([
@@ -855,21 +839,14 @@ describe('Pyodide command cwd', { timeout: 120_000 }, () => {
       ])
       expect(results.map((r) => r.exitCode)).toEqual([1, 1])
       expect(await defaultCwd(rt)).toBe(before)
-      const missing = await rt.run({
-        code: "print('must not run')",
-        args: [],
-        env: {},
-        stdin: null,
-        cwd: PathSpec.fromStrPath('/missing-cwd'),
-      })
+      const missing = await interpret(
+        rt,
+        { code: "print('must not run')" },
+        { cwd: PathSpec.fromStrPath('/missing-cwd') },
+      )
       expect(missing.exitCode).toBe(1)
       expect(new TextDecoder().decode(missing.stdout)).toBe('')
-      const fresh = await rt.run({
-        code: 'import os; print(os.getcwd())',
-        args: [],
-        env: {},
-        stdin: null,
-      })
+      const fresh = await interpret(rt, { code: 'import os; print(os.getcwd())' }, { cwd: NO_CWD })
       expect(new TextDecoder().decode(fresh.stdout)).toBe(`${before}\n`)
     } finally {
       await rt.close()
@@ -886,7 +863,7 @@ it.each([false, true])(
     const rt = new PyodideRuntime()
     if (worker)
       rt.bind(
-        new WorkspaceBinding(
+        WorkspaceBinding.overBridge(
           () => Promise.reject(new Error('unexpected I/O')),
           new PrefixResolver(() => ['/data/']),
         ),
@@ -897,12 +874,13 @@ it.each([false, true])(
         [{ [key]: 'guest-marker' }, 'guest-marker'],
         [{}, '<unset>'],
       ] as const) {
-        const result = await rt.run({
-          code: `import os; print(os.environ.get('${key}', '<unset>')); os.environ['${key}'] = 'changed'`,
-          args: [],
-          env,
-          stdin: null,
-        })
+        const result = await interpret(
+          rt,
+          {
+            code: `import os; print(os.environ.get('${key}', '<unset>')); os.environ['${key}'] = 'changed'`,
+          },
+          { env },
+        )
         expect(result.exitCode).toBe(0)
         expect(new TextDecoder().decode(result.stdout)).toBe(`${expected}\n`)
         expect(process.env[key]).toBe('host-marker')
@@ -919,7 +897,7 @@ it.each([false, true])(
 )
 
 describe('Pyodide run cwd', { timeout: 120_000 }, () => {
-  it('inherits the session cwd', async () => {
+  it("a bound run takes the caller's cwd, not the session's", async () => {
     const rt = new PyodideRuntime({ config: { autoLoadFromImports: false } })
     const ws = new Workspace(
       { '/data': new RAMVFS() },
@@ -934,20 +912,14 @@ describe('Pyodide run cwd', { timeout: 120_000 }, () => {
       expect(
         (await ws.shell('mkdir /data/sub; echo child > /data/sub/item; cd /data')).exitCode,
       ).toBe(0)
-      const run = await rt.run({
-        code: 'import os; print(os.getcwd())',
-        args: [],
-        env: {},
-        stdin: null,
-      })
-      expect(dec.decode(run.stdout)).toBe('/data\n')
-      const explicit = await rt.run({
-        code: 'import os; print(os.getcwd())',
-        args: [],
-        env: {},
-        stdin: null,
-        cwd: PathSpec.fromStrPath('/data/sub'),
-      })
+      const code = 'import os; print(os.getcwd())'
+      const run = await rt.execute([], [], context({ flags: { c: code } }))
+      expect(dec.decode(run.stdout)).toBe('/\n')
+      const explicit = await rt.execute(
+        [],
+        [],
+        context({ flags: { c: code }, cwd: PathSpec.fromStrPath('/data/sub') }),
+      )
       expect(dec.decode(explicit.stdout)).toBe('/data/sub\n')
     } finally {
       await ws.close()

@@ -5,7 +5,6 @@ from yarl import URL
 import mirage.core.msgraph.drive as drive_ops
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.core.msgraph.client import GraphError
-from mirage.core.msgraph.config import MsGraphConfig
 from mirage.core.msgraph.drive import (
     DriveLoc,
     _move_body,
@@ -41,9 +40,7 @@ def _loc(drive: str, path: str) -> DriveLoc:
     )
 
 
-async def _list_one_file(
-    config: MsGraphConfig, url: str, session=None
-) -> list[dict]:
+async def _list_one_file(accessor: OneDriveAccessor, url: str) -> list[dict]:
     return [{"name": "a.txt", "size": 3, "file": {}}]
 
 
@@ -85,10 +82,7 @@ async def test_iter_tree_emits_virtual_not_backend_path(monkeypatch):
     loc = DriveLoc(
         drive="d1", path="team/reports", virt="reports", url=_url, ref=_ref
     )
-    entries = [
-        entry
-        async for entry in iter_tree(MsGraphConfig(access_token="token"), loc)
-    ]
+    entries = [entry async for entry in iter_tree(_accessor(), loc)]
     assert entries == [
         ("reports/a.txt", {"name": "a.txt", "size": 3, "file": {}}, False)
     ]
@@ -102,8 +96,8 @@ async def test_iter_tree_emits_virtual_not_backend_path(monkeypatch):
 # sequence, not an internal call.
 
 
-def _config() -> MsGraphConfig:
-    return MsGraphConfig(access_token="tok")
+def _accessor() -> OneDriveAccessor:
+    return OneDriveAccessor(OneDriveConfig(access_token="tok"))
 
 
 @pytest.mark.asyncio
@@ -114,7 +108,7 @@ async def test_copy_polls_the_monitor_the_202_pointed_at():
             _url("a.txt", "/copy"), status=202, headers={"Location": monitor}
         )
         m.get(monitor, payload={"status": "completed"})
-        await copy_tree(_config(), _loc("d1", "a.txt"), _loc("d1", "b.txt"))
+        await copy_tree(_accessor(), _loc("d1", "a.txt"), _loc("d1", "b.txt"))
         # Without this the case passes when copy returns straight after the
         # 202 and never confirms the operation finished.
         assert ("GET", URL(monitor)) in m.requests
@@ -136,7 +130,7 @@ async def test_copy_raises_the_provider_code_when_the_monitor_fails():
         )
         with pytest.raises(GraphError) as exc:
             await copy_tree(
-                _config(), _loc("d1", "a.txt"), _loc("d1", "b.txt")
+                _accessor(), _loc("d1", "a.txt"), _loc("d1", "b.txt")
             )
     assert exc.value.code == "generalException"
     assert exc.value.status == 500
@@ -162,7 +156,7 @@ async def test_copy_deletes_a_conflicting_file_destination_and_retries():
         m.delete(_url("b.txt"), status=204)
         m.post(_url("a.txt", "/copy"), status=202, headers={"Location": retry})
         m.get(retry, payload={"status": "completed"})
-        await copy_tree(_config(), _loc("d1", "a.txt"), _loc("d1", "b.txt"))
+        await copy_tree(_accessor(), _loc("d1", "a.txt"), _loc("d1", "b.txt"))
         assert ("DELETE", URL(_url("b.txt"))) in m.requests
         assert len(m.requests[("POST", URL(_url("a.txt", "/copy")))]) == 2
         assert ("GET", URL(retry)) in m.requests
@@ -186,7 +180,7 @@ async def test_copy_normalizes_a_failed_replacement_retry(transport):
             m.post(_url("a.txt", "/copy"), status=409, payload=_CONFLICT)
         with pytest.raises(GraphError) as exc:
             await copy_tree(
-                _config(), _loc("d1", "a.txt"), _loc("d1", "b.txt")
+                _accessor(), _loc("d1", "a.txt"), _loc("d1", "b.txt")
             )
         assert exc.value.status == 500
         assert exc.value.code == "nameAlreadyExists"
@@ -218,7 +212,7 @@ async def test_copy_merges_two_folders_per_child_and_deletes_nothing():
             headers={"Location": child_monitor},
         )
         m.get(child_monitor, payload={"status": "completed"})
-        await copy_tree(_config(), _loc("d1", "src"), _loc("d1", "dst"))
+        await copy_tree(_accessor(), _loc("d1", "src"), _loc("d1", "dst"))
         assert ("POST", URL(_url("src/f.txt", "/copy"))) in m.requests
         assert ("GET", URL(child_monitor)) in m.requests
         assert not [k for k in m.requests if k[0] == "DELETE"]
@@ -245,7 +239,9 @@ async def test_copy_refuses_a_file_onto_folder_conflict_as_409():
         )
         m.get(_url("dst"), payload={"id": "2", "name": "dst", "folder": {}})
         with pytest.raises(GraphError) as exc:
-            await copy_tree(_config(), _loc("d1", "a.txt"), _loc("d1", "dst"))
+            await copy_tree(
+                _accessor(), _loc("d1", "a.txt"), _loc("d1", "dst")
+            )
         assert not [k for k in m.requests if k[0] == "DELETE"]
     assert exc.value.status == 409
     assert exc.value.code == "nameAlreadyExists"
@@ -264,7 +260,7 @@ async def test_rename_keeps_the_conflict_for_a_non_empty_folder():
         )
         with pytest.raises(GraphError):
             await rename_replace(
-                _config(), _loc("d1", "src"), _loc("d1", "dst")
+                _accessor(), _loc("d1", "src"), _loc("d1", "dst")
             )
         assert not [k for k in m.requests if k[0] == "DELETE"]
         assert len(m.requests[("PATCH", URL(_url("src")))]) == 1
@@ -274,10 +270,6 @@ _OD_BASE = "https://graph.microsoft.com/v1.0/me/drive"
 _OD_SPEC = PathSpec(
     virtual="/m/m/k.txt", directory="/m/m/", vfs_path="m/k.txt"
 )
-
-
-def _od_accessor() -> OneDriveAccessor:
-    return OneDriveAccessor(OneDriveConfig(access_token="tok"))
 
 
 @pytest.mark.asyncio
@@ -292,7 +284,7 @@ async def test_read_item_records_the_virtual_path_on_a_pinned_read():
             m.get(
                 _OD_BASE + "/root:/m/k.txt:/versions/3.0/content", body=b"old"
             )
-            data = await onedrive_read(_od_accessor(), _OD_SPEC)
+            data = await onedrive_read(_accessor(), _OD_SPEC)
     finally:
         scope.close()
         reset_revisions(revisions)
@@ -310,9 +302,7 @@ async def test_stream_item_records_the_virtual_path_on_a_pinned_read():
             m.get(
                 _OD_BASE + "/root:/m/k.txt:/versions/3.0/content", body=b"old"
             )
-            chunks = [
-                c async for c in onedrive_stream(_od_accessor(), _OD_SPEC)
-            ]
+            chunks = [c async for c in onedrive_stream(_accessor(), _OD_SPEC)]
     finally:
         scope.close()
         reset_revisions(revisions)
@@ -323,13 +313,13 @@ async def test_stream_item_records_the_virtual_path_on_a_pinned_read():
 def _feed(top: dict, rows: list[dict]):
     asked: dict[str, list] = {"get": [], "list": []}
 
-    async def get(config, url, params=None, session=None):
+    async def get(accessor, url, params=None):
         asked["get"].append((url, params))
         if isinstance(top, Exception):
             raise top
         return top
 
-    async def listing(config, url, params=None, session=None):
+    async def listing(accessor, url, params=None):
         asked["list"].append(url)
         return rows
 
@@ -361,9 +351,7 @@ async def test_delta_tree_places_every_item_by_its_parents(monkeypatch):
     get, listing, asked = _feed({"id": "T", "folder": {}}, rows)
     monkeypatch.setattr(drive_ops, "graph_get", get)
     monkeypatch.setattr(drive_ops, "graph_list", listing)
-    found = await drive_ops.delta_tree(
-        MsGraphConfig(access_token="token"), _loc("d1", "team/reports")
-    )
+    found = await drive_ops.delta_tree(_accessor(), _loc("d1", "team/reports"))
     assert asked["get"] == [(_url("team/reports"), {"$select": "id,folder"})]
     assert asked["list"] == [_url("team/reports", "/delta")]
     assert sorted(found) == ["b.txt", "notes", "sub", "sub/a.txt"]
@@ -385,9 +373,7 @@ async def test_delta_tree_ignores_a_parent_loop(monkeypatch):
     get, listing, _ = _feed({"id": "T", "folder": {}}, rows)
     monkeypatch.setattr(drive_ops, "graph_get", get)
     monkeypatch.setattr(drive_ops, "graph_list", listing)
-    found = await drive_ops.delta_tree(
-        MsGraphConfig(access_token="token"), _loc("d1", "")
-    )
+    found = await drive_ops.delta_tree(_accessor(), _loc("d1", ""))
     assert list(found) == ["g.txt"]
 
 
@@ -402,9 +388,7 @@ async def test_delta_tree_leaves_a_file_or_nothing_to_the_walk(
     get, listing, asked = _feed(top, [])
     monkeypatch.setattr(drive_ops, "graph_get", get)
     monkeypatch.setattr(drive_ops, "graph_list", listing)
-    found = await drive_ops.delta_tree(
-        MsGraphConfig(access_token="token"), _loc("d1", "f")
-    )
+    found = await drive_ops.delta_tree(_accessor(), _loc("d1", "f"))
     assert found is None
     assert asked["list"] == []
 
@@ -415,9 +399,7 @@ async def test_delta_tree_raises_what_graph_refuses(monkeypatch):
     monkeypatch.setattr(drive_ops, "graph_get", get)
     monkeypatch.setattr(drive_ops, "graph_list", listing)
     with pytest.raises(GraphError):
-        await drive_ops.delta_tree(
-            MsGraphConfig(access_token="token"), _loc("d1", "f")
-        )
+        await drive_ops.delta_tree(_accessor(), _loc("d1", "f"))
 
 
 @pytest.mark.asyncio
@@ -432,13 +414,11 @@ async def test_delta_tree_leaves_a_folder_from_another_drive_to_the_walk(
     get, listing, _ = _feed({"id": "T", "folder": {}}, rows)
     monkeypatch.setattr(drive_ops, "graph_get", get)
     monkeypatch.setattr(drive_ops, "graph_list", listing)
-    found = await drive_ops.delta_tree(
-        MsGraphConfig(access_token="token"), _loc("d1", "")
-    )
+    found = await drive_ops.delta_tree(_accessor(), _loc("d1", ""))
     assert found is None
 
 
-async def _refused(config, url, params=None, session=None):
+async def _refused(accessor, url, params=None):
     raise GraphError(400, "invalidRequest", "no delta here")
 
 
@@ -447,9 +427,7 @@ async def test_delta_tree_leaves_a_refused_feed_to_the_walk(monkeypatch):
     get, _, _ = _feed({"id": "T", "folder": {}}, [])
     monkeypatch.setattr(drive_ops, "graph_get", get)
     monkeypatch.setattr(drive_ops, "graph_list", _refused)
-    found = await drive_ops.delta_tree(
-        MsGraphConfig(access_token="token"), _loc("d1", "f")
-    )
+    found = await drive_ops.delta_tree(_accessor(), _loc("d1", "f"))
     assert found is None
 
 
@@ -465,9 +443,7 @@ async def test_delta_tree_leaves_a_feed_without_ctags_to_the_walk(
     get, listing, _ = _feed({"id": "T", "folder": {}}, rows)
     monkeypatch.setattr(drive_ops, "graph_get", get)
     monkeypatch.setattr(drive_ops, "graph_list", listing)
-    found = await drive_ops.delta_tree(
-        MsGraphConfig(access_token="token"), _loc("d1", "")
-    )
+    found = await drive_ops.delta_tree(_accessor(), _loc("d1", ""))
     assert found is None
 
 
@@ -482,9 +458,7 @@ async def test_delta_tree_leaves_a_feed_of_another_folder_to_the_walk(
     get, listing, _ = _feed({"id": "T", "folder": {}}, rows)
     monkeypatch.setattr(drive_ops, "graph_get", get)
     monkeypatch.setattr(drive_ops, "graph_list", listing)
-    found = await drive_ops.delta_tree(
-        MsGraphConfig(access_token="token"), _loc("d1", "team/reports")
-    )
+    found = await drive_ops.delta_tree(_accessor(), _loc("d1", "team/reports"))
     assert found is None
 
 
@@ -496,7 +470,7 @@ def _listings(
 ):
     asked: dict[str, list] = {"list": [], "batch": []}
 
-    async def listing(config, url, params=None, session=None):
+    async def listing(accessor, url, params=None):
         asked["list"].append(url)
         if url in refused:
             raise GraphError(403, "accessDenied", url)
@@ -504,7 +478,7 @@ def _listings(
             raise GraphError(404, "itemNotFound", url)
         return tree[url]
 
-    async def batch(config, urls, session=None):
+    async def batch(accessor, urls):
         asked["batch"].append(list(urls))
         answers = []
         for url in urls:
@@ -524,7 +498,7 @@ def _listings(
     return listing, batch, asked
 
 
-async def _refuse_batch(config, urls, session=None):
+async def _refuse_batch(accessor, urls):
     raise GraphError(400, "invalidRequest", "no batching here")
 
 
@@ -562,7 +536,7 @@ async def test_batch_tree_lists_a_level_per_batch(monkeypatch):
     monkeypatch.setattr(drive_ops, "graph_list", listing)
     monkeypatch.setattr(drive_ops, "graph_batch", batch)
     found = await drive_ops.batch_tree(
-        MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
+        _accessor(), _loc("d1", "top"), "/od/top"
     )
     assert sorted(found) == [
         "a",
@@ -591,7 +565,7 @@ async def test_batch_tree_splits_a_wide_level(monkeypatch):
     monkeypatch.setattr(drive_ops, "graph_list", listing)
     monkeypatch.setattr(drive_ops, "graph_batch", batch)
     found = await drive_ops.batch_tree(
-        MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
+        _accessor(), _loc("d1", "top"), "/od/top"
     )
     assert sorted(found) == names
     assert [len(urls) for urls in asked["batch"]] == [20, 5]
@@ -615,7 +589,7 @@ async def test_unanswered_listings_wait_once_for_the_longest_retry(
     monkeypatch.setattr(drive_ops, "graph_batch", batch)
     monkeypatch.setattr(drive_ops.asyncio, "sleep", nap)
     found = await drive_ops.batch_tree(
-        MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
+        _accessor(), _loc("d1", "top"), "/od/top"
     )
     assert "a/c/z.txt" in found
     assert "b/y.txt" in found
@@ -636,7 +610,7 @@ async def test_a_folder_the_account_may_not_open_leaves_the_walk(monkeypatch):
     monkeypatch.setattr(drive_ops, "graph_list", listing)
     monkeypatch.setattr(drive_ops, "graph_batch", batch)
     found = await drive_ops.batch_tree(
-        MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
+        _accessor(), _loc("d1", "top"), "/od/top"
     )
     assert found is None
 
@@ -650,7 +624,7 @@ async def test_a_listing_reads_its_later_pages(monkeypatch):
     monkeypatch.setattr(drive_ops, "graph_list", listing)
     monkeypatch.setattr(drive_ops, "graph_batch", batch)
     found = await drive_ops.batch_tree(
-        MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
+        _accessor(), _loc("d1", "top"), "/od/top"
     )
     assert found["b/y.txt"].size == 3
     assert nxt in asked["list"]
@@ -664,7 +638,7 @@ async def test_a_folder_gone_below_leaves_the_walk(monkeypatch):
     monkeypatch.setattr(drive_ops, "graph_list", listing)
     monkeypatch.setattr(drive_ops, "graph_batch", batch)
     found = await drive_ops.batch_tree(
-        MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
+        _accessor(), _loc("d1", "top"), "/od/top"
     )
     assert found is None
 
@@ -675,7 +649,7 @@ async def test_a_refused_batch_leaves_the_walk(monkeypatch):
     monkeypatch.setattr(drive_ops, "graph_list", listing)
     monkeypatch.setattr(drive_ops, "graph_batch", _refuse_batch)
     found = await drive_ops.batch_tree(
-        MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
+        _accessor(), _loc("d1", "top"), "/od/top"
     )
     assert found is None
 
@@ -688,9 +662,7 @@ async def test_a_missing_top_raises_what_its_listing_raises(monkeypatch):
     monkeypatch.setattr(drive_ops, "_is_file", _absent)
     monkeypatch.setattr(drive_ops, "_is_dir", _absent)
     with pytest.raises(FileNotFoundError):
-        await drive_ops.batch_tree(
-            MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
-        )
+        await drive_ops.batch_tree(_accessor(), _loc("d1", "top"), "/od/top")
 
 
 @pytest.mark.asyncio
@@ -719,12 +691,12 @@ async def test_stream_upload_has_bounded_parts_and_cancels_failed_session(
         if fail:
             with pytest.raises(GraphError):
                 await write_item_stream(
-                    _config(), _loc("d1", "file"), b"x" * total
+                    _accessor(), _loc("d1", "file"), b"x" * total
                 )
         else:
             assert (
                 await write_item_stream(
-                    _config(), _loc("d1", "file"), b"x" * total
+                    _accessor(), _loc("d1", "file"), b"x" * total
                 )
                 == total
             )
@@ -745,5 +717,5 @@ async def test_stream_upload_source_failure_never_starts_upload():
 
     with aioresponses() as m:
         with pytest.raises(OSError, match="source failed"):
-            await write_item_stream(_config(), _loc("d1", "file"), broken())
+            await write_item_stream(_accessor(), _loc("d1", "file"), broken())
         assert not m.requests

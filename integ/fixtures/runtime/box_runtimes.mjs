@@ -26,8 +26,12 @@ export class EchoBox extends Runtime {
     super(options, ['nvidia-smi'], [])
   }
 
-  runLine(line) {
-    return Promise.resolve({ stdout: ENC.encode(`box:${line}\n`), stderr: null, exitCode: 0 })
+  runLine(_engine, _paths, _texts, ctx) {
+    return Promise.resolve({
+      stdout: ENC.encode(`box:${ctx.flags.c}\n`),
+      stderr: null,
+      exitCode: 0,
+    })
   }
 }
 
@@ -39,9 +43,9 @@ export class ShoutPython extends LanguageRuntime {
     super(options, ['python3', 'python'], [])
   }
 
-  run(args) {
+  interpret(_engine, program) {
     return Promise.resolve({
-      stdout: ENC.encode(`${args.code.toUpperCase()}\n`),
+      stdout: ENC.encode(`${program.code.toUpperCase()}\n`),
       stderr: null,
       exitCode: 0,
     })

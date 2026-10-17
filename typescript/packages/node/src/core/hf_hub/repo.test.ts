@@ -13,18 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import * as client from './client.ts'
+import { handle } from './_test_util.ts'
 import { classifyAbsence, headCommit, revisionUrl } from './repo.ts'
-
-function accessor(config: Record<string, unknown> = {}): HfHubAccessor {
-  return new HfHubAccessor({ repoId: 'acme/widget', ...config } as never)
-}
 
 describe('headCommit', () => {
   it('reads the sha', async () => {
     const spy = vi.spyOn(client, 'hubGet').mockResolvedValue({ sha: 'deadbeef' })
-    expect(await headCommit(accessor())).toBe('deadbeef')
+    expect(await headCommit(handle())).toBe('deadbeef')
     spy.mockRestore()
   })
 
@@ -34,7 +30,7 @@ describe('headCommit', () => {
     // so reading it there files a `--revision dev` fetch under main's
     // snapshot and points refs/dev at it.
     const spy = vi.spyOn(client, 'hubGet').mockResolvedValue({ sha: 'deadbeef' })
-    await headCommit(accessor({ revision: 'dev' }))
+    await headCommit(handle({ revision: 'dev' }))
     expect(String(spy.mock.calls[0]?.[1])).toMatch(/\/revision\/dev$/)
     spy.mockRestore()
   })
@@ -43,7 +39,7 @@ describe('headCommit', () => {
   // the one every not-found message names, so it carries no query.
   it('asks only for the sha', async () => {
     const spy = vi.spyOn(client, 'hubGet').mockResolvedValue({ sha: 'deadbeef' })
-    const acc = accessor()
+    const acc = handle()
     await headCommit(acc)
     expect(spy.mock.calls[0]?.[1]).toBe(revisionUrl(acc))
     expect(spy.mock.calls[0]?.[2]).toEqual({ 'expand[]': 'sha' })
@@ -52,27 +48,27 @@ describe('headCommit', () => {
 
   it('is empty when the Hub reports none', async () => {
     const spy = vi.spyOn(client, 'hubGet').mockResolvedValue({})
-    expect(await headCommit(accessor())).toBe('')
+    expect(await headCommit(handle())).toBe('')
     spy.mockRestore()
   })
 
   it('is empty when the Hub answered something that is not an object', async () => {
     const spy = vi.spyOn(client, 'hubGet').mockResolvedValue([])
-    expect(await headCommit(accessor())).toBe('')
+    expect(await headCommit(handle())).toBe('')
     spy.mockRestore()
   })
 })
 
 describe('revisionUrl', () => {
   it('encodes a revision holding a slash', () => {
-    expect(revisionUrl(accessor({ revision: 'feature/foo' }))).toMatch(/\/revision\/feature%2Ffoo$/)
+    expect(revisionUrl(handle({ revision: 'feature/foo' }))).toMatch(/\/revision\/feature%2Ffoo$/)
   })
 })
 
 describe('classifyAbsence', () => {
   it('asks the bare revision url', async () => {
     const spy = vi.spyOn(client, 'hubGet').mockResolvedValue({})
-    const acc = accessor()
+    const acc = handle()
     await classifyAbsence(acc)
     expect(spy.mock.calls[0]?.[1]).toBe(revisionUrl(acc))
     expect(revisionUrl(acc)).not.toContain('?')

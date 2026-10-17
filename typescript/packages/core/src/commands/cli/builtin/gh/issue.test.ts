@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as AccessorModule from './accessor.ts'
+import { GitHubAccount } from '../../../../accessor/github.ts'
 import type * as IssueModule from '../../../../core/github/issue.ts'
 import type { Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -21,11 +21,6 @@ import { context } from '../../../../workspace/fixtures/context.ts'
 
 const FIELDS = vi.fn<typeof IssueModule.issueFields>()
 const LIST = vi.fn<typeof IssueModule.listIssueFields>()
-
-vi.mock('./accessor.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof AccessorModule>()
-  return { ...actual, ghTransport: () => ({}) }
-})
 
 vi.mock('../../../../core/github/issue.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof IssueModule>()
@@ -38,8 +33,10 @@ vi.mock('../../../../core/github/issue.ts', async (importOriginal) => {
 
 const { ISSUE_FIELDS, listCmd, viewCmd } = await import('./issue.ts')
 
-function args(flags: Context['flags'] = {}): [unknown, PathSpec[], string[], Context] {
-  return [{ token: 't' }, [], ['4'], context({ flags: { repo: 'o/r', ...flags } })]
+const ACCOUNT = new GitHubAccount({ token: 't' })
+
+function args(flags: Context['flags'] = {}): [GitHubAccount, PathSpec[], string[], Context] {
+  return [ACCOUNT, [], ['4'], context({ flags: { repo: 'o/r', ...flags } })]
 }
 
 function json(result: Awaited<ReturnType<typeof viewCmd>>): unknown {

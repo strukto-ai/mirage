@@ -31,12 +31,12 @@ from tests.core.slack.conftest import SEARCHER, FakeSlack
 
 @pytest.mark.asyncio
 async def test_search_messages_defaults_include_page_1():
-    cfg = SlackConfig(token="xoxp-test")
+    accessor = SlackAccessor(SlackConfig(token="xoxp-test"))
     with patch(
         "mirage.core.slack.search.slack_get",
         new=AsyncMock(return_value={"ok": True}),
     ) as fake_get:
-        await search_messages(cfg, "hello")
+        await search_messages(accessor, "hello")
     params = fake_get.call_args.kwargs["params"]
     assert params["query"] == "hello"
     assert params["count"] == 20
@@ -46,12 +46,12 @@ async def test_search_messages_defaults_include_page_1():
 
 @pytest.mark.asyncio
 async def test_search_messages_forwards_explicit_count_and_page():
-    cfg = SlackConfig(token="xoxp-test")
+    accessor = SlackAccessor(SlackConfig(token="xoxp-test"))
     with patch(
         "mirage.core.slack.search.slack_get",
         new=AsyncMock(return_value={"ok": True}),
     ) as fake_get:
-        await search_messages(cfg, "hello", count=50, page=3)
+        await search_messages(accessor, "hello", count=50, page=3)
     params = fake_get.call_args.kwargs["params"]
     assert params["count"] == 50
     assert params["page"] == 3
@@ -59,13 +59,13 @@ async def test_search_messages_forwards_explicit_count_and_page():
 
 @pytest.mark.asyncio
 async def test_search_files_calls_correct_endpoint():
-    config = SlackConfig(token="xoxb", search_token="xoxp")
+    accessor = SlackAccessor(SlackConfig(token="xoxb", search_token="xoxp"))
     with patch(
         "mirage.core.slack.search.slack_get",
         new_callable=AsyncMock,
         return_value={"ok": True, "files": {"matches": []}},
     ) as mock:
-        await search_files(config, "report")
+        await search_files(accessor, "report")
     args, kwargs = mock.call_args
     assert args[1] == "search.files"
     assert kwargs["params"]["query"] == "report"
@@ -132,7 +132,7 @@ async def test_a_stopped_search_stops_its_user_listing(monkeypatch):
     listing = asyncio.Event()
     stopped = asyncio.Event()
 
-    async def hang(config, method, params=None, session=None):
+    async def hang(accessor, method, params=None):
         listing.set()
         try:
             await asyncio.Event().wait()

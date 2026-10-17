@@ -17,18 +17,18 @@ import { listPins as listPinsCore } from '../../../../core/slack/pins.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { slackAccessor } from '../../../../accessor/slack.ts'
+import type { SlackAccessor } from '../../../../accessor/slack.ts'
 
 const ENC = new TextEncoder()
 
 export async function listPins(
-  config: unknown,
+  accessor: SlackAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, ctx.spec)
-  const items = await listPinsCore(slackAccessor(config), fl.asStr('channel') ?? '')
+  const items = await listPinsCore(accessor, fl.asStr('channel') ?? '')
   const out: ByteSource = ENC.encode(JSON.stringify(items))
   return [out, new IOResult()]
 }

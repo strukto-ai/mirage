@@ -19,6 +19,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.general.interpreter import run_output
 from mirage.commands.builtin.utils.limit import (
     maybe_with_timeout,
@@ -56,7 +57,7 @@ from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.routing import RouteDecision, runtime_for_language
-from mirage.runtime.types import CodeExecution, ScriptSource, ShellFn
+from mirage.runtime.types import ScriptSource, ShellFn
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, Limit, PathSpec, Producer, word_text
@@ -84,7 +85,7 @@ PASSTHROUGH_REST = Argument("args", nargs="*", metavar="")
 
 async def call_leaf(
     fn: Callable[..., Any],
-    config: Any,
+    accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
@@ -97,17 +98,16 @@ async def call_leaf(
 
     Args:
         fn (Callable[..., Any]): the leaf's handler.
-        config (Any): the install's validated config, None without a
-            model.
+        accessor (Accessor): the install's accessor.
         paths (list[PathSpec]): the cwd-resolved path operands.
         texts (list[str]): the text operands.
         ctx (Context): the leaf's context, the one a command gets.
     """
     result = (
-        fn(config, paths, texts, ctx)
+        fn(accessor, paths, texts, ctx)
         if inspect.iscoroutinefunction(fn)
         or inspect.iscoroutinefunction(getattr(fn, "__call__", None))
-        else await run_blocking(fn, config, paths, texts, ctx)
+        else await run_blocking(fn, accessor, paths, texts, ctx)
     )
     if inspect.isawaitable(result):
         return await result
@@ -140,9 +140,9 @@ def parse_spec_for(
 def _select_runtime(
     prog: str,
     leaf: CLI,
-    entries: list[Runtime],
-    routing: RouteDecision[Runtime] | None = None,
-) -> tuple[LanguageRuntime | None, IOResult | None]:
+    entries: list[Runtime[Any]],
+    routing: RouteDecision[Runtime[Any]] | None = None,
+) -> tuple[LanguageRuntime[Any] | None, IOResult | None]:
     """Pick the workspace entry that runs a script leaf.
 
     A ``runtime:`` pin names the entry, and the entry must speak the
@@ -172,7 +172,7 @@ def _select_runtime(
             f"selecting a runtime for {prog!r} without a script"
         )
     known = ", ".join(repr(entry.name) for entry in entries) or "none"
-    chosen: Runtime | None
+    chosen: Runtime[Any] | None
     if leaf.runtime is not None:
         chosen = next(
             (entry for entry in entries if entry.name == leaf.runtime), None
@@ -238,10 +238,10 @@ async def _script_output(
     config: Any,
     ctx: Context,
     script: ScriptSource,
-    runtime: LanguageRuntime,
+    runtime: LanguageRuntime[Any],
     prog: str,
 ) -> CommandOutput:
-    """Render the invocation onto the selected runtime as one CodeExecution.
+    """Render the invocation onto the selected runtime as one ``-c`` run.
 
     The script tier's whole contract, the one a native binary could
     also honor: the program is named (argv slot 0, so its own messages
@@ -252,8 +252,7 @@ async def _script_output(
     commands' one mapping (run_output).
 
     Args:
-        config (Any): the install's validated config, None without a
-            model.
+        config (Any): the install's config, handed to the program as JSON.
         ctx (Context): the line's context.
         script (ScriptSource): the install's embedded program.
         runtime (Runtime): the selected interpreter entry.
@@ -262,22 +261,24 @@ async def _script_output(
     env = dict(ctx.env or {})
     if config is not None:
         env[CLI_CONFIG_ENV] = json.dumps(config)
-    stdin = await materialize(ctx.stdin) if ctx.stdin is not None else None
     # A .mjs source needs the engine's module mode, the same bit the
     # js command derives from the operand's extension.
-    flags = {"module": True} if script.module else {}
+    flags: dict[str, FlagValue] = {"c": script.source, "script_cli": True}
+    if script.module:
+        flags["module"] = True
     result = await runtime.execute(
-        CodeExecution(
-            language=runtime.language,
-            code=script.source,
-            args=list(ctx.argv),
-            prog=prog,
-            script_cli=True,
-            cwd=ctx.cwd,
-            env=env,
-            stdin=stdin,
+        [],
+        list(ctx.argv),
+        replace(
+            ctx,
             flags=flags,
-        )
+            env=env,
+            spec=(
+                replace(ctx.spec, name=prog)
+                if ctx.spec is not None
+                else CommandSpec(name=prog)
+            ),
+        ),
     )
     return run_output(result)
 
@@ -309,11 +310,11 @@ class CLIContext:
 
     shell: ShellFn | None = None
     command_limits: Mapping[str, Limit] | None = None
-    entries: list[Runtime] | None = None
+    entries: list[Runtime[Any]] | None = None
     vfs: Files | None = None
     session: SessionView | None = None
     processes: ProcessView | None = None
-    routing: RouteDecision[Runtime] | None = None
+    routing: RouteDecision[Runtime[Any]] | None = None
 
 
 def drops_mount_caches(spec: CLI) -> bool:
@@ -591,7 +592,7 @@ async def handle_cli(
             raise RuntimeError(
                 f"walk returned a leaf without a handler for {prog!r}"
             )
-        body = call_leaf(fn, install.config, paths, texts, ctx)
+        body = call_leaf(fn, install.accessor, paths, texts, ctx)
     # The leaf's declared limit bounds the handler body and its
     # streams, exactly like mount dispatch: without the wrap a blocking
     # leaf hangs forever and an unbounded-output leaf ignores its own

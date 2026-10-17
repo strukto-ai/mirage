@@ -19,6 +19,7 @@ import { fileStreamOp, statOp } from '../../generic/crossmount/utils.ts'
 import { tarGeneric } from '../../generic/tar/tar.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 import { isDirOf, relayIsDirOf, walkOf } from '../archive_io.ts'
+import { dispatchOf } from '../../utils/links.ts'
 
 const tar: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
   const idx = ctx.index ?? undefined
@@ -26,7 +27,7 @@ const tar: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
   const mkdir = requireOp(ops.mkdir, 'mkdir')
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   const stat = async (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, idx)
-  const dispatch = ctx.dispatch
+  const dispatch = dispatchOf(ctx)
   const fl = new FlagView(ctx.flags, specOf('tar'))
   if (dispatch !== undefined && !fl.asBool('create')) {
     // -t reads and -x writes wherever cwd or -C says, which need not
@@ -46,7 +47,7 @@ const tar: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
           await dispatch('mkdir', p)
         },
         stat: statOp(dispatch),
-        walk: walkOf(ops, accessor, idx, ctx.dispatch, 'tar'),
+        walk: walkOf(ops, accessor, idx, dispatch, 'tar'),
         isDir: relayIsDirOf(dispatch),
       },
       true,
@@ -61,7 +62,7 @@ const tar: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
     },
     mkdir: (p, parents) => mkdir(accessor, p, parents),
     stat,
-    walk: walkOf(ops, accessor, idx, ctx.dispatch, 'tar'),
+    walk: walkOf(ops, accessor, idx, dispatch, 'tar'),
     isDir: isDirOf(ops, accessor, idx),
   })
 }

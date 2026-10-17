@@ -18,7 +18,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { modifiedTs } from '../../../core/generic/find.ts'
 import { fsStrerror, isEnoent, isEnotdir, isMissError, walkRefusal } from '../../../errors/fs.ts'
-import { dotRefusal, linkFollow, statOrEnoent } from '../utils/paths.ts'
+import { dotRefusal, linkFollow, statOrEnoent, vfsStatPath } from '../utils/paths.ts'
 import { failureText } from '../../../errors/classify.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { FindOptions } from '../../../vfs/types.ts'
@@ -383,7 +383,7 @@ export function findGeneric(
       // nothing is there (see resolvePathStat). That is what makes the
       // missing case answerable above every backend rather than only where
       // one wires a stat.
-      const startStat = ctx.statPath
+      const startStat = vfsStatPath(ctx.vfs)
       if (root.walkError !== null) {
         // The walk refused the start point before find ran (the empty
         // name, a link loop), and every probe below goes by the path it

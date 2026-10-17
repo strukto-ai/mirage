@@ -91,19 +91,19 @@ class FakeDiscordApi:
         self.day_fetches: list[tuple[str, str]] = []
         self.downloads: list[tuple[str, int, int | None]] = []
 
-    async def list_guilds(self, config, session=None):
+    async def list_guilds(self, accessor):
         return [dict(GUILD)]
 
-    async def list_channels(self, config, guild_id, session=None):
+    async def list_channels(self, accessor, guild_id):
         assert guild_id == GUILD["id"]
         return [dict(c) for c in CHANNELS]
 
-    async def list_members(self, config, guild_id, session=None):
+    async def list_members(self, accessor, guild_id):
         assert guild_id == GUILD["id"]
         return [dict(m) for m in MEMBERS]
 
     async def list_messages_for_day(
-        self, config, channel_id, date_str, scope, session=None
+        self, accessor, channel_id, date_str, scope
     ):
         self.day_fetches.append((channel_id, date_str))
         if date_str == SEALED_DAY:
@@ -114,16 +114,14 @@ class FakeDiscordApi:
             return [dict(m) for m in MESSAGES]
         return []
 
-    async def get_history_jsonl(
-        self, config, channel_id, date_str, scope, session=None
-    ):
+    async def get_history_jsonl(self, accessor, channel_id, date_str, scope):
         return jsonl_bytes(
             await self.list_messages_for_day(
-                config, channel_id, date_str, scope
+                accessor, channel_id, date_str, scope
             )
         )
 
-    async def download_file(self, url, offset=0, size=None, session=None):
+    async def download_file(self, accessor, url, offset=0, size=None):
         self.downloads.append((url, offset, size))
         data = b"0123456789"
         end = len(data) if size is None else offset + size

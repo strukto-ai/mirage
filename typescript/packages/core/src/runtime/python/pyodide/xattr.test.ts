@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { MountMode } from '../../../types.ts'
+import { MountMode, PathSpec } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
@@ -57,20 +57,23 @@ describe('pyodide extended attributes', { timeout: 120_000 }, () => {
   it('answer ENOTSUP where no worker can wait on the dispatcher', async () => {
     const rt = new PyodideRuntime()
     try {
-      const out = await rt.run({
-        code: [
-          'import errno, os',
-          'try:',
-          '    os.listxattr("/data")',
-          '    answer = "served"',
-          'except OSError as exc:',
-          '    answer = exc.errno == errno.ENOTSUP',
-          'print(answer)',
-        ].join('\n'),
-        args: [],
-        env: {},
-        stdin: null,
-      })
+      const out = await rt.interpret(
+        undefined,
+        {
+          code: [
+            'import errno, os',
+            'try:',
+            '    os.listxattr("/data")',
+            '    answer = "served"',
+            'except OSError as exc:',
+            '    answer = exc.errno == errno.ENOTSUP',
+            'print(answer)',
+          ].join('\n'),
+          args: [],
+          stdin: null,
+        },
+        { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), env: {} },
+      )
       expect(new TextDecoder().decode(out.stdout)).toBe('True\n')
     } finally {
       await rt.close()

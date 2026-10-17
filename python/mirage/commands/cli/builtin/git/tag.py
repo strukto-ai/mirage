@@ -22,6 +22,7 @@ from dulwich.objects import ShaFile, Tag
 from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.commit import identity
 from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.dates import date_clock
@@ -205,7 +206,7 @@ def build_tag(
 
 
 async def tag(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """List, create or delete tags.
 
@@ -220,7 +221,7 @@ async def tag(
     operands are patterns.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context; git reads its repository

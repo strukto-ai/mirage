@@ -16,12 +16,15 @@ import json
 
 import pytest
 
+from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya import list_envelopes
 from mirage.commands.config import Context
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import materialize
 
-CONFIG = EmailConfig(imap_host="h", smtp_host="h", username="u", password="p")
+EMAIL = EmailAccessor(
+    EmailConfig(imap_host="h", smtp_host="h", username="u", password="p")
+)
 
 
 def envelope(uid: str, day: int) -> dict:
@@ -61,7 +64,7 @@ def patched(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_defaults_to_inbox_and_matches_everything(patched):
-    out, io = await list_envelopes(CONFIG, [], [], Context())
+    out, io = await list_envelopes(EMAIL, [], [], Context())
     assert io.exit_code == 0
     assert patched["folder"] == "INBOX"
     assert patched["criteria"] == "ALL"
@@ -75,14 +78,14 @@ async def test_list_defaults_to_inbox_and_matches_everything(patched):
 
 @pytest.mark.asyncio
 async def test_mailbox_flag_selects_the_folder(patched):
-    await list_envelopes(CONFIG, [], [], Context(flags={"mailbox": "Archive"}))
+    await list_envelopes(EMAIL, [], [], Context(flags={"mailbox": "Archive"}))
     assert patched["folder"] == "Archive"
 
 
 @pytest.mark.asyncio
 async def test_pages_count_from_one(patched):
     out, _ = await list_envelopes(
-        CONFIG, [], [], Context(flags={"page": 2, "page_size": 2})
+        EMAIL, [], [], Context(flags={"page": 2, "page_size": 2})
     )
     data = json.loads(await materialize(out))
     assert [d["uid"] for d in data] == ["1"]
@@ -95,7 +98,7 @@ async def test_empty_result_skips_the_header_fetch(patched, monkeypatch):
 
     patched["uids"] = []
     monkeypatch.setitem(list_envelopes.__globals__, "fetch_headers", boom)
-    out, io = await list_envelopes(CONFIG, [], [], Context())
+    out, io = await list_envelopes(EMAIL, [], [], Context())
     assert io.exit_code == 0
     assert json.loads(await materialize(out)) == []
 
@@ -103,7 +106,7 @@ async def test_empty_result_skips_the_header_fetch(patched, monkeypatch):
 @pytest.mark.asyncio
 async def test_only_the_pages_asked_for_are_fetched(patched):
     await list_envelopes(
-        CONFIG, [], [], Context(flags={"page": 2, "page_size": 2})
+        EMAIL, [], [], Context(flags={"page": 2, "page_size": 2})
     )
     # Not the whole mailbox: one page-worth of headers per page asked for.
     assert patched["budget"] == 4
@@ -112,9 +115,9 @@ async def test_only_the_pages_asked_for_are_fetched(patched):
 @pytest.mark.asyncio
 async def test_the_account_window_caps_the_fetch(patched):
     await list_envelopes(
-        CONFIG, [], [], Context(flags={"page": 100, "page_size": 25})
+        EMAIL, [], [], Context(flags={"page": 100, "page_size": 25})
     )
-    assert patched["budget"] == CONFIG.max_messages
+    assert patched["budget"] == EMAIL.config.max_messages
 
 
 @pytest.mark.asyncio
@@ -123,7 +126,7 @@ async def test_a_listing_is_header_only(patched):
     # in the MIME structure, but the listing is the envelope: a page of 25
     # messages must not carry 25 HTML bodies. `message read` and the mounted
     # .email.json keep them (#1067).
-    out, _ = await list_envelopes(CONFIG, [], [], Context())
+    out, _ = await list_envelopes(EMAIL, [], [], Context())
     data = json.loads(await materialize(out))
     assert data
     for row in data:

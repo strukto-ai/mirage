@@ -62,7 +62,7 @@ async def run_command_tree(
     context: EvaluationContext,
     stdin: Any,
     cancel: asyncio.Event | None,
-    routing_decision: RouteDecision[Runtime] | None = None,
+    routing_decision: RouteDecision[Runtime[Any]] | None = None,
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
     command_substitution: bool = False,

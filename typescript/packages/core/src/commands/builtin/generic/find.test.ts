@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { materialize } from '../../../io/types.ts'
+import { materialize, IOResult } from '../../../io/types.ts'
 
 import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
@@ -21,6 +21,8 @@ import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import { findGeneric as streamFind } from './find.ts'
 import { modifiedTs } from '../../../core/generic/find.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
+import { Files } from '../../../workspace/files.ts'
 
 async function findGeneric(...args: Parameters<typeof streamFind>) {
   const result = await streamFind(...args)
@@ -51,11 +53,15 @@ function fakeFind(root: PathSpec, _options: FindOptions): Promise<string[]> {
 }
 
 function optsWith(stat: FileStat | null, flags: Record<string, unknown> = {}): Context {
+  const dispatch: DispatchFn = (op, path) =>
+    op === 'stat' && stat !== null
+      ? Promise.resolve([stat, new IOResult()])
+      : Promise.reject(enoent(path.virtual))
   return {
     stdin: null,
     flags,
     cwd: PathSpec.fromStrPath('/'),
-    statPath: () => Promise.resolve(stat),
+    vfs: new Files(dispatch, null, null, () => null, { ledger: false }),
   } as unknown as Context
 }
 

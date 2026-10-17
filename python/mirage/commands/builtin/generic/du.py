@@ -8,6 +8,7 @@ from mirage.commands.builtin.constants import INTMAX
 from mirage.commands.builtin.utils.formatting import scaled_size
 from mirage.commands.builtin.utils.links import mounts_of
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.builtin.utils.paths import vfs_stat_path
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
@@ -797,7 +798,7 @@ async def du_generic(
             session_visibility(),
             compute_entries,
         ),
-        stat_path=ctx.stat_path,
+        stat_path=vfs_stat_path(ctx.vfs),
     )
     out = await du(
         present,

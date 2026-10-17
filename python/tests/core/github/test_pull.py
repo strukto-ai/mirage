@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.accessor.github import GitHubAccount
 from mirage.core.github.config import GhConfig
 from mirage.core.github.pull import (
     PullListFilter,
@@ -25,6 +26,8 @@ from mirage.core.github.pull import (
     pull_request_fields,
 )
 from mirage.core.github.repo import RepoRef
+
+ACCOUNT = GitHubAccount(GhConfig(token="t"))
 
 
 @pytest.mark.asyncio
@@ -48,7 +51,7 @@ async def test_pull_checks_follow_the_head_sha(monkeypatch):
     monkeypatch.setitem(pull_checks.__globals__, "github_pages", pages)
     monkeypatch.setitem(pull_checks.__globals__, "commit_statuses", statuses)
 
-    assert await pull_checks(GhConfig(token="t"), RepoRef("o", "r"), 3) == [
+    assert await pull_checks(ACCOUNT, RepoRef("o", "r"), 3) == [
         {"name": "test"}
     ]
 
@@ -81,7 +84,7 @@ async def test_pull_checks_merge_commit_status_contexts(monkeypatch):
     monkeypatch.setitem(pull_checks.__globals__, "github_pages", pages)
     monkeypatch.setitem(pull_checks.__globals__, "commit_statuses", statuses)
 
-    rows = await pull_checks(GhConfig(token="t"), RepoRef("o", "r"), 3)
+    rows = await pull_checks(ACCOUNT, RepoRef("o", "r"), 3)
 
     assert rows == [
         {
@@ -109,13 +112,13 @@ async def test_pull_checks_merge_commit_status_contexts(monkeypatch):
 async def test_commit_statuses_read_the_combined_endpoint(monkeypatch):
     calls = []
 
-    async def request(token, method, path, *args, **kwargs):
+    async def request(account, method, path, *args, **kwargs):
         calls.append((method, path))
         return {"state": "success", "statuses": [{"context": "ci"}, "junk"]}
 
     monkeypatch.setitem(commit_statuses.__globals__, "github_request", request)
 
-    rows = await commit_statuses(GhConfig(token="t"), RepoRef("o", "r"), "abc")
+    rows = await commit_statuses(ACCOUNT, RepoRef("o", "r"), "abc")
 
     assert calls == [("GET", "/repos/o/r/commits/abc/status")]
     assert rows == [{"context": "ci"}]
@@ -136,7 +139,7 @@ async def test_comment_pull_preflights_the_pull_number(monkeypatch):
     monkeypatch.setitem(comment_pull.__globals__, "github_request", request)
 
     with pytest.raises(ValueError, match="not a pull request"):
-        await comment_pull(GhConfig(token="t"), RepoRef("o", "r"), 4, "no")
+        await comment_pull(ACCOUNT, RepoRef("o", "r"), 4, "no")
     assert calls == [("GET", 4)]
 
 
@@ -155,7 +158,7 @@ async def test_list_pulls_filters_before_applying_the_limit(monkeypatch):
     monkeypatch.setitem(list_pulls.__globals__, "github_pages", pages)
 
     rows = await list_pulls(
-        GhConfig(token="t"),
+        ACCOUNT,
         RepoRef("o", "r"),
         {"state": "closed"},
         1,
@@ -185,9 +188,7 @@ async def test_pull_request_fields_ask_for_one_pull_by_number(monkeypatch):
         pull_request_fields.__globals__, "graphql_data", graphql
     )
 
-    node = await pull_request_fields(
-        GhConfig(token="t"), RepoRef("o", "r"), 7, "title"
-    )
+    node = await pull_request_fields(ACCOUNT, RepoRef("o", "r"), 7, "title")
 
     assert node == {"title": "t"}
     query, variables = graphql.sent[0]
@@ -206,7 +207,7 @@ async def test_pull_request_fields_declare_the_cursor_only_for_a_page(
     )
 
     await pull_request_fields(
-        GhConfig(token="t"),
+        ACCOUNT,
         RepoRef("o", "r"),
         7,
         "reviews(first: 100, after: $endCursor) {nodes {id}}",
@@ -242,7 +243,7 @@ async def test_pull_listing_pages_to_the_limit_and_lists_a_repeat_once(
     )
 
     rows = await list_pull_request_fields(
-        GhConfig(token="t"),
+        ACCOUNT,
         RepoRef("o", "r"),
         PullListFilter(("OPEN",), "main"),
         3,
@@ -270,7 +271,7 @@ async def test_pull_listing_asks_nothing_for_a_zero_limit(monkeypatch):
     )
 
     rows = await list_pull_request_fields(
-        GhConfig(token="t"),
+        ACCOUNT,
         RepoRef("o", "r"),
         PullListFilter(("OPEN",)),
         0,

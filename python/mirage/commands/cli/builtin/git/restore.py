@@ -21,6 +21,7 @@ from dulwich.objects import Commit, ObjectID
 from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.changes import head_entries
 from mirage.commands.cli.builtin.git.constants import GITLINK, HEAD
 from mirage.commands.cli.builtin.git.errors import (
@@ -163,7 +164,7 @@ def source_tree(repo: BaseRepo, revision: str) -> tuple[bytes, Tree]:
 
 
 async def restore(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Put paths back to what a source records.
 
@@ -176,7 +177,7 @@ async def restore(
     match the source" means for it. Pinned against git 2.50.1.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context; git reads its repository

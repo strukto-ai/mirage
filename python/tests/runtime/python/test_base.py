@@ -16,14 +16,14 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.runtime.python.base import PythonRuntime
-from mirage.runtime.types import RunArgs, RunResult
+from mirage.runtime.types import Program, RunResult
 
 
 class ProcessRuntime(PythonRuntime):
     name = "custom-process"
     runs = 0
 
-    async def run(self, args: RunArgs, context=None) -> RunResult:
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
         self.runs += 1
         return RunResult(
             stdout=b"unexpected execution", stderr=None, exit_code=0

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { NOOPAccessor } from '../../../../accessor/base.ts'
+import type { GitHubAccount } from '../../../../accessor/github.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import {
   createRepo,
@@ -41,7 +43,6 @@ import {
   csvValues,
   ghBool,
   ghRepo,
-  ghTransport,
   jsonFields,
   listLimit,
   textOut,
@@ -50,7 +51,6 @@ import {
   webOrigin,
 } from './accessor.ts'
 import { REPO_EDIT_FIELDS } from './constants.ts'
-import type { GhConfig } from '../../../../core/github/config.ts'
 import { parseCommand, parseToKwargs } from '../../../spec/parser.ts'
 import { findNode } from '../../walk.ts'
 import { GIT } from '../git/index.ts'
@@ -366,14 +366,14 @@ export function summary(repo: unknown, readme: string | null): string {
  * the text view reads the REST object and the README.
  */
 export async function view(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const transport = ghTransport(config)
-  const ref = ghRepo(config, texts[0] ?? fl.asStr('repo'))
+  const transport = accessor.transport
+  const ref = ghRepo(accessor, texts[0] ?? fl.asStr('repo'))
   const fields = jsonFields(fl, REPO_FIELDS)
   if (fields !== null) {
     const node = await repositoryFields(transport, ref, repoSelection(fields))
@@ -385,13 +385,13 @@ export async function view(
 
 /** `gh repo list`, over GraphQL for `--json` as `view` is. */
 export async function listCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const transport = ghTransport(config)
+  const transport = accessor.transport
   const limit = listLimit(fl, 30)
   const fields = jsonFields(fl, REPO_FIELDS)
   if (fields !== null) {
@@ -414,7 +414,7 @@ export async function listCmd(
 }
 
 export async function createCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -439,7 +439,7 @@ export async function createCmd(
   const homepage = fl.asStr('homepage')
   if (description !== undefined) body.description = description
   if (homepage !== undefined) body.homepage = homepage
-  const created = repo(await createRepo(ghTransport(config), owner, body))
+  const created = repo(await createRepo(accessor.transport, owner, body))
   return textOut(`${textValue(created.url)}\n`)
 }
 
@@ -447,8 +447,8 @@ export async function createCmd(
  * The Authorization git sends GitHub for the install's token: Basic with the
  * token as the password, what gh's credential helper hands git.
  */
-function tokenHeader(config: GhConfig): Record<string, string> {
-  return { Authorization: `Basic ${btoa(`x-access-token:${config.token}`)}` }
+function tokenHeader(accessor: GitHubAccount): Record<string, string> {
+  return { Authorization: `Basic ${btoa(`x-access-token:${accessor.config.token}`)}` }
 }
 
 /**
@@ -458,7 +458,7 @@ function tokenHeader(config: GhConfig): Record<string, string> {
  * not added.
  */
 export async function cloneCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -466,12 +466,12 @@ export async function cloneCmd(
   const [names, gitflags] = splitMarked(texts, ctx.argv ?? [])
   const spec = names[0]
   if (spec === undefined) throw new Error('cannot clone: repository argument required')
-  checkHost(config, repoHost(spec))
+  checkHost(accessor, repoHost(spec))
   const ref: RepoRef =
     !spec.includes('/') && !spec.includes(':')
-      ? { owner: await login(ghTransport(config)), repo: spec }
+      ? { owner: await login(accessor.transport), repo: spec }
       : parseRepo(spec)
-  const url = `${webOrigin(config as GhConfig)}/${ref.owner}/${ref.repo}.git`
+  const url = `${webOrigin(accessor)}/${ref.owner}/${ref.repo}.git`
   const target = names[1] ?? ref.repo
   const leaf = findNode(GIT.spec, ['clone'])?.node ?? GIT.spec
   const words = [...gitflags, url, target]
@@ -488,11 +488,11 @@ export async function cloneCmd(
     spec: leaf,
   }
   return gitClone(
-    null,
+    new NOOPAccessor(),
     [],
     parsed.args.map(([word]) => word),
     git,
-    tokenHeader(config as GhConfig),
+    tokenHeader(accessor),
   )
 }
 
@@ -504,7 +504,7 @@ export async function cloneCmd(
  * `--remote=false` asks for what this fork does anyway.
  */
 export async function fork(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -519,10 +519,10 @@ export async function fork(
   if (ghBool(fl, 'remote') && texts[0] === undefined) {
     throw new Error('--remote is not supported: there is no local checkout to add a remote to')
   }
-  const transport = ghTransport(config)
+  const transport = accessor.transport
   let source: RepoRef
   try {
-    source = ghRepo(config, texts[0])
+    source = ghRepo(accessor, texts[0])
   } catch (err) {
     if (texts[0] === undefined || !(err instanceof Error)) throw err
     throw new Error(`did not understand argument: ${err.message}`)
@@ -538,16 +538,16 @@ export async function fork(
 }
 
 export async function rename(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const transport = ghTransport(config)
+  const transport = accessor.transport
   // gh takes the *new name* as the operand and the repository to rename as
   // -R, which is the reverse of what the shape of the line suggests.
-  const target = ghRepo(config, fl.asStr('repo') ?? undefined)
+  const target = ghRepo(accessor, fl.asStr('repo') ?? undefined)
   const name = texts[0] ?? ''
   if (name === '') throw new Error('a new repository name is required')
   const renamed = (await renameRepo(transport, target, name)) as { full_name?: string }
@@ -562,13 +562,13 @@ export async function rename(
  * writing to anything but a terminal, success prints nothing.
  */
 export async function editCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, ctx.spec)
-  const ref = ghRepo(config, texts[0])
+  const ref = ghRepo(accessor, texts[0])
   const body: Record<string, unknown> = {}
   const security: Record<string, unknown> = {}
   for (const field of REPO_EDIT_FIELDS) {
@@ -599,7 +599,7 @@ export async function editCmd(
       1,
     )
   }
-  const transport = ghTransport(config)
+  const transport = accessor.transport
   if (Object.keys(security).length > 0) {
     const node = await repositoryFields(transport, ref, 'viewerCanAdminister')
     if (node.viewerCanAdminister !== true) {
@@ -626,7 +626,7 @@ export async function editCmd(
  * is gh's deprecated spelling of `--yes`, and it warns the way cobra does.
  */
 export async function deleteCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -641,9 +641,9 @@ export async function deleteCmd(
     )
   }
   if (!confirmed) throw new UsageError('--yes required when not running interactively', 1)
-  const transport = ghTransport(config)
+  const transport = accessor.transport
   const named = spec ?? ''
-  const ref = ghRepo(config, named.includes('/') ? named : `${await login(transport)}/${named}`)
+  const ref = ghRepo(accessor, named.includes('/') ? named : `${await login(transport)}/${named}`)
   await deleteRepo(transport, ref)
   const warning = ghBool(fl, 'confirm')
     ? 'Flag --confirm has been deprecated, use `--yes` instead\n'

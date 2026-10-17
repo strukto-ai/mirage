@@ -138,9 +138,7 @@ class NotionEventHook:
             object_id (str): The object's id.
         """
         try:
-            return await read(
-                self._accessor.config, object_id, session=self._accessor.pool
-            )
+            return await read(self._accessor, object_id)
         except NotionAPIError as exc:
             if exc.status != 404:
                 raise

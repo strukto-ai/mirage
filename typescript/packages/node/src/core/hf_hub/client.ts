@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { apiRequest } from '@struktoai/mirage-core/core/api/client'
+import type { HfAccountAccessor } from '../../accessor/hf_hub.ts'
 import type { ApiResponse, RetryPolicy } from '@struktoai/mirage-core/core/api/client'
 import type { ByteWindow } from '@struktoai/mirage-core/utils/ranges'
 import { API_SEGMENTS, MAX_RETRIES, RESOLVE_SEGMENTS, RETRY_STATUSES } from './constants.ts'
@@ -143,11 +144,6 @@ export function stallFetch(ms: number): typeof fetch {
   }
 }
 
-/** The fetch a call rides: bounded by the mount's timeout when it has one. */
-function fetchFor(timeoutMs: number | undefined): typeof fetch {
-  return timeoutMs === undefined ? hubFetch : stallFetch(timeoutMs)
-}
-
 export function hubHeaders(token: string | undefined): Record<string, string> {
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (token !== undefined && token !== '') headers.Authorization = `Bearer ${token}`
@@ -239,59 +235,56 @@ export function errorOf(response: Response, text: string): Error {
 }
 
 export async function hubGet(
-  token: string | undefined,
+  account: HfAccountAccessor,
   url: string,
   params?: Record<string, string>,
-  timeoutMs?: number,
 ): Promise<unknown> {
   return apiRequest('GET', url, {
     errorOf,
-    headers: hubHeaders(token),
+    headers: hubHeaders(account.token),
     params,
     retry: RETRY,
-    fetchFn: fetchFor(timeoutMs),
+    fetchFn: stallFetch(account.timeoutMs),
   })
 }
 
 /** One GET retaining status and headers, which tree pagination reads. */
 export async function hubGetResponse(
-  token: string | undefined,
+  account: HfAccountAccessor,
   url: string,
   params?: Record<string, string>,
-  timeoutMs?: number,
 ): Promise<ApiResponse> {
   return (await apiRequest('GET', url, {
     errorOf,
-    headers: hubHeaders(token),
+    headers: hubHeaders(account.token),
     params,
     retry: RETRY,
     read: 'response',
-    fetchFn: fetchFor(timeoutMs),
+    fetchFn: stallFetch(account.timeoutMs),
   })) as ApiResponse
 }
 
 export async function hubPost(
-  token: string | undefined,
+  account: HfAccountAccessor,
   url: string,
   body: unknown,
   params?: Record<string, string>,
-  timeoutMs?: number,
 ): Promise<unknown> {
   // fetch labels an untyped string body text/plain, and the Hub answers a
   // paths-info body without a JSON type with 400; python's aiohttp sets it.
   return apiRequest('POST', url, {
     errorOf,
-    headers: { ...hubHeaders(token), 'Content-Type': 'application/json' },
+    headers: { ...hubHeaders(account.token), 'Content-Type': 'application/json' },
     params,
     json: body,
     retry: RETRY,
-    fetchFn: fetchFor(timeoutMs),
+    fetchFn: stallFetch(account.timeoutMs),
   })
 }
 
 /** One arbitrary JSON call, for the endpoints that are not GET or POST. */
 export async function hubRequest(
-  token: string | undefined,
+  account: HfAccountAccessor,
   method: string,
   url: string,
   body: unknown,
@@ -299,10 +292,10 @@ export async function hubRequest(
 ): Promise<unknown> {
   const options: Parameters<typeof apiRequest>[2] = {
     errorOf,
-    headers: hubHeaders(token),
+    headers: hubHeaders(account.token),
     params,
     retry: RETRY,
-    fetchFn: hubFetch,
+    fetchFn: stallFetch(account.timeoutMs),
   }
   if (body !== null && body !== undefined) options.json = body
   return apiRequest(method.toUpperCase(), url, options)
@@ -310,19 +303,18 @@ export async function hubRequest(
 
 /** One newline-delimited-JSON POST, which is the commit endpoint's shape. */
 export async function hubPostNdjson(
-  token: string | undefined,
+  account: HfAccountAccessor,
   url: string,
   payload: Uint8Array,
   params?: Record<string, string>,
-  timeoutMs?: number,
 ): Promise<unknown> {
   return apiRequest('POST', url, {
     errorOf,
-    headers: { ...hubHeaders(token), 'Content-Type': 'application/x-ndjson' },
+    headers: { ...hubHeaders(account.token), 'Content-Type': 'application/x-ndjson' },
     params,
     body: payload,
     retry: RETRY,
-    fetchFn: fetchFor(timeoutMs),
+    fetchFn: stallFetch(account.timeoutMs),
   })
 }
 
@@ -333,18 +325,17 @@ export async function hubPostNdjson(
  * Range along, so a window costs no extra round trip.
  */
 export async function hubBytes(
-  token: string | undefined,
+  account: HfAccountAccessor,
   url: string,
   window?: ByteWindow,
-  timeoutMs?: number,
 ): Promise<Uint8Array> {
   return (await apiRequest('GET', url, {
     errorOf,
-    headers: hubHeaders(token),
+    headers: hubHeaders(account.token),
     retry: RETRY,
     read: 'bytes',
     window,
-    fetchFn: fetchFor(timeoutMs),
+    fetchFn: stallFetch(account.timeoutMs),
   })) as Uint8Array
 }
 
@@ -356,18 +347,17 @@ export async function hubBytes(
  * which is the only one that can vouch for them. The ETag is `''` when none.
  */
 export async function hubBytesTagged(
-  token: string | undefined,
+  account: HfAccountAccessor,
   url: string,
   window?: ByteWindow,
-  timeoutMs?: number,
 ): Promise<[Uint8Array, string]> {
   const response = (await apiRequest('GET', url, {
     errorOf,
-    headers: hubHeaders(token),
+    headers: hubHeaders(account.token),
     retry: RETRY,
     read: 'bytes_response',
     window,
-    fetchFn: fetchFor(timeoutMs),
+    fetchFn: stallFetch(account.timeoutMs),
   })) as ApiResponse
   return [response.data as Uint8Array, response.headers.etag ?? '']
 }
@@ -388,12 +378,11 @@ export function etagValue(raw: string): string {
  * chunk, so an empty file reports them too.
  */
 export async function* hubStream(
-  token: string | undefined,
+  account: HfAccountAccessor,
   url: string,
   onResponse?: (headers: Record<string, string>) => void,
-  timeoutMs?: number,
 ): AsyncIterable<Uint8Array> {
-  const response = await fetchFor(timeoutMs)(url, { headers: hubHeaders(token) })
+  const response = await stallFetch(account.timeoutMs)(url, { headers: hubHeaders(account.token) })
   if (response.status >= 400) throw errorOf(response, await response.text())
   if (onResponse !== undefined) {
     const headers: Record<string, string> = {}

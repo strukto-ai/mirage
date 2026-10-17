@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.slack import SlackAccessor
 from mirage.commands.cli.builtin.slack import SLACK
 from mirage.commands.spec.compile import compile_spec
 from mirage.core.slack.config import SlackConfig
@@ -38,6 +39,7 @@ def leaf(name: str):
 def test_tree_shape_matches_the_openclaw_vocabulary():
     assert SLACK.spec.name == "slack"
     assert SLACK.config_model is SlackConfig
+    assert SLACK.accessor is SlackAccessor
     assert [v.name for v in SLACK.spec.subcommands] == VERBS
 
 

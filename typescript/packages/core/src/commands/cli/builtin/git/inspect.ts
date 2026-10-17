@@ -1,3 +1,4 @@
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { PathSpec } from '../../../../types.ts'
 import { loadRefs, resolveSymbolic } from './refs.ts'
 import { MINIMUM_ABBREV, shortenRef } from './ref_fields.ts'
@@ -69,7 +70,7 @@ const GET_URL = new CommandSpec({
 })
 
 export async function remote(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -237,7 +238,7 @@ async function mergeBaseIds(repo: Repo, revisions: readonly string[]): Promise<[
 }
 
 export async function mergeBase(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -272,7 +273,7 @@ export async function mergeBase(
 }
 
 export async function config(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -352,7 +353,7 @@ export async function config(
 }
 
 export async function showRef(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -384,7 +385,7 @@ export async function showRef(
 }
 
 export async function revList(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -412,7 +413,7 @@ export async function revList(
 }
 
 export function version(
-  _config: unknown,
+  _accessor: NOOPAccessor,
   _paths: PathSpec[],
   _texts: string[],
   _ctx: Context,
@@ -531,7 +532,7 @@ function abbrevStrict(mode: FlagValue, warn: boolean): boolean {
  * bare exit 1.
  */
 export async function revParse(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

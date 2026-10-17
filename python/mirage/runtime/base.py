@@ -12,46 +12,53 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import logging
 from abc import ABC
 from collections.abc import Sequence
-from typing import Any, Callable, ClassVar
+from dataclasses import replace
+from typing import Any, Callable, ClassVar, Generic, cast
 
-from mirage.runtime.binding import RuntimeContext, WorkspaceBinding
+from mirage.commands.config import Context
+from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.mixin import (
+    E,
     LineExecutorMixin,
     ProcessExecutorMixin,
     StreamingProcessMixin,
 )
 from mirage.runtime.types import (
-    ExecutionRequest,
+    ExecutionKind,
     FilesystemOperation,
-    ProcessExecution,
+    OutputFn,
     RunResult,
     RuntimeCapabilities,
     RuntimeReach,
-    ShellRequest,
-    StreamExecution,
 )
+from mirage.types import PathSpec
 from mirage.utils.activity import Activity
 
+logger = logging.getLogger(__name__)
 
-class Runtime(ABC):
+
+class Runtime(ABC, Generic[E]):
     """An engine the workspace can route commands or whole lines to.
 
     A runtime is to its commands what the regex engine is to grep: the
     machinery inside a handler, invisible to the dispatcher. Each
     runtime declares the command names it captures; a command binds to
     the first runtime in the workspace's ordered list that captures
-    it. Implementations own their engine lifecycle (lazy boot, reuse
-    across runs, teardown in close).
+    it. Its hooks take what a handler takes, ``(engine, paths, texts,
+    ctx)``: the engine (``E``) is built once by ``open_engine``.
 
     The base holds only what every tier shares: the registry name, the
-    captured command names and the coerced config. What a runtime can
-    DO is declared by its tier and mixins, detected by type and never by
-    probing: LanguageRuntime interprets one command's code (run),
-    LineExecutorMixin takes whole lines (run_line).
+    captured command names, the coerced config and the engine. What a
+    runtime can DO is declared by its tier and mixins, detected by type
+    and never by probing: LanguageRuntime interprets code in its
+    language (run), LineExecutorMixin takes whole lines (run_line),
+    ProcessExecutorMixin runs an argv (run_process).
     """
 
     name: str
@@ -75,6 +82,7 @@ class Runtime(ABC):
     _binding: WorkspaceBinding | None = None
     _activity: Activity | None = None
     _retired: bool = False
+    _engine_task: "asyncio.Future[E] | None" = None
 
     def __init__(
         self,
@@ -146,48 +154,156 @@ class Runtime(ABC):
         self._binding = binding
 
     async def execute(
-        self, request: ExecutionRequest, context: RuntimeContext | None = None
+        self,
+        paths: Sequence[PathSpec],
+        texts: Sequence[str],
+        ctx: Context,
+        *,
+        kind: ExecutionKind = "code",
+        output: OutputFn | None = None,
     ) -> RunResult:
-        """Execute directly, or under the bound workspace's captured context.
+        """Run once, as the session the bound workspace captures.
 
-        This is the engine entry point. Workspace.shell remains the shell
-        admission and routing entry point, as it was for callers of run and
-        run_line.
+        The capture supplies the files (``ctx.vfs``, judged as the
+        program's own calls) and the session; the caller's ``ctx`` the
+        rest.
+
+        Args:
+            paths (Sequence[PathSpec]): the path operands (a script).
+            texts (Sequence[str]): the text operands (argv; a process's
+                program first).
+            ctx (Context): the run's context.
+            kind (ExecutionKind): code in the runtime's language, a
+                whole line (``sh -c`` with ``ctx.flags["c"]``), or a
+                process.
+            output (OutputFn | None): where a streamed process writes
+                its output; None collects it in the result.
         """
         release = self.admit()
         try:
-            if context is None and self._binding is not None:
-                context = self._binding.capture()
-            if context is not None:
-                if context.binding is not self._binding:
-                    raise ValueError(
-                        f"{self.name}: context belongs to another binding"
-                    )
-                if (
-                    self.reach != "workspace"
-                    and context.restricted_mounts
-                    and not self._serves_session(context)
-                ):
-                    return RunResult(
-                        stdout=b"",
-                        exit_code=127,
-                        stderr=(
-                            f"{self.name}: runtime cannot enforce this session's "
-                            "file restrictions\n"
-                        ).encode(),
-                    )
-                return await context.scope.run(
-                    lambda: self._execute(request, context)
+            capture = self._binding.capture() if self._binding else None
+            if (
+                capture is not None
+                and self.reach != "workspace"
+                and capture.restricted_mounts
+                and not self._serves_session(capture.restricted_mounts)
+            ):
+                return RunResult(
+                    stdout=b"",
+                    exit_code=127,
+                    stderr=(
+                        f"{self.name}: runtime cannot enforce this session's "
+                        "file restrictions\n"
+                    ).encode(),
                 )
-            return await self._execute(request, None)
+            engine = await self.engine()
+            if capture is None:
+                return await self._run(
+                    kind, engine, list(paths), list(texts), ctx, output
+                )
+            run_ctx = replace(
+                ctx,
+                vfs=capture.ctx.vfs,
+                session=(
+                    capture.ctx.session
+                    if capture.ctx.session is not None
+                    else ctx.session
+                ),
+                processes=(
+                    ctx.processes
+                    if ctx.processes is not None
+                    else capture.ctx.processes
+                ),
+            )
+            return await capture.scope.run(
+                lambda: self._run(
+                    kind, engine, list(paths), list(texts), run_ctx, output
+                )
+            )
         finally:
             release()
 
-    def _serves_session(self, context: RuntimeContext) -> bool:
+    async def _run(
+        self,
+        kind: ExecutionKind,
+        engine: E,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+        output: OutputFn | None,
+    ) -> RunResult:
+        """Hand the run to the capability its kind asks for.
+
+        Args:
+            kind (ExecutionKind): what is asked.
+            engine (E): the engine.
+            paths (list[PathSpec]): the path operands.
+            texts (list[str]): the text operands.
+            ctx (Context): the run's context.
+            output (OutputFn | None): a streamed process's output.
+        """
+        if kind == "process" and not texts:
+            raise ValueError("process argv must not be empty")
+        if kind == "code":
+            return await self.run(engine, paths, texts, ctx)
+        if kind == "line" and isinstance(self, LineExecutorMixin):
+            return await self.run_line(engine, paths, texts, ctx)
+        if kind == "process" and output is not None:
+            if isinstance(self, StreamingProcessMixin):
+                return await self.run_stream(engine, paths, texts, ctx, output)
+        elif kind == "process" and isinstance(self, ProcessExecutorMixin):
+            return await self.run_process(engine, paths, texts, ctx)
+        shown = "stream" if output is not None else kind
+        raise UnsupportedExecutionError(
+            f"{self.name}: {shown} execution is unsupported"
+        )
+
+    async def run(
+        self, engine: E, paths: list[PathSpec], texts: list[str], ctx: Context
+    ) -> RunResult:
+        """Run code in this runtime's language; only a language runtime
+        has one.
+
+        Args:
+            engine (E): the install's engine.
+            paths (list[PathSpec]): the script operand, if any.
+            texts (list[str]): the program's argv.
+            ctx (Context): the run's context.
+        """
+        raise UnsupportedExecutionError(
+            f"{self.name}: code execution is unsupported"
+        )
+
+    async def open_engine(self) -> E:
+        """Build the engine every run reuses, once; the default is None."""
+        return cast(E, None)
+
+    async def close_engine(self, engine: E) -> None:
+        """Release what ``open_engine`` built.
+
+        Args:
+            engine (E): the engine.
+        """
+        return None
+
+    async def engine(self) -> E:
+        """The engine, opened once and shared; a failed open is retried."""
+        if self._engine_task is None:
+            self._engine_task = asyncio.ensure_future(self.open_engine())
+        opening = self._engine_task
+        try:
+            return await asyncio.shield(opening)
+        except Exception:
+            if self._engine_task is opening:
+                self._engine_task = None
+            raise
+
+    def _serves_session(self, restricted_mounts: tuple[str, ...]) -> bool:
         """Whether every restricted mount is served through this caller's gate.
 
         Args:
-            context (RuntimeContext): the execution's captured workspace view.
+            restricted_mounts (tuple[str, ...]): the mounts the session
+                restricts.
         """
         return False
 
@@ -207,33 +323,14 @@ class Runtime(ABC):
         if self._activity is not None:
             await self._activity.wait()
 
-    def _capture_context(self) -> RuntimeContext | None:
-        return self._binding.capture() if self._binding is not None else None
-
-    async def _execute(
-        self, request: ExecutionRequest, context: RuntimeContext | None
-    ) -> RunResult:
-        if isinstance(request, StreamExecution) and isinstance(
-            self, StreamingProcessMixin
-        ):
-            if not request.argv:
-                raise ValueError("process argv must not be empty")
-            return await self.run_stream(request)
-        if isinstance(request, ProcessExecution) and isinstance(
-            self, ProcessExecutorMixin
-        ):
-            if not request.argv:
-                raise ValueError("process argv must not be empty")
-            return await self.run_process(request)
-        if isinstance(request, ShellRequest) and isinstance(
-            self, LineExecutorMixin
-        ):
-            return await self.run_line(
-                request.line, request.stdin, request.env, request.cwd.virtual
-            )
-        raise UnsupportedExecutionError(
-            f"{self.name}: {request.kind} execution is unsupported"
-        )
-
     async def close(self) -> None:
-        """Release engine resources. Default: nothing held."""
+        """Close the engine, when one was opened."""
+        opening, self._engine_task = self._engine_task, None
+        if opening is None:
+            return
+        try:
+            engine = await opening
+        except Exception as exc:
+            logger.debug("%s: engine never opened: %s", self.name, exc)
+            return
+        await self.close_engine(engine)

@@ -19,7 +19,7 @@ import { SCRIPT_EVAL_TIMEOUT } from '../runtime/constants.ts'
 import type { LanguageRuntime } from '../runtime/language.ts'
 import type { MountResolver } from '../runtime/resolver.ts'
 import { scriptEngine } from '../runtime/script.ts'
-import type { BridgeDispatchFn, RunResult } from '../runtime/types.ts'
+import type { DispatchFn, RunResult } from '../runtime/types.ts'
 import { FileStat, PathSpec, type JsonValue } from '../types.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import type { Policy } from './base.ts'
@@ -177,7 +177,7 @@ export function scriptAction(output: Uint8Array, method: ScriptMethod): Deny | A
  * called. The runtime is attached with these exactly as `Runtimes`
  * attaches an agent's, so a program's `open()` reads the mounts through
  * the same entry point an agent's program would, and a read from a policy
- * clears the dispatcher like any other. The bridge is built for one
+ * clears the dispatcher like any other. The dispatch is built for one
  * `issuer`, the policy's own token: every op it dispatches carries the
  * token to the dispatcher (`VfsContext.issuer`), which is how the
  * policy's `preVfs` tells its own read from anyone else's. The workspace
@@ -185,7 +185,7 @@ export function scriptAction(output: Uint8Array, method: ScriptMethod): Deny | A
  * its programs see no file.
  */
 export interface ScriptWiring {
-  bridge: (issuer: symbol) => BridgeDispatchFn
+  dispatch: (issuer: symbol) => DispatchFn
   resolver: MountResolver
 }
 
@@ -223,7 +223,7 @@ export interface ScriptWiring {
  * session reads it. A read from a program clears the dispatcher like any
  * other, except this policy's own `preVfs`: the policy is the one
  * asking, and judging its own read would re-enter the run waiting on it.
- * It knows its own read by `issuer`, a token only its bridge stamps and
+ * It knows its own read by `issuer`, a token only its dispatch stamps and
  * that rides each op as an argument: a mark kept in ambient context would
  * be whatever op another task dispatched while a read was in flight on a
  * runtime with no task isolation. Runs on one runtime are serialized; runs
@@ -235,7 +235,7 @@ export class ScriptPolicy implements Policy, SessionScoped {
   private readonly wiring: ScriptWiring | null
   private readonly engines = new Map<string, LanguageRuntime>()
   // The mark on every op this policy's own runtimes dispatch, and nothing
-  // else's: unexported, so only the bridge built for it can stamp it.
+  // else's: unexported, so only the dispatch built for it can stamp it.
   private readonly issuer = Symbol('policy read')
   // Each runtime's last run, which its next waits on.
   private readonly queues = new Map<LanguageRuntime, Promise<unknown>>()
@@ -373,15 +373,11 @@ export class ScriptPolicy implements Policy, SessionScoped {
         const cancel = new AbortController()
         try {
           return await runWithTimeout(
-            engine.execute({
-              kind: 'code',
-              language: entry.script.language,
-              code: entry.script.source,
-              args: [],
+            engine.execute([], [], {
+              flags: { c: entry.script.source, ...PROGRAM_FLAGS.get(entry.runtime) },
               cwd: PathSpec.fromStrPath(cwd),
               env: { [CTX_ENV]: payload },
               stdin: ENCODER.encode(payload),
-              flags: { ...PROGRAM_FLAGS.get(entry.runtime) },
               signal: cancel.signal,
               timeoutSeconds: SCRIPT_EVAL_TIMEOUT.seconds,
             }),
@@ -430,7 +426,7 @@ export class ScriptPolicy implements Policy, SessionScoped {
       engine = scriptEngine(entry.script, entry.runtime, config)
       // Keep policy-origin attribution on the binding's dispatch.
       if (this.wiring !== null) {
-        engine.bind(new WorkspaceBinding(this.wiring.bridge(this.issuer), this.wiring.resolver))
+        engine.bind(new WorkspaceBinding(this.wiring.dispatch(this.issuer), this.wiring.resolver))
       }
       this.engines.set(key, engine)
     }

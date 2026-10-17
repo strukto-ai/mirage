@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.commands.cli.builtin.gws import google_api_accessor
 from mirage.commands.cli.builtin.gws.api import fill_path, run_gws_method
 from mirage.commands.cli.builtin.gws.methods import GWS_METHODS
 from mirage.commands.config import Context
@@ -26,7 +27,7 @@ from mirage.io.stream import materialize
 
 METHODS = {(m.service, m.resource, m.method): m for m in GWS_METHODS}
 
-CONFIG = GoogleConfig(client_id="cid", refresh_token="rt")
+GOOGLE = google_api_accessor(GoogleConfig(client_id="cid", refresh_token="rt"))
 
 
 def test_fill_path():
@@ -53,7 +54,7 @@ async def test_documents_get_hits_docs_api():
     ) as get:
         out, io = await run_gws_method(
             method,
-            CONFIG,
+            GOOGLE,
             [],
             [],
             Context(flags={"params": '{"documentId": "d1"}'}),
@@ -79,7 +80,7 @@ async def test_files_list_follows_next_page_token_by_default():
         new_callable=AsyncMock,
         side_effect=pages,
     ) as get:
-        out, io = await run_gws_method(method, CONFIG, [], [], Context())
+        out, io = await run_gws_method(method, GOOGLE, [], [], Context())
     assert io.exit_code == 0
     assert get.await_count == 3
     tokens = [c.kwargs["params"].get("pageToken") for c in get.await_args_list]
@@ -100,7 +101,7 @@ async def test_single_page_output_has_no_trailing_newline():
         new_callable=AsyncMock,
         return_value={"files": []},
     ):
-        out, _io = await run_gws_method(method, CONFIG, [], [], Context())
+        out, _io = await run_gws_method(method, GOOGLE, [], [], Context())
     assert await materialize(out) == b'{"files":[]}'
 
 
@@ -118,7 +119,7 @@ async def test_page_limit_stops_early():
         side_effect=pages,
     ) as get:
         out, _io = await run_gws_method(
-            method, CONFIG, [], [], Context(flags={"page_limit": "2"})
+            method, GOOGLE, [], [], Context(flags={"page_limit": "2"})
         )
     assert get.await_count == 2
     assert len((await materialize(out)).decode().splitlines()) == 2
@@ -134,7 +135,7 @@ async def test_rejects_a_non_numeric_page_limit(raw):
         UsageError, match="--page-limit must be a whole number"
     ):
         await run_gws_method(
-            method, CONFIG, [], [], Context(flags={"page_limit": raw})
+            method, GOOGLE, [], [], Context(flags={"page_limit": raw})
         )
 
 
@@ -147,7 +148,7 @@ async def test_files_delete_outputs_nothing():
     ) as delete:
         out, io = await run_gws_method(
             method,
-            CONFIG,
+            GOOGLE,
             [],
             [],
             Context(flags={"params": '{"fileId": "f1"}'}),
@@ -161,7 +162,7 @@ async def test_files_delete_outputs_nothing():
 async def test_files_create_requires_body():
     method = METHODS[("drive", "files", "create")]
     with pytest.raises(UsageError, match="--json is required"):
-        await run_gws_method(method, CONFIG, [], [], Context())
+        await run_gws_method(method, GOOGLE, [], [], Context())
 
 
 @pytest.mark.asyncio
@@ -169,7 +170,7 @@ async def test_malformed_json_flag_is_a_usage_error():
     method = METHODS[("drive", "files", "create")]
     with pytest.raises(UsageError, match="--json must be valid JSON"):
         await run_gws_method(
-            method, CONFIG, [], [], Context(flags={"json": "{not json"})
+            method, GOOGLE, [], [], Context(flags={"json": "{not json"})
         )
 
 
@@ -183,7 +184,7 @@ async def test_permissions_create_posts_body():
     ) as post:
         out, _io = await run_gws_method(
             method,
-            CONFIG,
+            GOOGLE,
             [],
             [],
             Context(
@@ -208,7 +209,7 @@ async def test_files_export_returns_raw_bytes():
     ) as get_bytes:
         out, _io = await run_gws_method(
             method,
-            CONFIG,
+            GOOGLE,
             [],
             [],
             Context(
@@ -224,7 +225,9 @@ async def test_files_export_returns_raw_bytes():
     )
 
 
-SCOPED = GoogleConfig(client_id="cid", refresh_token="rt", folder_id="F1")
+SCOPED = google_api_accessor(
+    GoogleConfig(client_id="cid", refresh_token="rt", folder_id="F1")
+)
 
 
 @pytest.mark.asyncio
@@ -308,7 +311,7 @@ async def test_unscoped_install_places_nothing():
         ) as patch_call:
             await run_gws_method(
                 method,
-                CONFIG,
+                GOOGLE,
                 [],
                 [],
                 Context(flags={"json": '{"properties": {"title": "T"}}'}),

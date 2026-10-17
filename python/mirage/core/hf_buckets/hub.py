@@ -87,10 +87,7 @@ async def fetch_row(
         return None
     asked = accessor.bucket_path(key)
     rows = await hub_post(
-        accessor.token,
-        paths_info_url(accessor),
-        {"paths": [asked]},
-        session=accessor.pool,
+        accessor.account, paths_info_url(accessor), {"paths": [asked]}
     )
     if not isinstance(rows, list):
         raise HfHubError(

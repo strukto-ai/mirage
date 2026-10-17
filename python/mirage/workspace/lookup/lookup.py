@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Iterator
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mirage.commands.spec.compile import compile_spec
 from mirage.runtime.base import Runtime
@@ -63,7 +63,7 @@ def runtime_refused(
     name: str,
     session: SessionState,
     registry: "MountRegistry",
-    routing: RouteDecision[Runtime] | None = None,
+    routing: RouteDecision[Runtime[Any]] | None = None,
 ) -> bool:
     """Whether routing explicitly refused the external runtime for ``name``."""
     if routing is None:
@@ -77,7 +77,7 @@ def runtime_refused(
     )
 
 
-def _is_native(runtime: Runtime | None, name: str) -> bool:
+def _is_native(runtime: Runtime[Any] | None, name: str) -> bool:
     """Whether the runtime runs the name as a native program.
 
     A language runtime that also runs processes (local) still
@@ -98,7 +98,7 @@ def _layers(
     name: str,
     session: SessionState,
     registry: "MountRegistry",
-    routing: RouteDecision[Runtime] | None = None,
+    routing: RouteDecision[Runtime[Any]] | None = None,
 ) -> Iterator[Consumer]:
     """Yield every layer holding the name, most-preferred first.
 
@@ -171,7 +171,7 @@ def lookup(
     name: str,
     session: SessionState,
     registry: "MountRegistry",
-    routing: RouteDecision[Runtime] | None = None,
+    routing: RouteDecision[Runtime[Any]] | None = None,
 ) -> Consumer:
     """Route a command name to the layer that consumes it.
 

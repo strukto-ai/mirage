@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { GitHubAccessor } from '../accessor/github.ts'
+import { GitHubAccessor, GitHubAccount } from '../accessor/github.ts'
 import { read as githubRead } from '../core/github/read.ts'
 import { stat as githubStat } from '../core/github/stat.ts'
 import { LISTING_TRUST_WINDOW } from '../cache/index/constants.ts'
@@ -435,15 +435,18 @@ it.each(['gate', 'shell'])('reconciles GitHub IDs before the %s reread', async (
     repo: 'r',
     ref: 'main',
     defaultBranch: 'main',
-    transport: {
-      get: (path) =>
-        Promise.resolve(
-          path.includes('/blobs/')
-            ? { encoding: 'base64', content: btoa(path.split('/').pop() ?? '') }
-            : { tree: [{ path: 'f.txt', type: 'blob', sha, size: 2 }], truncated: false },
-        ),
-      request: () => Promise.reject(new Error('unexpected request')),
-    },
+    account: new GitHubAccount(
+      { token: 't' },
+      {
+        get: (path) =>
+          Promise.resolve(
+            path.includes('/blobs/')
+              ? { encoding: 'base64', content: btoa(path.split('/').pop() ?? '') }
+              : { tree: [{ path: 'f.txt', type: 'blob', sha, size: 2 }], truncated: false },
+          ),
+        request: () => Promise.reject(new Error('unexpected request')),
+      },
+    ),
   })
   const vfs = new RAMVFS()
   Object.defineProperty(vfs, 'supportsSnapshot', { value: true })

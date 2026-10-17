@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.accessor.github import GitHubAccount
 from mirage.core.github.config import GhConfig
 from mirage.core.github.release import (
     create_release,
@@ -27,7 +28,7 @@ from mirage.core.github.repo import RepoRef
 async def test_create_release_posts_the_typed_body(monkeypatch):
     calls = []
 
-    async def request(token, method, path, body, *, base_url):
+    async def request(account, method, path, body):
         calls.append((method, path, body))
         return {"tag_name": "v1"}
 
@@ -35,7 +36,7 @@ async def test_create_release_posts_the_typed_body(monkeypatch):
     body = {"tag_name": "v1", "draft": False}
 
     assert await create_release(
-        GhConfig(token="t"), RepoRef("o", "r"), body
+        GitHubAccount(GhConfig(token="t")), RepoRef("o", "r"), body
     ) == {"tag_name": "v1"}
     assert calls == [("POST", "/repos/o/r/releases", body)]
 
@@ -44,7 +45,7 @@ async def test_create_release_posts_the_typed_body(monkeypatch):
 async def test_get_latest_release_uses_the_authoritative_endpoint(monkeypatch):
     calls = []
 
-    async def request(token, method, path, *, base_url):
+    async def request(account, method, path):
         calls.append((method, path))
         return {"tag_name": "v1"}
 
@@ -53,7 +54,7 @@ async def test_get_latest_release_uses_the_authoritative_endpoint(monkeypatch):
     )
 
     assert await get_latest_release(
-        GhConfig(token="t"), RepoRef("o", "r")
+        GitHubAccount(GhConfig(token="t")), RepoRef("o", "r")
     ) == {"tag_name": "v1"}
     assert calls == [("GET", "/repos/o/r/releases/latest")]
 
@@ -62,13 +63,13 @@ async def test_get_latest_release_uses_the_authoritative_endpoint(monkeypatch):
 async def test_get_release_encodes_the_tag_path_segment(monkeypatch):
     calls = []
 
-    async def request(token, method, path, *, base_url):
+    async def request(account, method, path):
         calls.append(path)
         return {"tag_name": "v1#hot"}
 
     monkeypatch.setitem(get_release.__globals__, "github_request", request)
 
     assert await get_release(
-        GhConfig(token="t"), RepoRef("o", "r"), "v1#hot"
+        GitHubAccount(GhConfig(token="t")), RepoRef("o", "r"), "v1#hot"
     ) == {"tag_name": "v1#hot"}
     assert calls == ["/repos/o/r/releases/tags/v1%23hot"]

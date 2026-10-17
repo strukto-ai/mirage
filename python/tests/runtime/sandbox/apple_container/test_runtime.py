@@ -18,10 +18,10 @@ import subprocess
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.commands.config import Context
 from mirage.runtime.sandbox.apple_container import AppleContainerRuntime
 from mirage.runtime.sandbox.constants import EXEC_PRELUDE
 from mirage.runtime.table import build_runtime
-from mirage.runtime.types import ProcessExecution, ShellRequest
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
 
@@ -203,14 +203,9 @@ async def test_process_preserves_argv_and_probes_the_container_once():
         config={"container": "box", "env": {"E": "config"}}
     )
     argv = ("node", "a b", "$(echo literal)", "", "--flag")
-    result = await runtime.execute(
-        ProcessExecution(
-            argv=argv,
-            cwd=PathSpec.from_str_path("/work"),
-            env={"E": "request"},
-            stdin=b"input",
-        )
-    )
+    work = PathSpec.from_str_path("/work")
+    ctx = Context(cwd=work, env={"E": "request"}, stdin=b"input")
+    result = await runtime.execute([], list(argv), ctx, kind="process")
     assert result.stdout == b"out:--flag"
     assert result.stderr == b"warn"
     assert runtime.calls[-1] == (
@@ -231,9 +226,8 @@ async def test_process_preserves_argv_and_probes_the_container_once():
         ],
         b"input",
     )
-    await runtime.execute(
-        ShellRequest(line="pwd", cwd=PathSpec.from_str_path("/work"))
-    )
+    line = Context(flags={"c": "pwd"}, cwd=work)
+    await runtime.execute([], [], line, kind="line")
     assert runtime.inspected() == ["box"]
     assert runtime.capabilities.process and runtime.capabilities.shell
     assert runtime.capabilities.filesystem == ()
@@ -245,14 +239,10 @@ async def test_process_refuses_empty_argv_and_a_stopped_container():
         states={"box": "stopped"}, config={"container": "box"}
     )
     with pytest.raises(ValueError, match="argv must not be empty"):
-        await runtime.execute(
-            ProcessExecution(argv=(), cwd=PathSpec.from_str_path("/"))
-        )
+        await runtime.execute([], [], Context(), kind="process")
     assert not runtime.calls
     with pytest.raises(RuntimeError, match="not running"):
-        await runtime.execute(
-            ProcessExecution(argv=("node",), cwd=PathSpec.from_str_path("/"))
-        )
+        await runtime.execute([], ["node"], Context(), kind="process")
     assert len(runtime.calls) == 1
 
 

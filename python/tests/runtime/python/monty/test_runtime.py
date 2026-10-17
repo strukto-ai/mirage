@@ -17,11 +17,20 @@ import asyncio
 import pydantic_monty
 import pytest
 
+from mirage.commands.config import Context
 from mirage.runtime.python import MontyRuntime
-from mirage.runtime.types import RunArgs
+from mirage.runtime.types import Program, RunResult
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+
+
+async def _run(rt: MontyRuntime, program: Program, **fields) -> RunResult:
+    return await rt.interpret(await rt.engine(), program, Context(**fields))
+
+
+def _args(code: str, env: dict[str, str] | None = None, **fields):
+    return Program(code=code, **fields), env
 
 
 # A program's whole answer on both hosts: what it prints, its exit
@@ -33,41 +42,41 @@ from mirage.workspace import Workspace
     ("args", "exit_code", "stdout", "stderr"),
     [
         pytest.param(
-            RunArgs(code="print(21 * 2)"), 0, b"42\n", None, id="print"
+            _args(code="print(21 * 2)"), 0, b"42\n", None, id="print"
         ),
         pytest.param(
-            RunArgs(code="def broken("), 1, b"", b"SyntaxError", id="syntax"
+            _args(code="def broken("), 1, b"", b"SyntaxError", id="syntax"
         ),
         pytest.param(
-            RunArgs(code="print('before')\n1/0"),
+            _args(code="print('before')\n1/0"),
             1,
             b"before\n",
             b"ZeroDivisionError",
             id="error-keeps-stdout",
         ),
         pytest.param(
-            RunArgs(code="print(argv[1:])", args=["a", "b"]),
+            _args(code="print(argv[1:])", args=["a", "b"]),
             0,
             b"['a', 'b']\n",
             None,
             id="argv",
         ),
         pytest.param(
-            RunArgs(code="print(stdin.decode())", stdin=b"piped"),
+            _args(code="print(stdin.decode())", stdin=b"piped"),
             0,
             b"piped\n",
             None,
             id="stdin",
         ),
         pytest.param(
-            RunArgs(code="print(stdin is None)"),
+            _args(code="print(stdin is None)"),
             0,
             b"True\n",
             None,
             id="no-stdin",
         ),
         pytest.param(
-            RunArgs(
+            _args(
                 code="import os; print(os.environ.get('MY_VAR', 'unset'))",
                 env={"MY_VAR": "v1"},
             ),
@@ -77,7 +86,7 @@ from mirage.workspace import Workspace
             id="run-env",
         ),
         pytest.param(
-            RunArgs(
+            _args(
                 code="import os\n"
                 "try:\n"
                 "    os.environ['nope']\n"
@@ -91,7 +100,7 @@ from mirage.workspace import Workspace
             id="missing-env-key",
         ),
         pytest.param(
-            RunArgs(
+            _args(
                 code="import os\nos.environ['K'] = 'guest'\n"
                 "print(os.getenv('K'))",
                 env={"K": "v"},
@@ -102,7 +111,7 @@ from mirage.workspace import Workspace
             id="env-mutation-stays-in-the-guest",
         ),
         pytest.param(
-            RunArgs(
+            _args(
                 code="from datetime import datetime, timezone\n"
                 "print(datetime.now().tzinfo)\n"
                 "print(datetime.now(timezone.utc).tzinfo)"
@@ -113,7 +122,7 @@ from mirage.workspace import Workspace
             id="host-clock",
         ),
         pytest.param(
-            RunArgs(
+            _args(
                 code="from pathlib import Path\n"
                 "r = Path('rel/x.txt').resolve()\n"
                 "print(type(r).__name__, r)"
@@ -126,7 +135,8 @@ from mirage.workspace import Workspace
     ],
 )
 def test_monty_runs_a_program(args, exit_code, stdout, stderr):
-    result = asyncio.run(MontyRuntime().run(args))
+    program, env = args
+    result = asyncio.run(_run(MontyRuntime(), program, env=env))
     assert (result.exit_code, result.stdout) == (exit_code, stdout)
     if stderr is None:
         assert result.stderr is None
@@ -139,10 +149,10 @@ def test_monty_argv0_is_prog_when_named():
     # interpreter's own placeholder stands, as `python3 -c` expects.
     runtime = MontyRuntime()
     result = asyncio.run(
-        runtime.run(RunArgs(code="print(argv[0])", args=["a"], prog="pager"))
+        _run(runtime, Program(code="print(argv[0])", args=["a"], prog="pager"))
     )
     assert (result.exit_code, result.stdout) == (0, b"pager\n")
-    plain = asyncio.run(runtime.run(RunArgs(code="print(argv[0])")))
+    plain = asyncio.run(_run(runtime, Program(code="print(argv[0])")))
     assert plain.stdout == b"main.py\n"
 
 
@@ -164,7 +174,7 @@ def test_monty_environ_is_a_dict_of_the_run_env():
         )
     )
     result = asyncio.run(
-        runtime.run(RunArgs(code=code, env={"K": "v", "OTHER": "w"}))
+        _run(runtime, Program(code=code), env={"K": "v", "OTHER": "w"})
     )
     assert result.exit_code == 0
     assert result.stdout == (
@@ -187,7 +197,7 @@ def test_monty_name():
 async def test_monty_runs_off_loop_and_cancellation_halts():
     rt = MontyRuntime()
     hot = "n = 0\nwhile True:\n    n = n + 1"
-    task = asyncio.ensure_future(rt.run(RunArgs(code=hot)))
+    task = asyncio.ensure_future(_run(rt, Program(code=hot)))
     ticks = 0
     for _ in range(6):
         await asyncio.sleep(0.05)
@@ -196,7 +206,7 @@ async def test_monty_runs_off_loop_and_cancellation_halts():
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    result = await rt.run(RunArgs(code="print(6 * 7)"))
+    result = await _run(rt, Program(code="print(6 * 7)"))
     assert result.exit_code == 0
     assert result.stdout == b"42\n"
 
@@ -228,7 +238,7 @@ def test_workspace_explicit_monty_fails_loud(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_cwd_inherits_context_and_explicit_run_cwd_wins():
+async def test_a_bound_run_takes_the_callers_cwd_not_the_sessions():
     runtime = MontyRuntime()
     ws = Workspace(
         {"/data": RAMVFS()},
@@ -238,10 +248,11 @@ async def test_cwd_inherits_context_and_explicit_run_cwd_wins():
     try:
         assert (await ws.shell("mkdir /data/sub; cd /data")).exit_code == 0
         code = "import os; print(os.getcwd())"
-        inherited = await runtime.run(RunArgs(code=code))
-        assert inherited.stdout == b"/data\n"
-        explicit = await runtime.run(
-            RunArgs(code=code, cwd=PathSpec.from_str_path("/data/sub"))
+        default = await runtime.execute([], [], Context(flags={"c": code}))
+        assert default.stdout == b"/\n"
+        cwd = PathSpec.from_str_path("/data/sub")
+        explicit = await runtime.execute(
+            [], [], Context(flags={"c": code}, cwd=cwd)
         )
         assert explicit.stdout == b"/data/sub\n"
     finally:
@@ -273,10 +284,10 @@ def test_reach_is_vfs():
 async def test_max_memory_caps_a_run_and_leaves_a_small_one_alone():
     runtime = MontyRuntime(config={"max_memory": "1M"})
     try:
-        big = await runtime.run(RunArgs(code="x = [0] * 10_000_000"))
+        big = await _run(runtime, Program(code="x = [0] * 10_000_000"))
         assert big.exit_code == 1
         assert big.stderr is not None and b"MemoryError" in big.stderr
-        small = await runtime.run(RunArgs(code="print(sum(range(10)))"))
+        small = await _run(runtime, Program(code="print(sum(range(10)))"))
         assert (small.exit_code, small.stdout) == (0, b"45\n")
     finally:
         await runtime.close()
@@ -296,14 +307,15 @@ def test_monty_refuses_a_path_no_mount_serves():
         "from pathlib import Path\nPath('/tmp').mkdir()",
         "open('/tmp/x.txt', 'w').write('hi')",
     ):
-        result = asyncio.run(runtime.run(RunArgs(code=code)))
+        result = asyncio.run(_run(runtime, Program(code=code)))
         assert result.exit_code == 1
         assert b"FileNotFoundError" in result.stderr
     result = asyncio.run(
-        runtime.run(
-            RunArgs(
+        _run(
+            runtime,
+            Program(
                 code="from pathlib import Path\nprint(Path('/tmp').exists())"
-            )
+            ),
         )
     )
     assert result.exit_code == 0, result.stderr

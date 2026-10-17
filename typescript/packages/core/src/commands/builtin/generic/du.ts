@@ -37,6 +37,7 @@ import { compareCodePoints } from '../../../utils/sort.ts'
 import type { DuEntries } from '../../../vfs/types.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { mountsOf } from '../utils/links.ts'
+import { vfsStatPath } from '../utils/paths.ts'
 export type ComputeSize = (p: PathSpec) => Promise<number>
 export type ComputeEntries = (p: PathSpec) => Promise<DuEntries>
 
@@ -665,7 +666,7 @@ export async function duGeneric(
     stat,
     (p) => duHasContent(ctx.vfs?.vis() ?? undefined, computeEntries, p),
     ctx.mountPrefix,
-    ctx.statPath ?? null,
+    vfsStatPath(ctx.vfs) ?? null,
   )
   const out = await du(
     present,

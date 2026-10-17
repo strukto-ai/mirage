@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.history import (
     get_history_jsonl,
@@ -27,12 +28,12 @@ from mirage.core.time_range import TimeRange
 
 
 @pytest.fixture
-def config():
-    return DiscordConfig(token="test-bot-token")
+def accessor():
+    return DiscordAccessor(DiscordConfig(token="test-bot-token"))
 
 
 @pytest.mark.asyncio
-async def test_get_history_jsonl(config):
+async def test_get_history_jsonl(accessor):
     messages = [
         {"id": "1196242344345600200", "content": "second"},
         {"id": "1196242344345600100", "content": "first"},
@@ -43,7 +44,7 @@ async def test_get_history_jsonl(config):
         return_value=messages,
     ):
         result = await get_history_jsonl(
-            config, "C001", "2024-01-15", TimeRange()
+            accessor, "C001", "2024-01-15", TimeRange()
         )
 
     lines = result.decode().strip().split("\n")
@@ -56,21 +57,21 @@ async def test_get_history_jsonl(config):
 
 
 @pytest.mark.asyncio
-async def test_get_history_empty(config):
+async def test_get_history_empty(accessor):
     with patch(
         "mirage.core.discord.paginate.discord_get",
         new_callable=AsyncMock,
         return_value=[],
     ):
         result = await get_history_jsonl(
-            config, "C001", "2024-01-15", TimeRange()
+            accessor, "C001", "2024-01-15", TimeRange()
         )
 
     assert result == b""
 
 
 @pytest.mark.asyncio
-async def test_messages_after_an_id_start_past_it(config):
+async def test_messages_after_an_id_start_past_it(accessor):
     later = str(snowflake_at(1705320000) + 5)
     with patch(
         "mirage.core.discord.paginate.discord_get",
@@ -78,6 +79,6 @@ async def test_messages_after_an_id_start_past_it(config):
         return_value=[],
     ) as get:
         await list_messages_for_day(
-            config, "C001", "2024-01-15", TimeRange(), after=later
+            accessor, "C001", "2024-01-15", TimeRange(), after=later
         )
     assert get.await_args.kwargs["params"]["after"] == later

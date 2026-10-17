@@ -18,6 +18,7 @@ import { IOResult } from '../../../io/types.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import { vfsStatPath } from '../utils/paths.ts'
 
 const ENC = new TextEncoder()
 
@@ -396,8 +397,9 @@ function variable(name: string): readonly [string, string | null] | undefined {
 
 /** Whether the PATH operand names something pathconf could open. */
 async function pathExists(ctx: Context, word: string): Promise<boolean> {
-  if (ctx.statPath === undefined) return true
-  return (await ctx.statPath(PathSpec.fromStrPath(word, undefined, ctx.cwd))) !== null
+  const statPath = vfsStatPath(ctx.vfs)
+  if (statPath === undefined) return true
+  return (await statPath(PathSpec.fromStrPath(word, undefined, ctx.cwd))) !== null
 }
 
 // glibc `getconf`: one variable's value, or `-a` for all of them. A pathconf

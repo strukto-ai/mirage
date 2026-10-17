@@ -36,7 +36,7 @@ export async function* readStream(
   }
   try {
     const url = resolveUrl(accessor, rel)
-    for await (const chunk of hubStream(accessor.token, url, stamp, accessor.timeoutMs)) {
+    for await (const chunk of hubStream(accessor.account, url, stamp)) {
       if (rec !== null) rec.bytes += chunk.byteLength
       yield chunk
     }

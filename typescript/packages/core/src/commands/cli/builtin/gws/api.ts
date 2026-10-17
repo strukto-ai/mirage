@@ -14,7 +14,8 @@
 import { CommandSpec } from '../../../spec/types.ts'
 import { CLIHandler } from '../../types.ts'
 
-import { TokenManager } from '../../../../core/google/client.ts'
+import type { GoogleApiAccessor } from '../../../../accessor/google_api.ts'
+import type { TokenManager } from '../../../../core/google/client.ts'
 import {
   driveBase,
   googleDelete,
@@ -194,7 +195,7 @@ async function placeInScope(
 
 export async function runGwsMethod(
   method: GwsMethod,
-  config: GoogleConfig,
+  accessor: GoogleApiAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
@@ -212,8 +213,8 @@ export async function runGwsMethod(
   if (method.needsBody === true && Object.keys(body).length === 0) {
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode('--json is required\n') })]
   }
-  ;[body, params] = scopeRequest(method, config, body, params)
-  const tm = new TokenManager(config)
+  ;[body, params] = scopeRequest(method, accessor.tokenManager.config, body, params)
+  const tm = accessor.tokenManager
   let path: string
   let query: Record<string, unknown>
   try {
@@ -352,8 +353,8 @@ export function apiHandlers(): Record<string, CLIHandler> {
     GWS_METHODS.map((method) => [
       `${method.service} ${method.resource} ${method.method}`,
       new CLIHandler({
-        fn: (config, paths, texts, ctx) =>
-          runGwsMethod(method, config as GoogleConfig, paths, texts, ctx),
+        fn: (accessor: GoogleApiAccessor, paths: PathSpec[], texts: string[], ctx: Context) =>
+          runGwsMethod(method, accessor, paths, texts, ctx),
         write: method.http !== 'GET',
       }),
     ]),

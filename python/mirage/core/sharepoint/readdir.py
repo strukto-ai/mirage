@@ -51,10 +51,9 @@ async def readdir(
     if resolved.drive_id is None:
         return []
     return await readdir_items(
-        accessor.config,
+        accessor,
         drive_loc(accessor.config, resolved, target.vfs_path),
         virtual_key(path),
-        session=accessor.pool,
     )
 
 
@@ -77,8 +76,7 @@ async def tree(
     if resolved.level in ("root", "site") or resolved.drive_id is None:
         return None
     return await batch_tree(
-        accessor.config,
+        accessor,
         drive_loc(accessor.config, resolved, path.vfs_path),
         virtual_key(path),
-        session=accessor.pool,
     )

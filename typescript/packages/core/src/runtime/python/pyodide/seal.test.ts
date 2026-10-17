@@ -22,8 +22,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { WorkspaceBinding } from '../../binding.ts'
 import { PrefixResolver } from '../../resolver.ts'
 import { FileStat, FileType } from '../../../types.ts'
-import type { BridgeDispatchFn } from '../../types.ts'
+import type { BridgeDispatchFn, RunResult } from '../../types.ts'
 import { PyodideRuntime } from './runtime.ts'
+import { context } from '../../../workspace/fixtures/context.ts'
 import * as sealing from './seal.ts'
 
 const ENC = new TextEncoder()
@@ -42,8 +43,13 @@ function unexpected(): never {
   throw new Error('unexpected filesystem operation')
 }
 
+/** Run `code` at `/` with no stdin. */
+function interpret(rt: PyodideRuntime, code: string): Promise<RunResult> {
+  return rt.interpret(undefined, { code, args: [], stdin: null }, context())
+}
+
 function bind(rt: PyodideRuntime): PyodideRuntime {
-  rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/data'])))
+  rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data'])))
   return rt
 }
 
@@ -194,8 +200,9 @@ describe.skipIf(typeof module.registerHooks !== 'function')(
       await writeFile(file, 'host-only')
       const rt = bind(new PyodideRuntime({ config: { autoLoadFromImports: false } }))
       try {
-        const result = await rt.run({
-          code: `
+        const result = await interpret(
+          rt,
+          `
 import pyodide_js
 F = pyodide_js.loadPackage.constructor.constructor
 
@@ -214,10 +221,7 @@ print(refusal(lambda: pyodide_js._module.asyncLoad(${JSON.stringify(file)})))
 print(refusal(lambda: F('fs', 'path', 'return fs.forceLoadFile({url: path})')(pyodide_js.FS, ${JSON.stringify(file)})))
 print(refusal(lambda: pyodide_js._module.FS_createPreloadedFile('/', 'host', ${JSON.stringify(file)}, True, False)))
 `,
-          args: [],
-          env: {},
-          stdin: null,
-        })
+        )
         expect(result.exitCode).toBe(0)
         expect(DEC.decode(result.stderr ?? undefined)).toBe('')
         expect(DEC.decode(result.stdout)).toBe('undefined,undefined\n' + 'refused\n'.repeat(6))
@@ -236,8 +240,9 @@ print(refusal(lambda: pyodide_js._module.FS_createPreloadedFile('/', 'host', ${J
         }),
       )
       try {
-        const result = await builder.run({
-          code: `
+        const result = await interpret(
+          builder,
+          `
 import base64, io, zipfile
 buffer = io.BytesIO()
 with zipfile.ZipFile(buffer, 'w') as archive:
@@ -247,10 +252,7 @@ with zipfile.ZipFile(buffer, 'w') as archive:
     archive.writestr('mirage_seal_probe-1.0.dist-info/RECORD', '')
 print(base64.b64encode(buffer.getvalue()).decode())
 `,
-          args: [],
-          env: {},
-          stdin: null,
-        })
+        )
         const wheel = Buffer.from(DEC.decode(result.stdout).trim(), 'base64')
         const filename = 'mirage_seal_probe-1.0-py3-none-any.whl'
         await writeFile(join(dir, filename), wheel)
@@ -269,12 +271,10 @@ print(base64.b64encode(buffer.getvalue()).decode())
           sha256: createHash('sha256').update(wheel).digest('hex'),
         }
         await writeFile(join(dir, 'pyodide-lock.json'), JSON.stringify(lock))
-        const run = await rt.run({
-          code: `import mirage_seal_probe; print(mirage_seal_probe.value)\n${GLOBALS}`,
-          args: [],
-          env: {},
-          stdin: null,
-        })
+        const run = await interpret(
+          rt,
+          `import mirage_seal_probe; print(mirage_seal_probe.value)\n${GLOBALS}`,
+        )
         expect(DEC.decode(run.stderr ?? undefined)).toBe('')
         expect(run.exitCode).toBe(0)
         expect(DEC.decode(run.stdout)).toBe('42\nundefined,undefined,undefined,undefined\n')
@@ -324,8 +324,9 @@ print(base64.b64encode(buffer.getvalue()).decode())
           pending.push(...pkg.depends)
         }
         await writeFile(join(dir, 'pyodide-lock.json'), lockText)
-        const run = await rt.run({
-          code: `
+        const run = await interpret(
+          rt,
+          `
 from PIL import Image, _imaging
 import io
 image = Image.new('RGB', (2, 3), (12, 34, 56))
@@ -336,10 +337,7 @@ with Image.open(io.BytesIO(buffer.getvalue())) as restored:
 print(_imaging.__file__.endswith('.so'))
 ${GLOBALS}
 `,
-          args: [],
-          env: {},
-          stdin: null,
-        })
+        )
         expect(DEC.decode(run.stderr ?? undefined)).toBe('')
         expect(run.exitCode).toBe(0)
         expect(DEC.decode(run.stdout)).toBe(
@@ -355,12 +353,10 @@ ${GLOBALS}
       const rt = bind(new PyodideRuntime({ config: { autoLoadFromImports: false } }))
       try {
         for (let i = 0; i < 2; i++) {
-          const result = await rt.run({
-            code: `${GLOBALS}\nprint(sum(i*i for i in range(5)))\nprint(open('/data/hello.txt').read())`,
-            args: [],
-            env: {},
-            stdin: null,
-          })
+          const result = await interpret(
+            rt,
+            `${GLOBALS}\nprint(sum(i*i for i in range(5)))\nprint(open('/data/hello.txt').read())`,
+          )
           expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('')
           expect(result.exitCode).toBe(0)
           expect(DEC.decode(result.stdout)).toBe(
@@ -386,7 +382,7 @@ it('keeps an init_module worker open for trusted host access', async () => {
     }),
   )
   try {
-    const result = await rt.run({ code: GLOBALS, args: [], env: {}, stdin: null })
+    const result = await interpret(rt, GLOBALS)
     expect(result.exitCode).toBe(0)
     const kinds = DEC.decode(result.stdout).trim().split(',')
     expect(kinds[0]).toBe('object')
@@ -471,7 +467,7 @@ it('fails a run whose worker seal failed', async () => {
     },
   )
   try {
-    await expect(rt.run({ code: 'print(42)', args: [], env: {}, stdin: null })).rejects.toBe(error)
+    await expect(interpret(rt, 'print(42)')).rejects.toBe(error)
     expect(seal).toHaveBeenCalledTimes(1)
   } finally {
     await rt.close()

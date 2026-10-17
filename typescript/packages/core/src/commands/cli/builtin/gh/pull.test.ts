@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as AccessorModule from './accessor.ts'
+import { GitHubAccount } from '../../../../accessor/github.ts'
 import type * as PullModule from '../../../../core/github/pull.ts'
 import type { Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -36,11 +36,6 @@ const NAME_ONLY_DIFF =
 const FIELDS = vi.fn<typeof PullModule.pullRequestFields>()
 const LIST = vi.fn<typeof PullModule.listPullRequestFields>()
 
-vi.mock('./accessor.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof AccessorModule>()
-  return { ...actual, ghTransport: () => ({}) }
-})
-
 vi.mock('../../../../core/github/pull.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof PullModule>()
   return {
@@ -61,8 +56,10 @@ function json(result: Awaited<ReturnType<typeof viewCmd>>): Record<string, unkno
   return JSON.parse(new TextDecoder().decode(result[0] as Uint8Array)) as Record<string, unknown>
 }
 
-function args(flags: Context['flags'] = {}): [unknown, PathSpec[], string[], Context] {
-  return [{ token: 't' }, [], ['5'], context({ flags: { repo: 'o/r', ...flags } })]
+const ACCOUNT = new GitHubAccount({ token: 't' })
+
+function args(flags: Context['flags'] = {}): [GitHubAccount, PathSpec[], string[], Context] {
+  return [ACCOUNT, [], ['5'], context({ flags: { repo: 'o/r', ...flags } })]
 }
 
 async function bucketOf(row: Record<string, unknown>): Promise<unknown> {

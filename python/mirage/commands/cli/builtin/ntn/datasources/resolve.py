@@ -12,14 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.notion import NotionAccessor
 from mirage.commands.cli.builtin.ntn.util import (
     first_text,
-    notion_config,
+    notion_transport,
     pretty_json,
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.pages import get_database
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -27,11 +27,14 @@ from mirage.types import JsonValue, PathSpec
 
 
 async def resolve(
-    config: NotionConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: NotionAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     database_id = first_text(texts, "database id")
-    database = await get_database(notion_config(config, ctx), database_id)
+    database = await get_database(notion_transport(accessor, ctx), database_id)
     stubs = database.get("data_sources") or []
     if fl.as_bool("json"):
         payload: dict[str, JsonValue] = {

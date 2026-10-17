@@ -17,17 +17,17 @@ import { searchMessages } from '../../../../core/slack/search.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { slackAccessor } from '../../../../accessor/slack.ts'
+import type { SlackAccessor } from '../../../../accessor/slack.ts'
 
 export async function search(
-  config: unknown,
+  accessor: SlackAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, ctx.spec)
   const out: ByteSource = await searchMessages(
-    slackAccessor(config),
+    accessor,
     fl.asStr('query') ?? '',
     fl.asInt('count', 20),
     fl.asInt('page', 1),

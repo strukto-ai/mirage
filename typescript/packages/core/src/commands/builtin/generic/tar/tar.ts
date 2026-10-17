@@ -65,7 +65,7 @@ import { stdinStream } from '../../utils/stream.ts'
 import { lsModeString } from '../../utils/formatting.ts'
 import { ensureDir, extractDest } from '../archive/extract.ts'
 import type { Compression, CompressionKind, CreateResult, ReadResult } from './types.ts'
-import { linksOf, mountsOf } from '../../utils/links.ts'
+import { linksOf, mountView } from '../../utils/links.ts'
 import { formatOptionalRecords } from '../../utils/output.ts'
 import { escapeQuote } from '../../../../utils/quote.ts'
 
@@ -620,7 +620,8 @@ export async function tarGeneric(
       isDir: deps.isDir,
       directories,
       links: linksOf(ctx) ?? null,
-      mounts: mountsOf(ctx) ?? null,
+      // Every mount nested under an operand bounds the scan, a relayed run's too.
+      mounts: mountView(ctx.vfs) ?? null,
       oneFileSystem: parsed.oneFileSystem,
     })
     if (!plan.write) {

@@ -15,13 +15,12 @@
 import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
-import { EmailAccessor } from '../../../../accessor/email.ts'
+import type { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchMessage } from '../../../../core/email/client.ts'
-import type { EmailConfig } from '../../../../core/email/config.ts'
 import { firstText, route } from './util.ts'
 
 export async function reply(
-  config: unknown,
+  accessor: EmailAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -29,15 +28,9 @@ export async function reply(
   const fl = new FlagView(ctx.flags)
   const uid = firstText(texts, 'message id')
   const mailbox = fl.asStr('mailbox', 'INBOX')
-  const accessor = new EmailAccessor(config as EmailConfig)
-  let original
-  try {
-    original = await fetchMessage(accessor, mailbox, uid)
-  } finally {
-    await accessor.close()
-  }
+  const original = await fetchMessage(accessor, mailbox, uid)
   return route(
-    config as EmailConfig,
+    accessor,
     fl,
     ctx.stdin,
     {

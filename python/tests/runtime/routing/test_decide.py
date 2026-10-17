@@ -17,7 +17,7 @@ from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.routing import runtime_for_language
-from mirage.runtime.types import RunArgs, RunResult
+from mirage.runtime.types import Program, RunResult
 from mirage.runtime.workspace import WorkspaceRuntime
 
 
@@ -25,7 +25,7 @@ class AlphaRuntime(Runtime):
     name = "alpha"
     captures = ("python3", "python")
 
-    async def run(self, args: RunArgs, context=None) -> RunResult:
+    async def run(self, engine, paths, texts, ctx) -> RunResult:
         return RunResult(stdout=b"alpha\n", stderr=None, exit_code=0)
 
 
@@ -33,7 +33,7 @@ class NodeRuntime(JsRuntime):
     name = "node-engine"
     captures = ("node",)
 
-    async def run(self, args: RunArgs, context=None) -> RunResult:
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 

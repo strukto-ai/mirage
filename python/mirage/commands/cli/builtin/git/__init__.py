@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.add import add
 from mirage.commands.cli.builtin.git.branch import branch, branch_read_only
 from mirage.commands.cli.builtin.git.cat_file import cat_file
@@ -736,12 +737,12 @@ STATUS_OPTIONS = (
 
 
 async def help_cmd(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Render the declared command tree, without needing a repository.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the optional command to describe.
         ctx (Context): the line's context.

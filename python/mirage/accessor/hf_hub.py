@@ -12,17 +12,77 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import aiohttp
 from pydantic import SecretStr
 
-from mirage.accessor.base import SessionAccessor
-from mirage.core.hf_hub.client import stall_timeout
+from mirage.accessor.base import Accessor, SessionAccessor
+from mirage.core.hf_hub.config import HfConfig
 from mirage.core.hf_hub.constants import DEFAULT_REVISION
 from mirage.utils import key_prefix as kp
-from mirage.vfs.hf_buckets.config import HfRepoConfig
+from mirage.vfs.hf_buckets.config import HfBucketsConfig, HfRepoConfig
 
 
-class HfHubAccessor(SessionAccessor):
-    """A mount onto one Hugging Face Hub repository.
+def stall_timeout(seconds: float) -> aiohttp.ClientTimeout:
+    """How long a Hub request may go without progress.
+
+    The clock restarts on every body chunk, so a download that keeps
+    flowing is never cut off. Zero or less is no bound: a negative read
+    bound would fire at once.
+
+    Args:
+        seconds (float): the configured timeout.
+
+    Returns:
+        aiohttp.ClientTimeout: the bound, for the account's pool.
+    """
+    if seconds <= 0:
+        return aiohttp.ClientTimeout(total=None)
+    return aiohttp.ClientTimeout(
+        total=None, sock_connect=seconds, sock_read=seconds
+    )
+
+
+class HfAccountAccessor(SessionAccessor):
+    """One Hub account: credential, origin and the pool its calls ride.
+
+    The `hf` CLI's install accessor and the account a repository handle
+    borrows; a mount builds its own with `account_of`.
+
+    Args:
+        config (HfConfig): the token and the Hub origin.
+        timeout (float): seconds one request may go without progress.
+    """
+
+    def __init__(self, config: HfConfig, timeout: float = 30) -> None:
+        super().__init__(timeout=stall_timeout(timeout))
+        self.config = config
+
+    @property
+    def token(self) -> SecretStr | None:
+        return self.config.token
+
+    @property
+    def endpoint(self) -> str:
+        return self.config.endpoint
+
+
+def account_of(config: HfRepoConfig | HfBucketsConfig) -> HfAccountAccessor:
+    """The account a repository or bucket mount builds and owns.
+
+    Args:
+        config (HfRepoConfig | HfBucketsConfig): the mount's config.
+
+    Returns:
+        HfAccountAccessor: an account no other handle shares.
+    """
+    return HfAccountAccessor(
+        HfConfig(token=config.token, endpoint=config.endpoint),
+        timeout=config.timeout,
+    )
+
+
+class HfHubAccessor(Accessor):
+    """One Hugging Face Hub repository, over an account it never closes.
 
     The Hub's listing endpoint is recursive, so one paged walk is the
     mount's entire listing, which the mount keeps; every stat and read
@@ -36,9 +96,15 @@ class HfHubAccessor(SessionAccessor):
     REPO_TYPE: str = ""
     VFS_NAME: str = ""
 
-    def __init__(self, config: HfRepoConfig, repo_type: str = "") -> None:
+    def __init__(
+        self,
+        account: HfAccountAccessor,
+        config: HfRepoConfig,
+        repo_type: str = "",
+    ) -> None:
         """Args:
-        config (HfRepoConfig): repo id, credential and revision.
+        account (HfAccountAccessor): the account every call rides.
+        config (HfRepoConfig): repo id, revision, key prefix and listing mode.
         repo_type (str): overrides the class's own kind, for a caller
             that learns it from a command line rather than from
             which VFS it mounted. The `hf` CLI is the only one:
@@ -47,7 +113,7 @@ class HfHubAccessor(SessionAccessor):
             the mount's tree and commit code instead of growing a
             second Hub client.
         """
-        super().__init__(timeout=stall_timeout(config.timeout))
+        self.account = account
         self.config = config
         self._repo_type = repo_type or self.REPO_TYPE
 
@@ -61,11 +127,7 @@ class HfHubAccessor(SessionAccessor):
 
     @property
     def endpoint(self) -> str:
-        return self.config.endpoint
-
-    @property
-    def token(self) -> SecretStr | None:
-        return self.config.token
+        return self.account.endpoint
 
     @property
     def revision(self) -> str:

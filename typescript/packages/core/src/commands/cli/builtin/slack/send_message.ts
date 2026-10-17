@@ -17,18 +17,17 @@ import { postMessage, replyToThread } from '../../../../core/slack/post.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { slackAccessor } from '../../../../accessor/slack.ts'
+import type { SlackAccessor } from '../../../../accessor/slack.ts'
 
 const ENC = new TextEncoder()
 
 export async function sendMessage(
-  config: unknown,
+  accessor: SlackAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, ctx.spec)
-  const accessor = slackAccessor(config)
   const channel = fl.asStr('channel') ?? ''
   const text = fl.asStr('text') ?? ''
   const threadTs = fl.asStr('thread_ts')

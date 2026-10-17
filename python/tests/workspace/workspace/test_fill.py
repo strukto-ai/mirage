@@ -1523,11 +1523,11 @@ class NiceBox(Runtime, LineExecutorMixin):
     name = "nicebox"
     captures = ("nice",)
 
-    async def run_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-    ) -> RunResult:
+    async def run_line(self, engine, paths, texts, ctx) -> RunResult:
         return RunResult(
-            stdout=f"{env.get('TOKEN')}\n".encode(), stderr=None, exit_code=0
+            stdout=f"{(ctx.env or {}).get('TOKEN')}\n".encode(),
+            stderr=None,
+            exit_code=0,
         )
 
 
@@ -1969,9 +1969,7 @@ class LineBox(Runtime, LineExecutorMixin):
     name = "sandbox"
     captures = ("*",)
 
-    async def run_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-    ) -> RunResult:
+    async def run_line(self, engine, paths, texts, ctx) -> RunResult:
         return RunResult(stdout=b"box", stderr=None, exit_code=0)
 
 

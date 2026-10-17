@@ -24,7 +24,7 @@ def script_engine(
     script: ScriptSource,
     runtime: str,
     config: Mapping[str, Any] | None = None,
-) -> LanguageRuntime:
+) -> LanguageRuntime[Any]:
     """Build the runtime a config program runs on: the one the config
     named, with the settings it gave.
 

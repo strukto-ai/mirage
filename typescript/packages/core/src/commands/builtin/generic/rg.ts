@@ -55,7 +55,7 @@ import {
   type Tally,
 } from '../rg_search.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
-import { type LinkResolver, linkResolver, mountsOf } from '../utils/links.ts'
+import { type LinkResolver, linkResolver, mountsOf, dispatchOf } from '../utils/links.ts'
 import { formatRecords } from '../utils/output.ts'
 import { isStdin, stdinStream, wrapBytes } from '../utils/stream.ts'
 import { PcreError, hostFlags, translatePcre } from '../utils/pcre.ts'
@@ -842,7 +842,7 @@ export async function rgGeneric(
   const types = new FileTypes(f.typeChanges, f.typeSelections)
   if (f.typeList) return [formatRecords(typeListing(types.definitions)), new IOResult()]
   const notes: string[] = []
-  const walk = walkFilter(f, types, await ignoreRules(fl, ctx.dispatch, notes))
+  const walk = walkFilter(f, types, await ignoreRules(fl, dispatchOf(ctx), notes))
   let pat: RegExp | null = null
   if (!f.listFiles) {
     const resolution = await resolvePattern('rg', texts, ctx.flags, paths, ctx.mountPrefix, stream)

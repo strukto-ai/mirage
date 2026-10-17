@@ -1,3 +1,4 @@
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { loadMailmap, mappedIdentity } from './mailmap.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -13,7 +14,7 @@ import { fatal, optionOperand, verbUsage } from './util.ts'
 
 /** Summarize repository history by author. */
 export async function shortlog(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

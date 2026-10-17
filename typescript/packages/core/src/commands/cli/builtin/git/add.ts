@@ -14,6 +14,7 @@
 
 import git from 'isomorphic-git'
 
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { visibleEntries, matched, repoRelative } from './pathspec.ts'
 
 import { fsStrerror, isEacces } from '../../../../errors/fs.ts'
@@ -264,7 +265,7 @@ export async function stageTracked(
  * already holds.
  */
 export async function add(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

@@ -27,15 +27,12 @@ import {
 } from '@struktoai/mirage-core/runtime/mixin'
 import { PythonRuntime } from '@struktoai/mirage-core/runtime/python/base'
 import { prepareSource } from '@struktoai/mirage-core/runtime/python/execution'
-import { initArgv, type InitFlags } from '@struktoai/mirage-core/runtime/python/flags'
+import { initArgv } from '@struktoai/mirage-core/runtime/python/flags'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
-import type {
-  ProcessExecution,
-  StreamExecution,
-  RunArgs,
-  RunResult,
-} from '@struktoai/mirage-core/runtime/types'
+import type { Context } from '@struktoai/mirage-core/commands/config'
+import type { PathSpec } from '@struktoai/mirage-core/types'
+import type { OutputFn, Program, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { LOCAL_CONFIG_KEYS, type LocalConfig } from './config.ts'
 import { closeChildren, cwdRefusal, runCli } from '../../sandbox/cli.ts'
 
@@ -145,7 +142,7 @@ function notRun(message: string, exitCode: number): RunResult {
  * or the MIRAGE_LOCAL_HOME environment variable at another binary, e.g. a
  * project venv whose packages the code needs.
  */
-export class LocalRuntime extends PythonRuntime implements StreamingProcess {
+export class LocalRuntime extends PythonRuntime<undefined> implements StreamingProcess<undefined> {
   readonly name = 'local'
   readonly [PROCESS_EXECUTOR] = true as const
   readonly [STREAMING_PROCESS] = true as const
@@ -178,31 +175,46 @@ export class LocalRuntime extends PythonRuntime implements StreamingProcess {
     return this.spawnProgram(this.python, ['--version'], {}, null, signal)
   }
 
-  run(args: RunArgs): Promise<RunResult> {
+  interpret(_engine: undefined, program: Program, ctx: Context): Promise<RunResult> {
     // Honoring the init switches is just handing them back to the real
     // interpreter, which is why this tier gets them exactly right
     // (sys.flags included) where an in-process engine cannot.
     return this.spawnProgram(
       this.python,
-      [...initArgv((args.flags ?? {}) as InitFlags), '-c', prepareSource(args), ...args.args],
-      args.env,
-      args.stdin,
-      args.signal,
+      [...initArgv(ctx.flags), '-c', prepareSource(program, ctx.cwd), ...program.args],
+      ctx.env ?? {},
+      program.stdin,
+      ctx.signal,
     )
   }
 
-  runProcess(request: ProcessExecution): Promise<RunResult> {
-    return this.executeProcess(request)
+  runProcess(
+    _engine: undefined,
+    _paths: PathSpec[],
+    texts: string[],
+    ctx: Context,
+  ): Promise<RunResult> {
+    return this.executeProcess(texts, ctx)
   }
 
-  runStream(request: StreamExecution): Promise<RunResult> {
-    return this.executeProcess(request)
+  runStream(
+    _engine: undefined,
+    _paths: PathSpec[],
+    texts: string[],
+    ctx: Context,
+    output: OutputFn,
+  ): Promise<RunResult> {
+    return this.executeProcess(texts, ctx, output)
   }
 
-  private async executeProcess(request: ProcessExecution | StreamExecution): Promise<RunResult> {
-    request.signal?.throwIfAborted()
-    const name = request.argv[0]
-    const cwd = request.cwd.virtual
+  private async executeProcess(
+    argv: string[],
+    ctx: Context,
+    output?: OutputFn,
+  ): Promise<RunResult> {
+    ctx.signal?.throwIfAborted()
+    const name = argv[0] ?? ''
+    const cwd = ctx.cwd.virtual
     const refusal = await cwdRefusal(name, cwd)
     if (refusal !== null) return refusal
     let program: string
@@ -221,12 +233,12 @@ export class LocalRuntime extends PythonRuntime implements StreamingProcess {
     // fails as the shell's would, so `tool || fallback` goes on.
     return this.spawnProgram(
       program,
-      request.argv.slice(1),
-      request.env,
-      request.stdin,
-      request.signal,
+      argv.slice(1),
+      ctx.env ?? {},
+      ctx.stdin,
+      ctx.signal,
       cwd,
-      request.kind === 'stream' ? request.output : undefined,
+      output,
     ).catch((err: unknown) => {
       const { code, syscall } = err as NodeJS.ErrnoException
       if (code === undefined || syscall?.startsWith('spawn') !== true) throw err

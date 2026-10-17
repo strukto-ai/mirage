@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Context } from '../../../commands/config.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { HOME_CONFIG_KEYS, type RuntimeOptions } from '../../config.ts'
 import { JsRuntime } from '../base.ts'
-import type { RunArgs, RunResult } from '../../types.ts'
+import type { Program, RunResult } from '../../types.ts'
 import { RuntimeFiles } from '../../files.ts'
 import { fromGuestText, installQuickJsFs, toGuestText } from './fs.ts'
 import { cwdPreamble } from './execution.ts'
@@ -36,20 +37,24 @@ const STACK_SIZE = 1024 * 1024
 // The asyncify variant is used so `std.open`/`os.readdir` can suspend
 // the guest while a workspace-mount read or write awaits the dispatch,
 // matching the Python runtime's live file I/O.
-export class QuickJsRuntime extends JsRuntime {
+export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
   readonly name = 'quickjs'
   // The engine's `std.open`/`os.readdir` suspend (asyncify) into the
   // workspace bridge: guest I/O has no way around the gate.
   override readonly reach = 'workspace'
   override readonly filesystem = ['read', 'write', 'list', 'stat'] as const
-  private newAsyncModule: NewAsyncModule | null = null
 
   constructor(options: RuntimeOptions = {}) {
     super(options, HOME_CONFIG_KEYS)
   }
 
+  /** The asyncify module factory; each run builds its own module from it. */
+  protected override openEngine(): Promise<NewAsyncModule> {
+    return loadQuickJsModule()
+  }
+
   override async version(): Promise<RunResult> {
-    const newAsyncModule = await this.loadModule()
+    const newAsyncModule = await this.engine()
     const QuickJS = await newAsyncModule()
     const ctx = QuickJS.newContext()
     try {
@@ -68,17 +73,27 @@ export class QuickJsRuntime extends JsRuntime {
     }
   }
 
-  async run(args: RunArgs, context = this.captureContext()): Promise<RunResult> {
-    const newAsyncModule = await this.loadModule()
+  /**
+   * Run one program on a fresh module of the install's engine.
+   *
+   * @param newAsyncModule the install's module factory.
+   * @param program the source and argv to run.
+   * @param ctx the run's context.
+   */
+  async interpret(
+    newAsyncModule: NewAsyncModule,
+    program: Program,
+    ctx: Context,
+  ): Promise<RunResult> {
     const QuickJS = await newAsyncModule()
     // Module-owned context, not newRuntime(): the async module's runtime
     // disposer unregisters callbacks before QTS_FreeRuntime, so a runtime
     // that ever defined an asyncified host fn throws on dispose
     // (justjake/quickjs-emscripten#261). newContext() hands the runtime
     // to the context as an owned lifetime, which tears down in the safe
-    // order; ctx.dispose() ends both.
-    const ctx = QuickJS.newContext()
-    const runtime: QuickJSAsyncRuntime = ctx.runtime
+    // order; vm.dispose() ends both.
+    const vm = QuickJS.newContext()
+    const runtime: QuickJSAsyncRuntime = vm.runtime
     runtime.setMemoryLimit(MEMORY_LIMIT)
     runtime.setMaxStackSize(STACK_SIZE)
     const out: string[] = []
@@ -87,57 +102,56 @@ export class QuickJsRuntime extends JsRuntime {
     // The guest executes on this event loop, so a busy loop blocks the
     // limit timer itself: the VM's interrupt hook is the only thing
     // that can still fire (python's epoch interruption on a thread).
-    const timedOut = this.installInterrupt(runtime, args.signal, args.timeoutSeconds, exit)
+    const timedOut = this.installInterrupt(runtime, ctx.signal, ctx.timeoutSeconds, exit)
     try {
-      this.installGlobals(ctx, args, out, err, exit)
-      const files = RuntimeFiles.of(context)
-      const closeAll = installQuickJsFs(ctx, files)
+      this.installGlobals(vm, program, ctx, out, err, exit)
+      const files = RuntimeFiles.of(ctx, this.binding)
+      const closeAll = installQuickJsFs(vm, files)
 
-      const boot = ctx.evalCode(`(() => { ${BOOTSTRAP} })()`, 'mirage:bootstrap')
+      const boot = vm.evalCode(`(() => { ${BOOTSTRAP} })()`, 'mirage:bootstrap')
       if (boot.error) {
         boot.error.dispose()
         throw new Error('quickjs bootstrap failed')
       }
       boot.value.dispose()
 
-      let result = await ctx.evalCodeAsync(cwdPreamble(args.cwd ?? context?.ctx.cwd), 'mirage:cwd')
+      let result = await vm.evalCodeAsync(cwdPreamble(ctx.cwd), 'mirage:cwd')
       if (!result.error) {
         result.value.dispose()
-        result = await ctx.evalCodeAsync(
-          args.code,
-          args.flags?.module === true ? 'input.mjs' : 'input.js',
+        result = await vm.evalCodeAsync(
+          program.code,
+          ctx.flags.module === true ? 'input.mjs' : 'input.js',
           {
-            type: args.flags?.module === true ? 'module' : 'global',
+            type: ctx.flags.module === true ? 'module' : 'global',
           },
         )
       }
       let exitCode = 0
       if (result.error) {
-        if (timedOut.value && args.timeoutSeconds !== undefined) {
+        if (timedOut.value && ctx.timeoutSeconds !== undefined) {
           result.error.dispose()
           await closeAll()
-          throw new CommandTimeoutError(this.name, args.timeoutSeconds)
+          throw new CommandTimeoutError(this.name, ctx.timeoutSeconds)
         }
         if (exit.called) {
           exitCode = exit.code
         } else {
-          err.push(this.formatError(ctx, result.error) + '\n')
+          err.push(this.formatError(vm, result.error) + '\n')
           exitCode = 1
         }
         result.error.dispose()
       } else {
-        exitCode = await this.drainJobs(runtime, ctx, err, exit)
+        exitCode = await this.drainJobs(runtime, vm, err, exit)
         // A module's evaluation is a promise, so a throw after a top-level
         // await rejects it rather than failing the eval; a script's last
         // value is the promise of the async call it ends with (`main()`).
         // The library has no rejection tracker, so a promise a script
         // drops before its end goes unreported.
-        const state = ctx.getPromiseState(result.value)
+        const state = vm.getPromiseState(result.value)
         if (state.type === 'rejected') {
           if (!exit.called) {
-            const label =
-              args.flags?.module === true ? '' : 'Possibly unhandled promise rejection: '
-            err.push(label + this.formatError(ctx, state.error) + '\n')
+            const label = ctx.flags.module === true ? '' : 'Possibly unhandled promise rejection: '
+            err.push(label + this.formatError(vm, state.error) + '\n')
             exitCode = 1
           }
           state.error.dispose()
@@ -158,13 +172,8 @@ export class QuickJsRuntime extends JsRuntime {
         exitCode,
       }
     } finally {
-      ctx.dispose()
+      vm.dispose()
     }
-  }
-
-  override close(): Promise<void> {
-    // Each run disposes its own runtime/context; nothing persists.
-    return Promise.resolve()
   }
 
   /**
@@ -194,7 +203,8 @@ export class QuickJsRuntime extends JsRuntime {
 
   private installGlobals(
     ctx: QuickJSAsyncContext,
-    args: RunArgs,
+    program: Program,
+    run: Context,
     out: string[],
     err: string[],
     exit: { code: number; called: boolean },
@@ -224,7 +234,7 @@ export class QuickJsRuntime extends JsRuntime {
         exit.called = true
       }),
     )
-    const stdin = args.stdin ?? new Uint8Array()
+    const stdin = program.stdin ?? new Uint8Array()
     let position = 0
     setGlobal(
       '__mirage_readStdin',
@@ -244,7 +254,7 @@ export class QuickJsRuntime extends JsRuntime {
     // A named program takes scriptArgs[0], the slot qjs fills with a
     // script's path when it runs a file; an unnamed run leaves the args
     // alone, so the js command keeps its spelling.
-    const scriptArgs = args.prog !== undefined ? [args.prog, ...args.args] : args.args
+    const scriptArgs = program.prog !== undefined ? [program.prog, ...program.args] : program.args
     scriptArgs.forEach((a, i) => {
       const s = ctx.newString(a)
       ctx.setProp(argv, i, s)
@@ -252,7 +262,7 @@ export class QuickJsRuntime extends JsRuntime {
     })
     setGlobal('scriptArgs', argv)
     const env = ctx.newObject()
-    for (const [k, v] of Object.entries(args.env)) {
+    for (const [k, v] of Object.entries(run.env ?? {})) {
       const s = ctx.newString(v)
       ctx.setProp(env, k, s)
       s.dispose()
@@ -335,10 +345,5 @@ export class QuickJsRuntime extends JsRuntime {
     const message = readStr('message')
     if (name === undefined && message === undefined) return String(ctx.dump(handle))
     return message ? `${name ?? 'Error'}: ${message}` : (name ?? 'Error')
-  }
-
-  private async loadModule(): Promise<NewAsyncModule> {
-    this.newAsyncModule ??= await loadQuickJsModule()
-    return this.newAsyncModule
   }
 }

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.cli.builtin.discord.delete import delete
 from mirage.commands.cli.builtin.discord.edit import edit
 from mirage.commands.cli.builtin.discord.members import members
@@ -163,4 +164,5 @@ DISCORD = CLI(
         "server-info": CLIHandler(fn=server_info),
     },
     config_model=DiscordConfig,
+    accessor=DiscordAccessor,
 )

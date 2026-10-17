@@ -164,12 +164,6 @@ def test_offending_names_the_word_parse_options_would(
     assert offending(texts, frozenset(marked), known_set) == word
 
 
-async def _verb(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
-) -> None:
-    return None
-
-
 def test_switches_reads_the_leaf_the_line_was_parsed_against():
     leaf = CommandSpec(
         name="mv",

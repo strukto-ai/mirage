@@ -80,4 +80,4 @@ def build_delta_hook(accessor: SharePointAccessor) -> DeltaHook:
                 )
         return found
 
-    return GraphDeltaHook(config, accessor.pool, targets)
+    return GraphDeltaHook(accessor, targets)

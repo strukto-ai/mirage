@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.guilds import list_guilds_stream
 from mirage.core.discord.history import snowflake_at, stream_messages_for_day
@@ -26,25 +27,25 @@ from mirage.core.time_range import TimeRange
 
 
 @pytest.fixture
-def config():
-    return DiscordConfig(token="t")
+def accessor():
+    return DiscordAccessor(DiscordConfig(token="t"))
 
 
 @pytest.mark.asyncio
-async def test_list_guilds_stream_walks_pages(config):
+async def test_list_guilds_stream_walks_pages(accessor):
     with patch(
         "mirage.core.discord.paginate.discord_get",
         new_callable=AsyncMock,
         side_effect=[[{"id": "G1"}, {"id": "G2"}], [{"id": "G3"}]],
     ):
         collected = []
-        async for page in list_guilds_stream(config, page_size=2):
+        async for page in list_guilds_stream(accessor, page_size=2):
             collected.append(page)
     assert collected == [[{"id": "G1"}, {"id": "G2"}], [{"id": "G3"}]]
 
 
 @pytest.mark.asyncio
-async def test_list_members_stream_walks_user_ids(config):
+async def test_list_members_stream_walks_user_ids(accessor):
     page1 = [{"user": {"id": "U1"}}, {"user": {"id": "U2"}}]
     page2 = [{"user": {"id": "U3"}}]
     with patch(
@@ -53,14 +54,14 @@ async def test_list_members_stream_walks_user_ids(config):
         side_effect=[page1, page2],
     ) as mock:
         collected = []
-        async for page in list_members_stream(config, "G1", page_size=2):
+        async for page in list_members_stream(accessor, "G1", page_size=2):
             collected.append(page)
     assert collected == [page1, page2]
     assert mock.call_args_list[1].kwargs["params"]["after"] == "U2"
 
 
 @pytest.mark.asyncio
-async def test_stream_messages_for_day_filters_by_date(config):
+async def test_stream_messages_for_day_filters_by_date(accessor):
     before_int = snowflake_at(
         datetime(2024, 1, 16, tzinfo=timezone.utc).timestamp()
     )
@@ -74,7 +75,7 @@ async def test_stream_messages_for_day_filters_by_date(config):
         pages = [
             p
             async for p in stream_messages_for_day(
-                config, "C1", "2024-01-15", TimeRange(), page_size=2
+                accessor, "C1", "2024-01-15", TimeRange(), page_size=2
             )
         ]
     flat = [m for page in pages for m in page]
@@ -83,7 +84,7 @@ async def test_stream_messages_for_day_filters_by_date(config):
 
 
 @pytest.mark.asyncio
-async def test_search_guild_stream_flattens_contexts(config):
+async def test_search_guild_stream_flattens_contexts(accessor):
     p1 = {
         "messages": [[{"id": "1"}], [{"id": "2"}]],
         "total_results": 30,
@@ -95,7 +96,9 @@ async def test_search_guild_stream_flattens_contexts(config):
         side_effect=[p1, p2],
     ):
         collected = []
-        async for page in search_guild_stream(config, "G1", "x", max_pages=2):
+        async for page in search_guild_stream(
+            accessor, "G1", "x", max_pages=2
+        ):
             collected.append(page)
     flat = [m["id"] for page in collected for m in page]
     assert flat == ["1", "2", "3"]

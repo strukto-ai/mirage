@@ -12,9 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
+from mirage.commands.config import Context
 from mirage.runtime.base import Runtime
+from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python import LocalRuntime
 from mirage.runtime.python.base import PythonRuntime
@@ -29,7 +33,7 @@ from mirage.runtime.table import (
     runtime_bindings_for,
     whole_line_runtime,
 )
-from mirage.runtime.types import RunArgs, RunResult
+from mirage.runtime.types import RunResult
 from mirage.runtime.workspace import WorkspaceRuntime
 
 
@@ -37,7 +41,7 @@ class FakeRuntime(Runtime):
     name = "fake"
     captures = ("python3", "made-up")
 
-    async def run(self, args: RunArgs, context=None) -> RunResult:
+    async def run(self, engine, paths, texts, ctx) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 
@@ -117,9 +121,7 @@ class _LineRuntime(Runtime, LineExecutorMixin):
     name = "boxy"
     captures = ("nvidia-smi",)
 
-    async def run_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-    ) -> RunResult:
+    async def run_line(self, engine, paths, texts, ctx) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 
@@ -147,7 +149,8 @@ def test_vfs_is_a_pure_routing_marker():
     vfs = WorkspaceRuntime()
     assert not isinstance(vfs, LineExecutorMixin)
     assert not hasattr(vfs, "run_line")
-    assert not hasattr(vfs, "run")
+    with pytest.raises(UnsupportedExecutionError, match="code execution"):
+        asyncio.run(vfs.execute([], [], Context()))
 
 
 def test_vfs_marker_reach_is_vfs():

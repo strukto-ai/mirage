@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
-import type { RunArgs } from '../types.ts'
+import type { Program } from '../types.ts'
 import { mainFilename, prepareSource } from './execution.ts'
 
 function script(raw: string, virtual: string): PathSpec {
@@ -26,22 +26,20 @@ function script(raw: string, virtual: string): PathSpec {
   })
 }
 
-function run(opts: { code?: string; prog?: string; script?: PathSpec; cwd?: string }): RunArgs {
+function run(opts: { code?: string; prog?: string; script?: PathSpec }): Program {
   return {
     code: opts.code ?? 'print(1)',
     args: [],
-    env: {},
     stdin: null,
     ...(opts.prog !== undefined ? { prog: opts.prog } : {}),
     ...(opts.script !== undefined ? { scriptPath: opts.script } : {}),
-    ...(opts.cwd !== undefined ? { cwd: PathSpec.fromStrPath(opts.cwd) } : {}),
   }
 }
 
 // Mirrors Python's tests/runtime/python/test_execution.py.
 describe('prepareSource', () => {
   it.each([undefined, '-c'])('passes a payload through untouched (prog %s)', (prog) => {
-    expect(prepareSource(run(prog !== undefined ? { prog } : {}))).toBe('print(1)')
+    expect(prepareSource(run(prog !== undefined ? { prog } : {}), null)).toBe('print(1)')
   })
 
   it.each([
@@ -53,25 +51,30 @@ describe('prepareSource', () => {
   ])('names %s under %s as typed against the cwd', (raw, cwd, name) => {
     // CPython 3.13.5: absolute against the working directory, never
     // normalized, whatever the spelling.
-    expect(mainFilename(run({ prog: raw, script: script(raw, '/w/s.py'), cwd }))).toBe(name)
+    expect(
+      mainFilename(run({ prog: raw, script: script(raw, '/w/s.py') }), PathSpec.fromStrPath(cwd)),
+    ).toBe(name)
   })
 
   it('sets argv[0] and __file__ and compiles a script under its own name', () => {
-    const out = prepareSource(run({ prog: 's.py', script: script('s.py', '/w/s.py'), cwd: '/w' }))
+    const out = prepareSource(
+      run({ prog: 's.py', script: script('s.py', '/w/s.py') }),
+      PathSpec.fromStrPath('/w'),
+    )
     expect(out).toContain(`argv[0] = "s.py"`)
     expect(out).toContain(`__file__ = "/w/s.py"`)
     expect(out).toContain(`, "/w/s.py", 'exec')`)
   })
 
   it.each(['', '-'])('compiles both stdin entry points as <stdin> (prog %j)', (prog) => {
-    const out = prepareSource(run({ prog }))
+    const out = prepareSource(run({ prog }), null)
     expect(out).toContain(`, "<stdin>", 'exec')`)
     expect(out).toContain(`__file__ = "<stdin>"`)
     expect(out).toContain(`argv[0] = ${JSON.stringify(prog)}`)
   })
 
   it('names no file for a module', () => {
-    const out = prepareSource(run({ prog: 'json.tool' }))
+    const out = prepareSource(run({ prog: 'json.tool' }), null)
     expect(out).toContain(`, "json.tool", 'exec')`)
     expect(out).not.toContain('__file__')
   })

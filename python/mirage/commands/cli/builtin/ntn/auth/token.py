@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.notion import NotionAccessor
 from mirage.commands.config import Context
-from mirage.core.notion.config import NotionConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -21,7 +21,10 @@ from mirage.vfs.secrets import reveal_secret
 
 
 async def token(
-    config: NotionConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: NotionAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    secret = reveal_secret(config.api_key)
+    secret = reveal_secret(accessor.config.api_key)
     return yield_bytes(f"{secret}\n".encode()), IOResult()

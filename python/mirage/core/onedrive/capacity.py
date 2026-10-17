@@ -26,10 +26,7 @@ async def capacity(accessor: OneDriveAccessor) -> CapacityResult:
         accessor (OneDriveAccessor): backend accessor.
     """
     drive = await graph_get(
-        accessor.config,
-        drive_base(accessor.config),
-        params={"$select": "quota"},
-        session=accessor.pool,
+        accessor, drive_base(accessor.config), params={"$select": "quota"}
     )
     quota = drive.get("quota") or {}
     if quota.get("total") is None:

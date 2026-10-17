@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import replace
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.discover import (
     discover,
     require_work_tree,
@@ -98,12 +99,12 @@ def git_would_refuse(
 
 def verb(
     fn: Callable[
-        [None, list[PathSpec], list[str], Context],
+        [Accessor, list[PathSpec], list[str], Context],
         Awaitable[tuple[ByteSource | None, IOResult]],
     ],
     refused: ReadOnlyRefusal | None = None,
 ) -> Callable[
-    [None, list[PathSpec], list[str], Context],
+    [Accessor, list[PathSpec], list[str], Context],
     Awaitable[tuple[ByteSource | None, IOResult]],
 ]:
     """A git verb whose ``refname is ambiguous`` warnings reach stderr,
@@ -123,14 +124,17 @@ def verb(
     """
 
     async def run(
-        config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+        accessor: Accessor,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
     ) -> tuple[ByteSource | None, IOResult]:
         lines: list[str] = []
         warned = AMBIGUOUS.set(lines)
         placed = LOCATIONS.set(None)
         try:
             try:
-                out, io = await fn(config, paths, texts, ctx)
+                out, io = await fn(accessor, paths, texts, ctx)
             except OSError as exc:
                 location = LOCATIONS.get()
                 if (

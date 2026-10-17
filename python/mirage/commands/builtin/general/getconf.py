@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
+from mirage.commands.builtin.utils.paths import vfs_stat_path
 from mirage.commands.config import Context, command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -409,10 +410,11 @@ async def path_exists(ctx: Context, word: str) -> bool:
         ctx (Context): the invocation, for its cwd and stat function.
         word (str): the operand as typed.
     """
-    if ctx.stat_path is None:
+    stat_path = vfs_stat_path(ctx.vfs)
+    if stat_path is None:
         return True
     spec = PathSpec.from_str_path(word, cwd=ctx.cwd)
-    return await ctx.stat_path(spec) is not None
+    return await stat_path(spec) is not None
 
 
 @command("getconf", vfs=None, spec=SPECS["getconf"])

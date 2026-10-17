@@ -264,6 +264,8 @@ class _OneLink:
 async def _linked(op: str, path: PathSpec, **_):
     if op == "stat" and path.virtual == "/db/private/f":
         return LINKED, IOResult()
+    if op == "stat" and path.virtual == "/db":
+        return FileStat(name="db", type=FileType.DIRECTORY), IOResult()
     raise FileNotFoundError(path.virtual)
 
 

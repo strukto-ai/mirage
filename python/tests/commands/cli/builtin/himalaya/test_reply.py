@@ -25,8 +25,10 @@ from mirage.commands.config import Context
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import materialize
 
-CONFIG = EmailConfig(
-    imap_host="h", smtp_host="h", username="me@example.com", password="p"
+EMAIL = EmailAccessor(
+    EmailConfig(
+        imap_host="h", smtp_host="h", username="me@example.com", password="p"
+    )
 )
 
 ORIGINAL = {
@@ -47,7 +49,7 @@ def patched(monkeypatch):
         seen["args"] = (folder, uid)
         return ORIGINAL
 
-    async def fake_deliver(config, raw, save=None):
+    async def fake_deliver(accessor, raw, save=None):
         seen["raw"] = raw
         return BytesParser(policy=default_policy).parsebytes(raw), ""
 
@@ -66,14 +68,14 @@ def parse(raw: bytes):
 
 @pytest.mark.asyncio
 async def test_reply_takes_the_id_positionally_and_defaults_to_inbox(patched):
-    await reply(CONFIG, [], ["7"], Context(flags={"body": "thanks"}))
+    await reply(EMAIL, [], ["7"], Context(flags={"body": "thanks"}))
     assert patched["args"] == ("INBOX", "7")
-    assert patched["closed"] is True
+    assert "closed" not in patched
 
 
 @pytest.mark.asyncio
 async def test_reply_writes_mime_to_stdout_without_send(patched):
-    out, io = await reply(CONFIG, [], ["7"], Context(flags={"body": "thanks"}))
+    out, io = await reply(EMAIL, [], ["7"], Context(flags={"body": "thanks"}))
     assert io.exit_code == 0
     assert "raw" not in patched
     message = parse(await materialize(out))
@@ -86,7 +88,7 @@ async def test_reply_writes_mime_to_stdout_without_send(patched):
 @pytest.mark.asyncio
 async def test_reply_all_is_spelled_by_naming_the_other_recipients(patched):
     out, _ = await reply(
-        CONFIG,
+        EMAIL,
         [],
         ["7"],
         Context(flags={"body": "thanks", "cc": "bob@example.com"}),
@@ -99,7 +101,7 @@ async def test_reply_all_is_spelled_by_naming_the_other_recipients(patched):
 @pytest.mark.asyncio
 async def test_bottom_posting_puts_the_quote_first(patched):
     out, _ = await reply(
-        CONFIG,
+        EMAIL,
         [],
         ["7"],
         Context(
@@ -119,7 +121,7 @@ async def test_bottom_posting_puts_the_quote_first(patched):
 @pytest.mark.asyncio
 async def test_send_flag_pushes_through_smtp_and_reports_json(patched):
     out, io = await reply(
-        CONFIG, [], ["7"], Context(flags={"body": "thanks", "send": True})
+        EMAIL, [], ["7"], Context(flags={"body": "thanks", "send": True})
     )
     assert io.exit_code == 0
     assert b"Re: Quarterly numbers" in patched["raw"]
@@ -133,4 +135,4 @@ async def test_send_flag_pushes_through_smtp_and_reports_json(patched):
 @pytest.mark.asyncio
 async def test_reply_without_an_id_is_a_usage_error(patched):
     with pytest.raises(ValueError, match="message id is required"):
-        await reply(CONFIG, [], [], Context(flags={"body": "thanks"}))
+        await reply(EMAIL, [], [], Context(flags={"body": "thanks"}))

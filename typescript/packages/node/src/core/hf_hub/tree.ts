@@ -127,13 +127,10 @@ export async function fetchPath(
   rel: string,
 ): Promise<Map<string, TreeEntry>> {
   const asked = accessor.repoPath(rel)
-  const answer = await hubPost(
-    accessor.token,
-    pathsInfoUrl(accessor),
-    { paths: [asked], expand: accessor.expandCommits === true },
-    undefined,
-    accessor.timeoutMs,
-  )
+  const answer = await hubPost(accessor.account, pathsInfoUrl(accessor), {
+    paths: [asked],
+    expand: accessor.expandCommits === true,
+  })
   // Only an empty list says the path is missing; an answer of any other shape
   // is one the client cannot read, not an absence.
   if (!Array.isArray(answer)) {
@@ -196,7 +193,7 @@ export async function walkPages(
   for (let page = 0; page < limit; page += 1) {
     let response
     try {
-      response = await hubGetResponse(accessor.token, target, query, accessor.timeoutMs)
+      response = await hubGetResponse(accessor.account, target, query)
     } catch (err) {
       // Only a request carrying first-page params can learn that the subtree
       // is missing; a cursor page failing means the listing broke part way,

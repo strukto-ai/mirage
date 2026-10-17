@@ -11,12 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { GitHubAccount } from '../../../../accessor/github.ts'
 import { CommandSpec } from '../../../spec/types.ts'
 import { CLI } from '../../types.ts'
 import { CLIHandler } from '../../types.ts'
 
 import { searchHandlers, searchSpec } from './search.ts'
-import { GhConfigSchema } from '../../../../core/github/config.ts'
+import { GhConfigSchema, type GhConfig } from '../../../../core/github/config.ts'
 import { BOOLEAN, HELP_TOPICS, REPO_EDIT_FIELDS } from './constants.ts'
 import type { RepoEditField } from './types.ts'
 import { findChild, nodeHelp } from '../../walk.ts'
@@ -514,7 +515,7 @@ const ENC = new TextEncoder()
  * stderr with the list of commands and still exits 0.
  */
 function helpCmd(
-  _config: unknown,
+  _accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   _ctx: Context,
@@ -649,4 +650,5 @@ export const GH = new CLI({
     'workflow run': new CLIHandler({ fn: workflowRunCmd, write: true }),
   },
   configModel: GhConfigSchema,
+  accessor: (config) => new GitHubAccount(config as GhConfig),
 })

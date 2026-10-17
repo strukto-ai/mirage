@@ -21,13 +21,9 @@ from urllib.parse import quote
 
 import aiohttp
 
-from mirage.core.api.client import (
-    RetryPolicy,
-    SessionArg,
-    api_request,
-    header_delay,
-    resolve_session,
-)
+from mirage.accessor.onedrive import OneDriveAccessor
+from mirage.accessor.sharepoint import SharePointAccessor
+from mirage.core.api.client import RetryPolicy, api_request, header_delay
 from mirage.core.msgraph.config import MsGraphConfig, graph_api
 from mirage.core.msgraph.constants import MAX_BACKOFF, RETRY_STATUSES
 from mirage.utils.ranges import ByteWindow
@@ -88,10 +84,6 @@ def headers(config: MsGraphConfig) -> dict[str, str]:
     }
 
 
-def _timeout(config: MsGraphConfig) -> aiohttp.ClientTimeout:
-    return aiohttp.ClientTimeout(total=config.timeout)
-
-
 def _policy(config: MsGraphConfig) -> RetryPolicy:
     return RetryPolicy(
         statuses=RETRY_STATUSES,
@@ -127,11 +119,10 @@ def _lenient_json(text: str) -> Any:
 
 
 async def _request(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     method: str,
     url: str,
     *,
-    session: SessionArg = None,
     params: dict[str, Any] | None = None,
     json_body: dict[str, Any] | None = None,
     data: bytes | None = None,
@@ -140,6 +131,7 @@ async def _request(
     read: Literal["json", "bytes", "none", "location"] = "json",
     window: ByteWindow | None = None,
 ) -> Any:
+    config = accessor.config
     refreshed = False
     while True:
         hdrs = headers(config) if auth else {}
@@ -157,8 +149,7 @@ async def _request(
                 retry=_policy(config),
                 read="text" if read == "json" else read,
                 window=window,
-                session=session,
-                timeout=None if session is not None else _timeout(config),
+                session=accessor.pool,
             )
         except GraphError as err:
             # a 401 under a token provider means the token aged out
@@ -178,53 +169,40 @@ async def _request(
 
 
 async def graph_get(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     url: str,
     params: dict[str, Any] | None = None,
-    session: SessionArg = None,
 ) -> dict[str, Any]:
-    data: dict[str, Any] = await _request(
-        config, "GET", url, params=params, session=session
-    )
+    data: dict[str, Any] = await _request(accessor, "GET", url, params=params)
     return data
 
 
 async def graph_list(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     url: str,
     params: dict[str, Any] | None = None,
-    session: SessionArg = None,
 ) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     next_url: str | None = url
     next_params = params
-    sess, own = resolve_session(session, timeout=_timeout(config))
-    try:
-        while next_url:
-            data = await _request(
-                config, "GET", next_url, params=next_params, session=sess
-            )
-            items.extend(data.get("value", []))
-            next_url = data.get("@odata.nextLink")
-            next_params = None
-    finally:
-        if own:
-            await sess.close()
+    while next_url:
+        data = await _request(accessor, "GET", next_url, params=next_params)
+        items.extend(data.get("value", []))
+        next_url = data.get("@odata.nextLink")
+        next_params = None
     return items
 
 
 async def graph_get_bytes(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     url: str,
     window: ByteWindow | None = None,
-    session: SessionArg = None,
     auth: bool = True,
 ) -> bytes:
     data: bytes = await _request(
-        config,
+        accessor,
         "GET",
         url,
-        session=session,
         auth=auth,
         read="bytes",
         window=window,
@@ -233,66 +211,54 @@ async def graph_get_bytes(
 
 
 async def graph_stream(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     url: str,
     chunk_size: int = 8192,
-    session: SessionArg = None,
     auth: bool = True,
 ) -> AsyncIterator[bytes]:
     # A chunked generator cannot ride api_request: the body outlives the
     # call, so the response must stay open while the caller consumes it.
-    sess, own = resolve_session(session, timeout=_timeout(config))
-    try:
-        attempt = 0
-        refreshed = False
-        while True:
-            hdrs = headers(config) if auth else {}
-            async with sess.get(url, headers=hdrs) as resp:
-                if (
-                    resp.status in RETRY_STATUSES
-                    and attempt < config.max_retries
-                ):
-                    await asyncio.sleep(
-                        header_delay(resp, attempt, _policy(config))
-                    )
-                    attempt += 1
-                    continue
-                if (
-                    resp.status == 401
-                    and auth
-                    and not refreshed
-                    and callable(config.access_token)
-                ):
-                    refreshed = True
-                    continue
-                if resp.status >= 400:
-                    raise _error_of(
-                        resp, await resp.text(), method="GET", url=url
-                    )
-                async for chunk in resp.content.iter_chunked(chunk_size):
-                    yield chunk
-                return
-    finally:
-        if own:
-            await sess.close()
+    config = accessor.config
+    sess = accessor.pool.get()
+    attempt = 0
+    refreshed = False
+    while True:
+        hdrs = headers(config) if auth else {}
+        async with sess.get(url, headers=hdrs) as resp:
+            if resp.status in RETRY_STATUSES and attempt < config.max_retries:
+                await asyncio.sleep(
+                    header_delay(resp, attempt, _policy(config))
+                )
+                attempt += 1
+                continue
+            if (
+                resp.status == 401
+                and auth
+                and not refreshed
+                and callable(config.access_token)
+            ):
+                refreshed = True
+                continue
+            if resp.status >= 400:
+                raise _error_of(resp, await resp.text(), method="GET", url=url)
+            async for chunk in resp.content.iter_chunked(chunk_size):
+                yield chunk
+            return
 
 
 async def graph_post(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     url: str,
     body: dict[str, Any] | None = None,
-    session: SessionArg = None,
 ) -> dict[str, Any]:
     data: dict[str, Any] = await _request(
-        config, "POST", url, json_body=body or {}, session=session
+        accessor, "POST", url, json_body=body or {}
     )
     return data
 
 
 async def graph_batch(
-    config: MsGraphConfig,
-    urls: list[str],
-    session: SessionArg = None,
+    accessor: OneDriveAccessor | SharePointAccessor, urls: list[str]
 ) -> list[tuple[int, dict[str, Any], float]]:
     """The answers to several GETs from one JSON batch (``$batch``), each
     as its status, its body and the seconds its ``Retry-After`` asks to be
@@ -305,21 +271,16 @@ async def graph_batch(
     at most ``MAX_BACKOFF``, 0 when the answer names none.
 
     Args:
-        config (MsGraphConfig): Graph config.
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         urls (list[str]): the GETs, each under ``graph_api(config)``.
-        session (SessionArg): pool or live session to ride.
     """
-    root = graph_api(config)
+    root = graph_api(accessor.config)
     requests = [
         {"id": str(i), "method": "GET", "url": url.removeprefix(root)}
         for i, url in enumerate(urls)
     ]
     data = await _request(
-        config,
-        "POST",
-        f"{root}/$batch",
-        json_body={"requests": requests},
-        session=session,
+        accessor, "POST", f"{root}/$batch", json_body={"requests": requests}
     )
     answers: dict[str, tuple[int, dict[str, Any], float]] = {}
     for reply in data.get("responses") or []:
@@ -351,17 +312,15 @@ def _retry_after(headers: dict[str, Any]) -> float:
 
 
 async def graph_post_monitor(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     url: str,
     body: dict[str, Any] | None = None,
-    session: SessionArg = None,
 ) -> str:
     location = await _request(
-        config,
+        accessor,
         "POST",
         url,
         json_body=body or {},
-        session=session,
         read="location",
     )
     if not isinstance(location, str) or not location:
@@ -374,37 +333,34 @@ async def graph_post_monitor(
 
 
 async def graph_patch(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     url: str,
     body: dict[str, Any],
-    session: SessionArg = None,
 ) -> dict[str, Any]:
     data: dict[str, Any] = await _request(
-        config, "PATCH", url, json_body=body, session=session
+        accessor, "PATCH", url, json_body=body
     )
     return data
 
 
 async def graph_delete(
-    config: MsGraphConfig, url: str, session: SessionArg = None
+    accessor: OneDriveAccessor | SharePointAccessor, url: str
 ) -> None:
-    await _request(config, "DELETE", url, session=session, read="none")
+    await _request(accessor, "DELETE", url, read="none")
 
 
 async def graph_put_bytes(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     url: str,
     data: bytes,
     content_type: str = "application/octet-stream",
-    session: SessionArg = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = await _request(
-        config,
+        accessor,
         "PUT",
         url,
         data=data,
         extra_headers={"Content-Type": content_type},
-        session=session,
     )
     return payload
 
@@ -416,49 +372,45 @@ def _monitor_error(
 
 
 async def poll_monitor(
-    url: str, timeout: float, interval: float = 1.0, session: SessionArg = None
+    accessor: OneDriveAccessor | SharePointAccessor,
+    url: str,
+    interval: float = 1.0,
 ) -> dict[str, Any]:
     waited = 0.0
-    sess, own = resolve_session(session)
-    try:
-        while True:
-            payload = await api_request(
-                "GET",
-                url,
-                error_of=partial(_monitor_error, url=url),
-                session=sess,
+    while True:
+        payload = await api_request(
+            "GET",
+            url,
+            error_of=partial(_monitor_error, url=url),
+            session=accessor.pool,
+        )
+        if not isinstance(payload, dict):
+            raise GraphError(
+                502,
+                "invalidMonitorResponse",
+                f"GET {url} did not return an object",
             )
-            if not isinstance(payload, dict):
-                raise GraphError(
-                    502,
-                    "invalidMonitorResponse",
-                    f"GET {url} did not return an object",
-                )
-            status = payload.get("status")
-            if not isinstance(status, str) or not status:
-                raise GraphError(
-                    502,
-                    "invalidMonitorResponse",
-                    f"GET {url} did not return a status",
-                )
-            if status in ("completed", "failed"):
-                return payload
-            if waited >= timeout:
-                return payload
-            await asyncio.sleep(interval)
-            waited += interval
-    finally:
-        if own:
-            await sess.close()
+        status = payload.get("status")
+        if not isinstance(status, str) or not status:
+            raise GraphError(
+                502,
+                "invalidMonitorResponse",
+                f"GET {url} did not return a status",
+            )
+        if status in ("completed", "failed"):
+            return payload
+        if waited >= accessor.config.timeout:
+            return payload
+        await asyncio.sleep(interval)
+        waited += interval
 
 
 async def upload_chunk(
-    config: MsGraphConfig,
+    accessor: OneDriveAccessor | SharePointAccessor,
     upload_url: str,
     data: bytes,
     start: int,
     total: int,
-    session: SessionArg = None,
 ) -> dict[str, Any]:
     end = start + len(data) - 1
     hdrs = {"Content-Range": f"bytes {start}-{end}/{total}"}
@@ -468,23 +420,21 @@ async def upload_chunk(
         error_of=partial(_error_of, method="PUT", url=upload_url),
         headers=hdrs,
         data=data,
-        retry=_policy(config),
+        retry=_policy(accessor.config),
         read="text",
-        session=session,
-        timeout=None if session is not None else _timeout(config),
+        session=accessor.pool,
     )
     payload: dict[str, Any] = _lenient_json(text)
     return payload
 
 
 async def cancel_upload(
-    config: MsGraphConfig, upload_url: str, session: SessionArg = None
+    accessor: OneDriveAccessor | SharePointAccessor, upload_url: str
 ) -> None:
     await api_request(
         "DELETE",
         upload_url,
         error_of=partial(_error_of, method="DELETE", url=upload_url),
         read="none",
-        session=session,
-        timeout=None if session is not None else _timeout(config),
+        session=accessor.pool,
     )

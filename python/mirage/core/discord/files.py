@@ -15,12 +15,8 @@
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from mirage.core.api.client import (
-    SessionArg,
-    api_request,
-    api_stream,
-    status_error,
-)
+from mirage.accessor.discord import DiscordAccessor
+from mirage.core.api.client import api_request, api_stream, status_error
 from mirage.utils.naming import file_id_name
 from mirage.utils.ranges import window_for
 
@@ -59,10 +55,10 @@ def file_blob_name(att: dict[str, Any]) -> str:
 
 
 async def download_file(
+    accessor: DiscordAccessor,
     url: str,
     offset: int = 0,
     size: int | None = None,
-    session: SessionArg = None,
 ) -> bytes:
     """Download a Discord-hosted file blob, optionally only a byte range.
 
@@ -74,11 +70,11 @@ async def download_file(
     ``window_if_unranged`` then trims.
 
     Args:
+        accessor (DiscordAccessor): Discord accessor.
         url (str): Discord attachment URL (typically ``url`` from the
             attachment object).
         offset (int): first byte to read.
         size (int | None): how many bytes, or None for the rest.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         bytes: raw file content.
@@ -89,23 +85,18 @@ async def download_file(
         error_of=status_error,
         read="bytes",
         window=window_for(offset, size),
-        session=session,
+        session=accessor.pool,
     )
     return data
 
 
 def download_file_stream(
-    url: str,
-    session: SessionArg = None,
+    accessor: DiscordAccessor, url: str
 ) -> AsyncGenerator[bytes, None]:
     """Stream an attachment with bounded reads and response cleanup.
 
     Args:
+        accessor (DiscordAccessor): Discord accessor.
         url (str): attachment download URL.
-        session (SessionArg): pool or live session to borrow.
     """
-    return api_stream(
-        url,
-        error_of=status_error,
-        session=session,
-    )
+    return api_stream(url, error_of=status_error, session=accessor.pool)

@@ -44,8 +44,12 @@ from mirage.commands.builtin.utils.limit import (
     run_with_timeout,
     with_pull_timeout,
 )
-from mirage.commands.builtin.utils.links import link_view
-from mirage.commands.builtin.utils.paths import dispatch_stat, link_follow
+from mirage.commands.builtin.utils.links import dispatch_of, link_view
+from mirage.commands.builtin.utils.paths import (
+    dispatch_stat,
+    link_follow,
+    vfs_stat_path,
+)
 from mirage.commands.config import (
     Command,
     Context,
@@ -318,6 +322,19 @@ def _handed_on(
     if names is None or "index" in names:
         handed["index"] = index
     return handed
+
+
+def _named_spec(cmd: Command, cmd_name: str) -> CommandSpec:
+    """The grammar a handler sees at ``ctx.spec``, named for the command
+    it runs as (python3 or python, js or node).
+
+    Args:
+        cmd (Command): the handler about to run.
+        cmd_name (str): the command name the mount runs.
+    """
+    if cmd.spec.name == cmd_name:
+        return cmd.spec
+    return dataclasses.replace(cmd.spec, name=cmd_name)
 
 
 async def _read_window(
@@ -899,7 +916,7 @@ class MountEntry:
         """
         async with self.use():
             handlers = await self._pick_handlers(
-                cmd_name, paths, ctx.stat_path
+                cmd_name, paths, vfs_stat_path(ctx.vfs)
             )
             if not handlers:
                 return None, IOResult(
@@ -1068,7 +1085,6 @@ class MountEntry:
         cwd = ctx.cwd.virtual
         return dataclasses.replace(
             ctx,
-            command=cmd_name,
             flags=flags,
             cwd=PathSpec(
                 virtual=cwd,
@@ -1079,8 +1095,10 @@ class MountEntry:
             mount_prefix=mount_prefix,
             index=self.index,
             io=dataclasses.replace(
-                dispatched_io(self.io, ctx.dispatch, paths),
-                access=ctx.access,
+                dispatched_io(self.io, dispatch_of(ctx), paths),
+                access=(
+                    ctx.session.access() if ctx.session is not None else None
+                ),
             ),
         )
 
@@ -1100,6 +1118,7 @@ class MountEntry:
         """
         outer = current_caller()
         links = link_view(ctx.vfs)
+        dispatch = dispatch_of(ctx)
         token = bind_caller(
             dataclasses.replace(
                 self._on_mount(outer),
@@ -1108,10 +1127,10 @@ class MountEntry:
                 mount=(self.prefix, self.mode),
                 walk_probe=(
                     WalkProbe(
-                        stat=functools.partial(dispatch_stat, ctx.dispatch),
+                        stat=functools.partial(dispatch_stat, dispatch),
                         follow=link_follow(links),
                     )
-                    if ctx.dispatch is not None
+                    if dispatch is not None
                     else outer.walk_probe
                 ),
             )
@@ -1237,6 +1256,7 @@ class MountEntry:
             if resolved_limit is not None
             else None
         )
+        ctx = dataclasses.replace(ctx, spec=_named_spec(cmd, cmd_name))
         with host_io():
             return await run_with_timeout(
                 cmd.fn(self.vfs.accessor, paths, texts, ctx),

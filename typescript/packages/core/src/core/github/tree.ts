@@ -133,7 +133,7 @@ export async function refreshTree(
   accessor: GitHubAccessor,
 ): Promise<{ tree: Record<string, TreeEntry>; version: string | null } | null> {
   const { tree, truncated, sha } = await fetchTree(
-    accessor.transport,
+    accessor.account.transport,
     accessor.owner,
     accessor.repo,
     accessor.ref,
@@ -174,7 +174,7 @@ export async function pointRow(
   const expression = parent === '' ? accessor.ref : `${accessor.ref}:${parent}`
   let page: { tree: GitHubTreeItem[]; truncated: boolean }
   try {
-    page = await fetchDirPage(accessor.transport, accessor.owner, accessor.repo, expression)
+    page = await fetchDirPage(accessor.account.transport, accessor.owner, accessor.repo, expression)
   } catch (err) {
     if (err instanceof GitHubApiError && DEFER_STATUSES.has(err.status)) return null
     throw err

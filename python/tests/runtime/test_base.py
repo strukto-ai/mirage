@@ -16,8 +16,10 @@ import asyncio
 
 import pytest
 
+from mirage.commands.config import Context
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
+from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin
 
@@ -28,10 +30,11 @@ class MarkerRuntime(Runtime):
 
 
 def test_base_carries_no_capability_entry_points():
-    # The base holds identity and config only; run, run_line and attach
+    # The base holds identity and config only; code, run_line and attach
     # belong to the tiers and mixins, detected by isinstance.
     rt = MarkerRuntime()
-    assert not hasattr(rt, "run")
+    with pytest.raises(UnsupportedExecutionError, match="code execution"):
+        asyncio.run(rt.execute([], [], Context()))
     assert not hasattr(rt, "run_line")
     assert not hasattr(rt, "attach")
     assert not isinstance(rt, LanguageRuntime)

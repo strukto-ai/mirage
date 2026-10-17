@@ -28,6 +28,7 @@ import { setProject } from './issue/set_project.ts'
 import { transition } from './issue/transition.ts'
 import { update } from './issue/update.ts'
 import * as reads from './reads.ts'
+import { linearAccessor } from './util.ts'
 
 const TEAM_OPTION = new Argument('--team', { required: true, help: 'Team key, name, or ID' })
 
@@ -268,4 +269,5 @@ export const LINEAR = new CLI({
     search: new CLIHandler({ fn: reads.search }),
   },
   configModel: LinearConfigSchema,
+  accessor: linearAccessor,
 })

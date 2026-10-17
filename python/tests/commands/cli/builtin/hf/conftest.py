@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.commands.config import Context
 from mirage.core.hf_hub.config import HfConfig
 from mirage.io.stream import yield_bytes
@@ -34,7 +35,7 @@ def leaf_args(
 ):
     """One `hf` leaf's arguments, as the executor would build them."""
     return (
-        config,
+        HfAccountAccessor(config),
         [PathSpec.from_str_path(p) for p in paths],
         list(texts),
         Context(

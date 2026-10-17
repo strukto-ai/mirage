@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { materialize } from '../../../../io/types.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
@@ -75,14 +76,17 @@ function gitWouldRefuse(
   )
 }
 
-export function verb(fn: CLIVerbFn, refused: ReadOnlyRefusal | null = null): CLIVerbFn {
-  return async (config, paths, texts, ctx) => {
+export function verb(
+  fn: CLIVerbFn<NOOPAccessor>,
+  refused: ReadOnlyRefusal | null = null,
+): CLIVerbFn<NOOPAccessor> {
+  return async (accessor, paths, texts, ctx) => {
     const own = { ...ctx, argv: [...(ctx.argv ?? [])] }
     const lines: string[] = []
     AMBIGUOUS.set(own.argv, lines)
     let result: CommandFnResult
     try {
-      result = await fn(config, paths, texts, own)
+      result = await fn(accessor, paths, texts, own)
     } catch (err) {
       const location = LOCATIONS.get(own.argv) ?? null
       const path = (err as { virtualPath?: string }).virtualPath

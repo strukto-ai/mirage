@@ -19,16 +19,18 @@ from typing import Any, TypeVar
 
 from mirage.bridge.sync import run_async_from_sync
 from mirage.commands.builtin.utils.links import link_view
+from mirage.commands.config import Context
 from mirage.concurrency.limiter import ConcurrencyLimiter
 from mirage.errors.fs import einval, eloop, numbered
 from mirage.errors.types import OperationNotSupportedError
-from mirage.runtime.binding import RuntimeContext
+from mirage.runtime.binding import ScopedResolver, WorkspaceBinding
 from mirage.runtime.constants import ABSENT_PATH, LISTING_ENTRY_CONCURRENCY
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.handles import FlushStep, Kept
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn, VFSEntry, VFSStat
 from mirage.types import FileStat, PathSpec
+from mirage.utils.context_scope import ContextScope
 from mirage.utils.path import CycleError, norm, resolve_path
 from mirage.utils.remnants import entry_name
 from mirage.utils.stat_view import (
@@ -153,21 +155,30 @@ class RuntimeFiles:
         self._limiter = ConcurrencyLimiter(LISTING_ENTRY_CONCURRENCY)
 
     @classmethod
-    def of(cls, context: RuntimeContext | None) -> "RuntimeFiles | None":
-        """The file adapter every engine builds from its execution context.
+    def of(
+        cls, ctx: Context, binding: WorkspaceBinding | None
+    ) -> "RuntimeFiles | None":
+        """The file adapter every engine builds for one run.
+
+        Over the run's files (``ctx.vfs``, whose calls are the program's
+        own), the binding's routing table and the namespace's links, each
+        replaying the run's context, which ``Runtime.execute`` set up, for
+        a guest that calls back from elsewhere.
 
         Args:
-            context (RuntimeContext | None): the execution's captured entry
-                points; None outside a workspace, which has no adapter.
+            ctx (Context): the run's context.
+            binding (WorkspaceBinding | None): the runtime's binding;
+                None outside a workspace, which has no adapter.
         """
-        if context is None:
+        if binding is None or ctx.vfs is None:
             return None
-        links = link_view(context.ctx.vfs)
+        scope = ContextScope()
+        links = link_view(ctx.vfs)
         return cls(
-            context.dispatch,
+            scope.wrap_async(ctx.vfs.dispatch),
             asyncio.get_running_loop(),
-            context.resolver,
-            None if links is None else context.scope.wrap(links.resolve),
+            ScopedResolver(binding.resolver, scope),
+            None if links is None else scope.wrap(links.resolve),
         )
 
     def kept(self, path: str, *, stored: bool, rendered: bool) -> Kept:

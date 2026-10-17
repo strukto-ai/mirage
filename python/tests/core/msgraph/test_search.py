@@ -33,7 +33,7 @@ async def ask(text: str, vfs_path: str = "") -> list[PathSpec] | None:
     virtual = "/od/" + vfs_path if vfs_path else "/od"
     scope = PathSpec(vfs_path=vfs_path, virtual=virtual, directory=virtual)
     loc = drive_loc(ACCESSOR.config, vfs_path)
-    return await files_containing(ACCESSOR.config, [(scope, loc)], text)
+    return await files_containing(ACCESSOR, [(scope, loc)], text)
 
 
 @pytest.mark.asyncio

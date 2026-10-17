@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.linear import LinearAccessor
 from mirage.commands.cli.builtin.linear import reads
 from mirage.commands.cli.builtin.linear.comment.add import add as comment_add
 from mirage.commands.cli.builtin.linear.comment.update import (
@@ -320,4 +321,5 @@ LINEAR = CLI(
         "search": CLIHandler(fn=reads.search),
     },
     config_model=LinearConfig,
+    accessor=LinearAccessor,
 )

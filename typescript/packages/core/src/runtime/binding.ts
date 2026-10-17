@@ -21,17 +21,16 @@ import { isGlob, showHead } from '../utils/hidden.ts'
 import { PathSpec } from '../types.ts'
 import { ContextScope } from '../utils/context_scope.ts'
 import type { MountResolver } from './resolver.ts'
-import type { BridgeDispatchFn } from './types.ts'
-import type { Files } from '../workspace/files.ts'
+import type { BridgeDispatchFn, DispatchFn } from './types.ts'
+import { Files } from '../workspace/files.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 
 /** Local workspace entry points captured for one execution, never guest
  * globals. `ctx` is the same `Context` a command or CLI gets: its `vfs` is
- * the session's files, whose links a guest's path resolves through, absent
- * outside a workspace. */
+ * the session's files over the binding's dispatch, so a guest's calls are
+ * the program's own. */
 export interface RuntimeContext {
   readonly binding: WorkspaceBinding
-  readonly dispatch: BridgeDispatchFn
   readonly resolver: MountResolver
   readonly scope: ContextScope
   readonly ctx: Context
@@ -41,22 +40,44 @@ export interface RuntimeContext {
 /** Live workspace connection; capture creates views scoped to one execution. */
 export class WorkspaceBinding {
   /**
-   * The last three serve an adapter that serves the mounts as files (a
-   * sandbox's SFTP), each null outside a workspace.
-   *
-   * @param files the workspace's `ws.vfs`.
-   * @param getSession its live session by id.
+   * @param dispatch a program's own file call, its gate included; null
+   *   over a guest bridge alone (`overBridge`).
+   * @param resolver the routing table.
+   * @param context the capture for one execution; `captureBinding` when
+   *   absent.
+   * @param files the workspace's `ws.vfs`, for an adapter that serves the
+   *   mounts as files (a sandbox's SFTP); null outside a workspace.
+   * @param getSession its live session by id; null outside a workspace.
    * @param mountPrefixes every prefix a sandbox may be told of, whatever
-   *   the session hides.
+   *   the session hides; null outside a workspace.
+   * @param bridge the guest bridge a run with no files rides.
    */
   constructor(
-    readonly dispatch: BridgeDispatchFn,
+    readonly dispatch: DispatchFn | null,
     readonly resolver: MountResolver,
     private readonly context?: (binding: WorkspaceBinding) => RuntimeContext,
     readonly files: Files | null = null,
     readonly getSession: ((sessionId: string) => SessionState) | null = null,
     readonly mountPrefixes: (() => string[]) | null = null,
+    readonly bridge: BridgeDispatchFn | null = null,
   ) {}
+
+  /**
+   * A binding whose file calls ride a guest bridge (the Pyodide worker's,
+   * across `postMessage`) rather than a dispatcher.
+   *
+   * @param bridge the guest bridge.
+   * @param resolver the routing table.
+   * @param context the capture for one execution; `captureBinding` when
+   *   absent.
+   */
+  static overBridge(
+    bridge: BridgeDispatchFn,
+    resolver: MountResolver,
+    context?: (binding: WorkspaceBinding) => RuntimeContext,
+  ): WorkspaceBinding {
+    return new WorkspaceBinding(null, resolver, context, null, null, null, bridge)
+  }
 
   capture(): RuntimeContext {
     return this.context === undefined ? captureBinding(this) : this.context(this)
@@ -92,18 +113,30 @@ export function restrictedMountsFor(session: SessionState, prefixes: readonly st
   return [...restricted].sort(compareCodePoints)
 }
 
-/** Pin callback attribution without copying authoritative workspace state. */
+/**
+ * Pin callback attribution without copying authoritative workspace state.
+ *
+ * @param binding the workspace connection.
+ * @param views the session's context, its restricted mounts, and the
+ *   dispatch bound to that session (the binding's own when absent).
+ * @param scope the context the entry points replay.
+ */
 export function captureBinding(
   binding: WorkspaceBinding,
   views: {
     ctx?: Partial<Context>
     restrictedMounts?: readonly string[]
-    // The bridge bound to the session the views describe; the binding's
-    // own serves a context captured with no session named.
-    dispatch?: BridgeDispatchFn
+    dispatch?: DispatchFn
   } = {},
   scope = new ContextScope([...captureSessionContext(), captureExecutionContext()]),
 ): RuntimeContext {
+  const given = views.dispatch ?? binding.dispatch
+  const dispatch = given === null ? null : scope.wrap(given)
+  const vfs =
+    dispatch === null
+      ? undefined
+      : (views.ctx?.vfs?.over(dispatch) ??
+        new Files(dispatch, null, null, () => null, { ledger: false }))
   const session = views.ctx?.session
   const wrapped =
     session === undefined
@@ -117,20 +150,20 @@ export function captureBinding(
           isReadonly: scope.wrap(session.isReadonly.bind(session)),
           profile: scope.wrap(session.profile.bind(session)),
           cwd: scope.wrap(session.cwd.bind(session)),
+          sessionId: session.sessionId,
+          access: scope.wrap(session.access.bind(session)),
         }
+  const rest: Partial<Context> = { ...views.ctx }
+  delete rest.vfs
   return Object.freeze({
     binding,
-    dispatch: scope.wrap(views.dispatch ?? binding.dispatch),
-    resolver: {
-      prefixes: scope.wrap(() => binding.resolver.prefixes()),
-      ownerOf: scope.wrap((path: string) => binding.resolver.ownerOf(path)),
-      linkChildren: scope.wrap((path: string) => binding.resolver.linkChildren(path)),
-    },
+    resolver: new ScopedResolver(binding.resolver, scope),
     restrictedMounts: Object.freeze(views.restrictedMounts ?? []),
     ctx: Object.freeze({
       stdin: null,
       flags: {},
-      ...views.ctx,
+      ...rest,
+      ...(vfs !== undefined ? { vfs } : {}),
       cwd: views.ctx?.cwd ?? PathSpec.fromStrPath('/'),
       env: Object.freeze({ ...views.ctx?.env }),
       ...(wrapped === undefined ? {} : { session: wrapped }),
@@ -139,11 +172,35 @@ export function captureBinding(
   })
 }
 
+/** Delegate every routing question under the captured context. */
+export class ScopedResolver implements MountResolver {
+  /**
+   * @param resolver the routing table asked.
+   * @param scope the context each question replays.
+   */
+  constructor(
+    private readonly resolver: MountResolver,
+    private readonly scope: ContextScope,
+  ) {}
+
+  prefixes(): string[] {
+    return this.scope.call(() => this.resolver.prefixes())
+  }
+
+  ownerOf(path: string): string | null {
+    return this.scope.call(() => this.resolver.ownerOf(path))
+  }
+
+  linkChildren(directory: string): Set<string> {
+    return this.scope.call(() => this.resolver.linkChildren(directory))
+  }
+}
+
 /**
  * The bridge a runtime's file I/O rides, over a dispatch shaped like
  * `Workspace.dispatch` (name, string path, positional args, kwargs): the
- * workspace's own for a guest, `ws.vfs.dispatch` for node's patched
- * `fs`. A read is the rendered one unless its `raw` attr asks for the
+ * run's files for a guest (`RuntimeFiles.of`), `ws.vfs.dispatch` for
+ * node's patched `fs`. A read is the rendered one unless its `raw` attr asks for the
  * stored bytes, and its `offset`/`size` attrs ask for a byte range,
  * matching Python's `RuntimeFiles.read`.
  */

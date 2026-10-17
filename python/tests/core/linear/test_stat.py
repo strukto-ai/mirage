@@ -164,11 +164,11 @@ _DOCUMENTS = [
 ]
 
 
-async def _issue_by_id(config, issue_id, session=None):
+async def _issue_by_id(accessor, issue_id):
     return next(issue for issue in _ISSUES if issue["id"] == issue_id)
 
 
-async def _comments_for(config, issue_id, session=None):
+async def _comments_for(accessor, issue_id):
     return list(_COMMENTS.get(issue_id, []))
 
 

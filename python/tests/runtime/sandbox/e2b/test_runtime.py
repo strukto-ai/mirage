@@ -18,8 +18,16 @@ from dataclasses import dataclass
 import pytest
 from e2b import CommandExitException, NotFoundException
 
+from mirage.commands.config import Context
 from mirage.runtime.sandbox.constants import PTY_MARK, PTY_RAW
 from mirage.runtime.sandbox.e2b import E2BConfig, E2BRuntime, sdk
+from mirage.types import PathSpec
+
+
+def _line(box: E2BRuntime, line: str, stdin: bytes | None, env=None):
+    cwd = PathSpec.from_str_path("/workspace")
+    ctx = Context(flags={"c": line}, stdin=stdin, env=env, cwd=cwd)
+    return box.run_line(None, [], [], ctx)
 
 
 @dataclass
@@ -161,9 +169,7 @@ def test_sandbox_id_is_required():
 @pytest.mark.parametrize("data", [None, b"", b"a\nb\n", bytes(range(256))])
 async def test_native_stdin_eof_and_command_are_preserved(data):
     runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
-    result = await runtime.run_line(
-        "wc -l | cat", data, {"E": "1"}, "/workspace"
-    )
+    result = await _line(runtime, "wc -l | cat", data, {"E": "1"})
     assert result.exit_code == 0
     assert result.stdout == (data or b"").hex().encode()
     assert result.stderr == b"warn"
@@ -201,7 +207,7 @@ async def test_parallel_calls_connect_once_and_keep_input_separate():
     runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
     payloads = [bytes([i]) * 100 for i in range(6)]
     results = await asyncio.gather(
-        *(runtime.run_line("cat", data, {}, "/workspace") for data in payloads)
+        *(_line(runtime, "cat", data) for data in payloads)
     )
     assert len(FakeSandbox.connected) == 1
     assert [r.stdout for r in results] == [

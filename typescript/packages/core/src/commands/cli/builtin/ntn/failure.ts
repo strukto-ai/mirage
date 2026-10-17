@@ -17,6 +17,7 @@ import { IOResult } from '../../../../io/types.ts'
 import { NotionAPIError } from '../../../../core/notion/client.ts'
 import type { CLIVerbFn } from '../../types.ts'
 import type { PathSpec } from '../../../../types.ts'
+import type { NtnAccessor } from './util.ts'
 
 const ENC = new TextEncoder()
 
@@ -100,15 +101,15 @@ export const GUARDED = Symbol.for('ntn.guarded')
 // which drops the status, the reason phrase and Notion's machine-readable code:
 // exactly the three fields a caller branches on. failure.test.ts fails if a
 // leaf is left unwrapped.
-export function guarded(fn: CLIVerbFn): CLIVerbFn {
+export function guarded(fn: CLIVerbFn<NtnAccessor>): CLIVerbFn<NtnAccessor> {
   const wrapped = async (
-    config: unknown,
+    accessor: NtnAccessor,
     paths: PathSpec[],
     texts: string[],
     ctx: Context,
   ): Promise<CommandFnResult> => {
     try {
-      return await fn(config, paths, texts, ctx)
+      return await fn(accessor, paths, texts, ctx)
     } catch (err) {
       if (!(err instanceof NotionAPIError)) throw err
       const [stderr, exitCode] = apiFailure(err)

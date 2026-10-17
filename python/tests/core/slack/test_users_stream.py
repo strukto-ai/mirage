@@ -16,13 +16,14 @@ from unittest.mock import patch
 
 import pytest
 
+from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.users import list_users_stream
 
 
 @pytest.mark.asyncio
 async def test_list_users_stream_walks_pages_and_filters():
-    cfg = SlackConfig(token="xoxb-t")
+    acc = SlackAccessor(SlackConfig(token="xoxb-t"))
     pages = [
         {
             "members": [
@@ -51,14 +52,14 @@ async def test_list_users_stream_walks_pages_and_filters():
     ]
     calls = []
 
-    async def fake_get(_cfg, method, params=None, token=None, session=None):
+    async def fake_get(_acc, method, params=None):
         assert method == "users.list"
         calls.append(dict(params or {}))
         return pages[len(calls) - 1]
 
     with patch("mirage.core.slack.paginate.slack_get", new=fake_get):
         seen = []
-        async for page in list_users_stream(cfg):
+        async for page in list_users_stream(acc):
             seen.append(page)
 
     assert len(seen) == 2

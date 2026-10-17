@@ -95,14 +95,12 @@ import {
   WorkspaceBinding,
   captureBinding,
   restrictedMountsFor,
-  workspaceBridge,
   type RuntimeContext,
 } from '../../runtime/binding.ts'
 import { ContextScope } from '../../utils/context_scope.ts'
 import {
   captureSessionContext,
   currentCaller,
-  type CallerDispatchFn,
   getAdmission,
   getCurrentSessionUnlessForeign,
   runExplaining,
@@ -117,7 +115,7 @@ import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { makeVar, VarAttr } from '../../shell/variable.ts'
 import { eacces, enoent } from '../../errors/fs.ts'
 import { sessionView, envSnapshot } from '../session/state.ts'
-import type { BridgeDispatchFn, DispatchFn } from '../../runtime/types.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import { Dispatcher } from '../dispatcher/index.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
@@ -397,7 +395,7 @@ export class Workspace {
       // The entry points the runtime world attaches, so a profile policy reads
       // the mounts an agent's program would, and through the same gate,
       // with its ops stamped as its own for its `preVfs` to recognize.
-      { bridge: (issuer) => this.buildWorkspaceBridge(issuer), resolver: sandboxResolver },
+      { dispatch: (issuer) => this.programDispatch(issuer), resolver: sandboxResolver },
     )
     this.registry.policies.add(this.scriptPolicy)
     for (const entry of options.policies ?? []) this.registry.policies.add(entry)
@@ -543,7 +541,7 @@ export class Workspace {
       (path) => this.namespace.followParent(path),
     )
     this.runtimeBinding = new WorkspaceBinding(
-      this.buildWorkspaceBridge(),
+      this.programDispatch(),
       sandboxResolver,
       () => this.runtimeContext(),
       this.vfs,
@@ -556,6 +554,7 @@ export class Workspace {
       binding: this.runtimeBinding,
     })
     this.closers.push(() => this.runtimeWorld.close())
+    this.closers.push(() => this.registry.clis.close())
     this.router = new Router(this.registry, this.runtimeWorld)
     if (options.routePolicy !== undefined) {
       this.registry.policies.place(new PlacementPolicy(options.routePolicy, this.scriptPolicy))
@@ -625,10 +624,11 @@ export class Workspace {
     return this.registry.clis.install(name, spec, config)
   }
 
-  /** Remove an installed CLI; its head word stops resolving (127). */
-  unregisterCli(name: string): void {
+  /** Remove an installed CLI and close its accessor; its head word stops
+   * resolving (127). */
+  async unregisterCli(name: string): Promise<void> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    this.registry.clis.uninstall(name)
+    await this.registry.clis.uninstall(name)
   }
 
   /** Snapshot of the installed CLIs keyed by head word. */
@@ -684,7 +684,7 @@ export class Workspace {
           cwd: PathSpec.fromStrPath(session.cwd),
           env: envSnapshot(session),
         },
-        dispatch: this.buildWorkspaceBridge(undefined, dispatcher, getAdmission()),
+        dispatch: this.programDispatch(undefined, dispatcher, getAdmission()),
         restrictedMounts: restrictedMountsFor(session, this.sandboxMounts()),
       },
       scope,
@@ -808,41 +808,39 @@ export class Workspace {
     })
   }
 
-  // The sandboxed runtimes' sole data path (quickjs, pyodide, monty).
-  // Routes through the private dispatch continuation, not the raw Files facade,
-  // so runtime journal replay stays open during close and sandbox I/O takes
-  // the same path as shell commands — cache read-through on
-  // reads, post-write invalidation, and mount-mode enforcement narrowed
-  // by the current session all come from the Dispatcher. An `issuer` rides
-  // every op as the `issuer` kwarg, which the dispatcher
-  // lifts onto the dispatcher's context and never forwards to a backend:
-  // it is how a profile policy's own reads reach its `preVfs` marked as
-  // its own, as an argument rather than ambient state. A `gate` is the
-  // command running the program, so a rule scoped to `python3` reaches its
-  // `open()`.
-  private buildWorkspaceBridge(
+  /**
+   * A program's own file call: the sandboxed runtimes' sole data path
+   * (quickjs, pyodide, monty), which `ctx.vfs` carries into a run.
+   *
+   * Routes through the dispatcher itself, not the raw Files facade, so
+   * runtime journal replay stays open during close and sandbox I/O takes
+   * the same path as shell commands: cache read-through on reads,
+   * post-write invalidation, and mount-mode enforcement narrowed by the
+   * current session all come from the Dispatcher. Mirrors Python's
+   * `Workspace._program_dispatch`.
+   *
+   * @param issuer rides every op as the `issuer` kwarg, which the
+   *   dispatcher lifts onto its context and never forwards to a backend:
+   *   it is how a profile policy's own reads reach its `preVfs` marked as
+   *   its own, as an argument rather than ambient state.
+   * @param dispatcher the dispatcher, bound to a session when one is named.
+   * @param gate the command running the program, so a rule scoped to
+   *   `python3` reaches its `open()`.
+   */
+  private programDispatch(
     issuer?: symbol,
     dispatcher: Dispatcher = this.dispatcher,
     gate: EntryGate | null = null,
-  ): BridgeDispatchFn {
-    const dispatch: CallerDispatchFn = (op, path, args, kwargs, report, caller) =>
+  ): DispatchFn {
+    return (name, path, args = [], kwargs = {}, report) =>
       dispatcher.dispatch(
-        op,
-        path,
-        args,
-        kwargs,
-        report,
-        caller ?? (gate === null ? undefined : { ...currentCaller(), ruleGate: gate }),
-      )
-    return workspaceBridge((name, path, args, kwargs = {}) =>
-      this.dispatchInternal(
         name,
         path,
         args,
         issuer === undefined ? kwargs : { ...kwargs, issuer },
-        dispatch,
-      ),
-    )
+        report,
+        gate === null ? undefined : { ...currentCaller(), ruleGate: gate },
+      )
   }
 
   private async getShellParser(): Promise<ShellParser> {

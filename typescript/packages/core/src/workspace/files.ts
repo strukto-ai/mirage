@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type ByteSource, type IOResult, OpReport } from '../io/types.ts'
+import { type ByteSource, IOResult, OpReport } from '../io/types.ts'
 import { closeQuietly, ensureStream } from '../io/stream.ts'
 import type { OpRecord } from '../observe/record.ts'
 import { finishRecord, type OpTimer, startOp } from '../observe/context.ts'
@@ -30,7 +30,13 @@ import { leadsHidden, pathVisible } from '../utils/hidden.ts'
 import { norm } from '../utils/path.ts'
 import { normDir, ownerPrefix } from '../utils/slash.ts'
 import { compareCodePoints } from '../utils/sort.ts'
-import type { NamespaceLinks, OpKwargs, SessionAccess, SessionBind } from '../view/types.ts'
+import type {
+  FollowOperands,
+  NamespaceLinks,
+  OpKwargs,
+  SessionAccess,
+  SessionBind,
+} from '../view/types.ts'
 
 /** Receives each record with the id of the session the op ran as. */
 export type OpSink = (rec: OpRecord, sessionId: string) => Promise<void>
@@ -61,6 +67,10 @@ export interface FilesOptions {
   // What the session a call would run as sees, given this facade's own; the
   // bound session's when unset.
   visibility?: ((sessionId: string | null) => Visibility | null) | null
+  // The line's operand resolution a command's globs give their matches.
+  follow?: FollowOperands | null
+  // Record each op on `records`; false where the dispatcher does the accounting.
+  ledger?: boolean
 }
 
 // The op's byte count for recording: the result first, else the input
@@ -161,6 +171,9 @@ export class Files {
    * workspace-wide account (python's `Files.records`).
    */
   readonly records: OpRecord[]
+  /** @internal The line's operand resolution; Python keeps it private. */
+  readonly follow: FollowOperands | null
+  private readonly ledger: boolean
 
   constructor(
     dispatch: CallerDispatchFn,
@@ -180,6 +193,8 @@ export class Files {
     this.records = options.records ?? []
     this.prefixesOf = options.prefixes ?? (() => [])
     this.visibilityOf = options.visibility ?? null
+    this.follow = options.follow ?? null
+    this.ledger = options.ledger ?? true
   }
 
   private options(): FilesOptions {
@@ -246,6 +261,22 @@ export class Files {
       this.ownerOf,
       { ...this.options(), bind: null },
     )
+  }
+
+  /**
+   * The same files over another dispatcher, keeping no ledger.
+   *
+   * @internal Behind `captureBinding`; Python spells it `Files._over`.
+   * @param dispatch the dispatcher the calls go to.
+   */
+  over(dispatch: CallerDispatchFn): Files {
+    return new Files(dispatch, null, this.links, this.ownerOf, {
+      sessionId: this.sessionId,
+      prefixes: this.prefixesOf,
+      visibility: this.visibilityOf,
+      follow: this.follow,
+      ledger: false,
+    })
   }
 
   /**
@@ -362,16 +393,21 @@ export class Files {
   /**
    * `Workspace.dispatch` as this facade runs it: as its session, and
    * recorded on `records`. The dispatcher `RuntimeFiles` drives for node's
-   * patched `fs` (`patchNodeFs`), a facade caller like FUSE. Mirrors
-   * Python's `Files.dispatch`.
+   * patched `fs` (`patchNodeFs`), a facade caller like FUSE, and a
+   * handler's for any op its typed methods do not spell; bound, so a handler
+   * can hand it on. The IOResult is empty unless this facade keeps no
+   * ledger. Mirrors Python's `Files.dispatch`.
    */
-  dispatch(
+  readonly dispatch = async (
     name: string,
     path: string | PathSpec,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
-  ): Promise<unknown> {
-    return this.through(name, path, args, kwargs)
+    report?: OpReport,
+  ): Promise<[unknown, IOResult]> => {
+    if (!this.ledger)
+      return this.dispatchFn(name, PathSpec.fromStrPath(path, undefined, '/'), args, kwargs, report)
+    return [await this.through(name, path, args, kwargs), new IOResult()]
   }
 
   /**
@@ -389,6 +425,7 @@ export class Files {
     kwargs: OpKwargs = {},
     sessionId?: string,
   ): Promise<unknown> {
+    if (!this.ledger) return (await this.dispatch(op, path, args, kwargs))[0]
     const timer = startOp()
     const report = new OpReport()
     const spelled = typeof path === 'string' ? path : path.virtual

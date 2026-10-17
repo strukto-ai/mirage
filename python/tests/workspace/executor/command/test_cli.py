@@ -13,10 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from dataclasses import asdict
+from types import SimpleNamespace
 
 import pytest
 from pydantic import BaseModel
 
+from mirage.accessor.base import NOOPAccessor
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import Context, command
 from mirage.commands.errors import PartialOutputError
@@ -32,7 +35,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.routing import RouteDecision
-from mirage.runtime.types import RunArgs, RunResult, ScriptSource
+from mirage.runtime.types import Program, RunResult, ScriptSource
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.variable import VarAttr
 from mirage.types import Limit, MountMode, PathSpec
@@ -57,13 +60,20 @@ class TokenConfig(BaseModel):
 CALLS: list[tuple] = []
 
 
-async def send(config: TokenConfig, paths, texts, ctx: Context):
-    CALLS.append((config, paths, texts, ctx))
-    return f"sent[{config.token}]\n".encode(), IOResult()
+def token_install(name: str, cli: CLI, token: str = "tok") -> CLIInstall:
+    config = TokenConfig(token=token)
+    return CLIInstall(
+        name=name, cli=cli, config=config, accessor=NOOPAccessor(config)
+    )
 
 
-def send_sync(config: TokenConfig, paths, texts, ctx: Context):
-    return f"sync[{config.token}]\n".encode(), IOResult()
+async def send(accessor: NOOPAccessor, paths, texts, ctx: Context):
+    CALLS.append((accessor, paths, texts, ctx))
+    return f"sent[{accessor.config.token}]\n".encode(), IOResult()
+
+
+def send_sync(accessor: NOOPAccessor, paths, texts, ctx: Context):
+    return f"sync[{accessor.config.token}]\n".encode(), IOResult()
 
 
 def raise_sync(config: TokenConfig, paths, texts, ctx: Context):
@@ -80,7 +90,7 @@ def make_sync_install(fn) -> CLIInstall:
         handlers={"go": CLIHandler(fn=fn)},
         config_model=TokenConfig,
     )
-    return CLIInstall(name="prog", cli=spec, config=TokenConfig(token="tok"))
+    return token_install("prog", spec)
 
 
 def make_install(name: str = "prog") -> CLIInstall:
@@ -106,7 +116,7 @@ def make_install(name: str = "prog") -> CLIInstall:
         handlers={"message send": CLIHandler(fn=send)},
         config_model=TokenConfig,
     )
-    return CLIInstall(name=name, cli=spec, config=TokenConfig(token="tok"))
+    return token_install(name, spec)
 
 
 @pytest.mark.asyncio
@@ -123,8 +133,8 @@ async def test_leaf_runs_with_config_group_flags_and_texts():
     stdout, io, node = await handle_cli(install, parts, session)
     assert io.exit_code == 0
     assert await materialize(stdout) == b"sent[tok]\n"
-    config, _, texts, ctx = CALLS.pop()
-    assert config.token == "tok"
+    accessor, _, texts, ctx = CALLS.pop()
+    assert accessor.config.token == "tok"
     assert texts == ["hello", "world"]
     assert ctx.flags["to"] == "#eng"
     assert ctx.flags["verbose"] == 2
@@ -141,10 +151,9 @@ async def test_leaf_runs_with_config_group_flags_and_texts():
     assert ctx.env == {"EDITOR": "vi", "PWD": "/"}
     assert node.command == "prog -vv message send -t #eng hello world"
 
-    paths_install = CLIInstall(
-        name="paths",
-        config=TokenConfig(token="tok"),
-        cli=CLI(
+    paths_install = token_install(
+        "paths",
+        CLI(
             CommandSpec(
                 name="paths",
                 arguments=(
@@ -333,7 +342,7 @@ async def test_a_timed_out_write_still_drops_the_caches():
         },
         config_model=TokenConfig,
     )
-    install = CLIInstall(name="prog", cli=spec, config=TokenConfig(token="t"))
+    install = token_install("prog", spec, "t")
     with pytest.raises(CommandTimeoutError):
         await handle_cli(
             install, ["prog", "run"], SessionState("t"), drop_caches=drop
@@ -358,7 +367,7 @@ async def test_a_canceled_write_still_drops_the_caches():
         handlers={"run": CLIHandler(fn=send, write=True)},
         config_model=TokenConfig,
     )
-    install = CLIInstall(name="prog", cli=spec, config=TokenConfig(token="t"))
+    install = token_install("prog", spec, "t")
     calling = asyncio.create_task(
         handle_cli(
             install, ["prog", "run"], SessionState("t"), drop_caches=drop
@@ -400,17 +409,22 @@ async def test_the_session_cwd_rides_the_invocation_record():
     assert CALLS.pop()[3].cwd.virtual == "/data"
 
 
+def _seen(program: Program, ctx: Context) -> SimpleNamespace:
+    env = ctx.env or {}
+    return SimpleNamespace(**asdict(program), env=env, flags=ctx.flags)
+
+
 class FakePyRuntime(LanguageRuntime):
     name = "fakepy"
     language = "python"
 
     def __init__(self) -> None:
         super().__init__()
-        self.seen: list[RunArgs] = []
+        self.seen: list[SimpleNamespace] = []
         self.result = RunResult(stdout=b"ran\n", stderr=None, exit_code=0)
 
-    async def run(self, args: RunArgs, context=None) -> RunResult:
-        self.seen.append(args)
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+        self.seen.append(_seen(program, ctx))
         return self.result
 
 
@@ -426,7 +440,7 @@ class FakeJsRuntime(FakePyRuntime):
 class CrashingRuntime(FakePyRuntime):
     name = "crashpy"
 
-    async def run(self, args: RunArgs, context=None) -> RunResult:
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
         raise RuntimeError("engine exploded")
 
 
@@ -434,7 +448,7 @@ class SleepingRuntime(FakePyRuntime):
     name = "sleepy"
     cancelled = False
 
-    async def run(self, args: RunArgs, context=None) -> RunResult:
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
         try:
             await asyncio.sleep(0.5)
         except asyncio.CancelledError:
@@ -511,11 +525,11 @@ async def test_script_module_bit_reaches_the_runtime_as_a_flag():
         install, ["pager"], SessionState("t"), context=CLIContext(entries=[js])
     )
     assert io.exit_code == 0
-    assert js.seen.pop().flags == {"module": True}
+    assert js.seen.pop().flags.get("module") is True
 
 
 @pytest.mark.asyncio
-async def test_script_without_the_module_bit_sends_no_flags():
+async def test_script_without_the_module_bit_sends_no_module_flag():
     py = FakePyRuntime()
     await handle_cli(
         script_install(),
@@ -523,7 +537,9 @@ async def test_script_without_the_module_bit_sends_no_flags():
         SessionState("t"),
         context=CLIContext(entries=[py]),
     )
-    assert py.seen.pop().flags == {}
+    flags = py.seen.pop().flags
+    assert "module" not in flags
+    assert flags["script_cli"] is True
 
 
 @pytest.mark.asyncio
@@ -676,10 +692,10 @@ class TierPyRuntime(PythonRuntime):
     def __init__(self, name: str) -> None:
         super().__init__()
         self.name = name
-        self.seen: list[RunArgs] = []
+        self.seen: list[SimpleNamespace] = []
 
-    async def run(self, args: RunArgs, context=None) -> RunResult:
-        self.seen.append(args)
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+        self.seen.append(_seen(program, ctx))
         return RunResult(stdout=b"ran\n", stderr=None, exit_code=0)
 
 
@@ -1146,9 +1162,7 @@ async def test_git_usage_style_does_not_change_custom_cli_option_grammar():
         handlers={"branch": CLIHandler(fn=send)},
         config_model=TokenConfig,
     )
-    install = CLIInstall(
-        name="custom", cli=spec, config=TokenConfig(token="tok")
-    )
+    install = token_install("custom", spec)
     stdout, io, _ = await handle_cli(
         install, ["custom", "branch", "--top"], SessionState("t")
     )

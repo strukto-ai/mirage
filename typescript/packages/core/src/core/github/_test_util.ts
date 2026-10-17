@@ -12,11 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { GitHubAccessor } from '../../accessor/github.ts'
+import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 import type { Evicted, SetDirOptions } from '../../cache/index/config.ts'
 import type { FileStat } from '../../types.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { HttpGitHubTransport } from './client.ts'
 import { CODE_SEARCH_SIZE_LIMIT } from './constants.ts'
 import { sha1Hex } from '../../utils/hash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -429,7 +428,7 @@ export class FakeGitHub {
 
 export function servedAccessor(ref = 'main'): GitHubAccessor {
   return new GitHubAccessor({
-    transport: new HttpGitHubTransport({ token: 't', baseUrl: BASE }),
+    account: new GitHubAccount({ token: 't', baseUrl: BASE }),
     owner: 'o',
     repo: 'r',
     ref,

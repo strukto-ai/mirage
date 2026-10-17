@@ -19,8 +19,7 @@ import type { Files } from '@struktoai/mirage-core/workspace/files'
 import { boundedMap } from '@struktoai/mirage-core/concurrency/limiter'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
-import type { HfHubAccessor } from '../../../../accessor/hf_hub.ts'
-import type { HfConfig } from '../../../../core/hf_hub/config.ts'
+import type { HfAccountAccessor, HfHubAccessor } from '../../../../accessor/hf_hub.ts'
 import {
   blobPath,
   cacheRoot,
@@ -113,7 +112,7 @@ async function writeFile(
     accessor.revision,
     repoPath,
   )
-  const data = await hubBytes(accessor.token, url, undefined, accessor.timeoutMs)
+  const data = await hubBytes(accessor.account, url)
   const target = localDir.join(repoPath)
   await ensureDir(vfs, target.parent)
   await vfs.write(target, data)
@@ -159,7 +158,7 @@ async function cacheFile(
       accessor.revision,
       entry.path,
     )
-    const data = await hubBytes(accessor.token, url, undefined, accessor.timeoutMs)
+    const data = await hubBytes(accessor.account, url)
     await ensureDir(vfs, blob.parent)
     await vfs.write(blob, data)
   }
@@ -326,7 +325,7 @@ async function refuseAbsent(accessor: HfHubAccessor, names: readonly string[]): 
  * mounted.
  */
 export async function downloadCmd(
-  config: unknown,
+  accessor: HfAccountAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -354,10 +353,10 @@ export async function downloadCmd(
   const exclude = fl.asList('exclude')
   if (include.length > 0) refuseVariadic(names, '--include', include)
   if (exclude.length > 0) refuseVariadic(names, '--exclude', exclude)
-  const accessor = hubFor(config as HfConfig, repoId ?? '', repoTypeOf(fl), fl.asStr('revision'))
-  const tree = await listedOrEmpty(accessor)
+  const hub = hubFor(accessor, repoId ?? '', repoTypeOf(fl), fl.asStr('revision'))
+  const tree = await listedOrEmpty(hub)
   const paths = selected(tree, names, include, exclude)
-  if (paths.length === 0) await refuseAbsent(accessor, names)
+  if (paths.length === 0) await refuseAbsent(hub, names)
   let workers = fl.asInt('max_workers', MAX_DOWNLOAD_WORKERS)
   if (workers < 1) {
     // Upstream fetches one named file without a pool and hands any other
@@ -374,11 +373,11 @@ export async function downloadCmd(
     // between; that is what upstream does too, which is why --force-download
     // only means anything in cache mode.
     base = localDir.virtual
-    written = await fetchAll(vfs, accessor, paths, localDir, workers)
+    written = await fetchAll(vfs, hub, paths, localDir, workers)
   } else {
     ;[base, written] = await fetchIntoCache(
       vfs,
-      accessor,
+      hub,
       tree,
       paths,
       cacheDir ?? PathSpec.fromStrPath('/'),

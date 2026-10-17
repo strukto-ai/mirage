@@ -17,7 +17,6 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.core.api.client import SessionArg
 from mirage.core.hierarchy.readdir import Listed, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.render.json import jsonl_bytes
@@ -87,17 +86,13 @@ def _date_range(
 
 
 async def _latest_message_ts(
-    config, channel_id: str, session: SessionArg = None
+    accessor: SlackAccessor, channel_id: str
 ) -> float | None:
     try:
         data = await slack_get(
-            config,
+            accessor,
             "conversations.history",
-            params={
-                "channel": channel_id,
-                "limit": 1,
-            },
-            session=session,
+            params={"channel": channel_id, "limit": 1},
         )
     except RuntimeError as e:
         if any(code in str(e) for code in _SOFT_HISTORY_ERRORS):
@@ -133,11 +128,7 @@ async def _earliest_message_ts(
         params["latest"] = f"{accessor.time_range.end:.6f}"
     first = latest
     async for page in cursor_pages(
-        accessor.config,
-        "conversations.history",
-        params,
-        "messages",
-        session=accessor.pool,
+        accessor, "conversations.history", params, "messages"
     ):
         for message in page:
             first = min(first, float(message["ts"]))
@@ -175,7 +166,7 @@ def _conversation(
 async def _list_channels_root(
     accessor: SlackAccessor, match: ScopeMatch
 ) -> Listed:
-    channels = await list_channels(accessor.config, session=accessor.pool)
+    channels = await list_channels(accessor)
     return [
         _conversation(channel_dirname(ch), ch, ch.get("name", ""))
         for ch in channels
@@ -183,8 +174,8 @@ async def _list_channels_root(
 
 
 async def _list_dms_root(accessor: SlackAccessor, match: ScopeMatch) -> Listed:
-    dms = await list_dms(accessor.config, session=accessor.pool)
-    users = await list_users(accessor.config, session=accessor.pool)
+    dms = await list_dms(accessor)
+    users = await list_users(accessor)
     user_map = {u["id"]: u.get("name", u["id"]) for u in users}
     return [
         _conversation(
@@ -199,7 +190,7 @@ async def _list_dms_root(accessor: SlackAccessor, match: ScopeMatch) -> Listed:
 async def _list_users_root(
     accessor: SlackAccessor, match: ScopeMatch
 ) -> Listed:
-    users = await list_users(accessor.config, session=accessor.pool)
+    users = await list_users(accessor)
     return [
         FileStat(
             name=user_filename(u),
@@ -218,9 +209,7 @@ async def _list_channel_days(
     channel_id = str(own.extra["channel_id"])
     created = int(own.extra.get("created") or 0)
     span = glob_span(match.pattern)
-    latest_ts = await _latest_message_ts(
-        accessor.config, channel_id, session=accessor.pool
-    )
+    latest_ts = await _latest_message_ts(accessor, channel_id)
     if latest_ts and accessor.time_range.bounded:
         start = created or accessor.time_range.start
         if start is not None:
@@ -272,11 +261,7 @@ async def _day_listing(
     """
     try:
         messages = await fetch_messages_for_day(
-            accessor.config,
-            channel_id,
-            date_str,
-            accessor.time_range,
-            session=accessor.pool,
+            accessor, channel_id, date_str, accessor.time_range
         )
     except RuntimeError as e:
         if any(code in str(e) for code in _SOFT_HISTORY_ERRORS):

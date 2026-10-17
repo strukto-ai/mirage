@@ -63,6 +63,7 @@ import { contentSize } from '../../../utils/stat_view.ts'
 import { escapeName } from '../../../utils/quote.ts'
 import { charWidth } from '../../../utils/width.ts'
 import { linksOf, mountsOf, owedNames } from '../utils/links.ts'
+import { vfsStatPath } from '../utils/paths.ts'
 
 type Readdir = (p: PathSpec) => Promise<string[]>
 type Stat = (p: PathSpec) => Promise<FileStat>
@@ -1173,11 +1174,13 @@ function finish(lines: string[], warnings: readonly LsWarning[]): CommandFnResul
   return [out, new IOResult({ exitCode })]
 }
 
+// `statPath` stats a mount root or dot entry across mounts; the cross-mount relay passes none.
 export async function lsGeneric(
   paths: PathSpec[],
   ctx: Context,
   readdir: Readdir,
   stat: Stat,
+  statPath: StatPath | null = vfsStatPath(ctx.vfs) ?? null,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, specOf('ls'))
   const targets: PathSpec[] =
@@ -1266,7 +1269,7 @@ export async function lsGeneric(
     followArgs,
     childMounts,
     mounts: mountsOf(ctx) ?? null,
-    statPath: ctx.statPath ?? null,
+    statPath,
     statNeeded: statNeeded(flags),
   }
   const probed: Operand[] = []
@@ -1303,12 +1306,10 @@ export async function lsGeneric(
           let row = new FileStat({ name, type: FileType.DIRECTORY })
           // Only the namespace can stat a parent outside this mount.
           // Without `statPath`, keep the synthetic directory row.
-          if (statNeeded(flags) && (ctx.statPath !== undefined || underPath(target, prefix))) {
+          if (statNeeded(flags) && (statPath !== null || underPath(target, prefix))) {
             try {
               const found =
-                ctx.statPath !== undefined
-                  ? await ctx.statPath(target)
-                  : await stat(childSpec(target, prefix))
+                statPath !== null ? await statPath(target) : await stat(childSpec(target, prefix))
               if (found !== null) row = found.with({ name })
             } catch (err) {
               if (!isWalkError(err)) throw err

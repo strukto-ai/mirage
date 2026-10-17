@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GitHubApiError, type GitHubTransport } from './client.ts'
 import { fetchDirTree, fetchTree } from './tree.ts'
-import { GitHubAccessor } from '../../accessor/github.ts'
+import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import type { Evicted } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
@@ -62,7 +62,7 @@ describe('a listing', () => {
     // external writes ago.
     let calls = 0
     const accessor = new GitHubAccessor({
-      transport: {
+      account: new GitHubAccount({ token: 't' }, {
         get: () => {
           calls += 1
           return Promise.resolve({
@@ -73,7 +73,7 @@ describe('a listing', () => {
             truncated: false,
           })
         },
-      } as unknown as GitHubTransport,
+      } as unknown as GitHubTransport),
       owner: 'acme',
       repo: 'proj',
       ref: 'main',
@@ -187,7 +187,7 @@ describe('the point request', () => {
         request: () => Promise.reject(new Error('unused')),
       } as unknown as GitHubTransport
       const accessor = new GitHubAccessor({
-        transport,
+        account: new GitHubAccount({ token: 't' }, transport),
         owner: 'o',
         repo: 'r',
         ref: 'main',
@@ -204,7 +204,7 @@ describe('the point request', () => {
       request: () => Promise.reject(new Error('unused')),
     } as unknown as GitHubTransport
     const accessor = new GitHubAccessor({
-      transport,
+      account: new GitHubAccount({ token: 't' }, transport),
       owner: 'o',
       repo: 'r',
       ref: 'main',

@@ -15,8 +15,8 @@
 from dataclasses import dataclass
 from typing import Any, cast
 
+from mirage.accessor.github import GitHubAccount
 from mirage.core.github.client import github_request
-from mirage.core.github.config import GhConfig
 from mirage.core.github.constants import GRAPHQL_PATH
 from mirage.core.github.paginate import github_pages
 from mirage.core.github.repo import RepoRef, graphql_data
@@ -34,10 +34,10 @@ def _only_issue(value: JsonValue, number: int) -> JsonValue:
 
 
 async def list_issues(
-    config: GhConfig, ref: RepoRef, params: dict[str, str], limit: int
+    account: GitHubAccount, ref: RepoRef, params: dict[str, str], limit: int
 ) -> list[dict[str, Any]]:
     return await github_pages(
-        config,
+        account,
         _path(ref),
         params=params,
         limit=limit,
@@ -45,44 +45,37 @@ async def list_issues(
     )
 
 
-async def get_issue(config: GhConfig, ref: RepoRef, number: int) -> JsonValue:
-    value = await github_request(
-        config.token, "GET", _path(ref, f"/{number}"), base_url=config.base_url
-    )
+async def get_issue(
+    account: GitHubAccount, ref: RepoRef, number: int
+) -> JsonValue:
+    value = await github_request(account, "GET", _path(ref, f"/{number}"))
     return _only_issue(value, number)
 
 
 async def create_issue(
-    config: GhConfig, ref: RepoRef, body: dict[str, JsonValue]
+    account: GitHubAccount, ref: RepoRef, body: dict[str, JsonValue]
 ) -> JsonValue:
-    return await github_request(
-        config.token, "POST", _path(ref), body, base_url=config.base_url
-    )
+    return await github_request(account, "POST", _path(ref), body)
 
 
 async def edit_issue(
-    config: GhConfig, ref: RepoRef, number: int, body: dict[str, JsonValue]
+    account: GitHubAccount,
+    ref: RepoRef,
+    number: int,
+    body: dict[str, JsonValue],
 ) -> JsonValue:
-    await get_issue(config, ref, number)
+    await get_issue(account, ref, number)
     return await github_request(
-        config.token,
-        "PATCH",
-        _path(ref, f"/{number}"),
-        body,
-        base_url=config.base_url,
+        account, "PATCH", _path(ref, f"/{number}"), body
     )
 
 
 async def comment_issue(
-    config: GhConfig, ref: RepoRef, number: int, body: str
+    account: GitHubAccount, ref: RepoRef, number: int, body: str
 ) -> JsonValue:
-    await get_issue(config, ref, number)
+    await get_issue(account, ref, number)
     return await github_request(
-        config.token,
-        "POST",
-        _path(ref, f"/{number}/comments"),
-        {"body": body},
-        base_url=config.base_url,
+        account, "POST", _path(ref, f"/{number}/comments"), {"body": body}
     )
 
 
@@ -122,13 +115,13 @@ fragment CommentFields on IssueComment {
 
 
 async def issue_comments(
-    config: GhConfig, ref: RepoRef, number: int
+    account: GitHubAccount, ref: RepoRef, number: int
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     cursor: str | None = None
     while True:
         response = await github_request(
-            config.token,
+            account,
             "POST",
             GRAPHQL_PATH,
             {
@@ -140,7 +133,6 @@ async def issue_comments(
                     "cursor": cursor,
                 },
             },
-            base_url=config.base_url,
         )
         if not isinstance(response, dict):
             raise ValueError("Invalid GitHub comments response")
@@ -180,7 +172,7 @@ class IssueSelections:
 
 
 async def issue_fields(
-    config: GhConfig,
+    account: GitHubAccount,
     ref: RepoRef,
     number: int,
     selections: IssueSelections,
@@ -193,7 +185,7 @@ async def issue_fields(
     cursor as ``end_cursor``.
 
     Args:
-        config (GhConfig): the install's configuration.
+        account (GitHubAccount): the token, API base and pool to ride.
         ref (RepoRef): the repository.
         number (int): the issue or pull request.
         selections (IssueSelections): what to read of each.
@@ -221,7 +213,7 @@ async def issue_fields(
         else ""
     )
     data = await graphql_data(
-        config,
+        account,
         "query IssueByNumber($owner: String!, $repo: String!, "
         f"$number: Int!{cursor}) {{\n"
         "    repository(owner: $owner, name: $repo) {\n"
@@ -275,7 +267,7 @@ _ISSUE_LIST = (
 
 
 async def list_issue_fields(
-    config: GhConfig,
+    account: GitHubAccount,
     ref: RepoRef,
     filter_: IssueListFilter,
     limit: int,
@@ -288,7 +280,7 @@ async def list_issue_fields(
     same issues.
 
     Args:
-        config (GhConfig): the install's configuration.
+        account (GitHubAccount): the token, API base and pool to ride.
         ref (RepoRef): the repository.
         filter_ (IssueListFilter): the states, assignee, author and
             labels.
@@ -317,7 +309,7 @@ async def list_issue_fields(
             variables["labels"] = list(filter_.labels)
         if cursor is not None:
             variables["endCursor"] = cursor
-        data = await graphql_data(config, query, variables)
+        data = await graphql_data(account, query, variables)
         repository = data.get("repository") or {}
         if repository.get("hasIssuesEnabled") is False:
             raise ValueError(

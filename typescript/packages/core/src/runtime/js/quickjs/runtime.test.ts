@@ -18,9 +18,15 @@ import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import type { Context } from '../../../commands/config.ts'
+import { context } from '../../../workspace/fixtures/context.ts'
+
+function execute(rt: QuickJsRuntime, code: string, extra: Partial<Context> = {}) {
+  return rt.execute([], [], context({ flags: { c: code }, ...extra }))
+}
 
 describe('QuickJS cwd', () => {
-  it('inherits the captured cwd and honors an explicit one', async () => {
+  it("a bound run takes the caller's cwd, not the session's", async () => {
     const rt = new QuickJsRuntime()
     const ws = new Workspace(
       { '/data': new RAMVFS() },
@@ -30,25 +36,23 @@ describe('QuickJS cwd', () => {
         runtimes: [rt, 'workspace'],
       },
     )
-    const args = { code: 'console.log(os.getcwd()[0])', args: [], env: {}, stdin: null }
+    const code = 'console.log(os.getcwd()[0])'
     const dec = new TextDecoder()
     try {
       expect(
         (await ws.shell('mkdir /data/sub; echo child > /data/sub/item; cd /data')).exitCode,
       ).toBe(0)
-      expect(dec.decode((await rt.run(args)).stdout)).toBe('/data\n')
+      expect(dec.decode((await execute(rt, code)).stdout)).toBe('/\n')
       expect(
-        dec.decode((await rt.run({ ...args, cwd: PathSpec.fromStrPath('/data/sub') })).stdout),
+        dec.decode((await execute(rt, code, { cwd: PathSpec.fromStrPath('/data/sub') })).stdout),
       ).toBe('/data/sub\n')
-      const bad = await rt.run({
-        ...args,
-        code: "console.log('must not run')",
+      const bad = await execute(rt, "console.log('must not run')", {
         cwd: PathSpec.fromStrPath('/missing'),
       })
       expect(bad.exitCode).toBe(1)
       expect(dec.decode(bad.stdout)).toBe('')
       expect(dec.decode(bad.stderr ?? new Uint8Array())).toContain('cannot change directory')
-      expect(dec.decode((await rt.run(args)).stdout)).toBe('/data\n')
+      expect(dec.decode((await execute(rt, code)).stdout)).toBe('/\n')
     } finally {
       await ws.close()
     }
@@ -71,12 +75,10 @@ it('marks a FILE whose flush failed as in error', async () => {
     { mode: MountMode.EXEC, shellParser: await getTestParser(), runtimes: [rt, 'workspace'] },
   )
   try {
-    const result = await rt.run({
-      code: "const f = std.open('/data/x', 'w'); f.puts('x'); print(String(f.flush()), f.error())",
-      args: [],
-      env: {},
-      stdin: null,
-    })
+    const result = await execute(
+      rt,
+      "const f = std.open('/data/x', 'w'); f.puts('x'); print(String(f.flush()), f.error())",
+    )
     expect(new TextDecoder().decode(result.stdout)).toBe('undefined true\n')
   } finally {
     await ws.close()
@@ -115,10 +117,7 @@ describe('QuickJS compatibility', () => {
       0,
     ],
   ])('runs %s', async (code, stdout, stderr, exitCode) => {
-    const result = await new QuickJsRuntime().run({
-      code,
-      args: [],
-      env: {},
+    const result = await execute(new QuickJsRuntime(), code, {
       stdin: new TextEncoder().encode('abcdef'),
     })
     expect(new TextDecoder().decode(result.stdout)).toBe(stdout)

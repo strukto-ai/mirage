@@ -14,7 +14,8 @@
 
 import { WorkspaceBinding } from '../../binding.ts'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import type { BridgeDispatchFn } from '../../types.ts'
+import type { Context } from '../../../commands/config.ts'
+import type { BridgeDispatchFn, Program, RunResult } from '../../types.ts'
 import { MontyRuntime } from './index.ts'
 import { MontyUnavailableError } from './errors.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
@@ -22,6 +23,7 @@ import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { PrefixResolver } from '../../resolver.ts'
+import { context } from '../../../workspace/fixtures/context.ts'
 
 function makeBridge(
   seed: Record<string, Uint8Array>,
@@ -132,13 +134,21 @@ function makeBridge(
   return { dispatch, files, writes, mutations, appends }
 }
 
+async function interpret(
+  rt: MontyRuntime,
+  program: Partial<Program> & { code: string },
+  extra: Partial<Context> = {},
+): Promise<RunResult> {
+  return rt.interpret(await rt.engine(), { args: [], stdin: null, ...program }, context(extra))
+}
+
 function run(
   rt: MontyRuntime,
   code: string,
   args: string[] = [],
   env: Record<string, string> = {},
-) {
-  return rt.run({ code, args, env, stdin: null })
+): Promise<RunResult> {
+  return interpret(rt, { code, args }, { env })
 }
 
 const text = (b: Uint8Array | null): string => (b === null ? '' : new TextDecoder().decode(b))
@@ -146,12 +156,12 @@ const text = (b: Uint8Array | null): string => (b === null ? '' : new TextDecode
 describe('MontyRuntime', () => {
   const runtimes: MontyRuntime[] = []
   const make = (
-    dispatch?: WorkspaceBinding['dispatch'],
+    dispatch?: BridgeDispatchFn,
     listMounts: () => string[] = () => [],
   ): MontyRuntime => {
     const rt = new MontyRuntime()
     if (dispatch !== undefined)
-      rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(listMounts)))
+      rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(listMounts)))
     runtimes.push(rt)
     return rt
   }
@@ -237,12 +247,15 @@ describe('MontyRuntime', () => {
   ])(
     'runs a program: %s',
     async (_name, program, exitCode, stdout, stderr) => {
-      const result = await make().run({
-        code: program.code,
-        args: program.args ?? [],
-        env: program.env ?? {},
-        stdin: program.stdin === undefined ? null : new TextEncoder().encode(program.stdin),
-      })
+      const result = await interpret(
+        make(),
+        {
+          code: program.code,
+          args: program.args ?? [],
+          stdin: program.stdin === undefined ? null : new TextEncoder().encode(program.stdin),
+        },
+        { env: program.env ?? {} },
+      )
       expect([result.exitCode, text(result.stdout)]).toEqual([exitCode, stdout])
       if (stderr === null) expect(text(result.stderr)).toBe('')
       else expect(text(result.stderr)).toContain(stderr)
@@ -253,7 +266,7 @@ describe('MontyRuntime', () => {
   it('a deadline SIGKILLs the busy worker and reports exit 124', async () => {
     const rt = make()
     await expect(
-      rt.run({ code: 'while True: pass', args: [], env: {}, stdin: null, timeoutSeconds: 0.3 }),
+      interpret(rt, { code: 'while True: pass' }, { timeoutSeconds: 0.3 }),
     ).rejects.toThrow(/monty: timed out after 0.3s/)
   }, 30_000)
 
@@ -263,26 +276,14 @@ describe('MontyRuntime', () => {
     setTimeout(() => {
       ctrl.abort()
     }, 200)
-    const result = await rt.run({
-      code: 'while True: pass',
-      args: [],
-      env: {},
-      stdin: null,
-      signal: ctrl.signal,
-    })
+    const result = await interpret(rt, { code: 'while True: pass' }, { signal: ctrl.signal })
     expect(result.exitCode).toBe(1)
   }, 30_000)
 
   it('argv[0] is prog when the caller names the program', async () => {
     // A named caller (a CLI install) owns argv[0]; without one the
     // interpreter's own placeholder stands, as `python3 -c` expects.
-    const named = await make().run({
-      code: 'print(argv[0])',
-      args: ['a'],
-      prog: 'pager',
-      env: {},
-      stdin: null,
-    })
+    const named = await interpret(make(), { code: 'print(argv[0])', args: ['a'], prog: 'pager' })
     expect([named.exitCode, text(named.stdout)]).toEqual([0, 'pager\n'])
     const plain = await run(make(), 'print(argv[0])')
     expect(text(plain.stdout)).toBe('main.py\n')
@@ -368,7 +369,7 @@ describe('MontyRuntime', () => {
     expect(() => new MontyRuntime({ config: { maxMemory: 1048576 } })).not.toThrow()
   })
 
-  it('inherits context cwd and honors an explicit run cwd', async () => {
+  it("a bound run takes the caller's cwd, not the session's", async () => {
     const rt = new MontyRuntime()
     const ws = new Workspace(
       { '/data': new RAMVFS() },
@@ -377,14 +378,13 @@ describe('MontyRuntime', () => {
     try {
       expect((await ws.shell('mkdir /data/sub; cd /data')).exitCode).toBe(0)
       const code = 'import os; print(os.getcwd())'
-      expect(text((await run(rt, code)).stdout)).toBe('/data\n')
-      const explicit = await rt.run({
-        code,
-        args: [],
-        env: {},
-        stdin: null,
-        cwd: PathSpec.fromStrPath('/data/sub'),
-      })
+      const fallback = await rt.execute([], [], context({ flags: { c: code } }))
+      expect(text(fallback.stdout)).toBe('/\n')
+      const explicit = await rt.execute(
+        [],
+        [],
+        context({ flags: { c: code }, cwd: PathSpec.fromStrPath('/data/sub') }),
+      )
       expect(text(explicit.stdout)).toBe('/data/sub\n')
     } finally {
       await ws.close()
@@ -555,7 +555,7 @@ describe('MontyRuntime', () => {
       close: () => Promise.resolve(),
     })
     const rt = make()
-    ;(rt as unknown as { execution: { pool: unknown } }).execution.pool = crashed(
+    ;((await rt.engine()) as unknown as { pool: unknown }).pool = crashed(
       new monty.MontyCrashedError('worker gone', { timedOut: false }),
     )
     const dead = await run(rt, 'print(1)')
@@ -563,7 +563,7 @@ describe('MontyRuntime', () => {
     expect(text(dead.stderr)).toBe('monty: worker crashed\n')
 
     const timedOut = make()
-    ;(timedOut as unknown as { execution: { pool: unknown } }).execution.pool = crashed(
+    ;((await timedOut.engine()) as unknown as { pool: unknown }).pool = crashed(
       new monty.MontyCrashedError('watchdog', { timedOut: true }),
     )
     const late = await run(timedOut, 'print(1)')
@@ -632,31 +632,25 @@ describe('Workspace with the monty runtime', () => {
 })
 
 describe('monty unavailable', () => {
-  it('runCode maps MontyUnavailableError to exit 127', async () => {
-    const { runCode } = await import('../../../commands/builtin/general/interpreter.ts')
+  it('runInterpreter maps MontyUnavailableError to exit 127', async () => {
+    const { runInterpreter } = await import('../../../commands/builtin/general/interpreter.ts')
     const { MontyUnavailableError } = await import('./index.ts')
     class UnavailableMonty extends MontyRuntime {
-      override run(): Promise<never> {
+      override interpret(): Promise<never> {
         return Promise.reject(new MontyUnavailableError('install @pydantic/monty'))
       }
       override version(): Promise<never> {
-        return this.run()
+        return this.interpret()
       }
     }
     const runtime = new UnavailableMonty()
-    const source = {
-      code: 'print(1)',
-      args: [],
-      stdin: null,
-      scriptPath: null,
-      mode: 'payload' as const,
-    }
-    const out = await runCode(
+    const out = await runInterpreter(
       'python3',
-      source,
       runtime,
-      {},
-      { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/') },
+      [],
+      [],
+      { stdin: null, flags: { c: 'print(1)' }, cwd: PathSpec.fromStrPath('/') },
+      null,
     )
     if (out === null) throw new Error('no output')
     const [, io] = out

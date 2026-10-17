@@ -38,7 +38,7 @@ _TOP_PAGE = {
 }
 
 
-async def _fake_search_pages(config, session=None):
+async def _fake_search_pages(accessor):
     return [_TOP_PAGE]
 
 

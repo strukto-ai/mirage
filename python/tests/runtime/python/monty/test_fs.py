@@ -17,11 +17,12 @@ import errno
 
 import pytest
 
+from mirage.commands.config import Context
 from mirage.errors.types import OperationNotSupportedError
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.python import MontyRuntime
 from mirage.runtime.resolver import PrefixResolver
-from mirage.runtime.types import RunArgs
+from mirage.runtime.types import RunResult
 from mirage.types import ContentType, FileStat, FileType
 
 
@@ -139,11 +140,13 @@ class FakeDispatch:
         raise ValueError(f"unexpected op {op}")
 
 
+async def _run(runtime: MontyRuntime, code: str) -> RunResult:
+    return await runtime.execute([], [], Context(flags={"c": code}))
+
+
 def test_monty_host_filesystem_invisible():
     runtime = MontyRuntime()
-    result = asyncio.run(
-        runtime.run(RunArgs(code="print(open('/etc/passwd').read())"))
-    )
+    result = asyncio.run(_run(runtime, "print(open('/etc/passwd').read())"))
     assert result.exit_code == 1
     assert b"FileNotFoundError" in result.stderr
 
@@ -161,12 +164,11 @@ def test_monty_stat_answers_from_the_mounts_own_row():
     runtime = MontyRuntime()
     runtime.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: [])))
     result = asyncio.run(
-        runtime.run(
-            RunArgs(
-                code="from pathlib import Path\n"
-                "st = Path('/s3/a.txt').stat()\n"
-                "print(oct(st.st_mode), int(st.st_mtime), st.st_size)"
-            )
+        _run(
+            runtime,
+            "from pathlib import Path\n"
+            "st = Path('/s3/a.txt').stat()\n"
+            "print(oct(st.st_mode), int(st.st_mtime), st.st_size)",
         )
     )
     assert result.exit_code == 0
@@ -181,11 +183,10 @@ def test_monty_stat_reports_an_unknown_stamp_as_epoch_zero():
     runtime = MontyRuntime()
     runtime.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: [])))
     result = asyncio.run(
-        runtime.run(
-            RunArgs(
-                code="from pathlib import Path\n"
-                "print(int(Path('/s3/a.txt').stat().st_mtime))"
-            )
+        _run(
+            runtime,
+            "from pathlib import Path\n"
+            "print(int(Path('/s3/a.txt').stat().st_mtime))",
         )
     )
     assert result.exit_code == 0
@@ -197,12 +198,11 @@ def test_monty_reports_a_character_device_without_reading_it():
     runtime = MontyRuntime()
     runtime.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: [])))
     result = asyncio.run(
-        runtime.run(
-            RunArgs(
-                code="from pathlib import Path\n"
-                "p = Path('/dev/zero')\n"
-                "print(p.exists(), p.is_file(), oct(p.stat().st_mode))"
-            )
+        _run(
+            runtime,
+            "from pathlib import Path\n"
+            "p = Path('/dev/zero')\n"
+            "print(p.exists(), p.is_file(), oct(p.stat().st_mode))",
         )
     )
     assert result.exit_code == 0, result.stderr
@@ -221,12 +221,11 @@ def test_monty_predicates_answer_from_the_row_not_a_listing():
     runtime = MontyRuntime()
     runtime.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: [])))
     result = asyncio.run(
-        runtime.run(
-            RunArgs(
-                code="from pathlib import Path\n"
-                "p = Path('/s3/d/f.txt')\n"
-                "print(p.exists(), p.is_file(), p.is_dir())"
-            )
+        _run(
+            runtime,
+            "from pathlib import Path\n"
+            "p = Path('/s3/d/f.txt')\n"
+            "print(p.exists(), p.is_file(), p.is_dir())",
         )
     )
     assert result.exit_code == 0, result.stderr
@@ -244,12 +243,11 @@ def test_monty_append_sends_only_the_new_bytes():
     runtime = MontyRuntime()
     runtime.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: [])))
     result = asyncio.run(
-        runtime.run(
-            RunArgs(
-                code="for part in ['b', 'c', 'd']:\n"
-                "    with open('/s3/log.txt', 'a') as f:\n"
-                "        f.write(part)"
-            )
+        _run(
+            runtime,
+            "for part in ['b', 'c', 'd']:\n"
+            "    with open('/s3/log.txt', 'a') as f:\n"
+            "        f.write(part)",
         )
     )
     assert result.exit_code == 0, result.stderr
@@ -273,12 +271,11 @@ def test_monty_append_falls_back_when_the_mount_has_no_append_op():
     runtime = MontyRuntime()
     runtime.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: ["/s3/"])))
     result = asyncio.run(
-        runtime.run(
-            RunArgs(
-                code="for part in ['b', 'c']:\n"
-                "    with open('/s3/log.txt', 'a') as f:\n"
-                "        f.write(part)"
-            )
+        _run(
+            runtime,
+            "for part in ['b', 'c']:\n"
+            "    with open('/s3/log.txt', 'a') as f:\n"
+            "        f.write(part)",
         )
     )
     assert result.exit_code == 0, result.stderr
@@ -312,7 +309,7 @@ def test_monty_mkdir_on_a_file_raises_even_under_exist_ok(read_first):
         + read
         + "Path('/s3/a.txt').mkdir(exist_ok=True)"
     )
-    result = asyncio.run(runtime.run(RunArgs(code=code)))
+    result = asyncio.run(_run(runtime, code))
     assert result.exit_code == 1
     assert b"FileExistsError" in result.stderr
     assert dispatch.dirs == []
@@ -329,7 +326,7 @@ def test_monty_a_dangling_link_is_a_link_though_it_does_not_exist():
         "p = Path('/s3/dangling')\n"
         "print(p.exists(), p.is_symlink())"
     )
-    result = asyncio.run(runtime.run(RunArgs(code=code)))
+    result = asyncio.run(_run(runtime, code))
     assert result.exit_code == 0, result.stderr
     assert result.stdout == b"False True\n"
 
@@ -342,7 +339,7 @@ def test_monty_a_refused_readlink_is_not_read_as_not_a_link():
     runtime = MontyRuntime()
     runtime.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: [])))
     code = "from pathlib import Path\nPath('/s3/x').is_symlink()"
-    result = asyncio.run(runtime.run(RunArgs(code=code)))
+    result = asyncio.run(_run(runtime, code))
     assert result.exit_code == 1
     assert b"PermissionError: [Errno 13] Permission denied: '/s3/x'" in (
         result.stderr

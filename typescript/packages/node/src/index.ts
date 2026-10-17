@@ -447,7 +447,7 @@ export { knownRuntimes, registerRuntime } from '@struktoai/mirage-core/runtime/t
 export { type MountResolver, PrefixResolver } from '@struktoai/mirage-core/runtime/resolver'
 export { RuntimeFiles } from '@struktoai/mirage-core/runtime/files'
 export { CrossMountError } from '@struktoai/mirage-core/runtime/errors'
-export type { RunArgs, RuntimeReach } from '@struktoai/mirage-core/runtime/types'
+export type { ExecutionKind, Program, RuntimeReach } from '@struktoai/mirage-core/runtime/types'
 export type { RoutePolicy } from '@struktoai/mirage-core/runtime/routing/types'
 export {
   type ExecuteOptions,

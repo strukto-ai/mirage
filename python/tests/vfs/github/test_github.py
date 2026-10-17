@@ -83,7 +83,7 @@ def _listing(tree: dict):
         tree (dict): The recursive tree each listing is cut from.
     """
 
-    async def page(config, owner, repo, tree_sha, session=None):
+    async def page(config, owner, repo, tree_sha):
         at = tree_sha.partition(":")[2]
         stem = at + "/" if at else ""
         return [
@@ -129,7 +129,7 @@ def test_caches_reads() -> None:
 
 def test_bind_args() -> None:
     vfs = _make_vfs()
-    assert vfs.accessor.config is CONFIG
+    assert vfs.config is CONFIG
     assert vfs.accessor.owner == OWNER
     assert vfs.accessor.repo == REPO
     assert vfs.accessor.ref == "main"
@@ -260,9 +260,7 @@ async def test_ensure_default_branch_fetches_once_and_caches() -> None:
         assert await ensure_default_branch(vfs.accessor) == "develop"
         assert await ensure_default_branch(vfs.accessor) == "develop"
     assert vfs.accessor.default_branch == "develop"
-    mock_branch.assert_awaited_once_with(
-        CONFIG, OWNER, REPO, vfs.accessor.pool
-    )
+    mock_branch.assert_awaited_once_with(vfs.accessor.account, OWNER, REPO)
 
 
 @pytest.mark.asyncio

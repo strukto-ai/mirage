@@ -33,9 +33,13 @@ import { CycleError, resolvePath } from '../utils/path.ts'
 import type { FlushStep, Kept } from './handles/index.ts'
 import { PrefixResolver, type MountResolver } from './resolver.ts'
 import type { BridgeDispatchFn } from './types.ts'
-import type { RuntimeContext } from './binding.ts'
+import { ScopedResolver, workspaceBridge, type WorkspaceBinding } from './binding.ts'
 import { linkView } from '../commands/builtin/utils/links.ts'
-import type { FileStat, SetAttrFields } from '../types.ts'
+import type { Context } from '../commands/config.ts'
+import { captureSessionContext } from '../context/session_context.ts'
+import { captureExecutionContext } from '../execution/context.ts'
+import { PathSpec, type FileStat, type SetAttrFields } from '../types.ts'
+import { ContextScope } from '../utils/context_scope.ts'
 import { concat } from '../utils/bytes.ts'
 import { entryName } from '../utils/remnants.ts'
 import type { VFSEntry, VFSStat } from './types.ts'
@@ -113,21 +117,23 @@ export function keptView(kept: Kept, raw: boolean): Uint8Array {
  * the call (quickjs asyncify) or records the mutation and replays it
  * after the run (pyodide), so nothing here has to block a worker
  * thread the way the Python runtimes do.
- *
- * Args:
- *   dispatch: the workspace op dispatch this runtime was attached to.
- *   resolver: the workspace mount routing table; the default answers
- *     no mounts, so routing questions answer null.
- *   resolve: where the namespace's links lead a path; null while the
- *     workspace keeps no links.
  */
 export class RuntimeFiles {
   private readonly dispatch: BridgeDispatchFn
   private readonly resolver: MountResolver
   private readonly noAppend = new Set<string>()
 
+  /**
+   * @param bridge the bridge every op rides, over the run's files; it also
+   *   answers the raw calls a guest makes past the typed methods (the
+   *   Pyodide worker's xattr and alias checks).
+   * @param resolver the workspace mount routing table; the default answers
+   *   no mounts, so routing questions answer null.
+   * @param resolve where the namespace's links lead a path; null while the
+   *   workspace keeps no links.
+   */
   constructor(
-    dispatch: BridgeDispatchFn,
+    readonly bridge: BridgeDispatchFn,
     resolver: MountResolver = new PrefixResolver(() => []),
     private readonly resolve: ((path: string) => string) | null = null,
   ) {
@@ -138,7 +144,7 @@ export class RuntimeFiles {
     this.dispatch = async (...args) => {
       const release = await limiter.acquire()
       try {
-        return await dispatch(...args)
+        return await bridge(...args)
       } finally {
         release()
       }
@@ -147,18 +153,35 @@ export class RuntimeFiles {
   }
 
   /**
-   * The file adapter every engine builds from its execution context; none
-   * outside a workspace.
+   * The file adapter every engine builds for one run.
+   *
+   * Over the run's files (`ctx.vfs`, whose calls are the program's own),
+   * the binding's routing table and the namespace's links, each replaying
+   * the run's context, which `Runtime.execute` set up, for a guest that
+   * calls back from elsewhere. A run with no files rides the binding's
+   * guest bridge (`WorkspaceBinding.overBridge`, the Pyodide worker's).
+   *
+   * @param ctx the run's context.
+   * @param binding the runtime's binding; null outside a workspace, which
+   *   has no adapter.
    */
-  static of(context: RuntimeContext): RuntimeFiles
-  static of(context: RuntimeContext | undefined): RuntimeFiles | null
-  static of(context: RuntimeContext | undefined): RuntimeFiles | null {
-    if (context === undefined) return null
-    const links = linkView(context.ctx.vfs)
+  static of(ctx: Context, binding: WorkspaceBinding | null): RuntimeFiles | null {
+    if (binding === null) return null
+    const vfs = ctx.vfs
+    const bridge =
+      vfs === undefined
+        ? binding.bridge
+        : workspaceBridge(
+            async (name, path, args, kwargs) =>
+              (await vfs.dispatch(name, PathSpec.fromStrPath(path), args, kwargs))[0],
+          )
+    if (bridge === null) return null
+    const scope = new ContextScope([...captureSessionContext(), captureExecutionContext()])
+    const links = linkView(vfs)
     return new RuntimeFiles(
-      context.dispatch,
-      context.resolver,
-      links === undefined ? null : context.scope.wrap(links.resolve.bind(links)),
+      scope.wrap(bridge),
+      new ScopedResolver(binding.resolver, scope),
+      links === undefined ? null : scope.wrap(links.resolve.bind(links)),
     )
   }
 

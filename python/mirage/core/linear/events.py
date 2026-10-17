@@ -81,9 +81,7 @@ class LinearEventHook:
         if isinstance(team, dict) and text_field(team, "key") is not None:
             self._teams[team_id] = dict(team)
         if team_id not in self._teams:
-            for listed in await list_teams(
-                self._accessor.config, session=self._accessor.pool
-            ):
+            for listed in await list_teams(self._accessor):
                 self._teams[str(listed.get("id"))] = listed
         known = self._teams.get(team_id)
         return f"teams/{team_dirname(known)}" if known is not None else None
@@ -190,11 +188,7 @@ class LinearEventHook:
         place = self._issues.get(issue_id)
         if place is None:
             place = await self._issue_dir(
-                await get_issue(
-                    self._accessor.config,
-                    issue_id,
-                    session=self._accessor.pool,
-                )
+                await get_issue(self._accessor, issue_id)
             )
         if place is None:
             return ()

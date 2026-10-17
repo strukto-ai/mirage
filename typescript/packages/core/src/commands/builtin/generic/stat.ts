@@ -50,7 +50,8 @@ import { groupName, identityOf, ownerName, type Identity } from '../utils/identi
 import { formatRecords } from '../utils/output.ts'
 import { missingOperandError } from '../../spec/usage.ts'
 import { encodeText } from '../../../shell/bytes.ts'
-import { linksOf, mountsOf } from '../utils/links.ts'
+import { linksOf, mountsOf, dispatchOf } from '../utils/links.ts'
+import { vfsStatPath } from '../utils/paths.ts'
 
 const TYPE_LABELS: Partial<Record<FileType, string>> = {
   [FileType.DIRECTORY]: 'directory',
@@ -530,10 +531,11 @@ export async function statGeneric(
   const parsed = parseFlags(ctx.flags)
   if (paths.length === 0) throw missingOperandError('stat', null)
   const fmt = parsed.format
+  const statPath = vfsStatPath(ctx.vfs)
   if (parsed.fileSystem) {
-    const dispatch = ctx.dispatch
+    const dispatch = dispatchOf(ctx)
     const probe = (p: PathSpec): Promise<FileStat> =>
-      operandStat(p, stat, ctx.statPath, mountsOf(ctx), linksOf(ctx))
+      operandStat(p, stat, statPath, mountsOf(ctx), linksOf(ctx))
     const statfs: StatfsFn | null =
       dispatch !== undefined ? (p) => dispatchedStatfs(dispatch, p) : null
     return fileSystems(paths, fmt ?? FS_LAYOUT, probe, statfs)
@@ -553,7 +555,7 @@ export async function statGeneric(
     }
     let s: FileStat
     try {
-      s = await operandStat(p, stat, ctx.statPath, mountsOf(ctx), linksOf(ctx))
+      s = await operandStat(p, stat, statPath, mountsOf(ctx), linksOf(ctx))
     } catch (e) {
       // GNU stat keeps reporting the remaining operands, exit 1.
       if (!isFsError(e)) throw e

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { NotionAccessor } from '../../../../accessor/notion.ts'
 import { HttpNotionTransport } from '../../../../core/notion/client.ts'
 import type { NotionConfig } from '../../../../core/notion/config.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
@@ -23,25 +24,41 @@ import { compareCodePoints } from '../../../../utils/sort.ts'
 const ENC = new TextEncoder()
 const CHECKED = '✓'
 
-export function notionTransport(
-  config: unknown,
-  bag?: Record<string, FlagValue>,
-): HttpNotionTransport {
-  const cfg = config as NotionConfig
-  // --notion-version is upstream's per-invocation override of the header, and
-  // the executor has already filled it from NOTION_API_VERSION when the line
-  // omitted it, so a verb reads one flag and never the environment. Every verb
-  // passes its flags here rather than building a transport of its own, or the
-  // override would work on whichever verbs remembered it.
-  const flagVersion = bag === undefined ? undefined : new FlagView(bag).asStr('notion_version')
-  // An empty flag falls back to the config's own pin, exactly as python's
-  // `notion_config` returns `config` untouched for an empty --notion-version.
-  const version = flagVersion !== undefined && flagVersion !== '' ? flagVersion : cfg.apiVersion
+// An ntn install's accessor; `ntn api` sends raw REST, so it holds the HTTP transport.
+export type NtnAccessor = NotionAccessor<HttpNotionTransport>
+
+function httpTransport({ apiKey, baseUrl, apiVersion }: NotionConfig): HttpNotionTransport {
   return new HttpNotionTransport({
-    apiKey: cfg.apiKey,
-    ...(cfg.baseUrl !== undefined && cfg.baseUrl !== '' ? { baseUrl: cfg.baseUrl } : {}),
-    ...(version !== undefined && version !== '' ? { apiVersion: version } : {}),
+    apiKey,
+    ...(baseUrl !== undefined && baseUrl !== '' ? { baseUrl } : {}),
+    ...(apiVersion !== undefined && apiVersion !== '' ? { apiVersion } : {}),
   })
+}
+
+// The install's accessor, built once from its validated config.
+export function ntnAccessor(config: unknown): NtnAccessor {
+  const cfg = config as NotionConfig
+  return new NotionAccessor(httpTransport(cfg), cfg)
+}
+
+// The install's config with this line's --notion-version applied (the
+// executor fills it from NOTION_API_VERSION); an empty flag keeps the pin.
+export function notionConfig(accessor: NtnAccessor, bag: Record<string, FlagValue>): NotionConfig {
+  if (accessor.config === undefined) throw new Error('ntn: the accessor carries no account config')
+  const version = new FlagView(bag).asStr('notion_version')
+  if (version === undefined || version === '') return accessor.config
+  return { ...accessor.config, apiVersion: version }
+}
+
+// The transport for this line; every verb comes through here so the version
+// override reaches all of them.
+export function notionTransport(
+  accessor: NtnAccessor,
+  bag: Record<string, FlagValue>,
+): HttpNotionTransport {
+  const version = new FlagView(bag).asStr('notion_version')
+  if (version === undefined || version === '') return accessor.transport
+  return httpTransport(notionConfig(accessor, bag))
 }
 
 function sortDeep(value: unknown): unknown {

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { captureBinding, WorkspaceBinding } from '../../../binding.ts'
+import { WorkspaceBinding } from '../../../binding.ts'
 import { PathSpec } from '../../../../types.ts'
 import { PrefixResolver } from '../../../resolver.ts'
 import type { BridgeDispatchFn } from '../../../types.ts'
@@ -63,28 +63,31 @@ const dispatch: BridgeDispatchFn = (...args) =>
   Promise.resolve(call({ op: 'dispatch', path: args[1], args }))
 let runtime: PyodideRuntime | null = null
 let prefixes: string[] = []
-let cwd = PathSpec.fromStrPath('/')
 async function execute(request: ExecuteRequest): Promise<void> {
   try {
     prefixes = request.prefixes
-    cwd = PathSpec.fromStrPath(request.cwd ?? request.args.cwd ?? '/')
     if (runtime === null) {
       interrupt =
         request.interruptBuffer === undefined ? undefined : new Int32Array(request.interruptBuffer)
       runtime = new PyodideRuntime({ config: request.config }, sync, request.interruptBuffer)
-      runtime.bind(
-        new WorkspaceBinding(dispatch, new PrefixResolver(() => prefixes), (binding) =>
-          captureBinding(binding, { ctx: { cwd } }),
-        ),
-      )
+      // No files cross to the worker: its file adapter rides the bridge the
+      // main thread answers.
+      runtime.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => prefixes)))
     }
-    const value = await runtime.run({
-      ...request.args,
-      ...(request.args.cwd !== undefined ? { cwd: PathSpec.fromStrPath(request.args.cwd) } : {}),
-      ...(request.args.scriptPath !== undefined
-        ? { scriptPath: new PathSpec(request.args.scriptPath) }
-        : {}),
-    } as Parameters<PyodideRuntime['run']>[0])
+    // The program the main thread resolved, its script rebuilt from the
+    // fields structured clone kept.
+    const { scriptPath, ...program } = request.program
+    const value = await runtime.interpret(
+      undefined,
+      { ...program, ...(scriptPath !== undefined ? { scriptPath: new PathSpec(scriptPath) } : {}) },
+      {
+        stdin: null,
+        flags: request.flags,
+        cwd: PathSpec.fromStrPath(request.cwd),
+        env: request.env,
+        ...(request.timeoutSeconds !== undefined ? { timeoutSeconds: request.timeoutSeconds } : {}),
+      },
+    )
     post({ kind: 'result', value })
   } catch (error) {
     post({

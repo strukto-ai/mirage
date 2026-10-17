@@ -15,33 +15,42 @@
 import pytest
 
 from mirage.accessor.hf_hub import (
+    HfAccountAccessor,
     HfDatasetsAccessor,
+    HfHubAccessor,
     HfModelsAccessor,
     HfSpacesAccessor,
+    account_of,
+    stall_timeout,
 )
-from mirage.core.hf_hub.client import stall_timeout
+from mirage.core.hf_hub.config import HfConfig
 from mirage.vfs.hf_buckets.config import HfRepoConfig
+
+
+def models(config: HfRepoConfig) -> HfModelsAccessor:
+    """A model mount's handle, over the account the mount builds."""
+    return HfModelsAccessor(account_of(config), config)
 
 
 def test_revision_defaults_to_main_without_a_request():
     """Unlike GitHub's default branch, the Hub creates every repository
     with `main` and offers no way to change which branch is default, so
     naming no revision costs nothing to resolve."""
-    assert HfModelsAccessor(HfRepoConfig(repo_id="a/b")).revision == "main"
+    assert models(HfRepoConfig(repo_id="a/b")).revision == "main"
 
 
 def test_revision_honours_an_explicit_pin():
-    acc = HfModelsAccessor(HfRepoConfig(repo_id="a/b", revision="v2"))
+    acc = models(HfRepoConfig(repo_id="a/b", revision="v2"))
     assert acc.revision == "v2"
 
 
 def test_key_prefix_is_normalized_with_a_trailing_slash():
-    acc = HfModelsAccessor(HfRepoConfig(repo_id="a/b", key_prefix="/sub/dir"))
+    acc = models(HfRepoConfig(repo_id="a/b", key_prefix="/sub/dir"))
     assert acc.key_prefix == "sub/dir/"
 
 
 def test_key_prefix_is_empty_when_unset():
-    assert HfModelsAccessor(HfRepoConfig(repo_id="a/b")).key_prefix == ""
+    assert models(HfRepoConfig(repo_id="a/b")).key_prefix == ""
 
 
 @pytest.mark.parametrize(
@@ -57,21 +66,36 @@ def test_key_prefix_is_empty_when_unset():
 def test_repo_path_joins_the_prefix_exactly_once(prefix, local, expected):
     """The prefix is normalized with a trailing slash, so a hand-written
     join produced `sub/dir//a.txt` and 404'd every prefixed read."""
-    acc = HfModelsAccessor(HfRepoConfig(repo_id="a/b", key_prefix=prefix))
+    acc = models(HfRepoConfig(repo_id="a/b", key_prefix=prefix))
     assert acc.repo_path(local) == expected
 
 
 def test_expand_commits_defaults_to_deciding_by_size():
-    assert HfModelsAccessor(HfRepoConfig(repo_id="a/b")).expand_commits is None
+    assert models(HfRepoConfig(repo_id="a/b")).expand_commits is None
+
+
+def test_stall_timeout_bounds_progress_not_the_whole_request():
+    bound = stall_timeout(5)
+    assert (bound.total, bound.sock_connect, bound.sock_read) == (None, 5, 5)
+
+
+@pytest.mark.parametrize("seconds", [0, -1])
+def test_a_bound_of_zero_or_less_is_none(seconds):
+    bound = stall_timeout(seconds)
+    assert (bound.total, bound.sock_connect, bound.sock_read) == (
+        None,
+        None,
+        None,
+    )
 
 
 def test_the_pool_waits_the_configured_timeout_without_progress():
-    assert HfModelsAccessor(
-        HfRepoConfig(repo_id="a/b")
-    ).pool._timeout == stall_timeout(30)
-    assert HfModelsAccessor(
+    assert models(HfRepoConfig(repo_id="a/b")).account.pool._timeout == (
+        stall_timeout(30)
+    )
+    assert models(
         HfRepoConfig(repo_id="a/b", timeout=5)
-    ).pool._timeout == stall_timeout(5)
+    ).account.pool._timeout == stall_timeout(5)
 
 
 @pytest.mark.parametrize(
@@ -83,7 +107,28 @@ def test_the_pool_waits_the_configured_timeout_without_progress():
     ],
 )
 def test_each_repo_kind_sends_its_own_type(accessor_cls, repo_type, uri):
-    acc = accessor_cls(HfRepoConfig(repo_id="org/repo"))
+    config = HfRepoConfig(repo_id="org/repo")
+    acc = accessor_cls(account_of(config), config)
     assert acc.REPO_TYPE == repo_type
     assert acc.repo_type == repo_type
     assert acc.bucket_uri == uri
+
+
+def test_the_mount_account_carries_its_credential_and_origin():
+    config = HfRepoConfig(
+        repo_id="a/b", token="t", endpoint="https://hub.example"
+    )
+    acc = models(config)
+    assert acc.account.token.get_secret_value() == "t"
+    assert acc.endpoint == "https://hub.example"
+
+
+@pytest.mark.asyncio
+async def test_a_repository_handle_borrows_the_account_it_rides():
+    """Closing a per-call handle leaves the pool to the account's owner."""
+    account = HfAccountAccessor(HfConfig(token="t"))
+    session = account.pool.get()
+    await HfHubAccessor(account, HfRepoConfig(repo_id="a/b"), "model").close()
+    assert not session.closed
+    await account.close()
+    assert session.closed

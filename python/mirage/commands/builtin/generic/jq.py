@@ -13,6 +13,7 @@ from mirage.commands.builtin.generic.program import (
     program_file_refusal,
     read_program_file,
 )
+from mirage.commands.builtin.utils.links import dispatch_of
 from mirage.commands.builtin.utils.stream import is_stdin, stdin_stream
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
@@ -679,7 +680,7 @@ async def jq_generic(
         read_bytes,
         read_stream,
         ctx.stdin,
-        ctx.dispatch,
+        dispatch_of(ctx),
     )
 
 

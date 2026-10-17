@@ -12,11 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.linear import LinearAccessor
 from mirage.commands.cli.builtin.linear.util import text_or_stdin
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.linear.client import issue_create, resolve_team
-from mirage.core.linear.config import LinearConfig
 from mirage.core.linear.normalize import normalize_issue, to_json_bytes
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -24,17 +24,20 @@ from mirage.types import PathSpec
 
 
 async def create(
-    config: LinearConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: LinearAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    team = await resolve_team(config, fl.as_str("team") or "")
+    team = await resolve_team(accessor, fl.as_str("team") or "")
     description = None
     if fl.as_str("description") is not None or ctx.stdin is not None:
         description = await text_or_stdin(
             fl.as_str("description"), ctx.stdin, "description is required"
         )
     issue = await issue_create(
-        config,
+        accessor,
         team_id=team["id"],
         title=fl.as_str("title") or "",
         description=description,

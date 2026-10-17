@@ -21,7 +21,7 @@ from mirage.io.types import materialize
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
-from mirage.runtime.types import RunArgs, RunResult
+from mirage.runtime.types import Program, RunResult
 
 
 class Engine(PythonRuntime):
@@ -36,7 +36,7 @@ class Engine(PythonRuntime):
         self.release = asyncio.Event()
         self.release.set()
 
-    async def run(self, args: RunArgs, context=None) -> RunResult:
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
         self.entered.set()
         await self.release.wait()
         return RunResult(
@@ -58,7 +58,7 @@ class Gate(Runtime, LineExecutorMixin):
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
 
-    async def run_line(self, line, stdin, env, cwd):
+    async def run_line(self, engine, paths, texts, ctx):
         self.entered.set()
         await self.release.wait()
         return RunResult(stdout=b"", stderr=None, exit_code=0)

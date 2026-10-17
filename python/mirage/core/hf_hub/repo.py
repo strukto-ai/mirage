@@ -73,10 +73,7 @@ async def head_commit(accessor: HfHubAccessor) -> str:
     # 110 bytes. A param, never part of revision_url, which every not-found
     # message names verbatim.
     data: JsonValue = await hub_get(
-        accessor.token,
-        revision_url(accessor),
-        {"expand[]": "sha"},
-        session=accessor.pool,
+        accessor.account, revision_url(accessor), {"expand[]": "sha"}
     )
     if not isinstance(data, dict):
         return ""
@@ -106,9 +103,7 @@ async def classify_absence(accessor: HfHubAccessor) -> Absence:
         revision resolves and the empty listing means an empty subtree.
     """
     try:
-        await hub_get(
-            accessor.token, revision_url(accessor), session=accessor.pool
-        )
+        await hub_get(accessor.account, revision_url(accessor))
     except HfHubError as exc:
         if exc.error_code == "RepoNotFound":
             return Absence.REPO

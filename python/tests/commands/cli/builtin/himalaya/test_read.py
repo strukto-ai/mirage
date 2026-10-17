@@ -22,11 +22,13 @@ from mirage.commands.config import Context
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import materialize
 
-CONFIG = EmailConfig(imap_host="h", smtp_host="h", username="u", password="p")
+EMAIL = EmailAccessor(
+    EmailConfig(imap_host="h", smtp_host="h", username="u", password="p")
+)
 
 
 @pytest.mark.asyncio
-async def test_read_takes_the_id_positionally_and_closes_the_accessor(
+async def test_read_takes_the_id_positionally_on_the_installs_accessor(
     monkeypatch,
 ):
     seen = {}
@@ -46,17 +48,14 @@ async def test_read_takes_the_id_positionally_and_closes_the_accessor(
 
     monkeypatch.setitem(read.__globals__, "fetch_message", fake_fetch)
     monkeypatch.setattr(EmailAccessor, "close", fake_close)
-    out, io = await read(
-        CONFIG, [], ["7"], Context(flags={"mailbox": "INBOX"})
-    )
+    out, io = await read(EMAIL, [], ["7"], Context(flags={"mailbox": "INBOX"}))
     assert io.exit_code == 0
     # Rendered through the mount's own renderer, so INTERNALDATE (which
     # only picks the date directory) never reaches the output.
     assert json.loads(await materialize(out)) == {"subject": "Hi", "uid": "7"}
-    assert isinstance(seen["accessor"], EmailAccessor)
-    assert seen["accessor"].config is CONFIG
+    assert seen["accessor"] is EMAIL
     assert seen["args"] == ("INBOX", "7")
-    assert closed == [seen["accessor"]]
+    assert closed == []
 
 
 @pytest.mark.asyncio
@@ -68,19 +67,14 @@ async def test_read_defaults_the_mailbox_to_inbox(monkeypatch):
         return {"uid": uid}
 
     monkeypatch.setitem(read.__globals__, "fetch_message", fake_fetch)
-    monkeypatch.setattr(EmailAccessor, "close", lambda self: _noop())
-    await read(CONFIG, [], ["7"], Context())
+    await read(EMAIL, [], ["7"], Context())
     assert seen["folder"] == "INBOX"
-
-
-async def _noop():
-    return None
 
 
 @pytest.mark.asyncio
 async def test_read_without_an_id_is_a_usage_error():
     with pytest.raises(ValueError, match="message id is required"):
-        await read(CONFIG, [], [], Context())
+        await read(EMAIL, [], [], Context())
 
 
 @pytest.mark.asyncio
@@ -93,14 +87,13 @@ async def test_raw_writes_the_rfc5322_bytes_verbatim(monkeypatch):
 
     monkeypatch.setitem(read.__globals__, "fetch_raw_message", fake_raw)
     monkeypatch.setitem(read.__globals__, "fetch_message", boom)
-    monkeypatch.setattr(EmailAccessor, "close", lambda self: _noop())
-    out, io = await read(CONFIG, [], ["7"], Context(flags={"raw": True}))
+    out, io = await read(EMAIL, [], ["7"], Context(flags={"raw": True}))
     assert io.exit_code == 0
     assert await materialize(out) == b"From: a@x\r\n\r\nbody"
 
 
 @pytest.mark.asyncio
-async def test_read_closes_the_accessor_on_error(monkeypatch):
+async def test_read_leaves_the_accessor_open_on_error(monkeypatch):
     closed = []
 
     async def fake_fetch(accessor, folder, uid):
@@ -112,5 +105,5 @@ async def test_read_closes_the_accessor_on_error(monkeypatch):
     monkeypatch.setitem(read.__globals__, "fetch_message", fake_fetch)
     monkeypatch.setattr(EmailAccessor, "close", fake_close)
     with pytest.raises(FileNotFoundError):
-        await read(CONFIG, [], ["9"], Context())
-    assert len(closed) == 1
+        await read(EMAIL, [], ["9"], Context())
+    assert closed == []

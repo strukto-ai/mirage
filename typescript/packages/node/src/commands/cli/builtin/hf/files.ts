@@ -15,12 +15,12 @@
 import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
+import type { HfAccountAccessor } from '../../../../accessor/hf_hub.ts'
 import { repoUrl } from '../../../../core/hf_hub/client.ts'
 import { commit } from '../../../../core/hf_hub/commit.ts'
 import { EMPTY_COMMIT_WARNING } from '../../../../core/hf_hub/constants.ts'
 import { headCommit } from '../../../../core/hf_hub/repo.ts'
 import { deletionsFor, fetchTree, repoFiles } from '../../../../core/hf_hub/tree.ts'
-import type { HfConfig } from '../../../../core/hf_hub/config.ts'
 import { hubFor, repoTypeOf, requireOperands, requireToken, textOut } from './accessor.ts'
 
 /**
@@ -33,23 +33,22 @@ import { hubFor, repoTypeOf, requireOperands, requireToken, textOut } from './ac
  * does, and names the commit the revision already points at.
  */
 export async function deleteCmd(
-  config: unknown,
+  accessor: HfAccountAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const cfg = config as HfConfig
   requireOperands(texts, ['repo_id', 'patterns'])
-  requireToken(cfg, 'repo-files delete')
+  requireToken(accessor, 'repo-files delete')
   const fl = new FlagView(ctx.flags)
   const [repoId, ...patterns] = texts
   const target = repoId ?? ''
-  const accessor = hubFor(cfg, target, repoTypeOf(fl), fl.asStr('revision'))
-  const deletions = deletionsFor(repoFiles(await fetchTree(accessor)), patterns)
+  const hub = hubFor(accessor, target, repoTypeOf(fl), fl.asStr('revision'))
+  const deletions = deletionsFor(repoFiles(await fetchTree(hub)), patterns)
   const message = fl.asStr('commit_message')
   let url: string
   let stderr = ''
-  const reply = await commit(accessor, {
+  const reply = await commit(hub, {
     deletions,
     message:
       message === undefined || message === ''
@@ -59,8 +58,8 @@ export async function deleteCmd(
     createPr: fl.asBool('create_pr'),
   })
   if (reply === undefined) {
-    const home = repoUrl(cfg.endpoint, accessor.repoType, target)
-    url = `${home}/commit/${await headCommit(accessor)}`
+    const home = repoUrl(hub.endpoint, hub.repoType, target)
+    url = `${home}/commit/${await headCommit(hub)}`
     stderr = EMPTY_COMMIT_WARNING
   } else {
     url = typeof reply.commitUrl === 'string' ? reply.commitUrl : ''

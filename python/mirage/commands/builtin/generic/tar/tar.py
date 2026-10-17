@@ -57,7 +57,7 @@ from mirage.commands.builtin.generic.tar.types import (
     ReadMode,
     ReadResult,
 )
-from mirage.commands.builtin.utils.links import links_of, mounts_of
+from mirage.commands.builtin.utils.links import links_of, mount_view
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.output import (
     format_optional_records,
@@ -1034,7 +1034,7 @@ async def tar_generic(
         exclude=parsed.exclude,
         one_file_system=parsed.one_file_system,
         links=links_of(ctx),
-        mounts=mounts_of(ctx),
+        mounts=mount_view(ctx.vfs),
         cwd=ctx.cwd,
         relay=relay,
         stdin=ctx.stdin,

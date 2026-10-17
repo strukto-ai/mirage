@@ -18,12 +18,15 @@ from email.policy import default as default_policy
 
 import pytest
 
+from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya import send
 from mirage.commands.config import Context
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import materialize
 
-CONFIG = EmailConfig(imap_host="h", smtp_host="h", username="u", password="p")
+EMAIL = EmailAccessor(
+    EmailConfig(imap_host="h", smtp_host="h", username="u", password="p")
+)
 RAW = b"From: me@example.com\nTo: a@b.com\nSubject: Hi\n\nyo"
 
 
@@ -31,7 +34,7 @@ RAW = b"From: me@example.com\nTo: a@b.com\nSubject: Hi\n\nyo"
 def sent(monkeypatch):
     seen: dict = {}
 
-    async def fake_deliver(config, raw, save=None):
+    async def fake_deliver(accessor, raw, save=None):
         seen["raw"] = raw
         seen["save"] = save
         message = BytesParser(policy=default_policy).parsebytes(raw)
@@ -43,7 +46,7 @@ def sent(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_send_reads_the_message_from_stdin(sent):
-    out, io = await send(CONFIG, [], [], Context(stdin=RAW))
+    out, io = await send(EMAIL, [], [], Context(stdin=RAW))
     assert io.exit_code == 0
     assert sent["raw"] == RAW
     assert json.loads(await materialize(out)) == {
@@ -55,33 +58,33 @@ async def test_send_reads_the_message_from_stdin(sent):
 
 @pytest.mark.asyncio
 async def test_send_takes_an_inline_message_with_escaped_newlines(sent):
-    await send(CONFIG, [], ["From:", "me@x", "\\n\\n", "body"], Context())
+    await send(EMAIL, [], ["From:", "me@x", "\\n\\n", "body"], Context())
     assert sent["raw"] == b"From: me@x \n\n body"
 
 
 @pytest.mark.asyncio
 async def test_inline_message_wins_over_stdin(sent):
-    await send(CONFIG, [], ["From:", "me@x"], Context(stdin=RAW))
+    await send(EMAIL, [], ["From:", "me@x"], Context(stdin=RAW))
     assert sent["raw"] == b"From: me@x"
 
 
 @pytest.mark.asyncio
 async def test_an_empty_message_is_refused_before_smtp(sent):
     with pytest.raises(ValueError, match="no message provided"):
-        await send(CONFIG, [], [], Context(stdin=b"   \n "))
+        await send(EMAIL, [], [], Context(stdin=b"   \n "))
     assert "raw" not in sent
 
 
 @pytest.mark.asyncio
 async def test_a_clean_send_writes_nothing_to_stderr(sent):
-    _, io = await send(CONFIG, [], [], Context(stdin=RAW))
+    _, io = await send(EMAIL, [], [], Context(stdin=RAW))
     assert io.stderr is None
 
 
 @pytest.mark.asyncio
 async def test_an_unsaved_copy_reaches_stderr_without_failing_the_verb(sent):
     sent["warning"] = "himalaya: sent copy not saved: Sent: NO\n"
-    out, io = await send(CONFIG, [], [], Context(stdin=RAW))
+    out, io = await send(EMAIL, [], [], Context(stdin=RAW))
     assert io.exit_code == 0
     assert await materialize(io.stderr) == sent["warning"].encode()
     assert json.loads(await materialize(out))["status"] == "sent"
@@ -89,11 +92,11 @@ async def test_an_unsaved_copy_reaches_stderr_without_failing_the_verb(sent):
 
 @pytest.mark.asyncio
 async def test_save_names_the_mailbox_for_the_copy(sent):
-    await send(CONFIG, [], [], Context(stdin=RAW, flags={"save": "Drafts"}))
+    await send(EMAIL, [], [], Context(stdin=RAW, flags={"save": "Drafts"}))
     assert sent["save"] == "Drafts"
 
 
 @pytest.mark.asyncio
 async def test_without_save_the_account_resolves_its_own_mailbox(sent):
-    await send(CONFIG, [], [], Context(stdin=RAW))
+    await send(EMAIL, [], [], Context(stdin=RAW))
     assert sent["save"] is None

@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto'
 import { Workspace, SSHVFS, SSHRuntime } from '@struktoai/mirage-node'
 import { Limit, MountMode, RAMVFS } from '@struktoai/mirage-core'
 import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
-import { exerciseCancellation } from '../../fixtures/runtime/e2b_cancel.ts'
+import { exerciseCancellation, runLine } from '../../fixtures/runtime/e2b_cancel.ts'
 
 const dec = new TextDecoder()
 const hash = (data: Uint8Array) => createHash('sha256').update(data).digest('hex')
@@ -25,33 +25,26 @@ const hash = (data: Uint8Array) => createHash('sha256').update(data).digest('hex
 async function exercise(runtime: E2BRuntime | SSHRuntime, label: string) {
   const bytes = Uint8Array.from({ length: 262144 }, (_, i) => i % 256)
   for (const data of [null, new Uint8Array(), bytes]) {
-    const result = await runtime.runLine(
+    const result = await runLine(
+      runtime,
       "python3 -c 'import sys,hashlib; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'",
       data,
-      {},
-      '/home/user',
     )
     assert.equal(result.exitCode, 0)
     assert.equal(dec.decode(result.stdout).trim(), hash(data ?? new Uint8Array()))
   }
   for (let i = 0; i < 6; i++) {
-    const result = await runtime.runLine(
-      'printf out; printf err >&2; exit 7',
-      new Uint8Array([1]),
-      {},
-      '/home/user',
-    )
+    const result = await runLine(runtime, 'printf out; printf err >&2; exit 7', new Uint8Array([1]))
     assert.equal(result.exitCode, 7)
     assert.equal(dec.decode(result.stdout), 'out')
     assert.equal(dec.decode(result.stderr ?? undefined), 'err')
   }
   const results = await Promise.all(
     Array.from({ length: 6 }, (_, i) =>
-      runtime.runLine(
+      runLine(
+        runtime,
         "python3 -c 'import sys,time,json; s=time.time(); d=sys.stdin.buffer.read(); time.sleep(2); print(json.dumps([s,time.time(),d.hex()]))'",
         new Uint8Array([i]),
-        {},
-        '/home/user',
       ),
     ),
   )

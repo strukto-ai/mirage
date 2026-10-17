@@ -18,10 +18,9 @@ import type { EvaluationContext } from '../../evaluation.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
-import type { FollowOperands, ReaddirPath, StatPath } from '../../../view/types.ts'
+import type { FollowOperands } from '../../../view/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { envSnapshot, sessionView } from '../../session/state.ts'
-import { pathReaddir, pathStat } from '../../mount/namespace/probe.ts'
 import { Files } from '../../files.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
 import { ownLimit } from '../../../policy/builtin/output_cap.ts'
@@ -232,15 +231,6 @@ export async function runOnMount(
     mount.commandLimits.get(cmdName) ??
     ownLimit(registry.commandLimits, cmdName)
 
-  // A traversal command's start point is statted through the dispatcher so
-  // a start point under another mount answers (`find -L` follows a link
-  // across mounts before the command ever runs).
-  const statPath: StatPath = (path) => pathStat(dispatch, path)
-  // The same entry point for a listing: a walker whose output is one document
-  // (tree) reads the subtree under a nested mount through here, because
-  // that subtree lives in a VFS its own accessor cannot open.
-  const readdirPath: ReaddirPath = (path: string) => pathReaddir(dispatch, path)
-
   const [lineRuntime, denial] = lineRuntimeFor(
     cmdName,
     runtimeBindings,
@@ -263,24 +253,22 @@ export async function runOnMount(
       flags,
       {
         admission: ctx.admission,
-        access,
         stdin: opts.stdin ?? null,
         cwd: PathSpec.fromStrPath(session.cwd),
-        dispatch,
         vfs: new Files(dispatch, null, namespace ?? null, (path) => registry.mountOwner(path), {
           prefixes: () => registry.mountPrefixes(),
           visibility: () => session.visibility,
+          follow: ctx.follow ?? null,
+          ledger: false,
         }),
-        sessionId: session.sessionId,
         env: envSnapshot(session),
         session: sessionView(session, registry.policies, context.frame.diagnostics),
         ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
-        execAllowed: registry.isExecAllowed(access),
-        execPathAllowed: (virtual) => registry.execAllowedAt(virtual, access),
-        ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
-        ...(ctx.follow !== undefined ? { followOperands: ctx.follow } : {}),
-        statPath,
-        readdirPath,
+        runtime: {
+          execAllowed: registry.isExecAllowed(access),
+          execPathAllowed: (virtual: string) => registry.execAllowedAt(virtual, access),
+          ...(lineRuntime !== undefined ? { bound: lineRuntime } : {}),
+        },
         ...(signal !== undefined ? { signal } : {}),
         ...(ctx.executeFn !== undefined
           ? { shell: nestedShell(ctx.executeFn, session, signal) }

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { GitHubAccessor } from '../../accessor/github.ts'
+import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 import { FileChangeKind, type JsonValue, PathSpec } from '../../types.ts'
 import type { GitHubTransport } from './client.ts'
 import { GitHubEventHook } from './events.ts'
@@ -26,7 +26,7 @@ function accessor(): GitHubAccessor {
     request: () => Promise.resolve({}),
   }
   return new GitHubAccessor({
-    transport,
+    account: new GitHubAccount({ token: 't' }, transport),
     owner: 'acme',
     repo: 'proj',
     ref: 'main',

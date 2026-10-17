@@ -16,6 +16,7 @@ import json
 
 import pytest
 
+from mirage.accessor.slack import SlackAccessor
 from mirage.commands.cli.builtin.slack import (
     SLACK,
     emoji_list,
@@ -34,7 +35,7 @@ from mirage.commands.config import Context
 from mirage.core.slack.config import SlackConfig
 from mirage.io.types import materialize
 
-CONFIG = SlackConfig(token="xoxb-test")
+ACCESSOR = SlackAccessor(SlackConfig(token="xoxb-test"))
 
 
 def _ctx(leaf: str, **flags: str) -> Context:
@@ -46,7 +47,7 @@ async def _json(out):
     return json.loads(await materialize(out))
 
 
-async def _echo_fetch(config, channel, limit):
+async def _echo_fetch(accessor, channel, limit):
     return [{"ts": "1.0", "text": f"{channel}:{limit}"}]
 
 
@@ -54,21 +55,21 @@ async def _echo_fetch(config, channel, limit):
 async def test_send_message_threads_when_thread_ts_given(monkeypatch):
     calls = []
 
-    async def fake_reply(config, channel, thread_ts, text):
-        calls.append((channel, thread_ts, text))
+    async def fake_reply(accessor, channel, thread_ts, text):
+        calls.append((accessor, channel, thread_ts, text))
         return {"ok": True}
 
     monkeypatch.setitem(
         send_message.__globals__, "reply_to_thread", fake_reply
     )
     out, io = await send_message(
-        CONFIG,
+        ACCESSOR,
         [],
         [],
         _ctx("send-message", channel="C1", text="hi", thread_ts="9.9"),
     )
     assert io.exit_code == 0
-    assert calls == [("C1", "9.9", "hi")]
+    assert calls == [(ACCESSOR, "C1", "9.9", "hi")]
 
 
 @pytest.mark.asyncio
@@ -77,7 +78,7 @@ async def test_read_messages_defaults_limit(monkeypatch):
         read_messages.__globals__, "fetch_recent_messages", _echo_fetch
     )
     out, _io = await read_messages(
-        CONFIG, [], [], _ctx("read-messages", channel="C1")
+        ACCESSOR, [], [], _ctx("read-messages", channel="C1")
     )
     assert await _json(out) == [{"ts": "1.0", "text": "C1:20"}]
 
@@ -88,7 +89,7 @@ async def test_read_messages_keeps_an_explicit_zero_limit(monkeypatch):
         read_messages.__globals__, "fetch_recent_messages", _echo_fetch
     )
     out, _io = await read_messages(
-        CONFIG, [], [], Context(flags={"channel": "C1", "limit": 0})
+        ACCESSOR, [], [], Context(flags={"channel": "C1", "limit": 0})
     )
     assert await _json(out) == [{"ts": "1.0", "text": "C1:0"}]
 
@@ -97,50 +98,50 @@ async def test_read_messages_keeps_an_explicit_zero_limit(monkeypatch):
 async def test_search_keeps_an_explicit_zero_count_and_page(monkeypatch):
     calls = []
 
-    async def fake_search(config, query, count, page):
+    async def fake_search(accessor, query, count, page):
         calls.append((query, count, page))
         return b"{}"
 
     monkeypatch.setitem(search.__globals__, "search_messages", fake_search)
     await search(
-        CONFIG, [], [], Context(flags={"query": "q", "count": 0, "page": 0})
+        ACCESSOR, [], [], Context(flags={"query": "q", "count": 0, "page": 0})
     )
-    await search(CONFIG, [], [], Context(flags={"query": "q"}))
+    await search(ACCESSOR, [], [], Context(flags={"query": "q"}))
     assert calls == [("q", 0, 0), ("q", 20, 1)]
 
 
 @pytest.mark.asyncio
 async def test_react_and_reactions(monkeypatch):
-    async def fake_add(config, channel, ts, emoji):
+    async def fake_add(accessor, channel, ts, emoji):
         return {"ok": True, "emoji": emoji}
 
-    async def fake_get(config, channel, ts):
+    async def fake_get(accessor, channel, ts):
         return {"ts": ts, "reactions": []}
 
     monkeypatch.setitem(react.__globals__, "add_reaction", fake_add)
     monkeypatch.setitem(reactions.__globals__, "get_reactions", fake_get)
     out, _io = await react(
-        CONFIG,
+        ACCESSOR,
         [],
         [],
         _ctx("react", channel="C1", ts="1.2", emoji="tada"),
     )
     assert (await _json(out))["emoji"] == "tada"
     out, _io = await reactions(
-        CONFIG, [], [], _ctx("reactions", channel="C1", ts="1.2")
+        ACCESSOR, [], [], _ctx("reactions", channel="C1", ts="1.2")
     )
     assert (await _json(out))["ts"] == "1.2"
 
 
 @pytest.mark.asyncio
 async def test_pin_unpin_list(monkeypatch):
-    async def fake_pin(config, channel, ts):
+    async def fake_pin(accessor, channel, ts):
         return {"ok": True}
 
-    async def fake_unpin(config, channel, ts):
+    async def fake_unpin(accessor, channel, ts):
         return {"ok": True}
 
-    async def fake_list(config, channel):
+    async def fake_list(accessor, channel):
         return [{"type": "message"}]
 
     monkeypatch.setitem(pin_message.__globals__, "pin_message_core", fake_pin)
@@ -149,26 +150,28 @@ async def test_pin_unpin_list(monkeypatch):
     )
     monkeypatch.setitem(list_pins.__globals__, "list_pins_core", fake_list)
     out, _io = await pin_message(
-        CONFIG, [], [], _ctx("pin-message", channel="C1", ts="1.2")
+        ACCESSOR, [], [], _ctx("pin-message", channel="C1", ts="1.2")
     )
     assert (await _json(out))["ok"] is True
     out, _io = await unpin_message(
-        CONFIG, [], [], _ctx("unpin-message", channel="C1", ts="1.2")
+        ACCESSOR, [], [], _ctx("unpin-message", channel="C1", ts="1.2")
     )
     assert (await _json(out))["ok"] is True
-    out, _io = await list_pins(CONFIG, [], [], _ctx("list-pins", channel="C1"))
+    out, _io = await list_pins(
+        ACCESSOR, [], [], _ctx("list-pins", channel="C1")
+    )
     assert await _json(out) == [{"type": "message"}]
 
 
 @pytest.mark.asyncio
 async def test_member_info_and_list_members(monkeypatch):
-    async def fake_profile(config, user):
+    async def fake_profile(accessor, user):
         return {"id": user}
 
-    async def fake_search(config, query):
+    async def fake_search(accessor, query):
         return [{"name": query}]
 
-    async def fake_list(config):
+    async def fake_list(accessor):
         return [{"name": "everyone"}]
 
     monkeypatch.setitem(
@@ -177,22 +180,22 @@ async def test_member_info_and_list_members(monkeypatch):
     monkeypatch.setitem(list_members.__globals__, "search_users", fake_search)
     monkeypatch.setitem(list_members.__globals__, "list_users", fake_list)
     out, _io = await member_info(
-        CONFIG, [], [], _ctx("member-info", user="U1")
+        ACCESSOR, [], [], _ctx("member-info", user="U1")
     )
     assert (await _json(out))["id"] == "U1"
     out, _io = await list_members(
-        CONFIG, [], [], _ctx("list-members", query="alice")
+        ACCESSOR, [], [], _ctx("list-members", query="alice")
     )
     assert await _json(out) == [{"name": "alice"}]
-    out, _io = await list_members(CONFIG, [], [], _ctx("list-members"))
+    out, _io = await list_members(ACCESSOR, [], [], _ctx("list-members"))
     assert await _json(out) == [{"name": "everyone"}]
 
 
 @pytest.mark.asyncio
 async def test_emoji_list(monkeypatch):
-    async def fake_emoji(config):
+    async def fake_emoji(accessor):
         return {"shipit": "url"}
 
     monkeypatch.setitem(emoji_list.__globals__, "list_emoji", fake_emoji)
-    out, _io = await emoji_list(CONFIG, [], [], _ctx("emoji-list"))
+    out, _io = await emoji_list(ACCESSOR, [], [], _ctx("emoji-list"))
     assert await _json(out) == {"shipit": "url"}

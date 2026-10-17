@@ -15,8 +15,7 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
-from mirage.core.api.client import SessionArg
-from mirage.core.slack.config import SlackConfig
+from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.paginate import cursor_pages
 
 
@@ -25,69 +24,59 @@ def _channel_base_params(types: str, limit: int) -> dict[str, Any]:
 
 
 def list_channels_stream(
-    config: SlackConfig,
+    accessor: SlackAccessor,
     types: str = "public_channel,private_channel",
     limit: int = 200,
-    session: SessionArg = None,
 ) -> AsyncIterator[list[dict[str, Any]]]:
     """Page-streaming variant: yields one Slack page per HTTP round-trip.
 
     Args:
-        config (SlackConfig): Slack credentials.
+        accessor (SlackAccessor): Slack accessor.
         types (str): channel types to list.
         limit (int): max per page.
-        session (SessionArg): pool or live session to ride.
 
     Yields:
         list[dict]: channels in one Slack page.
     """
     return cursor_pages(
-        config,
+        accessor,
         "conversations.list",
         base_params=_channel_base_params(types, limit),
         items_key="channels",
-        session=session,
     )
 
 
 async def list_channels(
-    config: SlackConfig,
+    accessor: SlackAccessor,
     types: str = "public_channel,private_channel",
     limit: int = 200,
-    session: SessionArg = None,
 ) -> list[dict[str, Any]]:
     """List channels via conversations.list (eager; collects all pages).
 
     Args:
-        config (SlackConfig): Slack credentials.
+        accessor (SlackAccessor): Slack accessor.
         types (str): channel types to list.
         limit (int): max per page.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         list[dict]: channel metadata dicts.
     """
     out: list[dict[str, Any]] = []
-    async for page in list_channels_stream(
-        config, types=types, limit=limit, session=session
-    ):
+    async for page in list_channels_stream(accessor, types=types, limit=limit):
         out.extend(page)
     return out
 
 
 async def list_dms(
-    config: SlackConfig, limit: int = 200, session: SessionArg = None
+    accessor: SlackAccessor, limit: int = 200
 ) -> list[dict[str, Any]]:
     """List direct messages via conversations.list (eager).
 
     Args:
-        config (SlackConfig): Slack credentials.
+        accessor (SlackAccessor): Slack accessor.
         limit (int): max per page.
-        session (SessionArg): pool or live session to ride.
 
     Returns:
         list[dict]: DM channel dicts.
     """
-    return await list_channels(
-        config, types="im,mpim", limit=limit, session=session
-    )
+    return await list_channels(accessor, types="im,mpim", limit=limit)

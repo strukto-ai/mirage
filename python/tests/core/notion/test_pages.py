@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from mirage.core.api.client import SessionArg, SessionPool
+from mirage.accessor.notion import NotionAccessor
 from mirage.core.api.errors import PaginationStalledError
 from mirage.core.notion import pages as pages_mod
 from mirage.core.notion.client import NotionAPIError
@@ -27,6 +27,7 @@ from mirage.core.notion.config import NotionConfig
 
 ROOT_ID = "aaaa1111-2222-3333-4444-555566667777"
 NESTED_ID = "bbbb1111-2222-3333-4444-555566667777"
+ACCESSOR = NotionAccessor(NotionConfig(api_key="key"))
 
 CASES = json.loads(
     (
@@ -39,12 +40,12 @@ class QueryReplies:
     def __init__(self, responses: list[dict[str, Any]]) -> None:
         self.responses = iter(responses)
         self.requests: list[dict[str, Any]] = []
-        self.sessions: list[SessionArg] = []
+        self.accessors: list[NotionAccessor] = []
 
-    async def post(self, config, path, body, session=None):
+    async def post(self, accessor, path, body):
         assert path == "/data_sources/ds/query"
         self.requests.append(dict(body))
-        self.sessions.append(session)
+        self.accessors.append(accessor)
         reply = next(self.responses)
         if "raise" in reply:
             raise NotionAPIError(**reply["raise"])
@@ -64,12 +65,9 @@ def assert_query_error(exc: Exception, expected: dict[str, Any]) -> None:
 async def test_query_pages_shared_contract(monkeypatch, case):
     replies = QueryReplies(case["responses"])
     monkeypatch.setattr(pages_mod, "notion_post", replies.post)
-    pool = SessionPool()
     body = {"filter": {"property": "Done", "checkbox": {"equals": False}}}
     async with aclosing(
-        pages_mod.query_data_source_pages(
-            NotionConfig(api_key="key"), "ds", body=body, session=pool
-        )
+        pages_mod.query_data_source_pages(ACCESSOR, "ds", body=body)
     ) as pages:
         assert replies.requests == []
         for at, expected in enumerate(case["pages"], 1):
@@ -87,7 +85,7 @@ async def test_query_pages_shared_contract(monkeypatch, case):
     assert [r.get("start_cursor") for r in replies.requests] == case["cursors"]
     assert all(r["filter"] == body["filter"] for r in replies.requests)
     assert all(r["page_size"] == 100 for r in replies.requests)
-    assert all(session is pool for session in replies.sessions)
+    assert all(seen is ACCESSOR for seen in replies.accessors)
     assert set(body) == {"filter"}
 
 
@@ -98,14 +96,10 @@ async def test_query_collector_shared_contract(monkeypatch, case):
     monkeypatch.setattr(pages_mod, "notion_post", replies.post)
     if "error" in case:
         with pytest.raises((NotionAPIError, PaginationStalledError)) as exc:
-            await pages_mod.query_data_source(
-                NotionConfig(api_key="key"), "ds"
-            )
+            await pages_mod.query_data_source(ACCESSOR, "ds")
         assert_query_error(exc.value, case["error"])
     else:
-        rows = await pages_mod.query_data_source(
-            NotionConfig(api_key="key"), "ds"
-        )
+        rows = await pages_mod.query_data_source(ACCESSOR, "ds")
         assert rows == [row for page in case["pages"] for row in page]
     assert [r.get("start_cursor") for r in replies.requests] == case["cursors"]
 
@@ -114,9 +108,7 @@ async def test_query_collector_shared_contract(monkeypatch, case):
 async def test_closing_query_pages_stops_requests(monkeypatch):
     replies = QueryReplies(CASES[0]["responses"])
     monkeypatch.setattr(pages_mod, "notion_post", replies.post)
-    pages = pages_mod.query_data_source_pages(
-        NotionConfig(api_key="key"), "ds"
-    )
+    pages = pages_mod.query_data_source_pages(ACCESSOR, "ds")
     async with aclosing(pages):
         async for page in pages:
             assert page == CASES[0]["pages"][0]
@@ -133,7 +125,7 @@ async def test_query_pages_keep_initial_cursor_and_cap_page_size(monkeypatch):
     body = {"start_cursor": "initial", "page_size": 7}
     async with aclosing(
         pages_mod.query_data_source_pages(
-            NotionConfig(api_key="key"), "ds", page_size=250, body=body
+            ACCESSOR, "ds", page_size=250, body=body
         )
     ) as pages:
         assert await anext(pages) == CASES[0]["pages"][0]
@@ -167,19 +159,18 @@ _TREE: dict[str, list[dict[str, Any]]] = {
 async def test_block_tree_threads_one_session_through_every_level(monkeypatch):
     """The recursion dropped the session, so nested pages churned one
     ClientSession per block request while the top level rode the pool."""
-    pool = SessionPool()
-    seen: list[SessionArg] = []
+    seen: list[NotionAccessor] = []
 
-    async def fake_paginate_list(config, path, page_size=100, session=None):
-        seen.append(session)
+    async def fake_paginate_list(accessor, path, page_size=100):
+        seen.append(accessor)
         return _TREE[path]
 
     monkeypatch.setattr(pages_mod, "paginate_list", fake_paginate_list)
-    blocks = await pages_mod.list_block_tree(None, ROOT_ID, session=pool)
+    blocks = await pages_mod.list_block_tree(ACCESSOR, ROOT_ID)
 
     assert [b["id"] for b in blocks] == [NESTED_ID]
     assert len(seen) == 2
-    assert all(s is pool for s in seen)
+    assert all(s is ACCESSOR for s in seen)
 
 
 @pytest.mark.asyncio
@@ -197,5 +188,5 @@ async def test_one_page_query_refuses_an_incomplete_page(monkeypatch):
     monkeypatch.setattr(pages_mod, "notion_post", post)
     with pytest.raises(NotionAPIError, match="query_result_limit_reached"):
         await pages_mod.query_data_source_page(
-            NotionConfig(api_key="key"), "ds", {"page_size": 10}
+            ACCESSOR, "ds", {"page_size": 10}
         )

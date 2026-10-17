@@ -15,7 +15,8 @@ import { CommandSpec } from '../../../spec/types.ts'
 import { CLI } from '../../types.ts'
 import { CLIHandler } from '../../types.ts'
 
-import { AirtableConfigSchema } from '../../../../core/airtable/config.ts'
+import { AirtableAccessor } from '../../../../accessor/airtable.ts'
+import { type AirtableConfig, AirtableConfigSchema } from '../../../../core/airtable/config.ts'
 import { Argument } from '../../../spec/types.ts'
 
 import * as reads from './reads.ts'
@@ -161,4 +162,5 @@ export const AIRTABLE = new CLI({
     'comment add': new CLIHandler({ fn: writes.commentAdd, write: true }),
   },
   configModel: AirtableConfigSchema,
+  accessor: (config) => new AirtableAccessor(config as AirtableConfig),
 })

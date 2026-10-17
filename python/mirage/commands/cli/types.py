@@ -19,6 +19,7 @@ from typing import Any, Callable, Literal
 
 from pydantic import BaseModel
 
+from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import CommandSpec, FlagValue
@@ -35,9 +36,9 @@ class CLIHandler:
     """Execution and policy for one command path.
 
     Args:
-        fn (Callable | None): callback receiving ``(config, paths, texts,
-            ctx)``, the same ``Context`` a command gets; None only for a
-            script installation.
+        fn (Callable | None): callback receiving ``(accessor, paths,
+            texts, ctx)``, the same ``Context`` a command gets; None only
+            for a script installation.
         write (bool): whether invoking the command may mutate state.
         limit (Limit | None): default execution and output limits.
     """
@@ -56,6 +57,9 @@ class CLI:
         handlers (Mapping[str, CLIHandler]): canonical paths below the
             root, separated by spaces; the root leaf uses an empty key.
         config_model (type[BaseModel] | None): installation config schema.
+        accessor (Callable[..., Accessor]): builds the install's
+            accessor from its validated config, once per install; a CLI
+            that reaches no service keeps ``NOOPAccessor``.
         script (ScriptSource | None): program owning the whole installation.
         runtime (str | None): runtime executing that script.
     """
@@ -63,6 +67,7 @@ class CLI:
     spec: CommandSpec
     handlers: Mapping[str, CLIHandler] = field(default_factory=dict)
     config_model: type[BaseModel] | None = None
+    accessor: Callable[..., Accessor] = NOOPAccessor
     script: ScriptSource | None = None
     runtime: str | None = None
 
@@ -93,6 +98,11 @@ def _validate_cli(cli: CLI) -> None:
         if cli.config_model is not None:
             raise ValueError(
                 f"cli {name!r}: script config is opaque; it cannot declare config_model"
+            )
+        if cli.accessor is not NOOPAccessor:
+            raise ValueError(
+                f"cli {name!r}: a script reaches its service itself; "
+                "it cannot declare accessor"
             )
         if any(handler.fn is not None for handler in cli.handlers.values()):
             raise ValueError(

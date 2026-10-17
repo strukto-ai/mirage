@@ -27,12 +27,7 @@ import { CLAP_EXIT, CLI_CONFIG_ENV, GIT_LONG_OPTIONS } from '../../../commands/c
 import type { CLI } from '../../../commands/cli/types.ts'
 import type { Context } from '../../../commands/config.ts'
 import { listedNode, nodeHelp, ownsArgv, walk } from '../../../commands/cli/walk.ts'
-import {
-  type DispatchFn,
-  type RunResult,
-  type ScriptSource,
-  type ShellFn,
-} from '../../../runtime/types.ts'
+import { type RunResult, type ScriptSource, type ShellFn } from '../../../runtime/types.ts'
 import type { SessionView } from '../../../view/types.ts'
 import type { Files } from '../../files.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
@@ -180,7 +175,7 @@ function missing(message: string): IOResult {
 }
 
 /**
- * Render the invocation onto the selected runtime as one RunArgs.
+ * Render the invocation onto the selected runtime as one `-c` run.
  *
  * The script tier's whole contract, the one a native binary could also
  * honor: the program is named (argv slot 0, so its own messages read
@@ -188,7 +183,16 @@ function missing(message: string): IOResult {
  * verbatim tokens after the head), reads piped stdin, and finds the
  * install's config as `MIRAGE_CLI_CONFIG` (JSON) in its environment.
  * The outcome converts through the interpreter handlers' one mapping
- * (runOutput). `prog` is the installed head word.
+ * (runOutput).
+ *
+ * @param config the install's config, handed to the program as JSON.
+ * @param ctx the line's context.
+ * @param script the install's embedded program.
+ * @param runtime the selected interpreter entry.
+ * @param prog the installed head word.
+ * @param timeout the limit, which an engine that blocks its event loop
+ *   must interrupt itself at.
+ * @param signal aborted when the limit trips.
  */
 async function scriptOutput(
   config: unknown,
@@ -203,24 +207,21 @@ async function scriptOutput(
   if (config !== null && config !== undefined) {
     env[CLI_CONFIG_ENV] = JSON.stringify(config)
   }
-  const stdin = ctx.stdin !== null ? await materialize(ctx.stdin) : null
+  // A .mjs source needs the engine's module mode, the same bit the js
+  // command derives from the operand's extension.
+  const flags: Record<string, FlagValue> = { c: script.source, scriptCli: true }
+  if (script.module) flags.module = true
+  // Renamed to the installed head word, which the program names itself by.
+  const spec: CommandSpecInit = ctx.spec ?? {}
   let result: RunResult
   try {
-    // A .mjs source needs the engine's module mode, the same bit the js
-    // command derives from the operand's extension.
-    result = await runtime.execute({
-      kind: 'code',
-      language: runtime.language,
-      code: script.source,
-      args: [...(ctx.argv ?? [])],
-      prog,
-      scriptCli: true,
-      cwd: ctx.cwd,
+    result = await runtime.execute([], [...(ctx.argv ?? [])], {
+      ...ctx,
+      flags,
       env,
-      stdin,
+      spec: new CommandSpec({ ...spec, name: prog }),
       signal,
       ...(timeout !== null && timeout > 0 ? { timeoutSeconds: timeout } : {}),
-      ...(script.module ? { flags: { module: true } } : {}),
     })
   } catch (err) {
     // A limit interrupt is named after the CLI, as the workspace's own
@@ -322,11 +323,7 @@ export async function handleCli(
   }
 
   if (context.vfs !== undefined) {
-    const files = context.vfs
-    const dispatch: DispatchFn = async (op, path, args, kwargs) => [
-      await files.dispatch(op, path, args, kwargs),
-      new IOResult(),
-    ]
+    const dispatch = context.vfs.dispatch
     for (const base of result.operandBases) {
       const info = await pathStat(dispatch, base)
       if (info !== null && info.type === FileType.DIRECTORY) continue
@@ -503,7 +500,7 @@ export async function handleCli(
     // Defer the call into the promise: a synchronously-thrown leaf
     // error must land in the catch arms below, exactly as when the
     // call sat inside the try.
-    body = Promise.resolve().then(() => fn(install.config, paths, texts, ctx))
+    body = Promise.resolve().then(() => fn(install.accessor, paths, texts, ctx))
   }
   // The leaf's declared limit bounds the handler body and its
   // streams, exactly like mount dispatch: without the wrap a blocking

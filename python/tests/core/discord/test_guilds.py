@@ -16,17 +16,18 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.guilds import list_guilds
 
 
 @pytest.fixture
-def config():
-    return DiscordConfig(token="test-bot-token")
+def accessor():
+    return DiscordAccessor(DiscordConfig(token="test-bot-token"))
 
 
 @pytest.mark.asyncio
-async def test_list_guilds(config):
+async def test_list_guilds(accessor):
     mock_data = [
         {"id": "G001", "name": "My Server"},
         {"id": "G002", "name": "Another Server"},
@@ -36,7 +37,7 @@ async def test_list_guilds(config):
         new_callable=AsyncMock,
         return_value=mock_data,
     ) as mock_get:
-        result = await list_guilds(config)
+        result = await list_guilds(accessor)
 
     assert len(result) == 2
     assert result[0]["name"] == "My Server"

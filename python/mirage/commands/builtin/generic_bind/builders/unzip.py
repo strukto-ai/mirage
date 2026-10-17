@@ -42,11 +42,11 @@ async def unzip(
     resolved = (
         await ops.resolve_glob(accessor, paths, ctx.index) if paths else []
     )
-    if ctx.dispatch is not None:
+    if ctx.vfs is not None:
         # Extraction writes wherever cwd or -d says, which need not be
         # this mount, so the functions are dispatch-relayed and each path
         # routes to the mount that owns it.
-        prim = transfer_primitives(ctx.dispatch)
+        prim = transfer_primitives(ctx.vfs.dispatch)
         return await unzip_generic(
             resolved,
             list(texts),

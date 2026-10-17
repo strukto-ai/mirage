@@ -345,10 +345,13 @@ const ONE_LINK = {
   symlinkTargets: () => new Map<string, string>(),
 } as unknown as NamespaceLinks
 
-const linked: DispatchFn = (op, path) =>
-  op === 'stat' && path.virtual === '/db/private/f'
+const linked: DispatchFn = (op, path) => {
+  if (op === 'stat' && path.virtual === '/db')
+    return Promise.resolve([new FileStat({ name: 'db', type: FileType.DIRECTORY }), new IOResult()])
+  return op === 'stat' && path.virtual === '/db/private/f'
     ? Promise.resolve([new FileStat({ name: 'f', type: FileType.FILE, size: 6 }), new IOResult()])
     : Promise.reject(enoent(path))
+}
 
 // A link into the operand's tree is left to the file's own name, but a
 // directory the walk may not list hides that name, and GNU then counts the

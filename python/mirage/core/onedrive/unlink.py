@@ -21,11 +21,7 @@ from mirage.types import PathSpec
 
 async def unlink(accessor: OneDriveAccessor, path: PathSpec) -> None:
     try:
-        await graph_delete(
-            accessor.config,
-            item_url(accessor.config, path.vfs_path),
-            session=accessor.pool,
-        )
+        await graph_delete(accessor, item_url(accessor.config, path.vfs_path))
     except GraphError as exc:
         if exc.status == 404:
             raise enoent(path)

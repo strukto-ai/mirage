@@ -33,9 +33,6 @@ async def create(accessor: SharePointAccessor, path: PathSpec) -> None:
     resolved = await resolve_item(accessor, path)
     timer = start_op()
     await write_item(
-        accessor.config,
-        drive_loc(accessor.config, resolved, path.vfs_path),
-        b"",
-        session=accessor.pool,
+        accessor, drive_loc(accessor.config, resolved, path.vfs_path), b""
     )
     record("create", path.virtual, "sharepoint", 0, timer)

@@ -42,7 +42,6 @@ async def trello_card_move(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags, spec=SPEC)
-    config = accessor.config
     card_id = fl.as_str("card_id")
     if not card_id:
         raise ValueError("--card_id is required")
@@ -54,9 +53,7 @@ async def trello_card_move(
     require_mount_writable()
     await require_card(accessor, card_id)
     await require_list(accessor, list_id)
-    card = await card_move(
-        config, card_id=card_id, list_id=list_id, session=accessor.pool
-    )
+    card = await card_move(accessor, card_id=card_id, list_id=list_id)
     return yield_bytes(
         json.dumps(
             normalize_card(card), ensure_ascii=False, separators=(",", ":")

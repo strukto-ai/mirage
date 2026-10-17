@@ -39,10 +39,9 @@ PLAIN_LINES = [
 ]
 
 
-def config(**overrides) -> EmailConfig:
-    return EmailConfig(
-        imap_host="h", smtp_host="h", username="u", password="p", **overrides
-    )
+def account(**overrides) -> EmailAccessor:
+    fields = dict(imap_host="h", smtp_host="h", username="u", password="p")
+    return EmailAccessor(EmailConfig(**fields, **overrides))
 
 
 def fake_imap(lines: list[bytes], append_result: str = "OK"):
@@ -91,26 +90,26 @@ def smtp(monkeypatch):
 @pytest.mark.asyncio
 async def test_the_server_names_its_own_sent_mailbox(imap):
     imap["lines"] = GMAIL_LINES
-    accessor = EmailAccessor(config())
+    accessor = account()
     assert await resolve_sent_folder(accessor, None) == "[Gmail]/Sent Mail"
 
 
 @pytest.mark.asyncio
 async def test_a_server_with_no_tag_falls_back_to_sent(imap):
-    accessor = EmailAccessor(config())
+    accessor = account()
     assert await resolve_sent_folder(accessor, None) == "Sent"
 
 
 @pytest.mark.asyncio
 async def test_a_configured_folder_beats_the_servers_tag(imap):
     imap["lines"] = GMAIL_LINES
-    accessor = EmailAccessor(config())
+    accessor = account()
     assert await resolve_sent_folder(accessor, "Archive") == "Archive"
 
 
 @pytest.mark.asyncio
 async def test_a_configured_folder_is_taken_without_asking(imap):
-    accessor = EmailAccessor(config())
+    accessor = account()
     assert await resolve_sent_folder(accessor, "Archive") == "Archive"
     assert "client" not in imap
 
@@ -118,26 +117,26 @@ async def test_a_configured_folder_is_taken_without_asking(imap):
 @pytest.mark.asyncio
 async def test_the_copy_is_appended_seen_and_the_mailbox_is_quoted(imap):
     imap["lines"] = GMAIL_LINES
-    assert await save_sent_copy(config(), RAW) == "[Gmail]/Sent Mail"
+    assert await save_sent_copy(account(), RAW) == "[Gmail]/Sent Mail"
     # A mailbox name holding a space is two arguments unless it is
     # quoted, and both Gmail's and Exchange's hold one.
     imap["client"].append.assert_awaited_once_with(
         RAW, mailbox='"[Gmail]/Sent Mail"', flags="\\Seen"
     )
-    assert imap["closed"] is True
+    assert "closed" not in imap
 
 
 @pytest.mark.asyncio
 async def test_a_refused_append_names_the_mailbox(imap):
     imap["append_result"] = "NO"
     with pytest.raises(ValueError, match="Sent: .*TRYCREATE"):
-        await save_sent_copy(config(), RAW)
-    assert imap["closed"] is True
+        await save_sent_copy(account(), RAW)
+    assert "closed" not in imap
 
 
 @pytest.mark.asyncio
 async def test_deliver_sends_then_saves(imap, smtp):
-    message, warning = await deliver(config(), RAW)
+    message, warning = await deliver(account(), RAW)
     assert smtp["raw"] == RAW
     assert message["Subject"] == "Hi"
     assert warning == ""
@@ -146,7 +145,7 @@ async def test_deliver_sends_then_saves(imap, smtp):
 
 @pytest.mark.asyncio
 async def test_save_copy_off_sends_and_touches_no_mailbox(imap, smtp):
-    _, warning = await deliver(config(save_copy=False), RAW)
+    _, warning = await deliver(account(save_copy=False), RAW)
     assert smtp["raw"] == RAW
     assert warning == ""
     assert "client" not in imap
@@ -155,7 +154,7 @@ async def test_save_copy_off_sends_and_touches_no_mailbox(imap, smtp):
 @pytest.mark.asyncio
 async def test_a_failed_copy_warns_but_the_send_still_counts(imap, smtp):
     imap["append_result"] = "NO"
-    message, warning = await deliver(config(), RAW)
+    message, warning = await deliver(account(), RAW)
     # The message is already on the wire, so the copy's failure is
     # reported rather than raised: a non-zero exit invites a retry that
     # would send it a second time.
@@ -177,7 +176,7 @@ async def test_a_broken_connection_warns_rather_than_raising(
 
     monkeypatch.setattr(EmailAccessor, "get_imap", fake_get_imap)
     monkeypatch.setattr(EmailAccessor, "close", fake_close)
-    _, warning = await deliver(config(), RAW)
+    _, warning = await deliver(account(), RAW)
     assert warning == (
         "himalaya: sent copy not saved: IMAP login failed for u on h\n"
     )
@@ -186,7 +185,7 @@ async def test_a_broken_connection_warns_rather_than_raising(
 @pytest.mark.asyncio
 async def test_save_names_the_mailbox_and_skips_resolution(imap):
     imap["lines"] = GMAIL_LINES
-    assert await save_sent_copy(config(), RAW, "Drafts") == "Drafts"
+    assert await save_sent_copy(account(), RAW, "Drafts") == "Drafts"
     imap["client"].append.assert_awaited_once_with(
         RAW, mailbox='"Drafts"', flags="\\Seen"
     )
@@ -196,7 +195,7 @@ async def test_save_names_the_mailbox_and_skips_resolution(imap):
 @pytest.mark.asyncio
 async def test_save_beats_the_accounts_own_sent_mailbox(imap, smtp):
     imap["lines"] = GMAIL_LINES
-    _, warning = await deliver(config(), RAW, "Drafts")
+    _, warning = await deliver(account(), RAW, "Drafts")
     assert warning == ""
     imap["client"].append.assert_awaited_once_with(
         RAW, mailbox='"Drafts"', flags="\\Seen"
@@ -207,6 +206,6 @@ async def test_save_beats_the_accounts_own_sent_mailbox(imap, smtp):
 async def test_save_files_a_copy_even_with_save_copy_off(imap, smtp):
     # --save is the user asking on this one line, so the account-level
     # switch does not veto it.
-    _, warning = await deliver(config(save_copy=False), RAW, "Drafts")
+    _, warning = await deliver(account(save_copy=False), RAW, "Drafts")
     assert warning == ""
     imap["client"].append.assert_awaited_once()

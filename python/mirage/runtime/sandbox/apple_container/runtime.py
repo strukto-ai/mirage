@@ -32,7 +32,7 @@ from mirage.runtime.sandbox.constants import EXEC_PRELUDE
 from mirage.runtime.types import RunResult, SandboxPipe
 
 
-class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin):
+class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
     """Containers under Apple's `container` tool as a whole-line runtime.
 
     You start the containers yourself; mirage only connects to them and

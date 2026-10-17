@@ -52,6 +52,7 @@ import type { MountSnapshot } from './snapshot/types.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import { ExecutionNode } from './types.ts'
 import { Workspace } from './workspace/workspace.ts'
+import type { NOOPAccessor } from '../accessor/base.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -500,8 +501,8 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
 })
 
 describe('cli registry snapshot', () => {
-  const cliEcho = (config: unknown): [Uint8Array, IOResult] => [
-    new TextEncoder().encode(`tok=${(config as { token: string }).token}\n`),
+  const cliEcho = (accessor: NOOPAccessor): [Uint8Array, IOResult] => [
+    new TextEncoder().encode(`tok=${(accessor.config as { token: string }).token}\n`),
     new IOResult(),
   ]
 

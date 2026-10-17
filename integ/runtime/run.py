@@ -37,11 +37,11 @@ from typing import Any  # noqa: E402
 from mirage import (  # noqa: E402
     EXTERNAL_COMMANDS,
     MountMode,
-    ProcessExecution,
     ProcessExecutorMixin,
     Workspace,
 )
 from mirage.commands.cli.types import CLI  # noqa: E402
+from mirage.commands.config import Context  # noqa: E402
 from mirage.commands.spec.types import CommandSpec  # noqa: E402
 from mirage.errors import classify  # noqa: E402
 from mirage.policy import Policy  # noqa: E402
@@ -164,7 +164,7 @@ _s3_endpoint: str | None = None
 _mongo_seeded = False
 
 
-class EchoBox(Runtime, LineExecutorMixin):
+class EchoBox(Runtime[None], LineExecutorMixin[None]):
     """A test-only whole-line runtime: echoes the raw line back."""
 
     name = "echobox"
@@ -172,10 +172,14 @@ class EchoBox(Runtime, LineExecutorMixin):
     captures = ("nvidia-smi",)
 
     async def run_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
+        self,
+        engine: None,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
     ) -> RunResult:
         return RunResult(
-            stdout=f"box:{line}\n".encode(), stderr=None, exit_code=0
+            stdout=f"box:{ctx.flags['c']}\n".encode(), stderr=None, exit_code=0
         )
 
 
@@ -185,18 +189,22 @@ class EchoBox(Runtime, LineExecutorMixin):
 register_runtime(EchoBox.name, EchoBox)
 
 
-class ProcessBox(Runtime, ProcessExecutorMixin):
+class ProcessBox(Runtime[None], ProcessExecutorMixin[None]):
     """A host-authored argv runtime using the public capability import."""
 
     name = "processbox"
     reach = "workspace"
     captures = (EXTERNAL_COMMANDS,)
 
-    async def run_process(self, request: ProcessExecution) -> RunResult:
+    async def run_process(
+        self,
+        engine: None,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+    ) -> RunResult:
         return RunResult(
-            stdout=(
-                json.dumps(request.argv, separators=(",", ":")) + "\n"
-            ).encode(),
+            stdout=(json.dumps(texts, separators=(",", ":")) + "\n").encode(),
             stderr=None,
             exit_code=0,
         )

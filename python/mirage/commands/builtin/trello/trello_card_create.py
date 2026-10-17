@@ -48,7 +48,6 @@ async def trello_card_create(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags, spec=SPEC)
-    config = accessor.config
     list_id = fl.as_str("list_id")
     if not list_id:
         raise ValueError("--list_id is required")
@@ -72,13 +71,7 @@ async def trello_card_create(
     # grant can admit it (a write-granting carve-out names no card).
     require_mount_writable()
     await require_list(accessor, list_id)
-    card = await card_create(
-        config,
-        list_id=list_id,
-        name=name,
-        desc=desc,
-        session=accessor.pool,
-    )
+    card = await card_create(accessor, list_id=list_id, name=name, desc=desc)
     return yield_bytes(
         json.dumps(
             normalize_card(card), ensure_ascii=False, separators=(",", ":")

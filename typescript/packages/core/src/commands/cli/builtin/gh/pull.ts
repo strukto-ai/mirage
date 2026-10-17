@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { GitHubAccount } from '../../../../accessor/github.ts'
 import { DIFF_HEADER, PR_INVALID_LIMIT } from './constants.ts'
 import { commentsFor, commentsText } from './issue.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -35,7 +36,6 @@ import {
   bodyValue,
   camel,
   ghBool,
-  ghTransport,
   jsonFields,
   listLimit,
   repoFor,
@@ -338,8 +338,8 @@ function viewText(row: Record<string, unknown>): string {
   return `title:\t${textValue(row.title)}\nstate:\t${textValue(row.state).toUpperCase()}\nauthor:\t${textValue(author?.login)}\nbase:\t${textValue(row.baseRefName)}\nhead:\t${textValue(row.headRefName)}\n--\n${textValue(row.body)}\n`
 }
 
-function target(config: unknown, texts: string[], fl: FlagView) {
-  return repoNumber(config, fl, texts[0], 'pull request', 'pull')
+function target(accessor: GitHubAccount, texts: string[], fl: FlagView) {
+  return repoNumber(accessor, fl, texts[0], 'pull request', 'pull')
 }
 
 /**
@@ -348,7 +348,7 @@ function target(config: unknown, texts: string[], fl: FlagView) {
  * in gh's own shape; the text view reads the REST listing.
  */
 export async function listCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
@@ -360,8 +360,8 @@ export async function listCmd(
   const fields = jsonFields(fl, PR_FIELDS)
   if (fields !== null) {
     const rows = await listPullRequestFields(
-      ghTransport(config),
-      repoFor(config, fl),
+      accessor.transport,
+      repoFor(accessor, fl),
       { states: STATES[wanted] ?? ['OPEN'], base, head },
       listLimit(fl, 30, PR_INVALID_LIMIT),
       selection(PULL_FIELD_TABLE, fields, false),
@@ -377,8 +377,8 @@ export async function listCmd(
   if (base !== undefined) params.base = base
   if (head !== undefined) params.head = head
   const values = await listPulls(
-    ghTransport(config),
-    repoFor(config, fl),
+    accessor.transport,
+    repoFor(accessor, fl),
     params,
     listLimit(fl, 30, PR_INVALID_LIMIT),
     wanted === 'merged'
@@ -395,20 +395,20 @@ export async function listCmd(
  * comments.
  */
 export async function viewCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const [ref, number] = target(config, texts, fl)
+  const [ref, number] = target(accessor, texts, fl)
   const fields = jsonFields(fl, PR_FIELDS)
   if (fields !== null) {
-    const node = await viewedPull(ghTransport(config), ref, number, fields)
+    const node = await viewedPull(accessor.transport, ref, number, fields)
     return typedOut(exportedNode(PULL_FIELD_TABLE, node, fields), fl, '', PR_FIELDS)
   }
-  const row = pull(await getPull(ghTransport(config), ref, number))
-  const comments = await commentsFor(config, fl, ref, number)
+  const row = pull(await getPull(accessor.transport, ref, number))
+  const comments = await commentsFor(accessor, fl, ref, number)
   return typedOut(
     row,
     fl,
@@ -418,7 +418,7 @@ export async function viewCmd(
 }
 
 export async function createCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
@@ -442,12 +442,12 @@ export async function createCmd(
     draft: ghBool(fl, 'draft'),
     maintainer_can_modify: !ghBool(fl, 'no_maintainer_edit'),
   }
-  const created = pull(await createPull(ghTransport(config), repoFor(config, fl), body))
+  const created = pull(await createPull(accessor.transport, repoFor(accessor, fl), body))
   return textOut(`${textValue(created.url)}\n`)
 }
 
 export async function editCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -461,13 +461,13 @@ export async function editCmd(
   if (base !== undefined) body.base = base
   if (text !== undefined) body.body = text
   if (Object.keys(body).length === 0) throw new Error('no pull request fields to edit')
-  const [ref, number] = target(config, texts, fl)
-  const edited = pull(await editPull(ghTransport(config), ref, number, body))
+  const [ref, number] = target(accessor, texts, fl)
+  const edited = pull(await editPull(accessor.transport, ref, number, body))
   return textOut(`${textValue(edited.url)}\n`)
 }
 
 export async function mergeCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -482,36 +482,36 @@ export async function mergeCmd(
   if (subject !== undefined) body.commit_title = subject
   if (message !== undefined) body.commit_message = message
   if (sha !== undefined) body.sha = sha
-  const [ref, number] = target(config, texts, fl)
-  await mergePull(ghTransport(config), ref, number, body)
+  const [ref, number] = target(accessor, texts, fl)
+  await mergePull(accessor.transport, ref, number, body)
   return textOut(`✓ Merged pull request ${ref.owner}/${ref.repo}#${String(number)}\n`)
 }
 
 export async function closeCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const [ref, number] = target(config, texts, fl)
-  const edited = pull(await editPull(ghTransport(config), ref, number, { state: 'closed' }))
+  const [ref, number] = target(accessor, texts, fl)
+  const edited = pull(await editPull(accessor.transport, ref, number, { state: 'closed' }))
   return textOut(
     `✓ Closed pull request ${ref.owner}/${ref.repo}#${String(number)} (${textValue(edited.title)})\n`,
   )
 }
 
 export async function commentCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const [ref, number] = target(config, texts, fl)
+  const [ref, number] = target(accessor, texts, fl)
   const comment = pull(
     await commentPull(
-      ghTransport(config),
+      accessor.transport,
       ref,
       number,
       (await bodyValue(ctx, fl, { required: true })) ?? '',
@@ -521,14 +521,14 @@ export async function commentCmd(
 }
 
 export async function diffCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const [ref, number] = target(config, texts, fl)
-  const value = await diffPull(ghTransport(config), ref, number)
+  const [ref, number] = target(accessor, texts, fl)
+  const value = await diffPull(accessor.transport, ref, number)
   if (ghBool(fl, 'name_only')) {
     return textOut(
       changedNames(value)
@@ -562,14 +562,14 @@ function check(value: Record<string, unknown>): Record<string, unknown> {
 }
 
 export async function checksCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const [ref, number] = target(config, texts, fl)
-  const rows = (await pullChecks(ghTransport(config), ref, number)).map(check)
+  const [ref, number] = target(accessor, texts, fl)
+  const rows = (await pullChecks(accessor.transport, ref, number)).map(check)
   const human = rows
     .map((row) => `${textValue(row.name)}\t${textValue(row.state)}\t${textValue(row.link)}\n`)
     .join('')

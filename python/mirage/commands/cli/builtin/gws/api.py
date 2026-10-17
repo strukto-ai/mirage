@@ -19,6 +19,7 @@ from enum import Enum, auto
 from typing import Any
 from urllib.parse import quote
 
+from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.commands.cli.builtin.gws.methods import (
     GWS_METHODS,
     SERVICE_BASES,
@@ -245,7 +246,7 @@ async def place_in_scope(
 
 async def run_gws_method(
     method: GwsMethod,
-    config: GoogleConfig,
+    accessor: GoogleApiAccessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
@@ -255,41 +256,41 @@ async def run_gws_method(
     body = _parse_json_flag(fl.as_str("json") or "", "--json")
     if method.needs_body and not body:
         raise UsageError("--json is required")
-    body, params = scope_request(method, config, body, params)
-    async with TokenManager(config) as token_manager:
-        path, query = fill_path(method.path, params)
-        url = SERVICE_BASES[method.service](token_manager) + path
-        query_params = _query_str(query)
-        if method.raw_bytes:
-            data = await google_get_bytes(
-                token_manager, _with_query(url, query_params)
-            )
-            return yield_bytes(data), IOResult()
-        if method.http == "GET":
-            # Deliberate divergence from the official gws CLI, which stops
-            # at one page unless --page-all is passed: a truncated listing
-            # is indistinguishable from a complete one, so mirage follows
-            # the token by default and --page-limit is how you opt out.
-            out = await _paginate(
-                method,
-                token_manager,
-                url,
-                body,
-                query_params,
-                _parse_page_limit(fl.as_str("page_limit")),
-            )
-            return yield_bytes(out), IOResult()
-        result = await _CALLERS[method.http](
-            token_manager, url, body, query_params
+    body, params = scope_request(method, accessor.config, body, params)
+    token_manager = accessor.token_manager
+    path, query = fill_path(method.path, params)
+    url = SERVICE_BASES[method.service](token_manager) + path
+    query_params = _query_str(query)
+    if method.raw_bytes:
+        data = await google_get_bytes(
+            token_manager, _with_query(url, query_params)
         )
-        if method.placement == "relocate" and isinstance(result, dict):
-            await place_in_scope(method, token_manager, result)
-        if result is _NO_CONTENT:
-            return None, IOResult()
-        out = json_lib.dumps(
-            result, ensure_ascii=False, separators=(",", ":")
-        ).encode()
+        return yield_bytes(data), IOResult()
+    if method.http == "GET":
+        # Deliberate divergence from the official gws CLI, which stops
+        # at one page unless --page-all is passed: a truncated listing
+        # is indistinguishable from a complete one, so mirage follows
+        # the token by default and --page-limit is how you opt out.
+        out = await _paginate(
+            method,
+            token_manager,
+            url,
+            body,
+            query_params,
+            _parse_page_limit(fl.as_str("page_limit")),
+        )
         return yield_bytes(out), IOResult()
+    result = await _CALLERS[method.http](
+        token_manager, url, body, query_params
+    )
+    if method.placement == "relocate" and isinstance(result, dict):
+        await place_in_scope(method, token_manager, result)
+    if result is _NO_CONTENT:
+        return None, IOResult()
+    out = json_lib.dumps(
+        result, ensure_ascii=False, separators=(",", ":")
+    ).encode()
+    return yield_bytes(out), IOResult()
 
 
 def _parse_page_limit(raw: str | None) -> int | None:

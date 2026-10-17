@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.commands.cli.builtin.hf.accessor import require_token, text_out
 from mirage.commands.config import Context
 from mirage.core.hf_hub.account import whoami
-from mirage.core.hf_hub.config import HfConfig
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -24,11 +24,14 @@ PUBLIC_HUB = "https://huggingface.co"
 
 
 async def whoami_cmd(
-    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: HfAccountAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """Print the account the configured token belongs to."""
-    require_token(config, "auth whoami")
-    account = await whoami(config)
+    require_token(accessor, "auth whoami")
+    account = await whoami(accessor)
     name = account.get("name")
     orgs = account.get("orgs")
     lines = [str(name) if isinstance(name, str) else ""]
@@ -53,14 +56,17 @@ async def whoami_cmd(
         lines.append(f"orgs:  {','.join(members)}")
     # Upstream prints this whenever the endpoint is not huggingface.co, which
     # for every mirage install is always: the endpoint is the deployment's.
-    endpoint = config.endpoint.rstrip("/")
+    endpoint = accessor.endpoint.rstrip("/")
     if endpoint != PUBLIC_HUB:
         lines.append(f"Authenticated through private endpoint: {endpoint}")
     return text_out("\n".join(lines) + "\n")
 
 
 async def list_cmd(
-    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: HfAccountAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """List the stored access tokens.
 
@@ -70,8 +76,8 @@ async def list_cmd(
     to a set it cannot hold, and reports nothing when there is none.
     """
     rows = ["{:<20} {}".format("NAME", "TOKEN")]
-    if config.token is not None:
-        account = await whoami(config)
+    if accessor.token is not None:
+        account = await whoami(accessor)
         name = account.get("name")
         rows.append(
             "{:<20} {}".format(

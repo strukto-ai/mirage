@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.commands.cli.builtin.hf.accessor import (
     repo_type_of,
     require_operands,
@@ -24,18 +25,20 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.core.hf_hub.admin import create_repo, create_tag, list_tags
 from mirage.core.hf_hub.admin import delete_tag as delete_tag_api
 from mirage.core.hf_hub.client import repo_url
-from mirage.core.hf_hub.config import HfConfig
 from mirage.core.hf_hub.constants import DEFAULT_REVISION
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import PathSpec
 
 
 async def create_cmd(
-    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: HfAccountAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """Create a repository on the Hub."""
     require_operands(texts, ["repo_id"])
-    require_token(config, "repo create")
+    require_token(accessor, "repo create")
     fl = FlagView(ctx.flags)
     repo_id = texts[0]
     repo_type = repo_type_of(fl)
@@ -46,7 +49,7 @@ async def create_cmd(
             "docker or static)"
         )
     result = await create_repo(
-        config,
+        accessor,
         repo_id,
         repo_type,
         private=bool(fl.as_bool("private")),
@@ -58,20 +61,23 @@ async def create_cmd(
     return text_out(
         f"{url}\n"
         if isinstance(url, str)
-        else f"{repo_url(config.endpoint, repo_type, repo_id)}\n"
+        else f"{repo_url(accessor.endpoint, repo_type, repo_id)}\n"
     )
 
 
 async def tag_create_cmd(
-    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: HfAccountAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """Tag a revision of a repository."""
     require_operands(texts, ["repo_id", "tag"])
-    require_token(config, "repo tag create")
+    require_token(accessor, "repo tag create")
     fl = FlagView(ctx.flags)
     repo_id, tag = texts[0], texts[1]
     await create_tag(
-        config,
+        accessor,
         repo_id,
         tag,
         repo_type_of(fl),
@@ -82,13 +88,16 @@ async def tag_create_cmd(
 
 
 async def tag_list_cmd(
-    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: HfAccountAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """List a repository's tags."""
     require_operands(texts, ["repo_id"])
     fl = FlagView(ctx.flags)
     repo_id = texts[0]
-    tags = await list_tags(config, repo_id, repo_type_of(fl))
+    tags = await list_tags(accessor, repo_id, repo_type_of(fl))
     return text_out("".join(f"{name}\n" for name in tags))
 
 
@@ -117,7 +126,10 @@ async def confirmed(ctx: Context) -> bool:
 
 
 async def tag_delete_cmd(
-    config: HfConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: HfAccountAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """Delete a tag from a repository.
 
@@ -125,7 +137,7 @@ async def tag_delete_cmd(
     terminal, so the answer arrives either as ``-y`` or on stdin.
     """
     require_operands(texts, ["repo_id", "tag"])
-    require_token(config, "repo tag delete")
+    require_token(accessor, "repo tag delete")
     fl = FlagView(ctx.flags)
     repo_id, tag = texts[0], texts[1]
     if not await confirmed(ctx):
@@ -133,5 +145,5 @@ async def tag_delete_cmd(
             f"deleting tag {tag} needs -y, or y on stdin: there is no "
             "terminal to confirm on"
         )
-    await delete_tag_api(config, repo_id, tag, repo_type_of(fl))
+    await delete_tag_api(accessor, repo_id, tag, repo_type_of(fl))
     return text_out(f"Tag {tag} deleted on {repo_id}\n")

@@ -32,7 +32,7 @@ async def _create_dir(
     config = accessor.config
     parent = posixpath.dirname(path)
     await create_child_folder(
-        config,
+        accessor,
         item_url(config, drive_id, parent, action="/children"),
         posixpath.basename(path),
         FolderTarget(
@@ -40,7 +40,6 @@ async def _create_dir(
             parent=item_url(config, drive_id, parent),
             virtual=virtual,
         ),
-        session=accessor.pool,
         exist_ok=exist_ok,
     )
 

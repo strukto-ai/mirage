@@ -18,6 +18,7 @@ from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from dataclasses import replace
 from typing import ParamSpec
 
+from mirage.context.session_context import session_access
 from mirage.policy import (
     Policies,
     PolicyDenied,
@@ -69,7 +70,7 @@ def env_snapshot(session: SessionState) -> dict[str, str]:
     """The one copy-out of a session's environment.
 
     Every tier that hands the env onward as a process view (a command's
-    or CLI's ``ctx.env``, guest ``RunArgs.env``, the ``env`` builtin)
+    or CLI's ``ctx.env``, a runtime's, the ``env`` builtin)
     copies through here, so the hidden-vars filter lands on all of
     them by construction rather than on however many hand-rolled
     copies someone remembers.
@@ -1658,7 +1659,7 @@ def session_view(
     *,
     diagnostics: list[str | bytes] | None = None,
 ) -> SessionView:
-    """The session plane's view: eight facts bound to one session.
+    """The session plane's view: ten facts bound to one session.
 
     The one constructor every tier uses — builtins, the command
     dispatcher, a bare unit test — so the gate cannot be skipped by
@@ -1691,4 +1692,6 @@ def session_view(
         is_readonly=functools.partial(env_is_readonly, session),
         profile=functools.partial(session_profile, session),
         cwd=lambda: session.cwd,
+        session_id=session.session_id,
+        access=functools.partial(session_access, session),
     )

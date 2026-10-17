@@ -33,7 +33,6 @@ from mirage.core.airtable.client import (
     list_records,
     list_tables,
 )
-from mirage.core.airtable.config import AirtableConfig
 from mirage.core.airtable.normalize import (
     normalize_base,
     normalize_base_summary,
@@ -47,10 +46,9 @@ from mirage.io.types import IOResult
 
 
 async def _base_list(
-    config: AirtableConfig,
+    accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
-    accessor: AirtableAccessor,
     fl: FlagView,
 ) -> Outcome:
     no_operands(texts)
@@ -60,13 +58,12 @@ async def _base_list(
 
 
 async def _base_get(
-    config: AirtableConfig,
+    accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
-    accessor: AirtableAccessor,
     fl: FlagView,
 ) -> Outcome:
-    base_id = scoped_base(config, one_operand(texts, "BASE"))
+    base_id = scoped_base(accessor.config, one_operand(texts, "BASE"))
     for base in await list_bases(accessor):
         if base.get("id") == base_id:
             tables = await list_tables(accessor, base_id)
@@ -76,14 +73,13 @@ async def _base_get(
 
 
 async def _table_get(
-    config: AirtableConfig,
+    accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
-    accessor: AirtableAccessor,
     fl: FlagView,
 ) -> Outcome:
     ref = one_operand(texts, "TABLE")
-    base_id = scoped_base(config, fl.as_str("base") or "")
+    base_id = scoped_base(accessor.config, fl.as_str("base") or "")
     table = find_table(await list_tables(accessor, base_id), ref)
     if table is None:
         raise LookupError(f"{ref}: no such table in {base_id}")
@@ -93,18 +89,17 @@ async def _table_get(
 
 
 async def _record_list(
-    config: AirtableConfig,
+    accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
-    accessor: AirtableAccessor,
     fl: FlagView,
 ) -> Outcome:
     no_operands(texts)
     asked = fl.as_int("max_records")
     if asked is not None and asked < 1:
         raise UsageError("--max-records must be at least 1")
-    base_id = scoped_base(config, fl.as_str("base") or "")
-    cap = config.max_read_records
+    base_id = scoped_base(accessor.config, fl.as_str("base") or "")
+    cap = accessor.config.max_read_records
     records = await list_records(
         accessor,
         base_id,
@@ -123,14 +118,13 @@ async def _record_list(
 
 
 async def _record_get(
-    config: AirtableConfig,
+    accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
-    accessor: AirtableAccessor,
     fl: FlagView,
 ) -> Outcome:
     record_id = one_operand(texts, "RECORD")
-    base_id = scoped_base(config, fl.as_str("base") or "")
+    base_id = scoped_base(accessor.config, fl.as_str("base") or "")
     record = await get_record(
         accessor, base_id, fl.as_str("table") or "", record_id
     )
@@ -138,14 +132,13 @@ async def _record_get(
 
 
 async def _comment_list(
-    config: AirtableConfig,
+    accessor: AirtableAccessor,
     texts: list[str],
     ctx: Context,
-    accessor: AirtableAccessor,
     fl: FlagView,
 ) -> Outcome:
     record_id = one_operand(texts, "RECORD")
-    base_id = scoped_base(config, fl.as_str("base") or "")
+    base_id = scoped_base(accessor.config, fl.as_str("base") or "")
     comments = await list_comments(
         accessor, base_id, fl.as_str("table") or "", record_id
     )

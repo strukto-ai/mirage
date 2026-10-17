@@ -843,7 +843,7 @@ describe('fileSize', () => {
     const bound = fileSize(
       sized(new FileStat({ name: 'f', type: FileType.FILE, size: 7 })),
       accessor,
-      { ...NO_NS, dispatch },
+      { ...NO_NS, vfs: new Files(dispatch, null, null, () => null, { ledger: false }) },
     )
     expect(await bound(PathSpec.fromStrPath('/f'))).toBe(size)
     expect(asked).toEqual([['stat', { fresh: true }]])

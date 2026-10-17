@@ -24,10 +24,10 @@ import type { RuntimeOptions } from '../config.ts'
  * behavior has one home. A new JavaScript engine subclasses this, not
  * LanguageRuntime.
  */
-export abstract class JsRuntime extends LanguageRuntime {
+export abstract class JsRuntime<E = unknown> extends LanguageRuntime<E> {
   readonly language: RuntimeLanguage = 'js'
   /** The tier's head words: the class-default captures of every js engine. */
-  static readonly commands: readonly string[] = ['node', 'js'] as const
+  static override readonly commands: readonly string[] = ['node', 'js'] as const
 
   constructor(options: RuntimeOptions<object> = {}, configKeys: readonly string[] = []) {
     super(options, JsRuntime.commands, configKeys)

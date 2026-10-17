@@ -19,10 +19,11 @@ from pathlib import Path
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.commands.config import Context
 from mirage.io.types import materialize
 from mirage.runtime.js import QuickJsRuntime
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
-from mirage.runtime.types import RunArgs
+from mirage.runtime.types import Program, RunResult
 from mirage.runtime.wasm import WasmView
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -39,6 +40,14 @@ live = pytest.mark.skipif(
     _home_dir() is None,
     reason=f"{QUICKJS_HOME_ENV} does not point at a qjs-wasi.wasm build",
 )
+
+
+async def _run(rt: QuickJsRuntime, program: Program, **fields) -> RunResult:
+    return await rt.interpret(await rt.engine(), program, Context(**fields))
+
+
+async def _execute(rt: QuickJsRuntime, code: str, **fields) -> RunResult:
+    return await rt.execute([], [], Context(flags={"c": code}, **fields))
 
 
 def test_missing_home_raises_hint(monkeypatch):
@@ -61,14 +70,15 @@ class _ArgvSpy:
         return b"", b"", 0
 
 
-def _spied_runtime() -> QuickJsRuntime:
+async def _spied_argv(program: Program, **fields) -> list[str]:
     # __init__ demands a real qjs-wasi.wasm on disk and argv assembly is
     # the only thing under test, so the engine is stubbed out. These run
     # everywhere; the @live tests below need the build.
     rt = object.__new__(QuickJsRuntime)
     rt._binding = None
-    rt._execution = _ArgvSpy()
-    return rt
+    spy = _ArgvSpy()
+    await rt.interpret(spy, program, Context(**fields))
+    return spy.argv
 
 
 @pytest.mark.asyncio
@@ -78,9 +88,8 @@ async def test_program_args_ride_behind_the_end_of_options_marker():
     # the `--`, `node - -e prog` ran prog (the second -e wins) and
     # `node - -m` silently flipped module mode. The TS host sets
     # scriptArgs as a global and never had the hole.
-    rt = _spied_runtime()
-    await rt.run(RunArgs(code="CODE", args=["-e", "PROG", "-m"]))
-    assert rt._execution.argv == [
+    argv = await _spied_argv(Program(code="CODE", args=["-e", "PROG", "-m"]))
+    assert argv == [
         "qjs",
         "--std",
         "--script",
@@ -95,9 +104,8 @@ async def test_program_args_ride_behind_the_end_of_options_marker():
 
 @pytest.mark.asyncio
 async def test_named_program_still_takes_the_first_arg_slot():
-    rt = _spied_runtime()
-    await rt.run(RunArgs(code="CODE", prog="tool", args=["-m"]))
-    assert rt._execution.argv == [
+    argv = await _spied_argv(Program(code="CODE", prog="tool", args=["-m"]))
+    assert argv == [
         "qjs",
         "--std",
         "--script",
@@ -111,16 +119,15 @@ async def test_named_program_still_takes_the_first_arg_slot():
 
 @pytest.mark.asyncio
 async def test_module_mode_is_still_the_interpreters_own_switch():
-    rt = _spied_runtime()
-    await rt.run(RunArgs(code="CODE", flags={"module": True}))
-    assert rt._execution.argv == ["qjs", "--std", "-m", "-e", "CODE", "--"]
+    argv = await _spied_argv(Program(code="CODE"), flags={"module": True})
+    assert argv == ["qjs", "--std", "-m", "-e", "CODE", "--"]
 
 
 @live
 @pytest.mark.asyncio
 async def test_version_commands_report_the_quickjs_engine():
     runtime = QuickJsRuntime()
-    raw, _, code = await runtime._execution.run(
+    raw, _, code = await (await runtime.engine()).run(
         argv=["qjs", "--version"], stdin=None, env=[], fs=WasmView()
     )
     assert code == 0
@@ -144,7 +151,7 @@ def test_quickjs_runs_modern_js():
         "const f = (n) => n * 6 + 1; "
         "console.log(JSON.stringify([...'ab'].map((s, i) => s + i)), f(6))"
     )
-    result = asyncio.run(rt.run(RunArgs(code=code)))
+    result = asyncio.run(_run(rt, Program(code=code)))
     assert result.exit_code == 0
     assert result.stdout == b'["a0","b1"] 37\n'
     assert result.stderr is None
@@ -154,30 +161,33 @@ def test_quickjs_runs_modern_js():
 def test_quickjs_argv_stdin_module():
     rt = QuickJsRuntime()
     result = asyncio.run(
-        rt.run(
-            RunArgs(
+        _run(
+            rt,
+            Program(
                 code="console.log(scriptArgs.join('/'))", args=["a1", "a2"]
-            )
+            ),
         )
     )
     assert result.stdout == b"a1/a2\n"
     # std.in reads piped stdin (the std/os globals are exposed).
     result = asyncio.run(
-        rt.run(
-            RunArgs(
+        _run(
+            rt,
+            Program(
                 code="console.log(std.in.readAsString().trim().toUpperCase())",
                 stdin=b"piped\n",
-            )
+            ),
         )
     )
     assert result.stdout == b"PIPED\n"
     # module mode enables top-level await.
     result = asyncio.run(
-        rt.run(
-            RunArgs(
-                code="const x = await Promise.resolve(41); console.log(x + 1)",
-                flags={"module": True},
-            )
+        _run(
+            rt,
+            Program(
+                code="const x = await Promise.resolve(41); console.log(x + 1)"
+            ),
+            flags={"module": True},
         )
     )
     assert result.stdout == b"42\n"
@@ -186,9 +196,9 @@ def test_quickjs_argv_stdin_module():
 @live
 def test_quickjs_exit_code_and_error():
     rt = QuickJsRuntime()
-    result = asyncio.run(rt.run(RunArgs(code="std.exit(7)")))
+    result = asyncio.run(_run(rt, Program(code="std.exit(7)")))
     assert result.exit_code == 7
-    result = asyncio.run(rt.run(RunArgs(code="this is not js")))
+    result = asyncio.run(_run(rt, Program(code="this is not js")))
     assert result.exit_code == 1
     assert b"SyntaxError" in (result.stderr or b"")
 
@@ -203,7 +213,7 @@ def test_quickjs_without_dispatch_opens_nothing(path):
     # handle).
     rt = QuickJsRuntime()
     code = f"console.log(std.open('{path}', 'r') === null)"
-    result = asyncio.run(rt.run(RunArgs(code=code)))
+    result = asyncio.run(_run(rt, Program(code=code)))
     assert result.exit_code == 0
     assert result.stdout == b"true\n"
 
@@ -230,12 +240,12 @@ async def test_quickjs_node_command_end_to_end():
 @pytest.mark.asyncio
 async def test_quickjs_cancellation_stops_the_run():
     rt = QuickJsRuntime()
-    task = asyncio.ensure_future(rt.run(RunArgs(code="for (;;) {}")))
+    task = asyncio.ensure_future(_run(rt, Program(code="for (;;) {}")))
     await asyncio.sleep(0.5)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    result = await rt.run(RunArgs(code="console.log('alive')"))
+    result = await _run(rt, Program(code="console.log('alive')"))
     assert result.exit_code == 0
     assert result.stdout == b"alive\n"
 
@@ -243,8 +253,8 @@ async def test_quickjs_cancellation_stops_the_run():
 @live
 def test_quickjs_reuses_compiled_module():
     rt = QuickJsRuntime()
-    first = asyncio.run(rt.run(RunArgs(code="console.log(1)")))
-    second = asyncio.run(rt.run(RunArgs(code="console.log(2)")))
+    first = asyncio.run(_run(rt, Program(code="console.log(1)")))
+    second = asyncio.run(_run(rt, Program(code="console.log(2)")))
     assert (first.stdout, second.stdout) == (b"1\n", b"2\n")
     root = _home_dir()
     assert root is not None
@@ -278,7 +288,7 @@ def test_reach_is_vfs():
 
 @live
 @pytest.mark.asyncio
-async def test_cwd_inherits_context_and_explicit_run_cwd_wins():
+async def test_a_bound_run_takes_the_callers_cwd_not_the_sessions():
     runtime = QuickJsRuntime()
     ws = Workspace(
         {"/data": RAMVFS()},
@@ -291,21 +301,20 @@ async def test_cwd_inherits_context_and_explicit_run_cwd_wins():
                 "mkdir /data/sub; echo child > /data/sub/item; cd /data"
             )
         ).exit_code == 0
-        args = RunArgs(code="console.log(os.getcwd()[0])")
-        assert (await runtime.run(args)).stdout == b"/data\n"
-        explicit = await runtime.run(
-            RunArgs(code=args.code, cwd=PathSpec.from_str_path("/data/sub"))
+        code = "console.log(os.getcwd()[0])"
+        assert (await _execute(runtime, code)).stdout == b"/\n"
+        explicit = await _execute(
+            runtime, code, cwd=PathSpec.from_str_path("/data/sub")
         )
         assert explicit.stdout == b"/data/sub\n"
-        bad = await runtime.run(
-            RunArgs(
-                code="console.log('must not run')",
-                cwd=PathSpec.from_str_path("/missing"),
-            )
+        bad = await _execute(
+            runtime,
+            "console.log('must not run')",
+            cwd=PathSpec.from_str_path("/missing"),
         )
         assert bad.exit_code == 1
         assert bad.stdout == b""
         assert b"cannot change directory" in bad.stderr
-        assert (await runtime.run(args)).stdout == b"/data\n"
+        assert (await _execute(runtime, code)).stdout == b"/\n"
     finally:
         await ws.close()

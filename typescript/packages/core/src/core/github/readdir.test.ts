@@ -13,10 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { GitHubAccessor } from '../../accessor/github.ts'
+import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 import { type DirListing, FileType, PathSpec } from '../../types.ts'
 import { readdir } from './readdir.ts'
-import { GitHubApiError, HttpGitHubTransport, type GitHubTransport } from './client.ts'
+import { GitHubApiError, type GitHubTransport } from './client.ts'
 import { BASE, FakeGitHub, servedAccessor } from './_test_util.ts'
 
 const TREE = [
@@ -32,7 +32,7 @@ function accessor(): GitHubAccessor {
     get: () => Promise.resolve({ tree: TREE, truncated: false, sha: 'HEAD1' }),
   } as unknown as GitHubTransport
   return new GitHubAccessor({
-    transport,
+    account: new GitHubAccount({ token: 't' }, transport),
     owner: 'o',
     repo: 'r',
     ref: 'main',
@@ -86,7 +86,7 @@ describe('github readdir', () => {
       },
     } as unknown as GitHubTransport
     const shared = new GitHubAccessor({
-      transport,
+      account: new GitHubAccount({ token: 't' }, transport),
       owner: 'o',
       repo: 'r',
       ref: 'main',
@@ -117,7 +117,7 @@ describe('the truncated walk', () => {
     gh.truncatedRecursive = true
     vi.stubGlobal('fetch', gh.fetch)
     return new GitHubAccessor({
-      transport: new HttpGitHubTransport({ token: 't', baseUrl: BASE }),
+      account: new GitHubAccount({ token: 't', baseUrl: BASE }),
       owner: 'o',
       repo: 'r',
       ref: 'main',

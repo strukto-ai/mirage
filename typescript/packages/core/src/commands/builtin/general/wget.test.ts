@@ -18,6 +18,8 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { GENERAL_WGET } from './wget.ts'
 import { enoent } from '../../../errors/fs.ts'
+import { Files } from '../../../workspace/files.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -49,15 +51,16 @@ async function runWget(
   if (cmd === undefined) throw new Error('wget not registered')
   // What each write sent through the dispatcher, by path.
   const writes: Record<string, Uint8Array> = {}
+  const dispatch: DispatchFn = (_op, path, args) => {
+    if (refuse !== undefined) return Promise.reject(refuse)
+    writes[path.virtual] = args?.[0] as Uint8Array
+    return Promise.resolve([null, new IOResult()])
+  }
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
     cwd: PathSpec.fromStrPath('/'),
-    dispatch: (_op, path, args) => {
-      if (refuse !== undefined) return Promise.reject(refuse)
-      writes[path.virtual] = args?.[0] as Uint8Array
-      return Promise.resolve([null, new IOResult()])
-    },
+    vfs: new Files(dispatch, null, null, () => null, { ledger: false }),
   })
   if (result === null) return { out: '', err: '', exitCode: -1, writes }
   const [out, ioResult] = result

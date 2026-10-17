@@ -28,6 +28,7 @@ from mirage.io.types import IOResult, materialize
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from mirage.workspace.files import Files
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
 
@@ -270,7 +271,12 @@ async def test_a_directory_does_not_route_to_a_filetype_handler():
         return b"rendered\n", IOResult()
 
     mount.register_commands([plain, typed])
-    context = Context(stat_path=_stat_tally)
+
+    async def dispatch(name: str, path: PathSpec, /, **_kw):
+        assert name == "stat"
+        return await _stat_tally(path), IOResult()
+
+    context = Context(vfs=Files([], dispatch, ledger=False))
     await mount.run_command(
         "cat", [PathSpec.from_str_path("/dir.tally")], [], {}, context
     )

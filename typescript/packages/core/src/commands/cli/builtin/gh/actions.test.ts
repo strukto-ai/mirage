@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as AccessorModule from './accessor.ts'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { GitHubAccount } from '../../../../accessor/github.ts'
 import { GitHubApiError, type GitHubTransport } from '../../../../core/github/client.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { PartialOutputError, UsageError } from '../../../errors.ts'
@@ -50,16 +50,13 @@ class RouteTransport implements GitHubTransport {
   }
 }
 
-vi.mock('./accessor.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof AccessorModule>()
-  return { ...actual, ghTransport: () => new RouteTransport() }
-})
+const ACCOUNT = new GitHubAccount({ token: 't', repo: 'o/r' }, new RouteTransport())
 
 function args(
   texts: string[],
   flags: Context['flags'] = {},
-): [unknown, PathSpec[], string[], Context] {
-  return [{ token: 't', repo: 'o/r' }, [], texts, context({ flags })]
+): [GitHubAccount, PathSpec[], string[], Context] {
+  return [ACCOUNT, [], texts, context({ flags })]
 }
 
 function text(result: CommandFnResult): string {

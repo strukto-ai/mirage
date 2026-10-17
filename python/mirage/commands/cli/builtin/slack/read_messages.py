@@ -14,9 +14,9 @@
 
 import json
 
+from mirage.accessor.slack import SlackAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.history import fetch_recent_messages
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -24,12 +24,15 @@ from mirage.types import PathSpec
 
 
 async def read_messages(
-    config: SlackConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: SlackAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags, ctx.spec)
     channel = fl.as_str("channel") or ""
     limit = fl.as_int("limit", 20)
-    messages = await fetch_recent_messages(config, channel, limit)
+    messages = await fetch_recent_messages(accessor, channel, limit)
     out = json.dumps(
         messages, ensure_ascii=False, separators=(",", ":")
     ).encode()

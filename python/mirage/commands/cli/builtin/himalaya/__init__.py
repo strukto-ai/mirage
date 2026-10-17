@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.compose import compose
 from mirage.commands.cli.builtin.himalaya.forward import forward
 from mirage.commands.cli.builtin.himalaya.list import list_envelopes
@@ -201,4 +202,5 @@ HIMALAYA = CLI(
         "message forward": CLIHandler(fn=forward, write=True),
     },
     config_model=EmailConfig,
+    accessor=EmailAccessor,
 )

@@ -25,8 +25,7 @@ async def rename(
     src_resolved = await resolve_item(accessor, src)
     dst_resolved = await resolve_item(accessor, dst)
     await rename_replace(
-        config,
+        accessor,
         drive_loc(config, src_resolved, src.vfs_path),
         drive_loc(config, dst_resolved, dst.vfs_path),
-        session=accessor.pool,
     )

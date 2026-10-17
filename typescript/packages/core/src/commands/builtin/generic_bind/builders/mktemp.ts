@@ -17,6 +17,7 @@ import { mountKey } from '../../../../utils/key_prefix.ts'
 import { mktempGeneric } from '../../generic/mktemp.ts'
 import { pathExists } from '../../utils/copy.ts'
 import { requireOp, type GenericCommand, type GenericCommandFn } from '../adapter.ts'
+import { vfsStatPath } from '../../utils/paths.ts'
 
 const mktemp: GenericCommandFn = (ops, accessor, _paths, texts, ctx) => {
   // The name a pathless mktemp creates is under $TMPDIR or /tmp, which the
@@ -28,19 +29,20 @@ const mktemp: GenericCommandFn = (ops, accessor, _paths, texts, ctx) => {
   const write = requireOp(ops.write, 'write')
   const local = (p: PathSpec): PathSpec =>
     PathSpec.fromStrPath(p.virtual, mountKey(p.virtual, ctx.mountPrefix ?? ''))
+  const statPath = vfsStatPath(ctx.vfs)
   return mktempGeneric(
     texts,
     ctx,
     async (p) => {
-      if (ctx.dispatch !== undefined) await ctx.dispatch('mkdir', p, [], { parents: false })
+      if (ctx.vfs !== undefined) await ctx.vfs.dispatch('mkdir', p, [], { parents: false })
       else await mkdir(accessor, local(p))
     },
     async (p, d) => {
-      if (ctx.dispatch !== undefined) await ctx.dispatch('write', p, [d])
+      if (ctx.vfs !== undefined) await ctx.vfs.dispatch('write', p, [d])
       else await write(accessor, local(p), d)
     },
     async (p) => {
-      if (ctx.statPath !== undefined) return (await ctx.statPath(p)) !== null
+      if (statPath !== undefined) return (await statPath(p)) !== null
       return pathExists((at) => ops.stat(accessor, at), local(p))
     },
   )

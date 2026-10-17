@@ -18,6 +18,7 @@ from mirage.commands.builtin.utils.paths import (
     dot_refusal,
     link_follow,
     stat_or_enoent,
+    vfs_stat_path,
 )
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
@@ -504,7 +505,7 @@ async def find_walk_generic(
     flags = FlagView(ctx.flags, spec=SPECS["find"])
     bounded = flags.as_bool("xdev") or flags.as_bool("mount")
     mounts = mounts_of(ctx)
-    stat_path = ctx.stat_path
+    stat_path = vfs_stat_path(ctx.vfs)
     links = links_of(ctx)
     searches = (
         paths if paths else [PathSpec(virtual="/", directory="/", vfs_path="")]

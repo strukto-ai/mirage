@@ -157,6 +157,9 @@ export interface SessionView {
   profile(): string | null
   // The session's working directory, the one an operand resolves against.
   cwd(): string
+  readonly sessionId: string
+  // Its access and shell settings (hides, umask, shell options) as they stand.
+  access(): SessionAccess
 }
 
 // The symlink surface a namespace offers to lower layers. The workspace

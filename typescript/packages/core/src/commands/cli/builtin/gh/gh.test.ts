@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import type * as AccessorModule from './accessor.ts'
+import { GitHubAccount } from '../../../../accessor/github.ts'
+import type { GhConfig } from '../../../../core/github/config.ts'
 import { bodyValue, readCliFile, repoNumber } from './accessor.ts'
 import {
   GitHubApiError,
@@ -82,18 +83,17 @@ class FakeTransport implements GitHubTransport {
   }
 }
 
-vi.mock('./accessor.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof AccessorModule>()
-  return { ...actual, ghTransport: () => new FakeTransport() }
-})
+function account(config: GhConfig = { token: 't' }): GitHubAccount {
+  return new GitHubAccount(config, new FakeTransport())
+}
 
 function args(
   texts: string[],
   flags: Context['flags'] = {},
-  config: unknown = { token: 't' },
+  config: GhConfig = { token: 't' },
   extra: Partial<Pick<Context, 'stdin' | 'vfs' | 'argv'>> = {},
-): [unknown, PathSpec[], string[], Context] {
-  return [config, [], texts, context({ flags, ...extra })]
+): [GitHubAccount, PathSpec[], string[], Context] {
+  return [account(config), [], texts, context({ flags, ...extra })]
 }
 
 function text(result: CommandFnResult): string {
@@ -464,7 +464,7 @@ describe('gh issue and pull request subjects', () => {
   it('lets a full URL override the configured repository', () => {
     const flags = { repo: 'wrong/repo' }
     const [ref, number] = repoNumber(
-      { token: 't' },
+      account(),
       new FlagView(flags),
       'https://github.com/acme/tools/issues/42',
       'issue',
@@ -476,7 +476,7 @@ describe('gh issue and pull request subjects', () => {
   it('requires the URL kind to match the verb', () => {
     expect(() =>
       repoNumber(
-        { token: 't' },
+        account(),
         new FlagView({}),
         'https://github.com/acme/tools/issues/42',
         'pull request',
@@ -979,7 +979,7 @@ it('formats deleted authors, edited/minimized comments and nonzero reactions lik
     },
   })
   const rows = await commentsFor(
-    { token: 't' },
+    account(),
     new FlagView({ comments: true }),
     { owner: 'o', repo: 'r' },
     1,

@@ -45,7 +45,7 @@ async def require_list(accessor: TrelloAccessor, list_id: str) -> None:
     """
     if not scope_is_narrowed(accessor):
         return
-    lst = await get_list(accessor.config, list_id, session=accessor.pool)
+    lst = await get_list(accessor, list_id)
     if not await board_in_scope(accessor, str(lst.get("idBoard") or "")):
         raise _outside("list", list_id)
 
@@ -59,6 +59,6 @@ async def require_card(accessor: TrelloAccessor, card_id: str) -> None:
     """
     if not scope_is_narrowed(accessor):
         return
-    card = await get_card(accessor.config, card_id, session=accessor.pool)
+    card = await get_card(accessor, card_id)
     if not await board_in_scope(accessor, str(card.get("idBoard") or "")):
         raise _outside("card", card_id)

@@ -22,6 +22,8 @@ from mirage.commands.builtin.generic_bind.adapter import (
     require_op,
 )
 from mirage.commands.builtin.utils.copy import path_exists
+from mirage.commands.builtin.utils.links import dispatch_of
+from mirage.commands.builtin.utils.paths import vfs_stat_path
 from mirage.commands.config import CommandIO, Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -40,7 +42,8 @@ async def mktemp(
     # through the dispatcher to whichever mount does. Only a generic run
     # outside a workspace, with no dispatcher and no other mount, writes
     # through this mount's own ops.
-    dispatch = ctx.dispatch
+    dispatch = dispatch_of(ctx)
+    stat_path = vfs_stat_path(ctx.vfs)
 
     def local(path: PathSpec) -> PathSpec:
         return PathSpec.from_str_path(
@@ -60,8 +63,8 @@ async def mktemp(
             await require_op(ops, Operation.WRITE)(accessor, local(path), data)
 
     async def exists(path: PathSpec) -> bool:
-        if ctx.stat_path is not None:
-            return await ctx.stat_path(path) is not None
+        if stat_path is not None:
+            return await stat_path(path) is not None
         return await path_exists(partial(ops.stat, accessor), local(path))
 
     return await mktemp_generic(paths, list(texts), ctx, mkdir, write, exists)

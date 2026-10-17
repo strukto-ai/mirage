@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { GitHubAccount } from '../../../../accessor/github.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -37,7 +38,6 @@ import { readZipEntries, ZipFormatError, type ZipEntry } from '../../../builtin/
 import {
   camel,
   ghBool,
-  ghTransport,
   listLimit,
   readCliFile,
   repoFor,
@@ -111,7 +111,7 @@ function workflow(value: unknown): Record<string, unknown> {
 }
 
 export async function runListCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
@@ -131,8 +131,8 @@ export async function runListCmd(
   }
   const rows = (
     await listRuns(
-      ghTransport(config),
-      repoFor(config, fl),
+      accessor.transport,
+      repoFor(accessor, fl),
       params,
       listLimit(fl, 20),
       fl.asStr('workflow'),
@@ -148,7 +148,7 @@ export async function runListCmd(
 }
 
 export async function runViewCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -159,8 +159,8 @@ export async function runViewCmd(
   const logs = ghBool(fl, 'log')
   const failedOnly = ghBool(fl, 'log_failed')
   if (logs && failedOnly) throw new UsageError('specify only one of --log or --log-failed', 1)
-  const transport = ghTransport(config)
-  const ref = repoFor(config, fl)
+  const transport = accessor.transport
+  const ref = repoFor(accessor, fl)
   const row = run(await getRun(transport, ref, Number(raw)))
   // `--json` is answered first, as gh's exporter is.
   if ((logs || failedOnly) && fl.asStr('json') === undefined) {
@@ -350,7 +350,7 @@ async function runLog(
 }
 
 export async function runRerunCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -358,8 +358,8 @@ export async function runRerunCmd(
   const fl = new FlagView(ctx.flags)
   const raw = texts[0] ?? ''
   if (!/^\d+$/.test(raw)) throw new Error('a run ID is required in noninteractive mode')
-  const transport = ghTransport(config)
-  const ref = repoFor(config, fl)
+  const transport = accessor.transport
+  const ref = repoFor(accessor, fl)
   const job = fl.asStr('job')
   if (job !== undefined && job !== '') {
     if (!/^\d+$/.test(job)) throw new Error('--job expects a numeric job ID')
@@ -377,7 +377,7 @@ export async function runRerunCmd(
 }
 
 export async function workflowListCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
@@ -385,8 +385,8 @@ export async function workflowListCmd(
   const fl = new FlagView(ctx.flags)
   const rows = (
     await listWorkflows(
-      ghTransport(config),
-      repoFor(config, fl),
+      accessor.transport,
+      repoFor(accessor, fl),
       listLimit(fl, 50),
       ghBool(fl, 'all') ? undefined : (row) => row.state === 'active',
     )
@@ -398,7 +398,7 @@ export async function workflowListCmd(
 }
 
 export async function workflowViewCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -409,8 +409,8 @@ export async function workflowViewCmd(
   const yaml = ghBool(fl, 'yaml')
   const gitRef = fl.asStr('ref') ?? ''
   if (!yaml && gitRef !== '') throw new UsageError('`--yaml` required when specifying `--ref`', 1)
-  const transport = ghTransport(config)
-  const ref = repoFor(config, fl)
+  const transport = accessor.transport
+  const ref = repoFor(accessor, fl)
   const row = workflow(await getWorkflow(transport, ref, id))
   if (!yaml) {
     return textOut(
@@ -481,7 +481,7 @@ async function workflowInputs(ctx: Context, fl: FlagView): Promise<Record<string
 }
 
 export async function workflowRunCmd(
-  config: unknown,
+  accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -489,9 +489,9 @@ export async function workflowRunCmd(
   const fl = new FlagView(ctx.flags)
   const id = texts[0] ?? ''
   if (id === '') throw new Error('a workflow ID, name, or filename is required')
-  const transport = ghTransport(config)
-  const ref = repoFor(config, fl)
-  let branch = fl.asNonEmpty('ref') ?? (config as { branch?: string }).branch
+  const transport = accessor.transport
+  const ref = repoFor(accessor, fl)
+  let branch = fl.asNonEmpty('ref') ?? accessor.config.branch
   if (branch === undefined || branch === '') {
     const repository = (await viewRepo(transport, ref)) as { default_branch?: unknown }
     branch = typeof repository.default_branch === 'string' ? repository.default_branch : undefined

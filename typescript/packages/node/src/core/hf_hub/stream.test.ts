@@ -15,8 +15,9 @@
 import { runWithRecording } from '@struktoai/mirage-core/observe/context'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { HfHubAccessor } from '../../accessor/hf_hub.ts'
+import type { HfAccountAccessor } from '../../accessor/hf_hub.ts'
 import * as client from './client.ts'
+import { handle } from './_test_util.ts'
 import { readStream } from './stream.ts'
 import { parseEntry, rowOf } from './tree.ts'
 
@@ -25,7 +26,7 @@ const PATH = new PathSpec({ virtual: '/m/m/k.txt', vfsPath: 'm/k.txt', directory
 const K_ROW = rowOf(parseEntry({ type: 'file', oid: 'oid-k', size: 5, path: 'm/k.txt' }), 'k.txt')
 
 function streamed(): AsyncIterable<Uint8Array> {
-  return readStream(new HfHubAccessor({ repoId: 'acme/widget' } as never), PATH, K_ROW)
+  return readStream(handle(), PATH, K_ROW)
 }
 
 afterEach(() => {
@@ -53,7 +54,7 @@ function answering(etag: string, ...payload: string[]) {
   // Reports its headers the way the real hubStream does: once, before the
   // first chunk.
   return async function* (
-    _token: string | undefined,
+    _account: HfAccountAccessor,
     _url: string,
     onResponse?: (headers: Record<string, string>) => void,
   ): AsyncIterable<Uint8Array> {

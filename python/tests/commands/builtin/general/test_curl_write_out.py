@@ -9,6 +9,7 @@ from mirage.commands.builtin.general.wget import wget
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.workspace import Workspace
+from mirage.workspace.files import Files
 
 
 @pytest.mark.asyncio
@@ -41,9 +42,10 @@ async def test_template_failure_refuses_transfer(
 ):
     request = AsyncMock()
     monkeypatch.setitem(curl.__wrapped__.__globals__, "http_request", request)
-    dispatch = AsyncMock(side_effect=failure) if failure is not None else None
+    dispatch = AsyncMock(side_effect=failure)
+    vfs = Files([], dispatch, ledger=False) if failure is not None else None
     ctx = Context(
-        dispatch=dispatch,
+        vfs=vfs,
         flags={
             "write_out": "@/format",
             "silent": silent,

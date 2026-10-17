@@ -27,8 +27,7 @@ from mirage.types import PathSpec
 Outcome = tuple[ByteSource | None, IOResult]
 
 Verb = Callable[
-    [AirtableConfig, list[str], Context, AirtableAccessor, FlagView],
-    Awaitable[Outcome],
+    [AirtableAccessor, list[str], Context, FlagView], Awaitable[Outcome]
 ]
 
 
@@ -143,26 +142,24 @@ async def stdin_text(stdin: ByteSource) -> str:
 
 async def run(
     verb: Verb,
-    config: AirtableConfig,
+    accessor: AirtableAccessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> Outcome:
-    """Run one verb on its own accessor.
+    """Run one verb on the install's accessor.
 
-    The accessor lives for the invocation and closes with it, the way a
-    one-shot ``SessionAccessor`` is used. A verb never names itself: the
-    CLI may be installed under any head word, so a refusal is left to the
-    executor, which prefixes it with the words the line was typed under.
+    The accessor outlives the line: the workspace closes it with the
+    install, so every line of one install rides one connection pool. A
+    verb never names itself: the CLI may be installed under any head
+    word, so a refusal is left to the executor, which prefixes it with
+    the words the line was typed under.
 
     Args:
         verb (Verb): the verb's body.
-        config (AirtableConfig): the install's validated config.
+        accessor (AirtableAccessor): the install's accessor.
         paths (list[PathSpec]): the cwd-resolved path operands.
         texts (list[str]): the line's operands.
         ctx (Context): the leaf's context.
     """
-    async with AirtableAccessor(config) as accessor:
-        return await verb(
-            config, texts, ctx, accessor, FlagView(ctx.flags, ctx.spec)
-        )
+    return await verb(accessor, texts, ctx, FlagView(ctx.flags, ctx.spec))

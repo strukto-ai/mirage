@@ -16,6 +16,7 @@ import json
 import posixpath
 from email.policy import SMTP
 
+from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.builder import (
     Attachment,
     Compose,
@@ -29,7 +30,6 @@ from mirage.commands.cli.builtin.himalaya.deliver import (
     save_sent_copy,
 )
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.email.config import EmailConfig
 from mirage.errors.fs import fs_strerror
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -95,7 +95,7 @@ async def load_attachments(
 
 
 async def route(
-    config: EmailConfig,
+    accessor: EmailAccessor,
     fl: FlagView,
     stdin: ByteSource | None,
     source: Source | None,
@@ -108,7 +108,7 @@ async def route(
     RFC 5322 bytes go to stdout, so a composer chain can pick them up.
 
     Args:
-        config (EmailConfig): the account.
+        accessor (EmailAccessor): the install's account.
         fl (FlagView): the leaf's parsed flags.
         stdin (ByteSource | None): piped body, used when --body is absent.
         source (Source | None): the replied-to or forwarded message.
@@ -116,7 +116,7 @@ async def route(
             names files to load.
     """
     compose = Compose(
-        sender=fl.as_str("from", config.username),
+        sender=fl.as_str("from", accessor.config.username),
         to=split_addresses(fl.as_list("to")),
         cc=split_addresses(fl.as_list("cc")),
         bcc=split_addresses(fl.as_list("bcc")),
@@ -137,7 +137,7 @@ async def route(
         # --save without --send files the message and sends nothing, so
         # a refused APPEND means nothing happened at all and may fail
         # loudly: there is no delivered message a retry could duplicate.
-        folder = await save_sent_copy(config, raw, save)
+        folder = await save_sent_copy(accessor, raw, save)
         out = json.dumps(
             {
                 "status": "saved",
@@ -149,7 +149,7 @@ async def route(
             separators=(",", ":"),
         ).encode()
         return yield_bytes(out), IOResult()
-    _, warning = await deliver(config, raw, save)
+    _, warning = await deliver(accessor, raw, save)
     result = {
         "status": "sent",
         "to": message["To"],

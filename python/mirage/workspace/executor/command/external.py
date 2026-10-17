@@ -16,8 +16,11 @@ import asyncio
 import logging
 import shlex
 from collections.abc import AsyncIterator
+from dataclasses import replace
+from typing import Any
 
 from mirage.commands.builtin.utils.limit import run_with_timeout
+from mirage.commands.config import Context
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.pipe import BytePipe
@@ -28,13 +31,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import ProcessExecutorMixin, StreamingProcessMixin
 from mirage.runtime.routing.types import RouteDecision
-from mirage.runtime.types import (
-    ExecutionRequest,
-    ProcessExecution,
-    RunResult,
-    ShellRequest,
-    StreamExecution,
-)
+from mirage.runtime.types import ExecutionKind, OutputFn, RunResult
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, Producer
 from mirage.utils.abort import MirageAbortError
@@ -52,7 +49,7 @@ async def run_external(
     stdin: ByteSource | None,
     session: SessionState,
     registry: MountRegistry,
-    routing: RouteDecision[Runtime] | None = None,
+    routing: RouteDecision[Runtime[Any]] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute one admitted program; its surrounding shell stays in Mirage."""
     bindings = (
@@ -89,18 +86,13 @@ async def run_external(
 
     async def execute() -> RunResult:
         data = await materialize(stdin) if stdin is not None else None
+        ctx = Context(cwd=cwd, env=env, stdin=data)
         if isinstance(runtime, ProcessExecutorMixin):
             return await _execute_program(
-                runtime,
-                argv.name,
-                ProcessExecution(
-                    argv=argv.tokens, cwd=cwd, env=env, stdin=data
-                ),
+                runtime, argv.name, list(argv.tokens), ctx, "process"
             )
         return await _execute_program(
-            runtime,
-            argv.name,
-            ShellRequest(line=command, cwd=cwd, env=env, stdin=data),
+            runtime, argv.name, [], replace(ctx, flags={"c": command}), "line"
         )
 
     try:
@@ -133,7 +125,7 @@ async def run_external(
 
 
 def _stream_external(
-    runtime: Runtime,
+    runtime: Runtime[Any],
     argv: Argv,
     stdin: ByteSource | None,
     cwd: PathSpec,
@@ -161,13 +153,10 @@ def _stream_external(
                 _execute_program(
                     runtime,
                     argv.name,
-                    StreamExecution(
-                        argv=argv.tokens,
-                        cwd=cwd,
-                        env=env,
-                        stdin=stdin,
-                        output=pipe.write,
-                    ),
+                    list(argv.tokens),
+                    Context(cwd=cwd, env=env, stdin=stdin),
+                    "process",
+                    pipe.write,
                 ),
                 timeout,
                 argv.name,
@@ -222,11 +211,25 @@ def _stream_external(
 
 
 async def _execute_program(
-    runtime: Runtime, name: str, request: ExecutionRequest
+    runtime: Runtime[Any],
+    name: str,
+    texts: list[str],
+    ctx: Context,
+    kind: ExecutionKind,
+    output: OutputFn | None = None,
 ) -> RunResult:
-    """Keep an ordinary launch failure within the command that caused it."""
+    """Keep an ordinary launch failure within the command that caused it.
+
+    Args:
+        runtime (Runtime[Any]): the runtime the line routed to.
+        name (str): the program's name, for a launch failure's message.
+        texts (list[str]): the argv, or nothing for a line.
+        ctx (Context): the run's context.
+        kind (ExecutionKind): a process or a line.
+        output (OutputFn | None): where a streamed process writes.
+    """
     try:
-        return await runtime.execute(request)
+        return await runtime.execute([], texts, ctx, kind=kind, output=output)
     except (CommandTimeoutError, MirageAbortError):
         raise
     except Exception as exc:

@@ -78,10 +78,7 @@ async def read(
     try:
         with refusals_denied(path, REFUSED_STATUSES):
             data, etag = await hub_bytes_tagged(
-                accessor.token,
-                resolve_url(accessor, rel),
-                window,
-                session=accessor.pool,
+                accessor.account, resolve_url(accessor, rel), window
             )
     except HfHubError as exc:
         if is_missing(exc):

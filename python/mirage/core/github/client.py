@@ -20,14 +20,13 @@ from urllib.parse import urlencode
 import aiohttp
 from pydantic import SecretStr
 
+from mirage.accessor.github import GitHubAccount
 from mirage.core.api.client import (
     ApiResponse,
-    SessionArg,
     api_request,
     api_stream,
     status_error,
 )
-from mirage.core.github.config import GitHubConfig
 from mirage.core.github.constants import (
     API_BASE,
     API_VERSION,
@@ -127,36 +126,30 @@ class GitHubConnectionError(Exception):
 
 
 async def github_get(
-    token: SecretStr,
+    account: GitHubAccount,
     path: str,
     params: dict[str, Any] | None = None,
-    *,
-    base_url: str | None = None,
-    session: SessionArg = None,
     **kwargs: str,
 ) -> dict[str, Any]:
-    url = github_url(path, base_url, **kwargs)
     data: dict[str, Any] = await api_request(
         "GET",
-        url,
+        github_url(path, account.config.base_url, **kwargs),
         error_of=status_error,
-        headers=github_headers(token),
+        headers=github_headers(account.config.token),
         params=params,
-        session=session,
+        session=account.pool,
     )
     return data
 
 
 async def github_request(
-    token: SecretStr,
+    account: GitHubAccount,
     method: str,
     path: str,
     body: "JsonValue | _NoBody" = _NO_BODY,
     params: dict[str, str] | None = None,
     *,
-    base_url: str | None = None,
     headers: dict[str, str] | None = None,
-    session: SessionArg = None,
 ) -> "JsonValue":
     """One arbitrary API call, the shape `gh api` needs.
 
@@ -167,14 +160,13 @@ async def github_request(
     arrives from a command line and may hold braces of its own.
 
     Args:
-        token (SecretStr): the API token.
+        account (GitHubAccount): the token, API base and pool to ride.
         method (str): the HTTP method.
         path (str): the endpoint path, leading slash included.
         body (JsonValue | _NoBody): the JSON body; omitted sends none, while
             an explicit None sends JSON null.
         params (dict[str, str] | None): query parameters.
-        base_url (str | None): API base, defaulting to github.com's.
-        session (SessionArg): pool or live session to ride.
+        headers (dict[str, str] | None): headers to set over the defaults.
 
     Returns:
         JsonValue: the decoded body, None for an empty one.
@@ -183,36 +175,28 @@ async def github_request(
         GitHubApiError: the call answered with a non-2xx status.
     """
     response = await github_request_response(
-        token,
-        method,
-        path,
-        body,
-        params,
-        base_url=base_url,
-        headers=headers,
-        session=session,
+        account, method, path, body, params, headers=headers
     )
     return cast(JsonValue, response.data)
 
 
 async def github_request_response(
-    token: SecretStr,
+    account: GitHubAccount,
     method: str,
     path: str,
     body: "JsonValue | _NoBody" = _NO_BODY,
     params: dict[str, str] | None = None,
     *,
-    base_url: str | None = None,
     headers: dict[str, str] | None = None,
-    session: SessionArg = None,
 ) -> ApiResponse:
     """One GitHub call retaining status and headers for CLI pagination."""
+    base_url = account.config.base_url
     url = (
         graphql_url(base_url)
         if path == GRAPHQL_PATH
         else (base_url or API_BASE) + path
     )
-    merged = github_headers(token)
+    merged = github_headers(account.config.token)
     for key, value in (headers or {}).items():
         prior = next(
             (name for name in merged if name.lower() == key.lower()), None
@@ -231,7 +215,7 @@ async def github_request_response(
             json_body=None if not present else cast(JsonValue, body),
             json_body_present=present,
             read="bytes_response",
-            session=session,
+            session=account.pool,
         )
     except aiohttp.ClientConnectorDNSError as exc:
         raise GitHubConnectionError(
@@ -342,24 +326,20 @@ def blob_path(owner: str, repo: str, sha: str) -> str:
 
 
 def stream_blob(
-    config: GitHubConfig,
-    owner: str,
-    repo: str,
-    sha: str,
-    session: SessionArg = None,
+    account: GitHubAccount, owner: str, repo: str, sha: str
 ) -> AsyncGenerator[bytes, None]:
     """A blob's bytes as they download, in GitHub's raw media type.
 
     Args:
-        config (GitHubConfig): the token and API base.
+        account (GitHubAccount): the token, API base and pool.
         owner (str): the repository's owner.
         repo (str): the repository.
         sha (str): the blob's sha.
-        session (SessionArg): pool or live session to ride.
     """
+    config = account.config
     return api_stream(
         github_url(blob_path(owner, repo, sha), config.base_url),
         error_of=status_error,
         headers={**github_headers(config.token), "Accept": RAW_MEDIA_TYPE},
-        session=session,
+        session=account.pool,
     )

@@ -179,10 +179,9 @@ async def fetch_path(
     """
     asked = accessor.repo_path(rel)
     rows = await hub_post(
-        accessor.token,
+        accessor.account,
         paths_info_url(accessor),
         {"paths": [asked], "expand": accessor.expand_commits is True},
-        session=accessor.pool,
     )
     if not isinstance(rows, list):
         # Only an empty list says the path is missing; an answer of any
@@ -280,9 +279,7 @@ async def walk_pages(
     """
     for _ in range(limit):
         try:
-            response = await hub_get_response(
-                accessor.token, url, params, session=accessor.pool
-            )
+            response = await hub_get_response(accessor.account, url, params)
         except HfHubError as exc:
             # Only a request carrying first-page params can learn that the
             # subtree is missing; a cursor page failing means the listing

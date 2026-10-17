@@ -111,7 +111,7 @@ async def expand_argv(
     registry: MountRegistry,
     namespace: Namespace | None = None,
     view: SessionView | None = None,
-    routing: RouteDecision[Runtime] | None = None,
+    routing: RouteDecision[Runtime[Any]] | None = None,
 ) -> Argv:
     """Expand, classify, and glob-resolve a command's word nodes.
 

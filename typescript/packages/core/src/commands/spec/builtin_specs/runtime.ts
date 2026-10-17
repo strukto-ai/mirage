@@ -24,9 +24,9 @@ import { REMAINDER_OPERAND, TEXTS_OPERAND, TEXT_OPERAND } from '../constants.ts'
 // The four groups differ in who answers them: -c/-m select the source
 // and end option parsing (their argument is a program, so trailing
 // words are that program's argv); -x also selects source, by dropping
-// the script file's first line, and is answered here rather than by a
-// runtime because every engine reads the same resolved text; the init
-// switches are handed to the runtime through RunArgs.flags and honored
+// the script file's first line, and is answered where the program is
+// resolved (resolveProgram) because every engine reads the same resolved
+// text; the init switches are handed to the runtime in its ctx.flags and honored
 // by whichever engine can; -u is a structural no-op, since mirage
 // buffers every stream and returns it whole. Pinned against CPython
 // 3.12.11.

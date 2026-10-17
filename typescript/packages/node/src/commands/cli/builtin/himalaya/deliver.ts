@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { EmailAccessor } from '../../../../accessor/email.ts'
+import type { EmailAccessor } from '../../../../accessor/email.ts'
 import { listFolderEntries } from '../../../../core/email/client.ts'
 import type { ParsedRfc822 } from '../../../../core/email/_parse.ts'
-import type { EmailConfig } from '../../../../core/email/config.ts'
 import { sendRaw } from './smtp.ts'
 
 const SENT_ATTRIBUTE = '\\sent'
@@ -51,27 +50,23 @@ export async function resolveSentFolder(
 /**
  * APPENDs a message to a mailbox, seen, and answers with the mailbox it
  * landed in. `named` is the mailbox --save gave; without one the
- * account's own sent mailbox is resolved.
+ * account's own sent mailbox is resolved. The APPEND rides the install's
+ * IMAP connection, which stays open after it.
  *
  * Unlike python's, this path quotes nothing: imapflow builds the
  * command from typed attributes, so a mailbox holding a space arrives
  * as one argument on its own.
  */
 export async function saveSentCopy(
-  config: EmailConfig,
+  accessor: EmailAccessor,
   raw: Uint8Array,
   named: string | null = null,
 ): Promise<string> {
-  const accessor = new EmailAccessor(config)
-  try {
-    const folder = named ?? (await resolveSentFolder(accessor, config.sentFolder))
-    const imap = await accessor.getImap()
-    const result = await imap.append(folder, Buffer.from(raw), [SEEN_FLAG])
-    if (result === false) throw new Error(`${folder}: the server refused the message`)
-    return folder
-  } finally {
-    await accessor.close()
-  }
+  const folder = named ?? (await resolveSentFolder(accessor, accessor.config.sentFolder))
+  const imap = await accessor.getImap()
+  const result = await imap.append(folder, Buffer.from(raw), [SEEN_FLAG])
+  if (result === false) throw new Error(`${folder}: the server refused the message`)
+  return folder
 }
 
 /**
@@ -93,14 +88,14 @@ export async function saveSentCopy(
  * at all, precisely because nothing happened yet and failing is safe.
  */
 export async function deliver(
-  config: EmailConfig,
+  accessor: EmailAccessor,
   raw: Uint8Array,
   save: string | null = null,
 ): Promise<Delivery> {
-  const parsed = await sendRaw(config, raw)
-  if (save === null && !config.saveCopy) return { parsed, warning: '' }
+  const parsed = await sendRaw(accessor.config, raw)
+  if (save === null && !accessor.config.saveCopy) return { parsed, warning: '' }
   try {
-    await saveSentCopy(config, raw, save)
+    await saveSentCopy(accessor, raw, save)
   } catch (error) {
     // Every failure mode is caught on purpose: the message is already
     // delivered by this point, so no fault of the copy may turn into a

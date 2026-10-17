@@ -65,12 +65,12 @@ export async function runLs(
 ): Promise<CrossResult> {
   const ctx: Context = {
     ...crossOpts(flagKwargs),
-    dispatch,
     ...(vfs !== undefined ? { vfs } : {}),
     ...(sessionView !== undefined ? { session: sessionView } : {}),
   }
   // The dispatcher's listing names the links among the entries. Mirrors
   // Python's relayed_readdir.
-  const result = await lsGeneric(flatten(scopes), ctx, readdirOp(dispatch), relayedStat(dispatch))
+  const stat = relayedStat(dispatch)
+  const result = await lsGeneric(flatten(scopes), ctx, readdirOp(dispatch), stat, null)
   return result ?? [null, new IOResult()]
 }

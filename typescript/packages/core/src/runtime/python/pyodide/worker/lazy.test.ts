@@ -21,12 +21,14 @@ import { describe, expect, it, vi } from 'vitest'
 import { PyodideRuntime } from '../runtime.ts'
 import { PrefixResolver } from '../../../resolver.ts'
 import { FileStat, FileType, Limit, MountMode } from '../../../../types.ts'
-import type { BridgeDispatchFn, RunArgs } from '../../../types.ts'
+import type { Context } from '../../../../commands/config.ts'
+import type { BridgeDispatchFn, RunResult } from '../../../types.ts'
 import { CommandTimeoutError } from '../../../../errors/types.ts'
 import { CLI } from '../../../../commands/cli/types.ts'
 import { ScriptSource } from '../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { getTestParser } from '../../../../workspace/fixtures/workspace_fixture.ts'
+import { context } from '../../../../workspace/fixtures/context.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 
 import { getCurrentSession, runWithSession } from '../../../../context/session_context.ts'
@@ -55,12 +57,13 @@ function gate(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve }
 }
 
-const runArgs = (code: string, args: string[] = []): RunArgs => ({
-  code,
-  args,
-  env: {},
-  stdin: null,
-})
+/** Run `code` at `/` with an empty env, queued at the call in the caller's session. */
+const interpret = (
+  rt: PyodideRuntime,
+  code: string,
+  args: string[] = [],
+  extra: Partial<Context> = {},
+): Promise<RunResult> => rt.interpret(undefined, { code, args, stdin: null }, context(extra))
 
 describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
   it.each(['first', 'bad', 'later'])(
@@ -92,12 +95,11 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
         throw new Error(`unexpected op: ${op}`)
       }
       const rt = new PyodideRuntime()
-      rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/data/'])))
+      rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
       try {
-        const result = await rt.run(
-          runArgs(
-            readFileSync(new URL('./fixtures/py/discarded_writes.py', import.meta.url), 'utf8'),
-          ),
+        const result = await interpret(
+          rt,
+          readFileSync(new URL('./fixtures/py/discarded_writes.py', import.meta.url), 'utf8'),
         )
         const failedAt = names.indexOf(rejected)
         // The refused truncate fails the open that asked for it, so the
@@ -112,7 +114,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
           expect(DEC.decode(files.get(`/data/${name}`))).toBe('new')
         for (const name of names.slice(failedAt))
           expect(DEC.decode(files.get(`/data/${name}`))).toBe('old')
-        const next = await rt.run(runArgs("with open('/data/last', 'w') as f: f.write('fresh')"))
+        const next = await interpret(rt, "with open('/data/last', 'w') as f: f.write('fresh')")
         expect(next.exitCode).toBe(0)
         expect(DEC.decode(next.stderr ?? new Uint8Array())).toBe('')
         expect(DEC.decode(files.get('/data/last'))).toBe('fresh')
@@ -142,24 +144,23 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       throw new Error(`unexpected op: ${op}`)
     }
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/data/'])))
+    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
     try {
-      const result = await rt.run(
-        runArgs(
-          [
-            'import os',
-            "bad = open('/data/bad', 'r+')",
-            "good = open('/data/good', 'r+')",
-            "bad.write('new'); bad.flush()",
-            "good.write('new'); good.close()",
-            'try:',
-            "    os.rename('/data/bad', '/data/moved')",
-            'except OSError as e:',
-            "    print('rename', e.errno)",
-            "print(os.path.exists('/data/bad'), os.path.exists('/data/moved'))",
-            'bad.close()',
-          ].join('\n'),
-        ),
+      const result = await interpret(
+        rt,
+        [
+          'import os',
+          "bad = open('/data/bad', 'r+')",
+          "good = open('/data/good', 'r+')",
+          "bad.write('new'); bad.flush()",
+          "good.write('new'); good.close()",
+          'try:',
+          "    os.rename('/data/bad', '/data/moved')",
+          'except OSError as e:',
+          "    print('rename', e.errno)",
+          "print(os.path.exists('/data/bad'), os.path.exists('/data/moved'))",
+          'bad.close()',
+        ].join('\n'),
       )
       expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('')
       expect(result.exitCode).toBe(0)
@@ -192,23 +193,22 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       throw new Error(`unexpected op: ${op}`)
     }
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/data/'])))
+    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
     try {
-      const result = await rt.run(
-        runArgs(
-          [
-            "bad = open('/data/bad', 'r+')",
-            "good = open('/data/good', 'r+')",
-            "bad.write('new'); bad.flush()",
-            "good.write('new'); good.flush()",
-            'good.close()',
-            'try:',
-            '    bad.close()',
-            'except OSError as e:',
-            "    print('bad', e.errno)",
-            "with open('/data/later', 'r+') as f: f.write('new')",
-          ].join('\n'),
-        ),
+      const result = await interpret(
+        rt,
+        [
+          "bad = open('/data/bad', 'r+')",
+          "good = open('/data/good', 'r+')",
+          "bad.write('new'); bad.flush()",
+          "good.write('new'); good.flush()",
+          'good.close()',
+          'try:',
+          '    bad.close()',
+          'except OSError as e:',
+          "    print('bad', e.errno)",
+          "with open('/data/later', 'r+') as f: f.write('new')",
+        ].join('\n'),
       )
       expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('')
       expect(result.exitCode).toBe(0)
@@ -265,13 +265,14 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       throw new Error(`unexpected op: ${op}`)
     }
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/data/', '/huge/'])))
+    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/', '/huge/'])))
     try {
-      expect((await rt.run(runArgs('print(1)'))).exitCode).toBe(0)
+      expect((await interpret(rt, 'print(1)')).exitCode).toBe(0)
       expect(calls).toEqual([])
       const first = await context.run('one', () =>
-        rt.run(
-          runArgs("data = open('/data/one.bin', 'rb').read(); print(len(data), data[0], data[-1])"),
+        interpret(
+          rt,
+          "data = open('/data/one.bin', 'rb').read(); print(len(data), data[0], data[-1])",
         ),
       )
       expect(DEC.decode(first.stderr ?? new Uint8Array())).toBe('')
@@ -281,7 +282,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       calls.length = 0
       bytes = ENC.encode('fresh')
       const second = await context.run('two', () =>
-        rt.run(runArgs("print(open('/data/one.bin').read())")),
+        interpret(rt, "print(open('/data/one.bin').read())"),
       )
       expect(DEC.decode(second.stdout)).toBe('fresh\n')
       expect(calls.every((c) => c.session === 'two')).toBe(true)
@@ -311,13 +312,12 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       throw Object.assign(new Error(path), { code: 'ENOENT' })
     }
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/data/'])))
+    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
     try {
-      const result = await rt.run(
-        runArgs(
-          "import os\nfirst = sorted(os.listdir('/data'))\nsecond = sorted(os.listdir('/data'))\n" +
-            "print(first, second, [e.is_dir() for e in os.scandir('/data') if e.name == 'late'])",
-        ),
+      const result = await interpret(
+        rt,
+        "import os\nfirst = sorted(os.listdir('/data'))\nsecond = sorted(os.listdir('/data'))\n" +
+          "print(first, second, [e.is_dir() for e in os.scandir('/data') if e.name == 'late'])",
       )
       expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('')
       expect(DEC.decode(result.stdout)).toBe(
@@ -339,9 +339,9 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       throw Object.assign(new Error(path), { code: 'ENOENT' })
     }
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/dev/'])))
+    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/dev/'])))
     try {
-      const result = await rt.run(runArgs("print(open('/dev/stdin').read())"))
+      const result = await interpret(rt, "print(open('/dev/stdin').read())")
       expect(result.exitCode).toBe(0)
       expect(DEC.decode(result.stdout)).toBe('real\n')
     } finally {
@@ -375,14 +375,17 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       throw Object.assign(new Error(path), { code: 'ENOENT' })
     }
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/notion/', '/wandb/'])))
+    rt.bind(
+      WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/notion/', '/wandb/'])),
+    )
     try {
       const counts: number[] = []
       for (const name of ['first', 'second', 'third']) {
         data = ENC.encode(JSON.stringify({ name }))
         calls.length = 0
-        const result = await rt.run(
-          runArgs(readFileSync(new URL('./fixtures/py/lazy_glob.py', import.meta.url), 'utf8')),
+        const result = await interpret(
+          rt,
+          readFileSync(new URL('./fixtures/py/lazy_glob.py', import.meta.url), 'utf8'),
         )
         expect(result.exitCode).toBe(0)
         expect(DEC.decode(result.stdout)).toBe(`${name}\n`)
@@ -403,7 +406,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       const observed: string[] = []
       const rt = new PyodideRuntime()
       rt.bind(
-        new WorkspaceBinding(
+        WorkspaceBinding.overBridge(
           async (op, path, bytes) => {
             await Promise.resolve()
             if (op === 'readdir' && path === '/other/') {
@@ -434,11 +437,10 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
         ),
       )
       try {
-        const result = await rt.run(
-          runArgs(
-            readFileSync(new URL('./fixtures/py/descriptor_writes.py', import.meta.url), 'utf8'),
-            [mode],
-          ),
+        const result = await interpret(
+          rt,
+          readFileSync(new URL('./fixtures/py/descriptor_writes.py', import.meta.url), 'utf8'),
+          [mode],
         )
         expect(result.exitCode).toBe(0)
         const start = mode === 'append' ? 'old' : ''
@@ -456,7 +458,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       const calls: string[] = []
       const rt = new PyodideRuntime({ config: { maxConcurrency } })
       rt.bind(
-        new WorkspaceBinding(
+        WorkspaceBinding.overBridge(
           async (op, path) => {
             await Promise.resolve()
             const session = getCurrentSession()?.sessionId ?? 'missing'
@@ -475,10 +477,10 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       const two = new SessionState({ sessionId: 'two' })
       try {
         const first = runWithSession(one, () =>
-          runWithRecording(() => rt.run(runArgs("print(open('/data/one').read())"))),
+          runWithRecording(() => interpret(rt, "print(open('/data/one').read())")),
         )
         const second = runWithSession(two, () =>
-          runWithRecording(() => rt.run(runArgs("print(open('/data/two').read())"))),
+          runWithRecording(() => interpret(rt, "print(open('/data/two').read())")),
         )
         const [[run, firstRecords], [other, secondRecords]] = await Promise.all([first, second])
         expect(DEC.decode(run.stdout)).toBe('one\n')
@@ -502,7 +504,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       const writes: string[] = []
       const rt = new PyodideRuntime()
       rt.bind(
-        new WorkspaceBinding(
+        WorkspaceBinding.overBridge(
           async (op, path, bytes) => {
             if (op === 'stat')
               return new FileStat({ name: path, type: FileType.FILE, size: contents.length })
@@ -527,14 +529,14 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
         ),
       )
       try {
-        await rt.run(runArgs('pass'))
+        await interpret(rt, 'pass')
         const controller = new AbortController()
-        const first = rt.run({
-          ...runArgs(
-            "import os\nwith open('/data/file', 'w') as f: f.write('first')\nos.stat('/data/flush')",
-          ),
-          ...(kind === 'abort' ? { signal: controller.signal } : { timeoutSeconds: 0.1 }),
-        })
+        const first = interpret(
+          rt,
+          "import os\nwith open('/data/file', 'w') as f: f.write('first')\nos.stat('/data/flush')",
+          [],
+          kind === 'abort' ? { signal: controller.signal } : { timeoutSeconds: 0.1 },
+        )
         const checked =
           kind === 'timeout'
             ? expect(first).rejects.toBeInstanceOf(CommandTimeoutError)
@@ -542,7 +544,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
                 expect(result.exitCode).toBe(1)
               })
         await entered.promise
-        const next = rt.run(runArgs("with open('/data/file', 'w') as f: f.write('second')"))
+        const next = interpret(rt, "with open('/data/file', 'w') as f: f.write('second')")
         controller.abort()
         await new Promise((resolve) => setTimeout(resolve, 300))
         expect(writes).toEqual([])
@@ -571,32 +573,32 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       throw new Error(`unexpected op: ${op}`)
     }
     const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/data/'])))
+    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
     try {
-      await rt.run(runArgs('pass'))
+      await interpret(rt, 'pass')
       await expect(
-        rt.run({ ...runArgs('while True: pass'), timeoutSeconds: 0.1 }),
+        interpret(rt, 'while True: pass', [], { timeoutSeconds: 0.1 }),
       ).rejects.toBeInstanceOf(CommandTimeoutError)
       const controller = new AbortController()
       const timer = setTimeout(() => {
         controller.abort()
       }, 100)
-      const aborted = await rt.run({
-        ...runArgs(
-          readFileSync(new URL('./fixtures/py/slow_traceback.py', import.meta.url), 'utf8'),
-        ),
-        signal: controller.signal,
-      })
+      const aborted = await interpret(
+        rt,
+        readFileSync(new URL('./fixtures/py/slow_traceback.py', import.meta.url), 'utf8'),
+        [],
+        { signal: controller.signal },
+      )
       clearTimeout(timer)
       expect(aborted.exitCode).toBe(1)
       const blocked = expect(
-        rt.run({ ...runArgs("open('/data/hang').read()"), timeoutSeconds: 0.1 }),
+        interpret(rt, "open('/data/hang').read()", [], { timeoutSeconds: 0.1 }),
       ).rejects.toBeInstanceOf(CommandTimeoutError)
       await entered.promise
       await new Promise((resolve) => setTimeout(resolve, 300))
       release.resolve()
       await blocked
-      const fresh = await rt.run(runArgs('print(42)'))
+      const fresh = await interpret(rt, 'print(42)')
       expect(fresh.exitCode).toBe(0)
       expect(DEC.decode(fresh.stdout)).toBe('42\n')
     } finally {

@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any, ClassVar
 
-from mirage.runtime.binding import RuntimeContext
+from mirage.commands.config import Context
 from mirage.runtime.config import RuntimeConfig, memory_limit
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.python.base import PythonRuntime
@@ -29,13 +29,13 @@ from mirage.runtime.python.monty.fs import MontyFs
 from mirage.runtime.python.monty.loader import pydantic_monty
 from mirage.runtime.types import (
     FilesystemOperation,
-    RunArgs,
+    Program,
     RunResult,
     RuntimeReach,
 )
 
 
-class MontyRuntime(PythonRuntime):
+class MontyRuntime(PythonRuntime[MontyExecution]):
     """Run Python code on the Monty sandboxed interpreter.
 
     Code executes in Monty's Rust interpreter, inside a pooled worker
@@ -83,10 +83,15 @@ class MontyRuntime(PythonRuntime):
             raise ImportError(MISSING_EXTRA_HINT)
         super().__init__(captures, config)
         self._max_memory = memory_limit(self.config.max_memory)
-        self._execution = MontyExecution(self._max_memory)
 
-    async def run(
-        self, args: RunArgs, context: RuntimeContext | None = None
+    async def open_engine(self) -> MontyExecution:
+        return MontyExecution(self._max_memory)
+
+    async def close_engine(self, engine: MontyExecution) -> None:
+        await engine.close()
+
+    async def interpret(
+        self, engine: MontyExecution, program: Program, ctx: Context
     ) -> RunResult:
         """Run one program, reporting any switch this engine cannot honor.
 
@@ -97,34 +102,23 @@ class MontyRuntime(PythonRuntime):
         the program's own exit code stands.
 
         Args:
-            args (RunArgs): the execution request.
+            engine (MontyExecution): the install's worker pool.
+            program (Program): the source and argv to run.
+            ctx (Context): the run's context.
         """
-        notice = unhonored_notice(args.flags, self.name)
-        context = context or self._capture_context()
-        if args.cwd is None and context is not None:
-            args = replace(args, cwd=context.ctx.cwd)
+        notice = unhonored_notice(ctx.flags, self.name)
         # A nested call must not queue behind a parent holding this pool.
-        nested = (
-            context is not None
-            and context.ctx.processes is not None
-            and context.ctx.processes.depth > 0
-        )
-        execution = (
-            MontyExecution(self._max_memory) if nested else self._execution
-        )
+        nested = ctx.processes is not None and ctx.processes.depth > 0
+        execution = MontyExecution(self._max_memory) if nested else engine
         try:
-            result = await execution.run(args, self._fs(args.env, context))
+            result = await execution.run(
+                program,
+                ctx.cwd,
+                MontyFs(RuntimeFiles.of(ctx, self._binding), ctx.env or {}),
+            )
         finally:
-            if execution is not self._execution:
+            if execution is not engine:
                 await execution.close()
         if not notice:
             return result
         return replace(result, stderr=notice + (result.stderr or b""))
-
-    async def close(self) -> None:
-        await self._execution.close()
-
-    def _fs(
-        self, env: dict[str, str], context: RuntimeContext | None
-    ) -> MontyFs:
-        return MontyFs(RuntimeFiles.of(context), env)

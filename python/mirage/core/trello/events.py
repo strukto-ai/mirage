@@ -125,9 +125,7 @@ class TrelloEventHook:
             workspace_id (str): The workspace's id.
         """
         if workspace_id not in self._workspaces:
-            for listed in await list_workspaces(
-                self._accessor.config, session=self._accessor.pool
-            ):
+            for listed in await list_workspaces(self._accessor):
                 self._workspaces[str(listed.get("id"))] = workspace_dirname(
                     listed
                 )
@@ -143,9 +141,7 @@ class TrelloEventHook:
         if text_field(model, "id") == board_id and isinstance(model, dict):
             self._orgs[board_id] = text_field(model, "idOrganization")
         if board_id not in self._orgs:
-            board = await get_board(
-                self._accessor.config, board_id, session=self._accessor.pool
-            )
+            board = await get_board(self._accessor, board_id)
             self._orgs[board_id] = text_field(board, "idOrganization")
         return self._orgs[board_id]
 
@@ -219,15 +215,12 @@ class TrelloEventHook:
             board_dir (str): The card's board directory.
             card_id (str): The card's id.
         """
-        config = self._accessor.config
         try:
-            found = await get_card(
-                config, card_id, session=self._accessor.pool
-            )
+            found = await get_card(self._accessor, card_id)
             list_id = text_field(found, "idList")
             if list_id is None:
                 return None
-            lst = await get_list(config, list_id, session=self._accessor.pool)
+            lst = await get_list(self._accessor, list_id)
         except TrelloAPIError as exc:
             if exc.status != 404:
                 raise

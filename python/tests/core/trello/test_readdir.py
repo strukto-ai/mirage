@@ -255,7 +255,7 @@ async def test_board_in_scope_holds_an_id_to_workspace_id():
         "b_out": {"id": "b_out", "idOrganization": "ws2"},
     }
 
-    async def fake_board(config, board_id, session=None):
+    async def fake_board(accessor, board_id):
         return boards[board_id]
 
     with patch("mirage.core.trello.readdir.get_board", new=fake_board):

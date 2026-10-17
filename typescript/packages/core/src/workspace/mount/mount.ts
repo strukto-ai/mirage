@@ -69,7 +69,7 @@ import { readFailExitCode } from '../../commands/spec/usage.ts'
 import { materialize, type ByteSource, IOResult } from '../../io/types.ts'
 import { OutputStream, closeQuietly } from '../../io/stream.ts'
 import { flagOccurrences } from '../../commands/spec/flag_view.ts'
-import type { CommandSpec, FlagValue } from '../../commands/spec/types.ts'
+import { CommandSpec, type CommandSpecInit, type FlagValue } from '../../commands/spec/types.ts'
 import { runWithWriteContext } from '../../cache/context.ts'
 import { type WriteContext } from '../../cache/types.ts'
 import type { CacheManager } from '../../cache/manager.ts'
@@ -111,7 +111,7 @@ import {
 import { formatFsError } from '../../errors/render.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { dispatchStat, linkFollow } from '../../commands/builtin/utils/paths.ts'
+import { dispatchStat, linkFollow, vfsStatPath } from '../../commands/builtin/utils/paths.ts'
 import { linkView } from '../../commands/builtin/utils/links.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -269,9 +269,16 @@ export interface MountInit {
 // dispatcher (a mount driven directly) binds nothing. Mirrors the Python
 // set_walk_probe binding in Mount.run_command.
 function walkProbeOf(ctx: Partial<Context>): WalkProbe | null {
-  const dispatch = ctx.dispatch
-  if (dispatch === undefined) return null
-  return { stat: dispatchStat(dispatch), follow: linkFollow(linkView(ctx.vfs)) }
+  if (ctx.vfs === undefined) return null
+  return { stat: dispatchStat(ctx.vfs.dispatch), follow: linkFollow(linkView(ctx.vfs)) }
+}
+
+// The grammar a handler sees at `ctx.spec`, named for the command it runs as
+// (python3 or python, js or node). Mirrors Python's _named_spec.
+function namedSpec(cmd: Command, cmdName: string): CommandSpec {
+  if (cmd.spec.name === cmdName) return cmd.spec
+  const spec: CommandSpecInit = cmd.spec
+  return new CommandSpec({ ...spec, name: cmdName })
 }
 
 export class MountEntry {
@@ -1486,11 +1493,12 @@ export class MountEntry {
       }
       const keyedPaths = this.keyedPaths(cmdName, paths)
       const probe = walkProbeOf(ctx)
-      const runCtx = this.commandCtx(cmdName, this.keyedFlags(flags), ctx, probe, keyedPaths)
+      const access = ctx.session?.access()
+      const runCtx = this.commandCtx(this.keyedFlags(flags), ctx, access, probe, keyedPaths)
       return this.inCommandScope(probe, async (): Promise<[ByteSource | null, IOResult]> => {
         for (const cmd of handlers) {
           const refusal =
-            this.readOnlyRefusal(cmdName, cmd, flags, ctx.access) ??
+            this.readOnlyRefusal(cmdName, cmd, flags, access) ??
             this.unenforcedRefusal(cmdName, cmd)
           if (refusal !== null) return [null, refusal]
           const result = await this.runHandler(
@@ -1498,8 +1506,9 @@ export class MountEntry {
             cmd,
             keyedPaths,
             texts,
-            runCtx,
+            { ...runCtx, spec: namedSpec(cmd, cmdName) },
             limitOverride,
+            access,
           )
           if (result !== null) return this.wrapOutput(cmdName, cmd, keyedPaths, result)
         }
@@ -1530,14 +1539,15 @@ export class MountEntry {
     let extension =
       paths.length > 0 && paths[0] !== undefined ? getExtension(paths[0].virtual) : null
     const first = paths[0]
+    const statPath = vfsStatPath(ctx.vfs)
     if (
       extension !== null &&
       extension !== '' &&
       first !== undefined &&
-      ctx.statPath !== undefined &&
+      statPath !== undefined &&
       this.cmds.has(cmdKey(cmdName, extension))
     ) {
-      const entry = await ctx.statPath(first)
+      const entry = await statPath(first)
       if (entry !== null && entry.type === FileType.DIRECTORY) extension = null
     }
     return this.resolveCascade(cmdName, extension, this.cmds, this.generalCmds)
@@ -1612,13 +1622,13 @@ export class MountEntry {
    * either. Mirrors Python's MountEntry._command_ctx.
    */
   private commandCtx(
-    cmdName: string,
     flags: Record<string, FlagValue>,
     ctx: Partial<Context>,
+    access: SessionAccess | undefined,
     probe: WalkProbe | null,
     paths: readonly PathSpec[],
   ): Context {
-    const io = this.ioFor(ctx.access)
+    const io = this.ioFor(access)
     const prefix = rstripSlash(this.prefix)
     const cwd = (ctx.cwd ?? ROOT_CWD).virtual
     return {
@@ -1626,7 +1636,6 @@ export class MountEntry {
       stdin: ctx.stdin ?? null,
       flags,
       mountPrefix: prefix,
-      command: cmdName,
       cwd: new PathSpec({
         virtual: cwd,
         directory: cwd,
@@ -1635,9 +1644,9 @@ export class MountEntry {
       }),
       index: this.index,
       io: {
-        ...dispatchedIo(io, ctx.dispatch, paths),
+        ...dispatchedIo(io, ctx.vfs?.dispatch, paths),
         ...(ctx.admission === undefined ? {} : { admission: ctx.admission }),
-        ...(ctx.access === undefined ? {} : { access: ctx.access }),
+        ...(access === undefined ? {} : { access }),
         ...(probe === null ? {} : { walkProbe: probe }),
       },
     }
@@ -1760,6 +1769,7 @@ export class MountEntry {
     texts: string[],
     ctx: Context,
     limitOverride: Limit | null,
+    access: SessionAccess | undefined,
   ): Promise<CommandFnResult> {
     const resolvedLimit = resolveLimit(
       cmdName,
@@ -1778,7 +1788,7 @@ export class MountEntry {
             ...(cmdTimeout !== null && cmdTimeout > 0 ? { timeoutSeconds: cmdTimeout } : {}),
           }
         : ctx
-    const running = Promise.resolve(cmd.fn(this.viewFor(ctx.access).accessor, paths, texts, runCtx))
+    const running = Promise.resolve(cmd.fn(this.viewFor(access).accessor, paths, texts, runCtx))
     try {
       return await runWithTimeout(joinOrAbort(running, runSignal), cmdTimeout, cmdName)
     } catch (err) {

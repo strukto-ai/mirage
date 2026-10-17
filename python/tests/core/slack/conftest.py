@@ -114,7 +114,7 @@ class FakeSlack:
         self.user_lists = 0
         self.searcher_lists = 0
 
-    async def get(self, config, method, params=None, session=None):
+    async def get(self, accessor, method, params=None):
         await asyncio.sleep(0)
         params = params or {}
         if method == "conversations.list":
@@ -123,7 +123,7 @@ class FakeSlack:
                 *(CHANNELS if "public_channel" in types else []),
                 *(DMS if "im" in types else []),
             ]
-            if config.token.get_secret_value() == SEARCHER:
+            if accessor.config.token.get_secret_value() == SEARCHER:
                 self.searcher_lists += 1
                 channels = [c for c in channels if c["id"] not in self.hidden]
             return {"ok": True, "channels": channels}
@@ -202,10 +202,10 @@ class FakeSlack:
                     rows.append({"ts": m["ts"]})
         return found | {"shares": shares}
 
-    async def download(self, config, url, offset=0, size=None, session=None):
+    async def download(self, accessor, url, offset=0, size=None):
         return b"plan\n"
 
-    async def download_stream(self, config, url, session=None):
+    async def download_stream(self, accessor, url):
         yield b"plan\n"
 
 
@@ -231,9 +231,9 @@ def slack(monkeypatch):
         reads: list[str] = []
         history = read_mod.get_history_jsonl
 
-        async def counted(config, channel_id, day, *args, **kwargs):
+        async def counted(accessor, channel_id, day, *args, **kwargs):
             reads.append(f"{channel_id}/{day}")
-            return await history(config, channel_id, day, *args, **kwargs)
+            return await history(accessor, channel_id, day, *args, **kwargs)
 
         monkeypatch.setattr(read_mod, "get_history_jsonl", counted)
         settings = {"token": "xoxp-test", "content_search": True} | config

@@ -16,17 +16,18 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.members import list_members, search_members
 
 
 @pytest.fixture
-def config():
-    return DiscordConfig(token="test-bot-token")
+def accessor():
+    return DiscordAccessor(DiscordConfig(token="test-bot-token"))
 
 
 @pytest.mark.asyncio
-async def test_list_members(config):
+async def test_list_members(accessor):
     mock_data = [
         {"user": {"id": "U001", "username": "alice"}},
         {"user": {"id": "U002", "username": "bob"}},
@@ -36,7 +37,7 @@ async def test_list_members(config):
         new_callable=AsyncMock,
         return_value=mock_data,
     ) as mock_get:
-        result = await list_members(config, "G001")
+        result = await list_members(accessor, "G001")
 
     assert len(result) == 2
     assert result[0]["user"]["username"] == "alice"
@@ -48,7 +49,7 @@ async def test_list_members(config):
 
 
 @pytest.mark.asyncio
-async def test_search_members(config):
+async def test_search_members(accessor):
     mock_data = [
         {"user": {"id": "U001", "username": "alice"}},
     ]
@@ -57,13 +58,12 @@ async def test_search_members(config):
         new_callable=AsyncMock,
         return_value=mock_data,
     ) as mock_get:
-        result = await search_members(config, "G001", "ali")
+        result = await search_members(accessor, "G001", "ali")
 
     assert len(result) == 1
     assert result[0]["user"]["username"] == "alice"
     mock_get.assert_called_once_with(
-        config,
+        accessor,
         "/guilds/G001/members/search",
         params={"query": "ali", "limit": 100},
-        session=None,
     )

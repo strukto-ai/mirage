@@ -17,11 +17,14 @@ import asyncio
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.commands.config import Context
 from mirage.io.types import materialize
+from mirage.runtime.errors import UnsupportedExecutionError
+from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
 from mirage.runtime.types import RunResult
-from mirage.types import FileStat, FileType, Limit
+from mirage.types import FileStat, FileType, Limit, PathSpec
 
 
 class RecordingSandbox(RemoteSandbox):
@@ -114,9 +117,9 @@ async def test_failed_connect_retries_on_the_next_line():
 @pytest.mark.asyncio
 async def test_cwd_passes_through_verbatim_and_env_merges():
     box = RecordingSandbox(captures=("*",), config={"env": {"BASE": "1"}})
-    result = await box.run_line(
-        "nvidia-smi", None, {"LINE": "2"}, "/data/deep"
-    )
+    cwd = PathSpec.from_str_path("/data/deep")
+    ctx = Context(flags={"c": "nvidia-smi"}, env={"LINE": "2"}, cwd=cwd)
+    result = await box.run_line(None, [], [], ctx)
     assert result.exit_code == 0
     # The sandbox serves the workspace at the same prefixes as the
     # host, so nothing is rewritten.
@@ -138,12 +141,15 @@ async def test_stdin_bytes_reach_exec_line():
         await ws.close()
 
 
-def test_sandboxes_take_lines_not_stages():
+@pytest.mark.asyncio
+async def test_sandboxes_take_lines_not_stages():
     # A sandbox is a line executor, never the engine inside one
     # command: it carries the line entry point and no interpreter entry point.
     box = RecordingSandbox()
     assert isinstance(box, LineExecutorMixin)
-    assert not hasattr(box, "run")
+    assert not isinstance(box, LanguageRuntime)
+    with pytest.raises(UnsupportedExecutionError, match="code execution"):
+        await box.execute([], [], Context(flags={"c": "print(1)"}))
 
 
 def test_config_dict_form_coerces():

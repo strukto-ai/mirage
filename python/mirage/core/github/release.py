@@ -15,8 +15,8 @@
 from typing import Any
 from urllib.parse import quote
 
+from mirage.accessor.github import GitHubAccount
 from mirage.core.github.client import GitHubApiError, github_request
-from mirage.core.github.config import GhConfig
 from mirage.core.github.paginate import github_pages
 from mirage.core.github.repo import RepoRef
 from mirage.types import JsonValue
@@ -27,30 +27,24 @@ def _path(ref: RepoRef, tail: str = "") -> str:
 
 
 async def list_releases(
-    config: GhConfig, ref: RepoRef, limit: int
+    account: GitHubAccount, ref: RepoRef, limit: int
 ) -> list[dict[str, Any]]:
-    return await github_pages(config, _path(ref), limit=limit)
+    return await github_pages(account, _path(ref), limit=limit)
 
 
-async def get_release(config: GhConfig, ref: RepoRef, tag: str) -> JsonValue:
+async def get_release(
+    account: GitHubAccount, ref: RepoRef, tag: str
+) -> JsonValue:
     return await github_request(
-        config.token,
-        "GET",
-        _path(ref, f"/tags/{quote(tag, safe='')}"),
-        base_url=config.base_url,
+        account, "GET", _path(ref, f"/tags/{quote(tag, safe='')}")
     )
 
 
 async def get_latest_release(
-    config: GhConfig, ref: RepoRef
+    account: GitHubAccount, ref: RepoRef
 ) -> "JsonValue | None":
     try:
-        return await github_request(
-            config.token,
-            "GET",
-            _path(ref, "/latest"),
-            base_url=config.base_url,
-        )
+        return await github_request(account, "GET", _path(ref, "/latest"))
     except GitHubApiError as exc:
         if exc.status == 404:
             return None
@@ -58,8 +52,6 @@ async def get_latest_release(
 
 
 async def create_release(
-    config: GhConfig, ref: RepoRef, body: dict[str, JsonValue]
+    account: GitHubAccount, ref: RepoRef, body: dict[str, JsonValue]
 ) -> JsonValue:
-    return await github_request(
-        config.token, "POST", _path(ref), body, base_url=config.base_url
-    )
+    return await github_request(account, "POST", _path(ref), body)

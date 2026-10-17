@@ -12,12 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.types import RunArgs
+from mirage.runtime.types import Program
 
 
-def test_run_args_defaults():
-    args = RunArgs(code="x")
-    assert args.args == []
-    assert args.env == {}
-    assert args.stdin is None
-    assert args.flags == {}
+def test_program_defaults():
+    program = Program(code="x")
+    assert program.args == []
+    assert program.prog is None
+    assert program.stdin is None

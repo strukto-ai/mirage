@@ -17,22 +17,21 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import { materialize } from '@struktoai/mirage-core/io/types'
+import type { HfAccountAccessor } from '../../../../accessor/hf_hub.ts'
 import { createRepo, createTag, deleteTag, listTags } from '../../../../core/hf_hub/admin.ts'
 import { repoUrl } from '../../../../core/hf_hub/client.ts'
-import { hfEndpoint, type HfConfig } from '../../../../core/hf_hub/config.ts'
 import { DEFAULT_REVISION } from '../../../../core/hf_hub/constants.ts'
 import { repoTypeOf, requireOperands, requireToken, textOut } from './accessor.ts'
 
 /** Create a repository on the Hub. */
 export async function createCmd(
-  config: unknown,
+  accessor: HfAccountAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const cfg = config as HfConfig
   requireOperands(texts, ['repo_id'])
-  requireToken(cfg, 'repo create')
+  requireToken(accessor, 'repo create')
   const fl = new FlagView(ctx.flags)
   const repoId = texts[0] ?? ''
   const repoType = repoTypeOf(fl)
@@ -42,7 +41,7 @@ export async function createCmd(
       'creating a space requires --space_sdk (gradio, streamlit, docker or static)',
     )
   }
-  const result = await createRepo(cfg, repoId, {
+  const result = await createRepo(accessor, repoId, {
     repoType,
     private: fl.asBool('private'),
     spaceSdk: sdk,
@@ -51,25 +50,24 @@ export async function createCmd(
   })
   const url = result.url
   return textOut(
-    typeof url === 'string' ? `${url}\n` : `${repoUrl(hfEndpoint(cfg), repoType, repoId)}\n`,
+    typeof url === 'string' ? `${url}\n` : `${repoUrl(accessor.endpoint, repoType, repoId)}\n`,
   )
 }
 
 /** Tag a revision of a repository. */
 export async function tagCreateCmd(
-  config: unknown,
+  accessor: HfAccountAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const cfg = config as HfConfig
   requireOperands(texts, ['repo_id', 'tag'])
-  requireToken(cfg, 'repo tag create')
+  requireToken(accessor, 'repo tag create')
   const fl = new FlagView(ctx.flags)
   const repoId = texts[0] ?? ''
   const tag = texts[1] ?? ''
   await createTag(
-    cfg,
+    accessor,
     repoId,
     tag,
     repoTypeOf(fl),
@@ -81,14 +79,14 @@ export async function tagCreateCmd(
 
 /** List a repository's tags. */
 export async function tagListCmd(
-  config: unknown,
+  accessor: HfAccountAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   requireOperands(texts, ['repo_id'])
   const fl = new FlagView(ctx.flags)
-  const tags = await listTags(config as HfConfig, texts[0] ?? '', repoTypeOf(fl))
+  const tags = await listTags(accessor, texts[0] ?? '', repoTypeOf(fl))
   return textOut(tags.map((name) => `${name}\n`).join(''))
 }
 
@@ -116,14 +114,13 @@ async function confirmed(ctx: Context): Promise<boolean> {
  * so the answer arrives either as `-y` or on stdin.
  */
 export async function tagDeleteCmd(
-  config: unknown,
+  accessor: HfAccountAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const cfg = config as HfConfig
   requireOperands(texts, ['repo_id', 'tag'])
-  requireToken(cfg, 'repo tag delete')
+  requireToken(accessor, 'repo tag delete')
   const fl = new FlagView(ctx.flags)
   const repoId = texts[0] ?? ''
   const tag = texts[1] ?? ''
@@ -132,6 +129,6 @@ export async function tagDeleteCmd(
       `deleting tag ${tag} needs -y, or y on stdin: there is no terminal to confirm on`,
     )
   }
-  await deleteTag(cfg, repoId, tag, repoTypeOf(fl))
+  await deleteTag(accessor, repoId, tag, repoTypeOf(fl))
   return textOut(`Tag ${tag} deleted on ${repoId}\n`)
 }

@@ -5,8 +5,10 @@ from typing import Any
 
 import pytest
 
+from mirage.commands.config import Context
 from mirage.commands.spec.types import WordKind
 from mirage.context import bind_caller, current_caller, reset_caller
+from mirage.context.session_context import session_access
 from mirage.policy.constants import (
     CTX_ENV,
     DEFAULT_ASK_REASON,
@@ -33,14 +35,12 @@ from mirage.policy.types import (
     VfsContext,
     VfsResultContext,
 )
-from mirage.runtime.binding import RuntimeContext, WorkspaceBinding
+from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.resolver import MountResolver, PrefixResolver
 from mirage.runtime.types import (
-    CodeExecution,
     DispatchFn,
-    ExecutionRequest,
-    RunArgs,
+    Program,
     RunResult,
     ScriptSource,
 )
@@ -80,7 +80,7 @@ class FakeProgram(LanguageRuntime):
         self.exit_code = exit_code
         self.stderr = stderr
         self.delay = delay
-        self.requests: list[CodeExecution] = []
+        self.requests: list[Context] = []
         self.attached: tuple[DispatchFn, MountResolver] | None = None
         self.closed = False
         FakeProgram.built.append(self)
@@ -90,17 +90,17 @@ class FakeProgram(LanguageRuntime):
         self.attached = (binding.dispatch, binding.resolver)
 
     async def execute(
-        self, request: ExecutionRequest, context: RuntimeContext | None = None
+        self, paths, texts, ctx, *, kind="code", output=None
     ) -> RunResult:
-        assert isinstance(request, CodeExecution)
-        self.requests.append(request)
+        assert kind == "code" and not paths and not texts
+        self.requests.append(ctx)
         if self.delay:
             await asyncio.sleep(self.delay)
         return RunResult(
             stdout=self.stdout, stderr=self.stderr, exit_code=self.exit_code
         )
 
-    async def run(self, args: RunArgs, context=None) -> RunResult:
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
         raise NotImplementedError
 
     async def close(self) -> None:
@@ -176,6 +176,8 @@ def _session(cwd: str = "/data") -> SessionView:
         is_readonly=lambda name, follow_ref=True: name == "HOME",
         profile=lambda: "reviewer",
         cwd=lambda: cwd,
+        session_id="reviewer",
+        access=lambda: session_access(None),
     )
 
 
@@ -404,15 +406,14 @@ async def test_a_program_runs_unedited_with_its_context_in_the_env_and_stdin():
     ctx = _ctx(session=_session(cwd="/"), vfs=_vfs())
     assert await policy.pre_command(ctx) == (Deny("sealed"),)
     [request] = engine.requests
-    assert request.code == "SOURCE"
-    assert request.language == "python"
+    assert request.flags["c"] == "SOURCE"
     assert request.cwd.virtual == "/"
     payload = request.env[CTX_ENV]
     assert json.loads(payload) == script_context(ctx)
     assert request.stdin == payload.encode()
     assert request.env == {CTX_ENV: payload}
     assert json.loads(payload)["env"]["TEAM"] == "core"
-    assert request.flags == {}
+    assert request.flags == {"c": "SOURCE"}
 
 
 @pytest.mark.asyncio
@@ -420,7 +421,7 @@ async def test_a_program_on_wasi_keeps_the_sessions_directory_off_its_path():
     engine = FakeProgram()
     policy = _policy("pre_command", engine, entries=(_entry("wasi"),))
     await policy.pre_command(_ctx(session=_session(cwd="/data")))
-    assert engine.requests[0].flags == {"P": True}
+    assert engine.requests[0].flags == {"c": "SOURCE", "P": True}
 
 
 def _programs(method: str, *printed: bytes) -> ScriptPolicy:
@@ -674,9 +675,9 @@ class Waiting(FakeProgram):
         self.started = started
 
     async def execute(
-        self, request: ExecutionRequest, context: RuntimeContext | None = None
+        self, paths, texts, ctx, *, kind="code", output=None
     ) -> RunResult:
-        self.requests.append(request)
+        self.requests.append(ctx)
         await asyncio.wait_for(self.started.wait(), 5)
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
@@ -689,9 +690,9 @@ class Starting(FakeProgram):
         self.started = started
 
     async def execute(
-        self, request: ExecutionRequest, context: RuntimeContext | None = None
+        self, paths, texts, ctx, *, kind="code", output=None
     ) -> RunResult:
-        self.requests.append(request)
+        self.requests.append(ctx)
         self.started.set()
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
@@ -705,9 +706,9 @@ class Overlapping(FakeProgram):
         self.most = 0
 
     async def execute(
-        self, request: ExecutionRequest, context: RuntimeContext | None = None
+        self, paths, texts, ctx, *, kind="code", output=None
     ) -> RunResult:
-        self.requests.append(request)
+        self.requests.append(ctx)
         self.running += 1
         self.most = max(self.most, self.running)
         await asyncio.sleep(0.01)

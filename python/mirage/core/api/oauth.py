@@ -41,10 +41,10 @@ class TokenManager:
     ambiently), which is why it only ever surfaced as a flaky macOS
     battery.
 
-    A VFS-owned manager is drained by the VFS's ``close``. A
-    one-shot manager, which is what a CLI verb builds per invocation,
-    is used as an async context manager so the pool it opened dies with
-    the line that opened it.
+    A VFS-owned manager is drained by the VFS's ``close``, and a CLI
+    install's by its accessor's. A one-shot manager is used as an async
+    context manager so the pool it opened dies with the line that
+    opened it.
     """
 
     def __init__(self, buffer_seconds: float = 300.0) -> None:

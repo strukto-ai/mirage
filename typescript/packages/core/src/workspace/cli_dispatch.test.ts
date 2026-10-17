@@ -32,6 +32,7 @@ import { MountMode, PathSpec } from '../types.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import type { RuntimeLanguage } from '../runtime/types.ts'
 import { Workspace } from './workspace/workspace.ts'
+import type { NOOPAccessor } from '../accessor/base.ts'
 
 // Mirrors python/tests/e2e/test_cli_dispatch.py.
 
@@ -53,12 +54,12 @@ function tokenConfig(input: Record<string, unknown>): { token: string } {
 }
 
 function send(
-  config: unknown,
+  accessor: NOOPAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): [Uint8Array, IOResult] {
-  const token = (config as { token: string }).token
+  const token = (accessor.config as { token: string }).token
   const to = ctx.flags.to as string | undefined
   const body = texts.join(' ')
   return [new TextEncoder().encode(`sent[${token}] to=${String(to)}: ${body}\n`), new IOResult()]
@@ -178,7 +179,7 @@ describe('CLI dispatch e2e', () => {
   it('unregister returns the name to 127', async () => {
     const ws = buildWorkspace()
     ws.registerCli('sl', makeTree(), { token: 't' })
-    ws.unregisterCli('sl')
+    await ws.unregisterCli('sl')
     const res = await ws.shell('sl message send -t x hi')
     expect(res.exitCode).toBe(127)
     expect(dec.decode(res.stderr)).toContain('sl: command not found')

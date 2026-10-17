@@ -34,12 +34,13 @@ class RuntimeContext:
     The scoped entry points retain session, policy, and observation context
     even when called later from a worker callback. No workspace stores are
     exposed. ``ctx`` is the same ``Context`` a command or CLI gets: its
-    ``vfs`` is the session's files, whose links a guest's path resolves
-    through, None outside a workspace.
+    ``vfs`` is the session's files over the binding's dispatch, so a
+    guest's calls are the program's own, and its links are the ones a
+    guest's path resolves through. ``Runtime.execute`` runs under it and
+    hands the run this ``vfs`` and ``session``.
     """
 
     binding: WorkspaceBinding
-    dispatch: DispatchFn
     resolver: MountResolver
     scope: ContextScope
     ctx: Context
@@ -140,11 +141,21 @@ def capture_binding(
         binding (WorkspaceBinding): the workspace connection.
         ctx (Context | None): the session's files, session, processes,
             cwd and env, as a command gets them; None outside a session.
+            The files are rebuilt over the binding's dispatch.
         restricted_mounts (tuple[str, ...] | None): the mounts the
             session restricts.
     """
     scope = ContextScope()
     ctx = ctx if ctx is not None else Context()
+    dispatch = scope.wrap_async(binding.dispatch)
+    ctx = replace(
+        ctx,
+        vfs=(
+            ctx.vfs._over(dispatch)
+            if ctx.vfs is not None
+            else Files([], dispatch, ledger=False)
+        ),
+    )
     session = ctx.session
     if session is not None:
         ctx = replace(
@@ -164,7 +175,6 @@ def capture_binding(
     resolver = ScopedResolver(binding.resolver, scope)
     return RuntimeContext(
         binding=binding,
-        dispatch=scope.wrap_async(binding.dispatch),
         resolver=resolver,
         scope=scope,
         ctx=ctx,

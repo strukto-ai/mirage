@@ -14,9 +14,9 @@
 
 import json
 
+from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.members import list_members, search_members
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -24,7 +24,7 @@ from mirage.types import PathSpec
 
 
 async def members(
-    config: DiscordConfig,
+    accessor: DiscordAccessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
@@ -33,9 +33,9 @@ async def members(
     guild = fl.as_str("guild") or ""
     query = fl.as_str("query")
     if query:
-        result = await search_members(config, guild, query)
+        result = await search_members(accessor, guild, query)
     else:
-        result = await list_members(config, guild)
+        result = await list_members(accessor, guild)
     out = json.dumps(
         result, ensure_ascii=False, separators=(",", ":")
     ).encode()

@@ -105,7 +105,7 @@ export async function preupload(
         size: add.data.length,
       })),
     }
-    const data = await hubPost(accessor.token, url, body, undefined, accessor.timeoutMs)
+    const data = await hubPost(accessor.account, url, body)
     const rows = (data as { files?: unknown }).files
     for (const row of Array.isArray(rows) ? rows : []) {
       if (typeof row !== 'object' || row === null) continue
@@ -197,11 +197,10 @@ export async function commit(
   )
   const params = options.createPr === true ? { create_pr: '1' } : undefined
   const data = await hubPostNdjson(
-    accessor.token,
+    accessor.account,
     commitUrl(accessor, options.revision),
     body,
     params,
-    accessor.timeoutMs,
   )
   return typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : {}
 }

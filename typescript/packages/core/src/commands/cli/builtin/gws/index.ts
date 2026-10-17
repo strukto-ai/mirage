@@ -15,7 +15,9 @@ import { CommandSpec } from '../../../spec/types.ts'
 import { CLI } from '../../types.ts'
 import { CLIHandler } from '../../types.ts'
 
-import { GoogleConfigSchema } from '../../../../core/google/config.ts'
+import { GoogleApiAccessor } from '../../../../accessor/google_api.ts'
+import { TokenManager } from '../../../../core/google/client.ts'
+import { type GoogleConfig, GoogleConfigSchema } from '../../../../core/google/config.ts'
 
 import { Argument } from '../../../spec/types.ts'
 import { apiGroups, apiHandlers } from './api.ts'
@@ -29,6 +31,11 @@ import { triage } from './gmail/triage.ts'
 import { append as sheetsAppend } from './sheets/append.ts'
 import { read as sheetsRead } from './sheets/read.ts'
 import { write as sheetsWrite } from './sheets/write.ts'
+
+/** The install's accessor: one token manager per install, not a grant per line. */
+export function googleApiAccessor(config: unknown): GoogleApiAccessor {
+  return new GoogleApiAccessor({ tokenManager: new TokenManager(config as GoogleConfig) })
+}
 
 // The gws program tree, mirroring the official Google Workspace CLI:
 // one passthrough leaf per Discovery method (`gws drive files list`,
@@ -185,4 +192,5 @@ export const GWS = new CLI({
     'gmail triage': new CLIHandler({ fn: triage }),
   },
   configModel: GoogleConfigSchema,
+  accessor: googleApiAccessor,
 })

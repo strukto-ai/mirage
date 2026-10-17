@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.accessor.github import GitHubAccount
 from mirage.core.github.actions import (
     dispatch_workflow,
     get_workflow,
@@ -24,6 +25,8 @@ from mirage.core.github.actions import (
 )
 from mirage.core.github.config import GhConfig
 from mirage.core.github.repo import RepoRef
+
+ACCOUNT = GitHubAccount(GhConfig(token="t"))
 
 
 @pytest.mark.asyncio
@@ -37,7 +40,7 @@ async def test_list_runs_can_scope_to_a_workflow(monkeypatch):
     monkeypatch.setitem(list_runs.__globals__, "github_pages", pages)
 
     assert await list_runs(
-        GhConfig(token="t"),
+        ACCOUNT,
         RepoRef("o", "r"),
         {"status": "success"},
         5,
@@ -66,9 +69,7 @@ async def test_resolve_workflow_passes_ids_and_filenames_through(
     )
 
     assert (
-        await resolve_workflow(
-            GhConfig(token="t"), RepoRef("o", "r"), selector
-        )
+        await resolve_workflow(ACCOUNT, RepoRef("o", "r"), selector)
         == selector
     )
 
@@ -87,10 +88,7 @@ async def test_resolve_workflow_matches_a_display_name_case_insensitively(
         resolve_workflow.__globals__, "list_workflows", workflows
     )
 
-    assert (
-        await resolve_workflow(GhConfig(token="t"), RepoRef("o", "r"), "ci")
-        == "101"
-    )
+    assert await resolve_workflow(ACCOUNT, RepoRef("o", "r"), "ci") == "101"
     assert calls == [100]
 
 
@@ -106,9 +104,7 @@ async def test_resolve_workflow_rejects_an_unknown_display_name(monkeypatch):
     with pytest.raises(
         ValueError, match="could not find any workflows named Nightly"
     ):
-        await resolve_workflow(
-            GhConfig(token="t"), RepoRef("o", "r"), "Nightly"
-        )
+        await resolve_workflow(ACCOUNT, RepoRef("o", "r"), "Nightly")
 
 
 @pytest.mark.asyncio
@@ -118,7 +114,7 @@ async def test_workflow_verbs_resolve_a_display_name_once(monkeypatch):
     async def workflows(config, ref, limit):
         return [{"id": 101, "name": "CI"}]
 
-    async def request(token, method, path, body=None, *, base_url=None):
+    async def request(account, method, path, body=None):
         calls.append((method, path))
         return {}
 
@@ -131,7 +127,7 @@ async def test_workflow_verbs_resolve_a_display_name_once(monkeypatch):
     )
     monkeypatch.setitem(get_workflow.__globals__, "github_request", request)
     monkeypatch.setitem(list_runs.__globals__, "github_pages", pages)
-    config = GhConfig(token="t")
+    config = ACCOUNT
     ref = RepoRef("o", "r")
 
     await get_workflow(config, ref, "CI")
@@ -149,15 +145,13 @@ async def test_workflow_verbs_resolve_a_display_name_once(monkeypatch):
 async def test_rerun_omits_the_optional_debug_body(monkeypatch):
     calls = []
 
-    async def request(token, method, path, *args, base_url=None):
+    async def request(account, method, path, *args):
         calls.append((method, path, args))
         return None
 
     monkeypatch.setitem(rerun.__globals__, "github_request", request)
 
-    assert (
-        await rerun(GhConfig(token="t"), RepoRef("o", "r"), 7, "rerun") is None
-    )
+    assert await rerun(ACCOUNT, RepoRef("o", "r"), 7, "rerun") is None
     assert calls == [("POST", "/repos/o/r/actions/runs/7/rerun", ())]
 
 
@@ -165,12 +159,12 @@ async def test_rerun_omits_the_optional_debug_body(monkeypatch):
 async def test_workflow_verbs_encode_the_identifier(monkeypatch):
     calls = []
 
-    async def request(token, method, path, body=None, *, base_url=None):
+    async def request(account, method, path, body=None):
         calls.append((method, path, body))
         return {}
 
     monkeypatch.setitem(get_workflow.__globals__, "github_request", request)
-    config = GhConfig(token="t")
+    config = ACCOUNT
     ref = RepoRef("o", "r")
 
     await get_workflow(config, ref, "ci#nightly.yml")
@@ -201,7 +195,7 @@ async def test_list_workflows_filters_before_applying_the_limit(monkeypatch):
     monkeypatch.setitem(list_workflows.__globals__, "github_pages", pages)
 
     rows = await list_workflows(
-        GhConfig(token="t"),
+        ACCOUNT,
         RepoRef("o", "r"),
         1,
         include=lambda row: row["state"] == "active",

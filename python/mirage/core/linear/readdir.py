@@ -61,7 +61,7 @@ async def filtered_teams(accessor: LinearAccessor) -> list[dict[str, Any]]:
     Args:
         accessor (LinearAccessor): linear accessor.
     """
-    teams = await list_teams(accessor.config, session=accessor.pool)
+    teams = await list_teams(accessor)
     if not accessor.config.team_ids:
         return teams
     return [
@@ -129,9 +129,7 @@ async def _list_team(
 async def _list_members(
     accessor: LinearAccessor, match: ScopeMatch, entry: FileStat
 ) -> list[FileStat]:
-    users = await list_team_members(
-        accessor.config, match.slots["team_id"], session=accessor.pool
-    )
+    users = await list_team_members(accessor, match.slots["team_id"])
     rows = []
     for user in users:
         rendered = to_json_bytes(normalize_user(user))
@@ -150,9 +148,7 @@ async def _list_members(
 async def _list_issues(
     accessor: LinearAccessor, match: ScopeMatch, entry: FileStat
 ) -> list[FileStat]:
-    issues = await list_team_issues(
-        accessor.config, match.slots["team_id"], session=accessor.pool
-    )
+    issues = await list_team_issues(accessor, match.slots["team_id"])
     rows = []
     for issue in issues:
         extra: dict[str, Any] = {
@@ -179,9 +175,7 @@ async def _list_issue(
     # comments.jsonl costs the one bounded comments call, paid only when
     # this directory is entered.
     issue_id = match.slots["issue_id"]
-    comments = await list_issue_comments(
-        accessor.config, issue_id, session=accessor.pool
-    )
+    comments = await list_issue_comments(accessor, issue_id)
     rendered = [
         normalize_comment(
             comment, issue_id=issue_id, issue_key=entry.extra.get("issue_key")
@@ -211,12 +205,8 @@ async def _list_projects(
     accessor: LinearAccessor, match: ScopeMatch, entry: FileStat
 ) -> list[FileStat]:
     team_id = match.slots["team_id"]
-    projects = await list_team_projects(
-        accessor.config, team_id, session=accessor.pool
-    )
-    team_issues = await list_team_issues(
-        accessor.config, team_id, session=accessor.pool
-    )
+    projects = await list_team_projects(accessor, team_id)
+    team_issues = await list_team_issues(accessor, team_id)
     rows = []
     for project in projects:
         rendered = to_json_bytes(
@@ -244,9 +234,7 @@ async def _list_cycles(
     accessor: LinearAccessor, match: ScopeMatch, entry: FileStat
 ) -> list[FileStat]:
     team_id = match.slots["team_id"]
-    cycles = await list_team_cycles(
-        accessor.config, team_id, session=accessor.pool
-    )
+    cycles = await list_team_cycles(accessor, team_id)
     rows = []
     for cycle in cycles:
         rendered = to_json_bytes(normalize_cycle(cycle, team_id=team_id))
@@ -265,9 +253,7 @@ async def _list_cycles(
 async def _list_documents(
     accessor: LinearAccessor, match: ScopeMatch, entry: FileStat
 ) -> list[FileStat]:
-    documents = await list_team_documents(
-        accessor.config, match.slots["team_id"], session=accessor.pool
-    )
+    documents = await list_team_documents(accessor, match.slots["team_id"])
     rows = []
     for document in documents:
         rendered = to_json_bytes(normalize_document(document))

@@ -18,7 +18,12 @@ from pathlib import Path
 import asyncssh
 import pytest
 
+from mirage.commands.config import Context
 from mirage.runtime.sandbox.ssh import SSHRuntime, sdk
+
+
+def _line(box: SSHRuntime, line: str, stdin: bytes | None = None):
+    return box.run_line(None, [], [], Context(flags={"c": line}, stdin=stdin))
 
 
 class FakeSSHRuntime(SSHRuntime):
@@ -157,9 +162,7 @@ async def test_real_ssh_stdin_always_reaches_eof(data):
             }
         )
         try:
-            result = await asyncio.wait_for(
-                runtime.run_line("cat", data, {}, "/"), 5
-            )
+            result = await asyncio.wait_for(_line(runtime, "cat", data), 5)
             assert result.stdout == (data or b"").hex().encode()
             assert result.exit_code == 0
         finally:
@@ -255,10 +258,10 @@ async def test_dropped_connection_reconnects_before_next_command(monkeypatch):
 
     monkeypatch.setattr(sdk, "connect", connect)
     runtime = FakeSSHRuntime(config={"host": "box"})
-    await runtime.run_line("true", None, {}, "/")
-    await runtime.run_line("true", None, {}, "/")
+    await _line(runtime, "true")
+    await _line(runtime, "true")
     assert len(connections) == 1
     connections[0].close()
-    await runtime.run_line("true", None, {}, "/")
+    await _line(runtime, "true")
     assert len(connections) == 2
     await runtime.close()

@@ -175,13 +175,14 @@ def test_no_config_no_model_installs_with_none():
     assert reg.install("prog", tree()).config is None
 
 
-def test_uninstall_removes_and_unknown_raises():
+@pytest.mark.asyncio
+async def test_uninstall_removes_and_unknown_raises():
     reg = CLIRegistry()
     reg.install("prog", tree())
-    reg.uninstall("prog")
+    await reg.uninstall("prog")
     assert reg.get("prog") is None
     with pytest.raises(KeyError, match="not installed"):
-        reg.uninstall("prog")
+        await reg.uninstall("prog")
 
 
 @pytest.mark.parametrize("name,spec", [("slack", SLACK), ("discord", DISCORD)])

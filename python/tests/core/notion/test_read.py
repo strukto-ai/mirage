@@ -38,7 +38,7 @@ class Replies:
         self.responses = responses
         self.calls = []
 
-    async def post(self, config, path, body, session=None):
+    async def post(self, accessor, path, body):
         assert path == "/data_sources/ds/query"
         self.calls.append(dict(body))
         cursor = body.get("start_cursor")
@@ -207,7 +207,7 @@ async def test_empty_rows_stream_has_no_bytes(monkeypatch, path, parent):
 async def test_metadata_stream_falls_back_to_a_full_read(
     monkeypatch, replies, path, parent
 ):
-    async def get(config, endpoint, session=None):
+    async def get(accessor, endpoint):
         assert endpoint == "/data_sources/ds"
         return {"id": "ds", "title": [], "properties": {}}
 

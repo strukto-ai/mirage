@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.accessor.github import GitHubAccount
 from mirage.core.github.config import GhConfig
 from mirage.core.github.paginate import github_pages
 
@@ -25,15 +26,17 @@ async def test_limit_counts_only_included_rows(monkeypatch):
         "2": [{"number": 4}],
     }
     seen = []
+    account = GitHubAccount(GhConfig(token="t"))
 
-    async def request(token, method, path, params=None, *, base_url=None):
+    async def request(handle, method, path, params=None):
+        assert handle is account
         seen.append(params)
         return pages[params["page"]]
 
     monkeypatch.setitem(github_pages.__globals__, "github_request", request)
 
     rows = await github_pages(
-        GhConfig(token="t"),
+        account,
         "/repos/o/r/issues",
         limit=3,
         include=lambda row: "pull_request" not in row,

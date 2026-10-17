@@ -12,10 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.hf_hub import HfHubAccessor
+from mirage.accessor.hf_hub import HfAccountAccessor, HfHubAccessor
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.hf_hub.config import HfConfig
 from mirage.core.hf_hub.constants import API_SEGMENTS, DEFAULT_REVISION
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -43,38 +42,38 @@ def repo_type_of(fl: FlagView) -> str:
 
 
 def hub_for(
-    config: HfConfig,
+    account: HfAccountAccessor,
     repo_id: str,
     repo_type: str,
     revision: str | None = None,
 ) -> HfHubAccessor:
     """A Hub handle for the repository this line named.
 
-    The CLI builds one per invocation rather than owning a second Hub
-    client: an accessor is a value object here, holding the endpoint,
-    the credential and which repository is being addressed, so `hf` gets
-    the mount's tree walk and commit builder for free. It reaches no
+    The CLI builds one per invocation over the install's account rather
+    than owning a second Hub client: the handle only names which
+    repository is being addressed and rides the account's credential,
+    origin and pool, so `hf` gets the mount's tree walk and commit
+    builder for free and one install keeps one pool. It reaches no
     mount, which is what keeps this an account CLI. A verb reads paths
     and sizes, never the per-file commit a mount's mtimes come from, so
     the walk lists bare.
 
     Args:
-        config (HfConfig): the install's account config.
+        account (HfAccountAccessor): the install's account.
         repo_id (str): "namespace/name".
         repo_type (str): "model", "dataset" or "space".
         revision (str | None): the revision to read or write.
 
     Returns:
-        HfHubAccessor: the handle.
+        HfHubAccessor: the handle, which borrows the account and needs
+        no close.
     """
     repo = HfRepoConfig(
         repo_id=repo_id,
-        token=config.token,
-        endpoint=config.endpoint,
         revision=revision or DEFAULT_REVISION,
         expand_commits=False,
     )
-    return HfHubAccessor(repo, repo_type=repo_type)
+    return HfHubAccessor(account, repo, repo_type=repo_type)
 
 
 def require_operands(texts: list[str], names: list[str]) -> None:
@@ -104,7 +103,7 @@ def text_out(
     return yield_bytes(text.encode()), IOResult(stderr=stderr.encode() or None)
 
 
-def require_token(config: HfConfig, what: str) -> None:
+def require_token(account: HfAccountAccessor, what: str) -> None:
     """Refuse a verb that cannot work anonymously, before it is tried.
 
     The Hub answers 401 "Invalid username or password." for an
@@ -112,13 +111,13 @@ def require_token(config: HfConfig, what: str) -> None:
     as a missing one.
 
     Args:
-        config (HfConfig): the install's account config.
+        account (HfAccountAccessor): the install's account.
         what (str): what was being attempted, for the message.
 
     Raises:
         UsageError: the install carries no token.
     """
-    if config.token is None:
+    if account.token is None:
         raise UsageError(
             f"{what} requires a token; set `token` on the `hf` install"
         )

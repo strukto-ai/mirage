@@ -15,6 +15,7 @@
 import asyncio
 import dataclasses
 from collections.abc import Awaitable, Callable, Sequence
+from typing import Any
 
 from mirage.policy.decisions import op_question
 from mirage.policy.policies import agreed, settled
@@ -70,12 +71,12 @@ class Router:
         command: str,
         runtime: str | None,
         session: SessionState,
-        inherited: RouteDecision[Runtime] | None,
+        inherited: RouteDecision[Runtime[Any]] | None,
         judged: Callable[[], Awaitable[Sequence[tuple[Walked, list[Judged]]]]],
         held: Callable[[], Awaitable[bool]] | None = None,
         claimant: Claimant | None = None,
         cancel: asyncio.Event | None = None,
-    ) -> RouteDecision[Runtime] | Deny | Pending | None:
+    ) -> RouteDecision[Runtime[Any]] | Deny | Pending | None:
         """Resolve the routing decision for one typed line.
 
         Returns None when nothing decides (no runtime argument, nothing
@@ -156,7 +157,7 @@ class Router:
         judged: Callable[[], Awaitable[Sequence[tuple[Walked, list[Judged]]]]],
     ) -> tuple[
         tuple[Deny | Ask | Route, ...],
-        RouteDecision[Runtime] | Deny | Pending | None,
+        RouteDecision[Runtime[Any]] | Deny | Pending | None,
     ]:
         """Every ``pre_execute`` answer for a line and what they decide,
         without running it: what ``explain`` shows. An Ask reads the
@@ -192,8 +193,8 @@ class Router:
         return answers, self._unplaced(entries)
 
     def _routed(
-        self, entries: list[Runtime], name: str
-    ) -> RouteDecision[Runtime]:
+        self, entries: list[Runtime[Any]], name: str
+    ) -> RouteDecision[Runtime[Any]]:
         """The decision a policy's route places a line on. ``workspace``
         keeps the line in Mirage: no line executor (a ``*`` capture)
         takes it, and each command stays on its first other capturer.
@@ -209,13 +210,15 @@ class Router:
         if name != WorkspaceRuntime.name:
             return self._placed(entries, name)
         kept = [e for e in entries if "*" not in e.captures]
-        bindings: dict[str, Runtime | None] = {
+        bindings: dict[str, Runtime[Any] | None] = {
             command: None for entry in entries for command in entry.captures
         }
         bindings.update(bind_commands(kept))
         return RouteDecision(bindings=bindings, fallback=catch_all(entries))
 
-    def _unplaced(self, entries: list[Runtime]) -> RouteDecision[Runtime]:
+    def _unplaced(
+        self, entries: list[Runtime[Any]]
+    ) -> RouteDecision[Runtime[Any]]:
         """The decision for a line no policy placed: each command on its
         first capturer, kept for the line's nested evals.
 
@@ -227,7 +230,7 @@ class Router:
         )
 
     def runtime_for(
-        self, command: str, decision: RouteDecision[Runtime] | None
+        self, command: str, decision: RouteDecision[Runtime[Any]] | None
     ) -> str:
         """The runtime entry that serves a command under a decision (the
         static bindings when there is none), empty when the workspace
@@ -252,8 +255,8 @@ class Router:
         return serving.name
 
     def _placed(
-        self, entries: list[Runtime], name: str
-    ) -> RouteDecision[Runtime]:
+        self, entries: list[Runtime[Any]], name: str
+    ) -> RouteDecision[Runtime[Any]]:
         """The decision that serves a line on one named runtime: its
         captures over the static bindings.
 

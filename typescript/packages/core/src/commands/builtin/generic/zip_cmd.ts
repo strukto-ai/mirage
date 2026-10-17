@@ -29,7 +29,7 @@ import { encodeRecord, readArchive, updateArchive } from './archive/zip_update.t
 import { ZipUpdateError } from './archive/errors.ts'
 import type { MemberKind, ZipArchive, ZipRecord } from './archive/types.ts'
 import { OTHER_FILESYSTEM, scanOperand, type StatFn, type WalkFn } from './archive/walk.ts'
-import { linksOf, mountsOf } from '../utils/links.ts'
+import { linksOf, mountView } from '../utils/links.ts'
 import { formatOptionalRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
@@ -203,7 +203,8 @@ async function planZip(
       stat: deps.stat,
       walk: deps.walk,
       links: linksOf(ctx) ?? null,
-      mounts: mountsOf(ctx) ?? null,
+      // Every mount nested under an operand bounds the scan, a relayed run's too.
+      mounts: mountView(ctx.vfs) ?? null,
       dereference: !parsed.storeLinks,
       recurse,
     })

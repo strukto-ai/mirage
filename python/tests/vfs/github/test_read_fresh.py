@@ -16,8 +16,9 @@
 import aiohttp
 import pytest
 
+from mirage.accessor.github import GitHubAccount
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
-from mirage.core.github.config import GitHubConfig
+from mirage.core.github.config import GhConfig, GitHubConfig
 from mirage.core.github.tree import fetch_tree
 from mirage.types import (
     HiddenPaths,
@@ -487,7 +488,8 @@ async def test_a_truncated_repository_probes_one_directory():
     files = {"top.txt": b"t", "docs/a.txt": OLD}
     with serve(FakeGitHub(files=files, truncated_recursive=True)) as hub:
         config = GitHubConfig(token="t", base_url=hub.url)
-        tree, truncated, _ = await fetch_tree(config, "o", "r", "main")
+        async with GitHubAccount(GhConfig(token="t", base_url=hub.url)) as acc:
+            tree, truncated, _ = await fetch_tree(acc, "o", "r", "main")
         vfs = GitHubVFS(
             config,
             "o",
@@ -521,7 +523,8 @@ async def test_a_directory_github_cuts_short_is_not_absence():
     files = {"top.txt": b"t", "docs/a.txt": OLD, "docs/b.txt": b"bravo"}
     with serve(FakeGitHub(files=files, truncated_recursive=True)) as hub:
         config = GitHubConfig(token="t", base_url=hub.url)
-        tree, truncated, _ = await fetch_tree(config, "o", "r", "main")
+        async with GitHubAccount(GhConfig(token="t", base_url=hub.url)) as acc:
+            tree, truncated, _ = await fetch_tree(acc, "o", "r", "main")
         vfs = GitHubVFS(
             config,
             "o",

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass
+from typing import Any
 
 from mirage.observe.store import ObserverStore
 from mirage.runtime.base import Runtime
@@ -83,7 +84,7 @@ def resolve_control_stores(
 def wire_runtime_world(
     registry: MountRegistry,
     binding: WorkspaceBinding,
-    entries: list[Runtime | str] | None,
+    entries: list[Runtime[Any] | str] | None,
 ) -> tuple[Runtimes, Router]:
     """Build the ordered runtime world and its route-policy router.
 

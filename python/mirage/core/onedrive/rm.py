@@ -21,8 +21,4 @@ from mirage.types import PathSpec
 async def rm_r(accessor: OneDriveAccessor, path: PathSpec) -> None:
     if not path.vfs_path:
         return
-    await graph_delete(
-        accessor.config,
-        item_url(accessor.config, path.vfs_path),
-        session=accessor.pool,
-    )
+    await graph_delete(accessor, item_url(accessor.config, path.vfs_path))

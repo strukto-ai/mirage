@@ -17,7 +17,7 @@ import { getSelf } from '../../../../core/notion/pages.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { notionTransport, prettyJson } from './util.ts'
+import { notionTransport, prettyJson, type NtnAccessor } from './util.ts'
 
 const ENC = new TextEncoder()
 
@@ -66,13 +66,13 @@ export function whoamiRow(me: Record<string, unknown>): ByteSource {
 }
 
 export async function whoami(
-  config: unknown,
+  accessor: NtnAccessor,
   _paths: PathSpec[],
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const me = await getSelf(notionTransport(config, ctx.flags))
+  const me = await getSelf(notionTransport(accessor, ctx.flags))
   if (fl.asBool('json')) return [prettyJson(me), new IOResult()]
   return [whoamiRow(me), new IOResult()]
 }

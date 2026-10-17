@@ -55,7 +55,7 @@ import { type CliResult, openCliPipe, runCli } from '../cli.ts'
  */
 export class AppleContainerRuntime
   extends RemoteSandbox<AppleContainerConfig>
-  implements ProcessExecutor
+  implements ProcessExecutor<undefined>
 {
   readonly [PROCESS_EXECUTOR] = true as const
   readonly name = 'apple_container'

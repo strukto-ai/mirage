@@ -23,7 +23,8 @@ from mirage.runtime.python.execution import main_filename
 from mirage.runtime.python.monty.constants import DEFAULT_PROG, LIMITS
 from mirage.runtime.python.monty.fs import MontyFs
 from mirage.runtime.python.monty.loader import pydantic_monty
-from mirage.runtime.types import RunArgs, RunResult
+from mirage.runtime.types import Program, RunResult
+from mirage.types import PathSpec
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,9 @@ class MontyExecution:
         await pool.__aenter__()
         return pool
 
-    async def run(self, args: RunArgs, fs: MontyFs) -> RunResult:
+    async def run(
+        self, program: Program, cwd: PathSpec | None, fs: MontyFs
+    ) -> RunResult:
         # Execution lives in a monty worker subprocess (0.0.19 moved it
         # out of process so an interpreter crash cannot take the host
         # with it). feed_run awaits off the event loop, so the loop
@@ -94,12 +97,12 @@ class MontyExecution:
         # `is None`, not falsy: "" is CPython's own argv[0] for a
         # program piped in with no operand, so an empty prog is an
         # answer rather than an absent one.
-        prog = args.prog if args.prog is not None else DEFAULT_PROG
-        argv = [prog, *args.args]
+        prog = program.prog if program.prog is not None else DEFAULT_PROG
+        argv = [prog, *program.args]
         # Monty has no `sys.stdin`, so piped bytes ride in as a global
         # the same way argv does: raw bytes, None when nothing was piped.
-        inputs = {"argv": argv, "stdin": args.stdin}
-        cwd = args.cwd.virtual if args.cwd is not None else None
+        inputs = {"argv": argv, "stdin": program.stdin}
+        start = cwd.virtual if cwd is not None else None
         # A script is Monty's own script_name, which it keeps the last
         # part of for `__file__`, under the directory a feed starts in.
         checkout = pool.checkout(
@@ -107,8 +110,8 @@ class MontyExecution:
             assert_message_annotations=False,
             os_policy={"sleep_system_max": float("inf")},
             **(
-                {"script_name": main_filename(args)}
-                if args.script_path is not None
+                {"script_name": main_filename(program, cwd)}
+                if program.script_path is not None
                 else {}
             ),
         )
@@ -123,10 +126,10 @@ class MontyExecution:
                 worker_pid = session.worker_pid
                 try:
                     await session.feed_run(
-                        args.code,
+                        program.code,
                         inputs=inputs,
                         print_callback=collector,
-                        cwd=cwd,
+                        cwd=start,
                         os=fs,
                     )
                 except asyncio.CancelledError:

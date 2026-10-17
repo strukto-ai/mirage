@@ -14,10 +14,10 @@
 
 from typing import Any
 
-from mirage.commands.cli.builtin.ntn.util import notion_config, pretty_json
+from mirage.accessor.notion import NotionAccessor
+from mirage.commands.cli.builtin.ntn.util import notion_transport, pretty_json
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.pages import get_self
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -76,10 +76,13 @@ def whoami_row(me: dict[str, Any]) -> bytes:
 
 
 async def whoami(
-    config: NotionConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: NotionAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    me = await get_self(notion_config(config, ctx))
+    me = await get_self(notion_transport(accessor, ctx))
     if fl.as_bool("json"):
         return yield_bytes(pretty_json(me)), IOResult()
     return yield_bytes(whoami_row(me)), IOResult()

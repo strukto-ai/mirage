@@ -17,7 +17,8 @@ import { CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 import { registerCliSpec } from '@struktoai/mirage-core/commands/cli/specs'
 import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { Argument } from '@struktoai/mirage-core/commands/spec/index'
-import { HfConfigSchema } from '../../../../core/hf_hub/config.ts'
+import { HfAccountAccessor } from '../../../../accessor/hf_hub.ts'
+import { HfConfigSchema, type HfConfig } from '../../../../core/hf_hub/config.ts'
 import { listCmd, whoamiCmd } from './auth.ts'
 import { downloadCmd } from './download.ts'
 import { envCmd, versionCmd } from './env.ts'
@@ -260,6 +261,7 @@ export const HF = new CLI({
     version: new CLIHandler({ fn: versionCmd }),
   },
   configModel: HfConfigSchema,
+  accessor: (config) => new HfAccountAccessor(config as HfConfig),
 })
 
 registerCliSpec(HF)

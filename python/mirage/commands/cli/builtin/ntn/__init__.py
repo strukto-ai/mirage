@@ -14,6 +14,7 @@
 
 from functools import partial
 
+from mirage.accessor.notion import NotionAccessor
 from mirage.commands.cli.builtin.ntn.api import api
 from mirage.commands.cli.builtin.ntn.auth.token import token
 from mirage.commands.cli.builtin.ntn.datasources.query import query
@@ -232,4 +233,5 @@ NTN = CLI(
         "whoami": CLIHandler(fn=partial(guarded, whoami)),
     },
     config_model=NotionConfig,
+    accessor=NotionAccessor,
 )

@@ -45,9 +45,9 @@ async def csplit(
     # The pieces go to the prefix, or `xx` in the working directory, which
     # need not be this mount, so a dispatcher routes each write, and the
     # removal of a failed run's pieces, to the mount that owns it.
-    if ctx.dispatch is not None:
-        write_bytes = transfer_primitives(ctx.dispatch)["write"]
-        unlink = partial(dispatched_call, ctx.dispatch, "unlink")
+    if ctx.vfs is not None:
+        write_bytes = transfer_primitives(ctx.vfs.dispatch)["write"]
+        unlink = partial(dispatched_call, ctx.vfs.dispatch, "unlink")
     else:
         write_bytes = partial(require_op(ops, Operation.WRITE), accessor)
         unlink = partial(require_op(ops, Operation.UNLINK), accessor)

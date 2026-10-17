@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh import GH
 from mirage.commands.cli.builtin.gh.accessor import (
     body_value,
@@ -46,7 +47,7 @@ from mirage.io.types import materialize
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
-CONFIG = GhConfig(token="t")
+ACCOUNT = GitHubAccount(GhConfig(token="t"))
 CALLS: list[dict] = []
 REPLY: dict = {}
 RESPONSES: list[ApiResponse] = []
@@ -91,13 +92,12 @@ def _patch(monkeypatch):
         )
 
     async def fake_request(
-        token,
+        account,
         method,
         path,
         body=_MISSING,
         params=None,
         *,
-        base_url=None,
         headers=None,
     ):
         call = {"method": method, "path": path}
@@ -110,33 +110,21 @@ def _patch(monkeypatch):
         return _record(**call)
 
     async def fake_response(
-        token,
+        account,
         method,
         path,
         body=_MISSING,
         params=None,
         *,
-        base_url=None,
         headers=None,
     ):
         if body is _MISSING:
             await fake_request(
-                token,
-                method,
-                path,
-                params=params,
-                base_url=base_url,
-                headers=headers,
+                account, method, path, params=params, headers=headers
             )
         else:
             await fake_request(
-                token,
-                method,
-                path,
-                body,
-                params,
-                base_url=base_url,
-                headers=headers,
+                account, method, path, body, params, headers=headers
             )
         if RESPONSES:
             answer = RESPONSES.pop(0)
@@ -159,10 +147,14 @@ def _ctx(flags=None, stdin=None, vfs=None, argv=()) -> Context:
     return Context(argv=tuple(argv), flags=flags or {}, stdin=stdin, vfs=vfs)
 
 
+def _account(**fields) -> GitHubAccount:
+    return GitHubAccount(GhConfig(token="t", **fields))
+
+
 def _args(
-    texts=(), flags=None, config=CONFIG, stdin=None, vfs=None, argv=()
-) -> tuple[GhConfig, list[PathSpec], list[str], Context]:
-    return config, [], list(texts), _ctx(flags, stdin, vfs, argv)
+    texts=(), flags=None, accessor=ACCOUNT, stdin=None, vfs=None, argv=()
+) -> tuple[GitHubAccount, list[PathSpec], list[str], Context]:
+    return accessor, [], list(texts), _ctx(flags, stdin, vfs, argv)
 
 
 def test_registers_itself_under_the_grammar_gh_uses():
@@ -259,7 +251,7 @@ async def test_short_body_file_dash_reads_standard_input():
 def test_full_subject_url_overrides_the_configured_repository():
     flags = {"repo": "wrong/repo"}
     ref, number = repo_number(
-        CONFIG,
+        ACCOUNT,
         FlagView(flags),
         "https://github.com/acme/tools/issues/42",
         "issue",
@@ -271,7 +263,7 @@ def test_full_subject_url_overrides_the_configured_repository():
 def test_subject_url_kind_must_match_the_verb():
     with pytest.raises(ValueError, match="pull request number"):
         repo_number(
-            CONFIG,
+            ACCOUNT,
             FlagView({}),
             "https://github.com/acme/tools/issues/42",
             "pull request",
@@ -288,7 +280,7 @@ async def test_views_the_repository_the_operand_names():
 def _graphql(monkeypatch) -> None:
     """Answer the core GraphQL client from REPLY, recording each call."""
 
-    async def fake_request(token, method, path, body=_MISSING, **_kwargs):
+    async def fake_request(account, method, path, body=_MISSING, **_kwargs):
         return _record(method=method, path=path, body=body)
 
     monkeypatch.setitem(
@@ -452,8 +444,21 @@ async def test_json_repo_list_asks_graphql_for_the_owner(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_api_rides_the_install_account(monkeypatch):
+    accounts = []
+
+    async def response(account, *args, **kwargs):
+        accounts.append(account)
+        return ApiResponse({}, 200, {})
+
+    monkeypatch.setitem(api.__globals__, "github_request_response", response)
+    await api(*_args(["x"]))
+    assert accounts == [ACCOUNT]
+
+
+@pytest.mark.asyncio
 async def test_falls_back_to_the_install_repo():
-    await view(*_args(config=GhConfig(token="t", repo="cfg/repo")))
+    await view(*_args(accessor=_account(repo="cfg/repo")))
     assert CALLS[0]["path"] == "/repos/cfg/repo"
 
 
@@ -508,9 +513,7 @@ async def test_forks_under_the_source_name_when_unnamed():
 @pytest.mark.asyncio
 async def test_refuses_a_remote_for_the_current_repository():
     with pytest.raises(ValueError, match="--remote is not supported"):
-        await fork(
-            *_args([], {"remote": "true"}, GhConfig(token="t", repo="o/r"))
-        )
+        await fork(*_args([], {"remote": "true"}, _account(repo="o/r")))
 
 
 @pytest.fixture()
@@ -518,13 +521,12 @@ def _core_repo(monkeypatch):
     """Route the core repository calls through the recorder."""
 
     async def fake_request(
-        token,
+        account,
         method,
         path,
         body=_MISSING,
         params=None,
         *,
-        base_url=None,
         headers=None,
     ):
         call = {"method": method, "path": path}
@@ -904,7 +906,7 @@ async def test_api_strips_the_enterprise_prefix_from_link_pages():
         *_args(
             ["items"],
             {"paginate": True},
-            config=GhConfig(token="t", base_url="https://git.example/api/v3"),
+            accessor=_account(base_url="https://git.example/api/v3"),
         )
     )
     assert [call["path"] for call in CALLS] == ["/items", "/items?page=2"]
@@ -1274,7 +1276,7 @@ async def test_comment_metadata_matches_gh(monkeypatch):
 
     monkeypatch.setitem(comments_for.__globals__, "issue_comments", comments)
     rows = await comments_for(
-        CONFIG,
+        ACCOUNT,
         FlagView({"comments": True}),
         RepoRef("o", "r"),
         1,

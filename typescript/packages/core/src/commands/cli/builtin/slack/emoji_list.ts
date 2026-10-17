@@ -16,17 +16,17 @@ import { listEmoji } from '../../../../core/slack/emoji.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { slackAccessor } from '../../../../accessor/slack.ts'
+import type { SlackAccessor } from '../../../../accessor/slack.ts'
 
 const ENC = new TextEncoder()
 
 export async function emojiList(
-  config: unknown,
+  accessor: SlackAccessor,
   _paths: PathSpec[],
   _texts: string[],
   _ctx: Context,
 ): Promise<CommandFnResult> {
-  const emoji = await listEmoji(slackAccessor(config))
+  const emoji = await listEmoji(accessor)
   const out: ByteSource = ENC.encode(JSON.stringify(emoji))
   return [out, new IOResult()]
 }

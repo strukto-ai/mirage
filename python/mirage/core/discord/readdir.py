@@ -89,7 +89,7 @@ def _container_entry(name: str, guild_id: str) -> FileStat:
 
 
 async def _list_root(accessor: DiscordAccessor, match: ScopeMatch) -> Listed:
-    guilds = await list_guilds(accessor.config, session=accessor.pool)
+    guilds = await list_guilds(accessor)
     return [guild_entry(g) for g in guilds]
 
 
@@ -106,18 +106,14 @@ async def _list_guild(
 async def _list_channels_dir(
     accessor: DiscordAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
-    channels = await list_channels(
-        accessor.config, str(own.extra["guild_id"]), session=accessor.pool
-    )
+    channels = await list_channels(accessor, str(own.extra["guild_id"]))
     return [channel_entry(c) for c in channels]
 
 
 async def _list_members_dir(
     accessor: DiscordAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
-    members = await list_members(
-        accessor.config, str(own.extra["guild_id"]), session=accessor.pool
-    )
+    members = await list_members(accessor, str(own.extra["guild_id"]))
     return [member_entry(m) for m in members]
 
 
@@ -162,11 +158,7 @@ async def _day_listing(
     """
     try:
         messages = await list_messages_for_day(
-            accessor.config,
-            channel_id,
-            date_str,
-            accessor.time_range,
-            session=accessor.pool,
+            accessor, channel_id, date_str, accessor.time_range
         )
     except aiohttp.ClientResponseError as e:
         if _is_soft_error(e):

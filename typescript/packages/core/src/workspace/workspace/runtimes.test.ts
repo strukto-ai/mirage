@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import type { Context } from '../../commands/config.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutor } from '../../runtime/mixin.ts'
 import { PythonRuntime } from '../../runtime/python/base.ts'
-import type { RunArgs, RunResult } from '../../runtime/types.ts'
+import type { Program, RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
@@ -47,11 +48,11 @@ class Engine extends PythonRuntime {
     super()
   }
 
-  async run(args: RunArgs): Promise<RunResult> {
+  async interpret(_engine: unknown, _program: Program, ctx: Context): Promise<RunResult> {
     this.entered.open()
     await new Promise<void>((resolve) => {
       void this.release.then(resolve)
-      args.signal?.addEventListener('abort', () => {
+      ctx.signal?.addEventListener('abort', () => {
         resolve()
       })
     })

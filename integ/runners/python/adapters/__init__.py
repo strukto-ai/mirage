@@ -3171,11 +3171,8 @@ async def mutate_github(
         "message": f"integ: change {rel}",
         "content": base64.b64encode(content).decode(),
     }
-    config = accessor.config
     try:
-        current = await github_request(
-            config.token, "GET", endpoint, base_url=config.base_url
-        )
+        current = await github_request(accessor.account, "GET", endpoint)
     except GitHubApiError as exc:
         # Absent: create it. GitHub refuses a sha for a new file.
         if exc.status != 404:
@@ -3183,9 +3180,7 @@ async def mutate_github(
         logging.getLogger(__name__).debug("creating %s: %s", rel, exc)
     else:
         body["sha"] = str(current["sha"])
-    await github_request(
-        config.token, "PUT", endpoint, body, base_url=config.base_url
-    )
+    await github_request(accessor.account, "PUT", endpoint, body)
 
 
 async def delete_commit(shadow_ws: Workspace, path: str) -> None:
@@ -3220,19 +3215,12 @@ async def delete_github(shadow_ws: Workspace, path: str) -> None:
         raise ValueError(f"github cannot delete {path}")
     rel = path[len(mount.prefix.rstrip("/")) :].lstrip("/")
     endpoint = f"/repos/{accessor.owner}/{accessor.repo}/contents/{quote(rel)}"
-    config = accessor.config
-    current = await github_request(
-        config.token, "GET", endpoint, base_url=config.base_url
-    )
+    current = await github_request(accessor.account, "GET", endpoint)
     await github_request(
-        config.token,
+        accessor.account,
         "DELETE",
         endpoint,
-        {
-            "message": f"integ: delete {rel}",
-            "sha": str(current["sha"]),
-        },
-        base_url=config.base_url,
+        {"message": f"integ: delete {rel}", "sha": str(current["sha"])},
     )
 
 

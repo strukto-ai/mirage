@@ -14,17 +14,20 @@
 
 import json
 
+from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.deliver import deliver
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.email.config import EmailConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import PathSpec
 
 
 async def send(
-    config: EmailConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: EmailAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     # The operand is a whole RFC 5322 message, so tokens rejoin with a
     # space and literal \n become real line breaks, the way upstream's
@@ -37,7 +40,7 @@ async def send(
             "or pipe it via standard input"
         )
     message, warning = await deliver(
-        config, raw, FlagView(ctx.flags).as_str("save")
+        accessor, raw, FlagView(ctx.flags).as_str("save")
     )
     result = {
         "status": "sent",

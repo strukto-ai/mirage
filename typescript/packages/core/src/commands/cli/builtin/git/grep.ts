@@ -1,3 +1,4 @@
+import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { byteView, encodeText, fromByteView, utf8Locale } from '../../../../shell/bytes.ts'
@@ -146,7 +147,7 @@ async function searchEntries(repo: Repo, name: string): Promise<Map<string, Tree
 
 /** Search tracked working files, index blobs, or named historical trees. */
 export async function grep(
-  config: unknown,
+  _accessor: NOOPAccessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,

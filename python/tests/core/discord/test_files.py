@@ -16,6 +16,8 @@ import pytest
 from aioresponses import aioresponses
 from yarl import URL
 
+from mirage.accessor.discord import DiscordAccessor
+from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.files import download_file, file_blob_name
 
 BODY = b"0123456789"
@@ -27,7 +29,8 @@ async def _download(
 ) -> tuple[bytes, dict]:
     with aioresponses() as m:
         m.get(CDN_URL, status=status, body=body)
-        data = await download_file(CDN_URL, offset, size)
+        async with DiscordAccessor(DiscordConfig(token="t")) as accessor:
+            data = await download_file(accessor, CDN_URL, offset, size)
         sent = m.requests[("GET", URL(CDN_URL))][0].kwargs
     return data, sent
 

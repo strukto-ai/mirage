@@ -16,22 +16,32 @@ import asyncio
 from collections.abc import Sequence
 from typing import Any, ClassVar
 
+from mirage.commands.config import Context
+from mirage.io.types import materialize
 from mirage.runtime.base import Runtime
-from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.sandbox.config import SandboxConfig, check_mount_type
 from mirage.runtime.sandbox.mounts import SandboxMounts
 from mirage.runtime.types import (
     MountType,
-    ProcessExecution,
     RunResult,
     RuntimeReach,
     SandboxPipe,
 )
+from mirage.types import PathSpec
 
 
-class RemoteSandbox(Runtime, LineExecutorMixin):
+async def _piped(ctx: Context) -> bytes | None:
+    """The bytes piped into a run, read whole; None when nothing was.
+
+    Args:
+        ctx (Context): the run's context.
+    """
+    return await materialize(ctx.stdin) if ctx.stdin is not None else None
+
+
+class RemoteSandbox(Runtime[None], LineExecutorMixin[None]):
     """A runtime that executes programs in a sandbox the user runs.
 
     Captures default to unresolved program names. An explicit "*"
@@ -92,14 +102,18 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
             and "/" not in self._binding.mount_prefixes()
         )
 
-    def _serves_session(self, context: RuntimeContext) -> bool:
+    def _serves_session(self, restricted_mounts: tuple[str, ...]) -> bool:
         return self._mounts is not None and all(
             prefix.rstrip("/") not in ("", "/dev")
-            for prefix in context.restricted_mounts
+            for prefix in restricted_mounts
         )
 
     async def run_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
+        self,
+        engine: None,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
     ) -> RunResult:
         """Run one raw line in the sandbox, connecting once.
 
@@ -109,26 +123,38 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
         over the config environment.
 
         Args:
-            line (str): the raw typed line.
-            stdin (bytes | None): bytes piped into the line.
-            env (dict[str, str]): the session environment.
-            cwd (str): the session working directory.
+            engine (None): a sandbox keeps its own connection.
+            paths (list[PathSpec]): unused; the line names its paths.
+            texts (list[str]): unused.
+            ctx (Context): the line in ``flags["c"]``, the bytes piped
+                into it, the session environment and working directory.
         """
         refusal = await self._prepare()
         if refusal is not None:
             return refusal
-        merged = {**self.config.env, **env}
-        return await self.exec_line(line, stdin, merged, cwd)
+        line = ctx.flags.get("c")
+        return await self.exec_line(
+            line if isinstance(line, str) else "",
+            await _piped(ctx),
+            {**self.config.env, **(ctx.env or {})},
+            ctx.cwd.virtual,
+        )
 
-    async def run_process(self, request: ProcessExecution) -> RunResult:
+    async def run_process(
+        self,
+        engine: None,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+    ) -> RunResult:
         refusal = await self._prepare()
         if refusal is not None:
             return refusal
         return await self._exec_argv(
-            request.argv,
-            request.stdin,
-            {**self.config.env, **request.env},
-            request.cwd.virtual,
+            tuple(texts),
+            await _piped(ctx),
+            {**self.config.env, **(ctx.env or {})},
+            ctx.cwd.virtual,
         )
 
     async def settle(self) -> None:

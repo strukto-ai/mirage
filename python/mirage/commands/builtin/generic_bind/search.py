@@ -40,7 +40,7 @@ from mirage.commands.builtin.grep_pushdown import (
     search_terms,
 )
 from mirage.commands.builtin.types import SearchTerms
-from mirage.commands.builtin.utils.links import links_of
+from mirage.commands.builtin.utils.links import dispatch_of, links_of
 from mirage.commands.builtin.utils.tree import before_full_scan
 from mirage.commands.config import CommandIO, Context
 from mirage.commands.errors import UsageError
@@ -377,7 +377,7 @@ async def search_reads(
     walked = name == "rg" or directories_action(fl) == "recurse"
     if files is None and lines is None:
         if walked:
-            await _full_scan(ctx.dispatch, paths, name)
+            await _full_scan(dispatch_of(ctx), paths, name)
         return read_bytes, read_stream
     try:
         terms = (
@@ -390,7 +390,7 @@ async def search_reads(
         return read_bytes, read_stream
     dirs = await _directories(io, accessor, index, paths) if walked else []
     if terms is None:
-        await _full_scan(ctx.dispatch, dirs, name)
+        await _full_scan(dispatch_of(ctx), dirs, name)
         return read_bytes, read_stream
     drops_mark = name == "rg" and encoding_flag(fl) != "none"
     hits: set[str] | None = None
@@ -417,10 +417,10 @@ async def search_reads(
                 for hit in answer
             }
     if hits is None and lines is None:
-        await _full_scan(ctx.dispatch, dirs, name)
+        await _full_scan(dispatch_of(ctx), dirs, name)
         return read_bytes, read_stream
     if hits is not None and terms.reads_binary:
-        await _full_scan(ctx.dispatch, dirs, name)
+        await _full_scan(dispatch_of(ctx), dirs, name)
     named = {p.virtual for p in paths} - {p.virtual for p in dirs}
     scan_asked = False
     refusal: Exception | None = None
@@ -432,7 +432,7 @@ async def search_reads(
         if hits is None and not scan_asked:
             scan_asked = True
             try:
-                await _full_scan(ctx.dispatch, dirs, name)
+                await _full_scan(dispatch_of(ctx), dirs, name)
             except Exception as exc:
                 refusal = exc
                 raise

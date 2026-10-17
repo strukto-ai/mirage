@@ -19,13 +19,13 @@ from urllib.parse import quote, unquote
 import aiohttp
 import pytest
 
-from mirage.accessor.github import GitHubAccessor
+from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import Evicted
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.view import IndexView
 from mirage.core.github.client import GitHubApiError
-from mirage.core.github.config import GitHubConfig
+from mirage.core.github.config import GhConfig
 from mirage.core.github.readdir import readdir
 from mirage.core.github.tree import (
     ensure_tree,
@@ -42,8 +42,8 @@ from tests.fixtures.github_api import FakeGitHub, blob_sha, serve
 
 
 @pytest.fixture
-def config():
-    return GitHubConfig(token="ghp_test")
+def account():
+    return GitHubAccount(GhConfig(token="ghp_test"))
 
 
 @pytest.mark.asyncio
@@ -57,11 +57,11 @@ def config():
     ],
 )
 @patch("mirage.core.github.client.api_request")
-async def test_tree_requests_encode_reference_once(mock_request, config, ref):
+async def test_tree_requests_encode_reference_once(mock_request, account, ref):
     mock_request.return_value = {"tree": [], "truncated": False}
-    await fetch_tree(config, "o", "r", ref)
-    await fetch_dir_page(config, "o", "r", ref)
-    await fetch_dir_tree(config, "o", "r", ref)
+    await fetch_tree(account, "o", "r", ref)
+    await fetch_dir_page(account, "o", "r", ref)
+    await fetch_dir_tree(account, "o", "r", ref)
     encoded = quote(ref, safe="")
     expected = f"https://api.github.com/repos/o/r/git/trees/{encoded}"
     assert [call.args[1] for call in mock_request.await_args_list] == [
@@ -76,7 +76,7 @@ async def test_tree_requests_encode_reference_once(mock_request, config, ref):
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.tree.github_get")
-async def test_fetch_tree_parses_entries(mock_get, config):
+async def test_fetch_tree_parses_entries(mock_get, account):
     mock_get.return_value = {
         "truncated": False,
         "tree": [
@@ -84,7 +84,7 @@ async def test_fetch_tree_parses_entries(mock_get, config):
             {"path": "src/main.py", "type": "blob", "sha": "bbb", "size": 120},
         ],
     }
-    tree, truncated, _ = await fetch_tree(config, "acme", "proj", "main")
+    tree, truncated, _ = await fetch_tree(account, "acme", "proj", "main")
     assert "src" in tree
     assert "src/main.py" in tree
     assert tree["src"] == TreeEntry(
@@ -97,7 +97,7 @@ async def test_fetch_tree_parses_entries(mock_get, config):
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.tree.github_get")
-async def test_fetch_tree_excludes_submodule_gitlinks(mock_get, config):
+async def test_fetch_tree_excludes_submodule_gitlinks(mock_get, account):
     mock_get.return_value = {
         "truncated": False,
         "tree": [
@@ -110,14 +110,14 @@ async def test_fetch_tree_excludes_submodule_gitlinks(mock_get, config):
             {"path": "main.py", "type": "blob", "sha": "bbb", "size": 7},
         ],
     }
-    tree, _, _ = await fetch_tree(config, "acme", "proj", "main")
+    tree, _, _ = await fetch_tree(account, "acme", "proj", "main")
     assert "extern" not in tree
     assert list(tree) == ["main.py"]
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.tree.github_get")
-async def test_fetch_dir_tree_excludes_submodule_gitlinks(mock_get, config):
+async def test_fetch_dir_tree_excludes_submodule_gitlinks(mock_get, account):
     mock_get.return_value = {
         "tree": [
             {
@@ -129,30 +129,28 @@ async def test_fetch_dir_tree_excludes_submodule_gitlinks(mock_get, config):
             {"path": "main.py", "type": "blob", "sha": "bbb", "size": 7},
         ]
     }
-    entries = await fetch_dir_tree(config, "acme", "proj", "sha1")
+    entries = await fetch_dir_tree(account, "acme", "proj", "sha1")
     assert [e.path for e in entries] == ["main.py"]
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.tree.github_get")
-async def test_fetch_tree_truncation_warning(mock_get, config, caplog):
+async def test_fetch_tree_truncation_warning(mock_get, account, caplog):
     mock_get.return_value = {"truncated": True, "tree": []}
     with caplog.at_level(logging.WARNING):
-        await fetch_tree(config, "acme", "proj", "main")
+        await fetch_tree(account, "acme", "proj", "main")
     assert "truncated" in caplog.text
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.tree.github_get")
-async def test_fetch_tree_passes_params(mock_get, config):
+async def test_fetch_tree_passes_params(mock_get, account):
     mock_get.return_value = {"tree": []}
-    await fetch_tree(config, "acme", "proj", "v1")
+    await fetch_tree(account, "acme", "proj", "v1")
     mock_get.assert_awaited_once_with(
-        config.token,
+        account,
         "/repos/{owner}/{repo}/git/trees/{ref}",
         params={"recursive": "1"},
-        base_url=None,
-        session=None,
         owner="acme",
         repo="proj",
         ref="v1",
@@ -169,24 +167,24 @@ def _tree_payload() -> dict:
     }
 
 
-def _accessor(config):
+def _accessor(account):
     tree = {
         "data": TreeEntry(path="data", type="tree", sha="t1", size=None),
         "data/keep.txt": TreeEntry(
             path="data/keep.txt", type="blob", sha="b1", size=4
         ),
     }
-    return GitHubAccessor(config, "acme", "proj", "main", "main", tree=tree)
+    return GitHubAccessor(account, "acme", "proj", "main", "main", tree=tree)
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.tree.github_get")
-async def test_a_listing_refetches_the_build_tree(mock_get, config):
+async def test_a_listing_refetches_the_build_tree(mock_get, account):
     # The build tree is only true at build time: a mount's first listing
     # can come long after it, so reusing it would answer a repository
     # several external writes ago.
     mock_get.return_value = _tree_payload()
-    accessor = _accessor(config)
+    accessor = _accessor(account)
     listing = await readdir(accessor, _root("/gh"))
     mock_get.assert_awaited_once()
     assert [row.name for row in listing.seeds["data"]] == ["keep.txt"]
@@ -218,7 +216,7 @@ def test_tree_rows_give_an_empty_repo_a_root_listing():
 @patch("mirage.core.github.repo.github_get")
 @patch("mirage.core.github.tree.github_get")
 async def test_an_unpinned_mount_reads_the_repos_default_branch(
-    mock_tree_get, mock_repo_get, config
+    mock_tree_get, mock_repo_get, account
 ):
     """An unresolved ref must be settled before the tree is fetched.
 
@@ -230,7 +228,7 @@ async def test_an_unpinned_mount_reads_the_repos_default_branch(
     """
     mock_repo_get.return_value = {"default_branch": "master"}
     mock_tree_get.return_value = {"truncated": False, "tree": []}
-    accessor = GitHubAccessor(config, "acme", "proj")
+    accessor = GitHubAccessor(account, "acme", "proj")
     await ensure_tree(accessor)
     assert mock_tree_get.await_args.kwargs["ref"] == "master"
 
@@ -239,10 +237,10 @@ async def test_an_unpinned_mount_reads_the_repos_default_branch(
 @patch("mirage.core.github.repo.github_get")
 @patch("mirage.core.github.tree.github_get")
 async def test_a_pinned_mount_reads_its_ref_and_never_asks_for_the_branch(
-    mock_tree_get, mock_repo_get, config
+    mock_tree_get, mock_repo_get, account
 ):
     mock_tree_get.return_value = {"truncated": False, "tree": []}
-    accessor = GitHubAccessor(config, "acme", "proj", "release-2")
+    accessor = GitHubAccessor(account, "acme", "proj", "release-2")
     await ensure_tree(accessor)
     assert mock_tree_get.await_args.kwargs["ref"] == "release-2"
     mock_repo_get.assert_not_awaited()
@@ -250,7 +248,7 @@ async def test_a_pinned_mount_reads_its_ref_and_never_asks_for_the_branch(
 
 def _served_accessor(gh: FakeGitHub, ref: str = "main") -> GitHubAccessor:
     return GitHubAccessor(
-        GitHubConfig(token="t", base_url=gh.url), "o", "r", ref
+        GitHubAccount(GhConfig(token="t", base_url=gh.url)), "o", "r", ref
     )
 
 
@@ -301,7 +299,7 @@ async def test_a_root_child_asks_for_the_ref_itself():
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.tree.github_get")
-async def test_a_directory_page_carries_truncation(mock_get, config):
+async def test_a_directory_page_carries_truncation(mock_get, account):
     mock_get.return_value = {
         "truncated": True,
         "tree": [
@@ -309,25 +307,25 @@ async def test_a_directory_page_carries_truncation(mock_get, config):
             {"path": "vendor", "type": "commit", "sha": "c"},
         ],
     }
-    entries, truncated = await fetch_dir_page(config, "o", "r", "sha")
+    entries, truncated = await fetch_dir_page(account, "o", "r", "sha")
     assert truncated is True
     # A gitlink has no blob and no size; the page drops it like the tree.
     assert [e.path for e in entries] == ["a.py"]
     mock_get.return_value = {**mock_get.return_value, "truncated": False}
-    assert await fetch_dir_tree(config, "o", "r", "sha") == entries
+    assert await fetch_dir_tree(account, "o", "r", "sha") == entries
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.tree.github_get")
-async def test_a_directory_page_without_a_tree_is_refused(mock_get, config):
+async def test_a_directory_page_without_a_tree_is_refused(mock_get, account):
     mock_get.return_value = {"message": "something else"}
     with pytest.raises(GitHubApiError, match="carries no tree"):
-        await fetch_dir_page(config, "o", "r", "sha")
+        await fetch_dir_page(account, "o", "r", "sha")
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.tree.github_get")
-async def test_a_directory_tree_github_cut_short_is_refused(mock_get, config):
+async def test_a_directory_tree_github_cut_short_is_refused(mock_get, account):
     # The fallback walk caches what it gets as the whole directory; a name
     # past GitHub's cut would read as absent, and a fresh probe as gone.
     mock_get.return_value = {
@@ -335,7 +333,7 @@ async def test_a_directory_tree_github_cut_short_is_refused(mock_get, config):
         "tree": [{"path": "a.py", "type": "blob", "sha": "a", "size": 1}],
     }
     with pytest.raises(GitHubApiError, match="truncated the tree listing"):
-        await fetch_dir_tree(config, "o", "r", "sha")
+        await fetch_dir_tree(account, "o", "r", "sha")
 
 
 @pytest.mark.asyncio

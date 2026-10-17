@@ -58,7 +58,7 @@ async def filtered_workspaces(
     Args:
         accessor (TrelloAccessor): The mount's accessor.
     """
-    workspaces = await list_workspaces(accessor.config, session=accessor.pool)
+    workspaces = await list_workspaces(accessor)
     if accessor.config.workspace_id:
         workspaces = [
             w
@@ -78,9 +78,7 @@ async def filtered_boards(
         accessor (TrelloAccessor): The mount's accessor.
         workspace_id (str): The workspace whose boards to list.
     """
-    boards = await list_workspace_boards(
-        accessor.config, workspace_id, session=accessor.pool
-    )
+    boards = await list_workspace_boards(accessor, workspace_id)
     if accessor.config.board_ids:
         boards = [
             b for b in boards if b.get("id") in accessor.config.board_ids
@@ -118,7 +116,7 @@ async def board_in_scope(accessor: TrelloAccessor, board_id: str) -> bool:
         return False
     if not config.workspace_id:
         return True
-    board = await get_board(config, board_id, session=accessor.pool)
+    board = await get_board(accessor, board_id)
     return board.get("idOrganization") == config.workspace_id
 
 
@@ -209,9 +207,7 @@ async def _list_board(
 async def _list_members(
     accessor: TrelloAccessor, match: ScopeMatch, entry: FileStat
 ) -> list[FileStat]:
-    members = await list_board_members(
-        accessor.config, match.slots["board_id"], session=accessor.pool
-    )
+    members = await list_board_members(accessor, match.slots["board_id"])
     return [
         MEMBER(
             member_filename(member),
@@ -225,9 +221,7 @@ async def _list_members(
 async def _list_labels(
     accessor: TrelloAccessor, match: ScopeMatch, entry: FileStat
 ) -> list[FileStat]:
-    labels = await list_board_labels(
-        accessor.config, match.slots["board_id"], session=accessor.pool
-    )
+    labels = await list_board_labels(accessor, match.slots["board_id"])
     return [
         LABEL(
             label_filename(label),
@@ -241,9 +235,7 @@ async def _list_labels(
 async def _list_lists(
     accessor: TrelloAccessor, match: ScopeMatch, entry: FileStat
 ) -> list[FileStat]:
-    lists = await list_board_lists(
-        accessor.config, match.slots["board_id"], session=accessor.pool
-    )
+    lists = await list_board_lists(accessor, match.slots["board_id"])
     # list.json's normalizer only uses fields the list listing already
     # carries, so its exact size is free here.
     return [
@@ -272,9 +264,7 @@ async def _list_list(
 async def _list_cards(
     accessor: TrelloAccessor, match: ScopeMatch, entry: FileStat
 ) -> list[FileStat]:
-    cards = await list_list_cards(
-        accessor.config, match.slots["list_id"], session=accessor.pool
-    )
+    cards = await list_list_cards(accessor, match.slots["list_id"])
     rows = []
     for card in cards:
         # card.json's normalizer only uses fields the card listing already

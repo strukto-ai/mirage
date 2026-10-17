@@ -16,6 +16,7 @@ import json
 
 import pytest
 
+from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.cli.builtin.discord import (
     delete,
     edit,
@@ -32,7 +33,7 @@ from mirage.commands.config import Context
 from mirage.core.discord.config import DiscordConfig
 from mirage.io.types import materialize
 
-CONFIG = DiscordConfig(token="bot-token")
+ACCESSOR = DiscordAccessor(DiscordConfig(token="bot-token"))
 
 
 async def _json(out):
@@ -43,61 +44,61 @@ async def _json(out):
 async def test_send_forwards_reply_to(monkeypatch):
     calls = []
 
-    async def fake_send(config, channel, text, reply_to):
-        calls.append((channel, text, reply_to))
+    async def fake_send(accessor, channel, text, reply_to):
+        calls.append((accessor, channel, text, reply_to))
         return {"id": "M1"}
 
     monkeypatch.setitem(send.__globals__, "send_message", fake_send)
     await send(
-        CONFIG,
+        ACCESSOR,
         [],
         [],
         Context(flags={"channel": "C1", "text": "hi", "reply_to": "M0"}),
     )
-    assert calls == [("C1", "hi", "M0")]
+    assert calls == [(ACCESSOR, "C1", "hi", "M0")]
 
 
 @pytest.mark.asyncio
 async def test_read_defaults_limit(monkeypatch):
-    async def fake_fetch(config, channel, limit):
+    async def fake_fetch(accessor, channel, limit):
         return [{"id": "1", "content": f"{channel}:{limit}"}]
 
     monkeypatch.setitem(read.__globals__, "fetch_recent_messages", fake_fetch)
-    out, _io = await read(CONFIG, [], [], Context(flags={"channel": "C1"}))
+    out, _io = await read(ACCESSOR, [], [], Context(flags={"channel": "C1"}))
     assert await _json(out) == [{"id": "1", "content": "C1:20"}]
 
 
 @pytest.mark.asyncio
 async def test_edit_and_delete(monkeypatch):
-    async def fake_edit(config, channel, message, text):
+    async def fake_edit(accessor, channel, message, text):
         return {"id": message, "content": text}
 
-    async def fake_delete(config, channel, message):
+    async def fake_delete(accessor, channel, message):
         return None
 
     monkeypatch.setitem(edit.__globals__, "edit_message", fake_edit)
     monkeypatch.setitem(delete.__globals__, "delete_message", fake_delete)
     out, _io = await edit(
-        CONFIG,
+        ACCESSOR,
         [],
         [],
         Context(flags={"channel": "C1", "message": "M1", "text": "new"}),
     )
     assert (await _json(out))["content"] == "new"
     out, _io = await delete(
-        CONFIG, [], [], Context(flags={"channel": "C1", "message": "M1"})
+        ACCESSOR, [], [], Context(flags={"channel": "C1", "message": "M1"})
     )
     assert (await _json(out))["ok"] is True
 
 
 @pytest.mark.asyncio
 async def test_react_returns_ok(monkeypatch):
-    async def fake_react(config, channel, message, emoji):
+    async def fake_react(accessor, channel, message, emoji):
         return None
 
     monkeypatch.setitem(react.__globals__, "add_reaction", fake_react)
     out, _io = await react(
-        CONFIG,
+        ACCESSOR,
         [],
         [],
         Context(flags={"channel": "C1", "message": "M1", "emoji": "x"}),
@@ -109,13 +110,13 @@ async def test_react_returns_ok(monkeypatch):
 async def test_search_forwards_channel_filter(monkeypatch):
     calls = []
 
-    async def fake_search(config, guild, query, channel_id=None):
+    async def fake_search(accessor, guild, query, channel_id=None):
         calls.append((guild, query, channel_id))
         return [{"id": "M1"}]
 
     monkeypatch.setitem(search.__globals__, "search_guild", fake_search)
     out, _io = await search(
-        CONFIG,
+        ACCESSOR,
         [],
         [],
         Context(flags={"guild": "G1", "query": "q", "channel": "C1"}),
@@ -126,11 +127,11 @@ async def test_search_forwards_channel_filter(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_thread_create_and_poll(monkeypatch):
-    async def fake_thread(config, channel, name, message_id=None):
+    async def fake_thread(accessor, channel, name, message_id=None):
         return {"id": "T1", "name": name, "from": message_id}
 
     async def fake_poll(
-        config, channel, question, answers, duration_hours, multiselect
+        accessor, channel, question, answers, duration_hours, multiselect
     ):
         return {"id": "M9", "answers": answers, "hours": duration_hours}
 
@@ -139,14 +140,14 @@ async def test_thread_create_and_poll(monkeypatch):
     )
     monkeypatch.setitem(poll.__globals__, "send_poll", fake_poll)
     out, _io = await thread_create(
-        CONFIG,
+        ACCESSOR,
         [],
         [],
         Context(flags={"channel": "C1", "name": "topic", "message": "M1"}),
     )
     assert (await _json(out))["from"] == "M1"
     out, _io = await poll(
-        CONFIG,
+        ACCESSOR,
         [],
         [],
         Context(
@@ -164,25 +165,25 @@ async def test_thread_create_and_poll(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_members_and_server_info(monkeypatch):
-    async def fake_list(config, guild):
+    async def fake_list(accessor, guild):
         return [{"user": {"id": "U1"}}]
 
-    async def fake_search(config, guild, query):
+    async def fake_search(accessor, guild, query):
         return [{"user": {"id": "U2"}}]
 
-    async def fake_get(config, endpoint):
+    async def fake_get(accessor, endpoint):
         return {"id": endpoint.rsplit("/", 1)[-1]}
 
     monkeypatch.setitem(members.__globals__, "list_members", fake_list)
     monkeypatch.setitem(members.__globals__, "search_members", fake_search)
     monkeypatch.setitem(server_info.__globals__, "discord_get", fake_get)
-    out, _io = await members(CONFIG, [], [], Context(flags={"guild": "G1"}))
+    out, _io = await members(ACCESSOR, [], [], Context(flags={"guild": "G1"}))
     assert await _json(out) == [{"user": {"id": "U1"}}]
     out, _io = await members(
-        CONFIG, [], [], Context(flags={"guild": "G1", "query": "al"})
+        ACCESSOR, [], [], Context(flags={"guild": "G1", "query": "al"})
     )
     assert await _json(out) == [{"user": {"id": "U2"}}]
     out, _io = await server_info(
-        CONFIG, [], [], Context(flags={"guild": "G1"})
+        ACCESSOR, [], [], Context(flags={"guild": "G1"})
     )
     assert (await _json(out))["id"] == "G1"

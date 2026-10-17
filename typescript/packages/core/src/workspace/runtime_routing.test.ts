@@ -13,20 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import type { Context } from '../commands/config.ts'
 import { Runtime } from '../runtime/base.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
 import { WorkspaceRuntime } from '../runtime/workspace.ts'
 import { isLineExecutor, LINE_EXECUTOR, type LineExecutor } from '../runtime/mixin.ts'
 import { runtimeForLanguage } from '../runtime/routing/index.ts'
 import { SCRIPT_EVAL_TIMEOUT } from '../runtime/constants.ts'
-import type { RunArgs, RunResult } from '../runtime/types.ts'
+import type { RunResult } from '../runtime/types.ts'
 import { MontyRuntime } from '../runtime/python/monty/index.ts'
 import { QuickJsRuntime } from '../runtime/js/quickjs/runtime.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Channel, JobConsole } from '../shell/console/index.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { MountMode } from '../types.ts'
+import { MountMode, type PathSpec } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
 import type { WorkspaceOptions } from './workspace/types.ts'
 import type { Policy } from '../policy/base.ts'
@@ -41,7 +42,7 @@ class NamedFakeRuntime extends LanguageRuntime {
   constructor(readonly name: string) {
     super({ captures: ['python3', 'python'] })
   }
-  run(_args: RunArgs): Promise<RunResult> {
+  interpret(): Promise<RunResult> {
     return Promise.resolve({
       stdout: ENC.encode(`ran-${this.name}\n`),
       stderr: new Uint8Array(),
@@ -594,13 +595,9 @@ class LineBox extends Runtime implements LineExecutor {
     super({ captures: ['nvidia-smi'] })
   }
 
-  runLine(
-    line: string,
-    stdin: Uint8Array | null,
-    _env: Record<string, string>,
-    cwd: string,
-  ): Promise<RunResult> {
-    this.lines.push([line, stdin, cwd])
+  runLine(_e: unknown, _p: PathSpec[], _t: string[], ctx: Context): Promise<RunResult> {
+    const line = ctx.flags.c as string
+    this.lines.push([line, ctx.stdin as Uint8Array | null, ctx.cwd.virtual])
     return Promise.resolve({ stdout: ENC.encode(`box:${line}`), stderr: null, exitCode: 0 })
   }
 }

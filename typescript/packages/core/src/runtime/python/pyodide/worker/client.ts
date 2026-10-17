@@ -17,9 +17,12 @@ import { watchMemory } from '../watchdog.ts'
 import { memoryLimit } from '../../../config.ts'
 import { classify } from '../../../../errors/classify.ts'
 import { CommandTimeoutError } from '../../../../errors/types.ts'
-import type { BridgeDispatchFn, RunResult } from '../../../types.ts'
-import type { RuntimeContext } from '../../../binding.ts'
-import { RuntimeFiles } from '../../../files.ts'
+import type { Context } from '../../../../commands/config.ts'
+import { captureSessionContext } from '../../../../context/session_context.ts'
+import { captureExecutionContext } from '../../../../execution/context.ts'
+import { ContextScope } from '../../../../utils/context_scope.ts'
+import type { RunResult } from '../../../types.ts'
+import type { RuntimeFiles } from '../../../files.ts'
 import { applyMutation } from '../fs/journal.ts'
 import type { FlushFailure } from '../fs/types.ts'
 import { failureText } from './failure.ts'
@@ -156,16 +159,22 @@ export class PyodideWorkerClient {
     }
   }
 
-  async execute(
-    request: ExecuteRequest,
-    context: RuntimeContext,
-    signal?: AbortSignal,
-  ): Promise<RunResult> {
+  /**
+   * Run one request on the worker, answering its file and process calls
+   * until it reports.
+   *
+   * @param request the program and what of the run's context it reads.
+   * @param ctx the run's context: its processes, and the signal that
+   *   interrupts the guest.
+   * @param files the run's file adapter, which answers the guest's calls.
+   */
+  async execute(request: ExecuteRequest, ctx: Context, files: RuntimeFiles): Promise<RunResult> {
     if (this.failure !== null) throw this.failure
-    const files = RuntimeFiles.of(context)
-    const { dispatch, scope } = context
+    const signal = ctx.signal
+    // The run's context, replayed for each call the guest makes.
+    const scope = new ContextScope([...captureSessionContext(), captureExecutionContext()])
     const responses = new Set<Promise<void>>()
-    const processes = new GuestProcessTable(context)
+    const processes = new GuestProcessTable(ctx, files)
     const cap = request.config.maxMemory ?? null
     const limit = memoryLimit(cap)
     const unwatch =
@@ -194,7 +203,7 @@ export class PyodideWorkerClient {
         }
         if (message.kind === 'vfs') {
           const response = respond(message.buffer, () =>
-            scope.run(() => this.operation(message, files, dispatch, processes)),
+            scope.run(() => this.operation(message, files, processes)),
           )
           responses.add(response)
           void response.then(() => {
@@ -254,7 +263,6 @@ export class PyodideWorkerClient {
   private async operation(
     request: VfsRequest,
     files: RuntimeFiles,
-    dispatch: BridgeDispatchFn,
     processes: GuestProcessTable,
   ): Promise<unknown> {
     switch (request.op) {
@@ -270,7 +278,7 @@ export class PyodideWorkerClient {
         return files.readlink(request.path)
       case 'dispatch': {
         if (request.args === undefined) throw new Error('missing bridge arguments')
-        return dispatch(...request.args)
+        return files.bridge(...request.args)
       }
       case 'flush': {
         const mutations = request.mutations ?? []

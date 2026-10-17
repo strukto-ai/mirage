@@ -19,6 +19,7 @@ from dataclasses import dataclass, replace
 from dulwich.objects import Blob, Commit, ObjectID, ShaFile, Tag, Tree
 from dulwich.repo import BaseRepo
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.constants import (
     HEAD,
     TERMINATED_KINDS,
@@ -258,7 +259,7 @@ def _render(
 
 
 async def show(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Show each object a line names, in order.
 
@@ -272,7 +273,7 @@ async def show(
     name.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context; git reads its repository
@@ -346,7 +347,7 @@ def _diff_tree(
 
 
 async def diff_tree(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Compare a commit with its parents.
 
@@ -354,7 +355,7 @@ async def diff_tree(
     resolved; they limit every block to the paths they name.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context.

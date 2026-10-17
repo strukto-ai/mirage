@@ -40,7 +40,7 @@ async def _create_root(accessor: OneDriveAccessor, root: str) -> None:
         level = f"{parent}/{name}" if parent else name
         try:
             await create_child_folder(
-                accessor.config,
+                accessor,
                 full_item_url(accessor.config, parent, action="/children"),
                 name,
                 FolderTarget(
@@ -48,7 +48,6 @@ async def _create_root(accessor: OneDriveAccessor, root: str) -> None:
                     parent=full_item_url(accessor.config, parent),
                     virtual=root,
                 ),
-                session=accessor.pool,
             )
         except FileExistsError as exc:
             raise enotdir(root) from exc
@@ -67,7 +66,7 @@ async def _create_dir(
 
     async def create() -> None:
         await create_child_folder(
-            config,
+            accessor,
             item_url(config, parent, action="/children"),
             posixpath.basename(path),
             FolderTarget(
@@ -75,7 +74,6 @@ async def _create_dir(
                 parent=item_url(config, parent),
                 virtual=virtual,
             ),
-            session=accessor.pool,
             exist_ok=exist_ok,
         )
 

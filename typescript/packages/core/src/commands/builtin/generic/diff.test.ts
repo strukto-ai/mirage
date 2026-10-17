@@ -18,6 +18,9 @@ import { describe, expect, it } from 'vitest'
 import { cEscape, diffGeneric, switchWords } from './diff.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
+import { Files } from '../../../workspace/files.ts'
+import { IOResult } from '../../../io/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -28,6 +31,15 @@ function operand(raw: string, virtual: string): PathSpec {
 const DASH = operand('-', '/d/-')
 const DEV_STDIN = new PathSpec({ virtual: '/dev/stdin', directory: '/dev', vfsPath: 'stdin' })
 const DIRS: Record<string, string[]> = { '/d/sub': ['x'], '/d/sub2': ['x', 'y'] }
+
+function statFiles(modified: string): Files {
+  const dispatch: DispatchFn = (op, path) => {
+    if (op !== 'stat') return Promise.reject(new Error(`unexpected ${op}`))
+    const stat = new FileStat({ name: path.virtual, type: FileType.FILE, modified })
+    return Promise.resolve([stat, new IOResult()])
+  }
+  return new Files(dispatch, null, null, () => null, { ledger: false })
+}
 
 function readdir(p: PathSpec): Promise<string[]> {
   return Promise.resolve(DIRS[p.virtual] ?? [])
@@ -81,11 +93,8 @@ describe('diff headers', () => {
       Promise.resolve(
         new FileStat({ name: p.virtual, type: FileType.FILE, modified: '2026-10-05T00:00:00Z' }),
       )
-    const statPath = (virtual: string): Promise<FileStat | null> =>
-      Promise.resolve(
-        new FileStat({ name: virtual, type: FileType.FILE, modified: '2021-06-15T12:00:00Z' }),
-      )
-    const ctx = { flags: { u: true }, stdin: new Uint8Array(), statPath } as unknown as Context
+    const vfs = statFiles('2021-06-15T12:00:00Z')
+    const ctx = { flags: { u: true }, stdin: new Uint8Array(), vfs } as unknown as Context
     const [out] = await diffGeneric(
       [operand('a', '/d/a'), operand('b', '/d/b')],
       ctx,
@@ -107,18 +116,10 @@ describe('diff headers', () => {
       p.virtual === '/d/gone'
         ? Promise.reject(Object.assign(new Error(p.virtual), { code: 'ENOENT' }))
         : Promise.resolve(new FileStat({ name: p.virtual, type: FileType.FILE }))
-    const statPath = (virtual: string): Promise<FileStat | null> =>
-      Promise.resolve(
-        new FileStat({
-          name: virtual,
-          type: FileType.FILE,
-          modified: '2026-03-04T05:06:07.123456789Z',
-        }),
-      )
     const ctx = {
       flags: { u: true, new_file: true },
       stdin: new Uint8Array(),
-      statPath,
+      vfs: statFiles('2026-03-04T05:06:07.123456789Z'),
       env: { TZ: 'Asia/Hong_Kong' },
     } as unknown as Context
     const [out] = await diffGeneric(

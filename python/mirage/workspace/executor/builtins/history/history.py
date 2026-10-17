@@ -22,6 +22,7 @@ from mirage.vfs.history import HISTORY_PREFIX
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session.session import SessionState
+from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode
 
 # bash 5.2.21's own string, letters in ITS order (`history -anrw`, not
@@ -133,7 +134,7 @@ async def handle_history(
         flags,
         Context(
             cwd=PathSpec.from_str_path(session.cwd),
-            session_id=session.session_id,
+            session=session_view(session, registry.policies),
         ),
     )
     # The view command always returns byte stderr, but io.stderr is typed

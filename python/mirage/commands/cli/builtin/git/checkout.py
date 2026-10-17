@@ -22,6 +22,7 @@ from dulwich.objects import Commit, ObjectID
 from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 
+from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.branch import (
     branch_upstream,
     head_commit,
@@ -804,7 +805,7 @@ async def _checkout_paths(
 
 
 async def checkout(
-    config: None, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     """Switch the working tree to another branch or commit, or put
     paths back.
@@ -816,7 +817,7 @@ async def checkout(
     names, are put back instead; see ``_checkout_paths``.
 
     Args:
-        config (None): git declares no config_model.
+        accessor (Accessor): git reaches no service.
         paths (list[PathSpec]): the path operands; git declares none.
         texts (list[str]): the operands.
         ctx (Context): the line's context; git reads its repository

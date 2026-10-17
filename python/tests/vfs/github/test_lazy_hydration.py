@@ -32,7 +32,7 @@ TREE = {
 }
 
 
-async def _blob_stream(config, owner, repo, blob_sha, session=None):
+async def _blob_stream(config, owner, repo, blob_sha):
     yield blob_sha.encode()
 
 
@@ -40,7 +40,7 @@ async def _blob_stream(config, owner, repo, blob_sha, session=None):
 def tree_calls(monkeypatch):
     calls = []
 
-    async def _fetch_tree(config, owner, repo, ref, session=None):
+    async def _fetch_tree(config, owner, repo, ref):
         calls.append((owner, repo, ref))
         return dict(TREE), False, None
 
@@ -52,7 +52,7 @@ def tree_calls(monkeypatch):
 def dir_calls(monkeypatch):
     calls = []
 
-    async def _fetch_dir_page(config, owner, repo, tree_sha, session=None):
+    async def _fetch_dir_page(config, owner, repo, tree_sha):
         calls.append(tree_sha)
         at = tree_sha.partition(":")[2]
         prefix = at + "/" if at else ""
@@ -93,7 +93,7 @@ async def test_first_readdir_costs_one_tree_fetch(tree_calls):
 async def test_an_empty_repo_hydrates_once(tree_calls, monkeypatch):
     # Hydration was tracked by whether the tree held anything, so an
     # empty repository read as "never hydrated" and refetched forever.
-    async def _empty(config, owner, repo, ref, session=None):
+    async def _empty(config, owner, repo, ref):
         tree_calls.append((owner, repo, ref))
         return {}, False, None
 
@@ -117,7 +117,7 @@ async def test_a_tree_passed_to_the_constructor_counts_as_hydrated(tree_calls):
 
 @pytest.fixture
 def default_branch(monkeypatch):
-    async def _fetch(config, owner, repo, session=None):
+    async def _fetch(config, owner, repo):
         return "master"
 
     monkeypatch.setattr("mirage.core.github.repo.fetch_default_branch", _fetch)
@@ -193,7 +193,7 @@ async def test_always_reads_current_github_blob_after_probe(
     async def fetch_dir_page(*args, **kwargs):
         return [TreeEntry(path="f.txt", type="blob", sha=sha, size=2)], False
 
-    async def read_bytes(config, owner, repo, blob_sha, session=None):
+    async def read_bytes(config, owner, repo, blob_sha):
         return blob_sha.encode()
 
     monkeypatch.setattr("mirage.core.github.tree.fetch_tree", fetch_tree)

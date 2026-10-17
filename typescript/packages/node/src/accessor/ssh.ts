@@ -216,7 +216,7 @@ export class SSHAccessor extends Accessor {
     }
   }
 
-  close(): Promise<void> {
+  override close(): Promise<void> {
     if (this.client !== null) {
       this.client.end()
       this.client = null

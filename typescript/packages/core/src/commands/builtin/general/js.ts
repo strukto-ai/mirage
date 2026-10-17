@@ -16,9 +16,11 @@ import type { Accessor } from '../../../accessor/base.ts'
 import type { PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
+import { scriptOperand } from '../../../runtime/source.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { notBound, resolveSource, runCode, runtimeVersion } from './interpreter.ts'
+import { execRefusal, notBound, runInterpreter, runtimeVersion } from './interpreter.ts'
 
 async function js(
   _accessor: Accessor,
@@ -26,17 +28,23 @@ async function js(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const label = ctx.command ?? 'js'
-  if (!(ctx.runtime instanceof LanguageRuntime)) return notBound(label)
+  const named = ctx.spec?.name ?? ''
+  const label = named === '' ? 'js' : named
+  const runtime = ctx.runtime?.bound
+  if (!(runtime instanceof LanguageRuntime)) return notBound(label)
   const fl = new FlagView(ctx.flags, specOf('js'))
   if (fl.asBool('version')) {
-    return runtimeVersion(label, ctx.runtime, ctx.env ?? {}, ctx.signal, ctx.timeoutSeconds)
+    return runtimeVersion(label, runtime, ctx.env ?? {}, ctx.signal, ctx.timeoutSeconds)
   }
-  const prepared = await resolveSource(label, paths, texts, fl.asStr('e') ?? null, ctx)
-  if (Array.isArray(prepared) || prepared === null) return prepared
+  const switches: Record<string, FlagValue> = {}
+  const payload = fl.asStr('e')
+  if (payload !== undefined) switches.c = payload
+  const script = scriptOperand(paths, texts, switches, ctx.cwd)
+  const refusal = execRefusal(label, script, ctx.runtime)
+  if (refusal !== null) return refusal
   // A .mjs script is a module whatever the flag said.
-  const module = fl.asBool('module') || (prepared.scriptPath?.virtual.endsWith('.mjs') ?? false)
-  return runCode(label, prepared, ctx.runtime, { module }, ctx)
+  switches.module = fl.asBool('module') || (script?.virtual.endsWith('.mjs') ?? false)
+  return runInterpreter(label, runtime, paths, texts, { ...ctx, flags: switches }, script)
 }
 
 export const GENERAL_JS = command({

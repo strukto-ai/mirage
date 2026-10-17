@@ -12,28 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { LinearAccessor } from '../../../../../accessor/linear.ts'
 import { issueUpdate } from '../../../../../core/linear/client.ts'
 import { normalizeIssue, toJsonBytes } from '../../../../../core/linear/normalize.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { firstText, linearTransport, resolveIssue, textOrStdin } from '../util.ts'
+import { firstText, resolveIssue, textOrStdin } from '../util.ts'
 
 export async function update(
-  config: unknown,
+  accessor: LinearAccessor,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const transport = linearTransport(config)
-  const issueId = await resolveIssue(transport, firstText(texts, 'issue key'))
+  const issueId = await resolveIssue(accessor, firstText(texts, 'issue key'))
   let description: string | null = null
   if (fl.asStr('description') !== undefined || ctx.stdin !== null) {
     description = await textOrStdin(fl.asStr('description'), ctx.stdin, 'description is required')
   }
-  const issue = await issueUpdate(transport, {
+  const issue = await issueUpdate(accessor.transport, {
     issueId,
     title: fl.asStr('title') ?? null,
     description,

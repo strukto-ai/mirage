@@ -12,19 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { NotionConfig } from '../../../../../core/notion/config.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
+import { notionConfig, type NtnAccessor } from '../util.ts'
 
 const ENC = new TextEncoder()
 
 export function token(
-  config: unknown,
+  accessor: NtnAccessor,
   _paths: PathSpec[],
   _texts: string[],
-  _ctx: Context,
+  ctx: Context,
 ): CommandFnResult {
-  const cfg = config as NotionConfig
-  return [ENC.encode(`${cfg.apiKey}\n`), new IOResult()]
+  return [ENC.encode(`${notionConfig(accessor, ctx.flags).apiKey}\n`), new IOResult()]
 }

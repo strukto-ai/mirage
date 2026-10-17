@@ -68,10 +68,12 @@ export class CLIRegistry {
     if (NAMESPACE_COMMANDS.has(name) || name in BUILTIN_SPECS) {
       throw new Error(`CLI name '${name}' collides with a general command`)
     }
+    const validated = this.validateConfig(name, spec, config)
     const install: CLIInstall = {
       name,
       cli: spec,
-      config: this.validateConfig(name, spec, config),
+      config: validated,
+      accessor: spec.accessor(validated),
     }
     this.installs.set(name, install)
     return install
@@ -158,12 +160,21 @@ export class CLIRegistry {
     return result
   }
 
-  /** Remove an installed CLI; its head word stops resolving (127). */
-  uninstall(name: string): void {
-    if (!this.installs.has(name)) {
+  /** Remove an installed CLI and close its accessor; its head word stops resolving (127). */
+  async uninstall(name: string): Promise<void> {
+    const install = this.installs.get(name)
+    if (install === undefined) {
       throw new Error(`CLI name '${name}' is not installed`)
     }
     this.installs.delete(name)
+    await install.accessor.close?.()
+  }
+
+  /** Close every install's accessor, as the workspace closes. */
+  async close(): Promise<void> {
+    const installs = [...this.installs.values()]
+    this.installs.clear()
+    for (const install of installs) await install.accessor.close?.()
   }
 
   /** Look up an installation by head word. */

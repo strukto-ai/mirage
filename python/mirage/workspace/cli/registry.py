@@ -89,7 +89,12 @@ class CLIRegistry:
                 f"CLI name {name!r} collides with a general command"
             )
         validated = self._validate_config(name, spec, config)
-        install = CLIInstall(name=name, cli=spec, config=validated)
+        install = CLIInstall(
+            name=name,
+            cli=spec,
+            config=validated,
+            accessor=spec.accessor(validated),
+        )
         self._installs[name] = install
         return install
 
@@ -153,15 +158,23 @@ class CLIRegistry:
             # cut, the way `build_vfs` reports its config class.
             raise ValueError(f"CLI {name!r}: {error_summary(exc)}") from None
 
-    def uninstall(self, name: str) -> None:
-        """Remove an installed CLI; its head word stops resolving (127).
+    async def uninstall(self, name: str) -> None:
+        """Remove an installed CLI and close its accessor; its head word
+        stops resolving (127).
 
         Args:
             name (str): installed head word.
         """
         if name not in self._installs:
             raise KeyError(f"CLI name {name!r} is not installed")
-        del self._installs[name]
+        await self._installs.pop(name).accessor.close()
+
+    async def close(self) -> None:
+        """Close every install's accessor, as the workspace closes."""
+        installs = list(self._installs.values())
+        self._installs.clear()
+        for install in installs:
+            await install.accessor.close()
 
     def get(self, name: str) -> CLIInstall | None:
         """Look up an installation by head word.

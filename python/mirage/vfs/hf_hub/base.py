@@ -15,7 +15,7 @@
 from collections.abc import AsyncIterator
 from typing import Any, Generic, TypeVar
 
-from mirage.accessor.hf_hub import HfHubAccessor
+from mirage.accessor.hf_hub import HfHubAccessor, account_of
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 
 # The accessor a subclass narrows to. TypeScript spells this as an abstract
@@ -75,7 +75,7 @@ class HfHubVFS(BaseVFS, Generic[A]):
     def __init__(self, config: Any) -> None:
         super().__init__()
         self.config = config
-        self.accessor = self.ACCESSOR(self.config)
+        self.accessor = self.ACCESSOR(account_of(config), config)
 
     async def readdir(self, path: PathSpec) -> DirListing:
         return await _readdir(self.accessor, path)
@@ -114,3 +114,10 @@ class HfHubVFS(BaseVFS, Generic[A]):
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)
+
+    async def close(self) -> None:
+        """Drain the account the mount built, which its handle borrows."""
+        if self.is_closed:
+            return
+        await self.accessor.account.close()
+        await super().close()

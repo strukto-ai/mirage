@@ -143,10 +143,7 @@ class OneDriveVFS(BaseVFS):
             return None
         config = self.accessor.config
         return await _files_containing(
-            config,
-            [(path, drive_loc(config, path.vfs_path))],
-            text,
-            session=self.accessor.pool,
+            self.accessor, [(path, drive_loc(config, path.vfs_path))], text
         )
 
     async def capacity(self) -> CapacityResult:

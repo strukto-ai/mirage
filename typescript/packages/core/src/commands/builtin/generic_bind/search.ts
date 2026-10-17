@@ -38,7 +38,8 @@ import { searchTerms } from '../grep_pushdown.ts'
 import { compilePattern, patternArg } from '../grep_pattern.ts'
 import type { SearchTerms } from '../types.ts'
 import { beforeFullScan } from '../utils/tree.ts'
-import { linksOf } from '../utils/links.ts'
+import { linksOf, dispatchOf } from '../utils/links.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 
 type Reads = (p: PathSpec) => AsyncIterable<Uint8Array>
 
@@ -256,7 +257,7 @@ function linked(links: LinkView | undefined, virtual: string): boolean {
 // Let each walked directory's mount refuse a walk that reads every file; the
 // dispatcher passes over a path that is not a directory.
 async function fullScan(
-  dispatch: Context['dispatch'],
+  dispatch: DispatchFn | undefined,
   dirs: PathSpec[],
   name: string,
 ): Promise<void> {
@@ -301,7 +302,7 @@ export async function searchReads<A extends Accessor>(
   }
   const walked = name === 'rg' || directoriesAction(fl) === 'recurse'
   if (files === undefined && lines === undefined) {
-    if (walked) await fullScan(ctx.dispatch, paths, name)
+    if (walked) await fullScan(dispatchOf(ctx), paths, name)
     return stream
   }
   let terms: SearchTerms | null
@@ -315,7 +316,7 @@ export async function searchReads<A extends Accessor>(
   }
   const dirs = walked ? await directories(io, accessor, paths, index) : []
   if (terms === null) {
-    await fullScan(ctx.dispatch, dirs, name)
+    await fullScan(dispatchOf(ctx), dirs, name)
     return stream
   }
   const asked = terms
@@ -340,11 +341,11 @@ export async function searchReads<A extends Accessor>(
     }
   }
   if (hits === null && lines === undefined) {
-    await fullScan(ctx.dispatch, dirs, name)
+    await fullScan(dispatchOf(ctx), dirs, name)
     return stream
   }
   if (hits !== null && asked.readsBinary) {
-    await fullScan(ctx.dispatch, dirs, name)
+    await fullScan(dispatchOf(ctx), dirs, name)
   }
   const dirNames = new Set(dirs.map((p) => p.virtual))
   const named = new Set(paths.map((p) => p.virtual).filter((v) => !dirNames.has(v)))
@@ -353,7 +354,7 @@ export async function searchReads<A extends Accessor>(
   let scan: Promise<void> | null = null
   const readUnanswered = (): Promise<void> => {
     if (found !== null) return Promise.resolve()
-    scan ??= fullScan(ctx.dispatch, dirs, name)
+    scan ??= fullScan(dispatchOf(ctx), dirs, name)
     return scan
   }
   const narrowed = async (path: PathSpec): Promise<ByteSource | null> => {

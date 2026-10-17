@@ -14,9 +14,14 @@
 
 import { Accessor } from './base.ts'
 import type { NotionTransport } from '../core/notion/client.ts'
+import type { NotionConfig } from '../core/notion/config.ts'
 
-export class NotionAccessor extends Accessor {
-  constructor(public readonly transport: NotionTransport) {
+/** The transport, plus the account config behind it; a mount over MCP has none. */
+export class NotionAccessor<T extends NotionTransport = NotionTransport> extends Accessor {
+  constructor(
+    public readonly transport: T,
+    readonly config?: NotionConfig,
+  ) {
     super()
   }
 }

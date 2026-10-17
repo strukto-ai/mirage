@@ -14,6 +14,7 @@
 
 from typing import Any, cast
 
+from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh.accessor import (
     body_value,
     camel,
@@ -38,7 +39,6 @@ from mirage.commands.cli.builtin.gh.fields import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.github.config import GhConfig
 from mirage.core.github.issue import (
     IssueListFilter,
     IssueSelections,
@@ -83,7 +83,7 @@ _STATES = {
 
 
 async def _viewed_issue(
-    config: GhConfig, ref: RepoRef, number: int, fields: list[str]
+    accessor: GitHubAccount, ref: RepoRef, number: int, fields: list[str]
 ) -> Node:
     """One issue as ``gh issue view --json`` reads it.
 
@@ -94,14 +94,14 @@ async def _viewed_issue(
     query that matches what the number turned out to be.
 
     Args:
-        config (GhConfig): the install's configuration.
+        accessor (GitHubAccount): the install's account.
         ref (RepoRef): the repository.
         number (int): the issue or pull request.
         fields (list[str]): the ``--json`` fields.
     """
     names = [*fields, "id", *(["number"] if "projectItems" in fields else [])]
     node = await issue_fields(
-        config,
+        accessor,
         ref,
         number,
         IssueSelections(
@@ -121,7 +121,7 @@ async def _viewed_issue(
             if pull
             else IssueSelections(select, "")
         )
-        return await issue_fields(config, ref, number, halves, cursor)
+        return await issue_fields(accessor, ref, number, halves, cursor)
 
     return await read_rest(ISSUE_FIELD_TABLE, node, fields, fetch)
 
@@ -163,22 +163,25 @@ def _view_text(row: dict[str, Any]) -> str:
 
 
 def _target(
-    config: GhConfig, texts: list[str], fl: FlagView
+    accessor: GitHubAccount, texts: list[str], fl: FlagView
 ) -> tuple[RepoRef, int]:
     return repo_number(
-        config, fl, texts[0] if texts else None, "issue", "issues"
+        accessor, fl, texts[0] if texts else None, "issue", "issues"
     )
 
 
 async def list_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """``gh issue list``. With ``--json`` it asks GraphQL for exactly the
     fields named, the way gh's IssueList does, so every field gh accepts is
     answered in gh's own shape; the text view reads the REST listing.
 
     Args:
-        config (GhConfig): the install's account config.
+        accessor (GitHubAccount): the install's account.
         paths (list[PathSpec]): the path operands.
         texts (list[str]): the text operands.
         ctx (Context): the parsed flags and context.
@@ -188,8 +191,8 @@ async def list_cmd(
     fields = json_fields(fl, ISSUE_FIELDS)
     if fields is not None:
         answers = await list_issue_fields(
-            config,
-            repo_for(config, fl),
+            accessor,
+            repo_for(accessor, fl),
             IssueListFilter(
                 _STATES.get(state, ("OPEN",)),
                 fl.as_nonempty("assignee"),
@@ -219,38 +222,41 @@ async def list_cmd(
     if labels:
         params["labels"] = ",".join(labels)
     values = await list_issues(
-        config, repo_for(config, fl), params, list_limit(fl, 30)
+        accessor, repo_for(accessor, fl), params, list_limit(fl, 30)
     )
     rows = [_issue(value) for value in values]
     return await typed_out(rows, fl, _list_text(rows), ISSUE_FIELDS)
 
 
 async def view_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     """``gh issue view``. With ``--json`` it reads the fields named over
     GraphQL, as gh does (see _viewed_issue); the text view reads the REST
     object, and ``-c`` its comments.
 
     Args:
-        config (GhConfig): the install's account config.
+        accessor (GitHubAccount): the install's account.
         paths (list[PathSpec]): the path operands.
         texts (list[str]): the text operands.
         ctx (Context): the parsed flags and context.
     """
     fl = FlagView(ctx.flags)
-    ref, number = _target(config, texts, fl)
+    ref, number = _target(accessor, texts, fl)
     fields = json_fields(fl, ISSUE_FIELDS)
     if fields is not None:
-        node = await _viewed_issue(config, ref, number, fields)
+        node = await _viewed_issue(accessor, ref, number, fields)
         return await typed_out(
             exported_node(ISSUE_FIELD_TABLE, node, fields),
             fl,
             "",
             ISSUE_FIELDS,
         )
-    row = _issue(await get_issue(config, ref, number))
-    comments = await comments_for(config, fl, ref, number)
+    row = _issue(await get_issue(accessor, ref, number))
+    comments = await comments_for(accessor, fl, ref, number)
     return await typed_out(
         row,
         fl,
@@ -262,7 +268,10 @@ async def view_cmd(
 
 
 async def create_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     title = fl.as_str("title")
@@ -278,7 +287,8 @@ async def create_cmd(
         body["labels"] = cast(JsonValue, labels)
     if assignees:
         body["assignees"] = cast(JsonValue, assignees)
-    created = _issue(await create_issue(config, repo_for(config, fl), body))
+    ref = repo_for(accessor, fl)
+    created = _issue(await create_issue(accessor, ref, body))
     return text_out(f"{created.get('url', '')}\n")
 
 
@@ -295,10 +305,13 @@ def _names(value: Any) -> list[str]:
 
 
 async def edit_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    ref, number = _target(config, texts, fl)
+    ref, number = _target(accessor, texts, fl)
     body: dict[str, JsonValue] = {}
     if fl.as_str("title") is not None:
         body["title"] = fl.as_str("title") or ""
@@ -310,7 +323,7 @@ async def edit_cmd(
     add_assignees = csv_values(fl.as_list("add_assignee"))
     remove_assignees = set(csv_values(fl.as_list("remove_assignee")))
     if additions or removals or add_assignees or remove_assignees:
-        current = _issue(await get_issue(config, ref, number))
+        current = _issue(await get_issue(accessor, ref, number))
         if additions or removals:
             names = _names(current.get("labels"))
             body["labels"] = list(
@@ -329,16 +342,16 @@ async def edit_cmd(
             )
     if not body:
         raise ValueError("no issue fields to edit")
-    edited = _issue(await edit_issue(config, ref, number, body))
+    edited = _issue(await edit_issue(accessor, ref, number, body))
     return text_out(f"{edited.get('url', '')}\n")
 
 
 async def _state(
-    config: GhConfig, texts: list[str], ctx: Context, state: str
+    accessor: GitHubAccount, texts: list[str], ctx: Context, state: str
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    ref, number = _target(config, texts, fl)
-    edited = _issue(await edit_issue(config, ref, number, {"state": state}))
+    ref, number = _target(accessor, texts, fl)
+    edited = _issue(await edit_issue(accessor, ref, number, {"state": state}))
     verb = "Closed" if state == "closed" else "Reopened"
     return text_out(
         f"✓ {verb} issue {ref.owner}/{ref.repo}#{number} "
@@ -347,33 +360,42 @@ async def _state(
 
 
 async def close_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    return await _state(config, texts, ctx, "closed")
+    return await _state(accessor, texts, ctx, "closed")
 
 
 async def reopen_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    return await _state(config, texts, ctx, "open")
+    return await _state(accessor, texts, ctx, "open")
 
 
 async def comment_cmd(
-    config: GhConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     body = await body_value(ctx, fl, required=True)
-    ref, number = _target(config, texts, fl)
-    comment = _issue(await comment_issue(config, ref, number, body or ""))
+    ref, number = _target(accessor, texts, fl)
+    comment = _issue(await comment_issue(accessor, ref, number, body or ""))
     return text_out(f"{comment.get('url', '')}\n")
 
 
 async def comments_for(
-    config: GhConfig, fl: FlagView, ref: RepoRef, number: int
+    accessor: GitHubAccount, fl: FlagView, ref: RepoRef, number: int
 ) -> list[dict[str, Any]] | None:
     if not gh_bool(fl, "comments"):
         return None
-    rows = await issue_comments(config, ref, number)
+    rows = await issue_comments(accessor, ref, number)
     for row in rows:
         row["author"] = row.get("author") or {"login": ""}
         row["minimizedReason"] = row.get("minimizedReason") or ""

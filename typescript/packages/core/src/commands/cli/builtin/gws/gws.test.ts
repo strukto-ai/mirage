@@ -32,7 +32,7 @@ import type { GoogleConfig } from '../../../../core/google/config.ts'
 import { CLIRegistry } from '../../../../workspace/cli/registry.ts'
 import { cliSpecFor } from '../../specs.ts'
 import { fillPath, runGwsMethod } from './api.ts'
-import { GWS } from './index.ts'
+import { GWS, googleApiAccessor } from './index.ts'
 import { GWS_METHODS } from './methods.ts'
 import { context } from '../../../../workspace/fixtures/context.ts'
 
@@ -40,7 +40,7 @@ const DEC = new TextDecoder()
 
 const METHODS = new Map(GWS_METHODS.map((m) => [`${m.service}.${m.resource}.${m.method}`, m]))
 
-const CONFIG: GoogleConfig = { clientId: 'cid', refreshToken: 'rt' }
+const ACCESSOR = googleApiAccessor({ clientId: 'cid', refreshToken: 'rt' })
 
 function method(key: string) {
   const m = METHODS.get(key)
@@ -200,7 +200,7 @@ describe('gws api passthrough', () => {
     vi.mocked(client.googleGet).mockResolvedValue({ documentId: 'd1', title: 'T' })
     const result = await runGwsMethod(
       method('docs.documents.get'),
-      CONFIG,
+      ACCESSOR,
       [],
       [],
       context({ flags: { params: '{"documentId": "d1"}' } }),
@@ -219,7 +219,7 @@ describe('gws api passthrough', () => {
       .mockResolvedValueOnce({ files: [{ id: 'a' }], nextPageToken: 't1' })
       .mockResolvedValueOnce({ files: [{ id: 'b' }], nextPageToken: 't2' })
       .mockResolvedValueOnce({ files: [{ id: 'c' }] })
-    const result = await runGwsMethod(method('drive.files.list'), CONFIG, [], [], context())
+    const result = await runGwsMethod(method('drive.files.list'), ACCESSOR, [], [], context())
     if (result === null) throw new Error('expected result')
     expect(result[1].exitCode).toBe(0)
     const calls = vi.mocked(client.googleGet).mock.calls
@@ -244,7 +244,7 @@ describe('gws api passthrough', () => {
       .mockReset()
       .mockResolvedValueOnce({ files: [], nextPageToken: 't1' })
       .mockResolvedValueOnce({ files: [] })
-    const result = await runGwsMethod(method('drive.files.list'), CONFIG, [], [], context())
+    const result = await runGwsMethod(method('drive.files.list'), ACCESSOR, [], [], context())
     if (result === null) throw new Error('expected result')
     expect(DEC.decode(result[0] as Uint8Array)).toBe(
       '{"files":[],"nextPageToken":"t1"}\n{"files":[]}\n',
@@ -253,7 +253,7 @@ describe('gws api passthrough', () => {
 
   it('single-page output has no trailing newline', async () => {
     vi.mocked(client.googleGet).mockReset().mockResolvedValue({ files: [] })
-    const result = await runGwsMethod(method('drive.files.list'), CONFIG, [], [], context())
+    const result = await runGwsMethod(method('drive.files.list'), ACCESSOR, [], [], context())
     if (result === null) throw new Error('expected result')
     expect(DEC.decode(result[0] as Uint8Array)).toBe('{"files":[]}')
   })
@@ -266,7 +266,7 @@ describe('gws api passthrough', () => {
       .mockResolvedValueOnce({ files: [] })
     const result = await runGwsMethod(
       method('drive.files.list'),
-      CONFIG,
+      ACCESSOR,
       [],
       [],
       context({ flags: { page_limit: '2' } }),
@@ -285,7 +285,7 @@ describe('gws api passthrough', () => {
   it.each(['x', '-1', '1.5', '١٢', '²'])('rejects --page-limit %s', async (raw) => {
     const result = await runGwsMethod(
       method('drive.files.list'),
-      CONFIG,
+      ACCESSOR,
       [],
       [],
       context({ flags: { page_limit: raw } }),
@@ -298,7 +298,7 @@ describe('gws api passthrough', () => {
     vi.mocked(client.googleDelete).mockResolvedValue(undefined)
     const result = await runGwsMethod(
       method('drive.files.delete'),
-      CONFIG,
+      ACCESSOR,
       [],
       [],
       context({ flags: { params: '{"fileId": "f1"}' } }),
@@ -309,7 +309,7 @@ describe('gws api passthrough', () => {
   })
 
   it('files create requires a body', async () => {
-    const result = await runGwsMethod(method('drive.files.create'), CONFIG, [], [], context())
+    const result = await runGwsMethod(method('drive.files.create'), ACCESSOR, [], [], context())
     if (result === null) throw new Error('expected result')
     expect(result[1].exitCode).toBe(2)
   })
@@ -317,7 +317,7 @@ describe('gws api passthrough', () => {
   it('malformed --json is a usage error with the shared wording', async () => {
     const result = await runGwsMethod(
       method('drive.files.create'),
-      CONFIG,
+      ACCESSOR,
       [],
       [],
       context({ flags: { json: '{not json' } }),
@@ -331,7 +331,7 @@ describe('gws api passthrough', () => {
     vi.mocked(client.googlePost).mockResolvedValue({ id: 'p1' })
     const result = await runGwsMethod(
       method('drive.permissions.create'),
-      CONFIG,
+      ACCESSOR,
       [],
       [],
       context({
@@ -349,7 +349,7 @@ describe('gws api passthrough', () => {
     vi.mocked(client.googleGetBytes).mockResolvedValue(new TextEncoder().encode('%PDF-1.4'))
     const result = await runGwsMethod(
       method('drive.files.export'),
-      CONFIG,
+      ACCESSOR,
       [],
       [],
       context({ flags: { params: '{"fileId": "f1", "mimeType": "application/pdf"}' } }),
@@ -362,7 +362,7 @@ describe('gws api passthrough', () => {
 })
 
 describe('gws folder scope placement', () => {
-  const SCOPED: GoogleConfig = { clientId: 'cid', refreshToken: 'rt', folderId: 'F1' }
+  const SCOPED = googleApiAccessor({ clientId: 'cid', refreshToken: 'rt', folderId: 'F1' })
 
   it('declares shared drive support alongside an injected parent', async () => {
     vi.mocked(client.googlePost).mockReset().mockResolvedValue({ id: 'f9' })
@@ -428,7 +428,7 @@ describe('gws folder scope placement', () => {
     vi.mocked(client.googlePatch).mockReset()
     await runGwsMethod(
       method('sheets.spreadsheets.create'),
-      CONFIG,
+      ACCESSOR,
       [],
       [],
       context({ flags: { json: '{"properties": {"title": "T"}}' } }),

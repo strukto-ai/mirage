@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import copy
 import json
 
+from mirage.accessor.notion import NotionAccessor
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.notion.config import NotionConfig
 from mirage.io.types import ByteSource, materialize
 from mirage.types import JsonValue
 
@@ -219,24 +220,27 @@ def parse_json_text(text: str, flag: str) -> dict[str, JsonValue]:
     return parsed
 
 
-def notion_config(config: NotionConfig, ctx: Context) -> NotionConfig:
-    """The install's config with this line's Notion-Version applied.
+def notion_transport(accessor: NotionAccessor, ctx: Context) -> NotionAccessor:
+    """The install's accessor with this line's Notion-Version applied.
 
     ``--notion-version`` is upstream's per-invocation override of the
     header, and the executor has already filled it from
     ``NOTION_API_VERSION`` when the line omitted it, so a verb reads one
     flag and never the environment. Every verb goes through here rather
-    than passing ``config`` straight down, or the override would
-    work on whichever verbs remembered it.
+    than passing ``accessor`` straight down, or the override would work
+    on whichever verbs remembered it. The copy shares ``accessor.pool``:
+    only the header changes per line.
 
     Args:
-        config (NotionConfig): the install's config.
+        accessor (NotionAccessor): the install's accessor.
         ctx (Context): the leaf's context, carrying its flags.
 
     Returns:
-        NotionConfig: the config to hand the transport.
+        NotionAccessor: the accessor to hand the client.
     """
     version = FlagView(ctx.flags).as_str("notion_version")
     if not version:
-        return config
-    return config.model_copy(update={"api_version": version})
+        return accessor
+    line = copy.copy(accessor)
+    line.config = accessor.config.model_copy(update={"api_version": version})
+    return line

@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { HfAccountAccessor } from '../../accessor/hf_hub.ts'
 import { HfHubError, hubGet, hubPost, hubRequest, repoUrl, revSegment } from './client.ts'
-import { hfEndpoint, type HfConfig } from './config.ts'
 import { API_SEGMENTS, DEFAULT_REVISION, HTTP_CONFLICT } from './constants.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 
@@ -30,9 +30,14 @@ export function splitRepoId(repoId: string): [string | null, string] {
   return [repoId.slice(0, cut), repoId.slice(cut + 1)]
 }
 
-function repoApiUrl(config: HfConfig, repoType: string, repoId: string, suffix: string): string {
+function repoApiUrl(
+  account: HfAccountAccessor,
+  repoType: string,
+  repoId: string,
+  suffix: string,
+): string {
   const segment = API_SEGMENTS[repoType] ?? 'models'
-  return `${rstripSlash(hfEndpoint(config))}/api/${segment}/${repoId}${suffix}`
+  return `${rstripSlash(account.endpoint)}/api/${segment}/${repoId}${suffix}`
 }
 
 export interface CreateRepoOptions {
@@ -54,7 +59,7 @@ export interface CreateRepoOptions {
 
 /** Create a repository on the Hub. */
 export async function createRepo(
-  config: HfConfig,
+  account: HfAccountAccessor,
   repoId: string,
   options: CreateRepoOptions = {},
 ): Promise<Record<string, unknown>> {
@@ -69,22 +74,22 @@ export async function createRepo(
   if (options.resourceGroupId !== undefined && options.resourceGroupId !== '') {
     body.resourceGroupId = options.resourceGroupId
   }
-  const url = `${rstripSlash(hfEndpoint(config))}/api/repos/create`
+  const url = `${rstripSlash(account.endpoint)}/api/repos/create`
   let data: unknown
   try {
-    data = await hubPost(config.token, url, body)
+    data = await hubPost(account, url, body)
   } catch (err) {
     if (options.existOk !== true || !(err instanceof HfHubError) || err.status !== HTTP_CONFLICT) {
       throw err
     }
-    return { url: repoUrl(hfEndpoint(config), options.repoType ?? 'model', repoId) }
+    return { url: repoUrl(account.endpoint, options.repoType ?? 'model', repoId) }
   }
   return typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : {}
 }
 
 /** Tag a revision of a repository. */
 export async function createTag(
-  config: HfConfig,
+  account: HfAccountAccessor,
   repoId: string,
   tag: string,
   repoType = 'model',
@@ -94,23 +99,23 @@ export async function createTag(
   const body: Record<string, unknown> = { tag }
   if (message !== undefined) body.message = message
   await hubPost(
-    config.token,
-    repoApiUrl(config, repoType, repoId, `/tag/${revSegment(revision)}`),
+    account,
+    repoApiUrl(account, repoType, repoId, `/tag/${revSegment(revision)}`),
     body,
   )
 }
 
 /** Remove a tag from a repository. */
 export async function deleteTag(
-  config: HfConfig,
+  account: HfAccountAccessor,
   repoId: string,
   tag: string,
   repoType = 'model',
 ): Promise<void> {
   await hubRequest(
-    config.token,
+    account,
     'DELETE',
-    repoApiUrl(config, repoType, repoId, `/tag/${revSegment(tag)}`),
+    repoApiUrl(account, repoType, repoId, `/tag/${revSegment(tag)}`),
     null,
   )
 }
@@ -122,11 +127,11 @@ export async function deleteTag(
  * no tag listing of its own.
  */
 export async function listTags(
-  config: HfConfig,
+  account: HfAccountAccessor,
   repoId: string,
   repoType = 'model',
 ): Promise<string[]> {
-  const data = await hubGet(config.token, repoApiUrl(config, repoType, repoId, '/refs'))
+  const data = await hubGet(account, repoApiUrl(account, repoType, repoId, '/refs'))
   const rows = (data as { tags?: unknown }).tags
   const names: string[] = []
   for (const row of Array.isArray(rows) ? rows : []) {

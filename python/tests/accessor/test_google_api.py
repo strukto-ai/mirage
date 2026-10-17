@@ -12,6 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import AsyncMock
+
+import pytest
+
 from mirage.accessor.gdocs import GDocsAccessor
 from mirage.accessor.google_api import GoogleApiAccessor
 
@@ -20,3 +24,10 @@ def test_an_app_accessor_is_the_google_api_accessor():
     accessor = GDocsAccessor(config=None, token_manager="tm")
     assert isinstance(accessor, GoogleApiAccessor)
     assert accessor.token_manager == "tm"
+
+
+@pytest.mark.asyncio
+async def test_closing_the_accessor_drains_its_token_manager():
+    token_manager = AsyncMock()
+    await GDocsAccessor(config=None, token_manager=token_manager).close()
+    token_manager.close.assert_awaited_once()

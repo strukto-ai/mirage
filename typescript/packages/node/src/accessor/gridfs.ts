@@ -50,7 +50,7 @@ export class GridFSAccessor extends Accessor {
     return client
   }
 
-  async close(): Promise<void> {
+  override async close(): Promise<void> {
     if (this.clientPromise === null) return
     const client = await this.clientPromise
     this.clientPromise = null

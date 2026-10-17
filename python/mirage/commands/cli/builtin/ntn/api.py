@@ -16,11 +16,12 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from mirage.accessor.notion import NotionAccessor
 from mirage.commands.cli.builtin.ntn.serde import serde_message
 from mirage.commands.cli.builtin.ntn.util import (
     compact_json,
     first_text,
-    notion_config,
+    notion_transport,
     rust_debug,
 )
 from mirage.commands.config import Context
@@ -33,7 +34,6 @@ from mirage.core.notion.client import (
     notion_post,
     notion_put,
 )
-from mirage.core.notion.config import NotionConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import JsonValue, PathSpec
@@ -222,7 +222,10 @@ def refusal(stderr: str, code: int) -> tuple[None, IOResult]:
 
 
 async def api(
-    config: NotionConfig, paths: list[PathSpec], texts: list[str], ctx: Context
+    accessor: NotionAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     path = first_text(texts, "api path")
@@ -295,17 +298,17 @@ async def api(
         raise UsageError(f"unsupported method: {method}")
     route = path if path.startswith("/") else f"/{path}"
     route = route[3:] if route.startswith("/v1/") else route
-    config = notion_config(config, ctx)
+    line = notion_transport(accessor, ctx)
     if method == "GET":
         result = await notion_get(
-            config, route, params=params or None, extra_headers=headers or None
+            line, route, params=params or None, extra_headers=headers or None
         )
     else:
         # `name==value` is a query parameter whatever the method is, so
         # it rides alongside the body rather than being dropped the
         # moment the call stops being a GET.
         result = await call(
-            config,
+            line,
             route,
             body,
             extra_headers=headers or None,

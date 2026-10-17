@@ -48,7 +48,6 @@ async def trello_card_comment_update(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags, spec=SPEC)
-    config = accessor.config
     card_id = fl.as_str("card_id")
     if not card_id:
         raise ValueError("--card_id is required")
@@ -67,11 +66,7 @@ async def trello_card_comment_update(
     require_mount_writable()
     await require_card(accessor, card_id)
     comment = await comment_update(
-        config,
-        card_id=card_id,
-        comment_id=comment_id,
-        text=text,
-        session=accessor.pool,
+        accessor, card_id=card_id, comment_id=comment_id, text=text
     )
     payload = normalize_comment(comment, card_id=card_id)
     return yield_bytes(

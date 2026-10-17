@@ -19,6 +19,7 @@ import { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
 import type { Context } from '../../config.ts'
 import { sedGeneric } from './sed.ts'
+import { Files } from '../../../workspace/files.ts'
 
 const DEC = new TextDecoder()
 
@@ -67,7 +68,7 @@ it('closes primed input when an in-place write is refused', async () => {
         stdin: null,
         flags: { i: true },
         cwd: PathSpec.fromStrPath('/'),
-        dispatch: () => Promise.reject(error),
+        vfs: new Files(() => Promise.reject(error), null, null, undefined, { ledger: false }),
       } as Context,
       async function* () {
         try {
