@@ -24,9 +24,9 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.mount.constants import LISTING_CONCURRENCY
 from mirage.mount.sftp import (
     MirageSFTPServer,
+    PipeServer,
     filetype,
     listing,
-    serve_pipe,
     to_attrs,
 )
 from mirage.mount.types import MountAttrs
@@ -47,13 +47,20 @@ HOST_SAFE = {
     "format_longname",
 }
 
-# SFTP v3 packet types and the one status code the pipe tests read.
+# SFTP v3 packet types, open flags and status codes the pipe tests use.
 FXP_INIT = 1
+FXP_OPEN = 3
+FXP_CLOSE = 4
+FXP_WRITE = 6
 FXP_STAT = 17
 FXP_SYMLINK = 20
 FXP_VERSION = 2
 FXP_STATUS = 101
+FXP_HANDLE = 102
 FXP_ATTRS = 105
+FXF_WRITE = 0x02
+FXF_CREAT = 0x08
+FXF_TRUNC = 0x10
 FX_NO_SUCH_FILE = 2
 FX_OK = 0
 
@@ -174,6 +181,10 @@ def packet(kind: int, body: bytes) -> bytes:
     return struct.pack(">IB", len(body) + 1, kind) + body
 
 
+def string(data: bytes) -> bytes:
+    return struct.pack(">I", len(data)) + data
+
+
 async def answer(reader: asyncio.StreamReader) -> tuple[int, bytes]:
     (size,) = struct.unpack(">I", await reader.readexactly(4))
     data = await reader.readexactly(size)
@@ -205,7 +216,9 @@ async def test_a_pipe_answers_as_its_session():
     await ws.session("agent", profile="agent")
     requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
     served = asyncio.create_task(
-        serve_pipe(ws.vfs, ws.get_session("agent"), requests, Feed(answers))
+        PipeServer(ws.vfs, ws.get_session("agent")).serve(
+            requests, Feed(answers)
+        )
     )
     requests.feed_data(packet(FXP_INIT, struct.pack(">I", 3)))
     kind, body = await answer(answers)
@@ -228,7 +241,9 @@ async def test_a_pipe_accepts_sshfs_symlink_wire_order(target):
     await ws.session("agent")
     requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
     served = asyncio.create_task(
-        serve_pipe(ws.vfs, ws.get_session("agent"), requests, Feed(answers))
+        PipeServer(ws.vfs, ws.get_session("agent")).serve(
+            requests, Feed(answers)
+        )
     )
     try:
         requests.feed_data(packet(FXP_INIT, struct.pack(">I", 3)))
@@ -267,7 +282,57 @@ async def test_a_pipe_closed_before_it_speaks_ends_quietly():
     requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
     requests.feed_eof()
     await asyncio.wait_for(
-        serve_pipe(ws.vfs, ws.get_session("agent"), requests, Feed(answers)),
+        PipeServer(ws.vfs, ws.get_session("agent")).serve(
+            requests, Feed(answers)
+        ),
         5,
     )
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_sync_lands_what_a_pipe_acknowledged_before_its_close():
+    # sshfs answers close(2) once the write is acknowledged and sends the
+    # close that lands it later, on its own: the sync between them lands it.
+    ws = Workspace({"/notes": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.session("agent")
+    server = PipeServer(ws.vfs, ws.get_session("agent"))
+    requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
+    served = asyncio.create_task(server.serve(requests, Feed(answers)))
+    try:
+        requests.feed_data(packet(FXP_INIT, struct.pack(">I", 3)))
+        await answer(answers)
+        flags = FXF_WRITE | FXF_CREAT | FXF_TRUNC
+        requests.feed_data(
+            packet(
+                FXP_OPEN,
+                struct.pack(">I", 1)
+                + string(b"/notes/new.txt")
+                + struct.pack(">II", flags, 0),
+            )
+        )
+        kind, body = await answer(answers)
+        assert kind == FXP_HANDLE
+        handle = body[8:]
+        requests.feed_data(
+            packet(
+                FXP_WRITE,
+                struct.pack(">I", 2)
+                + string(handle)
+                + struct.pack(">Q", 0)
+                + string(b"made\n"),
+            )
+        )
+        assert (await answer(answers))[1][:8] == struct.pack(">II", 2, FX_OK)
+        assert await ws.vfs.read("/notes/new.txt") == b""
+        await server.sync()
+        assert await ws.vfs.read("/notes/new.txt") == b"made\n"
+        requests.feed_data(
+            packet(FXP_CLOSE, struct.pack(">I", 3) + string(handle))
+        )
+        assert (await answer(answers))[1][:8] == struct.pack(">II", 3, FX_OK)
+        assert await ws.vfs.read("/notes/new.txt") == b"made\n"
+    finally:
+        requests.feed_eof()
+        await asyncio.wait_for(served, 5)
+        await ws.close()

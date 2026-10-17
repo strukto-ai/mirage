@@ -17,11 +17,12 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { describe, expect, it } from 'vitest'
 import { Workspace } from '../workspace.ts'
 import { OPEN, STATUS } from './constants.ts'
-import { longname, servePipe, toAttrs, workspacePath } from './sftp.ts'
+import { PipeServer, longname, toAttrs, workspacePath } from './sftp.ts'
 
 // SFTP v3 packet types the pipe tests speak.
 const FXP_INIT = 1
 const FXP_OPEN = 3
+const FXP_CLOSE = 4
 const FXP_WRITE = 6
 const FXP_STAT = 17
 const FXP_SYMLINK = 20
@@ -133,13 +134,13 @@ describe('helpers', () => {
   })
 })
 
-describe('servePipe', () => {
+describe('PipeServer', () => {
   it.each(['real', 'missing'])('accepts sshfs symlink wire order (target=%s)', async (target) => {
     const ws = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.vfs.write('/notes/real', 'target')
     await ws.session('agent')
     const end = client()
-    const served = servePipe(ws.vfs, ws.getSession('agent'), end.reader, end.writer)
+    const served = new PipeServer(ws.vfs, ws.getSession('agent')).serve(end.reader, end.writer)
     try {
       end.send(packet(FXP_INIT, uint32(3)))
       await end.answer()
@@ -175,7 +176,7 @@ describe('servePipe', () => {
     await ws.vfs.write('/notes/secret.txt', 'salaries')
     await ws.session('agent', { profile: 'agent' })
     const end = client()
-    const served = servePipe(ws.vfs, ws.getSession('agent'), end.reader, end.writer)
+    const served = new PipeServer(ws.vfs, ws.getSession('agent')).serve(end.reader, end.writer)
     const version = Buffer.alloc(4)
     version.writeUInt32BE(3)
     end.send(packet(FXP_INIT, version))
@@ -200,7 +201,7 @@ describe('servePipe', () => {
     await ws.session('agent')
     const end = client()
     end.close()
-    await servePipe(ws.vfs, ws.getSession('agent'), end.reader, end.writer)
+    await new PipeServer(ws.vfs, ws.getSession('agent')).serve(end.reader, end.writer)
     await ws.close()
   })
 
@@ -208,7 +209,7 @@ describe('servePipe', () => {
     const ws = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.session('agent')
     const end = client()
-    const served = servePipe(ws.vfs, ws.getSession('agent'), end.reader, end.writer)
+    const served = new PipeServer(ws.vfs, ws.getSession('agent')).serve(end.reader, end.writer)
     end.send(packet(FXP_INIT, uint32(3)))
     await end.answer()
     const flags = OPEN.WRITE | OPEN.CREAT | OPEN.TRUNC
@@ -236,5 +237,56 @@ describe('servePipe', () => {
     await served
     expect(new TextDecoder().decode(await ws.vfs.read('/notes/out.txt'))).toBe('landed')
     await ws.close()
+  })
+
+  it('lands on sync what it acknowledged before its close', async () => {
+    // sshfs answers close(2) once the write is acknowledged and sends the
+    // close that lands it later, on its own: the sync between them lands it.
+    const ws = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.session('agent')
+    const server = new PipeServer(ws.vfs, ws.getSession('agent'))
+    const end = client()
+    const served = server.serve(end.reader, end.writer)
+    const read = async () => new TextDecoder().decode(await ws.vfs.read('/notes/new.txt'))
+    try {
+      end.send(packet(FXP_INIT, uint32(3)))
+      await end.answer()
+      const flags = OPEN.WRITE | OPEN.CREAT | OPEN.TRUNC
+      end.send(
+        packet(
+          FXP_OPEN,
+          Buffer.concat([
+            uint32(1),
+            sftpString(Buffer.from('/notes/new.txt')),
+            uint32(flags),
+            uint32(0),
+          ]),
+        ),
+      )
+      const [kind, body] = await end.answer()
+      expect(kind).toBe(FXP_HANDLE)
+      const handle = body.subarray(4)
+      end.send(
+        packet(
+          FXP_WRITE,
+          Buffer.concat([uint32(2), handle, Buffer.alloc(8), sftpString(Buffer.from('made\n'))]),
+        ),
+      )
+      expect((await end.answer())[1].subarray(0, 8)).toEqual(
+        Buffer.concat([uint32(2), uint32(STATUS.OK)]),
+      )
+      expect(await read()).toBe('')
+      await server.sync()
+      expect(await read()).toBe('made\n')
+      end.send(packet(FXP_CLOSE, Buffer.concat([uint32(3), handle])))
+      expect((await end.answer())[1].subarray(0, 8)).toEqual(
+        Buffer.concat([uint32(3), uint32(STATUS.OK)]),
+      )
+      expect(await read()).toBe('made\n')
+    } finally {
+      end.close()
+      await served
+      await ws.close()
+    }
   })
 })

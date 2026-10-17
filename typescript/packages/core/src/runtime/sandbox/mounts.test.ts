@@ -145,11 +145,15 @@ async function workspace(
 
 const sessions: SessionState[] = []
 
-const drain: PipeServer = async (_files, session, reader) => {
-  sessions.push(session)
-  const chunks = reader.getReader()
-  while (!(await chunks.read()).done) continue
-}
+// A served prefix's server that reads its pipe to the end.
+const drain = (_files: unknown, session: SessionState): PipeServer => ({
+  async serve(reader) {
+    sessions.push(session)
+    const chunks = reader.getReader()
+    while (!(await chunks.read()).done) continue
+  },
+  sync: () => Promise.resolve(),
+})
 
 beforeAll(() => {
   registerPipeServer(drain)
@@ -386,11 +390,14 @@ describe('SandboxMounts', () => {
 
   it('runs a server outside the line that started it', async () => {
     const bound: unknown[] = []
-    registerPipeServer(async (_files, _session, reader) => {
-      bound.push([getCurrentSession(), getAdmission(), lineRunning()])
-      const chunks = reader.getReader()
-      while (!(await chunks.read()).done) continue
-    })
+    registerPipeServer((files, session) => ({
+      ...drain(files, session),
+      serve: async (reader) => {
+        bound.push([getCurrentSession(), getAdmission(), lineRunning()])
+        const chunks = reader.getReader()
+        while (!(await chunks.read()).done) continue
+      },
+    }))
     try {
       const sandbox = new FakeSandbox('ssh')
       const ws = await workspace(sandbox)
@@ -399,6 +406,33 @@ describe('SandboxMounts', () => {
       expect(bound).toEqual([
         [null, null, false],
         [null, null, false],
+      ])
+      await ws.close()
+    } finally {
+      registerPipeServer(drain)
+    }
+  })
+
+  it('returns a line once every server has synced', async () => {
+    // sshfs sends the close that lands a line's writes after the line has
+    // ended, so the line lands them itself, outside the line, as that
+    // close would.
+    const sandbox = new FakeSandbox('ssh')
+    const synced: unknown[] = []
+    registerPipeServer((files, session) => ({
+      ...drain(files, session),
+      sync: () => {
+        synced.push([sandbox.commands.at(-1), lineRunning()])
+        return Promise.resolve()
+      },
+    }))
+    try {
+      const ws = await workspace(sandbox)
+      const agent = await ws.session('agent', { profile: 'agent' })
+      expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+      expect(synced).toEqual([
+        ['python3 job.py', false],
+        ['python3 job.py', false],
       ])
       await ws.close()
     } finally {
@@ -453,7 +487,10 @@ describe('SandboxMounts', () => {
   })
 
   it('says why a server that fails did', async () => {
-    registerPipeServer(() => Promise.reject(new Error('no server here')))
+    registerPipeServer((files, session) => ({
+      ...drain(files, session),
+      serve: () => Promise.reject(new Error('no server here')),
+    }))
     try {
       const sandbox = new FakeSandbox('ssh', [], true, false)
       const ws = await workspace(sandbox)

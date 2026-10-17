@@ -439,7 +439,7 @@ export class MirageSFTPServer {
   }
 }
 
-// What servePipe takes of ssh2's internals: its SFTP class, run with a
+// What PipeServer takes of ssh2's internals: its SFTP class, run with a
 // connection of our own whose only calls are a send and a close.
 type Ssh2Sftp = new (
   client: { _protocol: object },
@@ -460,47 +460,60 @@ function loadSftp(): Ssh2Sftp {
 }
 
 /**
- * Answer SFTP on a byte pipe as `session`, until the client closes it.
+ * SFTP on a byte pipe as `session`, for a sandbox's sshfs.
  *
  * The client is `sshfs -o passive`, using OpenSSH's reversed symlink
  * wire order. Every request it makes is a request of `session`,
  * held to its hides, modes and policies.
  */
-export async function servePipe(
-  files: Files,
-  session: SessionState,
-  reader: ReadableStream<Uint8Array>,
-  writer: PipeWriter,
-): Promise<void> {
-  const SFTP = loadSftp()
-  const core = new MountCore(files, { session })
-  const side = () => ({ id: 0, window: Infinity, packetSize: PIPE_PACKET_SIZE, state: 'open' })
-  const protocol = {
-    _remoteIdentRaw: undefined,
-    channelData: (_id: number, data: Uint8Array) => {
-      writer.write(data)
-    },
-    channelClose: () => {
-      writer.end()
-    },
+export class PipeServer {
+  private readonly core: MountCore
+
+  constructor(files: Files, session: SessionState) {
+    this.core = new MountCore(files, { session })
   }
-  const sftp = new SFTP(
-    { _protocol: protocol },
-    { type: 'session', incoming: side(), outgoing: side() },
-    { server: true },
-  )
-  const served = new MirageSFTPServer(sftp, () => Promise.resolve(core), undefined, true).attach()
-  const chunks = reader.getReader()
-  try {
-    for (;;) {
-      const { done, value } = await chunks.read()
-      if (done) break
-      sftp.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength))
+
+  /** Answer the client's requests until it closes the pipe. */
+  async serve(reader: ReadableStream<Uint8Array>, writer: PipeWriter): Promise<void> {
+    const SFTP = loadSftp()
+    const side = () => ({ id: 0, window: Infinity, packetSize: PIPE_PACKET_SIZE, state: 'open' })
+    const protocol = {
+      _remoteIdentRaw: undefined,
+      channelData: (_id: number, data: Uint8Array) => {
+        writer.write(data)
+      },
+      channelClose: () => {
+        writer.end()
+      },
     }
-  } finally {
-    sftp.push(null)
-    await served
+    const sftp = new SFTP(
+      { _protocol: protocol },
+      { type: 'session', incoming: side(), outgoing: side() },
+      { server: true },
+    )
+    const served = new MirageSFTPServer(
+      sftp,
+      () => Promise.resolve(this.core),
+      undefined,
+      true,
+    ).attach()
+    const chunks = reader.getReader()
+    try {
+      for (;;) {
+        const { done, value } = await chunks.read()
+        if (done) break
+        sftp.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength))
+      }
+    } finally {
+      sftp.push(null)
+      await served
+    }
+  }
+
+  /** Land every write the client has been told is done. */
+  sync(): Promise<void> {
+    return this.core.sync()
   }
 }
 
-registerPipeServer(servePipe)
+registerPipeServer((files, session) => new PipeServer(files, session))

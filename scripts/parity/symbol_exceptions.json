@@ -72,13 +72,9 @@
    }
   },
   "runtime/sandbox/mounts": {
-   "python_only": {
-    "serve_pipe": "Python imports mount.sftp's serve_pipe here, guarded since asyncssh is an extra; TypeScript's core has no MountCore or ssh2, so node registers its servePipe (registerPipeServer)."
-   },
    "typescript_only": {
     "Served": "Python keeps each served prefix as a tuple with its task; TypeScript names the record, whose promise carries no done state of its own.",
-    "pipeServer": "core holds the SFTP server node registers, since MountCore and ssh2 are node's; Python imports serve_pipe directly.",
-    "registerPipeServer": "node registers its servePipe with core, since MountCore and ssh2 are node's; Python imports serve_pipe directly.",
+    "registerPipeServer": "node registers how it makes its PipeServer with core, since MountCore and ssh2 are node's; Python imports PipeServer directly.",
     "sleep": "asyncio.sleep in Python.",
     "within": "asyncio.wait_for in Python."
    }

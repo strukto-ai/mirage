@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
 from typing import Any, ClassVar
 
 from mirage.runtime.base import Runtime
@@ -118,18 +118,32 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
         if refusal is not None:
             return refusal
         merged = {**self.config.env, **env}
-        return await self.exec_line(line, stdin, merged, cwd)
+        return await self._synced(self.exec_line(line, stdin, merged, cwd))
 
     async def run_process(self, request: ProcessExecution) -> RunResult:
         refusal = await self._prepare()
         if refusal is not None:
             return refusal
-        return await self._exec_argv(
-            request.argv,
-            request.stdin,
-            {**self.config.env, **request.env},
-            request.cwd.virtual,
+        return await self._synced(
+            self._exec_argv(
+                request.argv,
+                request.stdin,
+                {**self.config.env, **request.env},
+                request.cwd.virtual,
+            )
         )
+
+    async def _synced(self, run: Awaitable[RunResult]) -> RunResult:
+        """What a line returns, once the writes it made to served files
+        have landed (``SandboxMounts.sync``).
+
+        Args:
+            run (Awaitable[RunResult]): the line in the sandbox.
+        """
+        result = await run
+        if self._mounts is not None:
+            await self._mounts.sync()
+        return result
 
     async def _prepare(self) -> RunResult | None:
         await self._ensure_connected()

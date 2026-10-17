@@ -38,13 +38,13 @@ from mirage.workspace.session import SessionState
 
 logger = logging.getLogger(__name__)
 
-serve_pipe: Any
+PipeServer: Any
 try:
-    from mirage.mount.sftp import serve_pipe as _serve_pipe
+    from mirage.mount.sftp import PipeServer as _PipeServer
 except ImportError:
-    serve_pipe = None
+    PipeServer = None
 else:
-    serve_pipe = _serve_pipe
+    PipeServer = _PipeServer
 
 OCTAL_ESCAPE = re.compile(r"\\([0-7]{3})")
 
@@ -164,7 +164,9 @@ class SandboxMounts:
         self._run = run
         self._open_pipe = open_pipe
         self._session: SessionState | None = None
-        self._served: dict[str, tuple[SandboxPipe, asyncio.Task[None]]] = {}
+        self._served: dict[
+            str, tuple[SandboxPipe, asyncio.Task[None], Any]
+        ] = {}
         self._seen: tuple[frozenset[str], frozenset[str]] | None = None
         self._lock = asyncio.Lock()
 
@@ -240,6 +242,18 @@ class SandboxMounts:
             await self._unmount()
             self._session = None
 
+    async def sync(self) -> None:
+        """Land every write a served prefix's server has acknowledged.
+
+        sshfs answers close(2) once the file's writes are acknowledged and
+        sends the SFTP close that lands them afterwards, so a line can end
+        before they land. Its programs have closed their files by then,
+        so this lands every one, outside the line as that close would,
+        and ``file_effects_dispatched`` holds.
+        """
+        for _, _, server in list(self._served.values()):
+            await asyncio.create_task(server.sync(), context=Context())
+
     def _refusal(self, ruled: frozenset[str]) -> str | None:
         for prefix in sorted(ruled):
             if not any(
@@ -265,7 +279,7 @@ class SandboxMounts:
             if self._mount_type != "fuse"
             else ()
         )
-        ended = [p for p, (_, task) in self._served.items() if task.done()]
+        ended = [p for p, (_, task, _) in self._served.items() if task.done()]
         if (
             self._seen == (frozenset(every), visible)
             and not ended
@@ -296,24 +310,22 @@ class SandboxMounts:
             await self._drop(prefix)
         new = [p for p in wanted if p not in self._served]
         if new:
-            if serve_pipe is None:
+            if PipeServer is None:
                 raise ImportError(PIPE_SERVER_HINT)
             if (await self._run("command -v sshfs")).exit_code != 0:
                 raise RuntimeError(f"{self._runtime}: {SSHFS_HINT}")
             try:
                 for prefix in new:
-                    await self._serve(files, session, prefix, present)
+                    await self._serve(
+                        PipeServer(files, session), prefix, present
+                    )
             except BaseException:
                 await self._unmount()
                 raise
         self._seen = (frozenset(every), visible)
 
     async def _serve(
-        self,
-        files: Files,
-        session: SessionState,
-        prefix: str,
-        present: dict[str, str],
+        self, server: Any, prefix: str, present: dict[str, str]
     ) -> None:
         if present.get(prefix) == "fuse.sshfs":
             await self._run(unmount_line(prefix))
@@ -333,10 +345,9 @@ class SandboxMounts:
             f"exec sshfs -f -o {SSHFS_OPTIONS} {source} {path} 2>{log}"
         )
         task = asyncio.create_task(
-            serve_pipe(files, session, pipe.reader, pipe.writer),
-            context=Context(),
+            server.serve(pipe.reader, pipe.writer), context=Context()
         )
-        self._served[prefix] = (pipe, task)
+        self._served[prefix] = (pipe, task, server)
         try:
             deadline = asyncio.get_running_loop().time() + MOUNT_WAIT_SECONDS
             while (await self._table()).get(prefix) != "fuse.sshfs":
@@ -385,7 +396,7 @@ class SandboxMounts:
         return mount_table(listed.stdout.decode(errors="replace"))
 
     async def _drop(self, prefix: str) -> None:
-        pipe, task = self._served.pop(prefix)
+        pipe, task, _ = self._served.pop(prefix)
         try:
             done = await self._run(unmount_line(prefix))
             if done.exit_code != 0:

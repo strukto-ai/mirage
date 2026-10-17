@@ -555,13 +555,8 @@ class PipeReader:
         return default
 
 
-async def serve_pipe(
-    files: Files,
-    session: SessionState,
-    reader: ByteReader,
-    writer: PipeWriter,
-) -> None:
-    """Answer SFTP on a byte pipe as ``session``, until the client closes it.
+class PipeServer:
+    """SFTP on a byte pipe as ``session``, for a sandbox's sshfs.
 
     The client is ``sshfs -o passive``, using OpenSSH's reversed symlink
     wire order. Every request it makes is a request of
@@ -570,20 +565,34 @@ async def serve_pipe(
     Args:
         files (Files): the workspace's ``ws.vfs``.
         session (SessionState): the session every request runs as.
-        reader (ByteReader): the client's requests.
-        writer (PipeWriter): where the answers go.
     """
-    core = MountCore(files, session=session)
 
-    async def make_core() -> MountCore:
-        return core
+    def __init__(self, files: Files, session: SessionState) -> None:
+        self._core = MountCore(files, session=session)
 
-    try:
-        await run_sftp_server(
-            MirageSFTPServer(None, make_core, passive_sshfs=True),
-            cast("asyncssh.SSHReader[bytes]", PipeReader(reader)),
-            cast("asyncssh.SSHWriter[bytes]", writer),
-            SFTP_VERSION,
-        )
-    except EOFError as exc:
-        logger.debug("sftp: the pipe closed before its first request: %r", exc)
+    async def serve(self, reader: ByteReader, writer: PipeWriter) -> None:
+        """Answer the client's requests until it closes the pipe.
+
+        Args:
+            reader (ByteReader): the client's requests.
+            writer (PipeWriter): where the answers go.
+        """
+
+        async def make_core() -> MountCore:
+            return self._core
+
+        try:
+            await run_sftp_server(
+                MirageSFTPServer(None, make_core, passive_sshfs=True),
+                cast("asyncssh.SSHReader[bytes]", PipeReader(reader)),
+                cast("asyncssh.SSHWriter[bytes]", writer),
+                SFTP_VERSION,
+            )
+        except EOFError as exc:
+            logger.debug(
+                "sftp: the pipe closed before its first request: %r", exc
+            )
+
+    async def sync(self) -> None:
+        """Land every write the client has been told is done."""
+        await self._core.sync()

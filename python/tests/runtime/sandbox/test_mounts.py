@@ -34,6 +34,19 @@ class Sink:
         return None
 
 
+class Drain:
+    """A served prefix's server that reads its pipe to the end."""
+
+    def __init__(self, files, session):
+        self.session = session
+
+    async def serve(self, reader, writer):
+        await reader.read()
+
+    async def sync(self):
+        return None
+
+
 class FakeSandbox(RemoteSandbox):
     """A sandbox that answers its mount table and takes sshfs pipes."""
 
@@ -339,11 +352,12 @@ async def test_a_shown_read_only_path_on_a_sandbox_owned_mount_refuses(
 async def test_a_line_with_its_own_cwd_serves_the_live_session(monkeypatch):
     sessions = []
 
-    async def serve(files, session, reader, writer):
-        sessions.append(session)
-        await reader.read()
+    class Server(Drain):
+        async def serve(self, reader, writer):
+            sessions.append(self.session)
+            await super().serve(reader, writer)
 
-    monkeypatch.setattr(mounts, "serve_pipe", serve)
+    monkeypatch.setattr(mounts, "PipeServer", Server)
     sandbox = FakeSandbox("ssh")
     ws = workspace(sandbox)
     await ws.session("agent", profile="agent")
@@ -358,16 +372,39 @@ async def test_a_line_with_its_own_cwd_serves_the_live_session(monkeypatch):
 async def test_a_server_runs_outside_the_line_that_started_it(monkeypatch):
     bound = []
 
-    async def serve(files, session, reader, writer):
-        bound.append((get_current_session(), get_admission(), line_running()))
-        await reader.read()
+    class Server(Drain):
+        async def serve(self, reader, writer):
+            bound.append(
+                (get_current_session(), get_admission(), line_running())
+            )
+            await super().serve(reader, writer)
 
-    monkeypatch.setattr(mounts, "serve_pipe", serve)
+    monkeypatch.setattr(mounts, "PipeServer", Server)
     sandbox = FakeSandbox("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
     assert bound == [(None, None, False), (None, None, False)]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_line_returns_once_every_server_has_synced(monkeypatch):
+    # sshfs sends the close that lands a line's writes after the line has
+    # ended, so the line lands them itself, outside the line, as that
+    # close would.
+    sandbox = FakeSandbox("ssh")
+    synced = []
+
+    class Server(Drain):
+        async def sync(self):
+            synced.append((sandbox.commands[-1], line_running()))
+
+    monkeypatch.setattr(mounts, "PipeServer", Server)
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    assert synced == [("python3 job.py", False)] * 2
     await ws.close()
 
 
@@ -425,10 +462,11 @@ async def test_a_failed_unmount_still_stops_its_pipe():
 
 @pytest.mark.asyncio
 async def test_a_server_that_fails_says_why(monkeypatch):
-    async def serve(files, session, reader, writer):
-        raise RuntimeError("no server here")
+    class Server(Drain):
+        async def serve(self, reader, writer):
+            raise RuntimeError("no server here")
 
-    monkeypatch.setattr(mounts, "serve_pipe", serve)
+    monkeypatch.setattr(mounts, "PipeServer", Server)
     sandbox = FakeSandbox("ssh", sshfs_mounts=False)
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")

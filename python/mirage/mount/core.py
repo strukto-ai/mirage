@@ -883,8 +883,28 @@ class MountCore:
             fh (int | None): the handle whose buffer to drain.
         """
         ctx = self._handles.get(fh) if fh is not None else None
-        if ctx is None:
-            return
+        if ctx is not None:
+            await self._settle(ctx)
+
+    async def sync(self) -> None:
+        """Land what every open handle holds, as sync(2) does.
+
+        For a client whose close(2) returns before it releases the handle
+        (sshfs). A landing that fails is logged, and its bytes stay on the
+        handle for its own flush to retry and report.
+        """
+        for ctx in list(self._handles.values()):
+            try:
+                await self._settle(ctx)
+            except Exception as err:
+                logger.warning("fuse: landing %s failed: %r", ctx.path, err)
+
+    async def _settle(self, ctx: Handle) -> None:
+        """Land a handle's buffered writes in its file's turn.
+
+        Args:
+            ctx (Handle): the handle whose buffer to drain.
+        """
         # Queued with nothing buffered too: a flush still landing has taken
         # the buffer, and this one waits for it and retries what it puts
         # back, rather than reporting the file settled.

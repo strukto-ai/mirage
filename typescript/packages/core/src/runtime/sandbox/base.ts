@@ -113,19 +113,28 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     const refusal = await this.prepare(signal)
     if (refusal !== null) return refusal
     const merged = { ...this.config.env, ...env }
-    return this.execLine(line, stdin, merged, cwd, signal)
+    return this.synced(this.execLine(line, stdin, merged, cwd, signal))
   }
 
   async runProcess(request: ProcessExecution): Promise<RunResult> {
     const refusal = await this.prepare(request.signal)
     if (refusal !== null) return refusal
-    return this.execArgv(
-      request.argv,
-      request.stdin,
-      { ...this.config.env, ...request.env },
-      request.cwd.virtual,
-      request.signal,
+    return this.synced(
+      this.execArgv(
+        request.argv,
+        request.stdin,
+        { ...this.config.env, ...request.env },
+        request.cwd.virtual,
+        request.signal,
+      ),
     )
+  }
+
+  /** What a line returns, once the writes it made to served files have landed (`SandboxMounts.sync`). */
+  private async synced(run: Promise<RunResult>): Promise<RunResult> {
+    const result = await run
+    await this.mounts?.sync()
+    return result
   }
 
   private async prepare(signal?: AbortSignal): Promise<RunResult | null> {

@@ -31,22 +31,24 @@ import {
   UNMOUNT_WAIT_SECONDS,
 } from './constants.ts'
 
-/** How a served prefix's SFTP runs on its pipe (node's servePipe). */
-export type PipeServer = (
-  files: Files,
-  session: SessionState,
-  reader: ReadableStream<Uint8Array>,
-  writer: PipeWriter,
-) => Promise<void>
+/** A served prefix's SFTP server, as `session` (node's PipeServer). */
+export interface PipeServer {
+  /** Answer the client's requests on its pipe until it closes it. */
+  serve(reader: ReadableStream<Uint8Array>, writer: PipeWriter): Promise<void>
+  /** Land every write the client has been told is done. */
+  sync(): Promise<void>
+}
 
-let pipeServer: PipeServer | null = null
+let pipeServer: ((files: Files, session: SessionState) => PipeServer) | null = null
 
 /**
  * Where node puts the SFTP server a served prefix's pipe runs. Core has
  * none of its own: MountCore and ssh2 are node's.
  */
-export function registerPipeServer(serve: PipeServer): void {
-  pipeServer = serve
+export function registerPipeServer(
+  make: (files: Files, session: SessionState) => PipeServer,
+): void {
+  pipeServer = make
 }
 
 const DECODER = new TextDecoder()
@@ -128,6 +130,7 @@ async function within(task: Promise<void>, ms: number): Promise<void> {
 
 interface Served {
   pipe: SandboxPipe
+  server: PipeServer
   // Settles when the server ends, never rejecting: `failure` says why.
   serving: Promise<void>
   ended: boolean
@@ -238,6 +241,19 @@ export class SandboxMounts {
     })
   }
 
+  /**
+   * Land every write a served prefix's server has acknowledged.
+   *
+   * sshfs answers close(2) once the file's writes are acknowledged and
+   * sends the SFTP close that lands them afterwards, so a line can end
+   * before they land. Its programs have closed their files by then, so
+   * this lands every one, outside the line as that close would, and
+   * `fileEffectsDispatched` holds.
+   */
+  async sync(): Promise<void> {
+    for (const { server } of [...this.served.values()]) await runDetached(() => server.sync())
+  }
+
   private refusal(ruled: ReadonlySet<string>): string | null {
     for (const prefix of [...ruled].sort(compareCodePoints)) {
       if (
@@ -293,14 +309,14 @@ export class SandboxMounts {
     }
     const fresh = wanted.filter((p) => !this.served.has(p))
     if (fresh.length > 0) {
-      const server = pipeServer
-      if (server === null) throw new Error(PIPE_SERVER_HINT)
+      const make = pipeServer
+      if (make === null) throw new Error(PIPE_SERVER_HINT)
       if ((await this.run('command -v sshfs', signal)).exitCode !== 0) {
         throw new Error(`${this.runtime}: ${SSHFS_HINT}`)
       }
       try {
         for (const prefix of fresh) {
-          await this.serve(server, files, session, prefix, present, signal)
+          await this.serve(make(files, session), prefix, present, signal)
         }
       } catch (err) {
         await this.unmount()
@@ -312,8 +328,6 @@ export class SandboxMounts {
 
   private async serve(
     server: PipeServer,
-    files: Files,
-    session: SessionState,
     prefix: string,
     present: Map<string, string>,
     signal?: AbortSignal,
@@ -331,10 +345,8 @@ export class SandboxMounts {
     const log = singleQuote(`${SSHFS_LOG_PREFIX}_${crypto.randomUUID().replaceAll('-', '')}.log`)
     const source = singleQuote(`mirage:${prefix}`)
     const pipe = await this.openPipe(`exec sshfs -f -o ${SSHFS_OPTIONS} ${source} ${path} 2>${log}`)
-    const entry: Served = { pipe, serving: Promise.resolve(), ended: false, failure: null }
-    entry.serving = Promise.resolve(
-      runDetached(() => server(files, session, pipe.reader, pipe.writer)),
-    ).then(
+    const entry: Served = { pipe, server, serving: Promise.resolve(), ended: false, failure: null }
+    entry.serving = Promise.resolve(runDetached(() => server.serve(pipe.reader, pipe.writer))).then(
       () => {
         entry.ended = true
       },
