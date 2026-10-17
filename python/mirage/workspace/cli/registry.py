@@ -22,6 +22,7 @@ from mirage.commands.cli.types import CLI
 from mirage.commands.spec import SPECS
 from mirage.secrets.summary import error_summary
 from mirage.types import JsonValue
+from mirage.utils.abort import ABORT_JOIN_SECONDS
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.lookup.constants import (
     JOB_BUILTINS,
@@ -192,11 +193,18 @@ class CLIRegistry:
     async def close(self) -> None:
         """Close every install's accessor, including the ones still
         being removed, as the workspace closes; one failed close does not
-        skip the rest."""
+        skip the rest.
+
+        The workspace cancels its lines before this runs, so a line still
+        on an install is unwinding: it gets ``ABORT_JOIN_SECONDS`` to
+        finish before its accessor goes, rather than meeting a closed
+        client mid-request, and no longer, so one that never settles
+        cannot hold the workspace open.
+        """
         installs = list(self._installs.values())
         self._installs.clear()
         results = await asyncio.gather(
-            *(install.accessor.close() for install in installs),
+            *(_close_after_grace(install) for install in installs),
             *(asyncio.shield(task) for task in self._retiring.values()),
             return_exceptions=True,
         )
@@ -227,4 +235,13 @@ class CLIRegistry:
 
 async def _retire(install: CLIInstall) -> None:
     await install.activity.wait()
+    await install.accessor.close()
+
+
+async def _close_after_grace(install: CLIInstall) -> None:
+    idle = asyncio.ensure_future(install.activity.wait())
+    try:
+        await asyncio.wait({idle}, timeout=ABORT_JOIN_SECONDS)
+    finally:
+        idle.cancel()
     await install.accessor.close()

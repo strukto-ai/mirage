@@ -20,6 +20,7 @@ import { snakeToCamel } from '../../utils/normalize.ts'
 import { JOB_BUILTINS, KEYWORDS, NAMESPACE_COMMANDS, SHELL_NAMES } from '../lookup/constants.ts'
 import { z } from 'zod'
 
+import { ABORT_JOIN_MS } from '../../utils/abort.ts'
 import { Activity } from '../../utils/activity.ts'
 import type { CLIInstall } from './types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -190,12 +191,18 @@ export class CLIRegistry {
   /**
    * Close every install's accessor, including the ones still being removed,
    * as the workspace closes; one failed close does not skip the rest.
+   *
+   * The workspace aborts its lines before this runs, so a leaf still on an
+   * install is unwinding (or ignoring its abort): it gets `ABORT_JOIN_MS` to
+   * settle before its accessor goes, rather than meeting a closed client
+   * mid-request, and no longer, so one that never settles cannot hold the
+   * workspace open.
    */
   async close(): Promise<void> {
     const installs = [...this.installs.values()]
     this.installs.clear()
     const results = await Promise.allSettled([
-      ...installs.map((install) => install.accessor.close?.()),
+      ...installs.map((install) => closeAfterGrace(install)),
       ...this.retiring.values(),
     ])
     const failures = results.flatMap((r) => (r.status === 'rejected' ? [r.reason as unknown] : []))
@@ -221,5 +228,20 @@ export class CLIRegistry {
 
 async function retire(install: CLIInstall): Promise<void> {
   await install.activity.wait()
+  await install.accessor.close?.()
+}
+
+async function closeAfterGrace(install: CLIInstall): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      install.activity.wait(),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, ABORT_JOIN_MS)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
   await install.accessor.close?.()
 }

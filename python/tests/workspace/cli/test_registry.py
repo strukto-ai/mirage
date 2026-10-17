@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 from pydantic import BaseModel
 
@@ -211,6 +213,32 @@ async def test_close_closes_every_accessor_past_a_failed_one():
     assert failing.accessor.closed
     assert other.accessor.closed
     assert reg.names() == frozenset()
+
+
+@pytest.mark.asyncio
+async def test_close_lets_a_running_line_finish_before_its_accessor_goes():
+    reg = CLIRegistry()
+    install = reg.install(
+        "prog", tree(TokenConfig, ClosingAccessor), {"token": "ok"}
+    )
+    release = install.activity.acquire()
+    closing = asyncio.create_task(reg.close())
+    await asyncio.sleep(0)
+    assert not install.accessor.closed
+    release()
+    await asyncio.wait_for(closing, 1)
+    assert install.accessor.closed
+
+
+@pytest.mark.asyncio
+async def test_close_does_not_wait_out_a_line_that_never_ends():
+    reg = CLIRegistry()
+    install = reg.install(
+        "prog", tree(TokenConfig, ClosingAccessor), {"token": "ok"}
+    )
+    install.activity.acquire()
+    await asyncio.wait_for(reg.close(), 5)
+    assert install.accessor.closed
 
 
 @pytest.mark.parametrize("name,spec", [("slack", SLACK), ("discord", DISCORD)])

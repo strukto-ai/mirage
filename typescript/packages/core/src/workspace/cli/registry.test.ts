@@ -157,6 +157,35 @@ describe('CLIRegistry', () => {
     expect((other.accessor as ClosingAccessor).closed).toBe(true)
     expect(reg.names().size).toBe(0)
   })
+
+  it('close lets a running line finish before its accessor goes', async () => {
+    const reg = new CLIRegistry()
+    const install = reg.install(
+      'prog',
+      tree(tokenConfig, (config) => new ClosingAccessor(config as TokenConfig)),
+      { token: 'ok' },
+    )
+    const accessor = install.accessor as ClosingAccessor
+    const release = install.activity.acquire()
+    const closing = reg.close()
+    await Promise.resolve()
+    expect(accessor.closed).toBe(false)
+    release()
+    await closing
+    expect(accessor.closed).toBe(true)
+  })
+
+  it('close does not wait out a line that never ends', async () => {
+    const reg = new CLIRegistry()
+    const install = reg.install(
+      'prog',
+      tree(tokenConfig, (config) => new ClosingAccessor(config as TokenConfig)),
+      { token: 'ok' },
+    )
+    install.activity.acquire()
+    await reg.close()
+    expect((install.accessor as ClosingAccessor).closed).toBe(true)
+  })
 })
 
 describe('CLIRegistry zod config schemas', () => {
