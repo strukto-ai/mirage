@@ -27,7 +27,7 @@ export async function readMessages(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const messages = await fetchRecentMessages(
     slackAccessor(config),
     fl.asStr('channel') ?? '',

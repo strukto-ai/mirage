@@ -26,7 +26,7 @@ from mirage.types import PathSpec
 async def list_pins(
     config: SlackConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     items = await list_pins_core(config, fl.as_str("channel") or "")
     out = json.dumps(items, ensure_ascii=False, separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

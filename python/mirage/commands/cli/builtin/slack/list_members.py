@@ -26,7 +26,7 @@ from mirage.types import PathSpec
 async def list_members(
     config: SlackConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     query = fl.as_str("query")
     if query:
         users = await search_users(config, query)

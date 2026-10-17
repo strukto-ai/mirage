@@ -27,7 +27,7 @@ export async function pinMessage(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const result = await pinMessageCore(
     slackAccessor(config),
     fl.asStr('channel') ?? '',

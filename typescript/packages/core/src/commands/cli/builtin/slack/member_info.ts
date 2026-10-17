@@ -27,7 +27,7 @@ export async function memberInfo(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const user = await getUserProfile(slackAccessor(config), fl.asStr('user') ?? '')
   const out: ByteSource = ENC.encode(JSON.stringify(user))
   return [out, new IOResult()]

@@ -26,7 +26,7 @@ from mirage.types import PathSpec
 async def react(
     config: SlackConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     result = await add_reaction(
         config,
         fl.as_str("channel") or "",

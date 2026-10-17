@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type * as SlackAccessorModule from '../../../../accessor/slack.ts'
 import type { SlackResponse, SlackTransport } from '../../../../core/slack/client.ts'
 import { cliSpecFor } from '../../specs.ts'
-import type { CommandFnResult } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
 import { SLACK } from './index.ts'
 import { emojiList } from './emoji_list.ts'
@@ -24,6 +24,12 @@ import { listPins } from './list_pins.ts'
 import { readMessages } from './read_messages.ts'
 import { sendMessage } from './send_message.ts'
 import { context } from '../../../../workspace/fixtures/context.ts'
+
+function leafContext(leaf: string, flags: Record<string, string> = {}): Context {
+  const spec = SLACK.spec.subcommands.find((s) => s.name === leaf)
+  if (spec === undefined) throw new Error(`no slack leaf ${leaf}`)
+  return context({ flags, spec })
+}
 
 const DEC = new TextDecoder()
 
@@ -89,12 +95,12 @@ describe('slack verbs', () => {
   it('send-message posts, and threads when --thread-ts is given', async () => {
     CALLS.length = 0
     RESPONSE = { ok: true, ts: '9.9' }
-    await sendMessage({}, [], [], context({ flags: { channel: 'C1', text: 'hi' } }))
+    await sendMessage({}, [], [], leafContext('send-message', { channel: 'C1', text: 'hi' }))
     await sendMessage(
       {},
       [],
       [],
-      context({ flags: { channel: 'C1', text: 'hi', thread_ts: '1.0' } }),
+      leafContext('send-message', { channel: 'C1', text: 'hi', thread_ts: '1.0' }),
     )
     expect(CALLS[0]?.body).toEqual({ channel: 'C1', text: 'hi' })
     expect(CALLS[1]?.body).toEqual({ channel: 'C1', thread_ts: '1.0', text: 'hi' })
@@ -103,7 +109,9 @@ describe('slack verbs', () => {
   it('read-messages defaults the limit to 20', async () => {
     CALLS.length = 0
     RESPONSE = { ok: true, messages: [{ ts: '1.0', text: 'hey' }] }
-    const [out] = unwrap(await readMessages({}, [], [], context({ flags: { channel: 'C1' } })))
+    const [out] = unwrap(
+      await readMessages({}, [], [], leafContext('read-messages', { channel: 'C1' })),
+    )
     expect(CALLS[0]?.endpoint).toBe('conversations.history')
     expect(CALLS[0]?.params).toEqual({ channel: 'C1', limit: '20' })
     expect(JSON.parse(DEC.decode(out as Uint8Array))).toEqual([{ ts: '1.0', text: 'hey' }])
@@ -112,14 +120,14 @@ describe('slack verbs', () => {
   it('list-pins renders the items array', async () => {
     CALLS.length = 0
     RESPONSE = { ok: true, items: [{ type: 'message' }] }
-    const [out] = unwrap(await listPins({}, [], [], context({ flags: { channel: 'C1' } })))
+    const [out] = unwrap(await listPins({}, [], [], leafContext('list-pins', { channel: 'C1' })))
     expect(JSON.parse(DEC.decode(out as Uint8Array))).toEqual([{ type: 'message' }])
   })
 
   it('emoji-list renders the emoji mapping', async () => {
     CALLS.length = 0
     RESPONSE = { ok: true, emoji: { shipit: 'url' } }
-    const [out] = unwrap(await emojiList({}, [], [], context()))
+    const [out] = unwrap(await emojiList({}, [], [], leafContext('emoji-list')))
     expect(JSON.parse(DEC.decode(out as Uint8Array))).toEqual({ shipit: 'url' })
   })
 })

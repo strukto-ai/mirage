@@ -26,7 +26,7 @@ from mirage.types import PathSpec
 async def send_message(
     config: SlackConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     channel = fl.as_str("channel") or ""
     text = fl.as_str("text") or ""
     thread_ts = fl.as_str("thread_ts")

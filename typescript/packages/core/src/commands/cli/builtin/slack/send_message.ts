@@ -27,7 +27,7 @@ export async function sendMessage(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const accessor = slackAccessor(config)
   const channel = fl.asStr('channel') ?? ''
   const text = fl.asStr('text') ?? ''

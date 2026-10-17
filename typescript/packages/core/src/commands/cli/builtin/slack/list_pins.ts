@@ -27,7 +27,7 @@ export async function listPins(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const items = await listPinsCore(slackAccessor(config), fl.asStr('channel') ?? '')
   const out: ByteSource = ENC.encode(JSON.stringify(items))
   return [out, new IOResult()]

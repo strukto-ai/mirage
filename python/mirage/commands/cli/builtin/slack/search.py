@@ -23,7 +23,7 @@ from mirage.types import PathSpec
 async def search(
     config: SlackConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     result = await search_messages(
         config,
         fl.as_str("query") or "",

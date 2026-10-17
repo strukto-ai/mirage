@@ -27,7 +27,7 @@ export async function unpinMessage(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const result = await unpinMessageCore(
     slackAccessor(config),
     fl.asStr('channel') ?? '',

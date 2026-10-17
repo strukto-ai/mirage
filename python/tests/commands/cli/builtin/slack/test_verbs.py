@@ -17,6 +17,7 @@ import json
 import pytest
 
 from mirage.commands.cli.builtin.slack import (
+    SLACK,
     emoji_list,
     list_members,
     list_pins,
@@ -33,6 +34,11 @@ from mirage.core.slack.config import SlackConfig
 from mirage.io.types import materialize
 
 CONFIG = SlackConfig(token="xoxb-test")
+
+
+def _ctx(leaf: str, **flags: str) -> Context:
+    spec = next(s for s in SLACK.spec.subcommands if s.name == leaf)
+    return Context(flags=flags, spec=spec)
 
 
 async def _json(out):
@@ -54,7 +60,7 @@ async def test_send_message_threads_when_thread_ts_given(monkeypatch):
         CONFIG,
         [],
         [],
-        Context(flags={"channel": "C1", "text": "hi", "thread_ts": "9.9"}),
+        _ctx("send-message", channel="C1", text="hi", thread_ts="9.9"),
     )
     assert io.exit_code == 0
     assert calls == [("C1", "9.9", "hi")]
@@ -69,7 +75,7 @@ async def test_read_messages_defaults_limit(monkeypatch):
         read_messages.__globals__, "fetch_recent_messages", fake_fetch
     )
     out, _io = await read_messages(
-        CONFIG, [], [], Context(flags={"channel": "C1"})
+        CONFIG, [], [], _ctx("read-messages", channel="C1")
     )
     assert await _json(out) == [{"ts": "1.0", "text": "C1:20"}]
 
@@ -88,11 +94,11 @@ async def test_react_and_reactions(monkeypatch):
         CONFIG,
         [],
         [],
-        Context(flags={"channel": "C1", "ts": "1.2", "emoji": "tada"}),
+        _ctx("react", channel="C1", ts="1.2", emoji="tada"),
     )
     assert (await _json(out))["emoji"] == "tada"
     out, _io = await reactions(
-        CONFIG, [], [], Context(flags={"channel": "C1", "ts": "1.2"})
+        CONFIG, [], [], _ctx("reactions", channel="C1", ts="1.2")
     )
     assert (await _json(out))["ts"] == "1.2"
 
@@ -114,16 +120,14 @@ async def test_pin_unpin_list(monkeypatch):
     )
     monkeypatch.setitem(list_pins.__globals__, "list_pins_core", fake_list)
     out, _io = await pin_message(
-        CONFIG, [], [], Context(flags={"channel": "C1", "ts": "1.2"})
+        CONFIG, [], [], _ctx("pin-message", channel="C1", ts="1.2")
     )
     assert (await _json(out))["ok"] is True
     out, _io = await unpin_message(
-        CONFIG, [], [], Context(flags={"channel": "C1", "ts": "1.2"})
+        CONFIG, [], [], _ctx("unpin-message", channel="C1", ts="1.2")
     )
     assert (await _json(out))["ok"] is True
-    out, _io = await list_pins(
-        CONFIG, [], [], Context(flags={"channel": "C1"})
-    )
+    out, _io = await list_pins(CONFIG, [], [], _ctx("list-pins", channel="C1"))
     assert await _json(out) == [{"type": "message"}]
 
 
@@ -143,13 +147,15 @@ async def test_member_info_and_list_members(monkeypatch):
     )
     monkeypatch.setitem(list_members.__globals__, "search_users", fake_search)
     monkeypatch.setitem(list_members.__globals__, "list_users", fake_list)
-    out, _io = await member_info(CONFIG, [], [], Context(flags={"user": "U1"}))
+    out, _io = await member_info(
+        CONFIG, [], [], _ctx("member-info", user="U1")
+    )
     assert (await _json(out))["id"] == "U1"
     out, _io = await list_members(
-        CONFIG, [], [], Context(flags={"query": "alice"})
+        CONFIG, [], [], _ctx("list-members", query="alice")
     )
     assert await _json(out) == [{"name": "alice"}]
-    out, _io = await list_members(CONFIG, [], [], Context())
+    out, _io = await list_members(CONFIG, [], [], _ctx("list-members"))
     assert await _json(out) == [{"name": "everyone"}]
 
 
@@ -159,5 +165,5 @@ async def test_emoji_list(monkeypatch):
         return {"shipit": "url"}
 
     monkeypatch.setitem(emoji_list.__globals__, "list_emoji", fake_emoji)
-    out, _io = await emoji_list(CONFIG, [], [], Context())
+    out, _io = await emoji_list(CONFIG, [], [], _ctx("emoji-list"))
     assert await _json(out) == {"shipit": "url"}

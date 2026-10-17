@@ -27,7 +27,7 @@ export async function listMembers(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const accessor = slackAccessor(config)
   const query = fl.asStr('query')
   const users =

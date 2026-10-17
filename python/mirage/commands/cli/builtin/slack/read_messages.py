@@ -26,7 +26,7 @@ from mirage.types import PathSpec
 async def read_messages(
     config: SlackConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     channel = fl.as_str("channel") or ""
     limit = fl.as_int("limit") or 20
     messages = await fetch_recent_messages(config, channel, limit)

@@ -26,7 +26,7 @@ from mirage.types import PathSpec
 async def pin_message(
     config: SlackConfig, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     result = await pin_message_core(
         config,
         fl.as_str("channel") or "",

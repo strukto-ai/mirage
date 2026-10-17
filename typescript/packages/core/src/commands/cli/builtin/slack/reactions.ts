@@ -27,7 +27,7 @@ export async function reactions(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const message = await getReactions(
     slackAccessor(config),
     fl.asStr('channel') ?? '',
