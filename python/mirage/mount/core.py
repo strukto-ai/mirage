@@ -540,7 +540,7 @@ class MountCore:
         """
         ctx = self._handles.get(fh) if fh is not None else None
         key = self.identity(path) if ctx is None else ctx.key
-        await self._land_overlapped(key, offset, len(data), ctx)
+        self._supersede(key, offset, len(data), ctx)
         if ctx is not None:
             ctx.write_buf.append((offset, data))
             return len(data)
@@ -549,14 +549,15 @@ class MountCore:
         )
         return len(data)
 
-    async def _land_overlapped(
+    def _supersede(
         self, key: str, offset: int, size: int, ctx: Handle | None
     ) -> None:
-        """Land the writes another handle holds that a new write overlaps.
+        """Cut a new write's range out of what the file's other handles
+        hold: their bytes there are older, and the new write replaces them.
 
-        No two handles on a file then hold overlapping bytes, so whichever
+        No two handles on a file then hold the same bytes, so whichever
         flush, release or sync lands first, the file ends as its writes
-        were made. Writes that do not overlap stay buffered.
+        were made. Nothing lands here, so a write never waits on one.
 
         Args:
             key (str): the file identity.
@@ -567,11 +568,18 @@ class MountCore:
         """
         end = offset + size
         for other in self._open_on(key):
-            if other is not ctx and any(
-                at < end and offset < at + len(run)
-                for at, run in other.write_buf
-            ):
-                await self._land(other)
+            if other is ctx:
+                continue
+            kept: WriteBuf = []
+            for at, run in other.write_buf:
+                if at >= end or at + len(run) <= offset:
+                    kept.append((at, run))
+                    continue
+                if at < offset:
+                    kept.append((at, run[: offset - at]))
+                if at + len(run) > end:
+                    kept.append((end, run[end - at :]))
+            other.write_buf = kept
 
     async def create(self, path: str, mode: int | None = None) -> int:
         """Create an empty file and return a fresh handle.
@@ -915,23 +923,14 @@ class MountCore:
         """Land what every open handle holds, as sync(2) does.
 
         For a client whose close(2) returns before it releases the handle
-        (sshfs).
+        (sshfs). A landing that fails is logged, and its bytes stay on the
+        handle for its own flush to retry and report.
         """
         for ctx in list(self._handles.values()):
-            await self._land(ctx)
-
-    async def _land(self, ctx: Handle) -> None:
-        """Land a handle's buffer for a caller other than the handle's own
-        flush: a failure is logged, and its bytes stay on the handle for
-        that flush to retry and report.
-
-        Args:
-            ctx (Handle): the handle whose buffer to land.
-        """
-        try:
-            await self._settle(ctx)
-        except Exception as err:
-            logger.warning("fuse: landing %s failed: %r", ctx.path, err)
+            try:
+                await self._settle(ctx)
+            except Exception as err:
+                logger.warning("fuse: landing %s failed: %r", ctx.path, err)
 
     async def _settle(self, ctx: Handle) -> None:
         """Land a handle's buffered writes in its file's turn.

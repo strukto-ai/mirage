@@ -113,18 +113,20 @@ async def test_release_flushes_buffered_writes(seeded):
 async def test_two_handles_writes_land_in_the_order_they_were_made(
     seeded, land
 ):
-    # The handle opened first writes the same bytes last and lands first:
-    # the later write still wins, however the handles land.
+    # The handle opened first writes inside bytes the other holds, and
+    # lands first: the later write still wins, however the handles land,
+    # and nothing lands before they do.
     first = await seeded.open("/a.txt", os.O_WRONLY)
     second = await seeded.open("/a.txt", os.O_WRONLY)
-    await seeded.write("/a.txt", b"old", 0, second)
-    await seeded.write("/a.txt", b"new", 0, first)
+    await seeded.write("/a.txt", b"oldold", 0, second)
+    await seeded.write("/a.txt", b"new", 2, first)
+    assert await seeded.read("/a.txt", 100, 0, None) == b"hello world"
     if land == "sync":
         await seeded.sync()
     else:
         await seeded.release(first)
         await seeded.release(second)
-    assert await seeded.read("/a.txt", 100, 0, None) == b"newlo world"
+    assert await seeded.read("/a.txt", 100, 0, None) == b"olnewdworld"
 
 
 @pytest.mark.asyncio

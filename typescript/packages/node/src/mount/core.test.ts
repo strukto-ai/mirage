@@ -320,21 +320,24 @@ describe('MountCore', () => {
   it.each(['sync', 'release'])(
     "lands two handles' writes in the order they were made (%s)",
     async (land) => {
-      // The handle opened first writes the same bytes last and lands first:
-      // the later write still wins, however the handles land.
+      // The handle opened first writes inside bytes the other holds, and
+      // lands first: the later write still wins, however the handles land,
+      // and nothing lands before they do.
       const core = await mkCore()
+      const stored = async () =>
+        new TextDecoder().decode(await core.read('/data/greeting.txt', -1, 0, 100))
       const first = await core.open('/data/greeting.txt', fsConstants.O_WRONLY)
       const second = await core.open('/data/greeting.txt', fsConstants.O_WRONLY)
-      await core.write('/data/greeting.txt', second, new TextEncoder().encode('old'), 0)
-      await core.write('/data/greeting.txt', first, new TextEncoder().encode('new'), 0)
+      await core.write('/data/greeting.txt', second, new TextEncoder().encode('oldold'), 0)
+      await core.write('/data/greeting.txt', first, new TextEncoder().encode('new'), 2)
+      expect(await stored()).toBe('hello world\n')
       if (land === 'sync') {
         await core.sync()
       } else {
         await core.release(first)
         await core.release(second)
       }
-      const body = await core.read('/data/greeting.txt', -1, 0, 100)
-      expect(new TextDecoder().decode(body)).toBe('newlo world\n')
+      expect(await stored()).toBe('olnewdworld\n')
     },
   )
 
