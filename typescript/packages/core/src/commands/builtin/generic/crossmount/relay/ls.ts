@@ -67,7 +67,7 @@ export async function runLs(
     ...crossOpts(flagKwargs),
     dispatch,
     ...(vfs !== undefined ? { vfs } : {}),
-    ...(sessionView !== undefined ? { sessionView } : {}),
+    ...(sessionView !== undefined ? { session: sessionView } : {}),
   }
   // The dispatcher's listing names the links among the entries. Mirrors
   // Python's relayed_readdir.

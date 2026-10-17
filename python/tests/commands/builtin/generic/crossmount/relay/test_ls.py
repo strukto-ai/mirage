@@ -117,3 +117,26 @@ def test_a_nested_mount_root_keeps_the_name_its_parent_lists_it_by():
     assert out == (
         "/a:\none\nz.txt\n\n/a/one:\nx.txt\n\n/b:\ntwo\n\n/b/two:\ny.txt\n"
     )
+
+
+class ProfileView:
+    def profile(self) -> str:
+        return "reviewer"
+
+
+def test_a_long_listing_across_mounts_names_the_sessions_profile():
+    # An entry with no uid or gid takes the session's profile as owner
+    # and group, the same whether the line spans one mount or several.
+    out, _ = asyncio.run(
+        run_ls(
+            [scope("/a/z.txt"), scope("/b/two/y.txt")],
+            {"args_l": True},
+            make_dispatch(Calls()),
+            None,
+            ProfileView(),
+        )
+    )
+    assert out.decode() == (
+        "-rw-r--r-- 1 reviewer reviewer 3 - /a/z.txt\n"
+        "-rw-r--r-- 1 reviewer reviewer 3 - /b/two/y.txt\n"
+    )

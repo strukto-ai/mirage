@@ -19,6 +19,7 @@ import { FileStat, FileType, PathSpec } from '../../../../../types.ts'
 import { enotdir } from '../../../../../errors/fs.ts'
 import { mountKey } from '../../../../../utils/key_prefix.ts'
 import { rstripSlash } from '../../../../../utils/slash.ts'
+import type { SessionView } from '../../../../../view/types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import type { DispatchFn } from '../types.ts'
 import { runLs } from './ls.ts'
@@ -125,5 +126,23 @@ describe('runLs — cross-mount ls', () => {
     const { out, io } = await run(['/a', '/b'], { recursive: true }, files, nested)
     expect(io.exitCode).toBe(0)
     expect(out).toBe('/a:\none\nz.txt\n\n/a/one:\nx.txt\n\n/b:\ntwo\n\n/b/two:\ny.txt\n')
+  })
+
+  // An entry with no uid or gid takes the session's profile as owner and
+  // group, the same whether the line spans one mount or several. Mirrors
+  // test_ls.py.
+  it("names the session's profile in a long listing", async () => {
+    const view = { profile: () => 'reviewer' } as unknown as SessionView
+    const calls: Calls = { readdir: [], stat: [] }
+    const [out] = await runLs(
+      ['/a/z.txt', '/b/two/y.txt'].map(spec),
+      { args_l: true },
+      makeDispatch(calls, new Set()),
+      undefined,
+      view,
+    )
+    expect(new TextDecoder().decode(await materialize(out))).toBe(
+      '-rw-r--r-- 1 reviewer reviewer 3 - /a/z.txt\n-rw-r--r-- 1 reviewer reviewer 3 - /b/two/y.txt\n',
+    )
   })
 })
