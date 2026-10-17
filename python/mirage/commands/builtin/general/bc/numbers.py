@@ -87,6 +87,7 @@ def trunc_div(a: int, b: int) -> int:
 
 
 def rescale(num: BcNumber, scale: int) -> BcNumber:
+    ensure_bits(constants.DECIMAL_DIGIT_BITS * scale + 1)
     return BcNumber(shift_decimal(num.coefficient, scale - num.scale), scale)
 
 

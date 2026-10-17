@@ -16,6 +16,9 @@ import { execFileSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 import * as constants from './constants.ts'
 import { BcRuntimeError } from './errors.ts'
+import { runLines } from './command.ts'
+import { parseInput } from './lexer.ts'
+import { OutputColumn } from './render.ts'
 import {
   applyBinary,
   bcLength,
@@ -130,4 +133,19 @@ process.stdout.write(JSON.stringify([errors, output.join('')]))
     )
     expect(() => bcSqrt({ coefficient: 2n, scale: 0 }, 16000)).toThrow(constants.ARITHMETIC_LIMIT)
   })
+})
+
+it('refuses growing remainder scales and recovers on the next line', async () => {
+  const program = 'a=.1;scale=100;' + 'a=a%(3*a);'.repeat(200) + 'obase=2;a\n2+2\n'
+  const errors: string[] = []
+  const output: string[] = []
+  for await (const chunk of runLines(
+    parseInput(new TextEncoder().encode(program)),
+    state(),
+    new OutputColumn(0),
+    errors,
+  ))
+    output.push(new TextDecoder().decode(chunk))
+  expect(errors).toEqual(['Runtime error (func=(main), adr=3): Arithmetic limit exceeded'])
+  expect(output.join('')).toBe('4\n')
 })

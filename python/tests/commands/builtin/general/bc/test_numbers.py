@@ -21,7 +21,9 @@ from pathlib import Path
 import pytest
 
 from mirage.commands.builtin.general.bc import constants
+from mirage.commands.builtin.general.bc.command import run_lines
 from mirage.commands.builtin.general.bc.errors import BcRuntimeError
+from mirage.commands.builtin.general.bc.lexer import parse_input
 from mirage.commands.builtin.general.bc.numbers import (
     apply_binary,
     bc_length,
@@ -32,6 +34,7 @@ from mirage.commands.builtin.general.bc.numbers import (
     rescale,
 )
 from mirage.commands.builtin.general.bc.parser import eval_statement
+from mirage.commands.builtin.general.bc.render import OutputColumn
 from mirage.commands.builtin.general.bc.types import BcNumber, BcState
 
 
@@ -128,3 +131,22 @@ def test_preflight_bounds_scale_shifts_division_and_sqrt():
         divide(huge, BcNumber(1, 0), 16000)
     with pytest.raises(BcRuntimeError, match=constants.ARITHMETIC_LIMIT):
         bc_sqrt(BcNumber(2, 0), 16000)
+
+
+@pytest.mark.asyncio
+async def test_remainder_scale_growth_refuses_and_recovers():
+    program = "a=.1;scale=100;" + "a=a%(3*a);" * 200 + "obase=2;a\n2+2\n"
+    errors: list[str] = []
+    output = [
+        chunk
+        async for chunk in run_lines(
+            parse_input(program.encode()),
+            BcState(0, False),
+            OutputColumn(0),
+            errors,
+        )
+    ]
+    assert errors == [
+        "Runtime error (func=(main), adr=3): Arithmetic limit exceeded"
+    ]
+    assert b"".join(output) == b"4\n"

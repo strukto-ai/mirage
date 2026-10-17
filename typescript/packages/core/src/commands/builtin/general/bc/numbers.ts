@@ -68,6 +68,7 @@ export function truncDiv(a: bigint, b: bigint): bigint {
 }
 
 export function rescale(num: BcNumber, scale: number): BcNumber {
+  ensureBits(constants.DECIMAL_DIGIT_BITS * scale + 1)
   return { coefficient: shiftDecimal(num.coefficient, scale - num.scale), scale }
 }
 
