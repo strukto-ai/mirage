@@ -71,7 +71,7 @@ jobs:
             .venv-min/bin/python - <<'PY'
           import importlib.util
           banned = ["numpy", "pypdfium2", "PIL", "mfusepy", "opendal", "aioboto3",
-                    "pandas", "redis", "asyncssh", "motor", "asyncpg", "av"]
+                    "pandas", "redis", "asyncssh", "motor", "asyncpg", "av", "databricks"]
           present = [m for m in banned if importlib.util.find_spec(m) is not None]
           assert not present, f"optional deps leaked into base install: {present}"
           print("OK: no optional deps in base install")
@@ -80,8 +80,13 @@ jobs:
           import asyncio
 
           import mirage
+          from mirage.vfs.databricks_volume import DatabricksVolumeConfig, DatabricksVolumeVFS
 
           async def main():
+              DatabricksVolumeVFS(DatabricksVolumeConfig(
+                  catalog="main", schema="default", volume="files",
+                  host="https://example.databricks.com", token="test-token",
+              ))
               ws = mirage.Workspace({"/ram": mirage.RAMVFS()},
                                     mode=mirage.MountMode.WRITE)
               out = await ws.shell("echo hello | wc -c")
@@ -119,7 +124,6 @@ jobs:
             "chroma:mirage.vfs.chroma"
             "lancedb:mirage.vfs.lancedb"
             "qdrant:mirage.vfs.qdrant"
-            "databricks:mirage.vfs.databricks_volume"
             "pydantic-ai:mirage.agents.pydantic_ai"
             "openai:mirage.agents.openai_agents"
             "agno:mirage.agents.agno"

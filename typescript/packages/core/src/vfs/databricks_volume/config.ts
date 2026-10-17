@@ -18,7 +18,7 @@ import {
   redactConfigWithSchema,
   type ConfigOf,
   type RedactedConfig,
-  secretStr,
+  secretSchema,
 } from '../secrets.ts'
 
 function validVolumePart(value: string): boolean {
@@ -34,15 +34,51 @@ function normalizeRootPath(value: string): string {
   return '/' + parts.join('/')
 }
 
+/** Supplies each request's token for a fixed principal and permission scope.
+ * The provider owns refresh coordination. Different identities require isolated
+ * workspaces, caches, indexes, and external cache prefixes.
+ */
+export type TokenProvider = () => string | Promise<string>
+
+function normalizeHost(value: string): string {
+  if (/\s/.test(value) || /[?#\\]/.test(value)) {
+    throw new Error('host must be an HTTP(S) origin')
+  }
+  let host: URL
+  try {
+    host = new URL(value)
+  } catch {
+    throw new Error('host must be an HTTP(S) origin')
+  }
+  if (
+    !['http:', 'https:'].includes(host.protocol) ||
+    host.username !== '' ||
+    host.password !== '' ||
+    host.search !== '' ||
+    host.hash !== '' ||
+    host.pathname !== '/'
+  )
+    throw new Error('host must be an HTTP(S) origin without credentials, path, query or fragment')
+  return host.origin
+}
+
+function validToken(value: string): boolean {
+  return value.trim() !== '' && !/[\r\n]/.test(value)
+}
+
 const DatabricksVolumeConfigSchema = z.object({
   catalog: z.string().refine(validVolumePart, 'must be a non-empty path segment'),
   schema: z.string().refine(validVolumePart, 'must be a non-empty path segment'),
   volume: z.string().refine(validVolumePart, 'must be a non-empty path segment'),
   rootPath: z.string().transform(normalizeRootPath).default('/'),
-  host: z.string().optional(),
-  token: secretStr().optional(),
-  profile: z.string().optional(),
-  timeout: z.number().default(30),
+  host: z.string().transform(normalizeHost),
+  token: secretSchema(
+    z.union([
+      z.string().refine(validToken, 'token must be nonblank without CR or LF'),
+      z.custom<TokenProvider>((value) => typeof value === 'function'),
+    ]),
+  ),
+  timeout: z.number().positive().default(30),
 })
 
 export type DatabricksVolumeConfig = ConfigOf<typeof DatabricksVolumeConfigSchema>

@@ -15,7 +15,7 @@
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
-import { dbxFetch } from './client.ts'
+import { getDirectoryMetadata, getMetadata, upload } from './client.ts'
 import { ensurePathSpec, parentPath } from './_helpers.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
@@ -27,31 +27,18 @@ async function ensureParentDirectory(
   virtualTarget: string,
 ): Promise<void> {
   try {
-    await dbxFetch(accessor, 'HEAD', 'directories', remoteParent)
+    await getDirectoryMetadata(accessor, remoteParent)
     return
   } catch (exc) {
     if (!isNotFound(exc)) throw exc
   }
   try {
-    await dbxFetch(accessor, 'HEAD', 'files', remoteParent)
+    await getMetadata(accessor, remoteParent)
   } catch (exc) {
     if (isNotFound(exc)) throw enoent(virtualTarget)
     throw exc
   }
   throw enotdir(virtualTarget)
-}
-
-/** Upload bytes over a volume file. Mirrors Python's `upload_bytes_sync`. */
-export async function uploadBytes(
-  accessor: DatabricksVolumeAccessor,
-  remotePath: string,
-  data: Uint8Array,
-): Promise<void> {
-  await dbxFetch(accessor, 'PUT', 'files', remotePath, {
-    query: { overwrite: 'true' },
-    headers: { 'Content-Type': 'application/octet-stream' },
-    body: data,
-  })
 }
 
 export async function write(
@@ -65,7 +52,7 @@ export async function write(
   const timer = startOp()
   await ensureParentDirectory(accessor, remoteParent, p.virtual)
   try {
-    await uploadBytes(accessor, remotePath, data)
+    await upload(accessor, remotePath, data, true)
   } catch (exc) {
     if (isNotFound(exc)) throw enoent(p.virtual)
     throw exc

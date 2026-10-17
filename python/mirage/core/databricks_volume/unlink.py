@@ -12,22 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
+from mirage.core.databricks_volume.client import delete_file
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.stat import stat
 from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record, start_op
 from mirage.types import FileType, PathSpec
-
-
-def _delete_file_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> None:
-    accessor.files.delete(remote_path)
 
 
 async def unlink(
@@ -40,7 +32,7 @@ async def unlink(
     remote_path = backend_path(accessor.config, path)
     timer = start_op()
     try:
-        await asyncio.to_thread(_delete_file_sync, accessor, remote_path)
+        await delete_file(accessor, remote_path)
     except Exception as exc:
         if is_not_found(exc):
             raise enoent(path) from exc

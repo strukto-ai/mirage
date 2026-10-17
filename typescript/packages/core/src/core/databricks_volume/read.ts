@@ -15,10 +15,9 @@
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
-import { dbxFetch } from './client.ts'
+import { download } from './client.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
-import { rangeHeader, windowIfUnranged } from '../../utils/ranges.ts'
 import { enoent } from '../../errors/fs.ts'
 
 export interface DbxReadOptions {
@@ -40,17 +39,13 @@ export async function read(
     record('read', virtual, VFSName.DATABRICKS_VOLUME, 0, timer)
     return new Uint8Array(0)
   }
-  const range = rangeHeader(offset, size)
-  const headers: Record<string, string> = { Accept: 'application/octet-stream' }
-  if (range !== null) headers.Range = range
-  let r: Response
+  let data: Uint8Array
   try {
-    r = await dbxFetch(accessor, 'GET', 'files', remotePath, { headers })
+    data = await download(accessor, remotePath, { offset, size })
   } catch (exc) {
     if (isNotFound(exc)) throw enoent(path.virtual)
     throw exc
   }
-  const data = windowIfUnranged(new Uint8Array(await r.arrayBuffer()), r.status, offset, size)
   record('read', virtual, VFSName.DATABRICKS_VOLUME, data.byteLength, timer)
   return data
 }

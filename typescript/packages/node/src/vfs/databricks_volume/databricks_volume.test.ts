@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
+import { Workspace } from '../../workspace.ts'
 import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { normalizeDatabricksVolumeConfig, redactDatabricksVolumeConfig } from './config.ts'
 import { DatabricksVolumeVFS } from './databricks_volume.ts'
-import { parseDatabricksCfg } from './profile.ts'
 import { buildVfs } from '../registry.ts'
 
 const BASE_CONFIG = {
@@ -35,6 +36,21 @@ describe('config normalization', () => {
     expect(config.timeout).toBe(30)
   })
 
+  it.each([
+    'https://example.com?',
+    'https://example.com#',
+    'https://example.com\\extra',
+    'https://example.com\n',
+  ])('rejects malformed origin %j', (host) => {
+    expect(() => normalizeDatabricksVolumeConfig({ ...BASE_CONFIG, host })).toThrow()
+  })
+
+  it('normalizes the workspace origin', () => {
+    expect(
+      normalizeDatabricksVolumeConfig({ ...BASE_CONFIG, host: 'HTTPS://EXAMPLE.COM:443/' }).host,
+    ).toBe('https://example.com')
+  })
+
   it('rejects invalid volume parts', () => {
     expect(() => normalizeDatabricksVolumeConfig({ ...BASE_CONFIG, catalog: 'a/b' })).toThrow()
   })
@@ -44,29 +60,6 @@ describe('config normalization', () => {
     const redacted = redactDatabricksVolumeConfig(config)
     expect(redacted.token).toBe('<REDACTED>')
     expect(redacted.catalog).toBe('main')
-  })
-})
-
-describe('parseDatabricksCfg', () => {
-  it('extracts host and token from the named section', () => {
-    const content = [
-      '[DEFAULT]',
-      'host = https://default.example.com',
-      'token = tok-default',
-      '',
-      '[work]',
-      'host = https://work.example.com',
-      'token = tok-work',
-    ].join('\n')
-    expect(parseDatabricksCfg(content, 'work')).toEqual({
-      host: 'https://work.example.com',
-      token: 'tok-work',
-    })
-    expect(parseDatabricksCfg(content, 'DEFAULT')).toEqual({
-      host: 'https://default.example.com',
-      token: 'tok-default',
-    })
-    expect(parseDatabricksCfg(content, 'missing')).toEqual({})
   })
 })
 
@@ -99,5 +92,35 @@ describe('DatabricksVolumeVFS storageLocation', () => {
   it('is one store for one volume root whatever its token', async () => {
     expect(await location('/root', 'a')).toBe(await location('/root/', 'b'))
     expect(await location('/root', 'a')).not.toBe(await location('/other', 'a'))
+  })
+})
+
+describe('DatabricksVolumeVFS rotating credential state', () => {
+  it('requires an override after redacting a callback and restores with a fresh provider', async () => {
+    const token = vi.fn().mockReturnValue('secret-token')
+    const vfs = await DatabricksVolumeVFS.create(
+      normalizeDatabricksVolumeConfig({ ...BASE_CONFIG, token }),
+    )
+    const workspace = new Workspace({ '/volume': vfs })
+    try {
+      const state = await toStateDict(workspace)
+      expect(JSON.stringify(state)).not.toContain('secret-token')
+      expect(token).not.toHaveBeenCalled()
+      await expect(Workspace.fromState(state)).rejects.toThrow('needs_override')
+      const replacement = await DatabricksVolumeVFS.create(
+        normalizeDatabricksVolumeConfig({
+          ...BASE_CONFIG,
+          token: () => Promise.resolve('fresh-token'),
+        }),
+      )
+      const restored = await Workspace.fromState(state, {}, { '/volume': replacement })
+      try {
+        expect(await restored.shell('pwd')).toMatchObject({ exitCode: 0 })
+      } finally {
+        await restored.close()
+      }
+    } finally {
+      await workspace.close()
+    }
   })
 })

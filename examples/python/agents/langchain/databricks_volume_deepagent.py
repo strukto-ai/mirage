@@ -38,9 +38,8 @@ vfs = DatabricksVolumeVFS(
         schema=os.environ["DATABRICKS_VOLUME_SCHEMA"],
         volume=os.environ["DATABRICKS_VOLUME_NAME"],
         root_path=os.environ.get("DATABRICKS_VOLUME_ROOT_PATH", "/"),
-        host=os.environ.get("DATABRICKS_HOST"),
-        token=os.environ.get("DATABRICKS_TOKEN"),
-        profile=os.environ.get("DATABRICKS_CONFIG_PROFILE"),
+        host=os.environ["DATABRICKS_HOST"],
+        token=os.environ["DATABRICKS_TOKEN"],
     )
 )
 

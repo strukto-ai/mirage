@@ -139,4 +139,14 @@ describe('readdir', () => {
     ])
     expect(calls.filter((c) => c.method === 'HEAD')).toHaveLength(1)
   })
+  it('interprets early-epoch listing timestamps as milliseconds', async () => {
+    const { fetch } = routedFetch(() =>
+      jsonResponse({
+        contents: [{ path: `${TEST_ROOT}/early.txt`, file_size: 1, last_modified: 1000 }],
+      }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const [file] = await readdir(makeAccessor(), spec('/volume/'))
+    expect(file?.modified).toBe('1970-01-01T00:00:01Z')
+  })
 })

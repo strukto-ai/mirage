@@ -12,57 +12,38 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-from typing import Any
-
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
+from mirage.core.databricks_volume.client import (
+    create_directory,
+    download,
+    list_directory_contents,
+    upload,
+)
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.read import read
 from mirage.core.databricks_volume.stat import stat
-from mirage.core.databricks_volume.write import upload_bytes_sync, write
+from mirage.core.databricks_volume.write import write
 from mirage.errors.fs import eisdir
 from mirage.types import FileType, PathSpec
 
 
-def _download_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> bytes:
-    response = accessor.files.download(remote_path)
-    contents = getattr(response, "contents", response)
-    if hasattr(contents, "read"):
-        return contents.read()
-    return bytes(contents)
-
-
-def _create_directory_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> None:
-    accessor.files.create_directory(remote_path)
-
-
-def _list_directory_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> list[Any]:
-    return list(accessor.files.list_directory_contents(remote_path))
-
-
-def _copy_tree_sync(
+async def _copy_tree(
     accessor: DatabricksVolumeAccessor,
     remote_src: str,
     remote_dst: str,
 ) -> None:
-    _create_directory_sync(accessor, remote_dst)
-    for entry in _list_directory_sync(accessor, remote_src):
+    await create_directory(accessor, remote_dst)
+    for entry in await list_directory_contents(accessor, remote_src):
         name = entry.path.rstrip("/").rsplit("/", 1)[-1]
         child_dst = remote_dst.rstrip("/") + "/" + name
-        if getattr(entry, "is_directory", False):
-            _copy_tree_sync(accessor, entry.path, child_dst)
+        if entry.is_directory:
+            await _copy_tree(accessor, entry.path, child_dst)
         else:
-            upload_bytes_sync(
-                accessor, child_dst, _download_sync(accessor, entry.path)
+            await upload(
+                accessor,
+                child_dst,
+                await download(accessor, entry.path),
+                overwrite=True,
             )
 
 
@@ -93,9 +74,7 @@ async def copy(
                 f"cannot copy a directory, '{src.virtual}', "
                 f"into itself, '{dst.virtual}'"
             )
-        await asyncio.to_thread(
-            _copy_tree_sync, accessor, remote_src, remote_dst
-        )
+        await _copy_tree(accessor, remote_src, remote_dst)
         return
     if same_path:
         # Copying a file onto itself would re-upload it; skip.

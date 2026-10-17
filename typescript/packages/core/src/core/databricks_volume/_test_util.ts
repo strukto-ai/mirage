@@ -25,8 +25,10 @@ export function makeAccessor(rootPath = '/root'): DatabricksVolumeAccessor {
     schema: 'default',
     volume: 'agent_files',
     root_path: rootPath,
+    host: 'https://dbc.example.com',
+    token: 'tok-123',
   })
-  return new DatabricksVolumeAccessor(config, 'https://dbc.example.com', 'tok-123')
+  return new DatabricksVolumeAccessor(config)
 }
 
 export function spec(virtual: string, prefix = '/volume'): PathSpec {

@@ -17,7 +17,8 @@ import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { dbxFetch } from './client.ts'
+import { getMetadata, getDirectoryMetadata } from './client.ts'
+import type { FileMetadata } from './types.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
 import { enoent } from '../../errors/fs.ts'
@@ -40,7 +41,7 @@ async function directoryStatOrRaise(
   path: PathSpec,
 ): Promise<FileStat> {
   try {
-    await dbxFetch(accessor, 'HEAD', 'directories', remotePath)
+    await getDirectoryMetadata(accessor, remotePath)
   } catch (exc) {
     if (isNotFound(exc)) throw enoent(path.virtual)
     throw exc
@@ -54,9 +55,9 @@ export async function stat(accessor: DatabricksVolumeAccessor, path: PathSpec): 
     return new FileStat({ name: '/', type: FileType.DIRECTORY })
   }
   const remotePath = backendPath(accessor.config, path)
-  let r: Response
+  let metadata: FileMetadata
   try {
-    r = await dbxFetch(accessor, 'HEAD', 'files', remotePath)
+    metadata = await getMetadata(accessor, remotePath)
   } catch (exc) {
     if (isNotFound(exc)) {
       return directoryStatOrRaise(accessor, remotePath, path)
@@ -64,9 +65,8 @@ export async function stat(accessor: DatabricksVolumeAccessor, path: PathSpec): 
     throw exc
   }
   const name = nameFromBackendPath(remotePath)
-  const lengthHeader = r.headers.get('content-length')
-  const size = lengthHeader !== null && lengthHeader !== '' ? Number(lengthHeader) : null
-  const modified = modifiedFromHeader(r.headers.get('last-modified'))
+  const size = metadata.contentLength
+  const modified = modifiedFromHeader(metadata.lastModified)
   return new FileStat({
     name,
     size,

@@ -12,16 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from functools import partial
-from typing import Any
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
+from mirage.core.databricks_volume.client import (
+    get_directory_metadata,
+    get_metadata,
+    list_directory_contents,
+)
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.stat import modified_to_iso
+from mirage.core.databricks_volume.types import FileMetadata
 from mirage.errors.fs import listing_error
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
@@ -31,18 +35,13 @@ logger = logging.getLogger(__name__)
 SCOPE_ERROR = 10_000
 
 
-def _list_directory_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> list[Any]:
-    return list(accessor.files.list_directory_contents(remote_path))
-
-
 async def _exists(
-    config: DatabricksVolumeConfig, probe: Callable[[str], Any], key: str
+    config: DatabricksVolumeConfig,
+    probe: Callable[[str], Awaitable[FileMetadata | None]],
+    key: str,
 ) -> bool:
     try:
-        await asyncio.to_thread(probe, backend_path(config, key))
+        await probe(backend_path(config, key))
     except Exception as exc:
         if is_not_found(exc):
             return False
@@ -51,12 +50,12 @@ async def _exists(
 
 
 async def _is_file(accessor: DatabricksVolumeAccessor, key: str) -> bool:
-    return await _exists(accessor.config, accessor.files.get_metadata, key)
+    return await _exists(accessor.config, partial(get_metadata, accessor), key)
 
 
 async def _is_dir(accessor: DatabricksVolumeAccessor, key: str) -> bool:
     return await _exists(
-        accessor.config, accessor.files.get_directory_metadata, key
+        accessor.config, partial(get_directory_metadata, accessor), key
     )
 
 
@@ -76,11 +75,7 @@ async def readdir(
     list_path = path.dir if path.pattern else path
     remote_path = backend_path(accessor.config, list_path)
     try:
-        entries = await asyncio.to_thread(
-            _list_directory_sync,
-            accessor,
-            remote_path,
-        )
+        entries = await list_directory_contents(accessor, remote_path)
     except Exception as exc:
         # The Files API answers 404 for a missing path and for a path under
         # a file alike, so the errno comes from walking the ancestors: one
@@ -103,25 +98,21 @@ async def readdir(
     rows: list[FileStat] = []
     for entry in sorted(entries, key=lambda item: item.path):
         name = entry.path.rstrip("/").rsplit("/", 1)[-1]
-        if getattr(entry, "is_directory", False):
+        if entry.is_directory:
             rows.append(FileStat(name=name, type=FileType.DIRECTORY))
             continue
-        size = getattr(entry, "file_size", None)
+        size = entry.file_size
         if size is None:
             # DirectoryEntry normally carries file_size; when the lister
             # omits it, one HEAD per affected file fills the gap so no row
             # carries an unknown size.
-            metadata = await asyncio.to_thread(
-                accessor.files.get_metadata, entry.path
-            )
-            size = getattr(metadata, "content_length", None)
+            metadata = await get_metadata(accessor, entry.path)
+            size = metadata.content_length
         rows.append(
             FileStat(
                 name=name,
                 size=size,
-                modified=modified_to_iso(
-                    getattr(entry, "last_modified", None)
-                ),
+                modified=modified_to_iso(entry.last_modified),
                 type=FileType.FILE,
                 content=content_type_for_path(name),
             )

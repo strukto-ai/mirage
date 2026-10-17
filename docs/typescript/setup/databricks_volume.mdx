@@ -34,6 +34,8 @@ const vfs = await DatabricksVolumeVFS.create(
     schema: 'default',
     volume: 'agent_files',
     root_path: '/reports',
+    host: process.env.DATABRICKS_HOST,
+    token: process.env.DATABRICKS_TOKEN,
   }),
 )
 const ws = new Workspace({ '/dbx/': vfs }, { mode: MountMode.READ })
@@ -47,15 +49,36 @@ console.log(res.stdoutText)
 | `schema` | required | Unity Catalog schema name. |
 | `volume` | required | Unity Catalog volume name. |
 | `root_path` | `/` | Subdirectory inside the volume to expose. |
-| `host` | none | Optional workspace host override. |
-| `token` | none | Optional PAT override. Redacted in snapshots. |
-| `profile` | none | Optional `~/.databrickscfg` profile name. |
+| `host` | required | HTTP(S) workspace origin without a path, query, fragment, or credentials. |
+| `token` | required | Static token or synchronous or asynchronous token callback. Redacted in snapshots. |
 | `timeout` | `30` | Request timeout in seconds. |
 
-Credentials resolve in order: explicit `host`/`token` in the config, then the
-`DATABRICKS_HOST`/`DATABRICKS_TOKEN` environment variables, then the
-`profile` section of `~/.databrickscfg` (or `DATABRICKS_CONFIG_PROFILE`,
-falling back to `DEFAULT`).
+Pass `host` and `token` explicitly. Mirage does not discover environment
+variables, SDK profiles, or default credentials. An application can read its
+environment as shown above or use its own credential broker.
+
+For rotating credentials, pass a callback that returns a token or a promise
+of one. Mirage resolves it once for each outbound request, including listing
+pages and metadata probes. A stream resolves it when iteration starts. The
+provider owns token caching, refresh, and concurrent refresh coordination.
+Authentication failures propagate without a fallback or automatic replay.
+
+```ts
+const rotating = await DatabricksVolumeVFS.create(
+  normalizeDatabricksVolumeConfig({
+    catalog: 'main',
+    schema: 'default',
+    volume: 'agent_files',
+    host: process.env.DATABRICKS_HOST,
+    token: async () => broker.getAccessToken(),
+  }),
+)
+```
+
+Keep the principal and permission scope fixed for a VFS and its workspace.
+Different identities require isolated workspaces, file caches, indexes, and
+external cache prefixes. If permissions change, rebuild or invalidate those
+caches before further access.
 
 ## Filesystem layout
 
@@ -88,9 +111,9 @@ server-side rename.
 
 ## Snapshot behavior
 
-`token` is redacted in VFS state. Loading a snapshot back requires an
-override config that provides fresh credentials if the runtime auth chain does
-not already supply them.
+`token` is redacted in VFS state. A callback is never called or serialized
+during a snapshot. Loading the snapshot requires a live VFS override with
+fresh credentials.
 
 ## Example
 

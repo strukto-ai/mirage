@@ -37,7 +37,6 @@ import asyncpg
 import boto3
 import chromadb
 import lancedb
-from databricks_client import HttpFilesClient
 from moto.server import ThreadedMotoServer
 from pymongo import AsyncMongoClient
 from qdrant_client import AsyncQdrantClient, models
@@ -50,6 +49,7 @@ from mirage.accessor.sharepoint import SharePointConfig
 from mirage.cache.file.config import RedisCacheConfig
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.cli.types import CLI
+from mirage.core.databricks_volume.client import create_directory
 from mirage.core.databricks_volume.path import configured_root
 from mirage.core.email.config import EmailConfig
 from mirage.core.github.client import GitHubApiError, github_request
@@ -357,17 +357,19 @@ class DatabricksVolumeService:
         base, process = await start_kit_fake("databricks")
         return cls(run_id, base, process)
 
-    def vfs(self, mount: dict) -> DatabricksVolumeVFS:
+    async def vfs(self, mount: dict) -> DatabricksVolumeVFS:
         volume = f"mirage-integ-{self.run_id}-{mount['volume']}"
         config = DatabricksVolumeConfig(
             catalog="main",
             schema="default",
             volume=volume,
             root_path=mount.get("prefix") or "/",
+            host=self.base,
+            token=self.token,
         )
-        client = HttpFilesClient(self.base, self.token)
-        client.files.create_directory(configured_root(config))
-        return DatabricksVolumeVFS(config, client=client)
+        vfs = DatabricksVolumeVFS(config)
+        await create_directory(vfs.accessor, configured_root(config))
+        return vfs
 
     async def teardown(self) -> None:
         await stop_kit_fake(self.process)
@@ -2588,11 +2590,11 @@ def build_gridfs(
     return service.vfs(mount), _noop
 
 
-def build_databricks_volume(
+async def build_databricks_volume(
     mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, DatabricksVolumeService)
-    return service.vfs(mount), _noop
+    return await service.vfs(mount), _noop
 
 
 def build_onedrive(
@@ -2829,7 +2831,7 @@ ARG_ERROR_VFS: dict[str, tuple[type, type, dict[str, object]]] = {
         DatabricksVolumeVFS,
         DatabricksVolumeConfig,
         {
-            "host": "h",
+            "host": "https://workspace.example.com",
             "token": "t",
             "catalog": "c",
             "schema": "s",

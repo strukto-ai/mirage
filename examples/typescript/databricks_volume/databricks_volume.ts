@@ -54,17 +54,18 @@ async function main(): Promise<void> {
     schema: process.env.DATABRICKS_VOLUME_SCHEMA!,
     volume: process.env.DATABRICKS_VOLUME_NAME!,
     root_path: process.env.DATABRICKS_VOLUME_ROOT_PATH ?? '/',
-    ...(process.env.DATABRICKS_HOST !== undefined ? { host: process.env.DATABRICKS_HOST } : {}),
-    ...(process.env.DATABRICKS_TOKEN !== undefined ? { token: process.env.DATABRICKS_TOKEN } : {}),
-    ...(process.env.DATABRICKS_CONFIG_PROFILE !== undefined
-      ? { profile: process.env.DATABRICKS_CONFIG_PROFILE }
-      : {}),
+    host: process.env.DATABRICKS_HOST!,
+    token: () => process.env.DATABRICKS_TOKEN!,
   })
   const vfs = await DatabricksVolumeVFS.create(config)
   const ws = new Workspace({ '/dbx/': vfs }, { mode: MountMode.READ })
   try {
     console.log('=== not-found errors show the full virtual path ===')
-    for (const cmd of ['cat /dbx/__nf_missing__.txt', 'head /dbx/__nf_missing__.txt', 'stat /dbx/__nf_missing__.txt']) {
+    for (const cmd of [
+      'cat /dbx/__nf_missing__.txt',
+      'head /dbx/__nf_missing__.txt',
+      'stat /dbx/__nf_missing__.txt',
+    ]) {
       const res = await ws.shell(cmd)
       console.log(`$ ${cmd}`)
       console.log(`  exit=${String(res.exitCode)}  ${new TextDecoder().decode(res.stderr).trim()}`)
@@ -79,7 +80,6 @@ async function main(): Promise<void> {
       await run(ws, `stat "${target}"`)
       await run(ws, `head -n 20 "${target}"`)
       await run(ws, `grep -n TODO "${target}"`)
-
 
       // chmod/chown/touch never hit the Databricks API: attrs land in the
       // workspace namespace (durable, snapshot-captured) and merge into

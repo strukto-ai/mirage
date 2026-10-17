@@ -12,12 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.core.databricks_volume._helpers import is_directory_metadata
+from mirage.core.databricks_volume.client import (
+    get_directory_metadata,
+    get_metadata,
+)
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.errors.fs import enoent
@@ -26,16 +28,11 @@ from mirage.utils.dates import to_iso_z
 from mirage.utils.filetype import content_type_for_path
 
 
-def modified_to_iso(value) -> str | None:
+def modified_to_iso(value: str | int | None) -> str | None:
     if value is None or value == "":
         return None
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return to_iso_z(value)
-    if isinstance(value, (int, float)):
-        timestamp = value / 1000 if value > 10_000_000_000 else value
-        return to_iso_z(datetime.fromtimestamp(timestamp, timezone.utc))
+    if isinstance(value, int):
+        return to_iso_z(datetime.fromtimestamp(value / 1000, timezone.utc))
     try:
         parsed = parsedate_to_datetime(str(value))
     except (TypeError, ValueError):
@@ -55,9 +52,7 @@ async def _directory_stat_or_raise(
     path: PathSpec,
 ) -> FileStat:
     try:
-        await asyncio.to_thread(
-            accessor.files.get_directory_metadata, remote_path
-        )
+        await get_directory_metadata(accessor, remote_path)
     except Exception as exc:
         if is_not_found(exc):
             raise enoent(path) from exc
@@ -73,18 +68,14 @@ async def stat(accessor: DatabricksVolumeAccessor, path: PathSpec) -> FileStat:
         return FileStat(name="/", type=FileType.DIRECTORY)
     remote_path = backend_path(accessor.config, path)
     try:
-        metadata = await asyncio.to_thread(
-            accessor.files.get_metadata, remote_path
-        )
+        metadata = await get_metadata(accessor, remote_path)
     except Exception as exc:
         if is_not_found(exc):
             return await _directory_stat_or_raise(accessor, remote_path, path)
         raise
     name = _name_from_backend_path(remote_path)
-    if is_directory_metadata(metadata):
-        return FileStat(name=name, type=FileType.DIRECTORY)
-    size = getattr(metadata, "content_length", None)
-    modified = modified_to_iso(getattr(metadata, "last_modified", None))
+    size = metadata.content_length
+    modified = modified_to_iso(metadata.last_modified)
     return FileStat(
         name=name,
         size=size,

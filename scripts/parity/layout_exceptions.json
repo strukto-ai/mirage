@@ -157,16 +157,6 @@
     "daemon": "The uvicorn import target (mirage.server.daemon:app) the CLI spawns. Its twin is TypeScript's server/bin/daemon.ts, under the npm bin directory already excused as server/bin."
    }
   },
-  "core/databricks_volume": {
-   "typescript_only": {
-    "client": "A hand-rolled fetch client for the Databricks Files REST API. Python calls the databricks-sdk WorkspaceClient, which has no npm equivalent."
-   }
-  },
-  "vfs/databricks_volume": {
-   "typescript_only": {
-    "profile": "Parses ~/.databrickscfg for a named profile on node. Python's databricks-sdk resolves profiles itself."
-   }
-  },
   "vfs/lancedb": {
    "typescript_only": {
     "store": "Node's LanceDriver (core/lancedb/query.ts) over @lancedb/lancedb. Core's accessor takes a driver, so runtime-agnostic code never imports a native npm module; Python's accessor/lancedb.py opens lancedb itself."

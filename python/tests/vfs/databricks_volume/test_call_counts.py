@@ -9,8 +9,7 @@ from mirage.vfs.databricks_volume import (
     DatabricksVolumeVFS,
 )
 from mirage.workspace import Workspace
-from tests.core.databricks_volume.conftest import (
-    FakeClient,
+from tests.fixtures.databricks_api import (
     FakeFiles,
     directory_entry,
     file_entry,
@@ -24,15 +23,16 @@ AGES_DAYS = (1, 2, 3, 10, 20)
 
 
 def _rig() -> tuple[Workspace, FakeFiles, str]:
+    files = FakeFiles()
     config = DatabricksVolumeConfig(
         catalog="main",
         schema="default",
         volume="agent_files",
         root_path="/root",
         token="secret",
+        host=files.host,
     )
-    files = FakeFiles()
-    vfs = DatabricksVolumeVFS(config, FakeClient(files))
+    vfs = DatabricksVolumeVFS(config)
     root = backend_path(config, PathSpec.from_str_path("/"))
     files.directories[root] = [directory_entry(f"{root}/sub")]
     files.directory_metadata.add(f"{root}/sub")

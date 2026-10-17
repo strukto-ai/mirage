@@ -93,7 +93,6 @@ s3       = ["aioboto3>=15.5.0", "botocore>=1.40.61"]
 r2       = ["aioboto3>=15.5.0", "botocore>=1.40.61"]
 gcs      = ["aioboto3>=15.5.0", "botocore>=1.40.61"]
 oci      = ["aioboto3>=15.5.0", "botocore>=1.40.61"]
-databricks = ["databricks-sdk>=0.72.0"]
 
 # --- network / remote ---
 ssh      = ["asyncssh>=2.23.0"]
@@ -188,7 +187,6 @@ all = [
     "mirage-ai[r2]",
     "mirage-ai[gcs]",
     "mirage-ai[oci]",
-    "mirage-ai[databricks]",
     "mirage-ai[ssh]",
     "mirage-ai[nextcloud]",
     "mirage-ai[hf-buckets]",
@@ -220,7 +218,6 @@ sandbox = [
     "mirage-ai[r2]",
     "mirage-ai[gcs]",
     "mirage-ai[oci]",
-    "mirage-ai[databricks]",
     "mirage-ai[ssh]",
     "mirage-ai[nextcloud]",
     "mirage-ai[hf-buckets]",

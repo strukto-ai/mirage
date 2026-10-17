@@ -15,11 +15,10 @@
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 
-import { dbxFetch } from './client.ts'
+import { deleteFile, deleteDirectory, listDirectoryContents } from './client.ts'
 import { ensurePathSpec } from './_helpers.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath, virtualPath } from './path.ts'
-import { listDirectoryContents } from './readdir.ts'
 import { stat } from './stat.ts'
 import { unlink } from './unlink.ts'
 import { enoent } from '../../errors/fs.ts'
@@ -30,14 +29,14 @@ async function removeTreeRecurse(
   removed: string[],
 ): Promise<void> {
   for (const entry of await listDirectoryContents(accessor, remoteDir)) {
-    if (entry.is_directory === true) {
+    if (entry.isDirectory) {
       await removeTreeRecurse(accessor, entry.path, removed)
     } else {
-      await dbxFetch(accessor, 'DELETE', 'files', entry.path)
+      await deleteFile(accessor, entry.path)
       removed.push(entry.path)
     }
   }
-  await dbxFetch(accessor, 'DELETE', 'directories', remoteDir)
+  await deleteDirectory(accessor, remoteDir)
   removed.push(remoteDir)
 }
 

@@ -12,10 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
-from io import BytesIO
 from types import SimpleNamespace
-from urllib.parse import unquote
 
 import pytest
 from pydantic import ValidationError
@@ -32,180 +29,10 @@ from mirage.vfs.databricks_volume import (
     DatabricksVolumeConfig,
     DatabricksVolumeVFS,
 )
+from tests.fixtures.databricks_api import FakeFiles
 from tests.fixtures.driver_ops import ops
 from tests.fixtures.mount_commands import mount_commands
 from tests.fixtures.vfs_io import served
-
-
-class NotFoundError(Exception):
-    status_code = 404
-
-
-class FakeDownload:
-    def __init__(self, data: bytes) -> None:
-        self.contents = BytesIO(data)
-
-
-class FakeFiles:
-    def __init__(self) -> None:
-        self.downloads: dict[str, bytes] = {}
-        self.metadata: dict[str, object] = {}
-        self.directory_metadata: set[str] = set()
-        self.directories: dict[str, list[object]] = {}
-        self.upload_calls: list[tuple[str, bytes, bool]] = []
-        self.delete_calls: list[str] = []
-        self.create_directory_calls: list[str] = []
-        self.delete_directory_calls: list[str] = []
-
-    def download(self, path: str) -> FakeDownload:
-        if path not in self.downloads:
-            raise NotFoundError(path)
-        return FakeDownload(self.downloads[path])
-
-    def get_metadata(self, path: str) -> object:
-        if path not in self.metadata:
-            raise NotFoundError(path)
-        return self.metadata[path]
-
-    def get_directory_metadata(self, path: str) -> None:
-        if path not in self.directory_metadata:
-            raise NotFoundError(path)
-
-    def list_directory_contents(self, path: str) -> list[object]:
-        if path not in self.directories:
-            raise NotFoundError(path)
-        return self.directories[path]
-
-    def create_directory(self, path: str) -> None:
-        self.create_directory_calls.append(path)
-        cur = ""
-        for part in path.strip("/").split("/"):
-            cur = cur + "/" + part
-            if cur in self.directory_metadata:
-                continue
-            self.directory_metadata.add(cur)
-            self.metadata[cur] = SimpleNamespace(is_directory=True)
-            self.directories.setdefault(cur, [])
-            parent = posixpath.dirname(cur) or "/"
-            self._upsert_directory_entry(
-                parent, SimpleNamespace(path=cur, is_directory=True)
-            )
-
-    def delete_directory(self, path: str) -> None:
-        self.delete_directory_calls.append(path)
-        if path not in self.directory_metadata:
-            raise NotFoundError(path)
-        if self.directories.get(path):
-            raise OSError(f"directory not empty: {path}")
-        self.directory_metadata.discard(path)
-        self.metadata.pop(path, None)
-        self.directories.pop(path, None)
-        parent = posixpath.dirname(path.rstrip("/")) or "/"
-        self.directories[parent] = [
-            entry
-            for entry in self.directories.get(parent, [])
-            if getattr(entry, "path", None) != path
-        ]
-
-    def upload(self, path: str, contents, overwrite: bool = False) -> None:
-        data = contents.read()
-        self.upload_calls.append((path, data, overwrite))
-        parent = posixpath.dirname(path.rstrip("/")) or "/"
-        if parent not in self.directory_metadata:
-            if parent in self.metadata:
-                raise NotADirectoryError(parent)
-            raise NotFoundError(parent)
-        if path in self.directory_metadata:
-            raise IsADirectoryError(path)
-        self.downloads[path] = data
-        self.metadata[path] = SimpleNamespace(
-            content_length=len(data),
-            content_type=None,
-            last_modified=None,
-        )
-        self._upsert_directory_entry(
-            parent,
-            SimpleNamespace(
-                path=path,
-                is_directory=False,
-                file_size=len(data),
-            ),
-        )
-
-    def delete(self, path: str) -> None:
-        self.delete_calls.append(path)
-        if path in self.directory_metadata:
-            raise IsADirectoryError(path)
-        if path not in self.metadata and path not in self.downloads:
-            raise NotFoundError(path)
-        self.metadata.pop(path, None)
-        self.downloads.pop(path, None)
-        parent = posixpath.dirname(path.rstrip("/")) or "/"
-        self.directories[parent] = [
-            entry
-            for entry in self.directories.get(parent, [])
-            if getattr(entry, "path", None) != path
-        ]
-
-    def _upsert_directory_entry(self, parent: str, entry: object) -> None:
-        entries = [
-            existing
-            for existing in self.directories.get(parent, [])
-            if getattr(existing, "path", None) != getattr(entry, "path", None)
-        ]
-        entries.append(entry)
-        self.directories[parent] = sorted(
-            entries, key=lambda item: getattr(item, "path", "")
-        )
-
-
-def _apply_range_header(data: bytes, range_header: str) -> bytes:
-    if not range_header.startswith("bytes="):
-        raise ValueError(f"unsupported range header: {range_header}")
-    start_text, end_text = range_header.removeprefix("bytes=").split("-", 1)
-    start = int(start_text) if start_text else 0
-    end = int(end_text) + 1 if end_text else None
-    return data[start:end]
-
-
-class FakeApiClient:
-    def __init__(self, files: FakeFiles) -> None:
-        self.files = files
-
-    def do(
-        self,
-        method: str,
-        path: str | None = None,
-        url: str | None = None,
-        query: dict | None = None,
-        headers: dict | None = None,
-        body: dict | None = None,
-        raw: bool = False,
-        files: object = None,
-        data: object = None,
-        auth: object = None,
-        response_headers: list[str] | None = None,
-    ) -> dict:
-        if method != "GET" or path is None:
-            raise ValueError(f"unsupported fake API call: {method} {path}")
-        remote_path = unquote(path.removeprefix("/api/2.0/fs/files"))
-        if remote_path not in self.files.downloads:
-            raise NotFoundError(remote_path)
-        payload = self.files.downloads[remote_path]
-        range_header = (headers or {}).get("Range")
-        if range_header is not None:
-            payload = _apply_range_header(payload, range_header)
-        return {
-            "contents": BytesIO(payload),
-            "content-length": str(len(payload)),
-            "accept-ranges": "bytes",
-        }
-
-
-class FakeClient:
-    def __init__(self, files: FakeFiles) -> None:
-        self.files = files
-        self.api_client = FakeApiClient(files)
 
 
 def make_vfs(files: FakeFiles) -> DatabricksVolumeVFS:
@@ -215,9 +42,9 @@ def make_vfs(files: FakeFiles) -> DatabricksVolumeVFS:
             schema="default",
             volume="agent_files",
             root_path="/root",
+            host=files.host,
             token="secret",
-        ),
-        client=FakeClient(files),
+        )
     )
 
 
@@ -251,6 +78,8 @@ def test_config_validation_and_normalization():
         schema="default",
         volume="agent_files",
         root_path="nested/path",
+        host="https://dbc.example.com",
+        token="secret",
     )
     assert config.root_path == "/nested/path"
     with pytest.raises(ValidationError):
@@ -267,6 +96,8 @@ def test_backend_path_uses_volume_root_and_strips_mount_prefix():
         schema="default",
         volume="agent_files",
         root_path="/root",
+        host="https://dbc.example.com",
+        token="secret",
     )
     path = PathSpec(
         vfs_path=mount_key("/volume/reports/latest.md", "/volume"),
@@ -284,7 +115,7 @@ def test_vfs_state_redacts_token():
     assert state["type"] == VFSName.DATABRICKS_VOLUME
     assert state["needs_override"] is True
     assert state["config"]["token"] == "<REDACTED>"
-    assert state["config"]["host"] is None
+    assert state["config"]["host"] == vfs.config.host
     assert state["config"]["catalog"] == "main"
     assert "redacted_fields" not in state
 
@@ -789,9 +620,7 @@ def _location(root: str, token: str) -> str | None:
         host="https://dbc.example.com",
         token=token,
     )
-    return DatabricksVolumeVFS(
-        config, client=FakeClient(FakeFiles())
-    ).storage_location()
+    return DatabricksVolumeVFS(config).storage_location()
 
 
 def test_a_volume_root_is_one_store_whatever_its_token():

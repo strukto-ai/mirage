@@ -12,22 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.core.databricks_volume._helpers import parent_path
+from mirage.core.databricks_volume.client import create_directory
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.stat import stat
 from mirage.errors.fs import enoent, enotdir
 from mirage.types import FileType, PathSpec
-
-
-def _create_directory_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> None:
-    accessor.files.create_directory(remote_path)
 
 
 async def mkdir(
@@ -37,7 +29,7 @@ async def mkdir(
 ) -> None:
     remote_path = backend_path(accessor.config, path)
     if parents:
-        await asyncio.to_thread(_create_directory_sync, accessor, remote_path)
+        await create_directory(accessor, remote_path)
         return
     try:
         parent_stat = await stat(accessor, parent_path(path))
@@ -46,7 +38,7 @@ async def mkdir(
     if parent_stat.type != FileType.DIRECTORY:
         raise enotdir(path)
     try:
-        await asyncio.to_thread(_create_directory_sync, accessor, remote_path)
+        await create_directory(accessor, remote_path)
     except Exception as exc:
         if is_not_found(exc):
             raise enoent(path) from exc
