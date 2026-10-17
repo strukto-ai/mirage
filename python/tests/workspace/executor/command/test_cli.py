@@ -1437,6 +1437,10 @@ class ClosingAccessor(NOOPAccessor):
         self.closed = True
 
 
+async def _done_output():
+    yield b"done\n"
+
+
 @pytest.mark.asyncio
 async def test_removal_closes_the_accessor_after_the_leaf_and_its_output():
     entered = asyncio.Event()
@@ -1445,11 +1449,7 @@ async def test_removal_closes_the_accessor_after_the_leaf_and_its_output():
     async def stream_when_told(accessor, paths, texts, ctx: Context):
         entered.set()
         await finish.wait()
-
-        async def out():
-            yield b"done\n"
-
-        return out(), IOResult()
+        return _done_output(), IOResult()
 
     registry = CLIRegistry()
     install = registry.install(

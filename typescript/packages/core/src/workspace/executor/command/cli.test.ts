@@ -1118,15 +1118,16 @@ class ClosingAccessor extends NOOPAccessor {
   }
 }
 
+async function* doneOutput(): AsyncGenerator<Uint8Array> {
+  yield await Promise.resolve(new TextEncoder().encode('done\n'))
+}
+
 describe('handleCli install lifetime', () => {
   it('removal closes the accessor after the leaf and its output', async () => {
     let enter!: () => void
     const entered = new Promise<void>((resolve) => (enter = resolve))
     let finish!: () => void
     const finished = new Promise<void>((resolve) => (finish = resolve))
-    async function* out(): AsyncGenerator<Uint8Array> {
-      yield await Promise.resolve(new TextEncoder().encode('done\n'))
-    }
     const registry = new CLIRegistry()
     const install = registry.install(
       'prog',
@@ -1137,7 +1138,7 @@ describe('handleCli install lifetime', () => {
             fn: async () => {
               enter()
               await finished
-              return [out(), new IOResult()]
+              return [doneOutput(), new IOResult()]
             },
           }),
         },
