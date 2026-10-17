@@ -15,6 +15,7 @@
 import type { SessionAccess } from '../../view/types.ts'
 import { IOConfig } from '../../io/config.ts'
 import { commandsFor } from '../../commands/builtin/backends.ts'
+import type { Observer } from '../../observe/observer.ts'
 import type { ProcessView } from '../../process/view.ts'
 import type { SessionState } from '../session/session.ts'
 import { noMount } from '../../errors/fs.ts'
@@ -107,6 +108,7 @@ export interface RegistryPlacements {
 export class MountRegistry {
   private readonly indexConfig: IndexConfig | undefined
   processView?: (session: SessionState) => ProcessView
+  observer: Observer | null = null
   private readonly mountList: MountEntry[]
   readonly retiringMounts = new Map<BaseVFS, Promise<void>>()
   readonly retiredMounts = new WeakSet<BaseVFS>()

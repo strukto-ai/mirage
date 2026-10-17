@@ -25,9 +25,7 @@ import {
   hiddenRefusal,
   sessionVisibility,
   readonlyBelow,
-  requireMountWritable,
   runWithAdmission,
-  runWithMountGate,
   runWithSession,
   strongestModeUnder,
   runWithEvaluation,
@@ -366,75 +364,6 @@ describe('the path axis modes', () => {
       expect(readonlyBelow('/other/tree', '/repo', MountMode.WRITE)).toBeNull()
       return Promise.resolve()
     })
-  })
-
-  it('requireMountWritable needs the broad grant', async () => {
-    const sess = new SessionState({
-      sessionId: 'agent',
-      mountModes: new Map([['/trello', MountMode.READ]]),
-      visibility: { shown: { entries: [{ path: '/trello/board', mode: MountMode.WRITE }] } },
-    })
-    await runWithSession(sess, () =>
-      runWithMountGate('/trello', MountMode.WRITE, () => {
-        // The carve-out admits the command, but an id-addressed write
-        // names no path, so only the mount-wide grant counts.
-        expect(() => {
-          requireMountWritable('/trello')
-        }).toThrow(/read-only/)
-        return Promise.resolve()
-      }),
-    )
-    // Unrestricted (no session narrowing) writes pass, and with no
-    // mount bound the check is inert.
-    await runWithMountGate('/trello', MountMode.WRITE, () => {
-      requireMountWritable('/trello')
-      return Promise.resolve()
-    })
-    requireMountWritable('/trello')
-  })
-
-  it('requireMountWritable judges an explicit owner as it judges the bound one', async () => {
-    // A show entry's mode governs the paths below it; an id-addressed
-    // write names none, so only the profile's mount mode narrows it.
-    const shown = new SessionState({
-      sessionId: 'shown',
-      visibility: { shown: { entries: [{ path: '/t', mode: MountMode.READ }] } },
-    })
-    const capped = new SessionState({
-      sessionId: 'capped',
-      mountModes: new Map([['/t', MountMode.READ]]),
-    })
-    const outcome = (run: () => void): string => {
-      try {
-        run()
-        return 'ok'
-      } catch (error) {
-        return (error as { code?: string }).code ?? String(error)
-      }
-    }
-    for (const [sess, expected] of [
-      [shown, 'ok'],
-      [capped, 'EROFS'],
-    ] as const) {
-      await runWithMountGate('/t', MountMode.WRITE, () => {
-        expect(
-          outcome(() => {
-            requireMountWritable('/t', sess)
-          }),
-        ).toBe(expected)
-        return Promise.resolve()
-      })
-      await runWithSession(sess, () =>
-        runWithMountGate('/t', MountMode.WRITE, () => {
-          expect(
-            outcome(() => {
-              requireMountWritable('/t')
-            }),
-          ).toBe(expected)
-          return Promise.resolve()
-        }),
-      )
-    }
   })
 })
 

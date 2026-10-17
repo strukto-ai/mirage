@@ -590,7 +590,7 @@ describe('sandbox policy', () => {
     expect(await errorCode(fs.editText(target, edit, undefined, undefined, READ_ONLY))).toBe(
       'FS_SANDBOX_DENIED',
     )
-    expect(await ws.vfs.cat('/data/a.txt')).toBe('one')
+    expect(new TextDecoder().decode(await ws.vfs.read('/data/a.txt'))).toBe('one')
   })
 
   it('reads under a read-only policy, since only mutations are fenced', async () => {
@@ -685,7 +685,7 @@ describe('the session the adapter reads as', () => {
     expect(await fs.lstat('/data/vault/lk')).toBeUndefined()
     expect(await fs.lstat('/data/hidden-lk')).toBeUndefined()
     expect(String((await fs.resolve('/data/hidden-lk')).targetKey)).toBe('/data/hidden-lk')
-    expect(await ws.vfs.cat('/data/vault/secret')).toBe('top')
+    expect(new TextDecoder().decode(await ws.vfs.read('/data/vault/secret'))).toBe('top')
   })
 
   it('reads links as the ambient session the dispatcher will keep', async () => {
@@ -907,7 +907,7 @@ describe('processPathFromHostPath', () => {
     if (virtual === undefined) throw new Error('expected a mapping')
     // The point of the mapping: what it returns is live in this world,
     // not merely well-formed.
-    expect(await ws.vfs.cat(virtual)).toBe('hello')
+    expect(new TextDecoder().decode(await ws.vfs.read(virtual))).toBe('hello')
     expect(await fs.readText(await fs.resolve(virtual))).toBe('hello')
   })
 })

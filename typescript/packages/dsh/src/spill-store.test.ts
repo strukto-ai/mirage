@@ -22,6 +22,8 @@ import { MirageService } from './service.ts'
 import { MirageSpillStore, encodeSegment, sessionDirName } from './spill-store.ts'
 import type { MirageSpillConfig } from './spill-store.ts'
 
+const DEC = new TextDecoder()
+
 type SessionId = SaveTextSpill['owner']['sessionId']
 type ToolCallId = Extract<SaveTextSpill['source'], { kind: 'tool' }>['callId']
 
@@ -117,7 +119,7 @@ describe('saveText', () => {
   it('writes the full content where the locator says', async () => {
     const { store, ws } = await makeStore()
     const ref = await store.saveText(request('the whole output'))
-    expect(await ws.vfs.cat(String(ref.locator))).toBe('the whole output')
+    expect(DEC.decode(await ws.vfs.read(String(ref.locator)))).toBe('the whole output')
   })
 
   it('reports the exact UTF-8 byte length, not the character count', async () => {
@@ -146,7 +148,7 @@ describe('saveText', () => {
     const locator = String(ref.locator)
     expect(locator).toMatch(/^\/tmp\/spill\/session-[0-9a-f]{12}\//)
     expect(locator).not.toContain('..')
-    expect(await ws.vfs.cat(locator)).toBe('PAYLOAD')
+    expect(DEC.decode(await ws.vfs.read(locator))).toBe('PAYLOAD')
     // The whole point: a shell reading the locator back finds it.
     ws.createSession('probe')
     const read = await ws.shell(`cat ${locator}`, { sessionId: 'probe' })
@@ -194,8 +196,8 @@ describe('saveText', () => {
     const first = await store.saveText(request('first', { suggestedName: 'r.txt' }))
     const second = await store.saveText(request('second', { suggestedName: 'r.txt' }))
     expect(String(first.locator)).not.toBe(String(second.locator))
-    expect(await ws.vfs.cat(String(first.locator))).toBe('first')
-    expect(await ws.vfs.cat(String(second.locator))).toBe('second')
+    expect(DEC.decode(await ws.vfs.read(String(first.locator)))).toBe('first')
+    expect(DEC.decode(await ws.vfs.read(String(second.locator)))).toBe('second')
   })
 
   it('cannot be walked out of its directory by a suggested name', async () => {

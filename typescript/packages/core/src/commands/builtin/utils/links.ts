@@ -25,7 +25,7 @@ import { CycleError, posixNormpath, resolvePath } from '../../../utils/path.ts'
 import { normDir, ownerPrefix, rstripSlash } from '../../../utils/slash.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { namespaceNames } from '../../../view/namespace_view.ts'
-import type { Files } from '../../../workspace/files.ts'
+import { type Files, namespaceOf } from '../../../workspace/files.ts'
 import { resolvePathStat } from './paths.ts'
 
 /**
@@ -192,14 +192,16 @@ export function landingRoot(mounts: MountView, links: LinkView | null, virtual: 
  * so a walker judges where it lands. Mirrors Python's link_view.
  */
 export function linkView(files: Files | undefined): LinkView | undefined {
-  const table = files?.links ?? null
-  if (files === undefined || table === null) return undefined
+  if (files === undefined) return undefined
+  const namespace = namespaceOf(files)
+  const table = namespace.links
+  if (table === null) return undefined
   return {
     statAt: (path: string) => (files.isVisible(path) ? table.linkStatAt(path) : null),
     subtree: (directory: string) =>
       table.linkStatsBelow(directory).filter(([path]) => files.isVisible(path)),
     resolve: (path: string) =>
-      pathVisible(files.vis(), path) ? posixNormpath(table.follow(path)) : path,
+      pathVisible(namespace.vis(), path) ? posixNormpath(table.follow(path)) : path,
     exists: async (path: string) => {
       try {
         return (
@@ -237,10 +239,11 @@ export function linkView(files: Files | undefined): LinkView | undefined {
  */
 export function mountView(files: Files | undefined, crossing = false): MountView | undefined {
   if (files === undefined) return undefined
+  const namespace = namespaceOf(files)
   const below = (path: string): string[] => {
     if (crossing) return []
     const base = normDir(path)
-    return [...files.prefixes()]
+    return [...namespace.prefixes()]
       .filter((prefix) => prefix !== base && prefix.startsWith(base))
       .sort(compareCodePoints)
       .map((prefix) => rstripSlash(prefix) || '/')
@@ -248,12 +251,12 @@ export function mountView(files: Files | undefined, crossing = false): MountView
   return {
     descendants: below,
     visibleDescendants: (path: string) => {
-      const vis = files.vis()
+      const vis = namespace.vis()
       return below(path).filter((root) => pathVisible(vis, root))
     },
-    isRoot: (path: string) => !crossing && files.prefixes().includes(normDir(path)),
-    rootOf: (path: string) => ownerPrefix(files.prefixes(), path) ?? '/',
-    maxDuEntries: (path: string) => files.ownerOf(path)?.maxDuEntries ?? null,
+    isRoot: (path: string) => !crossing && namespace.prefixes().includes(normDir(path)),
+    rootOf: (path: string) => ownerPrefix(namespace.prefixes(), path) ?? '/',
+    maxDuEntries: (path: string) => namespace.ownerOf(path)?.maxDuEntries ?? null,
   }
 }
 
@@ -269,7 +272,8 @@ export function mountView(files: Files | undefined, crossing = false): MountView
  */
 export function owedNames(files: Files | undefined, directory: string): string[] {
   if (files === undefined) return []
-  return namespaceNames(files.vis(), files.prefixes(), files.links, directory)
+  const namespace = namespaceOf(files)
+  return namespaceNames(namespace.vis(), namespace.prefixes(), namespace.links, directory)
 }
 
 /** The workspace's links as the command's session sees them, read off its
@@ -304,5 +308,5 @@ export function dispatchOf(ctx: Context): DispatchFn | undefined {
 
 /** The line's operand resolution its files carry. Mirrors Python's follow_of. */
 export function followOf(ctx: Context): FollowOperands | undefined {
-  return ctx.vfs?.follow ?? undefined
+  return ctx.vfs === undefined ? undefined : (namespaceOf(ctx.vfs).follow ?? undefined)
 }

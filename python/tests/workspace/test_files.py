@@ -35,7 +35,7 @@ from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ram.store import RAMStore
 from mirage.workspace import Session
-from mirage.workspace.files import Files
+from mirage.workspace.files import Files, WorkspaceFiles
 from mirage.workspace.session import SessionState
 
 
@@ -43,7 +43,7 @@ def run(coro):
     return asyncio.run(coro)
 
 
-def make_ops(mode=MountMode.WRITE) -> tuple[Files, RAMStore]:
+def make_ops(mode=MountMode.WRITE) -> tuple[WorkspaceFiles, RAMStore]:
     vfs = RAMVFS()
     ws = Workspace({"/data/": vfs}, mode=mode)
     return ws.vfs, vfs._store
@@ -66,7 +66,7 @@ class TestMountPrefixes:
         derived = ops._for_session("agent")
         ops.unmount("/data/")
         assert "/data/" not in derived.mount_prefixes()
-        assert "/data/" not in [p for p, _ in derived.writable_mounts()]
+        assert derived.mount_of("/data/x") != "/data"
 
 
 class TestReadWrite:
@@ -625,11 +625,6 @@ class TestProbesAndConveniences:
         assert run(ops.is_dir("/data/nope")) is False
         assert run(ops.is_file("/data/nope")) is False
 
-    def test_cat_decodes_utf8(self):
-        ops, _ = make_ops()
-        run(ops.write("/data/a.txt", "héllo".encode()))
-        assert run(ops.cat("/data/a.txt")) == "héllo"
-
     def test_list_files_keeps_files_only_as_basenames(self):
         ops, _ = make_ops()
         run(ops.mkdir("/data/dir"))
@@ -684,15 +679,11 @@ class TestPerCallSession:
             run(ws.close())
 
     def test_a_forwarding_method_carries_the_session(self):
-        # cat/list_files/is_file answer through read/readdir/stat, so
-        # the session has to survive the hop or a convenience method
-        # would quietly read as the default.
+        # list_files/is_file answer through readdir/stat, so the session
+        # has to survive the hop or a convenience method would quietly
+        # read as the default.
         ws = self._split_ws()
         try:
-            assert (
-                run(ws.vfs.cat("/data/secret.txt", session_id="seeing"))
-                == "classified"
-            )
             assert run(ws.vfs.list_files("/data", session_id="blind")) == [
                 "open.txt"
             ]

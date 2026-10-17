@@ -19,8 +19,8 @@ import aiohttp
 
 from mirage.accessor.trello import TrelloAccessor
 from mirage.core.api.client import api_request
+from mirage.core.trello.config import TrelloConfig
 from mirage.vfs.secrets import reveal_secret
-from mirage.vfs.trello.config import TrelloConfig
 
 
 class TrelloAPIError(RuntimeError):

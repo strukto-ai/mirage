@@ -31,7 +31,7 @@ from mirage.fuse.mount import (
     mount_background,
     unmount_with_fusermount,
 )
-from mirage.workspace.files import Files
+from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.session.session import SessionState
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ class FuseManager:
 
     def setup(
         self,
-        files: Files,
+        files: WorkspaceFiles,
         prefix: str = "/",
         mountpoint: str | None = None,
         session: SessionState | None = None,
@@ -62,7 +62,7 @@ class FuseManager:
         """Mount the workspace's files and return the live mountpoint.
 
         Args:
-            files (Files): ``ws.vfs`` to serve.
+            files (WorkspaceFiles): ``ws.vfs`` to serve.
             prefix (str): mount root; non-empty scopes the tree.
             mountpoint (str | None): where to mount; None picks a temporary
                 directory appropriate for the backend.

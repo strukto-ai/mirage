@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { gnuDirname } from '@struktoai/mirage-core/utils/path'
+import { decode } from '@struktoai/mirage-core/workspace/tools/io_text'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { applyDiff } from '@openai/agents'
 import type { ApplyPatchOperation, ApplyPatchResult, Editor } from '@openai/agents'
@@ -47,7 +48,7 @@ export class MirageEditor implements Editor {
   ): Promise<ApplyPatchResult> {
     let current: string
     try {
-      current = await this.ws.vfs.cat(op.path)
+      current = decode(await this.ws.vfs.read(op.path))
     } catch {
       return { status: 'failed', output: `File not found: ${op.path}` }
     }

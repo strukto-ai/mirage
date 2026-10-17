@@ -180,7 +180,7 @@ describe('createMirageMcpServer', () => {
       arguments: { path: '/doc.txt', old_string: 'external', new_string: 'changed' },
     })
     expect(edit.isError).not.toBe(true)
-    expect(await workspace.vfs.cat('/doc.txt')).toBe('changed')
+    expect(new TextDecoder().decode(await workspace.vfs.read('/doc.txt'))).toBe('changed')
     await client.close()
     await server.close()
     await workspace.close()

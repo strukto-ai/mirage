@@ -18,11 +18,11 @@ import pytest
 
 from mirage.accessor.trello import TrelloAccessor
 from mirage.core.trello import readdir as trello_readdir
+from mirage.core.trello.config import TrelloConfig
 from mirage.core.trello.normalize import normalize_card, to_json_bytes
 from mirage.core.trello.stat import stat
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.vfs.trello import TrelloVFS
-from mirage.vfs.trello.config import TrelloConfig
 from mirage.workspace import Workspace
 from tests.fixtures.vfs_io import vfs_over
 

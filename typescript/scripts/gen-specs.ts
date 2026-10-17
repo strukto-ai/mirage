@@ -346,8 +346,8 @@ function emitVfsNames(
   console.log(`emitted ${payload.registry.length} registry names to ${path}`)
 }
 
-// Every registered command SPECS does not declare. A backend verb (`trello
-// card create`) carries its spec inline, so the SPECS loop never sees it and
+// Every registered command SPECS does not declare. A backend verb
+// (`chroma-query`) carries its spec inline, so the SPECS loop never sees it and
 // the parity gate could not tell a flag one language dropped. Each name gets
 // the spec its registrations share; two registrations of one name with
 // different specs is itself a failure. The directory is rewritten whole so a

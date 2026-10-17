@@ -221,7 +221,7 @@ const REGISTRY: Record<string, VFSFactory> = {
   },
   trello: async (config) => {
     const { TrelloVFS } = await import('@struktoai/mirage-core/vfs/trello/trello')
-    const { normalizeTrelloConfig } = await import('@struktoai/mirage-core/vfs/trello/config')
+    const { normalizeTrelloConfig } = await import('@struktoai/mirage-core/core/trello/config')
     return new TrelloVFS(normalizeTrelloConfig(config))
   },
   wandb: async (config) => {

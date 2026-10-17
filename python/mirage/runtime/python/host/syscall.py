@@ -23,7 +23,7 @@ from mirage.io import IOResult
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.resolver import PrefixResolver
 from mirage.types import PathSpec
-from mirage.workspace.files import Files
+from mirage.workspace.files import Files, namespace_of
 
 T = TypeVar("T")
 
@@ -57,7 +57,7 @@ def host_files(
 
     # No prefixes: the block routes every path itself (``HostFs``), so
     # only a listing's link marks are asked of the namespace.
-    links = files._links
+    links = namespace_of(files).links
     resolver = PrefixResolver(
         list, None if links is None else links.link_names_under
     )

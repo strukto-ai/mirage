@@ -61,7 +61,7 @@
         },
         {
           "facade": {
-            "method": "cat",
+            "method": "read",
             "path": "/data/seed.txt"
           },
           "expect": {

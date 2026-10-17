@@ -52,6 +52,10 @@ SUMMARIES = {
         "Read and send messages; manage reactions and pins; find members "
         "and search"
     ),
+    "trello": (
+        "Read boards, lists, labels and cards; create, update, move, "
+        "assign, label and comment on cards"
+    ),
 }
 
 

@@ -14,6 +14,7 @@
 import pytest
 
 from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.policy.match.allow import head_allowed
@@ -68,6 +69,11 @@ def _fixture() -> tuple[SessionState, Workspace]:
 
 
 async def _noop(accessor, paths, texts, ctx):
+    return None, IOResult()
+
+
+@command("history", vfs="ram", spec=CommandSpec())
+async def _mount_history(accessor, paths, texts, ctx):
     return None, IOResult()
 
 
@@ -291,6 +297,7 @@ def test_program_keeps_the_file_for_an_interpreter_a_runtime_runs():
 
 def test_program_has_no_file_for_a_shell_word_a_mount_also_registers():
     session, ws = _fixture()
+    ws.mount("/ram").register_commands([_mount_history])
     assert lookup_all("history", session, ws._registry) == [
         Consumer.SESSION,
         Consumer.MOUNT,

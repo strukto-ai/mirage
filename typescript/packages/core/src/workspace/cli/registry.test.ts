@@ -27,6 +27,7 @@ import { LINEAR } from '../../commands/cli/builtin/linear/index.ts'
 import { AIRTABLE } from '../../commands/cli/builtin/airtable/index.ts'
 import { NTN } from '../../commands/cli/builtin/ntn/index.ts'
 import { SLACK } from '../../commands/cli/builtin/slack/index.ts'
+import { TRELLO } from '../../commands/cli/builtin/trello/index.ts'
 import { CLIRegistry } from './registry.ts'
 
 // Mirrors python/tests/workspace/cli/test_registry.py.
@@ -325,6 +326,7 @@ const BUILTIN_CLIS: readonly (readonly [string, CLI])[] = [
   ['ntn', NTN],
   ['linear', LINEAR],
   ['airtable', AIRTABLE],
+  ['trello', TRELLO],
   ['git', GIT],
 ]
 

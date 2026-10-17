@@ -12,19 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.trello import COMMANDS
-from mirage.commands.config import Command
+from mirage.commands.cli.builtin.trello import TRELLO
 from mirage.commands.spec.compile import compile_spec
+from mirage.commands.spec.types import CommandSpec
 from mirage.vfs.trello.prompt import PROMPT, WRITE_PROMPT
 
 
-def _verbs() -> dict[str, Command]:
-    return {
-        rc.name: rc
-        for fn in COMMANDS
-        for rc in getattr(fn, "_registered_commands", [])
-        if rc.name.startswith("trello ")
-    }
+def _verbs(
+    node: CommandSpec = TRELLO.spec, path: tuple[str, ...] = ()
+) -> dict[str, CommandSpec]:
+    here = (*path, node.name)
+    if not node.subcommands:
+        return {" ".join(here): node}
+    verbs: dict[str, CommandSpec] = {}
+    for child in node.subcommands:
+        verbs.update(_verbs(child, here))
+    return verbs
 
 
 def _usage_lines(text: str) -> list[str]:
@@ -39,7 +42,7 @@ def _usage_lines(text: str) -> list[str]:
     return lines
 
 
-def _unmatched(line: str, verbs: dict[str, Command]) -> list[str]:
+def _unmatched(line: str, verbs: dict[str, CommandSpec]) -> list[str]:
     tokens = line.replace("[", " ").replace("]", " ").split()
     name = next(
         (
@@ -50,8 +53,8 @@ def _unmatched(line: str, verbs: dict[str, Command]) -> list[str]:
         None,
     )
     if name is None:
-        return [f"{line!r} names no registered command"]
-    spec = verbs[name].spec
+        return [f"{line!r} names no trello command"]
+    spec = verbs[name]
     longs = {option.names[-1] for option in compile_spec(spec).options}
     takes_operands = compile_spec(spec).rest is not None or bool(
         compile_spec(spec).positional
@@ -75,24 +78,21 @@ def _unmatched(line: str, verbs: dict[str, Command]) -> list[str]:
     return problems
 
 
-def test_every_taught_command_line_parses_against_its_spec():
-    """The prompts are how an agent learns the verbs, so each line must
-    name a registered command and only options its spec declares; the
-    write verbs take every id as a flag, never a path operand."""
+def test_every_taught_command_line_parses_against_the_cli():
+    """The prompts show the CLI's verbs by example, so each line must
+    name a trello command and only options its spec declares; the write
+    verbs take every id as a flag, never a path operand."""
     verbs = _verbs()
+    lines = _usage_lines(PROMPT + "\n" + WRITE_PROMPT)
+    assert lines
     problems = [
-        problem
-        for line in _usage_lines(PROMPT + "\n" + WRITE_PROMPT)
-        for problem in _unmatched(line, verbs)
+        problem for line in lines for problem in _unmatched(line, verbs)
     ]
     assert problems == []
 
 
-def test_the_prompts_teach_every_verb():
-    taught = {
-        " ".join(line.split()[:4])
-        if " ".join(line.split()[:4]) in _verbs()
-        else " ".join(line.split()[:3])
-        for line in _usage_lines(PROMPT + "\n" + WRITE_PROMPT)
-    }
-    assert taught == set(_verbs())
+def test_the_prompts_point_at_the_cli():
+    assert "trello --help" in PROMPT
+    assert "trello card create" in WRITE_PROMPT
+    assert "trello card comment" in WRITE_PROMPT
+    assert "trello --help" in WRITE_PROMPT

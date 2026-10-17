@@ -56,7 +56,7 @@ import { readSnapshotTar, writeSnapshotTar } from '@struktoai/mirage-core/worksp
 import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapshot/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
-import { withRefusal } from '@struktoai/mirage-core/workspace/tools/io_text'
+import { decode, withRefusal } from '@struktoai/mirage-core/workspace/tools/io_text'
 import {
   DEFAULT_EXEC_YIELD_MS,
   DEFAULT_WRITE_YIELD_MS,
@@ -180,7 +180,7 @@ export class MirageSandboxSession implements SandboxSession<MirageSandboxSession
         const path = this.resolve(op.path)
         let current: string
         try {
-          current = await this.workspace.vfs.cat(path, this.sessionId)
+          current = decode(await this.workspace.vfs.read(path, {}, this.sessionId))
         } catch (error) {
           return { status: 'failed', output: errorText(error) }
         }

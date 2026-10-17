@@ -167,7 +167,7 @@ r.stdoutText // "hello\n"
 
 // Writes flush back through the bridge:
 await ws.shell(`python3 -c 'open("/ram/out.txt","w").write("from python")'`)
-await ws.vfs.cat('/ram/out.txt') // "from python"
+new TextDecoder().decode(await ws.vfs.read('/ram/out.txt')) // "from python"
 ```
 
 PIL and other native-extension libs that go through Python's `open()` work too:

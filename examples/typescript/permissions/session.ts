@@ -121,7 +121,7 @@ async function read(
       role,
       "vfs.read",
       call,
-      (await handle.vfs.cat(path, sessionId)).trim(),
+      new TextDecoder().decode(await handle.vfs.read(path, {}, sessionId)).trim(),
       note,
     );
   } catch (err) {

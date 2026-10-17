@@ -16,9 +16,9 @@ import asyncio
 
 from mirage.accessor.trello import TrelloAccessor
 from mirage.core.trello.client import TrelloAPIError
+from mirage.core.trello.config import TrelloConfig
 from mirage.core.trello.events import TrelloEventHook
 from mirage.types import FileChangeKind, PathSpec
-from mirage.vfs.trello.config import TrelloConfig
 
 C, U, D, M, X = (
     FileChangeKind.CREATE,

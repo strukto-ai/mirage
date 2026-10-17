@@ -163,7 +163,6 @@
     {"op": "session", "id": "agent", "profile": {"commands": {"deny": [{"reason": "sealed", "paths": ["/data/sec/*"]}]}}},
     {"op": "exec", "command": "mkdir -p /data/sec/e; echo k > /data/sec/k; echo o > /data/o; ln -s /data/o /data/sec/m", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/sec/k"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
-    {"op": "vfs", "session": "agent", "call": "cat", "args": {"path": "/data/sec/k"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
     {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/sec/k", "data_base64": "eA=="}, "expect": {"errno": "EACCES", "reason": "sealed"}},
     {"op": "vfs", "session": "agent", "call": "append", "args": {"path": "/data/sec/k", "data_base64": "eA=="}, "expect": {"errno": "EACCES", "reason": "sealed"}},
     {"op": "vfs", "session": "agent", "call": "pwrite", "args": {"path": "/data/sec/k", "data_base64": "eA==", "offset": 0}, "expect": {"errno": "EACCES", "reason": "sealed"}},

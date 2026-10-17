@@ -721,8 +721,8 @@ async def _run_facade(
 
     Args:
         ws (Workspace): the workspace under test.
-        expect (dict[str, Any]): ``value`` (JSON-comparable result) or
-            ``throws_contains``.
+        expect (dict[str, Any]): ``value`` (JSON-comparable result,
+            bytes as their UTF-8 text) or ``throws_contains``.
         spec (dict[str, Any]): ``method`` (the python facade spelling,
             e.g. ``is_dir``), ``path``, ``data`` for a write, ``offset``
             for ``pwrite`` and ``length`` for ``truncate``.
@@ -763,7 +763,12 @@ async def _run_facade(
                 f"{expect['throws_contains']!r} in the message"
             ]
         return ["facade: expected an error, none raised"]
-    value = await method(*args)
+    answer = await method(*args)
+    value = (
+        answer.decode("utf-8", errors="replace")
+        if isinstance(answer, bytes)
+        else answer
+    )
     if "value" in expect and value != expect["value"]:
         return [f"facade value {value!r}, expected {expect['value']!r}"]
     return []

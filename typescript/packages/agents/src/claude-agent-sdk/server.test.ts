@@ -21,6 +21,8 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import * as shared from '@struktoai/mirage-core/workspace/tools/tool_descriptions'
 import { MirageServer } from './server.ts'
 
+const DEC = new TextDecoder()
+
 function mkWs(): Workspace {
   const ram = new RAMVFS()
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE })
@@ -78,7 +80,7 @@ describe('write', () => {
     const ws = mkWs()
     const result = await ws.tools.write('/new.txt', 'hello world')
     expect(result.isError).not.toBe(true)
-    expect(await ws.vfs.cat('/new.txt')).toBe('hello world')
+    expect(DEC.decode(await ws.vfs.read('/new.txt'))).toBe('hello world')
   })
 
   it('refuses an unread file', async () => {
@@ -93,7 +95,7 @@ describe('write', () => {
     const ws = mkWs()
     const result = await ws.tools.write('/nested/deep/file.txt', 'hi')
     expect(result.isError).not.toBe(true)
-    expect(await ws.vfs.cat('/nested/deep/file.txt')).toBe('hi')
+    expect(DEC.decode(await ws.vfs.read('/nested/deep/file.txt'))).toBe('hi')
   })
 })
 
@@ -103,7 +105,7 @@ describe('edit', () => {
     await ws.vfs.write('/edit.txt', 'foo bar baz')
     const result = await ws.tools.edit('/edit.txt', 'bar', 'qux')
     expect(result.isError).not.toBe(true)
-    expect(await ws.vfs.cat('/edit.txt')).toBe('foo qux baz')
+    expect(DEC.decode(await ws.vfs.read('/edit.txt'))).toBe('foo qux baz')
   })
 
   it('errors on missing file', async () => {
@@ -133,7 +135,7 @@ describe('edit', () => {
     await ws.vfs.write('/all.txt', 'aa bb aa')
     const result = await ws.tools.edit('/all.txt', 'aa', 'cc', true)
     expect(result.isError).not.toBe(true)
-    expect(await ws.vfs.cat('/all.txt')).toBe('cc bb cc')
+    expect(DEC.decode(await ws.vfs.read('/all.txt'))).toBe('cc bb cc')
   })
 })
 

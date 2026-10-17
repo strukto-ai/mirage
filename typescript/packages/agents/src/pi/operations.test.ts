@@ -20,6 +20,8 @@ import { Workspace } from '@struktoai/mirage-node'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { mirageOperations } from './operations.ts'
 
+const DEC = new TextDecoder()
+
 function mkWs(policies: Policy[] = []): Workspace {
   const ram = new RAMVFS()
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE, policies })
@@ -54,7 +56,7 @@ describe('mirageOperations.write', () => {
     const ws = mkWs()
     const ops = mirageOperations(ws)
     await ops.write.writeFile('/out.txt', 'data')
-    expect(await ws.vfs.cat('/out.txt')).toBe('data')
+    expect(DEC.decode(await ws.vfs.read('/out.txt'))).toBe('data')
   })
 
   it('mkdir creates nested directories', async () => {
@@ -80,7 +82,7 @@ describe('mirageOperations.edit', () => {
     const ops = mirageOperations(ws)
     const buf = await ops.edit.readFile('/f.txt')
     await ops.edit.writeFile('/f.txt', `${buf.toString()} + new`)
-    expect(await ws.vfs.cat('/f.txt')).toBe('old + new')
+    expect(DEC.decode(await ws.vfs.read('/f.txt'))).toBe('old + new')
   })
 
   it('rejects an edit after the file changed since the agent read it', async () => {
@@ -108,7 +110,7 @@ describe('mirageOperations.edit', () => {
     await expect(ops.edit.writeFile('/f.txt', 'replacement')).rejects.toThrow(
       'Read the file again before modifying it',
     )
-    expect(await ws.vfs.cat('/f.txt')).toBe('changed elsewhere')
+    expect(DEC.decode(await ws.vfs.read('/f.txt'))).toBe('changed elsewhere')
   })
 })
 
@@ -123,7 +125,7 @@ describe('mirageOperations stale write protection', () => {
     await expect(ops.write.writeFile('/f.txt', 'replacement')).rejects.toThrow(
       'Read the file again before modifying it',
     )
-    expect(await ws.vfs.cat('/f.txt')).toBe('changed elsewhere')
+    expect(DEC.decode(await ws.vfs.read('/f.txt'))).toBe('changed elsewhere')
   })
 
   it('can disable stale write protection', async () => {
@@ -133,7 +135,7 @@ describe('mirageOperations stale write protection', () => {
     await ops.read.readFile('/f.txt')
     await ws.vfs.write('/f.txt', 'changed elsewhere')
     await ops.write.writeFile('/f.txt', 'replacement')
-    expect(await ws.vfs.cat('/f.txt')).toBe('replacement')
+    expect(DEC.decode(await ws.vfs.read('/f.txt'))).toBe('replacement')
   })
 })
 

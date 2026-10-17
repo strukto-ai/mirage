@@ -17,7 +17,7 @@ import posixpath
 import sys
 
 from mirage.types import KERNEL_BACKENDS, MountBackend
-from mirage.workspace.files import Files
+from mirage.workspace.files import WorkspaceFiles
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +118,7 @@ def check_mountpoint(backend: MountBackend, mountpoint: str) -> None:
 
 
 def check_sizes(
-    backend: MountBackend, files: Files, root_prefix: str = ""
+    backend: MountBackend, files: WorkspaceFiles, root_prefix: str = ""
 ) -> None:
     """Warn when an fskit mount will serve size-unknown files as empty.
 
@@ -133,7 +133,7 @@ def check_sizes(
 
     Args:
         backend (MountBackend): the requested backend.
-        files (Files): ``ws.vfs`` whose mounts are being served.
+        files (WorkspaceFiles): ``ws.vfs`` whose mounts are being served.
         root_prefix (str): mount root, when the tree is scoped to one mount.
     """
     if backend is not MountBackend.FSKIT:
@@ -153,7 +153,7 @@ def check_sizes(
 
 
 def check_writes(
-    backend: MountBackend, files: Files, root_prefix: str = ""
+    backend: MountBackend, files: WorkspaceFiles, root_prefix: str = ""
 ) -> None:
     """Warn when an fskit mount accepts writes the shim may corrupt.
 
@@ -167,7 +167,7 @@ def check_writes(
 
     Args:
         backend (MountBackend): the requested backend.
-        files (Files): ``ws.vfs`` whose mounts are being served.
+        files (WorkspaceFiles): ``ws.vfs`` whose mounts are being served.
         root_prefix (str): mount root, when the tree is scoped to one mount.
     """
     if backend is not MountBackend.FSKIT:
@@ -193,7 +193,7 @@ def check_writes(
 
 def prepare_backend(
     value: "str | MountBackend | None",
-    files: Files | None = None,
+    files: WorkspaceFiles | None = None,
     mountpoint: str | None = None,
     root_prefix: str = "",
 ) -> MountBackend:
@@ -205,7 +205,8 @@ def prepare_backend(
 
     Args:
         value (str | MountBackend | None): the requested backend.
-        files (Files | None): the file API to size-check, when one is available.
+        files (WorkspaceFiles | None): the file API to size-check, when
+            one is available.
         mountpoint (str | None): intended mountpoint, when already known.
         root_prefix (str): mount root, for scoping the size check.
 

@@ -53,7 +53,7 @@ from mirage.runtime.types import VFSStat
 from mirage.utils.dates import timestamp_iso
 from mirage.utils.path import owner_prefix
 from mirage.utils.remnants import entry_name
-from mirage.workspace.files import Files
+from mirage.workspace.files import WorkspaceFiles, namespace_of
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -191,7 +191,7 @@ def _remove_tree(
 
 
 def make_rmtree(
-    files: Files, loop: asyncio.AbstractEventLoop | None
+    files: WorkspaceFiles, loop: asyncio.AbstractEventLoop | None
 ) -> Callable[..., None]:
     """``shutil.rmtree``, walking a mounted tree by name.
 
@@ -217,11 +217,11 @@ def make_rmtree(
     gives where it walks by name.
 
     Args:
-        files (Files): the workspace's ``ws.vfs``.
+        files (WorkspaceFiles): the workspace's ``ws.vfs``.
         loop (asyncio.AbstractEventLoop | None): the block's loop.
     """
     original = shutil.rmtree
-    links = files._links
+    links = namespace_of(files).links
 
     async def follow(path: str) -> str:
         return posixpath.normpath(
@@ -288,13 +288,13 @@ class HostFs:
     explicit chmod, where the guest asked for exactly that.
 
     Args:
-        files (Files): the workspace's file API.
+        files (WorkspaceFiles): the workspace's file API.
         loop (asyncio.AbstractEventLoop | None): the loop the file API's
             coroutines run on; None gives each call a throwaway loop.
     """
 
     def __init__(
-        self, files: Files, loop: asyncio.AbstractEventLoop | None
+        self, files: WorkspaceFiles, loop: asyncio.AbstractEventLoop | None
     ) -> None:
         self._files = files
         self._adapter = host_files(files, loop)
@@ -315,11 +315,11 @@ class HostFs:
         self._uid = _real_os.getuid() if hasattr(_real_os, "getuid") else 0
         self._gid = _real_os.getgid() if hasattr(_real_os, "getgid") else 0
         self._descriptors = Descriptors(
-            self._adapter, self._host, files._links
+            self._adapter, self._host, namespace_of(files).links
         )
 
     @property
-    def files(self) -> Files:
+    def files(self) -> WorkspaceFiles:
         """The workspace's file API this entry point answers through."""
         return self._files
 
@@ -1420,7 +1420,7 @@ def os_routing(router: HostFs) -> dict[str, Callable[..., Any]]:
 
 
 def make_os_module(
-    files: Files, loop: asyncio.AbstractEventLoop | None = None
+    files: WorkspaceFiles, loop: asyncio.AbstractEventLoop | None = None
 ) -> types.ModuleType:
     """A standalone copy of `os` that routes mounted paths.
 
@@ -1435,7 +1435,7 @@ def make_os_module(
     this copy.
 
     Args:
-        files (Files): The facade with the mount table.
+        files (WorkspaceFiles): The facade with the mount table.
         loop (asyncio.AbstractEventLoop | None): Shared event loop.
 
     Returns:

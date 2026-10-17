@@ -19,6 +19,9 @@ import { Workspace } from '@struktoai/mirage-node'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { LangchainWorkspace } from './backend.ts'
 
+const DEC = new TextDecoder()
+const ENC = new TextEncoder()
+
 function mkWs(): Workspace {
   const ram = new RAMVFS()
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE })
@@ -53,7 +56,7 @@ describe('LangchainWorkspace.write', () => {
     const r = await lw.write('/hello.txt', 'hi')
     expect(r.error).toBeUndefined()
     expect(r.path).toBe('/hello.txt')
-    expect(await ws.vfs.cat('/hello.txt')).toBe('hi')
+    expect(DEC.decode(await ws.vfs.read('/hello.txt'))).toBe('hi')
   })
 
   it('rejects existing path', async () => {
@@ -70,7 +73,7 @@ describe('LangchainWorkspace.write', () => {
     const lw = new LangchainWorkspace(ws)
     const r = await lw.write('/sub/nested.txt', 'x')
     expect(r.error).toBeUndefined()
-    expect(await ws.vfs.cat('/sub/nested.txt')).toBe('x')
+    expect(DEC.decode(await ws.vfs.read('/sub/nested.txt'))).toBe('x')
   })
 })
 
@@ -149,7 +152,18 @@ describe('LangchainWorkspace.edit', () => {
     const r = await lw.edit('/f.txt', 'bar', 'BAR')
     expect(r.error).toBeUndefined()
     expect(r.occurrences).toBe(1)
-    expect(await ws.vfs.cat('/f.txt')).toBe('foo BAR baz')
+    expect(DEC.decode(await ws.vfs.read('/f.txt'))).toBe('foo BAR baz')
+  })
+
+  it('keeps a leading BOM', async () => {
+    const ws = mkWs()
+    await ws.vfs.write('/f.txt', '\ufefffoo bar baz')
+    const lw = new LangchainWorkspace(ws)
+    const r = await lw.edit('/f.txt', 'bar', 'BAR')
+    expect(r.error).toBeUndefined()
+    expect(Array.from(await ws.vfs.read('/f.txt'))).toEqual(
+      Array.from(ENC.encode('\ufefffoo BAR baz')),
+    )
   })
 
   it('rejects multiple occurrences without replaceAll', async () => {
@@ -166,7 +180,7 @@ describe('LangchainWorkspace.edit', () => {
     const lw = new LangchainWorkspace(ws)
     const r = await lw.edit('/f.txt', 'aa', 'X', true)
     expect(r.occurrences).toBe(2)
-    expect(await ws.vfs.cat('/f.txt')).toBe('X X')
+    expect(DEC.decode(await ws.vfs.read('/f.txt'))).toBe('X X')
   })
 
   it('returns error for missing file', async () => {
@@ -281,8 +295,8 @@ describe('LangchainWorkspace.uploadFiles / downloadFiles', () => {
     ])
     expect(responses).toHaveLength(2)
     expect(responses[0]?.error).toBeNull()
-    expect(await ws.vfs.cat('/up1.txt')).toBe('one')
-    expect(await ws.vfs.cat('/up2.txt')).toBe('two')
+    expect(DEC.decode(await ws.vfs.read('/up1.txt'))).toBe('one')
+    expect(DEC.decode(await ws.vfs.read('/up2.txt'))).toBe('two')
   })
 
   it('download returns content for existing files', async () => {

@@ -27,6 +27,9 @@ import { Workspace } from '@struktoai/mirage-node'
 import { INTERRUPT, INTERRUPTED_EXIT_CODE, NO_STDIN } from './constants.ts'
 import { MirageSandboxClient, combinedOutput } from './sandbox.ts'
 
+const DEC = new TextDecoder()
+const ENC = new TextEncoder()
+
 function mkWs(): Workspace {
   return new Workspace(
     { '/': new RAMVFS(), '/ro': [new RAMVFS(), MountMode.READ] },
@@ -121,7 +124,7 @@ describe('MirageSandboxClient', () => {
         },
       }),
     )
-    expect(await ws.vfs.cat('/workspace/a/b/c.txt')).toBe('deep')
+    expect(DEC.decode(await ws.vfs.read('/workspace/a/b/c.txt'))).toBe('deep')
   })
 
   it('passes the manifest environment to every command', async () => {
@@ -142,7 +145,7 @@ describe('MirageSandboxClient', () => {
       diff: '+x = 1\n',
     })
     expect(statusOf(created)).toBe('completed')
-    expect(await ws.vfs.cat('/project/pkg/new.py')).toBe('x = 1')
+    expect(DEC.decode(await ws.vfs.read('/project/pkg/new.py'))).toBe('x = 1')
     expect(writes.mock.calls.map((call) => [call[0], call[2]])).toEqual([
       ['/project/pkg/new.py', session.sessionId],
     ])
@@ -152,11 +155,26 @@ describe('MirageSandboxClient', () => {
       diff: '@@\n-x = 1\n+x = 2\n',
     })
     expect(statusOf(updated)).toBe('completed')
-    expect(await ws.vfs.cat('/project/pkg/new.py')).toBe('x = 2')
+    expect(DEC.decode(await ws.vfs.read('/project/pkg/new.py'))).toBe('x = 2')
     expect(statusOf(await editor.deleteFile({ type: 'delete_file', path: 'pkg/new.py' }))).toBe(
       'completed',
     )
     expect(await ws.vfs.exists('/project/pkg/new.py')).toBe(false)
+  })
+
+  it('keeps a leading BOM when it patches a file', async () => {
+    const ws = mkWs()
+    await ws.vfs.write('/bom.txt', '\ufeffone\ntwo\nthree\n')
+    const session = await new MirageSandboxClient(ws).create()
+    const updated = await session.createEditor().updateFile({
+      type: 'update_file',
+      path: '/bom.txt',
+      diff: '@@\n two\n-three\n+THREE\n',
+    })
+    expect(statusOf(updated)).toBe('completed')
+    expect(Array.from(await ws.vfs.read('/bom.txt'))).toEqual(
+      Array.from(ENC.encode('\ufeffone\ntwo\nTHREE\n')),
+    )
   })
 
   it('reports a patch under a read-only mount as failed', async () => {
@@ -275,7 +293,7 @@ describe('MirageSandboxClient', () => {
     const ws = mkWs()
     const target = await new MirageSandboxClient(ws).create()
     await target.hydrateWorkspace(archive)
-    expect(await ws.vfs.cat('/kept.txt')).toBe('kept\n')
+    expect(DEC.decode(await ws.vfs.read('/kept.txt'))).toBe('kept\n')
   })
 
   it('joins stdout and stderr on separate lines', () => {

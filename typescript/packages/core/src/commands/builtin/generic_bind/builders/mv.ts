@@ -20,6 +20,7 @@ import { refuseReveal, requireOp, resolveGlobOf } from '../adapter.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { linksOf, mountsOf } from '../../utils/links.ts'
+import { namespaceOf } from '../../../../workspace/files.ts'
 
 const mv: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
   const rename = requireOp(ops.rename, 'rename')
@@ -40,7 +41,12 @@ const mv: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
     },
     links === undefined || ctx.vfs === undefined
       ? undefined
-      : transferLinksOf(links, ctx.vfs.dispatch, ctx.cwd.virtual, ctx.vfs.vis() ?? undefined),
+      : transferLinksOf(
+          links,
+          ctx.vfs.dispatch,
+          ctx.cwd.virtual,
+          namespaceOf(ctx.vfs).vis() ?? undefined,
+        ),
     ctx.stdin,
     mounts === undefined ? undefined : (p: string) => mounts.isRoot(p),
   )

@@ -24,7 +24,7 @@ import { flatten, readBytesOp, readdirOp, relayCopy, statOp } from '../utils.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { specOf } from '../../../../spec/builtins.ts'
-import type { Files } from '../../../../../workspace/files.ts'
+import { type Files, namespaceOf } from '../../../../../workspace/files.ts'
 import { linkView, mountView } from '../../../utils/links.ts'
 
 // Move operands that span mounts via the shared generic mv. Pure wiring:
@@ -83,7 +83,12 @@ export async function runMv(
     refuseReveal,
     links === undefined
       ? undefined
-      : transferLinksOf(links, dispatch, '/', vfs?.vis() ?? undefined),
+      : transferLinksOf(
+          links,
+          dispatch,
+          '/',
+          vfs === undefined ? undefined : (namespaceOf(vfs).vis() ?? undefined),
+        ),
     stdin,
     mounts === undefined ? undefined : (p: string) => mounts.isRoot(p),
     dispatch,

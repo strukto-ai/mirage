@@ -26,6 +26,8 @@ import type { VfsContext } from '../../policy/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { RAMWorkspaceStateStore } from '../store/ram.ts'
 
+const DEC = new TextDecoder()
+
 let ws: Workspace
 let ops: MirageToolOperations
 
@@ -77,7 +79,7 @@ describe('edit', () => {
     await ws.vfs.write('/a.txt', 'hello there')
     const result = await ops.edit('/a.txt', 'hello', 'goodbye')
     expect(result.isError).toBe(true)
-    expect(await ws.vfs.cat('/a.txt')).toBe('hello there')
+    expect(DEC.decode(await ws.vfs.read('/a.txt'))).toBe('hello there')
   })
 
   it('overwrites when stale-write protection is off', async () => {
@@ -87,7 +89,7 @@ describe('edit', () => {
     await ws.vfs.write('/a.txt', 'hello there')
     const result = await unchecked.edit('/a.txt', 'hello', 'goodbye')
     expect(result.isError).toBeUndefined()
-    expect(await ws.vfs.cat('/a.txt')).toBe('goodbye there')
+    expect(DEC.decode(await ws.vfs.read('/a.txt'))).toBe('goodbye there')
   })
 })
 
@@ -157,7 +159,7 @@ describe('write', () => {
     const result = await ops.write('/exists.txt', 'second')
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text).toContain('read all of it before overwriting it')
-    expect(await ws.vfs.cat('/exists.txt')).toBe('first')
+    expect(DEC.decode(await ws.vfs.read('/exists.txt'))).toBe('first')
   })
 
   it('refuses a partly read file', async () => {
@@ -166,7 +168,7 @@ describe('write', () => {
     const result = await ops.write('/three.txt', 'x')
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text).toContain('read all of it before overwriting it')
-    expect(await ws.vfs.cat('/three.txt')).toBe('1\n2\n3\n')
+    expect(DEC.decode(await ws.vfs.read('/three.txt'))).toBe('1\n2\n3\n')
   })
 
   it('overwrites a read file', async () => {
@@ -174,7 +176,7 @@ describe('write', () => {
     await ops.read('/exists.txt')
     const result = await ops.write('/exists.txt', 'second')
     expect(result.isError).not.toBe(true)
-    expect(await ws.vfs.cat('/exists.txt')).toBe('second')
+    expect(DEC.decode(await ws.vfs.read('/exists.txt'))).toBe('second')
   })
 
   it('refuses a file changed since it was read', async () => {
@@ -184,7 +186,7 @@ describe('write', () => {
     const result = await ops.write('/exists.txt', 'second')
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text).toContain('changed since it was last read')
-    expect(await ws.vfs.cat('/exists.txt')).toBe('moved')
+    expect(DEC.decode(await ws.vfs.read('/exists.txt'))).toBe('moved')
   })
 })
 
@@ -197,7 +199,7 @@ describe('a relative path', () => {
     expect(wrote.content[0]?.text).toBe('Written: /w/a.txt')
     expect(read.content[0]?.text).toBe('     1\thello\n')
     expect(edited.content[0]?.text).toBe('Edited: /w/a.txt (1 occurrence(s))')
-    expect(await ws.vfs.cat('/w/a.txt')).toBe('hi\n')
+    expect(DEC.decode(await ws.vfs.read('/w/a.txt'))).toBe('hi\n')
     expect(await ws.vfs.exists('/a.txt')).toBe(false)
   })
 

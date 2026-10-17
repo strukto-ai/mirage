@@ -77,7 +77,7 @@ import {
 import type { Policies } from '../../policy/index.ts'
 import { DryRun, Outcome, type EntryGate, type ShellExplanation } from '../../policy/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { Files } from '../files.ts'
+import { Files, WorkspaceFiles } from '../files.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { checkReadCapability } from '../mount/read_policy.ts'
 import { WritePolicyError } from '../mount/errors.ts'
@@ -195,7 +195,7 @@ export class Workspace {
   readonly namespace: Namespace
   private readonly dispatcher: Dispatcher
   readonly observer: Observer
-  readonly vfs: Files
+  readonly vfs: WorkspaceFiles
   private readonly toolTables = new Map<string | null, MirageToolOperations>()
   private readonly reads = new Map<string, FileVersionTracker>()
   private readonly shellExecutions = new Set<ShellExecution>()
@@ -437,6 +437,7 @@ export class Workspace {
       this.registry.clis.install(cliName, cliSpec, cliConfig)
     }
     this.observer = new Observer(stores.observe)
+    this.registry.observer = this.observer
     this.planes = [stores.namespace, stores.observe, stores.sessions]
     // Explicit at the construction site: the history view does not cache
     // reads, so its policy can only ever be bounded.
@@ -505,7 +506,7 @@ export class Workspace {
     // ledger, which is its own; the sink is only the observer's copy.
     // It runs as the default session, as a bare `shell` does, so the
     // default profile confines it too.
-    this.vfs = new Files(
+    this.vfs = new WorkspaceFiles(
       (op, path, args, kwargs, report, caller) => {
         if (this.isShuttingDown()) throw new Error('Workspace is closed')
         return this.dispatcher.dispatch(op, path, args, kwargs, report, caller)
@@ -1351,8 +1352,8 @@ export class Workspace {
   }
 
   /**
-   * The op ledger. It lives on the `Files` facade (python parity); these
-   * are thin delegates so the public workspace API keeps reading.
+   * The op ledger. It lives on `ws.vfs`, a `WorkspaceFiles` (python parity);
+   * these are thin delegates so the public workspace API keeps reading.
    */
   get records(): OpRecord[] {
     return this.vfs.records

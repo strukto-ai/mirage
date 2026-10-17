@@ -69,9 +69,39 @@ export interface FilesOptions {
   visibility?: ((sessionId: string | null) => Visibility | null) | null
   // The line's operand resolution a command's globs give their matches.
   follow?: FollowOperands | null
-  // Record each op on `records`; false where the dispatcher does the accounting.
+  // Record each op on the ledger; false where the dispatcher does the accounting.
   ledger?: boolean
 }
+
+/**
+ * What a session's files hold of the namespace, hides aside.
+ *
+ * The link table and the mount table as the workspace keeps them, hidden
+ * entries included, so it is never a handler's: a handler asks `Files`
+ * (`isVisible`, `mountOf`, `submounts`), which apply the session's hides.
+ * The code that walks the namespace beside the dispatcher reads it: the
+ * command helpers' link and mount views (globs, `find -L`, `cp -L`, `du`),
+ * the mount core and the file tool mapping a path the way the dispatcher
+ * does, the runtime's descriptors. Mirrors Python's `FilesNamespace`.
+ */
+export interface FilesNamespace {
+  /** The workspace link table, unfiltered by any session's hides. */
+  readonly links: NamespaceLinks | null
+  /** The line's operand resolution a command's globs give their matches. */
+  readonly follow: FollowOperands | null
+  /** The visibility of the session an op would run as. */
+  vis(): Visibility | null
+  /** The prefixes of the mounts that session is told of at all, hides aside. */
+  prefixes(): readonly string[]
+  /** The mount serving a path, by longest prefix. */
+  readonly ownerOf: OwnerOf
+}
+
+// TypeScript has no package-private: the class assigns these from its static
+// block, where its private members are in reach, and `namespaceOf` and
+// `withCaller` are the doors through them.
+let namespaceOfFiles: (files: Files) => FilesNamespace
+let callerFilesOf: (files: Files, changes: Partial<Caller>) => Files
 
 // The op's byte count for recording: the result first, else the input
 // (write payloads travel as the first positional argument). Mirrors
@@ -110,17 +140,18 @@ async function* recorded(
 }
 
 /**
- * The typed file API at `ws.vfs`, which FUSE and programmatic embedders call.
+ * The typed file API: `ws.vfs`, `session.vfs` and a command's, CLI leaf's or
+ * runtime's `ctx.vfs`.
  *
  * Every op delegates to the workspace dispatcher, so `ws.vfs` walks the
  * same pipeline as a shell command: link follow, session grants,
  * admission policies, cache read-through, namespace structure, and
  * post-write invalidation all fire once, at that one dispatcher. The facade
- * keeps only what is its own: the typed surface and the op ledger
- * (`records`, with the network/cache split derived from it) — the
- * ledger lives here, not on the workspace, which is what lets
- * `MountCore` take one `Files` instead of reaching through a whole
- * `Workspace`. Mirrors Python's `Files`.
+ * keeps only what is its own: the typed surface and the op ledger it
+ * records on — the ledger lives here, not on the workspace, which is what
+ * lets `MountCore` take one `Files` instead of reaching through a whole
+ * `Workspace`. The ledger is read on `ws.vfs`, a `WorkspaceFiles`. Mirrors
+ * Python's `Files`.
  *
  * The facade runs as one session, `sessionId`, through `bind`: every
  * op is judged under that session's profile (hides, mount modes,
@@ -141,23 +172,15 @@ async function* recorded(
  * reaching the dispatcher from widening the view it was given.
  */
 export class Files {
+  static {
+    namespaceOfFiles = (files) => files.namespace()
+    callerFilesOf = (files, changes) => files.forCaller(changes)
+  }
+
   private readonly dispatchFn: CallerDispatchFn
   private readonly sink: OpSink | null
-  /**
-   * The workspace link table, unfiltered by any session's hides: the mount
-   * core and the file tool follow it to map a path the way the dispatcher
-   * does, so one file opened through a link and through its target is
-   * recognised as one.
-   *
-   * @internal Not part of the supported surface; Python keeps it private.
-   */
-  readonly links: NamespaceLinks | null
-  /**
-   * The mount serving a path, by longest prefix.
-   *
-   * @internal Not part of the supported surface; Python keeps it private.
-   */
-  readonly ownerOf: OwnerOf
+  private readonly links: NamespaceLinks | null
+  private readonly ownerOf: OwnerOf
   private readonly bind: SessionBind | null
   private readonly dispatchAs: ((owner: SessionAccess) => CallerDispatchFn) | null
   private readonly caller: Partial<Caller> | null
@@ -165,14 +188,9 @@ export class Files {
   private readonly visibilityOf: ((sessionId: string | null) => Visibility | null) | null
   /** The session this facade runs as; null for the workspace's default. */
   readonly sessionId: string | null
-  /**
-   * The op ledger: every facade op lands here, and the executor
-   * appends each shell line's ops too, so this is the one
-   * workspace-wide account (python's `Files.records`).
-   */
-  readonly records: OpRecord[]
-  /** @internal The line's operand resolution; Python keeps it private. */
-  readonly follow: FollowOperands | null
+  /** The op ledger this facade records on; `WorkspaceFiles.records` reads it. */
+  protected readonly recorded: OpRecord[]
+  private readonly follow: FollowOperands | null
   private readonly ledger: boolean
 
   constructor(
@@ -190,7 +208,7 @@ export class Files {
     this.dispatchAs = options.dispatchAs ?? null
     this.caller = options.caller ?? null
     this.sessionId = options.sessionId ?? null
-    this.records = options.records ?? []
+    this.recorded = options.records ?? []
     this.prefixesOf = options.prefixes ?? (() => [])
     this.visibilityOf = options.visibility ?? null
     this.follow = options.follow ?? null
@@ -202,7 +220,7 @@ export class Files {
       bind: this.bind,
       dispatchAs: this.dispatchAs,
       sessionId: this.sessionId,
-      records: this.records,
+      records: this.recorded,
       prefixes: this.prefixesOf,
       visibility: this.visibilityOf,
     }
@@ -233,12 +251,9 @@ export class Files {
    * is answered by is claimed for the call's other ops and a call running
    * at the same time is never taken for this one; or a dry run's trace.
    * Said on each op, not bound in the async context, which without task
-   * isolation another task would read.
-   *
-   * @internal The mechanism behind a file tool's call and `explain.vfs`;
-   * Python's task context carries both.
+   * isolation another task would read. Reached through `withCaller`.
    */
-  forCaller(changes: Partial<Caller>): Files {
+  private forCaller(changes: Partial<Caller>): Files {
     return new Files(this.dispatchFn, this.sink, this.links, this.ownerOf, {
       ...this.options(),
       caller: { ...this.caller, ...changes },
@@ -282,22 +297,29 @@ export class Files {
   /**
    * The prefixes of the mounts the session an op would run as is told of at
    * all, hides aside: a session's own documents mount is one only it is told
-   * of.
-   *
-   * @internal Not part of the supported surface; Python keeps it private.
+   * of. Mirrors Python's `Files._served`.
    */
-  prefixes(): readonly string[] {
+  private prefixes(): readonly string[] {
     return this.prefixesOf(this.sessionId)
   }
 
   /**
    * The visibility of the session an op would run as: the bound one, else
-   * this facade's own.
-   *
-   * @internal Not part of the supported surface; Python keeps it private.
+   * this facade's own. Mirrors Python's `Files._vis`.
    */
-  vis(): Visibility | null {
+  private vis(): Visibility | null {
     return this.visibilityOf === null ? sessionVisibility() : this.visibilityOf(this.sessionId)
+  }
+
+  /** What `namespaceOf` hands the code that walks the namespace. */
+  private namespace(): FilesNamespace {
+    return {
+      links: this.links,
+      follow: this.follow,
+      vis: () => this.vis(),
+      prefixes: () => this.prefixes(),
+      ownerOf: this.ownerOf,
+    }
   }
 
   /**
@@ -365,18 +387,6 @@ export class Files {
     return [...found].sort(compareCodePoints)
   }
 
-  get networkBytes(): number {
-    let total = 0
-    for (const r of this.records) if (!r.isCache) total += r.bytes
-    return total
-  }
-
-  get cacheBytes(): number {
-    let total = 0
-    for (const r of this.records) if (r.isCache) total += r.bytes
-    return total
-  }
-
   private async record(
     op: string,
     path: string,
@@ -386,13 +396,13 @@ export class Files {
     session: string,
   ): Promise<void> {
     const rec = finishRecord(op, path, source, bytes, timer)
-    this.records.push(rec)
+    this.recorded.push(rec)
     if (this.sink !== null) await this.sink(rec, session)
   }
 
   /**
    * `Workspace.dispatch` as this facade runs it: as its session, and
-   * recorded on `records`. The dispatcher `RuntimeFiles` drives for node's
+   * recorded on the ledger. The dispatcher `RuntimeFiles` drives for node's
    * patched `fs` (`patchNodeFs`), a facade caller like FUSE, and a
    * handler's for any op its typed methods do not spell; bound, so a handler
    * can hand it on. The IOResult is empty unless this facade keeps no
@@ -811,10 +821,6 @@ export class Files {
     await this.through('rename', src, [PathSpec.fromStrPath(dst, undefined, '/')], {}, sessionId)
   }
 
-  async cat(path: string | PathSpec, sessionId?: string): Promise<string> {
-    return new TextDecoder('utf-8', { fatal: false }).decode(await this.read(path, {}, sessionId))
-  }
-
   async listFiles(path: string | PathSpec, sessionId?: string): Promise<string[]> {
     const entries = await this.readdir(path, sessionId)
     const files: string[] = []
@@ -825,6 +831,61 @@ export class Files {
     }
     return files
   }
+}
+
+/**
+ * `ws.vfs`: the files the host holds, with what only the host asks of them.
+ *
+ * The op ledger every ledgered facade appends to (`records`, with the
+ * network/cache split derived from it). The `Files` a handler, a CLI leaf, a
+ * runtime or `session.vfs` gets is a facade of its own, on which the ledger
+ * would report only that facade, so it is a plain `Files`. Mirrors Python's
+ * `WorkspaceFiles`, which also keeps the mount table in step and answers the
+ * mount questions FUSE and the runtime's `open()` interception ask; here the
+ * workspace's registry answers those.
+ */
+export class WorkspaceFiles extends Files {
+  /**
+   * The op ledger: every facade op lands here, and the executor appends each
+   * shell line's ops too, so this is the one workspace-wide account (Python's
+   * `WorkspaceFiles.records`).
+   */
+  get records(): OpRecord[] {
+    return this.recorded
+  }
+
+  /** Total bytes transferred over the network. */
+  get networkBytes(): number {
+    let total = 0
+    for (const r of this.recorded) if (!r.isCache) total += r.bytes
+    return total
+  }
+
+  /** Total bytes served from cache. */
+  get cacheBytes(): number {
+    let total = 0
+    for (const r of this.recorded) if (r.isCache) total += r.bytes
+    return total
+  }
+}
+
+/**
+ * The namespace a session's files hold, for the code that walks it beside the
+ * dispatcher; never a handler's (`FilesNamespace`). Mirrors Python's
+ * `namespace_of`.
+ */
+export function namespaceOf(files: Files): FilesNamespace {
+  return namespaceOfFiles(files)
+}
+
+/**
+ * The same files with `changes` said of every op's caller: a file tool's call
+ * or a dry run's trace. Never a handler's: the dispatcher trusts the caller, so
+ * one that dropped its rule gate would read past a path rule scoped to its
+ * command. Python's task context carries the caller instead.
+ */
+export function withCaller(files: Files, changes: Partial<Caller>): Files {
+  return callerFilesOf(files, changes)
 }
 
 // What a method reads files through: added to the method contexts here, where

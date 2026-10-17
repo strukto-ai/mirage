@@ -60,6 +60,6 @@ const paths = findAll.stdoutText
 console.log(paths.join('\n'))
 
 for (const path of paths) {
-  const content = await ws.vfs.cat(path)
+  const content = new TextDecoder().decode(await ws.vfs.read(path))
   console.log(`cat ${path}:\n${content}`)
 }

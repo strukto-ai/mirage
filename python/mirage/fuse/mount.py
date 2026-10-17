@@ -25,7 +25,7 @@ from mirage.fuse.backend import MountBackend, prepare_backend
 from mirage.fuse.darwin import install_macfuse_extensions, timespec_ns
 from mirage.fuse.fs import MirageFS
 from mirage.types import JsonValue
-from mirage.workspace.files import Files
+from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.session.session import SessionState
 
 
@@ -231,7 +231,7 @@ def _await_ready(
 
 
 def mount_background(
-    files: Files,
+    files: WorkspaceFiles,
     mountpoint: str,
     root_prefix: str = "",
     session: SessionState | None = None,
@@ -240,7 +240,7 @@ def mount_background(
     """Mount in a background thread and return once the tree is live.
 
     Args:
-        files (Files): ``ws.vfs`` to serve.
+        files (WorkspaceFiles): ``ws.vfs`` to serve.
         mountpoint (str): where to mount.
         root_prefix (str): mount root; non-empty scopes the tree.
         session (SessionState | None): bind ops to this session's mount grants.

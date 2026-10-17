@@ -4,7 +4,7 @@ icon: wrench
 description: Set up Mirage CLIs with Python or TypeScript.
 ---
 
-Mirage bundles ten command-line programs for its workspace shell. The
+Mirage bundles eleven command-line programs for its workspace shell. The
 [host `mirage` CLI](/home/access/cli) connects to a workspace; these programs
 run inside it. Each setup page includes Python and TypeScript registration.
 
@@ -21,6 +21,7 @@ run inside it. Each setup page includes Python and TypeScript registration.
 | [linear](/home/setup/cli/linear) | Query teams, issues, projects and documents; update issues and comments | 26 |
 | [ntn](/home/setup/cli/ntn) | Read and edit Markdown pages, query data sources and call Notion APIs | 9 |
 | [slack](/home/setup/cli/slack) | Read and send messages; manage reactions and pins; find members and search | 11 |
+| [trello](/home/setup/cli/trello) | Read boards, lists, labels and cards; create, update, move, assign, label and comment on cards | 16 |
 {/* END GENERATED CLI COMMANDS */}
 
 Account CLIs use their own validated config and can run without a service
@@ -28,8 +29,8 @@ mount. Credentials can be reused with the corresponding VFS; mounting a
 service does not register its CLI. `git` needs no account config and uses
 repositories on workspace mounts.
 
-All ten are available in Python and TypeScript on Node. TypeScript exports
-`hf` and `himalaya` from `@struktoai/mirage-node`, and the other eight from
+All eleven are available in Python and TypeScript on Node. TypeScript exports
+`hf` and `himalaya` from `@struktoai/mirage-node`, and the other nine from
 `@struktoai/mirage-core`.
 
 Use `<program> --help` for its groups, `<program> <command> --help` for flags,

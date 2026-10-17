@@ -151,27 +151,31 @@ only).
 
 ### VFS
 
-One backend adapter per prefix (`vfs/`, `BaseVFS`, `VFSAdapter`): object
-stores, SaaS, databases, disk, RAM. Each backend is four layers with one
-name: `accessor/x.py` (client), `core/x/` (pure functions), `ops/x/` (op
-table), `vfs/x/` (adapter and config model). `vfs/registry.py`
-(`known_vfs_names`, `build_vfs`) and the entry-point group `mirage.vfs` are
-the registry. A VFS never stores a symlink, reports leaf files only, and
-classifies an entry through `stat`, never by name.
+One backend per prefix (`vfs/`, `BaseVFS`): object stores, SaaS,
+databases, disk, RAM. Each backend is three layers with one name:
+`accessor/x.py` (client), `core/x/` (pure functions), `vfs/x/` (the
+`BaseVFS` subclass, whose methods are its ops, and its config model).
+`vfs/registry.py` (`known_vfs_names`, `build_vfs`) and the entry-point group
+`mirage.vfs` are the registry. A VFS never stores a symlink, reports leaf
+files only, and classifies an entry through `stat`, never by name.
 
 ### POSIX layer
 
-What the agent sees over every VFS. Ops (`ops/`, `OpsRegistry`) are the
-syscall-shaped table a mount answers: `read`, `write`, `append`, `stat`,
-`readdir`, `mkdir`, `rmdir`, `unlink`, `rename`, `truncate`; the dispatcher
-(`workspace/dispatcher/`) resolves a virtual path to a mount and calls them.
+What the agent sees over every VFS. Ops are the syscall-shaped methods a
+mount's `BaseVFS` declares with `vfs_call` (`vfs/call.py`): `read`, `write`,
+`append`, `stat`, `readdir`, `mkdir`, `rmdir`, `unlink`, `rename`,
+`truncate`; the dispatcher (`workspace/dispatcher/`) resolves a virtual path
+to a mount and calls them by name.
 Commands (`commands/builtin/`) are the coreutils: a generic implements a
 family once (`generic/`), `generic_bind/` binds it to a backend,
 `crossmount/` and `executor/fanout.py` handle a line that spans mounts. The
 namespace (`workspace/mount/namespace/`) sits above every backend with the
 mount table, symlinks and the attribute overlay; a handler reads links and
-mount boundaries off `ctx.vfs` (`links_of`, `mounts_of`). A `filetype` registration
-on a mount is the only renderer extension point.
+mount boundaries through `links_of` and `mounts_of`
+(`commands/builtin/utils/links`), as its session sees them: they read the
+tables off its files through the internal `namespace_of`, and `ctx.vfs`
+itself hands out neither. A `filetype` registration on a mount is the only
+renderer extension point.
 
 Pinned behavior: `find -size` rounds up and the start row is the generic's;
 `du` derives directory rows, sorts siblings, counts bytes and exits 1 on a
@@ -265,11 +269,11 @@ flowchart TD
     Exec --> Runtime["runtime routing<br/>workspace · process · remote"]
     Exec --> Handler["command handler<br/>(accessor, paths, texts, ctx)"]
     Spec["Argument · CommandSpec · CLI · FlagView"] -.-> Handler
-    Handler --> Dispatch["op dispatcher<br/>workspace/dispatcher · ops"]
-    Runtime -. RuntimeVFS .-> Dispatch
+    Handler --> Dispatch["op dispatcher<br/>workspace/dispatcher"]
+    Runtime -. RuntimeFiles .-> Dispatch
     FUSE["FUSE · FSKit"] --> Dispatch
     Dispatch --> NS["namespace<br/>mount table · symlinks · attr overlay"]
-    NS --> VFS["VFS<br/>ops table → core → accessor"]
+    NS --> VFS["VFS<br/>BaseVFS ops → core → accessor"]
     VFS --> Backend[("backend API")]
     Events["events"] -.-> NS
     Session["session · history<br/>stores · record clients"] -.-> Exec
@@ -279,14 +283,14 @@ One backend, bottom to top:
 
 ```mermaid
 flowchart LR
-    A["accessor/x.py<br/>client"] --> C["core/x/<br/>pure functions"] --> O["ops/x/<br/>op table"] --> V["vfs/x/<br/>adapter + config"] --> M["mount at a prefix"]
+    A["accessor/x.py<br/>client"] --> C["core/x/<br/>pure functions"] --> V["vfs/x/<br/>BaseVFS ops + config"] --> M["mount at a prefix"]
     W["commands/builtin/x/<br/>backend-aware wrappers"] -.-> M
 ```
 
 Repository:
 
 ```
-python/mirage/   accessor core ops vfs commands workspace shell runtime policy
+python/mirage/   accessor core vfs commands workspace shell runtime policy
                  observe cache events mount fuse cli server agents
 typescript/packages/
   core/          runtime-agnostic twin; no Node-only or browser-only API

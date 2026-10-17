@@ -24,7 +24,7 @@ from mirage.runtime.python.host.file import text_encoding
 from mirage.runtime.python.host.fs import HostFs
 from mirage.runtime.python.host.host_io import in_host_io
 from mirage.runtime.python.host.syscall import syscall
-from mirage.workspace.files import Files
+from mirage.workspace.files import WorkspaceFiles
 
 OpenPath: TypeAlias = str | bytes | int | os.PathLike[str] | os.PathLike[bytes]
 OpenResult: TypeAlias = IO[str] | IO[bytes]
@@ -140,14 +140,14 @@ class MountedOpen:
 
 
 def make_open(
-    files: Files,
+    files: WorkspaceFiles,
     loop: asyncio.AbstractEventLoop | None = None,
     router: HostFs | None = None,
 ) -> MountedOpen:
     """Create a patched open() that routes mounted paths through ops.
 
     Args:
-        files (Files): The facade with the mount table.
+        files (WorkspaceFiles): The facade with the mount table.
         loop (asyncio.AbstractEventLoop | None): Shared event loop.
         router (HostFs | None): the ``os`` entry point whose descriptors
             ``open`` wraps; None makes one of its own.

@@ -58,7 +58,7 @@ from mirage.runtime.types import ScriptSource
 from mirage.shell.console import JobConsole
 from mirage.shell.console.redis import RedisConsoleStore
 from mirage.shell.job_table import ConsoleFactory
-from mirage.types import ReadSpec, WritePolicy
+from mirage.types import JsonValue, ReadSpec, WritePolicy
 from mirage.vfs.airtable import AirtableConfig, AirtableVFS
 from mirage.vfs.aliyun import AliyunConfig, AliyunVFS
 from mirage.vfs.backblaze import BackblazeConfig, BackblazeVFS
@@ -847,8 +847,8 @@ class GwsService:
             )
         )
 
-    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
-        config: dict[str, object] = {
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
+        config: dict[str, JsonValue] = {
             "client_id": "integ",
             "refresh_token": GWS_TOKEN,
             "api_base": self.url,
@@ -927,11 +927,11 @@ class EmailService:
             )
         )
 
-    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         # h1 and h2 are the same spec installed twice: two head words,
         # two accounts, and neither shares the mount's account, so a
         # line's behavior proves which config it ran under.
-        integ = {
+        integ: dict[str, JsonValue] = {
             "imap_host": self.host,
             "imap_port": EMAIL_IMAP_PORT,
             "smtp_host": self.host,
@@ -1201,7 +1201,7 @@ class HfHubService:
         )
         return self.KINDS[kind](config)
 
-    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         return {
             "hf": (
                 cli_spec_for("hf"),
@@ -1427,7 +1427,7 @@ class SlackService:
             )
         )
 
-    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         return {
             "slack": (
                 cli_spec_for("slack"),
@@ -1481,7 +1481,7 @@ class GitHubService:
             )
         )
 
-    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         return {
             "gh": (
                 cli_spec_for("gh"),
@@ -1537,7 +1537,8 @@ class DifyService:
 
 
 class TrelloService:
-    """Points trello mounts at the shared fake Trello REST API server.
+    """Points trello mounts and the trello install at the shared fake
+    Trello REST API server.
 
     The server (integ/server/trello/) is external, Prisma-backed, and
     shared across both hosts; /reset re-seeds it to the fixture, so the
@@ -1545,18 +1546,31 @@ class TrelloService:
 
     Args:
         base (str): TRELLO_URL origin.
+        cli_scope (dict[str, JsonValue]): the scope knobs of the mount the
+            target names as ``cli_scope``, given to the CLI's install so
+            the CLI and that mount cover the same boards; empty for an
+            unscoped install.
     """
 
-    def __init__(self, base: str) -> None:
+    def __init__(self, base: str, cli_scope: dict[str, JsonValue]) -> None:
         self.base = base
+        self.cli_scope = cli_scope
 
     @classmethod
-    async def create(cls) -> "TrelloService":
+    async def create(cls, target: dict) -> "TrelloService":
         base = os.environ["TRELLO_URL"].rstrip("/")
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{base}/reset") as resp:
                 resp.raise_for_status()
-        return cls(base)
+        scope = next(
+            (
+                mount.get("config", {})
+                for mount in target["mounts"]
+                if mount["path"] == target.get("cli_scope")
+            ),
+            {},
+        )
+        return cls(base, scope)
 
     def vfs(self, mount: dict) -> TrelloVFS:
         return TrelloVFS(
@@ -1572,6 +1586,19 @@ class TrelloService:
                 }
             )
         )
+
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
+        return {
+            "trello": (
+                cli_spec_for("trello"),
+                {
+                    "api_key": "integ-key",
+                    "api_token": "integ-token",
+                    "base_url": self.base,
+                    **self.cli_scope,
+                },
+            ),
+        }
 
     async def teardown(self) -> None:
         return None
@@ -1612,7 +1639,7 @@ class DiscordService:
             )
         )
 
-    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         return {
             "discord": (
                 cli_spec_for("discord"),
@@ -1661,7 +1688,7 @@ class LinearService:
             )
         )
 
-    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         return {
             "linear": (
                 cli_spec_for("linear"),
@@ -1874,7 +1901,7 @@ class AirtableService:
             )
         )
 
-    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         # The same bounds as the mount, scoped to two of the fixture's three
         # bases so the battery can show a refused one (the Archive).
         return {
@@ -1952,7 +1979,7 @@ class NotionService:
             config=NotionConfig(api_key=self.token, base_url=f"{self.base}/v1")
         )
 
-    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, object]]]:
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
         return {
             "ntn": (
                 cli_spec_for("ntn"),
@@ -2996,7 +3023,7 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
     if target.get("service") == "slack":
         return await SlackService.create(run_id, target.get("dataset", "v1"))
     if target.get("service") == "trello":
-        return await TrelloService.create()
+        return await TrelloService.create(target)
     if target.get("service") == "discord":
         return await DiscordService.create(target.get("dataset", "v1"))
     if target.get("service") == "linear":
@@ -3057,7 +3084,7 @@ async def build_mounts(
 
 def cli_install(
     service: "Service | None", cli_name: str
-) -> tuple[CLI, dict[str, object] | None]:
+) -> tuple[CLI, dict[str, JsonValue] | None]:
     """The spec and config to install one CLI under its head word.
 
     Every CLI here so far talks to an API, so its mock service hands
@@ -3089,6 +3116,7 @@ def cli_install(
             LinearService,
             NotionService,
             SlackService,
+            TrelloService,
         ),
     )
     return service.cli_installs()[cli_name]

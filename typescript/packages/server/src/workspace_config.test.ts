@@ -73,7 +73,7 @@ describe('buildWorkspaceFromConfig', () => {
     const workspace = await buildWorkspaceFromConfig(path)
     await workspace.vfs.write('/hello.txt', 'hello')
 
-    expect(await workspace.vfs.cat('/hello.txt')).toBe('hello')
+    expect(new TextDecoder().decode(await workspace.vfs.read('/hello.txt'))).toBe('hello')
     await workspace.close()
 
     // 30s, not vitest's 5s default: `buildWorkspaceFromConfig` loads the

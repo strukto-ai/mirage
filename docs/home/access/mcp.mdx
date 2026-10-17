@@ -137,7 +137,7 @@ The final `CallToolResult` still contains the complete tool output and `isError`
 
 ## VFS calls and explain
 
-Add `?calls=all` to the URL, or `--all-calls` to `mirage mcp`, to also list each of the 24 [VFS calls](/home/access/http#call-the-vfs) as a tool named `vfs_<call>` (`vfs_read`, `vfs_is_dir`), with the same arguments. Each answers the route's JSON as text; a failed one answers `{detail, errno, refusal}` with `isError` set. `shell` and every `vfs_<call>` then take `explain: true`, which answers what the call would do and runs nothing; see [Explain](/home/policy/explain).
+Add `?calls=all` to the URL, or `--all-calls` to `mirage mcp`, to also list each of the 23 [VFS calls](/home/access/http#call-the-vfs) as a tool named `vfs_<call>` (`vfs_read`, `vfs_is_dir`), with the same arguments. Each answers the route's JSON as text; a failed one answers `{detail, errno, refusal}` with `isError` set. `shell` and every `vfs_<call>` then take `explain: true`, which answers what the call would do and runs nothing; see [Explain](/home/policy/explain).
 
 ## Sessions
 

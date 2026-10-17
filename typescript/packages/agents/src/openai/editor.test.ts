@@ -18,6 +18,9 @@ import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
 import { MirageEditor } from './editor.ts'
 
+const DEC = new TextDecoder()
+const ENC = new TextEncoder()
+
 function mkWs(): Workspace {
   const ram = new RAMVFS()
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE })
@@ -35,7 +38,7 @@ describe('MirageEditor', () => {
     })
 
     expect(result).toEqual({ status: 'completed' })
-    expect(await ws.vfs.cat('/hello.txt')).toBe('hello world\n')
+    expect(DEC.decode(await ws.vfs.read('/hello.txt'))).toBe('hello world\n')
   })
 
   it('createFile auto-mkdirs missing parent directories', async () => {
@@ -49,7 +52,7 @@ describe('MirageEditor', () => {
     })
 
     expect(result).toEqual({ status: 'completed' })
-    expect(await ws.vfs.cat('/data/sub/file.txt')).toBe('content\n')
+    expect(DEC.decode(await ws.vfs.read('/data/sub/file.txt'))).toBe('content\n')
   })
 
   it('createFile handles a root-level relative path without recursing on "."', async () => {
@@ -63,7 +66,7 @@ describe('MirageEditor', () => {
     })
 
     expect(result).toEqual({ status: 'completed' })
-    expect(await ws.vfs.cat('bare.txt')).toBe('bare')
+    expect(DEC.decode(await ws.vfs.read('bare.txt'))).toBe('bare')
   })
 
   it('createFile is idempotent on existing parent', async () => {
@@ -93,7 +96,24 @@ describe('MirageEditor', () => {
     })
 
     expect(result).toEqual({ status: 'completed' })
-    expect(await ws.vfs.cat('/notes.txt')).toBe('one\nTWO\nthree\n')
+    expect(DEC.decode(await ws.vfs.read('/notes.txt'))).toBe('one\nTWO\nthree\n')
+  })
+
+  it('updateFile keeps a leading BOM', async () => {
+    const ws = mkWs()
+    await ws.vfs.write('/bom.txt', '\ufeffone\ntwo\nthree\n')
+    const editor = new MirageEditor(ws)
+
+    const result = await editor.updateFile({
+      type: 'update_file',
+      path: '/bom.txt',
+      diff: '@@\n two\n-three\n+THREE\n',
+    })
+
+    expect(result).toEqual({ status: 'completed' })
+    expect(Array.from(await ws.vfs.read('/bom.txt'))).toEqual(
+      Array.from(ENC.encode('\ufeffone\ntwo\nTHREE\n')),
+    )
   })
 
   it('updateFile returns failed for missing path', async () => {

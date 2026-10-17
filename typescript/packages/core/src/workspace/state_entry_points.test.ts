@@ -2955,7 +2955,7 @@ describe('a dispatched op is judged by the gate of the command that issued it', 
       'mkdir -p /data/real && echo s > /data/real/secret && echo w > /data/real/walled',
     )
     const handle = await ws.session('g', { profile: 'mixed' })
-    expect(await handle.vfs.cat('/data/real/secret')).toBe('s\n')
+    expect(DEC.decode(await handle.vfs.read('/data/real/secret'))).toBe('s\n')
     await expect(handle.vfs.read('/data/real/walled')).rejects.toThrow()
     expect((await handle.shell('cat /data/real/secret')).exitCode).toBe(1)
   })

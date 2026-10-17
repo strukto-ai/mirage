@@ -30,7 +30,7 @@ from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.python.host.fs import HostFs, make_rmtree, os_routing
 from mirage.runtime.python.host.open import make_open
 from mirage.shell.job_table import JobTable, cancel_job
-from mirage.workspace.files import Files
+from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session.manager import SessionManager
@@ -91,7 +91,7 @@ class CloseDeps:
 
 
 def patch_process(
-    files: Files,
+    files: WorkspaceFiles,
     loop: asyncio.AbstractEventLoop,
 ) -> list[Patched]:
     """Point ``open`` and ``os`` at the workspace for a ``with`` block.
@@ -117,7 +117,7 @@ def patch_process(
     is the one that shows it; any pooled async client would).
 
     Args:
-        files (Files): the workspace's ``ws.vfs``.
+        files (WorkspaceFiles): the workspace's ``ws.vfs``.
         loop (asyncio.AbstractEventLoop): the block's loop.
 
     Returns:

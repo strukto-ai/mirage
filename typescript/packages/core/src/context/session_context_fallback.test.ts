@@ -26,7 +26,6 @@ import {
   sessionVisibility,
   redirectPathsFor,
   redirectTargetJudged,
-  requireMountWritable,
   runAsProgram,
   runWithAdmission,
   runWithMountGate,
@@ -60,8 +59,10 @@ import { Session, Workspace } from '../workspace/workspace/workspace.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
 import { ContextScope } from '../utils/context_scope.ts'
 import { pathVisible } from '../utils/hidden.ts'
-import { Files } from '../workspace/files.ts'
+import { Files, namespaceOf } from '../workspace/files.ts'
 import type { DispatchFn } from '../runtime/types.ts'
+
+const DEC = new TextDecoder()
 
 // The browser-runtime branch under node's test runner: the mock forces
 // the real FallbackStorage (no task isolation, one frame stack per
@@ -175,26 +176,6 @@ describe('the mount gate on the fallback storage', () => {
     ).rejects.toThrow('boom')
     expect(mountGateFor('/a/x')).toBeNull()
   })
-
-  it('requireMountWritable answers for the named mount, not a concurrent one', async () => {
-    const sess = new SessionState({
-      sessionId: 'agent',
-      mountModes: new Map([['/trello', MountMode.READ]]),
-    })
-    await runWithSession(sess, () =>
-      runWithMountGate('/s3', MountMode.WRITE, () =>
-        runWithMountGate('/trello', MountMode.WRITE, () => {
-          // Both gates live: the id-addressed trello write is judged by
-          // trello's own gate even with s3's writable one beside it.
-          expect(() => {
-            requireMountWritable('/trello')
-          }).toThrow(/read-only/)
-          requireMountWritable('/s3')
-          return Promise.resolve()
-        }),
-      ),
-    )
-  })
 })
 
 describe('session predicates on the fallback storage', () => {
@@ -284,9 +265,11 @@ describe('session predicates on the fallback storage', () => {
       await hold
     })
     const short = runWithSession(other, () => {
-      const vis = new Files(dispatch, null, null, () => null, {
-        visibility: () => other.visibility,
-      }).vis()
+      const vis = namespaceOf(
+        new Files(dispatch, null, null, () => null, {
+          visibility: () => other.visibility,
+        }),
+      ).vis()
       folded = pathVisible(vis, '/data/x')
       release()
       return Promise.resolve()
@@ -294,9 +277,11 @@ describe('session predicates on the fallback storage', () => {
     await Promise.all([long, short])
     expect(folded).toBe(true)
     // A session named outside any line keeps its own view.
-    const own = new Files(dispatch, null, null, () => null, {
-      visibility: () => other.visibility,
-    }).vis()
+    const own = namespaceOf(
+      new Files(dispatch, null, null, () => null, {
+        visibility: () => other.visibility,
+      }),
+    ).vis()
     expect(pathVisible(own, '/data/x')).toBe(true)
   })
 
@@ -522,7 +507,7 @@ describe('a named facade session on the fallback storage', () => {
       const holding = runWithSession(host, () => held, { owner: ws.sessionManager })
       const named = new Session(ws, ws.defaultSessionId).vfs
       await expect(named.read('/data/vault/secret')).rejects.toMatchObject({ code: 'ENOENT' })
-      expect(await ws.vfs.cat('/data/vault/secret')).toBe('top\n')
+      expect(DEC.decode(await ws.vfs.read('/data/vault/secret'))).toBe('top\n')
       release()
       await holding
     } finally {
@@ -556,7 +541,7 @@ describe('dry runs on the fallback storage', () => {
       await ws.vfs.write('/data/z', 'z')
       read()
       expect(await dry).toMatchObject({ outcome: Outcome.DENY, reason: 'x is sealed' })
-      expect(await ws.vfs.cat('/data/z')).toBe('z')
+      expect(DEC.decode(await ws.vfs.read('/data/z'))).toBe('z')
     } finally {
       await ws.close()
     }
@@ -587,7 +572,7 @@ describe('dry runs on the fallback storage', () => {
       await ws.vfs.write('/data/y', 'y')
       release()
       await explained
-      expect(await ws.vfs.cat('/data/y')).toBe('y')
+      expect(DEC.decode(await ws.vfs.read('/data/y'))).toBe('y')
     } finally {
       await ws.close()
     }

@@ -23,6 +23,8 @@ import { Workspace } from '../workspace/workspace.ts'
 import { applyStateDict, toStateDict } from '../snapshot/state.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 
+const DEC = new TextDecoder()
+
 async function workspace(): Promise<Workspace> {
   return new Workspace(
     { '/data': new RAMVFS(), '/secret': new RAMVFS() },
@@ -66,11 +68,11 @@ describe('generated documents', () => {
       expect(ws.listSessions()).toHaveLength(3)
       await ws.vfsMd('/VFS.md')
       const [restricted, full] = await Promise.all([
-        ws.vfs.cat('/VFS.md', 'a'),
-        ws.vfs.cat('/VFS.md', 'b'),
+        ws.vfs.read('/VFS.md', {}, 'a'),
+        ws.vfs.read('/VFS.md', {}, 'b'),
       ])
-      expect(restricted).toBe(preview)
-      expect(full).toContain('/secret')
+      expect(DEC.decode(restricted)).toBe(preview)
+      expect(DEC.decode(full)).toContain('/secret')
       const skill = await ws.skillMd()
       expect(skill).toContain('## `tool`')
       expect(skill.includes('This program parses its own arguments')).toBe(ownsArgv)
@@ -101,7 +103,7 @@ describe('generated documents', () => {
     await ws.vfsMd('/data/guides/VFS.md')
     await ws.vfsMd('/data/guides/VFS.md')
     await expect(ws.skillMd('/data/guides/VFS.md')).rejects.toThrow()
-    expect(await ws.vfs.cat('/data/exists')).toBe('keep')
+    expect(DEC.decode(await ws.vfs.read('/data/exists'))).toBe('keep')
     const vfs = ws.registry.tryMountForPrefix('/data')?.vfs as RAMVFS
     expect(vfs.store.files.has('/guides/VFS.md')).toBe(false)
     await ws.close()
@@ -135,12 +137,12 @@ it('releases document paths after unmount and the last session closes', async ()
   await a.vfsMd('/guide.md')
   await b.vfsMd('/guide.md')
   await ws.closeSession('a')
-  expect(await ws.vfs.cat('/guide.md', 'b')).toContain('Virtual filesystem')
+  expect(DEC.decode(await ws.vfs.read('/guide.md', {}, 'b'))).toContain('Virtual filesystem')
   await ws.closeSession('b')
   await ws.skillMd('/guide.md')
   await ws.unmount('/guide.md')
   await ws.vfsMd('/guide.md')
-  expect(await ws.vfs.cat('/guide.md')).toContain('Virtual filesystem')
+  expect(DEC.decode(await ws.vfs.read('/guide.md'))).toContain('Virtual filesystem')
   await ws.close()
 })
 
@@ -164,7 +166,7 @@ it('excludes live documents from a workspace copy', async () => {
   expect(await clone.vfs.exists('/VFS.md')).toBe(false)
   expect(await clone.vfs.exists('/SKILL.md')).toBe(false)
   await clone.vfsMd('/VFS.md')
-  expect(await clone.vfs.cat('/VFS.md')).toContain('Virtual filesystem')
+  expect(DEC.decode(await clone.vfs.read('/VFS.md'))).toContain('Virtual filesystem')
   await clone.close()
   await ws.close()
 })
@@ -174,8 +176,8 @@ it('binds where a read lands when a link sits above the name', async () => {
   await ws.vfs.mkdir('/data/guides')
   await ws.vfs.symlink('/guides', '/data/guides')
   const markdown = await ws.vfsMd('/guides/VFS.md')
-  expect(await ws.vfs.cat('/guides/VFS.md')).toBe(markdown)
-  expect(await ws.vfs.cat('/data/guides/VFS.md')).toBe(markdown)
+  expect(DEC.decode(await ws.vfs.read('/guides/VFS.md'))).toBe(markdown)
+  expect(DEC.decode(await ws.vfs.read('/data/guides/VFS.md'))).toBe(markdown)
   await ws.close()
 })
 
@@ -186,9 +188,9 @@ it('drops bindings on an in-place load, so the restored file shows', async () =>
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   await ws.vfsMd('/data/VFS.md')
   await applyStateDict(ws, state)
-  expect(await ws.vfs.cat('/data/VFS.md')).toBe('restored\n')
+  expect(DEC.decode(await ws.vfs.read('/data/VFS.md'))).toBe('restored\n')
   await ws.vfsMd('/VFS.md')
-  expect(await ws.vfs.cat('/VFS.md')).toContain('Virtual filesystem')
+  expect(DEC.decode(await ws.vfs.read('/VFS.md'))).toContain('Virtual filesystem')
   await source.close()
   await ws.close()
 })

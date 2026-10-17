@@ -219,7 +219,7 @@
         },
         {
           "facade": {
-            "method": "cat",
+            "method": "read",
             "path": "/s3/greeting.txt"
           },
           "expect": {

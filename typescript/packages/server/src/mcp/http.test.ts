@@ -159,7 +159,7 @@ describe('the MCP endpoint over HTTP', () => {
     })
     const text = (result: typeof read): string =>
       (result.content as { text: string }[])[0]?.text ?? ''
-    expect(names).toHaveLength(31)
+    expect(names).toHaveLength(30)
     expect(JSON.parse(text(read))).toEqual({ data_base64: 'aGk=' })
     expect(JSON.parse(text(said))).toMatchObject({ outcome: 'allow' })
     expect(refused.status).toBe(400)
@@ -226,7 +226,9 @@ describe('the MCP endpoint over HTTP', () => {
       content,
     })
     expect(written).toBe('Written: /big.txt')
-    expect((await app.registry.get(id).runner.ws.vfs.cat('/big.txt')).length).toBe(content.length)
+    expect(
+      new TextDecoder().decode(await app.registry.get(id).runner.ws.vfs.read('/big.txt')).length,
+    ).toBe(content.length)
   })
 
   it('runs shell as a daemon job', async () => {

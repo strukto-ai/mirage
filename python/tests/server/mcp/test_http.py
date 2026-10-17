@@ -149,7 +149,7 @@ async def test_calls_all_serves_the_vfs_calls_and_explain(tmp_path):
             )
         async with httpx.AsyncClient() as http:
             refused = await http.post(f"{url}?calls=some", json={})
-    assert len(names) == 31
+    assert len(names) == 30
     assert json.loads(read.content[0].text) == {"data_base64": "aGk="}
     assert json.loads(said.content[0].text)["outcome"] == "allow"
     assert refused.status_code == 400

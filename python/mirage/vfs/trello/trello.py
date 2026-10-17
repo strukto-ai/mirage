@@ -15,6 +15,7 @@
 from typing import Any
 
 from mirage.accessor.trello import TrelloAccessor
+from mirage.core.trello.config import TrelloConfig
 from mirage.core.trello.read import read as _read
 from mirage.core.trello.readdir import readdir as _readdir
 from mirage.core.trello.search import files_containing as _files_containing
@@ -22,7 +23,6 @@ from mirage.core.trello.stat import stat as _stat
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.trello.config import TrelloConfig
 from mirage.vfs.trello.prompt import PROMPT, WRITE_PROMPT
 
 

@@ -15,6 +15,7 @@
 import asyncio
 import posixpath
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from typing import Any
 
 from mirage.context import get_current_session, session_visibility
@@ -56,15 +57,18 @@ async def _recorded(
 
 
 class Files:
-    """The typed file API at ``ws.vfs``, for FUSE and programmatic callers.
+    """The typed file API: ``ws.vfs``, ``session.vfs`` and a command's,
+    CLI leaf's or runtime's ``ctx.vfs``.
 
     Every op delegates to the workspace dispatcher, so FUSE and
     ``ws.vfs`` walk the same pipeline as a shell command: link follow,
     session grants, admission policies, cache read-through, namespace
     structure, and write invalidation all fire once, at that one dispatcher.
     The facade keeps only what is its own: the typed surface, op
-    recording (``records``/``network_bytes``), and the mount-table
-    helpers.
+    recording, and the mount-table helpers. What only the host asks of
+    ``ws.vfs`` (the ledger, keeping its mount table in step, the mounts
+    FUSE and the runtime's ``open()`` interception ask about) is on
+    ``WorkspaceFiles``.
 
     ``dispatch`` is required, so there is no workspace-less mode. A
     second pipeline here would be a second entry point, and it drifted from
@@ -110,8 +114,9 @@ class Files:
         follow: FollowOperands | None = None,
         ledger: bool = True,
     ) -> None:
-        self._mounts: list[MountRow] = []
-        self.set_mounts(mounts)
+        self._mounts: list[MountRow] = sorted(
+            mounts, key=lambda m: len(m.prefix), reverse=True
+        )
         self._observer = observer
         self._session_id = session_id
         self._links = links
@@ -120,7 +125,7 @@ class Files:
         self._visibility = visibility
         self._follow = follow
         self._ledger = ledger
-        self.records: list[OpRecord] = records if records is not None else []
+        self._records: list[OpRecord] = records if records is not None else []
 
     @property
     def session_id(self) -> str | None:
@@ -149,7 +154,7 @@ class Files:
             session_id=session_id,
             links=self._links,
             bind=self._bind,
-            records=self.records,
+            records=self._records,
             visibility=self._visibility,
         )
         derived._mounts = self._mounts
@@ -283,73 +288,6 @@ class Files:
             found.add(root)
         return sorted(found)
 
-    def set_mounts(self, mounts: list[MountRow]) -> None:
-        """Refresh mount metadata without replacing the facade or its ledger.
-
-        Args:
-            mounts (list[MountRow]): the workspace's current mount table.
-        """
-        # In place, so a facade derived for a session sees the
-        # refreshed table through the list it shares.
-        self._mounts[:] = sorted(
-            mounts, key=lambda m: len(m.prefix), reverse=True
-        )
-
-    def unsized_mounts(self, root_prefix: str = "") -> list[tuple[str, str]]:
-        """Mounts the session sees whose files cannot be sized without
-        reading them.
-
-        Args:
-            root_prefix (str): when non-empty, only consider the mount
-                serving this prefix and anything nested under it, matching
-                how a scoped mount narrows the tree.
-
-        Returns:
-            list[tuple[str, str]]: (prefix, resource_type) pairs, in mount
-            resolution order.
-        """
-        root = root_prefix.rstrip("/")
-        found = []
-        for m in self._shown():
-            if root and not (
-                m.prefix.rstrip("/") == root or m.prefix.startswith(root + "/")
-            ):
-                continue
-            if not m.sizes_always_known:
-                found.append((m.prefix, m.resource_type))
-        return found
-
-    def writable_mounts(self, root_prefix: str = "") -> list[tuple[str, str]]:
-        """Mounts the session sees that accept writes, in mount
-        resolution order.
-
-        Args:
-            root_prefix (str): when non-empty, only consider the mount
-                serving this prefix and anything nested under it, matching
-                how a scoped mount narrows the tree.
-
-        Returns:
-            list[tuple[str, str]]: (prefix, resource_type) pairs.
-        """
-        root = root_prefix.rstrip("/")
-        found = []
-        for m in self._shown():
-            if root and not (
-                m.prefix.rstrip("/") == root or m.prefix.startswith(root + "/")
-            ):
-                continue
-            if m.mode is not MountMode.READ:
-                found.append((m.prefix, m.resource_type))
-        return found
-
-    def unmount(self, prefix: str) -> None:
-        stripped = prefix.strip("/")
-        norm = "/" + stripped + "/" if stripped else "/"
-        # In place, for the same reason ``set_mounts`` is: a facade
-        # derived for a session shares this list, and a retained one
-        # must stop reporting a mount the workspace dropped.
-        self._mounts[:] = [m for m in self._mounts if m.prefix != norm]
-
     def _record(
         self,
         op: str,
@@ -366,7 +304,7 @@ class Files:
             nbytes,
             timer,
         )
-        self.records.append(rec)
+        self._records.append(rec)
         if self._observer is not None:
             asyncio.ensure_future(self._observer.log_op(rec, session))
 
@@ -762,18 +700,6 @@ class Files:
             return False
         return st.type != FileType.DIRECTORY
 
-    async def cat(
-        self, path: str | PathSpec, *, session_id: str | None = None
-    ) -> str:
-        """The file's content as text (the TS facade's ``cat``).
-
-        Args:
-            path (str | PathSpec): Virtual path.
-            session_id (str | None): Session to run as outside a line.
-        """
-        data = await self.read(path, session_id=session_id)
-        return data.decode("utf-8", errors="replace")
-
     async def list_files(
         self, path: str | PathSpec, *, session_id: str | None = None
     ) -> list[str]:
@@ -1056,6 +982,99 @@ class Files:
         """
         await self._call("truncate", path, session_id, length=length)
 
+
+class WorkspaceFiles(Files):
+    """``ws.vfs``: the files the host holds, with what only the host asks.
+
+    The op ledger every ledgered facade appends to (``records``, with
+    the network/cache split derived from it), the mount table kept in
+    step with the workspace's (``set_mounts``, ``unmount``), and the
+    mount questions FUSE and the runtime's ``open()`` interception ask
+    (``unsized_mounts``, ``writable_mounts``, ``is_mounted``). The
+    ``Files`` a handler, a CLI leaf, a runtime or ``session.vfs`` gets
+    is a facade of its own, on which these would change or report only
+    that facade, so it is a plain ``Files``.
+    """
+
+    @property
+    def records(self) -> list[OpRecord]:
+        """The op ledger: every facade op lands here, and the executor
+        appends each shell line's ops too, so this is the one
+        workspace-wide account."""
+        return self._records
+
+    def set_mounts(self, mounts: list[MountRow]) -> None:
+        """Refresh mount metadata without replacing the facade or its ledger.
+
+        Args:
+            mounts (list[MountRow]): the workspace's current mount table.
+        """
+        # In place, so a facade derived for a session sees the
+        # refreshed table through the list it shares.
+        self._mounts[:] = sorted(
+            mounts, key=lambda m: len(m.prefix), reverse=True
+        )
+
+    def unsized_mounts(self, root_prefix: str = "") -> list[tuple[str, str]]:
+        """Mounts the session sees whose files cannot be sized without
+        reading them.
+
+        Args:
+            root_prefix (str): when non-empty, only consider the mount
+                serving this prefix and anything nested under it, matching
+                how a scoped mount narrows the tree.
+
+        Returns:
+            list[tuple[str, str]]: (prefix, resource_type) pairs, in mount
+            resolution order.
+        """
+        root = root_prefix.rstrip("/")
+        found = []
+        for m in self._shown():
+            if root and not (
+                m.prefix.rstrip("/") == root or m.prefix.startswith(root + "/")
+            ):
+                continue
+            if not m.sizes_always_known:
+                found.append((m.prefix, m.resource_type))
+        return found
+
+    def writable_mounts(self, root_prefix: str = "") -> list[tuple[str, str]]:
+        """Mounts the session sees that accept writes, in mount
+        resolution order.
+
+        Args:
+            root_prefix (str): when non-empty, only consider the mount
+                serving this prefix and anything nested under it, matching
+                how a scoped mount narrows the tree.
+
+        Returns:
+            list[tuple[str, str]]: (prefix, resource_type) pairs.
+        """
+        root = root_prefix.rstrip("/")
+        found = []
+        for m in self._shown():
+            if root and not (
+                m.prefix.rstrip("/") == root or m.prefix.startswith(root + "/")
+            ):
+                continue
+            if m.mode is not MountMode.READ:
+                found.append((m.prefix, m.resource_type))
+        return found
+
+    def unmount(self, prefix: str) -> None:
+        """Drop a mount the workspace removed from the mount table.
+
+        Args:
+            prefix (str): the removed mount's prefix.
+        """
+        stripped = prefix.strip("/")
+        norm = "/" + stripped + "/" if stripped else "/"
+        # In place, for the same reason ``set_mounts`` is: a facade
+        # derived for a session shares this list, and a retained one
+        # must stop reporting a mount the workspace dropped.
+        self._mounts[:] = [m for m in self._mounts if m.prefix != norm]
+
     @property
     def network_bytes(self) -> int:
         """Total bytes transferred over the network."""
@@ -1098,3 +1117,48 @@ class Files:
             )
             is not None
         )
+
+
+@dataclass(frozen=True)
+class FilesNamespace:
+    """What a session's files hold of the namespace, hides aside.
+
+    The link table and the mount table as the workspace keeps them,
+    hidden entries included, so it is never a handler's: a handler asks
+    ``Files`` (``is_visible``, ``mount_of``, ``submounts``), which apply
+    the session's hides. The code that walks the namespace beside the
+    dispatcher reads it: the command helpers' link and mount views
+    (globs, ``find -L``, ``cp -L``, ``du``), the mount core and the file
+    tool mapping a path the way the dispatcher does, the runtime's
+    descriptors.
+
+    Args:
+        links (NamespaceLinks | None): the workspace link table,
+            unfiltered by any session's hides.
+        follow (FollowOperands | None): the line's operand resolution a
+            command's globs give their matches.
+        vis (Callable[[], Visibility | None]): the visibility of the
+            session an op would run as.
+        mounts (Callable[[], list[MountRow]]): the mounts that session
+            is told of at all, hides aside.
+    """
+
+    links: NamespaceLinks | None
+    follow: FollowOperands | None
+    vis: Callable[[], Visibility | None]
+    mounts: Callable[[], list[MountRow]]
+
+
+def namespace_of(files: Files) -> FilesNamespace:
+    """The namespace a session's files hold, for the code that walks it
+    beside the dispatcher; never a handler's (``FilesNamespace``).
+
+    Args:
+        files (Files): the session's files.
+    """
+    return FilesNamespace(
+        links=files._links,
+        follow=files._follow,
+        vis=files._vis,
+        mounts=files._served,
+    )

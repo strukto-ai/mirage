@@ -30,7 +30,8 @@ import { DiskVFS } from '@struktoai/mirage-node'
 import type { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { Files } from '@struktoai/mirage-core/workspace/files'
+import { type Files, namespaceOf } from '@struktoai/mirage-core/workspace/files'
+import type { NamespaceLinks } from '@struktoai/mirage-core/view/types'
 import { FileType } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
@@ -45,7 +46,6 @@ import {
   restoreLineEndings,
 } from './text.ts'
 
-type LinksSeam = NonNullable<Files['links']>
 type Host = Awaited<Context['mirage']['ready']>
 
 // Read off the seam's own signature rather than imported: the policy type
@@ -156,7 +156,7 @@ function ownerPrefixOf(virtual: string, mounts: readonly MountEntry[]): string |
  * @param virtual the candidate virtual path.
  * @returns true when the path must not be offered.
  */
-function shadowedByLink(links: LinksSeam | null, virtual: string): boolean {
+function shadowedByLink(links: NamespaceLinks | null, virtual: string): boolean {
   if (links === null) return false
   try {
     return links.follow(virtual) !== virtual
@@ -222,11 +222,11 @@ export class MirageFileSystem extends FileSystem {
     return this.fsOps
   }
 
-  private get links(): LinksSeam | null {
+  private get links(): NamespaceLinks | null {
     if (this.fsOps === null) {
       throw new Error('mirage: filesystem used before the workspace is ready')
     }
-    return this.fsOps.links
+    return namespaceOf(this.fsOps).links
   }
 
   /**
@@ -393,7 +393,7 @@ export class MirageFileSystem extends FileSystem {
       // dispatch, so a read would land on the link's target rather than
       // the disk file the caller named. Links are namespace state, so the
       // disk mount cannot see one and only this table can say.
-      if (shadowedByLink(workspace.vfs.links, virtual)) continue
+      if (shadowedByLink(workspace.namespace, virtual)) continue
       return virtual
     }
     return undefined

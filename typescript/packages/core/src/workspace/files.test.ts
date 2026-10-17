@@ -49,7 +49,7 @@ describe('Files', () => {
   it('writeFile + readFile round-trips bytes', async () => {
     const ws = mkWorkspace()
     await ws.vfs.write('/data/a.txt', 'hello')
-    const text = await ws.vfs.cat('/data/a.txt')
+    const text = DEC.decode(await ws.vfs.read('/data/a.txt'))
     expect(text).toBe('hello')
   })
 
@@ -89,7 +89,7 @@ describe('Files', () => {
     const ws = mkWorkspace()
     await ws.vfs.write('/data/log.txt', 'head')
     await ws.vfs.append('/data/log.txt', new TextEncoder().encode('-tail'))
-    expect(await ws.vfs.cat('/data/log.txt')).toBe('head-tail')
+    expect(DEC.decode(await ws.vfs.read('/data/log.txt'))).toBe('head-tail')
     expect(ws.records.map((r) => r.op)).toContain('append')
   })
 
@@ -139,12 +139,6 @@ describe('Files', () => {
     expect(await ws.vfs.exists('/data/gone.txt')).toBe(true)
     await ws.vfs.unlink('/data/gone.txt')
     expect(await ws.vfs.exists('/data/gone.txt')).toBe(false)
-  })
-
-  it('cat reads file as string', async () => {
-    const ws = mkWorkspace()
-    await ws.vfs.write('/data/t.txt', 'content')
-    expect(await ws.vfs.cat('/data/t.txt')).toBe('content')
   })
 })
 
@@ -246,7 +240,7 @@ describe('Files policy entry point', () => {
     await ws.vfs.write('/data/secret.txt', 'TOPSECRET plans\n')
     await expect(ws.vfs.read('/data/secret.txt')).rejects.toThrow(PolicyDenied)
     await ws.vfs.write('/data/clean.txt', 'hello\n')
-    expect(await ws.vfs.cat('/data/clean.txt')).toBe('hello\n')
+    expect(DEC.decode(await ws.vfs.read('/data/clean.txt'))).toBe('hello\n')
   })
 
   it('preVfs denies a facade write before the backend runs', async () => {
@@ -386,7 +380,7 @@ describe('Files goes through the dispatcher', () => {
     )
     const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
     await ws.vfs.write('/m/doc.gdoc.json', 'stored')
-    expect(await ws.vfs.cat('/m/doc.gdoc.json')).toBe('rendered')
+    expect(DEC.decode(await ws.vfs.read('/m/doc.gdoc.json'))).toBe('rendered')
     expect(DEC.decode(await ws.vfs.read('/m/doc.gdoc.json', { raw: true }))).toBe('stored')
   })
 
@@ -400,7 +394,7 @@ describe('Files goes through the dispatcher', () => {
     const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
     await ws.vfs.write('/m/doc.gdoc.json', 'stored')
     await ws.cache.set('/m/doc.gdoc.json', new TextEncoder().encode('cached'), { ttl: 600 })
-    expect(await ws.vfs.cat('/m/doc.gdoc.json')).toBe('cached')
+    expect(DEC.decode(await ws.vfs.read('/m/doc.gdoc.json'))).toBe('cached')
     expect(DEC.decode(await ws.vfs.read('/m/doc.gdoc.json', { raw: true }))).toBe('cached')
   })
 
@@ -412,7 +406,7 @@ describe('Files goes through the dispatcher', () => {
   ])('never serves a filetype renderer %s from the file cache', async (_, build) => {
     const ws = build()
     await seed(ws, '/m/books.tally')
-    expect(await ws.vfs.cat('/m/books.tally')).toBe('rendered')
+    expect(DEC.decode(await ws.vfs.read('/m/books.tally'))).toBe('rendered')
   })
 
   it('never serves a renderer named by filetype warm', async () => {
@@ -430,7 +424,7 @@ describe('Files goes through the dispatcher', () => {
   ])('still serves %s warm', async (_, build, path) => {
     const ws = build()
     await seed(ws, path)
-    expect(await ws.vfs.cat(path)).toBe('cached')
+    expect(DEC.decode(await ws.vfs.read(path))).toBe('cached')
   })
 
   // The cached entry is never served to a user renderer, but its freshness
@@ -449,7 +443,7 @@ describe('Files goes through the dispatcher', () => {
     await ws.cache.set('/m/books.tally', new TextEncoder().encode('cached'), { ttl: 600 })
     const other = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
     await other.vfs.unlink('/m/books.tally')
-    await expect(ws.vfs.cat('/m/books.tally')).rejects.toThrow()
+    await expect(ws.vfs.read('/m/books.tally')).rejects.toThrow()
   })
 
   // The renderer lands while the read waits on the cache; the entry it
@@ -468,7 +462,7 @@ describe('Files goes through the dispatcher', () => {
         return data
       },
     })
-    expect(await ws.vfs.cat('/m/books.tally')).toBe('rendered')
+    expect(DEC.decode(await ws.vfs.read('/m/books.tally'))).toBe('rendered')
   })
 
   // The entry carries the version the backend answers, so the freshness
@@ -496,7 +490,7 @@ describe('Files goes through the dispatcher', () => {
       ttl: 600,
       fingerprint: 'v1',
     })
-    expect(await ws.vfs.cat('/m/books.tally')).toBe('rendered')
+    expect(DEC.decode(await ws.vfs.read('/m/books.tally'))).toBe('rendered')
   })
 
   // A renderer one RAM mount ships is that instance's own: a sibling mount
@@ -510,7 +504,7 @@ describe('Files goes through the dispatcher', () => {
     const ws = new Workspace({ '/a': shipping, '/b': plain }, { mode: MountMode.WRITE })
     await ws.vfs.write('/b/books.tally', 'stored')
     await ws.cache.set('/b/books.tally', new TextEncoder().encode('cached'), { ttl: 600 })
-    expect(await ws.vfs.cat('/b/books.tally')).toBe('cached')
+    expect(DEC.decode(await ws.vfs.read('/b/books.tally'))).toBe('cached')
   })
 
   it('refuses a write to a read-only mount at the dispatcher', async () => {
@@ -673,7 +667,7 @@ describe('a warm cache still answers a ranged read with the window', () => {
     const ws = mkCaching()
     await ws.vfs.write('/m/f.bin', '0123456789')
     await ws.cache.set('/m/f.bin', new TextEncoder().encode('CACHED-VAL'), { ttl: 600 })
-    expect(await ws.vfs.cat('/m/f.bin')).toBe('CACHED-VAL')
+    expect(DEC.decode(await ws.vfs.read('/m/f.bin'))).toBe('CACHED-VAL')
   })
 })
 
@@ -691,7 +685,7 @@ describe('Files rename is bounded by the mount', () => {
     const ws = mkTwoMounts()
     await ws.vfs.write('/a/x.txt', 'bytes')
     await ws.vfs.rename('/a/x.txt', '/a/y.txt')
-    expect(await ws.vfs.cat('/a/y.txt')).toBe('bytes')
+    expect(DEC.decode(await ws.vfs.read('/a/y.txt'))).toBe('bytes')
     expect(await ws.vfs.exists('/a/x.txt')).toBe(false)
   })
 
@@ -702,7 +696,7 @@ describe('Files rename is bounded by the mount', () => {
     const ws = mkTwoMounts()
     await ws.vfs.write('/a/x.txt', 'bytes')
     await expect(ws.vfs.rename('/a/x.txt', '/b/y.txt')).rejects.toMatchObject({ code: 'EXDEV' })
-    expect(await ws.vfs.cat('/a/x.txt')).toBe('bytes')
+    expect(DEC.decode(await ws.vfs.read('/a/x.txt'))).toBe('bytes')
     expect(await ws.vfs.exists('/b/y.txt')).toBe(false)
   })
 
@@ -714,7 +708,7 @@ describe('Files rename is bounded by the mount', () => {
     await expect(ws.vfs.rename('/a/x.txt', '/nowhere/y.txt')).rejects.toMatchObject({
       code: 'ENOENT',
     })
-    expect(await ws.vfs.cat('/a/x.txt')).toBe('bytes')
+    expect(DEC.decode(await ws.vfs.read('/a/x.txt'))).toBe('bytes')
   })
 })
 
@@ -876,7 +870,7 @@ describe('Files per-call sessionId', () => {
 
   it('runs the op as the session it names', async () => {
     const ws = await splitWs()
-    expect(await ws.vfs.cat('/data/secret.txt', 'seeing')).toBe('classified')
+    expect(DEC.decode(await ws.vfs.read('/data/secret.txt', {}, 'seeing'))).toBe('classified')
     expect(await ws.vfs.exists('/data/secret.txt', 'blind')).toBe(false)
     expect(await ws.vfs.readdir('/data', 'blind')).toEqual(['/data/open.txt'])
   })
@@ -891,7 +885,7 @@ describe('Files per-call sessionId', () => {
     // session has to survive the hop or a convenience method would
     // quietly read as the default.
     const ws = await splitWs()
-    expect(await ws.vfs.cat('/data/secret.txt', 'seeing')).toBe('classified')
+    expect(DEC.decode(await ws.vfs.read('/data/secret.txt', {}, 'seeing'))).toBe('classified')
     expect(await ws.vfs.listFiles('/data', 'blind')).toEqual(['open.txt'])
     expect(await ws.vfs.isFile('/data/secret.txt', 'blind')).toBe(false)
   })

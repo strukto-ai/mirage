@@ -33,6 +33,7 @@ from mirage.context import (
 from mirage.errors.fs import no_mount
 from mirage.errors.types import NoMountError
 from mirage.io.config import IOConfig
+from mirage.observe.observer import Observer
 from mirage.policy import Decisions, MountRootPolicy, Policies
 from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
@@ -101,6 +102,7 @@ class MountRegistry:
     def __init__(self, io: IOConfig | None = None) -> None:
         self.io = io if io is not None else IOConfig()
         self.process_view: Callable[[SessionState], ProcessView] | None = None
+        self.observer: Observer | None = None
         self._mounts: list[MountEntry] = []
         self.retiring_mounts: dict[int, asyncio.Task[None]] = {}
         self.retired_mounts: WeakValueDictionary[int, BaseVFS] = (

@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ops } from '../../test-utils.ts'
 import { PathSpec, VFSName } from '../../types.ts'
-import { redactTrelloConfig } from './config.ts'
+import { redactTrelloConfig } from '../../core/trello/config.ts'
 import { TrelloVFS } from './trello.ts'
 
 function jsonResponse(body: unknown): Response {

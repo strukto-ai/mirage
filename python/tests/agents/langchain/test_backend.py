@@ -129,6 +129,14 @@ async def test_aedit(backend):
 
 
 @pytest.mark.asyncio
+async def test_aedit_keeps_a_leading_bom(backend, workspace):
+    await workspace.vfs.write("/bom.txt", "\ufefffoo bar baz".encode())
+    result = await backend.aedit("/bom.txt", "bar", "BAR")
+    assert result.error is None
+    assert await workspace.vfs.read("/bom.txt") == "\ufefffoo BAR baz".encode()
+
+
+@pytest.mark.asyncio
 async def test_als(backend):
     await backend.awrite("/dir/a.txt", "a")
     await backend.awrite("/dir/b.txt", "b")

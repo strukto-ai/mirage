@@ -26,6 +26,7 @@ import { pathVisible } from '../../../utils/hidden.ts'
 import { dispatchStat, linkTarget } from '../utils/paths.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { linksOf } from '../utils/links.ts'
+import { namespaceOf } from '../../../workspace/files.ts'
 
 const MODES: Record<string, string> = { canonicalize_existing: 'e', canonicalize_missing: 'm' }
 const LINKS: Record<string, string> = { logical: 'L', physical: 'P', strip: 's', no_symlinks: 's' }
@@ -238,6 +239,6 @@ export async function realpathGeneric(
     ctx.cwd.virtual,
     linkTarget(linksOf(ctx)),
     parseFlags(ctx.flags),
-    ctx.vfs?.vis() ?? null,
+    ctx.vfs === undefined ? null : namespaceOf(ctx.vfs).vis(),
   )
 }

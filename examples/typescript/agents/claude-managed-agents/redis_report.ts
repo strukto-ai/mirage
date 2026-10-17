@@ -82,5 +82,5 @@ try {
 }
 
 console.log('\n=== /redis/report.md (from Redis, through Mirage) ===')
-console.log(await ws.vfs.cat('/redis/report.md'))
+console.log(new TextDecoder().decode(await ws.vfs.read('/redis/report.md')))
 await ws.close()

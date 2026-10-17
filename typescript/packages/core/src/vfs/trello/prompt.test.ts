@@ -12,21 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { compileSpec } from '../../commands/spec/compile.ts'
 import { describe, expect, it } from 'vitest'
-import { TRELLO_COMMANDS } from '../../commands/builtin/trello/index.ts'
-import type { Command } from '../../commands/config.ts'
+import { TRELLO } from '../../commands/cli/builtin/trello/index.ts'
+import { compileSpec } from '../../commands/spec/compile.ts'
+import type { CommandSpec } from '../../commands/spec/types.ts'
 import { PROMPT, WRITE_PROMPT } from './prompt.ts'
 
 const TEXT = `${PROMPT}\n${WRITE_PROMPT}`
 
-function verbs(): Map<string, Command> {
-  return new Map(
-    TRELLO_COMMANDS.filter((rc) => rc.name.startsWith('trello ')).map((rc) => [rc.name, rc]),
-  )
+function verbs(
+  node: CommandSpec = TRELLO.spec,
+  path: readonly string[] = [],
+): Map<string, CommandSpec> {
+  const here = [...path, node.name]
+  if (node.subcommands.length === 0) return new Map([[here.join(' '), node]])
+  return new Map(node.subcommands.flatMap((child) => [...verbs(child, here)]))
 }
 
-// Each command line a prompt teaches, continuation lines joined.
 function usageLines(text: string): string[] {
   const lines: string[] = []
   for (const line of text.split('\n')) {
@@ -39,7 +41,7 @@ function usageLines(text: string): string[] {
   return lines
 }
 
-function nameOf(tokens: string[], known: Map<string, Command>): string | null {
+function nameOf(tokens: string[], known: Map<string, CommandSpec>): string | null {
   for (const k of [3, 4]) {
     const name = tokens.slice(0, k).join(' ')
     if (known.has(name)) return name
@@ -47,18 +49,18 @@ function nameOf(tokens: string[], known: Map<string, Command>): string | null {
   return null
 }
 
-function unmatched(line: string, known: Map<string, Command>): string[] {
+function unmatched(line: string, known: Map<string, CommandSpec>): string[] {
   const tokens = line
     .replaceAll('[', ' ')
     .replaceAll(']', ' ')
     .split(/\s+/)
     .filter((t) => t !== '')
   const name = nameOf(tokens, known)
-  const rc = name === null ? undefined : known.get(name)
-  if (name === null || rc === undefined) return [`'${line}' names no registered command`]
-  const longs = new Set(compileSpec(rc.spec).options.map((o) => o.names.at(-1)))
-  const takesOperands =
-    compileSpec(rc.spec).rest !== null || compileSpec(rc.spec).positional.length > 0
+  const spec = name === null ? undefined : known.get(name)
+  if (name === null || spec === undefined) return [`'${line}' names no trello command`]
+  const compiled = compileSpec(spec)
+  const longs = new Set(compiled.options.map((o) => o.names.at(-1)))
+  const takesOperands = compiled.rest !== null || compiled.positional.length > 0
   const problems: string[] = []
   const rest = tokens.slice(name.split(' ').length)
   let i = 0
@@ -76,19 +78,18 @@ function unmatched(line: string, known: Map<string, Command>): string[] {
   return problems
 }
 
-// Mirrors python's tests/vfs/trello/test_prompt.py: the prompts are how an
-// agent learns the verbs, so each line must name a registered command and
-// only options its spec declares; the write verbs take every id as a flag,
-// never a path operand.
 describe('trello prompts', () => {
-  it('every taught command line parses against its spec', () => {
+  it('every taught command line parses against the CLI', () => {
     const known = verbs()
-    expect(usageLines(TEXT).flatMap((line) => unmatched(line, known))).toEqual([])
+    const lines = usageLines(TEXT)
+    expect(lines.length).toBeGreaterThan(0)
+    expect(lines.flatMap((line) => unmatched(line, known))).toEqual([])
   })
 
-  it('teach every verb', () => {
-    const known = verbs()
-    const taught = new Set(usageLines(TEXT).map((line) => nameOf(line.split(/\s+/), known) ?? line))
-    expect([...taught].sort()).toEqual([...known.keys()].sort())
+  it('point at the CLI', () => {
+    expect(PROMPT).toContain('trello --help')
+    expect(WRITE_PROMPT).toContain('trello card create')
+    expect(WRITE_PROMPT).toContain('trello card comment')
+    expect(WRITE_PROMPT).toContain('trello --help')
   })
 })

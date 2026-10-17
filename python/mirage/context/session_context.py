@@ -977,28 +977,6 @@ def require_paths_writable(
                 raise erofs(blame)
 
 
-def require_mount_writable() -> None:
-    """Refuse a service-addressed write unless the whole mount's
-    effective mode grants writes.
-
-    For bespoke commands whose write is addressed by a service id
-    rather than a path (trello's card writes): the admission gate lets
-    them run while any shown subtree grants writes, but an id names no
-    path a per-path check could judge, so only the mount-wide grant
-    counts and a write-granting carve-out alone refuses, failing
-    toward refusal. Inert outside a mount's command.
-
-    Args:
-        None
-    """
-    gate = get_mount_gate()
-    if gate is None:
-        return
-    prefix, mode = gate
-    if effective_mount_mode(prefix, mode) == MountMode.READ:
-        raise erofs(prefix)
-
-
 def session_access(session: SessionState | None) -> SessionAccess:
     """Bind access to its owner before an asynchronous operation suspends.
 

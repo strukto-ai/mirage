@@ -62,7 +62,7 @@ from mirage.vfs.secrets import (
     revealed_config_dump,
 )
 from mirage.workspace.documentation.documents import Documents
-from mirage.workspace.files import Files
+from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.mount.errors import WritePolicyError
 from mirage.workspace.mount.namespace import Namespace, NodeMeta
 from mirage.workspace.mount.read_policy import resolve_read_spec
@@ -119,7 +119,7 @@ class WorkspaceLike(Protocol):
     def cache(self) -> FileCacheMixin: ...
 
     @property
-    def vfs(self) -> Files: ...
+    def vfs(self) -> WorkspaceFiles: ...
 
     @property
     def namespace(self) -> Namespace: ...
