@@ -589,6 +589,21 @@ describe('MountCore', () => {
     expect(new TextDecoder().decode(body)).toBe('seed')
   })
 
+  it('lets a handle go when its landing at release is refused', async () => {
+    // As close(2): the refusal is reported and the handle is gone, rather
+    // than kept open with bytes nothing will ever land.
+    const vfs = new RAMVFS()
+    const seed = new Workspace({ '/data/': vfs }, { mode: MountMode.WRITE })
+    await seed.vfs.write('/data/existing.txt', 'seed')
+    const core = new MountCore(new Workspace({ '/data/': vfs }, { mode: MountMode.READ }).vfs)
+    const fh = await core.open('/data/existing.txt', fsConstants.O_WRONLY)
+    await core.write('/data/existing.txt', fh, new TextEncoder().encode('REFUSED'), 0)
+    await expect(core.release(fh)).rejects.toThrow()
+    expect(core.handles.has(fh)).toBe(false)
+    const body = await seed.vfs.read('/data/existing.txt')
+    expect(new TextDecoder().decode(body)).toBe('seed')
+  })
+
   it('keeps the body when the open carries no O_TRUNC', async () => {
     const core = await mkCore()
     const fh = await core.open('/data/greeting.txt', fsConstants.O_RDWR)

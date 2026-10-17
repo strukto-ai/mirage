@@ -1098,11 +1098,22 @@ class MountCore:
         return row
 
     async def release(self, fh: int) -> None:
+        """Land a handle's buffered writes and let it go.
+
+        The handle goes even when the landing fails, as close(2) releases
+        its descriptor: no adapter retries a release, so a kept handle
+        would never close. The failure still reaches the caller.
+
+        Args:
+            fh (int): the handle to release.
+        """
         ctx = self._handles.get(fh)
-        if ctx is not None:
-            # The FSKit shim sends RELEASE with no FLUSH before it.
-            await self.flush(ctx.path, fh)
-        self._handles.pop(fh)
+        try:
+            if ctx is not None:
+                # The FSKit shim sends RELEASE with no FLUSH before it.
+                await self.flush(ctx.path, fh)
+        finally:
+            self._handles.pop(fh)
 
     def identity(self, path: str, follow: bool = True) -> str:
         """Where a mount path really points: the mount-resolved path with

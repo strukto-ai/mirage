@@ -158,6 +158,22 @@ async def test_failed_settlement_keeps_the_other_handles_buffer():
 
 
 @pytest.mark.asyncio
+async def test_a_release_whose_landing_is_refused_still_lets_the_handle_go():
+    # As close(2): the refusal is reported and the handle is gone, rather
+    # than kept open with bytes nothing will ever land.
+    res = RAMVFS()
+    seed = Workspace({"/": res}, mode=MountMode.WRITE)
+    await seed.shell("tee /a.txt", stdin=b"seed")
+    core = MountCore(Workspace({"/": res}, mode=MountMode.READ).vfs)
+    fh = await core.open("/a.txt", os.O_WRONLY)
+    await core.write("/a.txt", b"REFUSED", 0, fh)
+    with pytest.raises(OSError):
+        await core.release(fh)
+    assert fh not in core.handles
+    assert await seed.vfs.read("/a.txt") == b"seed"
+
+
+@pytest.mark.asyncio
 async def test_open_without_o_trunc_keeps_the_body(seeded):
     fh = await seeded.open("/a.txt", os.O_RDWR)
     await seeded.write("/a.txt", b"J", 0, fh)
