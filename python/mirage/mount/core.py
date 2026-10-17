@@ -566,6 +566,9 @@ class MountCore:
             ctx (Handle | None): the handle making it, None for a direct
                 write.
         """
+        if ctx is not None and ctx.detached is not None:
+            # Its name is gone: the handles open there are on another file.
+            return
         end = offset + size
         for other in self._open_on(key):
             if other is ctx:

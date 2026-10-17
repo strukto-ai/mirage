@@ -39,9 +39,10 @@ class Sink:
 class Drain:
     """A served prefix's server that reads its pipe to the end."""
 
-    def __init__(self, files, session):
+    def __init__(self, files, session, admission):
         self.files = files
         self.session = session
+        self.admission = admission
 
     async def serve(self, reader, writer):
         await reader.read()
@@ -399,33 +400,35 @@ async def test_a_line_returns_once_every_server_has_landed(monkeypatch):
     # sshfs sends the close that lands a line's writes after the line has
     # ended, so the line lands them itself, one server at a time, outside
     # the line but with its write admission: a capture waiting for the
-    # line lets those writes through.
+    # line lets those writes through. Served requests carry that admission
+    # until the line has landed them, and none after.
     held = asyncio.Queue()
     landed = []
 
     class Server(Drain):
         async def sync(self):
             go = asyncio.Event()
-            await held.put(go)
+            await held.put((go, self))
             await go.wait()
             await self.files.write("/data/landed.txt", b"x")
-            landed.append(line_running())
+            landed.append((line_running(), self.admission().stop is not None))
 
     monkeypatch.setattr(mounts, "PipeServer", Server)
     ws = workspace(FakeSandbox("ssh"))
     agent = await ws.session("agent", profile="agent")
     line = asyncio.create_task(agent.shell("python3 job.py"))
-    first = await asyncio.wait_for(held.get(), 5)
+    first, server = await asyncio.wait_for(held.get(), 5)
     capture = asyncio.create_task(ws.snapshot(io.BytesIO()))
     while ws._admitting.is_set():
         await asyncio.sleep(0)
     first.set()
-    second = await asyncio.wait_for(held.get(), 5)
+    second, _ = await asyncio.wait_for(held.get(), 5)
     assert not line.done()
     second.set()
     assert (await asyncio.wait_for(line, 5)).exit_code == 0
     await asyncio.wait_for(capture, 5)
-    assert landed == [False, False]
+    assert landed == [(False, True), (False, True)]
+    assert server.admission().stop is None
     await ws.close()
 
 

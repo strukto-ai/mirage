@@ -14,6 +14,7 @@
 
 import asyncio
 import inspect
+import io
 import stat
 import struct
 
@@ -21,6 +22,7 @@ import asyncssh
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.context import Caller
 from mirage.mount.constants import LISTING_CONCURRENCY
 from mirage.mount.sftp import (
     MirageSFTPServer,
@@ -216,7 +218,7 @@ async def test_a_pipe_answers_as_its_session():
     await ws.session("agent", profile="agent")
     requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
     served = asyncio.create_task(
-        PipeServer(ws.vfs, ws.get_session("agent")).serve(
+        PipeServer(ws.vfs, ws.get_session("agent"), Caller).serve(
             requests, Feed(answers)
         )
     )
@@ -241,7 +243,7 @@ async def test_a_pipe_accepts_sshfs_symlink_wire_order(target):
     await ws.session("agent")
     requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
     served = asyncio.create_task(
-        PipeServer(ws.vfs, ws.get_session("agent")).serve(
+        PipeServer(ws.vfs, ws.get_session("agent"), Caller).serve(
             requests, Feed(answers)
         )
     )
@@ -282,12 +284,42 @@ async def test_a_pipe_closed_before_it_speaks_ends_quietly():
     requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
     requests.feed_eof()
     await asyncio.wait_for(
-        PipeServer(ws.vfs, ws.get_session("agent")).serve(
+        PipeServer(ws.vfs, ws.get_session("agent"), Caller).serve(
             requests, Feed(answers)
         ),
         5,
     )
     await ws.close()
+
+
+async def request(
+    requests: asyncio.StreamReader,
+    answers: asyncio.StreamReader,
+    kind: int,
+    ident: int,
+    body: bytes,
+) -> tuple[int, bytes]:
+    requests.feed_data(packet(kind, struct.pack(">I", ident) + body))
+    return await answer(answers)
+
+
+async def write_new(
+    requests: asyncio.StreamReader,
+    answers: asyncio.StreamReader,
+    path: bytes,
+    data: bytes,
+) -> bytes:
+    """Create ``path`` and write ``data`` to it, as sshfs would, leaving the
+    handle open; returns the handle."""
+    flags = FXF_WRITE | FXF_CREAT | FXF_TRUNC
+    opened = string(path) + struct.pack(">II", flags, 0)
+    kind, body = await request(requests, answers, FXP_OPEN, 1, opened)
+    assert kind == FXP_HANDLE
+    handle = body[8:]
+    written = string(handle) + struct.pack(">Q", 0) + string(data)
+    _, body = await request(requests, answers, FXP_WRITE, 2, written)
+    assert body[:8] == struct.pack(">II", 2, FX_OK)
+    return handle
 
 
 @pytest.mark.asyncio
@@ -296,43 +328,62 @@ async def test_a_sync_lands_what_a_pipe_acknowledged_before_its_close():
     # close that lands it later, on its own: the sync between them lands it.
     ws = Workspace({"/notes": RAMVFS()}, mode=MountMode.WRITE)
     await ws.session("agent")
-    server = PipeServer(ws.vfs, ws.get_session("agent"))
+    server = PipeServer(ws.vfs, ws.get_session("agent"), Caller)
     requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
     served = asyncio.create_task(server.serve(requests, Feed(answers)))
     try:
         requests.feed_data(packet(FXP_INIT, struct.pack(">I", 3)))
         await answer(answers)
-        flags = FXF_WRITE | FXF_CREAT | FXF_TRUNC
-        requests.feed_data(
-            packet(
-                FXP_OPEN,
-                struct.pack(">I", 1)
-                + string(b"/notes/new.txt")
-                + struct.pack(">II", flags, 0),
-            )
+        handle = await write_new(
+            requests, answers, b"/notes/new.txt", b"made\n"
         )
-        kind, body = await answer(answers)
-        assert kind == FXP_HANDLE
-        handle = body[8:]
-        requests.feed_data(
-            packet(
-                FXP_WRITE,
-                struct.pack(">I", 2)
-                + string(handle)
-                + struct.pack(">Q", 0)
-                + string(b"made\n"),
-            )
-        )
-        assert (await answer(answers))[1][:8] == struct.pack(">II", 2, FX_OK)
         assert await ws.vfs.read("/notes/new.txt") == b""
         await server.sync()
         assert await ws.vfs.read("/notes/new.txt") == b"made\n"
-        requests.feed_data(
-            packet(FXP_CLOSE, struct.pack(">I", 3) + string(handle))
+        _, body = await request(
+            requests, answers, FXP_CLOSE, 3, string(handle)
         )
-        assert (await answer(answers))[1][:8] == struct.pack(">II", 3, FX_OK)
+        assert body[:8] == struct.pack(">II", 3, FX_OK)
         assert await ws.vfs.read("/notes/new.txt") == b"made\n"
     finally:
+        requests.feed_eof()
+        await asyncio.wait_for(served, 5)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_running_lines_request_lands_past_a_capture_waiting_for_it():
+    # A request runs with the admission it is given: the running line's
+    # lets it land while a capture waits for that line, rather than wait
+    # on the capture the line is holding up.
+    ws = Workspace({"/notes": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.session("agent")
+    line = asyncio.create_task(ws.shell("sleep 30"))
+    while not ws._admitted:
+        await asyncio.sleep(0)
+    (stop,) = ws._admitted
+    server = PipeServer(
+        ws.vfs, ws.get_session("agent"), lambda: Caller(stop=stop)
+    )
+    requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
+    served = asyncio.create_task(server.serve(requests, Feed(answers)))
+    capture = asyncio.create_task(ws.snapshot(io.BytesIO()))
+    try:
+        while ws._admitting.is_set():
+            await asyncio.sleep(0)
+        async with asyncio.timeout(5):
+            requests.feed_data(packet(FXP_INIT, struct.pack(">I", 3)))
+            await answer(answers)
+            handle = await write_new(
+                requests, answers, b"/notes/new.txt", b"made\n"
+            )
+            await request(requests, answers, FXP_CLOSE, 3, string(handle))
+        assert await ws.vfs.read("/notes/new.txt") == b"made\n"
+        assert not capture.done()
+    finally:
+        line.cancel()
+        await asyncio.gather(line, return_exceptions=True)
+        await asyncio.wait_for(capture, 5)
         requests.feed_eof()
         await asyncio.wait_for(served, 5)
         await ws.close()

@@ -12,7 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { currentCaller, getCurrentSession, runWithCaller } from '../../context/session_context.ts'
+import {
+  currentCaller,
+  getCurrentSession,
+  runWithCaller,
+  type Caller,
+} from '../../context/session_context.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { singleQuote } from '../../utils/quote.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -39,14 +44,19 @@ export interface PipeServer {
   sync(): Promise<void>
 }
 
-let pipeServer: ((files: Files, session: SessionState) => PipeServer) | null = null
+let pipeServer: Parameters<typeof registerPipeServer>[0] | null = null
 
 /**
- * Where node puts the SFTP server a served prefix's pipe runs. Core has
- * none of its own: MountCore and ssh2 are node's.
+ * Where node puts the SFTP server a served prefix's pipe runs: as
+ * `session`, each request run with the write admission `admission` gives
+ * then. Core has none of its own: MountCore and ssh2 are node's.
  */
 export function registerPipeServer(
-  make: (files: Files, session: SessionState) => PipeServer,
+  make: (
+    files: Files,
+    session: SessionState,
+    admission: () => Pick<Caller, 'stop' | 'writeHeld'>,
+  ) => PipeServer,
 ): void {
   pipeServer = make
 }
@@ -166,6 +176,7 @@ interface Served {
  */
 export class SandboxMounts {
   private session: SessionState | null = null
+  private readonly lines: Pick<Caller, 'stop' | 'writeHeld'>[] = []
   private readonly served = new Map<string, Served>()
   private seen: string | null = null
   private lock: Promise<unknown> = Promise.resolve()
@@ -210,6 +221,8 @@ export class SandboxMounts {
         `${this.runtime}: mountType serves a session's view, and this line runs as none`,
       )
     }
+    const { stop, writeHeld } = currentCaller()
+    this.lines.push({ stop, writeHeld })
     return this.locked(async () => {
       const served = this.session
       const session = getSession(current.sessionId)
@@ -254,11 +267,27 @@ export class SandboxMounts {
    */
   async sync(): Promise<void> {
     const { stop, writeHeld } = currentCaller()
-    for (const { server } of [...this.served.values()]) {
-      await runDetached(() =>
-        runWithCaller({ ...currentCaller(), stop, writeHeld }, () => server.sync()),
-      )
+    try {
+      for (const { server } of [...this.served.values()]) {
+        await runDetached(() =>
+          runWithCaller({ ...currentCaller(), stop, writeHeld }, () => server.sync()),
+        )
+      }
+    } finally {
+      const index = this.lines.findIndex((held) => held.stop === stop)
+      if (index >= 0) this.lines.splice(index, 1)
     }
+  }
+
+  /**
+   * The write admission a served request runs with: the latest line running
+   * in the sandbox's, from its `admit` to its `sync`, and none between
+   * lines. A program's file op then counts as its line's, so a capture
+   * waiting for that line lets it land rather than holding it while the
+   * line waits on it.
+   */
+  private admission(): Pick<Caller, 'stop' | 'writeHeld'> {
+    return this.lines.at(-1) ?? { stop: null, writeHeld: false }
   }
 
   private refusal(ruled: ReadonlySet<string>): string | null {
@@ -323,7 +352,12 @@ export class SandboxMounts {
       }
       try {
         for (const prefix of fresh) {
-          await this.serve(make(files, session), prefix, present, signal)
+          await this.serve(
+            make(files, session, () => this.admission()),
+            prefix,
+            present,
+            signal,
+          )
         }
       } catch (err) {
         await this.unmount()

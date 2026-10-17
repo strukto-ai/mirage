@@ -471,6 +471,8 @@ export class MountCore {
    * lands here, so a write never waits on one.
    */
   private supersede(key: string, pos: number, size: number, ctx: Handle | undefined): void {
+    // Its name is gone: the handles open there are on another file.
+    if (ctx?.detached !== undefined) return
     const end = pos + size
     for (const other of this.openOn(key)) {
       if (other === ctx || other.writeBuf === undefined) continue

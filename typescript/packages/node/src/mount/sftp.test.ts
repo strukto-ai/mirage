@@ -58,6 +58,47 @@ function stat(ident: number, path: string): Buffer {
   return packet(FXP_STAT, Buffer.concat([body, name]))
 }
 
+// Requests that run outside any line.
+const NO_LINE = () => ({ stop: null, writeHeld: false })
+
+async function until(ready: () => boolean): Promise<void> {
+  for (let tries = 0; tries < 1000 && !ready(); tries++) {
+    await new Promise((resolve) => setTimeout(resolve, 1))
+  }
+  expect(ready()).toBe(true)
+}
+
+/**
+ * Create `path` and write `data` to it, as sshfs would, leaving the handle
+ * open; returns the handle as the requests that name it carry it.
+ */
+async function writeNew(
+  end: ReturnType<typeof client>,
+  path: string,
+  data: string,
+): Promise<Buffer> {
+  const flags = OPEN.WRITE | OPEN.CREAT | OPEN.TRUNC
+  end.send(
+    packet(
+      FXP_OPEN,
+      Buffer.concat([uint32(1), sftpString(Buffer.from(path)), uint32(flags), uint32(0)]),
+    ),
+  )
+  const [kind, body] = await end.answer()
+  expect(kind).toBe(FXP_HANDLE)
+  const handle = body.subarray(4)
+  end.send(
+    packet(
+      FXP_WRITE,
+      Buffer.concat([uint32(2), handle, Buffer.alloc(8), sftpString(Buffer.from(data))]),
+    ),
+  )
+  expect((await end.answer())[1].subarray(0, 8)).toEqual(
+    Buffer.concat([uint32(2), uint32(STATUS.OK)]),
+  )
+  return handle
+}
+
 /** A client end: requests go in, answers come back one packet at a time. */
 function client() {
   let feed: ReadableStreamDefaultController<Uint8Array> | null = null
@@ -140,7 +181,10 @@ describe('PipeServer', () => {
     await ws.vfs.write('/notes/real', 'target')
     await ws.session('agent')
     const end = client()
-    const served = new PipeServer(ws.vfs, ws.getSession('agent')).serve(end.reader, end.writer)
+    const served = new PipeServer(ws.vfs, ws.getSession('agent'), NO_LINE).serve(
+      end.reader,
+      end.writer,
+    )
     try {
       end.send(packet(FXP_INIT, uint32(3)))
       await end.answer()
@@ -176,7 +220,10 @@ describe('PipeServer', () => {
     await ws.vfs.write('/notes/secret.txt', 'salaries')
     await ws.session('agent', { profile: 'agent' })
     const end = client()
-    const served = new PipeServer(ws.vfs, ws.getSession('agent')).serve(end.reader, end.writer)
+    const served = new PipeServer(ws.vfs, ws.getSession('agent'), NO_LINE).serve(
+      end.reader,
+      end.writer,
+    )
     const version = Buffer.alloc(4)
     version.writeUInt32BE(3)
     end.send(packet(FXP_INIT, version))
@@ -201,7 +248,7 @@ describe('PipeServer', () => {
     await ws.session('agent')
     const end = client()
     end.close()
-    await new PipeServer(ws.vfs, ws.getSession('agent')).serve(end.reader, end.writer)
+    await new PipeServer(ws.vfs, ws.getSession('agent'), NO_LINE).serve(end.reader, end.writer)
     await ws.close()
   })
 
@@ -209,7 +256,10 @@ describe('PipeServer', () => {
     const ws = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.session('agent')
     const end = client()
-    const served = new PipeServer(ws.vfs, ws.getSession('agent')).serve(end.reader, end.writer)
+    const served = new PipeServer(ws.vfs, ws.getSession('agent'), NO_LINE).serve(
+      end.reader,
+      end.writer,
+    )
     end.send(packet(FXP_INIT, uint32(3)))
     await end.answer()
     const flags = OPEN.WRITE | OPEN.CREAT | OPEN.TRUNC
@@ -244,37 +294,14 @@ describe('PipeServer', () => {
     // close that lands it later, on its own: the sync between them lands it.
     const ws = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.session('agent')
-    const server = new PipeServer(ws.vfs, ws.getSession('agent'))
+    const server = new PipeServer(ws.vfs, ws.getSession('agent'), NO_LINE)
     const end = client()
     const served = server.serve(end.reader, end.writer)
     const read = async () => new TextDecoder().decode(await ws.vfs.read('/notes/new.txt'))
     try {
       end.send(packet(FXP_INIT, uint32(3)))
       await end.answer()
-      const flags = OPEN.WRITE | OPEN.CREAT | OPEN.TRUNC
-      end.send(
-        packet(
-          FXP_OPEN,
-          Buffer.concat([
-            uint32(1),
-            sftpString(Buffer.from('/notes/new.txt')),
-            uint32(flags),
-            uint32(0),
-          ]),
-        ),
-      )
-      const [kind, body] = await end.answer()
-      expect(kind).toBe(FXP_HANDLE)
-      const handle = body.subarray(4)
-      end.send(
-        packet(
-          FXP_WRITE,
-          Buffer.concat([uint32(2), handle, Buffer.alloc(8), sftpString(Buffer.from('made\n'))]),
-        ),
-      )
-      expect((await end.answer())[1].subarray(0, 8)).toEqual(
-        Buffer.concat([uint32(2), uint32(STATUS.OK)]),
-      )
+      const handle = await writeNew(end, '/notes/new.txt', 'made\n')
       expect(await read()).toBe('')
       await server.sync()
       expect(await read()).toBe('made\n')
@@ -284,6 +311,42 @@ describe('PipeServer', () => {
       )
       expect(await read()).toBe('made\n')
     } finally {
+      end.close()
+      await served
+      await ws.close()
+    }
+  })
+
+  it("lands a running line's request past a capture waiting for it", async () => {
+    // A request runs with the admission it is given: the running line's
+    // lets it land while a capture waits for that line, rather than wait
+    // on the capture the line is holding up.
+    const ws = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.session('agent')
+    const internals = ws as unknown as { admitted: Set<AbortController>; capturing: boolean }
+    const abort = new AbortController()
+    const line = ws.shell('sleep 30', { signal: abort.signal }).catch(() => undefined)
+    await until(() => internals.admitted.size === 1)
+    const [stop = null] = internals.admitted
+    const server = new PipeServer(ws.vfs, ws.getSession('agent'), () => ({
+      stop,
+      writeHeld: false,
+    }))
+    const end = client()
+    const served = server.serve(end.reader, end.writer)
+    const capture = ws.snapshot()
+    try {
+      await until(() => internals.capturing)
+      end.send(packet(FXP_INIT, uint32(3)))
+      await end.answer()
+      const handle = await writeNew(end, '/notes/new.txt', 'made\n')
+      end.send(packet(FXP_CLOSE, Buffer.concat([uint32(3), handle])))
+      await end.answer()
+      expect(new TextDecoder().decode(await ws.vfs.read('/notes/new.txt'))).toBe('made\n')
+    } finally {
+      abort.abort()
+      await line
+      await capture
       end.close()
       await served
       await ws.close()

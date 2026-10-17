@@ -19,7 +19,7 @@ import os
 import posixpath
 import stat
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, TypeVar, cast
 from weakref import WeakKeyDictionary
 
@@ -36,6 +36,7 @@ from asyncssh.constants import (
 )
 from asyncssh.sftp import run_sftp_server
 
+from mirage.context import Caller, bind_caller, current_caller, reset_caller
 from mirage.errors.fs import eexist, eisdir, enoent
 from mirage.errors.types import NoMountError
 from mirage.mount.constants import (
@@ -343,7 +344,8 @@ class MirageSFTPServer(asyncssh.SFTPServer):
         make_core (Callable[[], Awaitable[MountCore]]): makes the core on
             the first request.
         run (Callable[[Coroutine[Any, Any, Any]], Awaitable[Any]] | None):
-            runs one op on the workspace's loop; None awaits it here.
+            runs one op (on the workspace's loop, or with a line's write
+            admission); None awaits it here.
         on_exit (Callable[[], Awaitable[None]] | None): what the client's
             exit ends.
         passive_sshfs (bool): decode sshfs's reversed symlink arguments
@@ -560,15 +562,41 @@ class PipeServer:
 
     The client is ``sshfs -o passive``, using OpenSSH's reversed symlink
     wire order. Every request it makes is a request of
-    ``session``, held to its hides, modes and policies.
+    ``session``, held to its hides, modes and policies, and runs with
+    the write admission ``admission`` gives when it arrives.
 
     Args:
         files (Files): the workspace's ``ws.vfs``.
         session (SessionState): the session every request runs as.
+        admission (Callable[[], Caller]): the write admission each
+            request runs with.
     """
 
-    def __init__(self, files: Files, session: SessionState) -> None:
+    def __init__(
+        self,
+        files: Files,
+        session: SessionState,
+        admission: Callable[[], Caller],
+    ) -> None:
         self._core = MountCore(files, session=session)
+        self._admission = admission
+
+    async def _admitted(self, op: Coroutine[Any, Any, T]) -> T:
+        """Run one request with the write admission it is given now.
+
+        Args:
+            op (Coroutine[Any, Any, T]): the request's work on the core.
+        """
+        held = self._admission()
+        token = bind_caller(
+            replace(
+                current_caller(), stop=held.stop, write_held=held.write_held
+            )
+        )
+        try:
+            return await op
+        finally:
+            reset_caller(token)
 
     async def serve(self, reader: ByteReader, writer: PipeWriter) -> None:
         """Answer the client's requests until it closes the pipe.
@@ -583,7 +611,9 @@ class PipeServer:
 
         try:
             await run_sftp_server(
-                MirageSFTPServer(None, make_core, passive_sshfs=True),
+                MirageSFTPServer(
+                    None, make_core, self._admitted, passive_sshfs=True
+                ),
                 cast("asyncssh.SSHReader[bytes]", PipeReader(reader)),
                 cast("asyncssh.SSHWriter[bytes]", writer),
                 SFTP_VERSION,

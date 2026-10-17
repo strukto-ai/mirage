@@ -130,6 +130,22 @@ async def test_two_handles_writes_land_in_the_order_they_were_made(
 
 
 @pytest.mark.asyncio
+async def test_a_write_through_an_unlinked_handle_leaves_its_replacement(
+    seeded,
+):
+    # The old handle's file has no name left: the one now at that name is
+    # another file, and its writes stay.
+    old = await seeded.open("/a.txt", os.O_WRONLY)
+    await seeded.unlink("/a.txt")
+    new = await seeded.create("/a.txt")
+    await seeded.write("/a.txt", b"new", 0, new)
+    await seeded.write("/a.txt", b"old", 0, old)
+    await seeded.release(new)
+    await seeded.release(old)
+    assert await seeded.read("/a.txt", 100, 0, None) == b"new"
+
+
+@pytest.mark.asyncio
 async def test_open_with_o_trunc_drops_the_old_body(seeded):
     # libfuse 3 negotiates atomic O_TRUNC, so the kernel never sends a
     # separate truncate before an O_TRUNC open; the flag on the open has

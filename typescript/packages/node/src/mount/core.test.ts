@@ -341,6 +341,21 @@ describe('MountCore', () => {
     },
   )
 
+  it('leaves the file now at a name alone when an unlinked handle writes', async () => {
+    // The old handle's file has no name left: the one now at that name is
+    // another file, and its writes stay.
+    const core = await mkCore()
+    const old = await core.open('/data/greeting.txt', fsConstants.O_WRONLY)
+    await core.unlink('/data/greeting.txt')
+    const fresh = await core.create('/data/greeting.txt')
+    await core.write('/data/greeting.txt', fresh, new TextEncoder().encode('new'), 0)
+    await core.write('/data/greeting.txt', old, new TextEncoder().encode('old'), 0)
+    await core.release(fresh)
+    await core.release(old)
+    const body = await core.read('/data/greeting.txt', -1, 0, 100)
+    expect(new TextDecoder().decode(body)).toBe('new')
+  })
+
   it('drops the old body when the open carries O_TRUNC', async () => {
     // libfuse 3 negotiates atomic O_TRUNC, so the kernel never sends a
     // separate truncate before an O_TRUNC open; the flag on the open has

@@ -169,6 +169,7 @@ class SandboxMounts:
         self._run = run
         self._open_pipe = open_pipe
         self._session: SessionState | None = None
+        self._lines: list[Caller] = []
         self._served: dict[
             str, tuple[SandboxPipe, asyncio.Task[None], Any]
         ] = {}
@@ -204,6 +205,8 @@ class SandboxMounts:
                 f"{self._runtime}: mount_type serves a session's view, "
                 "and this line runs as none"
             )
+        line = current_caller()
+        self._lines.append(Caller(stop=line.stop, write_held=line.write_held))
         rules = current.commands
         if rules is not None and any(
             rule.commands and (rule.paths or rule.mount)
@@ -260,10 +263,25 @@ class SandboxMounts:
         """
         line = current_caller()
         admitted = Caller(stop=line.stop, write_held=line.write_held)
-        for _, _, server in list(self._served.values()):
-            context = Context()
-            context.run(bind_caller, admitted)
-            await asyncio.create_task(server.sync(), context=context)
+        try:
+            for _, _, server in list(self._served.values()):
+                context = Context()
+                context.run(bind_caller, admitted)
+                await asyncio.create_task(server.sync(), context=context)
+        finally:
+            for index, held in enumerate(self._lines):
+                if held.stop is line.stop:
+                    del self._lines[index]
+                    break
+
+    def _admission(self) -> Caller:
+        """The write admission a served request runs with: the latest line
+        running in the sandbox's, from its ``admit`` to its ``sync``, and
+        none between lines. A program's file op then counts as its line's,
+        so a capture waiting for that line lets it land rather than
+        holding it while the line waits on it.
+        """
+        return self._lines[-1] if self._lines else Caller()
 
     def _refusal(self, ruled: frozenset[str]) -> str | None:
         for prefix in sorted(ruled):
@@ -328,7 +346,9 @@ class SandboxMounts:
             try:
                 for prefix in new:
                     await self._serve(
-                        PipeServer(files, session), prefix, present
+                        PipeServer(files, session, self._admission),
+                        prefix,
+                        present,
                     )
             except BaseException:
                 await self._unmount()

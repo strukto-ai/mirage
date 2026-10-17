@@ -17,6 +17,11 @@ import { createRequire } from 'node:module'
 import { constants as osConstants } from 'node:os'
 import { posix } from 'node:path'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
+import {
+  currentCaller,
+  runWithCaller,
+  type Caller,
+} from '@struktoai/mirage-core/context/session_context'
 import { eexist, eisdir, enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
 import { registerPipeServer } from '@struktoai/mirage-core/runtime/sandbox/mounts'
 import type { PipeWriter } from '@struktoai/mirage-core/runtime/types'
@@ -143,12 +148,15 @@ export class MirageSFTPServer {
    *   released.
    * @param passiveSshfs decode sshfs's reversed symlink arguments on a
    *   pipe without SSH peer identification.
+   * @param run runs one request, with a line's write admission for a
+   *   sandbox's pipe; by default it just runs it.
    */
   constructor(
     private readonly sftp: SFTPWrapper,
     private readonly makeCore: () => Promise<MountCore>,
     private readonly onExit?: () => Promise<void>,
     private readonly passiveSshfs = false,
+    private readonly run: (op: () => Promise<void>) => Promise<void> = (op) => op(),
   ) {}
 
   /** Answer the client's requests; settles once it has left and its handles are released. */
@@ -235,7 +243,7 @@ export class MirageSFTPServer {
   private serve(id: number, task: () => Promise<void>): void {
     this.queue = this.queue.then(async () => {
       try {
-        await task()
+        await this.run(task)
       } catch (err) {
         const [status, message] = statusOf(err)
         this.sftp.status(id, status, message)
@@ -464,12 +472,17 @@ function loadSftp(): Ssh2Sftp {
  *
  * The client is `sshfs -o passive`, using OpenSSH's reversed symlink
  * wire order. Every request it makes is a request of `session`,
- * held to its hides, modes and policies.
+ * held to its hides, modes and policies, and runs with the write
+ * admission `admission` gives when it arrives.
  */
 export class PipeServer {
   private readonly core: MountCore
 
-  constructor(files: Files, session: SessionState) {
+  constructor(
+    files: Files,
+    session: SessionState,
+    private readonly admission: () => Pick<Caller, 'stop' | 'writeHeld'>,
+  ) {
     this.core = new MountCore(files, { session })
   }
 
@@ -496,6 +509,7 @@ export class PipeServer {
       () => Promise.resolve(this.core),
       undefined,
       true,
+      (op) => runWithCaller({ ...currentCaller(), ...this.admission() }, op),
     ).attach()
     const chunks = reader.getReader()
     try {
@@ -516,4 +530,4 @@ export class PipeServer {
   }
 }
 
-registerPipeServer((files, session) => new PipeServer(files, session))
+registerPipeServer((files, session, admission) => new PipeServer(files, session, admission))

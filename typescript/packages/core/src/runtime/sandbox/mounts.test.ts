@@ -426,17 +426,22 @@ describe('SandboxMounts', () => {
     // sshfs sends the close that lands a line's writes after the line has
     // ended, so the line lands them itself, one server at a time, outside
     // the line but with its write admission: a capture waiting for the
-    // line lets those writes through.
+    // line lets those writes through. Served requests carry that admission
+    // until the line has landed them, and none after.
     const holds: (() => void)[] = []
-    const landed: boolean[] = []
-    registerPipeServer((files, session) => ({
-      ...drain(files, session),
-      sync: async () => {
-        await new Promise<void>((resolve) => holds.push(resolve))
-        await files.write('/data/landed.txt', 'x')
-        landed.push(lineRunning())
-      },
-    }))
+    const landed: [boolean, boolean][] = []
+    const admissions: (() => { stop: unknown })[] = []
+    registerPipeServer((files, session, admission) => {
+      admissions.push(admission)
+      return {
+        ...drain(files, session),
+        sync: async () => {
+          await new Promise<void>((resolve) => holds.push(resolve))
+          await files.write('/data/landed.txt', 'x')
+          landed.push([lineRunning(), admission().stop !== null])
+        },
+      }
+    })
     try {
       const ws = await workspace(new FakeSandbox('ssh'))
       const agent = await ws.session('agent', { profile: 'agent' })
@@ -453,7 +458,11 @@ describe('SandboxMounts', () => {
       holds[1]?.()
       expect((await line).exitCode).toBe(0)
       await capture
-      expect(landed).toEqual([false, false])
+      expect(landed).toEqual([
+        [false, true],
+        [false, true],
+      ])
+      expect(admissions.map((admission) => admission().stop)).toEqual([null, null])
       await ws.close()
     } finally {
       registerPipeServer(drain)
