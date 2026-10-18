@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from functools import partial
 
 from mirage.policy import PolicyDenied
+from mirage.rs.glob import Glob
 from mirage.shell.array import (
     ShellArray,
     array_extent,
@@ -43,7 +44,6 @@ from mirage.shell.helpers import get_text, source_parts
 from mirage.shell.parameter import bad_substitution, scan_parameter
 from mirage.shell.types import ArithWrite, TSNodeLike
 from mirage.shell.types import NodeType as NT
-from mirage.utils.fnmatch import Matcher, fnmatch, suffix_start
 from mirage.utils.glob_walk import escape_glob, mark_globs
 from mirage.utils.path import expand_tilde
 from mirage.view.types import SessionView
@@ -870,19 +870,22 @@ async def _word_chunks(
     return out
 
 
-def _glob_strip(
+async def _glob_strip(
     value: str, pattern: str, greedy: bool, prefix: bool, extglob: bool = False
 ) -> str:
     if not pattern:
         return value
-    if prefix:
-        end = Matcher(value, pattern, extglob=extglob).end(0, greedy)
-        return value if end is None else value[end:]
-    start = suffix_start(value, pattern, greedy, extglob)
-    return value if start is None else value[:start]
+    glob = Glob(pattern, extglob)
+    try:
+        offset = await glob.extent(value, prefix, greedy)
+        if offset is None:
+            return value
+        return value[offset:] if prefix else value[:offset]
+    finally:
+        glob.close()
 
 
-def _glob_replace(
+async def _glob_replace(
     value: str,
     pattern: str,
     replacement: str,
@@ -890,55 +893,40 @@ def _glob_replace(
     anchor: str | None,
     extglob: bool = False,
 ) -> str:
-    """Bash ``${var/pat/rep}``: pattern is a glob, longest match wins.
-
-    Args:
-        value (str): the variable's value.
-        pattern (str): glob pattern (may be empty: value unchanged).
-        replacement (str): replacement text.
-        replace_all (bool): ``//`` — replace every match.
-        anchor (str | None): ``#`` (prefix) or ``%`` (suffix) or None.
-    """
     if not pattern:
         return value
-    if anchor == "%":
-        start = suffix_start(value, pattern, extglob=extglob)
-        return value if start is None else value[:start] + replacement
-    match = Matcher(value, pattern, extglob=extglob)
-    size = len(value)
-    if anchor == "#":
-        end = match.end(0)
-        return value if end is None else replacement + value[end:]
-    if not value:
-        return value if match.end(0) is None else replacement
-    out: list[str] = []
-    i = 0
-    while i < size:
-        end = match.end(i)
-        if end is None or end == i:
-            # No match here (or an empty one, which bash skips over).
-            out.append(value[i])
-            i += 1
-            continue
-        out.append(replacement)
-        i = end
-        if not replace_all:
-            out.append(value[i:])
-            return "".join(out)
-    return "".join(out)
+    glob = Glob(pattern, extglob)
+    try:
+        spans = await glob.spans(value, replace_all, anchor)
+        out: list[str] = []
+        cursor = 0
+        for start, end in spans:
+            out.extend((value[cursor:start], replacement))
+            cursor = end
+        out.append(value[cursor:])
+        return "".join(out)
+    finally:
+        glob.close()
 
 
-def _case_mod(op: str, val: str, pattern: str, extglob: bool = False) -> str:
+async def _case_mod(
+    op: str, val: str, pattern: str, extglob: bool = False
+) -> str:
     if not val:
         return val
     chars = list(val)
     scope = range(len(chars)) if op in ("^^", ",,") else range(1)
-    for i in scope:
-        ch = chars[i]
-        if pattern and not fnmatch(ch, pattern, extglob=extglob):
-            continue
-        chars[i] = ch.upper() if op in ("^", "^^") else ch.lower()
-    return "".join(chars)
+    glob = Glob(pattern, extglob) if pattern else None
+    try:
+        for i in scope:
+            ch = chars[i]
+            if glob is not None and not await glob.matches_async(ch):
+                continue
+            chars[i] = ch.upper() if op in ("^", "^^") else ch.lower()
+        return "".join(chars)
+    finally:
+        if glob is not None:
+            glob.close()
 
 
 class _ArithOperand:
@@ -1135,23 +1123,23 @@ async def _expand_subscript_key(
     return "".join(parts)
 
 
-def _value_op(
+async def _value_op(
     op: str, val: str, groups: list[str], extglob: bool = False
 ) -> str:
     if op in _STRIP_OPS:
         pattern = groups[0] if groups else ""
-        return _glob_strip(
+        return await _glob_strip(
             val, pattern, op in ("##", "%%"), op in ("#", "##"), extglob
         )
     if op in _REPLACE_OPS:
         pattern = groups[0] if groups else ""
         replacement = groups[1] if len(groups) > 1 else ""
         anchor = op[1] if len(op) > 1 and op[1] in "#%" else None
-        return _glob_replace(
+        return await _glob_replace(
             val, pattern, replacement, op == "//", anchor, extglob
         )
     if op in _CASE_OPS:
-        return _case_mod(op, val, groups[0] if groups else "", extglob)
+        return await _case_mod(op, val, groups[0] if groups else "", extglob)
     return val
 
 
@@ -1428,7 +1416,9 @@ async def _expand_braces(
         ]
     return [
         value_piece(
-            _value_op(p.op, val, groups, session.shopts.get("extglob", False)),
+            await _value_op(
+                p.op, val, groups, session.shopts.get("extglob", False)
+            ),
             quoted,
         )
     ]
@@ -1552,7 +1542,9 @@ async def _expand_splat(
         )
     elif p.op in _STRIP_OPS | _REPLACE_OPS | _CASE_OPS:
         items = [
-            _value_op(p.op, el, groups, session.shopts.get("extglob", False))
+            await _value_op(
+                p.op, el, groups, session.shopts.get("extglob", False)
+            )
             for el in values
         ]
     elif p.op in _UNSET_GUARD_OPS:

@@ -14,12 +14,8 @@
 
 import pytest
 
-from mirage.utils.fnmatch import (
-    Matcher,
-    fnmatch,
-    fnmatchcase,
-    suffix_start,
-)
+from mirage.rs.glob import Glob
+from mirage.utils.fnmatch import fnmatch, fnmatchcase
 
 
 @pytest.mark.parametrize(
@@ -254,11 +250,15 @@ def test_long_subjects_match_in_linear_time(pattern, tail, expected):
 
 
 def test_matcher_end_reads_every_offset_in_linear_time():
-    match = Matcher("abcab", "*b", extglob=False)
-    assert (match.end(0), match.end(0, longest=False)) == (5, 2)
-    assert (match.end(2), match.end(5)) == (5, None)
-    blank = Matcher(" " * 16000, "*b", extglob=False)
-    assert all(blank.end(i) is None for i in range(16001))
+    match = Glob("*b")
+    assert (match.end("abcab", 0), match.end("abcab", 0, longest=False)) == (
+        5,
+        2,
+    )
+    assert (match.end("abcab", 2), match.end("abcab", 5)) == (5, None)
+    blank = Glob("*b")
+    subject = " " * 16000
+    assert all(blank.end(subject, i) is None for i in range(16001))
 
 
 @pytest.mark.parametrize(
@@ -279,8 +279,9 @@ def test_matcher_end_reads_every_offset_in_linear_time():
     ],
 )
 def test_suffix_start_runs_the_reversed_pattern_once(name, pattern, expected):
-    shortest = suffix_start(name, pattern, longest=False, extglob=True)
-    assert (shortest, suffix_start(name, pattern, extglob=True)) == expected
+    glob = Glob(pattern, True)
+    shortest = glob.suffix(name, longest=False)
+    assert (shortest, glob.suffix(name)) == expected
 
 
 @pytest.mark.parametrize("operator", ["@", "?", "+", "*"])
@@ -288,3 +289,84 @@ def test_deep_extended_groups_use_an_explicit_stack(operator):
     pattern = (operator + "(") * 1200 + "a" + ")" * 1200
     assert fnmatch("a", pattern, extglob=True)
     assert not fnmatch("b", pattern, extglob=True)
+
+
+@pytest.mark.parametrize(
+    "name,pattern,ends,suffix",
+    [
+        (
+            "a😀\udcffb",
+            "?",
+            [(1, 1), (2, 2), (3, 3), (4, 4), (None, None)],
+            (3, 3),
+        ),
+        (
+            "a😀\udcffb",
+            "+(?)",
+            [(1, 4), (2, 4), (3, 4), (4, 4), (None, None)],
+            (3, 0),
+        ),
+        (
+            "a😀\udcffb",
+            "?b",
+            [(None, None), (None, None), (4, 4), (None, None), (None, None)],
+            (2, 2),
+        ),
+        (
+            "x\udcff😀",
+            "@(😀|\udcff😀)",
+            [(None, None), (3, 3), (3, 3), (None, None)],
+            (2, 1),
+        ),
+    ],
+)
+def test_match_extents_count_characters_and_preserve_raw_bytes(
+    name, pattern, ends, suffix
+):
+    match = Glob(pattern, True)
+    assert [
+        (match.end(name, i, longest=False), match.end(name, i))
+        for i in range(len(name) + 1)
+    ] == ends
+    assert (
+        match.suffix(name, longest=False),
+        match.suffix(name),
+    ) == suffix
+
+
+@pytest.mark.parametrize("index,literal", enumerate("*?[@+!()|"))
+def test_quoting_sentinels_are_literal_in_and_out_of_classes(index, literal):
+    quoted = chr(0xFDD0 + index)
+    assert fnmatch(literal, quoted, extglob=True)
+    assert not fnmatch("x", quoted, extglob=True)
+    assert fnmatch(literal, "[" + quoted + "]", extglob=True)
+    assert not fnmatch("x", "[" + quoted + "]", extglob=True)
+
+
+@pytest.mark.parametrize(
+    "name,pattern,expected",
+    [
+        ("5", "[[:digit:]z-a]", True),
+        ("z", "[[:digit:]z-a]", False),
+        ("a", "[[:digit:]z-a]", False),
+        ("b", "[z-ab]", True),
+        ("-", "[z-ab]", False),
+        ("b", "[!z-a]", True),
+        ("é", "[[:alpha:]]", False),
+        ("١", "[[:digit:]]", False),
+        ("\u00a0", "[[:space:]]", False),
+        ("\udcff", "[[:print:]]", False),
+        ("\udcff", "[!a]", True),
+        ("\ud83d", "?", True),
+    ],
+)
+def test_c_locale_classes_raw_bytes_and_descending_ranges(
+    name, pattern, expected
+):
+    assert fnmatch(name, pattern, extglob=True) is expected
+
+
+@pytest.mark.parametrize("pattern", ["[a--!]", "[a-!!]", "[a-^!]"])
+def test_fnmatchcase_normalizes_invalid_ranges_before_negation(pattern):
+    assert fnmatchcase("a", pattern)
+    assert not fnmatchcase("", pattern)

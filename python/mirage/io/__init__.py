@@ -12,11 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.io.async_line_iterator import AsyncLineIterator
-from mirage.io.types import IOResult, OpReport
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
 
-__all__ = [
-    "AsyncLineIterator",
-    "IOResult",
-    "OpReport",
-]
+if TYPE_CHECKING:
+    from mirage.io.async_line_iterator import (
+        AsyncLineIterator as AsyncLineIterator,
+    )
+    from mirage.io.types import IOResult as IOResult
+    from mirage.io.types import OpReport as OpReport
+
+_EXPORTS = {
+    "AsyncLineIterator": "mirage.io.async_line_iterator",
+    "IOResult": "mirage.io.types",
+    "OpReport": "mirage.io.types",
+}
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str) -> Any:
+    if name not in _EXPORTS:
+        raise AttributeError(name)
+    value = getattr(import_module(_EXPORTS[name]), name)
+    globals()[name] = value
+    return value

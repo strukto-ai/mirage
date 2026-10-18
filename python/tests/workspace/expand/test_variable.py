@@ -52,8 +52,14 @@ from mirage.workspace.session.state import seed_var
         ("hello", "xyz", "X", True, None, "hello"),
     ],
 )
-def test_glob_replace(value, pattern, replacement, all_, anchor, expected):
-    assert _glob_replace(value, pattern, replacement, all_, anchor) == expected
+@pytest.mark.asyncio
+async def test_glob_replace(
+    value, pattern, replacement, all_, anchor, expected
+):
+    assert (
+        await _glob_replace(value, pattern, replacement, all_, anchor)
+        == expected
+    )
 
 
 @pytest.mark.parametrize(
@@ -67,13 +73,15 @@ def test_glob_replace(value, pattern, replacement, all_, anchor, expected):
         (",", "HELLO", "[H]", "hELLO"),
     ],
 )
-def test_case_mod(op, val, pattern, expected):
-    assert _case_mod(op, val, pattern) == expected
+@pytest.mark.asyncio
+async def test_case_mod(op, val, pattern, expected):
+    assert await _case_mod(op, val, pattern) == expected
 
 
-def test_glob_strip_class_negation():
-    assert _glob_strip("abc", "[!x]", False, True) == "bc"
-    assert _glob_strip("abc", "[^x]", False, True) == "bc"
+@pytest.mark.asyncio
+async def test_glob_strip_class_negation():
+    assert await _glob_strip("abc", "[!x]", False, True) == "bc"
+    assert await _glob_strip("abc", "[^x]", False, True) == "bc"
 
 
 def test_pattern_text_splices_refs_live():

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { lineSignal } from '../abort.ts'
+import { mergeSignals } from '../../utils/abort.ts'
 import type { ExecuteFn } from './types.ts'
 import type { ProcessSubLine } from '../frame.ts'
 import { childContext, type EvaluationContext } from '../evaluation.ts'
@@ -375,7 +377,15 @@ async function nodeChunks(
     const prefix = foldedWhitespace(tsNode)
     const expandChild = (c: TSNodeLike, inQuotes: boolean): Promise<Chunk[]> =>
       expandChunks(c, context, executeFn, callStack, view, inQuotes)
-    const chunks = await expandBraces(tsNode, session, callStack, expandChild, view, quoted)
+    const chunks = await expandBraces(
+      tsNode,
+      session,
+      callStack,
+      expandChild,
+      view,
+      quoted,
+      mergeSignals(context.frame.abortSignal, lineSignal(session)),
+    )
     return prefix !== '' ? [piece(prefix), ...chunks] : chunks
   }
 

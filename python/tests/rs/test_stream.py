@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import sys
 import threading
@@ -5,7 +6,9 @@ import threading
 import pytest
 
 from mirage.rs.errors import StreamRefusal
+from mirage.rs.glob import Glob
 from mirage.rs.stream import open_stream, run_stream
+from mirage.workspace import Workspace
 
 DECODE = {"mode": "decode", "ignore_garbage": False}
 
@@ -58,3 +61,76 @@ def test_a_stream_may_be_freed_on_another_thread(monkeypatch):
     thread.start()
     thread.join()
     assert held == [] and raised == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reuse_subject", [False, True])
+async def test_glob_replacement_cancellation_prevents_later_output(
+    reuse_subject,
+):
+    glob = Glob("+(?)", True)
+    output: list[list[tuple[int, int]]] = []
+    subject = "a" * 2_000_000
+    if reuse_subject:
+        assert glob.end(subject, len(subject)) is None
+
+    async def replace() -> None:
+        output.append(await glob.spans(subject, True, None))
+
+    task = asyncio.create_task(replace())
+    pending = asyncio.get_running_loop().call_soon(task.cancel)
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=2)
+        assert output == []
+    finally:
+        pending.cancel()
+        task.cancel()
+        glob.close()
+
+
+@pytest.mark.asyncio
+async def test_foreground_parameter_cancellation_closes_matcher_before_returning(
+    monkeypatch,
+):
+    ws = Workspace({})
+    active = set()
+    entered = []
+    closed = set()
+    original_spans = Glob.spans
+    original_close = Glob.close
+    pending = None
+
+    async def spans(glob, name, all_, anchor):
+        nonlocal pending
+        active.add(glob)
+        entered.append(glob)
+        pending = asyncio.get_running_loop().call_soon(task.cancel)
+        try:
+            return await original_spans(glob, name, all_, anchor)
+        finally:
+            active.remove(glob)
+
+    def close(glob):
+        closed.add(glob)
+        original_close(glob)
+
+    monkeypatch.setattr(Glob, "spans", spans)
+    monkeypatch.setattr(Glob, "close", close)
+    await ws.shell("shopt -s extglob")
+    task = asyncio.create_task(
+        ws.shell("x=${X//+(?)/x}; touched=yes", env={"X": "a" * 2_000_000})
+    )
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert len(entered) == 1
+        assert not active
+        assert all(glob in closed for glob in entered)
+        result = await ws.shell('printf "%s\\n" "${touched-unset}"')
+        assert await result.stdout_str() == "unset\n"
+    finally:
+        if pending is not None:
+            pending.cancel()
+        task.cancel()
+        await ws.close()

@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { Matcher, fnmatch, fnmatchcase, suffixStart } from './fnmatch.ts'
+import { Glob } from '../rs/glob.ts'
+import { fnmatch, fnmatchcase } from './fnmatch.ts'
 
 const NAMES = [
   '',
@@ -294,11 +295,14 @@ it.each([
 )
 
 it('Matcher.end reads every offset in linear time', () => {
-  const match = new Matcher('abcab', '*b', false, false)
-  expect([match.end(0), match.end(0, false)]).toEqual([5, 2])
-  expect([match.end(2), match.end(5)]).toEqual([5, null])
-  const blank = new Matcher(' '.repeat(16000), '*b', false, false)
-  for (let i = 0; i <= 16000; i++) expect(blank.end(i)).toBeNull()
+  const match = new Glob('*b')
+  expect([match.end('abcab', 0), match.end('abcab', 0, false)]).toEqual([5, 2])
+  expect([match.end('abcab', 2), match.end('abcab', 5)]).toEqual([5, null])
+  const blank = new Glob('*b')
+  const subject = ' '.repeat(16000)
+  for (let i = 0; i <= 16000; i++) expect(blank.end(subject, i)).toBeNull()
+  match.close()
+  blank.close()
 })
 
 it.each([
@@ -317,10 +321,12 @@ it.each([
 ] as [string, string, (number | null)[]][])(
   'suffixStart runs the reversed pattern once: %#',
   (name, pattern, expected) => {
-    expect([
-      suffixStart(name, pattern, false, true),
-      suffixStart(name, pattern, true, true),
-    ]).toEqual(expected)
+    const glob = new Glob(pattern, true)
+    try {
+      expect([glob.suffix(name, false), glob.suffix(name)]).toEqual(expected)
+    } finally {
+      glob.close()
+    }
   },
 )
 
@@ -329,3 +335,105 @@ it.each(['@', '?', '+', '*'])('deep %s groups use an explicit stack', (operator)
   expect(fnmatch('a', pattern, true)).toBe(true)
   expect(fnmatch('b', pattern, true)).toBe(false)
 })
+
+it.each([
+  {
+    name: 'a😀\udcffb',
+    pattern: '?',
+    ends: [
+      [1, 1],
+      [2, 2],
+      [3, 3],
+      [4, 4],
+      [null, null],
+    ],
+    suffix: [3, 3],
+  },
+  {
+    name: 'a😀\udcffb',
+    pattern: '+(?)',
+    ends: [
+      [1, 4],
+      [2, 4],
+      [3, 4],
+      [4, 4],
+      [null, null],
+    ],
+    suffix: [3, 0],
+  },
+  {
+    name: 'a😀\udcffb',
+    pattern: '?b',
+    ends: [
+      [null, null],
+      [null, null],
+      [4, 4],
+      [null, null],
+      [null, null],
+    ],
+    suffix: [2, 2],
+  },
+  {
+    name: 'x\udcff😀',
+    pattern: '@(😀|\udcff😀)',
+    ends: [
+      [null, null],
+      [3, 3],
+      [3, 3],
+      [null, null],
+    ],
+    suffix: [2, 1],
+  },
+])(
+  'match extents count characters and preserve raw bytes: $pattern',
+  ({ name, pattern, ends, suffix }) => {
+    const matcher = new Glob(pattern, true)
+    expect(
+      Array.from({ length: Array.from(name).length + 1 }, (_, i) => [
+        matcher.end(name, i, false),
+        matcher.end(name, i),
+      ]),
+    ).toEqual(ends)
+    expect([matcher.suffix(name, false), matcher.suffix(name)]).toEqual(suffix)
+    matcher.close()
+  },
+)
+
+it.each(Array.from('*?[@+!()|', (literal, index) => ({ literal, index })))(
+  'quoting sentinel $index stays literal in and out of classes',
+  ({ literal, index }) => {
+    const quoted = String.fromCharCode(0xfdd0 + index)
+    expect(fnmatch(literal, quoted, true)).toBe(true)
+    expect(fnmatch('x', quoted, true)).toBe(false)
+    expect(fnmatch(literal, '[' + quoted + ']', true)).toBe(true)
+    expect(fnmatch('x', '[' + quoted + ']', true)).toBe(false)
+  },
+)
+
+it.each([
+  { name: '5', pattern: '[[:digit:]z-a]', expected: true },
+  { name: 'z', pattern: '[[:digit:]z-a]', expected: false },
+  { name: 'a', pattern: '[[:digit:]z-a]', expected: false },
+  { name: 'b', pattern: '[z-ab]', expected: true },
+  { name: '-', pattern: '[z-ab]', expected: false },
+  { name: 'b', pattern: '[!z-a]', expected: true },
+  { name: 'é', pattern: '[[:alpha:]]', expected: false },
+  { name: '١', pattern: '[[:digit:]]', expected: false },
+  { name: '\u00a0', pattern: '[[:space:]]', expected: false },
+  { name: '\udcff', pattern: '[[:print:]]', expected: false },
+  { name: '\udcff', pattern: '[!a]', expected: true },
+  { name: '\ud83d', pattern: '?', expected: true },
+])(
+  'C-locale classes, raw bytes and descending ranges: $name $pattern',
+  ({ name, pattern, expected }) => {
+    expect(fnmatch(name, pattern, true)).toBe(expected)
+  },
+)
+
+it.each(['[a--!]', '[a-!!]', '[a-^!]'])(
+  'fnmatchcase normalizes invalid ranges before negation: %s',
+  (pattern) => {
+    expect(fnmatchcase('a', pattern)).toBe(true)
+    expect(fnmatchcase('', pattern)).toBe(false)
+  },
+)

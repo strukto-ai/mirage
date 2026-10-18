@@ -39,6 +39,11 @@
       "id": "sort-numeric",
       "command": "sort -n /numbers > /sorted",
       "canceled": false
+    },
+    {
+      "id": "glob-parameter-loop",
+      "command": "bash -c 'shopt -s extglob; eval '\"'\"'printf -v matcher_value '\"'\"'\"'\"'\"'\"'\"'\"'%200000s'\"'\"'\"'\"'\"'\"'\"'\"' '\"'\"'\"'\"'\"'\"'\"'\"''\"'\"'\"'\"'\"'\"'\"'\"'; while :; do matcher_result=${matcher_value//+(?)/X}; done'\"'\"''",
+      "canceled": true
     }
   ],
   "stream": [

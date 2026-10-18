@@ -12,12 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { callerSignal } from '../workspace/abort.ts'
 import { dotglobActive, extglobActive, sessionVisibility } from '../context/session_context.ts'
 import { pathVisible } from './hidden.ts'
 import type { FollowOperands, SessionAccess } from '../view/types.ts'
 import { type FileStat, FileType, PathSpec, type ReaddirFn, type StatFn } from '../types.ts'
 import { isFsError } from '../errors/fs.ts'
 import { EXTGLOB_RE, fnmatch, patternParts, QUOTED_CHARS } from './fnmatch.ts'
+import { Glob } from '../rs/glob.ts'
 import { rekey } from './key_prefix.ts'
 import { rstripSlash } from './slash.ts'
 import { compareCodePoints } from './sort.ts'
@@ -392,6 +394,7 @@ export async function resolveGlobWith<A, I>(
   access?: SessionAccess,
   follow?: FollowOperands,
 ): Promise<PathSpec[]> {
+  const signal = callerSignal() ?? null
   const result: PathSpec[] = []
   const vis = sessionVisibility(access)
   for (const p of paths) {
@@ -423,8 +426,8 @@ export async function resolveGlobWith<A, I>(
       // before the empty-match test so an all-hidden match set reads as
       // no matches and falls back to the literal word, exactly what bash
       // prints when nothing matched.
-      let matched = (await expandPattern(readdir, accessor, word, index, access)).filter((m) =>
-        pathVisible(vis, m.virtual),
+      let matched = (await expandPattern(readdir, accessor, word, index, access, signal)).filter(
+        (m) => pathVisible(vis, m.virtual),
       )
       if (dirsOnly) {
         const kept: PathSpec[] = []
@@ -505,6 +508,7 @@ export async function expandPattern<A, I>(
   path: PathSpec,
   index?: I,
   access?: SessionAccess,
+  signal: AbortSignal | null = callerSignal() ?? null,
 ): Promise<PathSpec[]> {
   const prefix = path.virtual.slice(0, rstripSlash(path.virtual).length - path.vfsPath.length)
   const segments = path.vfsPath === '' ? [] : globParts(path.vfsPath, access)
@@ -522,33 +526,43 @@ export async function expandPattern<A, I>(
   let level = [base]
   for (const seg of segments.slice(first)) {
     const nextLevel: string[] = []
-    const matcher = globPattern(seg)
-    for (const parent of level) {
-      // Directory-shaped, carrying the segment as the pattern: a backend
-      // whose listing for this level is a bounded window moves the window to
-      // what the glob asks for instead of filtering its own (gcal, gdocs and
-      // the dated-message channels). Every other readdir reads the directory
-      // off the same spec and ignores the field. A literal segment carries
-      // none, so it keeps its warm listing.
-      const spec = new PathSpec({
-        virtual: parent,
-        directory: parent,
-        vfsPath: rekey(path.virtual, path.vfsPath, parent),
-        pattern: hasGlob(seg, access) ? seg : null,
-      })
-      let entries: string[]
-      try {
-        entries = await readdir(accessor, spec, index)
-      } catch (err) {
-        if (!isMissingDir(err)) throw err
-        entries = []
+    const matcher = new Glob(
+      globPattern(seg),
+      extglobActive(access),
+      !dotglobActive(access),
+      'shell',
+      signal ?? undefined,
+    )
+    try {
+      for (const parent of level) {
+        // Directory-shaped, carrying the segment as the pattern: a backend
+        // whose listing for this level is a bounded window moves the window to
+        // what the glob asks for instead of filtering its own (gcal, gdocs and
+        // the dated-message channels). Every other readdir reads the directory
+        // off the same spec and ignores the field. A literal segment carries
+        // none, so it keeps its warm listing.
+        const spec = new PathSpec({
+          virtual: parent,
+          directory: parent,
+          vfsPath: rekey(path.virtual, path.vfsPath, parent),
+          pattern: hasGlob(seg, access) ? seg : null,
+        })
+        let entries: string[]
+        try {
+          entries = await readdir(accessor, spec, index)
+        } catch (err) {
+          if (!isMissingDir(err)) throw err
+          entries = []
+        }
+        // A cold listing marks a folder with a trailing slash (box, gdrive,
+        // dropbox); the marker is not part of the name.
+        for (const e of entries) {
+          const entry = rstripSlash(e)
+          if (await matcher.matchesAsync(entry.split('/').pop() ?? '')) nextLevel.push(entry)
+        }
       }
-      // A cold listing marks a folder with a trailing slash (box, gdrive,
-      // dropbox); the marker is not part of the name.
-      for (const e of entries) {
-        const entry = rstripSlash(e)
-        if (globNameMatches(entry.split('/').pop() ?? '', matcher, access)) nextLevel.push(entry)
-      }
+    } finally {
+      matcher.close()
     }
     // bash sorts a pathname expansion.
     level = [...new Set(nextLevel)].sort(compareCodePoints)

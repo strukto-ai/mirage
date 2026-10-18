@@ -1,5 +1,5 @@
 {
-  "baseline": 3301,
+  "baseline": 3296,
  "modules": {
   "core/api/client": {
    "typescript_only": {
@@ -32,6 +32,13 @@
     "node": "Selects the Node worker port or browser message handler."
    }
   },
+  "rs/glob": {
+   "typescript_only": {
+    "units": "Validates character-value arrays returned by Rust; Python checks integer units while constructing a string.",
+    "finalizer": "Closes Wasm slots for abandoned synchronous matcher objects; Python releases native streams by reference counting.",
+    "spans": "Validates the Rust span result at the JavaScript boundary; Python validates pairs while reconstructing typed tuples."
+   }
+  },
   "rs/stream": {
    "typescript_only": {
     "Exports": "The raw ABI mirage-rs-wasm exports; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
@@ -39,7 +46,11 @@
     "bytesAt": "Copies bytes out of linear memory; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
     "compiled": "The compiled module, shared by every instance; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
     "current": "The live instance; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
-    "instance": "Compiles and instantiates the module once; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle."
+    "instance": "Compiles and instantiates the module once; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
+    "compiledSync": "Caches the embedded Wasm module for synchronous pure utilities; Python loads its native extension.",
+    "open": "Shares Wasm argument allocation between asynchronous and synchronous stream openers; Python constructs the native stream directly.",
+    "openStreamSync": "Synchronous pure utilities lazily initialize embedded Wasm; Python native streams open synchronously.",
+    "synchronous": "Shares the current embedded Wasm instance between synchronous utilities and asynchronous command streams."
    }
   },
   "utils/regex": {

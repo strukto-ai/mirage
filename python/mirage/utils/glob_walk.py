@@ -20,6 +20,7 @@ from typing import Any, Protocol
 
 from mirage.context import dotglob_active, extglob_active, session_visibility
 from mirage.errors.constants import WALK_ERRORS
+from mirage.rs.glob import Glob
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.fnmatch import (
     EXTGLOB_RE,
@@ -481,33 +482,38 @@ async def expand_pattern(
     level = [base]
     for seg in segments[first:]:
         next_level: list[str] = []
-        for parent in level:
-            # Directory-shaped, carrying the segment as the pattern: a
-            # backend whose listing for this level is a bounded window
-            # moves the window to what the glob asks for instead of
-            # filtering its own (gcal, gdocs and the dated-message
-            # channels). Every other readdir reads the directory off the
-            # same spec and ignores the field. A literal segment carries
-            # none, so it keeps its warm listing.
-            spec = PathSpec(
-                virtual=parent,
-                directory=parent,
-                vfs_path=rekey(path.virtual, path.vfs_path, parent),
-                pattern=seg if has_glob(seg, access) else None,
-            )
-            try:
-                entries = await readdir(spec)
-            except (FileNotFoundError, NotADirectoryError):
-                entries = []
-            pattern = glob_pattern(seg)
-            # A cold listing marks a folder with a trailing slash (box,
-            # gdrive, dropbox); the marker is not part of the name.
-            for e in entries:
-                entry = e.rstrip("/")
-                if glob_name_matches(
-                    entry.rsplit("/", 1)[-1], pattern, access
-                ):
-                    next_level.append(entry)
+        matcher = Glob(
+            glob_pattern(seg),
+            extglob_active(access),
+            not dotglob_active(access),
+        )
+        try:
+            for parent in level:
+                # Directory-shaped, carrying the segment as the pattern: a
+                # backend whose listing for this level is a bounded window
+                # moves the window to what the glob asks for instead of
+                # filtering its own (gcal, gdocs and the dated-message
+                # channels). Every other readdir reads the directory off the
+                # same spec and ignores the field. A literal segment carries
+                # none, so it keeps its warm listing.
+                spec = PathSpec(
+                    virtual=parent,
+                    directory=parent,
+                    vfs_path=rekey(path.virtual, path.vfs_path, parent),
+                    pattern=seg if has_glob(seg, access) else None,
+                )
+                try:
+                    entries = await readdir(spec)
+                except (FileNotFoundError, NotADirectoryError):
+                    entries = []
+                # A cold listing marks a folder with a trailing slash (box,
+                # gdrive, dropbox); the marker is not part of the name.
+                for e in entries:
+                    entry = e.rstrip("/")
+                    if await matcher.matches_async(entry.rsplit("/", 1)[-1]):
+                        next_level.append(entry)
+        finally:
+            matcher.close()
         # bash sorts a pathname expansion.
         level = sorted(set(next_level))
         if not level:

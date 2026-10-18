@@ -12,9 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { Workspace } from '../workspace/workspace/workspace.ts'
+import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { describe, expect, it, vi } from 'vitest'
 import { encodeBase64 } from '../utils/base64.ts'
 import { StreamRefusal } from './errors.ts'
+import { Glob } from './glob.ts'
 import { openStream } from './stream.ts'
 
 const DECODE = { mode: 'decode', ignore_garbage: false }
@@ -76,4 +79,69 @@ describe('openStream', () => {
       stream.close()
     }
   })
+})
+
+it.each([false, true])(
+  'glob replacement cancellation prevents later output with reused subject %s',
+  async (reuseSubject) => {
+    const controller = new AbortController()
+    const reason = new Error('replacement canceled')
+    const glob = new Glob('+(?)', true, false, 'shell', controller.signal)
+    const output: [number, number][][] = []
+    const subject = 'a'.repeat(2_000_000)
+    if (reuseSubject) expect(glob.end(subject, subject.length)).toBeNull()
+    const timer = setTimeout(() => {
+      controller.abort(reason)
+    }, 0)
+    try {
+      const work = glob.spans(subject, true, null).then((spans) => {
+        output.push(spans)
+      })
+      await expect(work).rejects.toBe(reason)
+      expect(output).toEqual([])
+    } finally {
+      clearTimeout(timer)
+      glob.close()
+    }
+  },
+)
+
+it('foreground parameter cancellation closes the matcher before returning', async () => {
+  const ws = new Workspace({}, { shellParser: await getTestParser() })
+  const controller = new AbortController()
+  const spansSpy = vi.spyOn(Glob.prototype, 'spans')
+  const closeSpy = vi.spyOn(Glob.prototype, 'close')
+  let work: ReturnType<typeof ws.shell> | undefined
+  try {
+    await ws.shell('shopt -s extglob')
+    work = ws.shell('x=${X//+(?)/x}; touched=yes', {
+      signal: controller.signal,
+      env: { X: 'a'.repeat(2_000_000) },
+    })
+    const aborted = expect(work).rejects.toMatchObject({ name: 'AbortError' })
+    await expect.poll(() => spansSpy.mock.calls.length).toBe(1)
+    const result = spansSpy.mock.results[0]
+    if (result?.type !== 'return') throw new Error('the matcher did not return a promise')
+    let settled = false
+    void result.value.then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      },
+    )
+    controller.abort()
+    await aborted
+    expect(settled).toBe(true)
+    expect(closeSpy.mock.instances).toContain(spansSpy.mock.instances[0])
+    const peer = await ws.shell('printf "%s\n" "${touched-unset}"')
+    expect(new TextDecoder().decode(peer.stdout)).toBe('unset\n')
+  } finally {
+    controller.abort()
+    await work?.catch(() => undefined)
+    spansSpy.mockRestore()
+    closeSpy.mockRestore()
+    await ws.close()
+  }
 })

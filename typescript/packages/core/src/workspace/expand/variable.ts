@@ -57,7 +57,7 @@ import {
 import { homeDir } from '../session/shell_dirs.ts'
 import { decodeAnsiC } from '../../shell/escapes.ts'
 import { sourceParts } from '../../shell/helpers.ts'
-import { Matcher, fnmatch, suffixStart } from '../../utils/fnmatch.ts'
+import { Glob } from '../../rs/glob.ts'
 import { escapeGlob, markGlobs } from '../../utils/glob_walk.ts'
 import { expandTilde } from '../../utils/path.ts'
 import { OPERAND_DQUOTE_ESCAPES } from './constants.ts'
@@ -649,83 +649,76 @@ async function wordChunks(
   return out
 }
 
-// Patterns read a value one character at a time, as Python's str does, so
-// the strip and replace below cut only at the UTF-16 offset of a character
-// boundary, never inside a surrogate pair.
-function globStrip(
+async function globStrip(
   value: string,
   pattern: string,
   greedy: boolean,
   prefix: boolean,
   extglob = false,
-): string {
+  signal?: AbortSignal,
+): Promise<string> {
   if (pattern === '') return value
-  const cuts = [0]
-  for (const char of value) cuts.push((cuts.at(-1) ?? 0) + char.length)
-  if (prefix) {
-    const end = new Matcher(value, pattern, false, extglob).end(0, greedy)
-    return end === null ? value : value.slice(cuts[end])
+  const glob = new Glob(pattern, extglob, false, 'shell', signal)
+  try {
+    const offset = await glob.extent(value, prefix, greedy)
+    if (offset === null) return value
+    const chars = Array.from(value)
+    return (prefix ? chars.slice(offset) : chars.slice(0, offset)).join('')
+  } finally {
+    glob.close()
   }
-  const start = suffixStart(value, pattern, greedy, extglob)
-  return start === null ? value : value.slice(0, cuts[start])
 }
 
-// Bash ${var/pat/rep}: pattern is a glob, longest match wins. anchor is
-// '#' (prefix), '%' (suffix), or null.
-function globReplace(
+async function globReplace(
   value: string,
   pattern: string,
   replacement: string,
   replaceAll: boolean,
   anchor: string | null,
   extglob = false,
-): string {
+  signal?: AbortSignal,
+): Promise<string> {
   if (pattern === '') return value
-  const cuts = [0]
-  for (const char of value) cuts.push((cuts.at(-1) ?? 0) + char.length)
-  if (anchor === '%') {
-    const start = suffixStart(value, pattern, true, extglob)
-    return start === null ? value : value.slice(0, cuts[start]) + replacement
-  }
-  const match = new Matcher(value, pattern, false, extglob)
-  const size = cuts.length - 1
-  if (anchor === '#') {
-    const end = match.end(0)
-    return end === null ? value : replacement + value.slice(cuts[end])
-  }
-  if (value === '') return match.end(0) === null ? value : replacement
-  const out: string[] = []
-  let k = 0
-  while (k < size) {
-    const end = match.end(k)
-    if (end === null || end === k) {
-      // No match here (or an empty one, which bash skips over).
-      out.push(value.slice(cuts[k], cuts[k + 1]))
-      k += 1
-      continue
+  const glob = new Glob(pattern, extglob, false, 'shell', signal)
+  try {
+    const spans = await glob.spans(value, replaceAll, anchor)
+    const chars = Array.from(value)
+    const out: string[] = []
+    let cursor = 0
+    for (const [start, end] of spans) {
+      out.push(chars.slice(cursor, start).join(''), replacement)
+      cursor = end
     }
-    out.push(replacement)
-    k = end
-    if (!replaceAll) {
-      out.push(value.slice(cuts[k]))
-      return out.join('')
-    }
+    out.push(chars.slice(cursor).join(''))
+    return out.join('')
+  } finally {
+    glob.close()
   }
-  return out.join('')
 }
 
-function caseMod(op: string, val: string, pattern: string, extglob = false): string {
+async function caseMod(
+  op: string,
+  val: string,
+  pattern: string,
+  extglob = false,
+  signal?: AbortSignal,
+): Promise<string> {
   if (val === '') return val
   const all = op === '^^' || op === ',,'
-  let out = ''
-  for (const [i, ch] of Array.from(val).entries()) {
-    if ((!all && i > 0) || (pattern !== '' && !fnmatch(ch, pattern, extglob))) {
-      out += ch
-      continue
+  const glob = pattern === '' ? null : new Glob(pattern, extglob, false, 'shell', signal)
+  try {
+    let out = ''
+    for (const [i, ch] of Array.from(val).entries()) {
+      if ((!all && i > 0) || (glob !== null && !(await glob.matchesAsync(ch)))) {
+        out += ch
+        continue
+      }
+      out += op === '^' || op === '^^' ? ch.toUpperCase() : ch.toLowerCase()
     }
-    out += op === '^' || op === '^^' ? ch.toUpperCase() : ch.toLowerCase()
+    return out
+  } finally {
+    glob?.close()
   }
-  return out
 }
 
 /** Evaluate and apply one substring bound before expanding the next. */
@@ -896,10 +889,23 @@ async function expandSubscriptKey(p: BraceParse, expandChild: ExpandChild): Prom
   return parts.join('')
 }
 
-function valueOp(op: string, val: string, groups: string[], extglob = false): string {
+async function valueOp(
+  op: string,
+  val: string,
+  groups: string[],
+  extglob = false,
+  signal?: AbortSignal,
+): Promise<string> {
   if (STRIP_OPS.has(op)) {
     const pattern = groups[0] ?? ''
-    return globStrip(val, pattern, op === '##' || op === '%%', op === '#' || op === '##', extglob)
+    return globStrip(
+      val,
+      pattern,
+      op === '##' || op === '%%',
+      op === '#' || op === '##',
+      extglob,
+      signal,
+    )
   }
   if (REPLACE_OPS.has(op)) {
     const pattern = groups[0] ?? ''
@@ -907,10 +913,10 @@ function valueOp(op: string, val: string, groups: string[], extglob = false): st
     let anchor: string | null = null
     if (op === '/#') anchor = '#'
     else if (op === '/%') anchor = '%'
-    return globReplace(val, pattern, replacement, op === '//', anchor, extglob)
+    return globReplace(val, pattern, replacement, op === '//', anchor, extglob, signal)
   }
   if (CASE_OPS.has(op)) {
-    return caseMod(op, val, groups[0] ?? '', extglob)
+    return caseMod(op, val, groups[0] ?? '', extglob, signal)
   }
   return val
 }
@@ -1034,6 +1040,7 @@ export async function expandBraces(
   expandChild: ExpandChild,
   view?: SessionView,
   quoted = false,
+  signal?: AbortSignal,
 ): Promise<Chunk[]> {
   return expandBracesIn(
     node,
@@ -1043,6 +1050,7 @@ export async function expandBraces(
     view,
     new ArithOperand(session, view),
     quoted,
+    signal,
   )
 }
 
@@ -1054,6 +1062,7 @@ async function expandBracesIn(
   view: SessionView | undefined,
   operand: ArithOperand,
   quoted: boolean,
+  signal?: AbortSignal,
 ): Promise<Chunk[]> {
   const text = node.text.trimStart()
   if (badSubstitution(text)) throw new BadSubstitution(text)
@@ -1104,6 +1113,7 @@ async function expandBracesIn(
       callStack,
       quoted,
       groups,
+      signal,
     )
   }
 
@@ -1242,7 +1252,9 @@ async function expandBracesIn(
     if (!varInEnv) return [valuePiece('', quoted)]
     return [valuePiece(await substring(val, node, expandChild, operand), quoted)]
   }
-  return [valuePiece(valueOp(p.op, val, groups, session.shopts.extglob ?? false), quoted)]
+  return [
+    valuePiece(await valueOp(p.op, val, groups, session.shopts.extglob ?? false, signal), quoted),
+  ]
 }
 
 /**
@@ -1309,6 +1321,7 @@ async function expandSplat(
   callStack: CallStack | null,
   quoted: boolean,
   groups: string[],
+  signal?: AbortSignal,
 ): Promise<Chunk[]> {
   const star = (p.subscript ?? p.varName) === '*'
   const joiner = star ? ifsJoiner(ifsValue(session, callStack)) : ' '
@@ -1325,7 +1338,9 @@ async function expandSplat(
     const unset = p.subscript !== null && values.length === 0
     items = unset ? [] : await sliceArray(arr, node, expandChild, operand)
   } else if (op !== null && (STRIP_OPS.has(op) || REPLACE_OPS.has(op) || CASE_OPS.has(op))) {
-    items = values.map((el) => valueOp(op, el, groups, session.shopts.extglob ?? false))
+    items = []
+    for (const el of values)
+      items.push(await valueOp(op, el, groups, session.shopts.extglob ?? false, signal))
   } else if (op !== null && UNSET_GUARD_OPS.has(op)) {
     const triggered =
       op === '-' || op === '+' || op === '=' || op === '?'

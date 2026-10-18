@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { expandPattern, resolveGlobWith } from '../utils/glob_walk.ts'
+import { newStatusWriter, runWithLineAbort } from '../workspace/abort.ts'
 import { CommandSpec } from '../commands/spec/types.ts'
 import { CLIHandler } from '../commands/cli/types.ts'
 
@@ -1382,5 +1384,71 @@ it('checks a link target under the caller’s own view while a peer hides the li
   } finally {
     release()
     await ws.close()
+  }
+})
+
+it('glob traversal keeps its captured signal across overlapping fallback sessions', async () => {
+  const first = new SessionState({ sessionId: 'glob-first' })
+  const other = new SessionState({ sessionId: 'glob-other' })
+  const wanted = new AbortController()
+  const unwanted = new AbortController()
+  unwanted.abort()
+  const [listed, announce] = gate()
+  const [hold, release] = gate()
+  const [otherHold, releaseOther] = gate()
+  let calls = 0
+  const read = async (): Promise<string[]> => {
+    calls += 1
+    if (calls === 1) {
+      announce()
+      await hold
+      return ['/root/one']
+    }
+    return calls === 2 ? ['/root/one/file'] : ['/second/file']
+  }
+  const work = runWithLineAbort(wanted.signal, [first], newStatusWriter(), () =>
+    runWithEvaluation(new EvaluationContext(first), () =>
+      resolveGlobWith(
+        read,
+        null,
+        [
+          new PathSpec({
+            virtual: '/root/*/*',
+            vfsPath: '/*/*',
+            directory: '/root/*',
+            pattern: '*',
+            resolved: false,
+          }),
+          new PathSpec({
+            virtual: '/second/*',
+            vfsPath: '/*',
+            directory: '/second',
+            pattern: '*',
+            resolved: false,
+          }),
+        ],
+        undefined,
+      ),
+    ),
+  )
+  await listed
+  const overlap = runWithLineAbort(unwanted.signal, [other], newStatusWriter(), () =>
+    runWithEvaluation(new EvaluationContext(other), () => otherHold),
+  )
+  try {
+    release()
+    expect((await work).map((path) => path.virtual)).toEqual(['/root/one/file', '/second/file'])
+    wanted.abort()
+    await expect(
+      runWithLineAbort(wanted.signal, [first], newStatusWriter(), () =>
+        runWithEvaluation(new EvaluationContext(first), () =>
+          expandPattern(read, null, PathSpec.fromStrPath('/root/*/*', '/*/*')),
+        ),
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+  } finally {
+    release()
+    releaseOther()
+    await overlap
   }
 })

@@ -51,13 +51,17 @@ const RECYCLE_BYTES = 32 * 1024 * 1024
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 let compiled: Promise<WebAssembly.Module> | undefined
+let compiledSync: WebAssembly.Module | undefined
 let current: Promise<Exports> | undefined
+let synchronous: Exports | undefined
 
 async function instance(): Promise<Exports> {
+  if (synchronous !== undefined) return synchronous
   compiled ??= WebAssembly.compile(decodeBase64(MIRAGE_RS_WASM) as BufferSource)
-  current ??= compiled.then(async (module) => {
-    const created = await WebAssembly.instantiate(module, {})
-    return created.exports as unknown as Exports
+  current ??= compiled.then((module) => {
+    compiledSync = module
+    synchronous ??= new WebAssembly.Instance(module, {}).exports as unknown as Exports
+    return synchronous
   })
   return current
 }
@@ -154,6 +158,7 @@ export class OpenStream {
       this.exports.memory.buffer.byteLength > RECYCLE_BYTES
     ) {
       current = undefined
+      if (synchronous === this.exports) synchronous = undefined
     }
   }
 
@@ -167,6 +172,7 @@ export class OpenStream {
       if (err instanceof WebAssembly.RuntimeError) {
         this.handle = 0
         current = undefined
+        if (synchronous === this.exports) synchronous = undefined
       }
       throw err
     }
@@ -207,6 +213,25 @@ export async function openStream(
   config: Readonly<Record<string, JsonValue>>,
 ): Promise<OpenStream> {
   const exports = await instance()
+  return open(exports, kind, config)
+}
+
+/** Open a stream for synchronous pure utilities, initializing Wasm on first use. */
+export function openStreamSync(
+  kind: string,
+  config: Readonly<Record<string, JsonValue>>,
+): OpenStream {
+  compiledSync ??= new WebAssembly.Module(decodeBase64(MIRAGE_RS_WASM) as BufferSource)
+  compiled ??= Promise.resolve(compiledSync)
+  synchronous ??= new WebAssembly.Instance(compiledSync, {}).exports as unknown as Exports
+  return open(synchronous, kind, config)
+}
+
+function open(
+  exports: Exports,
+  kind: string,
+  config: Readonly<Record<string, JsonValue>>,
+): OpenStream {
   const kindBytes = encoder.encode(kind)
   const configBytes = encoder.encode(JSON.stringify(config))
   const args = exports.mirage_rs_args(kindBytes.byteLength + configBytes.byteLength)
