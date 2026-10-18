@@ -54,7 +54,8 @@ def notices(manifest: str) -> str:
         if part.strip()
     ]
     sections += [path.read_text().strip() for path in ADAPTED]
-    return f"\n\n{RULE}\n\n".join(sections) + "\n"
+    joined = f"\n\n{RULE}\n\n".join(sections)
+    return "\n".join(line.rstrip() for line in joined.splitlines()) + "\n"
 
 
 def main() -> int:

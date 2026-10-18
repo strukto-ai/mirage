@@ -94,7 +94,6 @@
     "isomorphic-git": "^1.38.1",
     "jq-wasm": "3.0.0-jq-1.8.2",
     "modern-tar": "^0.8.4",
-    "pako": "^3.0.2",
     "sha.js": "^2.4.12",
     "uuid": "^14.0.1",
     "web-tree-sitter": "^0.26.13",

@@ -1,5 +1,5 @@
 {
-  "baseline": 3506,
+  "baseline": 3504,
  "modules": {
   "core/api/client": {
    "typescript_only": {
@@ -804,11 +804,6 @@
     "setSpoolFactory": "Installs Node/browser scratch storage without importing host APIs in core.",
     "SpoolFactory": "Typed host scratch factory; Python uses stdlib tempfile directly.",
     "SpoolStore": "Host scratch storage interface; Python uses a BinaryIO tempfile."
-   }
-  },
-  "utils/compress": {
-   "typescript_only": {
-    "deflateStream": "Shared pako wrapper for gzip/raw-deflate output; Python uses separate zlib wrappers."
    }
   },
   "workspace/files": {
