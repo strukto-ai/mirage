@@ -29,7 +29,7 @@ import {
   spec,
   TEST_ROOT,
   type FetchCall,
-} from './_test_util.ts'
+} from '../../../tests/core/databricks_volume/_test_util.ts'
 
 // The glob walk takes child paths; this backend lists rows.
 async function listedPaths(accessor: DatabricksVolumeAccessor, path: PathSpec): Promise<string[]> {

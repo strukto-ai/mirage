@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { makeEnv, NATIVE_BACKENDS } from './native_fixture.ts'
+import { makeEnv, NATIVE_BACKENDS } from '../../tests/commands/native_fixture.ts'
 
 describe.each(NATIVE_BACKENDS)('native basename (%s backend)', (kind) => {
   it('basename matches native', async () => {

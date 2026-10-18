@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '../../../commands/config.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
-import { context } from '../../../workspace/fixtures/context.ts'
+import { context } from '../../../../tests/workspace/fixtures/context.ts'
 import { WorkspaceBinding } from '../../binding.ts'
 import { PrefixResolver } from '../../resolver.ts'
 import type { RunResult } from '../../types.ts'
 import { PyodideExecution } from './execution.ts'
 import { PyodideRuntime } from './runtime.ts'
-import type * as FailingCleanup from './fixtures/failing_cleanup.ts'
-import type * as Capability from './fixtures/capability.ts'
+import type * as FailingCleanup from '../../../../tests/runtime/python/pyodide/fixtures/failing_cleanup.ts'
+import type * as Capability from '../../../../tests/runtime/python/pyodide/fixtures/capability.ts'
 
 /** Run `code` at `/`; pyodide has no engine, so the run queues at the call. */
 function interpret(
@@ -29,7 +29,10 @@ describe('PyodideRuntime host initializer', () => {
   })
 
   it('initializes before bootstrap and disposes after every command', async () => {
-    const ref = new URL('./fixtures/capability.ts', import.meta.url)
+    const ref = new URL(
+      '../../../../tests/runtime/python/pyodide/fixtures/capability.ts',
+      import.meta.url,
+    )
     const module = (await import(ref.href)) as typeof Capability
     const rt = new PyodideRuntime({
       config: {
@@ -58,7 +61,10 @@ describe('PyodideRuntime host initializer', () => {
   it.each(['inline', 'worker'] as const)(
     'preserves a timeout error when cleanup also fails (%s)',
     async (mode) => {
-      const ref = new URL('./fixtures/failing_cleanup.ts', import.meta.url)
+      const ref = new URL(
+        '../../../../tests/runtime/python/pyodide/fixtures/failing_cleanup.ts',
+        import.meta.url,
+      )
       ref.searchParams.set('case', `primary-${mode}`)
       const module = (await import(ref.href)) as typeof FailingCleanup
       module.configure('async')
@@ -94,7 +100,10 @@ describe('PyodideRuntime host initializer', () => {
   it.each(['mutable', 'frozen', 'readonly'] as const)(
     'keeps the original error, stack, and prior cause (%s)',
     async (mode) => {
-      const ref = new URL('./fixtures/failing_cleanup.ts', import.meta.url)
+      const ref = new URL(
+        '../../../../tests/runtime/python/pyodide/fixtures/failing_cleanup.ts',
+        import.meta.url,
+      )
       ref.searchParams.set('case', `prior-cause-${mode}`)
       const module = (await import(ref.href)) as typeof FailingCleanup
       const prior = new Error('original cause')
@@ -128,7 +137,10 @@ describe('PyodideRuntime host initializer', () => {
   )
 
   it('rejects cleanup-only failure after a successful run', async () => {
-    const ref = new URL('./fixtures/failing_cleanup.ts', import.meta.url)
+    const ref = new URL(
+      '../../../../tests/runtime/python/pyodide/fixtures/failing_cleanup.ts',
+      import.meta.url,
+    )
     ref.searchParams.set('case', 'cleanup-only-run')
     const module = (await import(ref.href)) as typeof FailingCleanup
     module.configure('async')

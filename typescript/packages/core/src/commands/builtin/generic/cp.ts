@@ -475,7 +475,7 @@ export async function copyTreeLinks(
       continue
     }
     const followed = respelled(PathSpec.fromStrPath(inside), shown)
-    const entries = await cpWalk(
+    const entries = await walk(
       copies.relay.readdir,
       copies.relayStat,
       followed,
@@ -853,7 +853,7 @@ async function duplicateForBackup(
       }
       return true
     }
-    const entries = await cpWalk(strategy.readdir, stat, target)
+    const entries = await walk(strategy.readdir, stat, target)
     const copiedAll = await copyEntries(cmdName, strategy, stat, target, backup, entries, errors)
     return copiedAll
   }
@@ -1130,7 +1130,7 @@ async function mirrorDirs(
 // refused it below the operand), is GNU's `cannot access` / `cannot stat`
 // line when `errors` is given and the walk goes on without its contents;
 // with no channel the refusal propagates rather than leave a silent gap.
-export async function cpWalk(
+export async function walk(
   readdir: ReaddirFn,
   stat: StatFn,
   root: PathSpec,
@@ -1620,7 +1620,7 @@ export async function cpGeneric(
       const srcBase = rstripSlash(src.mountPath)
       const dstBase = rstripSlash(target.mountPath)
       if (isPrimitiveCopy(strategy)) {
-        const walked = await cpWalk(strategy.readdir, stat, src, 'cp', errors, copies?.links)
+        const walked = await walk(strategy.readdir, stat, src, 'cp', errors, copies?.links)
         const entries = intoItself
           ? walked.filter((entry) => !within(entry.path, target.virtual))
           : walked

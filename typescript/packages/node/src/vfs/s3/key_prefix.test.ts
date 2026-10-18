@@ -10,7 +10,7 @@ import { GridFSVFS } from '../gridfs/gridfs.ts'
 import { HfModelsVFS } from '../hf_models/hf_models.ts'
 import { R2VFS } from '../r2/r2.ts'
 import { S3VFS } from './s3.ts'
-import { installS3Mock, S3MockStore, type S3Mock } from './mock.ts'
+import { installS3Mock, S3MockStore, type S3Mock } from '../../../tests/vfs/s3/mock.ts'
 
 const BUCKET = 'prefix-test-bucket'
 const PREFIX = 'users/abc/'

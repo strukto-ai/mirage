@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { ReadStream, SFTPWrapper } from 'ssh2'
 import { SSHAccessor } from '../../accessor/ssh.ts'
-import { StreamAccessor, makeFakeAccessor } from './_test_utils.ts'
+import { StreamAccessor, makeFakeAccessor } from '../../../tests/core/ssh/_test_utils.ts'
 import { follow, readStream } from './stream.ts'
 
 class DelayedCloseStream extends Readable {

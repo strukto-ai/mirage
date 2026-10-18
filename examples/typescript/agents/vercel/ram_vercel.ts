@@ -19,7 +19,7 @@ import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { generateText, stepCountIs } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import { mirageTools } from '@struktoai/mirage-agents/vercel'
-import { buildSystemPrompt } from '@struktoai/mirage-agents/openai'
+import { buildSystemPrompt } from '@struktoai/mirage-agents/openai_agents'
 
 loadEnv({
   path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../../.env.development'),

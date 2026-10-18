@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
-import { installFakeNavigator, makeMockRoot } from './test-utils.ts'
+import { installFakeNavigator, makeMockRoot } from '../tests/test-utils.ts'
 import { Workspace } from './workspace.ts'
 
 let restoreNav: () => void

@@ -18,7 +18,7 @@ import {
   makeIntegrationWS,
   run,
   runExit,
-} from './fixtures/integration_fixture.ts'
+} from '../../tests/workspace/fixtures/integration_fixture.ts'
 
 async function fresh(): Promise<{ ws: Awaited<ReturnType<typeof makeIntegrationWS>>['ws'] }> {
   const { ws } = await makeIntegrationWS(INTEGRATION_FILES)

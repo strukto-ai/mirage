@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FileStat } from '../../types.ts'
-import { withCacheMutation } from '../file/io.ts'
+import { mutationLock } from '../file/io.ts'
 import type { FileCache } from '../file/mixin.ts'
 import {
   LookupStatus,
@@ -91,7 +91,7 @@ export class IndexView extends IndexCacheStore {
   }
 
   private fence<T>(fn: () => Promise<T>): Promise<T> {
-    return this.locked ? fn() : withCacheMutation(this.cache, fn)
+    return this.locked ? fn() : mutationLock(this.cache, fn)
   }
 
   /** Cap the expiry, preserving the store default when it is shorter. */

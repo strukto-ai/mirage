@@ -27,7 +27,7 @@ vi.mock('./resolve.ts', async () => {
 
 import { CapacityState, type CapacityResult } from '../../types.ts'
 import * as client from '../google/client.ts'
-import { makeGDriveAccessor } from './_test_util.ts'
+import { makeGDriveAccessor } from '../../../tests/core/gdrive/_test_util.ts'
 import { capacity } from './capacity.ts'
 import * as resolve from './resolve.ts'
 

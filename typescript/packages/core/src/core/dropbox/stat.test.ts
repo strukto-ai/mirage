@@ -34,8 +34,8 @@ import type { DropboxEntry } from './api.ts'
 import { stat } from './stat.ts'
 import { read } from './read.ts'
 import { readdir } from './readdir.ts'
-import { FakeDropboxRpc } from './_test_util.ts'
-import { handedAt } from '../../workspace/fixtures/handed.ts'
+import { FakeDropboxRpc } from '../../../tests/core/dropbox/_test_util.ts'
+import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
 
 const STUB_TM = {} as DropboxTokenManager
 

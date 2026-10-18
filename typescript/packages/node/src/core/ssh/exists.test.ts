@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '@struktoai/mirage-core/types'
-import { makeFakeAccessor } from './_test_utils.ts'
+import { makeFakeAccessor } from '../../../tests/core/ssh/_test_utils.ts'
 import { exists } from './exists.ts'
 
 function spec(p: string): PathSpec {

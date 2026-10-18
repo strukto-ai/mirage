@@ -17,7 +17,7 @@ import {
   makeWorkspace,
   stderrStr,
   stdoutStr,
-} from '../../../workspace/fixtures/workspace_fixture.ts'
+} from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 // Mirrors the Python `node`/`js` command tests; both run on quickjs so a
 // script behaves identically across languages.

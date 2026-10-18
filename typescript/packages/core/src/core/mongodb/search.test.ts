@@ -17,7 +17,7 @@ import { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { PathSpec } from '../../types.ts'
 import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
 import type { MongoIterOptions } from './_driver.ts'
-import { arrayIter, stubMongoDriver } from './_test_util.ts'
+import { arrayIter, stubMongoDriver } from '../../../tests/core/mongodb/_test_util.ts'
 import { DEPTH, holdsFilter, linesContaining } from './search.ts'
 
 const DOCS = '/shop/collections/orders/documents.jsonl'

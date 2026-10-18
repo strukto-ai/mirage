@@ -20,7 +20,7 @@ import { enoent } from '../../errors/fs.ts'
 import { DirListing, FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import type { Handed } from '../../vfs/types.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import {
   beyondWindow,

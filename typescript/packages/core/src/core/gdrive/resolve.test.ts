@@ -17,17 +17,17 @@ import type * as DriveModule from '../google/drive.ts'
 
 vi.mock('../google/drive.ts', async () => {
   const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  const { driveModuleMock } = await import('./_test_util.ts')
+  const { driveModuleMock } = await import('../../../tests/core/gdrive/_test_util.ts')
   return driveModuleMock(actual)
 })
 
-import type { FakeDrive } from './_test_util.ts'
+import type { FakeDrive } from '../../../tests/core/gdrive/_test_util.ts'
 import {
   DOC_MIME,
   makeGDriveAccessor,
   makeScopedGDriveAccessor,
   resetFakeDrive,
-} from './_test_util.ts'
+} from '../../../tests/core/gdrive/_test_util.ts'
 import { DirListing, FileStat, FileType, PathSpec } from '../../types.ts'
 import { GoogleApiError } from '../google/client.ts'
 import { readdir } from './readdir.ts'

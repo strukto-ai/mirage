@@ -57,7 +57,7 @@ import {
   backupDisplaces,
   backupRaw,
   copyEntries,
-  cpWalk,
+  walk,
   destKind,
   justCreatedError,
   sameFileError,
@@ -612,7 +612,7 @@ export async function mvGeneric(
       // Across mounts GNU copies and then removes, and -v says so entry by
       // entry instead of `renamed` (coreutils 9.7).
       const verbose = flags.verbose ? lines : undefined
-      const entries = await cpWalk(strategy.readdir, stat, src)
+      const entries = await walk(strategy.readdir, stat, src)
       const copiedAll = await copyEntries('mv', strategy, stat, src, target, entries, errors, {
         copies,
         lines: verbose,

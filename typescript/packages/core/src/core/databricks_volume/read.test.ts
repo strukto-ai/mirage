@@ -14,7 +14,12 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { read } from './read.ts'
-import { makeAccessor, notFoundResponse, routedFetch, spec } from './_test_util.ts'
+import {
+  makeAccessor,
+  notFoundResponse,
+  routedFetch,
+  spec,
+} from '../../../tests/core/databricks_volume/_test_util.ts'
 
 afterEach(() => {
   vi.unstubAllGlobals()

@@ -236,9 +236,9 @@ const REGISTRY: Record<string, VFSFactory> = {
     return new GSlidesVFS(normalizeGSlidesConfig(config))
   },
   gdrive: async (config) => {
-    const { GDriveVFS } = await import('@struktoai/mirage-core/vfs/gdrive/gdrive')
+    const { GoogleDriveVFS } = await import('@struktoai/mirage-core/vfs/gdrive/gdrive')
     const { normalizeGDriveConfig } = await import('@struktoai/mirage-core/vfs/gdrive/config')
-    return new GDriveVFS(normalizeGDriveConfig(config))
+    return new GoogleDriveVFS(normalizeGDriveConfig(config))
   },
   onedrive: async (config) => {
     const { normalizeOneDriveConfig } = await import('@struktoai/mirage-core/accessor/onedrive')
@@ -296,7 +296,7 @@ export function knownVfsNames(): string[] {
  * be shadowed; re-registering a custom name replaces it. Mirrors
  * Python's `register_vfs` and the Node counterpart.
  */
-export function register(name: string, factory: VFSFactory): void {
+export function registerVfs(name: string, factory: VFSFactory): void {
   if (name in REGISTRY) throw new Error(`cannot register '${name}': shadows a builtin`)
   CUSTOM[name] = factory
 }

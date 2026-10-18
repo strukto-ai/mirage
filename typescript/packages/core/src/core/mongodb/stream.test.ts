@@ -17,7 +17,7 @@ import { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
-import { arrayIter, stubMongoDriver } from './_test_util.ts'
+import { arrayIter, stubMongoDriver } from '../../../tests/core/mongodb/_test_util.ts'
 import { follow, lastLines, lineCount, readStream } from './stream.ts'
 
 function docs(database: string, kind = 'collections', name = 'users'): PathSpec {

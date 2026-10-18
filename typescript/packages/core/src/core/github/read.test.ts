@@ -16,11 +16,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
 import { runWithRecording } from '../../observe/context.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { entryAt } from '../../workspace/fixtures/handed.ts'
+import { entryAt } from '../../../tests/workspace/fixtures/handed.ts'
 import { read, readStream } from './read.ts'
 import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
-import { FakeGitHub, blobSha, servedAccessor } from './_test_util.ts'
+import { FakeGitHub, blobSha, servedAccessor } from '../../../tests/core/github/_test_util.ts'
 
 const DEC = new TextDecoder()
 

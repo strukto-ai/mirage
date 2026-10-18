@@ -24,7 +24,7 @@ import { PrefixResolver } from '../../resolver.ts'
 import { FileStat, FileType } from '../../../types.ts'
 import type { BridgeDispatchFn, RunResult } from '../../types.ts'
 import { PyodideRuntime } from './runtime.ts'
-import { context } from '../../../workspace/fixtures/context.ts'
+import { context } from '../../../../tests/workspace/fixtures/context.ts'
 import * as sealing from './seal.ts'
 
 const ENC = new TextEncoder()
@@ -376,7 +376,10 @@ it('keeps an init_module worker open for trusted host access', async () => {
   const rt = bind(
     new PyodideRuntime({
       config: {
-        initModule: new URL('./fixtures/capability.ts', import.meta.url).href,
+        initModule: new URL(
+          '../../../../tests/runtime/python/pyodide/fixtures/capability.ts',
+          import.meta.url,
+        ).href,
         autoLoadFromImports: false,
       },
     }),

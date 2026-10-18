@@ -257,9 +257,9 @@ It spends no approval, records no question and never reaches the human, so it is
 A mount is not limited to the builtin VFS (`ram`, `s3`, `slack`, `redis`, ...). Register your own VFS factory host-side and its name becomes usable in a `mounts` block exactly like a builtin:
 
 ```ts
-import { registerVfsFactory } from '@struktoai/mirage-node'
+import { registerVfs } from '@struktoai/mirage-node'
 
-registerVfsFactory('acme', (config) => new AcmeVFS(config))
+registerVfs('acme', (config) => new AcmeVFS(config))
 ```
 
 ```yaml

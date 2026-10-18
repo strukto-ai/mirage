@@ -17,7 +17,7 @@ import { GitHubAccount } from '../../../../accessor/github.ts'
 import type * as IssueModule from '../../../../core/github/issue.ts'
 import type { Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { context } from '../../../../workspace/fixtures/context.ts'
+import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 
 const FIELDS = vi.fn<typeof IssueModule.issueFields>()
 const LIST = vi.fn<typeof IssueModule.listIssueFields>()

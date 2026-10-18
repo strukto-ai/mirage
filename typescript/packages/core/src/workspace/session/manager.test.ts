@@ -679,7 +679,7 @@ it.each([false, true])(
     manager.defaultProfile = original
     await manager.flush()
     const session = manager.get('default')
-    const before = session.toJSON()
+    const before = session.toDict()
     const persisted = await store.load()
     let enter = (): void => undefined
     let resume = (): void => undefined
@@ -703,14 +703,14 @@ it.each([false, true])(
     )
     try {
       await entered
-      expect(session.toJSON()).toEqual(before)
+      expect(session.toDict()).toEqual(before)
       expect(manager.commandsOf('')).toEqual(original.policies.commands)
       expect(manager.scriptsOf('')).toEqual(original.policies.scripts)
       session.cwd = '/changed-during-write'
       resume()
       if (failure) {
         expect(await updating).toEqual(new Error('store unavailable'))
-        expect(session.toJSON()).toEqual({ ...before, cwd: session.cwd })
+        expect(session.toDict()).toEqual({ ...before, cwd: session.cwd })
         expect(await store.load()).toEqual(persisted)
         expect(manager.commandsOf('')).toEqual(original.policies.commands)
         expect(manager.scriptsOf('')).toEqual(original.policies.scripts)
@@ -724,7 +724,7 @@ it.each([false, true])(
       expect(session.cwd).toBe('/changed-during-write')
       spy.mockRestore()
       await manager.flush()
-      expect((await store.load()).get('default')).toEqual(session.toJSON())
+      expect((await store.load()).get('default')).toEqual(session.toDict())
     } finally {
       resume()
       await updating

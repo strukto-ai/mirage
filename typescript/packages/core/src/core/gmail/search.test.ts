@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Handed } from '../../vfs/types.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
 import { GmailVFS } from '../../vfs/gmail/gmail.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 

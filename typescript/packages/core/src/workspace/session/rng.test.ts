@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { makeIntegrationWS } from '../fixtures/integration_fixture.ts'
+import { makeIntegrationWS } from '../../../tests/workspace/fixtures/integration_fixture.ts'
 import { RANDOM, RANDOM_MAX, RANDOM_UNSET } from '../../shell/constants.ts'
 import { makeVar, type ShellVar } from '../../shell/variable.ts'
 import { SessionState } from './session.ts'

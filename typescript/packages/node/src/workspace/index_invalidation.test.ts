@@ -17,7 +17,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { DiskVFS } from '../vfs/disk/disk.ts'
-import { tmpRoot } from '../test-utils.ts'
+import { tmpRoot } from '../../tests/test-utils.ts'
 import { Workspace } from '../workspace.ts'
 
 // Disk carries a 60s index TTL, so a cached directory listing outlives a

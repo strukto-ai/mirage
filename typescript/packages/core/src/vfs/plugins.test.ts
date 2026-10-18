@@ -23,7 +23,11 @@ import { write } from '../core/ram/write.ts'
 import { eacces } from '../errors/fs.ts'
 import { type FileStat, MountMode, PathSpec } from '../types.ts'
 import { sliceWindow } from '../utils/ranges.ts'
-import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
+import {
+  getTestParser,
+  stderrStr,
+  stdoutStr,
+} from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { BaseVFS } from './base.ts'
 import { RAMVFS } from './ram/ram.ts'

@@ -21,7 +21,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { Workspace } from '../../workspace.ts'
 import { S3VFS } from './s3.ts'
 import type { S3Config } from './config.ts'
-import { installS3Mock, type S3Mock } from './mock.ts'
+import { installS3Mock, type S3Mock } from '../../../tests/vfs/s3/mock.ts'
 
 const DATA_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

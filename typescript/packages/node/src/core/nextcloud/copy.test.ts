@@ -2,7 +2,7 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { dirCopy } from './copy.ts'
-import { ROOT, answering, multistatus } from './mock.ts'
+import { ROOT, answering, multistatus } from '../../../tests/core/nextcloud/mock.ts'
 
 afterEach(() => {
   vi.unstubAllGlobals()

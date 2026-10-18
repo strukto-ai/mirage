@@ -16,7 +16,7 @@ import type { FileStat } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { checksum } from './checksum.ts'
 import * as client from './client.ts'
-import { codeOf, handle, ps } from './_test_util.ts'
+import { codeOf, handle, ps } from '../../../tests/core/hf_hub/_test_util.ts'
 import { parseEntry, rowOf } from './tree.ts'
 
 const SHA = 'a'.repeat(64)

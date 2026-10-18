@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { CROSS_MOUNT_PAIRS, makeCrossEnv } from './native_fixture.ts'
+import { CROSS_MOUNT_PAIRS, makeCrossEnv } from '../../tests/commands/native_fixture.ts'
 
 const ENC = new TextEncoder()
 

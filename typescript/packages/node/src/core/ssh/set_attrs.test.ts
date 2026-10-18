@@ -16,7 +16,7 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
 import { setAttrs } from './set_attrs.ts'
 import { stat } from './stat.ts'
-import { makeFakeAccessor, type FakeSftp } from './_test_utils.ts'
+import { makeFakeAccessor, type FakeSftp } from '../../../tests/core/ssh/_test_utils.ts'
 
 const ENC = new TextEncoder()
 

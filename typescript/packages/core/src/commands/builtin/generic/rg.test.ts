@@ -18,7 +18,7 @@ import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import { eacces, enoent } from '../../../errors/fs.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { rgGeneric } from './rg.ts'
 

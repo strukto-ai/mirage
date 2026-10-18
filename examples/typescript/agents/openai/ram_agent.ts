@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { Agent, run } from '@openai/agents'
-import { buildSystemPrompt } from '@struktoai/mirage-agents/openai'
+import { buildSystemPrompt } from '@struktoai/mirage-agents/openai_agents'
 import { configureOpenAIExample } from './config.ts'
 
 loadEnv({

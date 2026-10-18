@@ -27,7 +27,7 @@ import { KeyLock } from '../lock.ts'
 const mutationLocks = new WeakMap<FileCache, KeyLock>()
 
 /** Serialize cache fills with mount ownership changes, including remote writes. */
-export function withCacheMutation<T>(cache: FileCache, fn: () => Promise<T>): Promise<T> {
+export function mutationLock<T>(cache: FileCache, fn: () => Promise<T>): Promise<T> {
   let lock = mutationLocks.get(cache)
   if (lock === undefined) {
     lock = new KeyLock()
@@ -80,7 +80,7 @@ export async function setCached(
   fingerprint: string | null,
   cacheFacts: (path: string) => CacheFacts,
 ): Promise<void> {
-  await withCacheMutation(cache, async () => {
+  await mutationLock(cache, async () => {
     const facts = cacheFacts(path)
     if (!facts.cacheable) return
     if (data.byteLength > cache.cacheLimit) {
@@ -157,7 +157,7 @@ export async function keepVersions(
   }
   if (Object.keys(versions).length === 0) return
   try {
-    await withCacheMutation(cache, () => cache.keepFingerprints(versions))
+    await mutationLock(cache, () => cache.keepFingerprints(versions))
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     const paths = Object.keys(versions).sort(compareCodePoints)

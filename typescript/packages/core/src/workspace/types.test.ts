@@ -33,7 +33,7 @@ describe('ExecutionNode', () => {
       stderr: new TextEncoder().encode('oops'),
       exitCode: 1,
     })
-    expect(n.toJSON()).toEqual({
+    expect(n.toDict()).toEqual({
       command: 'cat /x',
       stderr: 'oops',
       exitCode: 1,
@@ -51,7 +51,8 @@ describe('ExecutionNode', () => {
       durationMs: 2,
     })
     const root = new ExecutionNode({ op: '|', children: [child], records: [rec] })
-    const json = root.toJSON()
+    const json = root.toDict()
+    expect(JSON.parse(JSON.stringify(root))).toEqual(json)
     expect(json.op).toBe('|')
     expect(json.children).toHaveLength(1)
     expect(json.records).toHaveLength(1)

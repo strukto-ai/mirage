@@ -27,7 +27,7 @@ import {
   spec,
   TEST_ROOT,
   type FetchCall,
-} from './_test_util.ts'
+} from '../../../tests/core/databricks_volume/_test_util.ts'
 
 afterEach(() => {
   vi.unstubAllGlobals()

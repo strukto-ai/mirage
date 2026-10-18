@@ -29,7 +29,7 @@ import {
   FakeGraph,
   SITE_NAME,
   serveGraph,
-} from '../../core/msgraph/_test_util.ts'
+} from '../../../tests/core/msgraph/_test_util.ts'
 import { Workspace } from '../../workspace.ts'
 import { buildVfs } from '../registry.ts'
 

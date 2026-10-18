@@ -1,5 +1,5 @@
 {
-  "baseline": 3372,
+  "baseline": 3301,
  "modules": {
   "core/api/client": {
    "typescript_only": {
@@ -834,6 +834,24 @@
     "callerFilesOf": "TypeScript has no package-private: Files assigns it from its static block so withCaller reaches the private forCaller.",
     "namespaceOfFiles": "TypeScript has no package-private: Files assigns it from its static block so namespaceOf reaches the private members; Python's namespace_of reads them directly.",
     "withCaller": "The door to the private forCaller for the file tool and explain.vfs; Python's task context carries the caller instead, so it has no counterpart."
+   }
+  },
+  "agents/openai_agents/editor": {
+   "typescript_only": {
+    "ensureParent": "JavaScript Editor creates parent directories through VFS calls; the Python Editor runs mkdir -p through the workspace."
+   }
+  },
+  "agents/openai_agents/sandbox": {
+   "python_only": {
+    "shell_line": "Python SDK accepts argv or a shell command; this converts that input to a line. The JavaScript SDK passes a command string directly."
+   },
+   "typescript_only": {
+    "Line": "Tracks promise completion and cancellation for the JavaScript SDK. Python keeps asyncio Tasks and uses the SDK BaseSandboxSession.",
+    "LineOutcome": "Local promise-result shape; Python uses the SDK ExecResult type.",
+    "errorText": "JavaScript catch values are unknown and need conversion to a message; Python uses str(exception).",
+    "isSdkDefaultManifest": "Recognizes the JavaScript SDK default Manifest fields before selecting the Mirage root; the Python SDK creates its own session state.",
+    "mirageManifest": "Adapts the JavaScript SDK default manifest root while preserving user manifests; Python uses its SDK session-state creation path.",
+    "settleWithin": "Promise timeout helper with timer cleanup; Python uses asyncio task waiting."
    }
   }
  }

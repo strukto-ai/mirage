@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { PathSpec } from '../../../types.ts'
 import { eisdir, enoent } from '../../../errors/fs.ts'

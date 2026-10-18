@@ -758,7 +758,7 @@ async function runArgv(
           ...ctx,
           exitCode: io.exitCode,
           stderr: new TextDecoder().decode(stderr),
-          records: mine.map((r) => r.toJSON()),
+          records: mine.map((r) => r.toDict()),
         },
         claimant,
         signal,

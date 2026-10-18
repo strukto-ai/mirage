@@ -22,7 +22,7 @@ pnpm add @struktoai/mirage-agents @struktoai/mirage-node @mastra/core
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { Agent } from '@mastra/core/agent'
 import { mirageTools } from '@struktoai/mirage-agents/mastra'
-import { buildSystemPrompt } from '@struktoai/mirage-agents/openai'
+import { buildSystemPrompt } from '@struktoai/mirage-agents/openai_agents'
 
 const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 

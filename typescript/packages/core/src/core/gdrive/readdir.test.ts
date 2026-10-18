@@ -22,8 +22,8 @@ vi.mock('../google/drive.ts', async () => {
 
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { DirListing, FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
-import { GDriveVFS } from '../../vfs/gdrive/gdrive.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { TokenManager } from '../google/client.ts'
 import * as drive from '../google/drive.ts'
@@ -83,7 +83,7 @@ describe('a stat after the listings drop', () => {
         }),
       ])
     })
-    const vfs = new GDriveVFS({ clientId: 'x', refreshToken: 'y' })
+    const vfs = new GoogleDriveVFS({ clientId: 'x', refreshToken: 'y' })
     Object.assign(vfs, { accessor: makeAccessor() })
     const ws = new Workspace(
       { '/drive/': vfs },

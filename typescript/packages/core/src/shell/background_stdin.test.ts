@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
-import { getTestParser, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 
 // Port of tests/shell/test_background_jobs.py::test_background_does_not_consume_stdin.

@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { getRedirects } from '../helpers.ts'
 import type { TSNodeLike } from '../types.ts'
 import type { ShellParser } from './parse.ts'

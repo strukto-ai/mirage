@@ -17,7 +17,7 @@ import { CommandSpec, Argument } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode, VFSName } from '../types.ts'
-import { getTestParser, stderrStr } from './fixtures/workspace_fixture.ts'
+import { getTestParser, stderrStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { ExecuteResult } from './workspace/workspace.ts'
 import { Workspace } from './workspace/workspace.ts'
 

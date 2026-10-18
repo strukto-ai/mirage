@@ -14,7 +14,11 @@
 
 import { describe, expect, it } from 'vitest'
 import { VarAttr } from '../shell/variable.ts'
-import { makeWorkspace, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
+import {
+  makeWorkspace,
+  stderrStr,
+  stdoutStr,
+} from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { SessionState } from './session/session.ts'
 import { envSnapshot } from './session/state.ts'
 

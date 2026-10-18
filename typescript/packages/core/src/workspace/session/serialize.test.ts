@@ -17,30 +17,30 @@ import { describe, expect, it } from 'vitest'
 import type { CommandRule, AdmissionRules, Decision } from '../../policy/types.ts'
 import { Outcome, Scope } from '../../policy/types.ts'
 import {
-  commandsFromJSON,
-  commandsToJSON,
-  decisionFromJSON,
-  decisionToJSON,
-  ruleFromJSON,
-  ruleToJSON,
+  commandsFromDict,
+  commandsToDict,
+  decisionFromDict,
+  decisionToDict,
+  ruleFromDict,
+  ruleToDict,
 } from './serialize.ts'
 
 describe('session record codecs', () => {
   it('a rule round-trips and writes mount only when set', () => {
     const bare: CommandRule = { reason: 'no', commands: ['rm'] }
-    const data = ruleToJSON(bare)
+    const data = ruleToDict(bare)
     expect(data).toEqual({ reason: 'no', commands: ['rm'], paths: [] })
-    expect(ruleFromJSON(data)).toEqual({ reason: 'no', commands: ['rm'], paths: [], mount: '' })
+    expect(ruleFromDict(data)).toEqual({ reason: 'no', commands: ['rm'], paths: [], mount: '' })
     const scoped: CommandRule = {
       reason: 'ro',
       commands: ['git push'],
       paths: ['/repo/*'],
       mount: '/repo',
     }
-    expect(ruleToJSON(scoped).mount).toBe('/repo')
-    expect(ruleFromJSON(ruleToJSON(scoped))).toEqual(scoped)
+    expect(ruleToDict(scoped).mount).toBe('/repo')
+    expect(ruleFromDict(ruleToDict(scoped))).toEqual(scoped)
     // A record written before a field existed reads with the default.
-    expect(ruleFromJSON({ reason: 'x' })).toEqual({
+    expect(ruleFromDict({ reason: 'x' })).toEqual({
       reason: 'x',
       commands: [],
       paths: [],
@@ -54,15 +54,15 @@ describe('session record codecs', () => {
       ask: [{ reason: 'sign-off', commands: ['git push'], paths: [], mount: '' }],
       deny: [{ reason: 'no', commands: ['rm'], paths: [], mount: '' }],
     }
-    expect(commandsFromJSON(commandsToJSON(spec))).toEqual(spec)
+    expect(commandsFromDict(commandsToDict(spec))).toEqual(spec)
     const unlisted: AdmissionRules = {
       allow: null,
       ask: [],
       deny: [{ reason: 'x', commands: [], paths: [], mount: '' }],
     }
-    const data = commandsToJSON(unlisted)
+    const data = commandsToDict(unlisted)
     expect(data.allow).toBeNull()
-    expect(commandsFromJSON(data)).toEqual(unlisted)
+    expect(commandsFromDict(data)).toEqual(unlisted)
   })
 
   it('a decision round-trips', () => {
@@ -80,11 +80,11 @@ describe('session record codecs', () => {
       scope: Scope.SESSION,
       note: 'ok',
     }
-    expect(decisionFromJSON(decisionToJSON(record))).toEqual(record)
+    expect(decisionFromDict(decisionToDict(record))).toEqual(record)
     // A record still waiting has no outcome.
     const waiting: Decision = { ...record, id: 'd2', outcome: null, scope: Scope.ONCE, note: '' }
-    expect(decisionFromJSON(decisionToJSON(waiting))).toEqual(waiting)
-    expect(decisionToJSON(record).outcome).toBe('allow')
-    expect(decisionToJSON(record).scope).toBe('session')
+    expect(decisionFromDict(decisionToDict(waiting))).toEqual(waiting)
+    expect(decisionToDict(record).outcome).toBe('allow')
+    expect(decisionToDict(record).scope).toBe('session')
   })
 })

@@ -57,7 +57,7 @@ export class DiskRecordClient {
     this.dir = path.join(root, prefix)
   }
 
-  recordPath(name: string): string {
+  path(name: string): string {
     return path.join(this.dir, `${quoteName(name)}.json`)
   }
 
@@ -66,7 +66,7 @@ export class DiskRecordClient {
   async get(name: string): Promise<[Record<string, unknown> | null, string]> {
     let body: Buffer
     try {
-      body = await readFile(this.recordPath(name))
+      body = await readFile(this.path(name))
     } catch (e) {
       if (isMissing(e)) return [null, '']
       throw e
@@ -76,7 +76,7 @@ export class DiskRecordClient {
 
   async put(name: string, fields: Record<string, unknown>): Promise<void> {
     await mkdir(this.dir, { recursive: true })
-    await this.writeRecord(this.recordPath(name), fields)
+    await this.writeRecord(this.path(name), fields)
   }
 
   /**
@@ -92,7 +92,7 @@ export class DiskRecordClient {
     expectedGeneration: number,
   ): Promise<boolean> {
     await mkdir(this.dir, { recursive: true })
-    const target = this.recordPath(name)
+    const target = this.path(name)
     const lockPath = `${target}.lock`
     let fh = await this.acquireLock(lockPath)
     if (fh === null) {
@@ -126,7 +126,7 @@ export class DiskRecordClient {
   async delete(names: Iterable<string>): Promise<void> {
     for (const name of names) {
       try {
-        await unlink(this.recordPath(name))
+        await unlink(this.path(name))
       } catch (e) {
         // Delete promises absence; already-absent is success.
         if (!isMissing(e)) throw e
@@ -152,7 +152,7 @@ export class DiskRecordClient {
    */
   async lock(name: string): Promise<FileHandle> {
     await mkdir(this.dir, { recursive: true })
-    const lockPath = `${this.recordPath(name)}.lock`
+    const lockPath = `${this.path(name)}.lock`
     for (let i = 0; i < LOCK_RETRY_LIMIT; i++) {
       const fh = await this.acquireLock(lockPath)
       if (fh !== null) return fh
@@ -163,7 +163,7 @@ export class DiskRecordClient {
   }
 
   async unlock(name: string, fh: FileHandle): Promise<void> {
-    await this.releaseLock(fh, `${this.recordPath(name)}.lock`)
+    await this.releaseLock(fh, `${this.path(name)}.lock`)
   }
 
   // O_CREAT|O_EXCL ('wx'): filesystem-atomic mutex, the git protocol.

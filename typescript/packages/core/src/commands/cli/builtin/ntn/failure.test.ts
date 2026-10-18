@@ -19,7 +19,7 @@ import type { CLI, CLIHandler } from '../../types.ts'
 import { NTN } from './index.ts'
 import { GUARDED, HintedAPIError, apiFailure, guarded, sourceHint } from './failure.ts'
 import { ntnAccessor } from './util.ts'
-import { context } from '../../../../workspace/fixtures/context.ts'
+import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 
 const DEC = new TextDecoder()
 const ACCESSOR = ntnAccessor({ apiKey: 'k' })

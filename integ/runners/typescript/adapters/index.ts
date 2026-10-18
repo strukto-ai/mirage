@@ -45,7 +45,7 @@ import {
   DropboxVFS,
   EmailVFS,
   GDocsVFS,
-  GDriveVFS,
+  GoogleDriveVFS,
   GmailVFS,
   GCalVFS,
   GCSVFS,
@@ -116,7 +116,7 @@ import pg from 'pg'
 import {
   installFakeNavigator,
   makeMockRoot,
-} from '../../../../typescript/packages/browser/src/test-utils.ts'
+} from '../../../../typescript/packages/browser/tests/test-utils.ts'
 import { integRoot, walkFiles } from '../harness.ts'
 import { commit as hubCommit } from '@struktoai/mirage-node/core/hf_hub/commit'
 import type { Mount, Target } from '../harness.ts'
@@ -1954,13 +1954,13 @@ async function openGws(target: Target, options?: OpenOptions): Promise<Open> {
   const build = (): MountMap => {
     const mounts: Record<
       string,
-      GDriveVFS | GDocsVFS | GSheetsVFS | GSlidesVFS | GmailVFS | RAMVFS
+      GoogleDriveVFS | GDocsVFS | GSheetsVFS | GSlidesVFS | GmailVFS | RAMVFS
     > = {}
     for (const m of target.mounts) {
       if (m.vfs === 'ram') mounts[m.path] = new RAMVFS()
       else if (m.vfs !== 'gdrive') mounts[m.path] = gwsNativeVfs(m.vfs, base, m.config)
       else
-        mounts[m.path] = new GDriveVFS({
+        mounts[m.path] = new GoogleDriveVFS({
           clientId: 'integ',
           clientSecret: 'integ',
           refreshToken: GWS_TOKEN,
@@ -2365,7 +2365,7 @@ const ARG_ERROR_VFS: Record<string, () => BaseVFS> = {
       maxMessages: 200,
     }),
   gdocs: () => new GDocsVFS({ clientId: 'c', refreshToken: 'r' }),
-  gdrive: () => new GDriveVFS({ clientId: 'c', refreshToken: 'r' }),
+  gdrive: () => new GoogleDriveVFS({ clientId: 'c', refreshToken: 'r' }),
   gmail: () => new GmailVFS({ clientId: 'c', refreshToken: 'r' }),
   gsheets: () => new GSheetsVFS({ clientId: 'c', refreshToken: 'r' }),
   gslides: () => new GSlidesVFS({ clientId: 'c', refreshToken: 'r' }),

@@ -15,13 +15,13 @@
 import { WorkspaceBinding } from '../../binding.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
-import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { describe, expect, it } from 'vitest'
 import { QuickJsRuntime } from './runtime.ts'
 import { PrefixResolver } from '../../resolver.ts'
 import type { BridgeDispatchFn, RunResult } from '../../types.ts'
-import { context } from '../../../workspace/fixtures/context.ts'
+import { context } from '../../../../tests/workspace/fixtures/context.ts'
 
 const DEC = new TextDecoder()
 

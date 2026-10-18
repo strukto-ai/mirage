@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { runWithRecording } from '@struktoai/mirage-core/observe/context'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { spec, tmpRoot } from '../../test-utils.ts'
+import { spec, tmpRoot } from '../../../tests/test-utils.ts'
 import { read, readRange } from './read.ts'
 
 let root: string

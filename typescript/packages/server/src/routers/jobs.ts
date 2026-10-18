@@ -40,7 +40,7 @@ interface JobDetailDict extends JobBriefDict {
   error: string | null
 }
 
-function toDetailDict(entry: ExecutionRecord): JobDetailDict {
+function toDetail(entry: ExecutionRecord): JobDetailDict {
   const brief = toBriefDict(entry)
   return { ...brief, result: entry.result, error: entry.error }
 }
@@ -69,7 +69,7 @@ export function registerJobsRoutes(app: FastifyInstance, deps: JobsRoutesDeps): 
   app.get<{ Params: JobIdParams }>('/v1/jobs/:id', async (req, reply) => {
     const entry = await reachable(req.params.id, req.account)
     if (entry === null) return reply.status(404).send({ detail: 'job not found' })
-    return toDetailDict(entry)
+    return toDetail(entry)
   })
 
   app.post<{ Params: JobIdParams; Body: WaitBody | null }>(
@@ -79,7 +79,7 @@ export function registerJobsRoutes(app: FastifyInstance, deps: JobsRoutesDeps): 
       if ((await reachable(id, req.account)) === null)
         return reply.status(404).send({ detail: 'job not found' })
       const entry = await deps.jobs.wait(id, req.body?.timeout_s)
-      return toDetailDict(entry)
+      return toDetail(entry)
     },
   )
 

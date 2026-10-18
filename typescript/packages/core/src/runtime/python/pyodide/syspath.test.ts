@@ -18,7 +18,7 @@ import { PrefixResolver } from '../../resolver.ts'
 import { PathSpec } from '../../../types.ts'
 import { PyodideRuntime } from './runtime.ts'
 import type { BridgeDispatchFn, Program } from '../../types.ts'
-import { context } from '../../../workspace/fixtures/context.ts'
+import { context } from '../../../../tests/workspace/fixtures/context.ts'
 
 const EMPTY_MOUNT: BridgeDispatchFn = (op) =>
   Promise.resolve(op === 'readdir' ? [] : new Uint8Array())

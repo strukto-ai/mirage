@@ -39,7 +39,7 @@ import type { ExecuteStringFn } from '../builtins/types.ts'
 import { runAsShell } from '../../../context/session_context.ts'
 import type { Result } from './types.ts'
 
-export async function executeShellFunction(
+export async function runShellFunction(
   executeNode: ExecuteNodeFn,
   cmdName: string,
   source: string,

@@ -16,7 +16,7 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { checksum } from './checksum.ts'
-import { ROOT, answering, multistatus } from './mock.ts'
+import { ROOT, answering, multistatus } from '../../../tests/core/nextcloud/mock.ts'
 
 const SHA1 = 'a'.repeat(40)
 const MD5 = 'b'.repeat(32)

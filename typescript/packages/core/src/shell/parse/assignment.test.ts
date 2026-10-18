@@ -1,5 +1,5 @@
 import { assert, expect, it } from 'vitest'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 it.each([
   'value=x 2>/dev/null; echo done',

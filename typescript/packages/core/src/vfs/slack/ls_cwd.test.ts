@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { FakeSlackTransport, makeFakeVfs } from './_test_util.ts'
+import { FakeSlackTransport, makeFakeVfs } from '../../../tests/vfs/slack/_test_util.ts'
 
 // Regression guard for the Python-side bug fixed in PR #48: `ls` (no args)
 // after `cd /slack/...` would return [] because the cwd PathSpec was rebuilt

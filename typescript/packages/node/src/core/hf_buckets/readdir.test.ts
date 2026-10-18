@@ -16,7 +16,7 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { describe, expect, it } from 'vitest'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
-import { fakeHfOperator, installFakeOperator } from './mock.ts'
+import { fakeHfOperator, installFakeOperator } from '../../../tests/core/hf_buckets/mock.ts'
 import { readdir as listStats } from './readdir.ts'
 
 async function readdir(accessor: HfBucketsAccessor, path: PathSpec): Promise<string[]> {

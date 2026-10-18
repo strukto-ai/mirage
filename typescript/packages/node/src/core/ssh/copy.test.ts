@@ -17,7 +17,11 @@ import type { SFTPWrapper } from 'ssh2'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { copy, dirCopy } from './copy.ts'
 import { exists } from './exists.ts'
-import { makeFakeAccessor, RunAccessor, type RunAnswer } from './_test_utils.ts'
+import {
+  makeFakeAccessor,
+  RunAccessor,
+  type RunAnswer,
+} from '../../../tests/core/ssh/_test_utils.ts'
 import { read } from './read.ts'
 
 function spec(p: string): PathSpec {

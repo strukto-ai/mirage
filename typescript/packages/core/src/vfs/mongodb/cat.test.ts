@@ -20,7 +20,7 @@ vi.mock('../../core/mongodb/stat.ts', () => ({
 }))
 
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import { stubMongoDriver } from '../../core/mongodb/_test_util.ts'
+import { stubMongoDriver } from '../../../tests/core/mongodb/_test_util.ts'
 import * as statModule from '../../core/mongodb/stat.ts'
 import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
 import { PathSpec } from '../../types.ts'

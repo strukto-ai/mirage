@@ -27,7 +27,7 @@ import {
   restoreStatus,
   snapshotStatus,
 } from './statement.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const decode = (b: Uint8Array | null): string => new TextDecoder().decode(b ?? new Uint8Array())
 

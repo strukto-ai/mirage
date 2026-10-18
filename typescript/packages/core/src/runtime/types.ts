@@ -44,7 +44,7 @@ export interface CommandRuntime {
  * and eval). A union, not string, so a typo is a type error instead of
  * a selector that silently matches nothing and reports "no runtime".
  */
-export type RuntimeLanguage = 'python' | 'js'
+export type Language = 'python' | 'js'
 
 /**
  * Which entry points code executed by a runtime has to the outside world.
@@ -243,7 +243,7 @@ export type FilesystemOperation = 'read' | 'write' | 'list' | 'stat' | 'glob'
 
 /** Derived execution support; reach remains a separate guarantee. */
 export interface RuntimeCapabilities {
-  readonly languages: readonly RuntimeLanguage[]
+  readonly languages: readonly Language[]
   readonly shell: boolean
   readonly process: boolean
   readonly reach: RuntimeReach
@@ -270,7 +270,7 @@ export class ScriptSource {
    */
   constructor(
     readonly source: string,
-    readonly language: RuntimeLanguage = 'python',
+    readonly language: Language = 'python',
     readonly module = false,
   ) {}
 }

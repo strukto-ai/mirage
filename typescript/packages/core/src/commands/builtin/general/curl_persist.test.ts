@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BaseVFS } from '../../../vfs/base.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
-import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
 const ENC = new TextEncoder()

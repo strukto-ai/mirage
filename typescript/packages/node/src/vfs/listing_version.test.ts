@@ -25,10 +25,10 @@ import type { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { Reconciler } from '@struktoai/mirage-core/workspace/reconcile'
 import { Workspace as NodeWorkspace } from '../workspace.ts'
-import { FakeHub, serveHub } from '../core/hf_hub/_test_util.ts'
+import { FakeHub, serveHub } from '../../tests/core/hf_hub/_test_util.ts'
 import * as diskUtils from '../core/disk/utils.ts'
 import { DiskVFS } from './disk/disk.ts'
-import { InlineGitHub } from './fixtures/github.ts'
+import { InlineGitHub } from '../../tests/vfs/fixtures/github.ts'
 import { buildVfs, knownVfsNames } from './registry.ts'
 
 vi.mock('../core/disk/utils.ts', async (importOriginal) => {

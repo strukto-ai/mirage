@@ -17,7 +17,7 @@ import { publishRead } from '../../cache/context.ts'
 import { record, revisionFor, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
-import { createS3Client, isNotFoundError, loadS3Module, s3Key, streamToBuffer } from './client.ts'
+import { createS3Client, isNotFound, loadS3Module, s3Key, streamToBuffer } from './client.ts'
 import { enoent } from '../../errors/fs.ts'
 import { rangeHeader } from '../../utils/ranges.ts'
 
@@ -84,7 +84,7 @@ export async function read(
     if (range === null) publishRead(virtual, bytes, fingerprint)
     return bytes
   } catch (err) {
-    if (isNotFoundError(err)) {
+    if (isNotFound(err)) {
       throw enoent(path)
     }
     throw err

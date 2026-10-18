@@ -20,7 +20,7 @@ import { PythonRuntime } from '../../runtime/python/base.ts'
 import type { Program, RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace.ts'
 
 const ENC = new TextEncoder()

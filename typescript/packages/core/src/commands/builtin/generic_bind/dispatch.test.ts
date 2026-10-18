@@ -27,7 +27,7 @@ import type { Handed } from '../../../vfs/types.ts'
 import { eacces } from '../../../errors/fs.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 it('reads the output inside the running command', async () => {
   // A fresh mount trusts only the listings the running command made, so a

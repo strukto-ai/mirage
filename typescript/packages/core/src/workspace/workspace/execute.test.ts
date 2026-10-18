@@ -30,7 +30,7 @@ import {
   type Mark,
   stderrStr,
   stdoutStr,
-} from '../fixtures/workspace_fixture.ts'
+} from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace.ts'
 
 const ENC = new TextEncoder()

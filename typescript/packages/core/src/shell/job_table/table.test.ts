@@ -96,7 +96,7 @@ function gatedJob(table: JobTable, gate: Promise<void>): Job {
     console: new JobConsole(new GatedStore(gate)),
     task: new Promise<void>(() => undefined),
   })
-  table.loadJob(job)
+  table.load(job)
   return job
 }
 
@@ -244,7 +244,7 @@ describe('JobTable.wait', () => {
     const jt = new JobTable()
     const j = new Job({ id: 99, command: 'a', cwd: '/' })
     j.status = JobStatus.COMPLETED
-    jt.loadJob(j)
+    jt.load(j)
     const result = await jt.wait(99)
     expect(result).toBe(j)
   })
@@ -493,7 +493,7 @@ describe('JobTable per-session scoping', () => {
       sessionId: 'a',
       console: new JobConsole(),
     })
-    jt.loadJob(restored)
+    jt.load(restored)
     expect(jt.get(3, 'a')).toBe(restored)
     expect(jt.get(3)).toBeNull()
     expect(live(jt, 'a').id).toBe(4)

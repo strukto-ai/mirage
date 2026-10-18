@@ -27,7 +27,7 @@ import { Limit, MountMode, PathSpec } from '../../../types.ts'
 import type { RAMAccessor } from '../../../accessor/ram.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { parseSessionProfile } from '../../../policy/profile.ts'
-import { getTestParser } from '../../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { CLIRegistry } from '../../cli/registry.ts'
 import { MountEntry } from '../../mount/mount.ts'
@@ -39,7 +39,7 @@ import { PythonRuntime } from '../../../runtime/python/base.ts'
 import { Runtime } from '../../../runtime/base.ts'
 import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import { noWorker } from '../../../runtime/python/pyodide/errors.ts'
-import type { Program, RunResult, RuntimeLanguage } from '../../../runtime/types.ts'
+import type { Program, RunResult, Language } from '../../../runtime/types.ts'
 import { SessionState } from '../../session/session.ts'
 import { dropsMountCaches, handleCli } from './cli.ts'
 import { NOOPAccessor } from '../../../accessor/base.ts'
@@ -355,7 +355,7 @@ describe('handleCli', () => {
 
 class FakePyRuntime extends LanguageRuntime {
   readonly name: string = 'fakepy'
-  readonly language: RuntimeLanguage = 'python'
+  readonly language: Language = 'python'
   seen: (Context & Program)[] = []
   result: RunResult = { stdout: new TextEncoder().encode('ran\n'), stderr: null, exitCode: 0 }
 
@@ -394,7 +394,7 @@ class OtherPyRuntime extends FakePyRuntime {
 
 class FakeJsRuntime extends FakePyRuntime {
   override readonly name = 'fakejs'
-  override readonly language: RuntimeLanguage = 'js'
+  override readonly language: Language = 'js'
 }
 
 class CrashingRuntime extends FakePyRuntime {
@@ -427,7 +427,7 @@ function scriptInstall(
   opts: {
     runtime?: string | null
     config?: Record<string, unknown> | null
-    language?: RuntimeLanguage
+    language?: Language
     options?: Argument[]
   } = {},
 ): CLIInstall {

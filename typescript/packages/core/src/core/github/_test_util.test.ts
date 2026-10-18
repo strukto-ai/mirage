@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { BASE, FakeGitHub } from './_test_util.ts'
+import { BASE, FakeGitHub } from '../../../tests/core/github/_test_util.ts'
 
 const HEX40 = /^[0-9a-f]{40}$/
 

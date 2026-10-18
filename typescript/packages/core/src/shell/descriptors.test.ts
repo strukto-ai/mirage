@@ -17,7 +17,7 @@ import { FD_BOTH, FD_CLOSE } from './constants.ts'
 import { badDescriptorLine, unsupportedDescriptor } from './descriptors.ts'
 import { getRedirects } from './helpers.ts'
 import { RedirectKind, type Redirect, type TSNodeLike } from './types.ts'
-import { getTestParser } from '../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 
 async function redirects(line: string): Promise<Redirect[]> {
   const parser = await getTestParser()

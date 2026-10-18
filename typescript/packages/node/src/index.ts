@@ -326,7 +326,7 @@ export {
   type GSlidesConfig,
   type GSlidesConfigRedacted,
 } from '@struktoai/mirage-core/vfs/gslides/config'
-export { GDriveVFS, type GDriveVFSState } from '@struktoai/mirage-core/vfs/gdrive/gdrive'
+export { GoogleDriveVFS, type GDriveVFSState } from '@struktoai/mirage-core/vfs/gdrive/gdrive'
 export {
   normalizeGDriveConfig,
   redactGDriveConfig,
@@ -390,12 +390,7 @@ export { AppleContainerRuntime } from './runtime/sandbox/apple_container/runtime
 export type { AppleContainerConfig } from './runtime/sandbox/apple_container/config.ts'
 export { SSHRuntime } from './runtime/sandbox/ssh/runtime.ts'
 export type { SSHRuntimeConfig } from './runtime/sandbox/ssh/config.ts'
-export {
-  buildVfs,
-  knownVfsNames,
-  register as registerVfsFactory,
-  type VFSFactory,
-} from './vfs/registry.ts'
+export { buildVfs, knownVfsNames, registerVfs, type VFSFactory } from './vfs/registry.ts'
 export { MODULE_SUFFIXES, isModulePath, loadAttr, splitRef } from './vfs/loader.ts'
 export {
   absolutizeScripts,

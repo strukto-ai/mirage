@@ -78,13 +78,17 @@ export class ExecutionNode {
   }
 
   toJSON(): Record<string, unknown> {
+    return this.toDict()
+  }
+
+  toDict(): Record<string, unknown> {
     const d: Record<string, unknown> = {}
     if (this.command !== null) d.command = this.command
     if (this.op !== null) d.op = this.op
     d.stderr = new TextDecoder('utf-8', { fatal: false }).decode(this.stderr)
     d.exitCode = this.exitCode
-    if (this.children.length > 0) d.children = this.children.map((c) => c.toJSON())
-    if (this.records.length > 0) d.records = this.records.map((r) => r.toJSON())
+    if (this.children.length > 0) d.children = this.children.map((c) => c.toDict())
+    if (this.records.length > 0) d.records = this.records.map((r) => r.toDict())
     return d
   }
 }

@@ -18,7 +18,7 @@ import { DiscordAccessor } from '../../accessor/discord.ts'
 import { PathSpec } from '../../types.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
 import { makeResolveGlob } from '../../utils/glob_walk.ts'
-import { mountDiscord } from '../../workspace/fixtures/chat_fixture.ts'
+import { mountDiscord } from '../../../tests/workspace/fixtures/chat_fixture.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
 import { readdir as discordReaddir } from './readdir.ts'
 

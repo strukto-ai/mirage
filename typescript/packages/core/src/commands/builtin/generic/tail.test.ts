@@ -33,7 +33,7 @@ import { record, startOp } from '../../../observe/context.ts'
 import { Channel } from '../../../shell/console/index.ts'
 import type { Job } from '../../../shell/job_table/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
 const ENC = new TextEncoder()

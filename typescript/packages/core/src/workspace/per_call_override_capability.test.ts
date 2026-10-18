@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { makeWorkspace, stdoutStr } from './fixtures/workspace_fixture.ts'
+import { makeWorkspace, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 
 // `Workspace.shell({cwd, env})` constructs a new Session via
 // `targetSession.fork({...})`. fork() must propagate hiddenPaths so the

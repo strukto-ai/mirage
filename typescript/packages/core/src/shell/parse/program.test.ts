@@ -1,5 +1,5 @@
 import { assert, describe, expect, it } from 'vitest'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { getFunctionBody } from '../helpers.ts'
 import { retainPrograms } from './program.ts'
 

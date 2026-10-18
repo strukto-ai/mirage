@@ -27,7 +27,7 @@ import { sessionEntry } from '../../../session/session.ts'
 // The kind one layer reports a name as. A function is a function and one
 // of bash's own builtins is a builtin; every other layer runs a program,
 // whose file is the name's under /usr/bin.
-function kindOf(consumer: Consumer, name: string): NameKind {
+function kind(consumer: Consumer, name: string): NameKind {
   if (consumer === Consumer.FUNCTION) return NameKind.FUNCTION
   if (consumer === Consumer.SESSION && BASH_BUILTINS.has(name)) return NameKind.BUILTIN
   return NameKind.FILE
@@ -50,9 +50,9 @@ export function classify(
   if (KEYWORDS.has(name)) return NameKind.KEYWORD
   const consumer = lookup(name, session, registry)
   if (consumer === Consumer.UNKNOWN) return null
-  const kind = kindOf(consumer, name)
-  if (kind === NameKind.FILE && program(name, session, registry) === null) return null
-  return kind
+  const nameKind = kind(consumer, name)
+  if (nameKind === NameKind.FILE && program(name, session, registry) === null) return null
+  return nameKind
 }
 
 /**
@@ -87,9 +87,9 @@ export function classifyAll(
   if (KEYWORDS.has(name)) kinds.push(NameKind.KEYWORD)
   const hasFile = program(name, session, registry) !== null
   for (const consumer of lookupAll(name, session, registry)) {
-    const kind = kindOf(consumer, name)
-    if (kind === NameKind.FILE && !hasFile) continue
-    if (!kinds.includes(kind)) kinds.push(kind)
+    const nameKind = kind(consumer, name)
+    if (nameKind === NameKind.FILE && !hasFile) continue
+    if (!kinds.includes(nameKind)) kinds.push(nameKind)
   }
   if (!kinds.includes(NameKind.FILE) && hasFile) kinds.push(NameKind.FILE)
   return kinds

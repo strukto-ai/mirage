@@ -30,10 +30,10 @@ vi.mock('../../core/github/constants.ts', async () => {
   }
 })
 
-import { blobSha, FakeGitHub } from '../../core/github/_test_util.ts'
+import { blobSha, FakeGitHub } from '../../../tests/core/github/_test_util.ts'
 import type { GitHubTreeItem } from '../../core/github/client.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../ram/ram.ts'

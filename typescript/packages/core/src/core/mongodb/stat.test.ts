@@ -18,7 +18,7 @@ import { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
 import { ContentType, FileType, PathSpec } from '../../types.ts'
 import { stat } from './stat.ts'
-import { stubMongoDriver } from './_test_util.ts'
+import { stubMongoDriver } from '../../../tests/core/mongodb/_test_util.ts'
 
 function ps(p: string): PathSpec {
   return new PathSpec({ virtual: p, directory: p, vfsPath: mountKey(p, '/mongo') })

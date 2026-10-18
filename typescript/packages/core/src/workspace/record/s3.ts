@@ -15,7 +15,7 @@
 import {
   createS3Client,
   isConditionLost,
-  isNotFoundError,
+  isNotFound,
   loadS3Module,
   streamToBuffer,
 } from '../../core/s3/client.ts'
@@ -64,7 +64,7 @@ export class S3RecordClient {
         new mod.GetObjectCommand({ Bucket: this.config.bucket, Key: this.key(name) }),
       )
     } catch (err) {
-      if (isNotFoundError(err)) return [null, '']
+      if (isNotFound(err)) return [null, '']
       throw err
     }
     const body = await streamToBuffer(response.Body)

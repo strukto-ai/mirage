@@ -18,7 +18,7 @@ import type { Policy } from '../../policy/base.ts'
 import type { Action, SessionContext } from '../../policy/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 const DEC = new TextDecoder()

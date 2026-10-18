@@ -19,7 +19,11 @@ import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { type JobResult, type JobRunner, JobStatus, JobTable } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser, stdoutStr, stderrStr } from '../fixtures/workspace_fixture.ts'
+import {
+  getTestParser,
+  stdoutStr,
+  stderrStr,
+} from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { ExecutionNode } from '../types.ts'

@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { CapacityState, MountMode } from '../../../../types.ts'
 import type { CapacityResult } from '../../../../types.ts'
-import { getTestParser } from '../../../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
 
 // RAM backend that reports a fixed quota, standing in for a real filesystem

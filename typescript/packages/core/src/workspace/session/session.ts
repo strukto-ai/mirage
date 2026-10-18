@@ -38,10 +38,10 @@ import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
 import { attrsFromLetters, copyVar, makeVar, storedAttrs, VarAttr } from '../../shell/variable.ts'
 import type { AdmissionRules, Decision, HideReason, ProfileScripts } from '../../policy/types.ts'
 import {
-  commandsFromJSON,
-  commandsToJSON,
-  decisionFromJSON,
-  decisionToJSON,
+  commandsFromDict,
+  commandsToDict,
+  decisionFromDict,
+  decisionToDict,
   scriptsFromJSON,
   scriptsToJSON,
   type CommandsJSON,
@@ -866,6 +866,10 @@ export class SessionState {
    * session, a node kernel tier binds it).
    */
   toJSON(): Record<string, unknown> {
+    return this.toDict()
+  }
+
+  toDict(): Record<string, unknown> {
     // A managed name serializes as its pointer, never its value: a
     // stored session may leak only where a secret lives. `env` skips
     // the name (the fetched plaintext must not land in the record)
@@ -948,18 +952,18 @@ export class SessionState {
         patterns: [...(vis.vars.patterns ?? [])],
       }
     }
-    if (this.commands !== null) data.commands = commandsToJSON(this.commands)
+    if (this.commands !== null) data.commands = commandsToDict(this.commands)
     if (Object.keys(this.scripts).length > 0) data.scripts = scriptsToJSON(this.scripts)
     if (Object.keys(this.commandLimits).length > 0)
       data.command_limits = commandLimitsToJSON(this.commandLimits)
     if (JSON.stringify(this.processes) !== JSON.stringify(DEFAULT_PROCESS_PERMISSIONS))
       data.processes = this.processes
     if (this.profile !== null) data.profile = this.profile
-    if (this.decisions.length > 0) data.decisions = this.decisions.map(decisionToJSON)
+    if (this.decisions.length > 0) data.decisions = this.decisions.map(decisionToDict)
     return data
   }
 
-  static fromJSON(data: {
+  static fromDict(data: {
     session_id: string
     cwd?: string
     env?: Record<string, string>
@@ -982,7 +986,7 @@ export class SessionState {
     readonly_functions?: string[]
     exported_functions?: string[]
   }): SessionState {
-    const commands = data.commands != null ? commandsFromJSON(data.commands) : null
+    const commands = data.commands != null ? commandsFromDict(data.commands) : null
     const processes = parseProcessPermissions(data.processes ?? DEFAULT_PROCESS_PERMISSIONS)
     const vars =
       data.env !== undefined || data.var_attrs !== undefined || data.managed != null
@@ -1033,7 +1037,7 @@ export class SessionState {
       profile: data.profile ?? null,
       commandLimits: parseCommandLimits(data.command_limits),
       processes,
-      decisions: data.decisions != null ? data.decisions.map(decisionFromJSON) : [],
+      decisions: data.decisions != null ? data.decisions.map(decisionFromDict) : [],
     })
     // A recorded session comes back as it was written, so a startup
     // variable it had unset stays unset rather than being seeded again; a

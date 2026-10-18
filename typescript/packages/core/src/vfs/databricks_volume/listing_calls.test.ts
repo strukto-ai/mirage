@@ -20,9 +20,9 @@ import {
   routedFetch,
   TEST_ROOT,
   type FetchCall,
-} from '../../core/databricks_volume/_test_util.ts'
+} from '../../../tests/core/databricks_volume/_test_util.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { DatabricksVolumeVFSBase } from './databricks_volume.ts'
 

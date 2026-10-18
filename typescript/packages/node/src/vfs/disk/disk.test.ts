@@ -24,7 +24,7 @@ import { copy as copyCore } from '../../core/disk/copy.ts'
 import { exists as existsCore } from '../../core/disk/exists.ts'
 import { rmR as rmRCore } from '../../core/disk/rm.ts'
 import { readStream as streamCore } from '../../core/disk/stream.ts'
-import { spec, tmpRoot } from '../../test-utils.ts'
+import { spec, tmpRoot } from '../../../tests/test-utils.ts'
 import { Workspace } from '../../workspace.ts'
 import { DiskVFS } from './disk.ts'
 

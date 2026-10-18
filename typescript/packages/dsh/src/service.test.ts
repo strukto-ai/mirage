@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
-import { LocalRuntime, Workspace, registerVfsFactory } from '@struktoai/mirage-node'
+import { LocalRuntime, Workspace, registerVfs } from '@struktoai/mirage-node'
 import { MirageService } from './service.ts'
 
 describe('MirageService', () => {
@@ -129,7 +129,7 @@ describe('MirageService', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
-    registerVfsFactory('gated-ram', async () => {
+    registerVfs('gated-ram', async () => {
       await gate
       return new RAMVFS()
     })

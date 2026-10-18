@@ -13,7 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { makeIntegrationWS, run, runExit } from './fixtures/integration_fixture.ts'
+import {
+  makeIntegrationWS,
+  run,
+  runExit,
+} from '../../tests/workspace/fixtures/integration_fixture.ts'
 
 describe('readonly', () => {
   it('blocks reassignment', async () => {

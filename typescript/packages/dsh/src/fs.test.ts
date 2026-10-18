@@ -28,7 +28,7 @@ import {
   LocalRuntime,
   Workspace,
   parseSessionProfile,
-  registerVfsFactory,
+  registerVfs,
 } from '@struktoai/mirage-node'
 import { MirageFileSystem } from './fs.ts'
 import type { MirageFsConfig } from './fs.ts'
@@ -533,7 +533,7 @@ describe('cancellation across readiness', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
-    registerVfsFactory('gated-ram-write', async () => {
+    registerVfs('gated-ram-write', async () => {
       await gate
       return new RAMVFS()
     })

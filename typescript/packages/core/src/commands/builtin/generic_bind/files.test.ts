@@ -33,7 +33,7 @@ import {
 } from './files.ts'
 import { runWithRevisions } from '../../../observe/context.ts'
 import { BatchedRAM } from '../../../test-utils.ts'
-import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
 const ENC = new TextEncoder()

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { RedisResourceBase } from '@struktoai/mirage-core/vfs/redis/redis'
+import { RedisVFS as CoreRedisVFS } from '@struktoai/mirage-core/vfs/redis/redis'
 import { UpstashRedisStore, type UpstashRedisStoreOptions } from './store.ts'
 
 export type { RedisVFSState } from '@struktoai/mirage-core/vfs/redis/redis'
@@ -27,7 +27,7 @@ export type RedisVFSOptions = UpstashRedisStoreOptions
  * node and python mounts take, and the keyspace is the one they use, so one
  * configuration and one database serve all three.
  */
-export class RedisVFS extends RedisResourceBase {
+export class RedisVFS extends CoreRedisVFS {
   declare readonly store: UpstashRedisStore
 
   constructor(options: RedisVFSOptions) {

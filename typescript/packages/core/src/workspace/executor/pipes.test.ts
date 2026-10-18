@@ -23,7 +23,7 @@ import { ExecutionNode } from '../types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { handleConnection, handlePipe, handleSubshell } from './pipes.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
-import { makeIntegrationWS } from '../fixtures/integration_fixture.ts'
+import { makeIntegrationWS } from '../../../tests/workspace/fixtures/integration_fixture.ts'
 
 function node(text: string): TSNodeLike {
   return { type: 'command', text, children: [], namedChildren: [], isNamed: true }

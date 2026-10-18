@@ -25,7 +25,7 @@ import { Workspace } from '../../workspace.ts'
 import { DiskVFS } from '../disk/disk.ts'
 import { S3VFS } from './s3.ts'
 import type { S3Config } from './config.ts'
-import { installS3Mock, type S3Mock } from './mock.ts'
+import { installS3Mock, type S3Mock } from '../../../tests/vfs/s3/mock.ts'
 
 type BackendKind = 'ram' | 'disk' | 's3'
 

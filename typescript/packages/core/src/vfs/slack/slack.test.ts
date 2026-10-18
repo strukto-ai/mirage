@@ -2,10 +2,10 @@ import { expect, it, vi } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import { NodeSlackTransport } from '../../core/slack/client.ts'
 import { FileStat, FileType } from '../../types.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { SlackVFSBase } from './slack.ts'
-import { seedChannel } from './_test_util.ts'
+import { seedChannel } from '../../../tests/vfs/slack/_test_util.ts'
 
 it.each([false, true])(
   'aborting cat releases a stalled attachment body (prefix=%s)',

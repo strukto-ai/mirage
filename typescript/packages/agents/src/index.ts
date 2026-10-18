@@ -12,4 +12,4 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export {} // intentionally empty; integrations are accessed via subpath exports (e.g. '@struktoai/mirage-agents/openai')
+export {} // intentionally empty; integrations are accessed via subpath exports (e.g. '@struktoai/mirage-agents/openai_agents')

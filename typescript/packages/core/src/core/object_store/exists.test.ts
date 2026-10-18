@@ -14,7 +14,12 @@
 
 import { describe, expect, it } from 'vitest'
 import { makeExists } from './exists.ts'
-import { FakeAccessor, FakeStore, makeDriver, spec } from './fakes.ts'
+import {
+  FakeAccessor,
+  FakeStore,
+  makeDriver,
+  spec,
+} from '../../../tests/core/object_store/fakes.ts'
 import { makeStat } from './stat.ts'
 
 const accessor = new FakeAccessor()

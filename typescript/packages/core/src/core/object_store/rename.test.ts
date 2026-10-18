@@ -15,7 +15,13 @@
 import { describe, expect, it } from 'vitest'
 import { runWithRecording } from '../../observe/context.ts'
 import { makeExists } from './exists.ts'
-import { codeOf, FakeAccessor, FakeStore, makeDriver, spec } from './fakes.ts'
+import {
+  codeOf,
+  FakeAccessor,
+  FakeStore,
+  makeDriver,
+  spec,
+} from '../../../tests/core/object_store/fakes.ts'
 import { makeRename } from './rename.ts'
 import { makeStat } from './stat.ts'
 

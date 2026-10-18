@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../io/types.ts'
 import { getParts } from '../../shell/helpers.ts'
 import { globPattern, unmarkGlobs } from '../../utils/glob_walk.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { SessionState } from '../session/session.ts'
 import { expandWords } from './parts.ts'
 

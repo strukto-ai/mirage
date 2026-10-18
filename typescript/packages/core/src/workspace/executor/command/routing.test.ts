@@ -20,8 +20,8 @@ import { DeviceInput } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { Workspace } from '../../workspace/workspace.ts'
-import { getTestParser } from '../../fixtures/workspace_fixture.ts'
-import { runResult } from '../../fixtures/integration_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { runResult } from '../../../../tests/workspace/fixtures/integration_fixture.ts'
 import {
   commandWords,
   defaultCwdOperand,

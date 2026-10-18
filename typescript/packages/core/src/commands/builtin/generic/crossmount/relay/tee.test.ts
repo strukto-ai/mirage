@@ -5,7 +5,7 @@ import { MountMode, PathSpec } from '../../../../../types.ts'
 import { enoent } from '../../../../../errors/fs.ts'
 import { RAMVFS } from '../../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { runTee } from './tee.ts'
 
 const DEC = new TextDecoder()

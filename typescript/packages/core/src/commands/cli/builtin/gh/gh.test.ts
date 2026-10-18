@@ -33,7 +33,7 @@ import { PartialOutputError } from '../../../errors.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import { api } from './api.ts'
 import { deleteCmd, editCmd, fork, listCmd, rename, summary, view } from './repo.ts'
-import { context } from '../../../../workspace/fixtures/context.ts'
+import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 
 const DEC = new TextDecoder()
 

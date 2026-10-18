@@ -21,7 +21,7 @@ import {
   type IndexConfig,
   type RedisIndexConfig,
 } from './config.ts'
-import { withCacheMutation } from '../file/io.ts'
+import { mutationLock } from '../file/io.ts'
 import { RAMFileCacheStore } from '../file/ram.ts'
 import { ListingCheckStore, RAMIndexCacheStore } from './ram.ts'
 import { RedisIndexCacheStore } from './redis.ts'
@@ -293,7 +293,7 @@ function holdMutation(cache: RAMFileCacheStore): {
   const gate = new Promise<void>((resolve) => {
     release = resolve
   })
-  const done = withCacheMutation(cache, async () => {
+  const done = mutationLock(cache, async () => {
     enter()
     await gate
   })
@@ -711,7 +711,7 @@ describe('IndexView cleanup after a re-list', () => {
     const done: string[] = []
     const view = new IndexView(new RAMIndexCacheStore(), cache, '/data', () => true, {
       onGone: (gone) =>
-        withCacheMutation(cache, () => {
+        mutationLock(cache, () => {
           done.push(...gone.map((child) => child.path))
           return Promise.resolve()
         }),
@@ -932,7 +932,7 @@ describe('the listing gate', () => {
       expect(await settleWithin(entered, 2000)).toBe('done')
       expect(
         await settleWithin(
-          withCacheMutation(cache, () => Promise.resolve()),
+          mutationLock(cache, () => Promise.resolve()),
           2000,
         ),
       ).toBe('done')

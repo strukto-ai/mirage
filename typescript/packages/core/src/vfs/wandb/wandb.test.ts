@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest'
 import { WandbVFS } from './wandb.ts'
 import { normalizeWandbConfig } from '../../core/wandb/config.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { MountMode } from '../../types.ts'
 
 it('isolates mount scopes and directory indexes', async () => {

@@ -15,7 +15,7 @@
 import { PathSpec } from '../../types.ts'
 import { LanguageRuntime } from '../language.ts'
 import type { Argv0Rules } from '../source.ts'
-import type { RunResult, RuntimeLanguage } from '../types.ts'
+import type { RunResult, Language } from '../types.ts'
 import type { RuntimeOptions } from '../config.ts'
 import { PAYLOAD_ARGV0, STDIN_ARGV0 } from './execution.ts'
 
@@ -75,7 +75,7 @@ export function moduleSource(name: string, label: string): string {
  * this, not LanguageRuntime.
  */
 export abstract class PythonRuntime<E = unknown> extends LanguageRuntime<E> {
-  readonly language: RuntimeLanguage = 'python'
+  readonly language: Language = 'python'
   /** The tier's head words: the class-default captures of every python engine. */
   static override readonly commands: readonly string[] = ['python3', 'python'] as const
   override readonly argv0Rules: Argv0Rules = CPYTHON_ARGV0

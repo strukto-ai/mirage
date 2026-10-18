@@ -17,8 +17,13 @@ import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
-import { makeIntegrationWS, run, runExit, runResult } from '../fixtures/integration_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import {
+  makeIntegrationWS,
+  run,
+  runExit,
+  runResult,
+} from '../../../tests/workspace/fixtures/integration_fixture.ts'
 
 describe('heredoc body expansion', () => {
   it('expands braced vars and command substitutions', async () => {

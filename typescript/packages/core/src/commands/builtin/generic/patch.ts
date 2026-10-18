@@ -47,7 +47,7 @@ function stripName(name: string, stripCount: number): string | null {
 // A `---`/`+++` line's name, and what a reject file says for it: the file
 // as `-p` leaves it (`/dev/null` when it leaves nothing) and the timestamp
 // the header carried. Mirrors Python's _label.
-function labelOf(line: string, stripCount: number): [string, string] {
+function label(line: string, stripCount: number): [string, string] {
   const rest = line.slice(4)
   const tab = rest.indexOf('\t')
   const name = (tab < 0 ? rest : rest.slice(0, tab)).trim()
@@ -181,11 +181,11 @@ function parsePatch(patchText: string, stripCount: number): Section[] {
     const line = lines[index] ?? ''
     index += 1
     if (line.startsWith('--- ')) {
-      oldLabel = labelOf(line, stripCount)[1]
+      oldLabel = label(line, stripCount)[1]
       continue
     }
     if (!line.startsWith('+++ ')) continue
-    const [newName, newLabel] = labelOf(line, stripCount)
+    const [newName, newLabel] = label(line, stripCount)
     const [hunks, next] = parseHunks(lines, index)
     index = next
     const target = stripName(newName, stripCount) ?? newName.slice(newName.lastIndexOf('/') + 1)

@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import type { SFTPWrapper } from 'ssh2'
 import { CapacityState, type CapacityResult } from '@struktoai/mirage-core/types'
 import { capacity } from './capacity.ts'
-import { RunAccessor } from './_test_utils.ts'
+import { RunAccessor } from '../../../tests/core/ssh/_test_utils.ts'
 
 function remote(answer: Error | Record<string, number | bigint>): [RunAccessor, string[]] {
   const asked: string[] = []

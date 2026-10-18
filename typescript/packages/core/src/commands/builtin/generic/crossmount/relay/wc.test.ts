@@ -23,7 +23,7 @@ import type { FlagValue } from '../../../../spec/types.ts'
 import { enoent } from '../../../../../errors/fs.ts'
 import { RAMVFS } from '../../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { CrossResult } from '../types.ts'
 import { runWc } from './wc.ts'
 

@@ -13,7 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { makeIntegrationWS, run, runExit, runResult } from './fixtures/integration_fixture.ts'
+import {
+  makeIntegrationWS,
+  run,
+  runExit,
+  runResult,
+} from '../../tests/workspace/fixtures/integration_fixture.ts'
 
 async function withWS(
   fn: (ws: Awaited<ReturnType<typeof makeIntegrationWS>>['ws']) => Promise<void>,

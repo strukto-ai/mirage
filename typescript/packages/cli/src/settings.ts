@@ -108,7 +108,7 @@ export function loadDaemonSettings(options: LoadOptions = {}): DaemonSettings {
   return settings
 }
 
-function defaultConfigPath(env: Record<string, string | undefined> = process.env): string {
+function configPath(env: Record<string, string | undefined> = process.env): string {
   return join(mirageHome(env), 'config.toml')
 }
 
@@ -194,7 +194,7 @@ function formatValue(key: string, value: string): string {
 }
 
 export function listConfig(path?: string): Record<string, string> {
-  const p = path ?? defaultConfigPath(process.env as Record<string, string | undefined>)
+  const p = path ?? configPath(process.env as Record<string, string | undefined>)
   if (!existsSync(p)) return {}
   return parseDaemonTable(readFileSync(p, 'utf-8'))
 }
@@ -206,7 +206,7 @@ export function getConfig(key: string, path?: string): string | undefined {
 
 export function setConfig(key: string, value: string, path?: string): void {
   checkKey(key)
-  const p = path ?? defaultConfigPath(process.env as Record<string, string | undefined>)
+  const p = path ?? configPath(process.env as Record<string, string | undefined>)
   const lines = existsSync(p) ? readFileSync(p, 'utf-8').split('\n') : []
   if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
   const rendered = `${key} = ${formatValue(key, value)}`
@@ -246,7 +246,7 @@ export function setConfig(key: string, value: string, path?: string): void {
 }
 
 export function unsetConfig(key: string, path?: string): void {
-  const p = path ?? defaultConfigPath(process.env as Record<string, string | undefined>)
+  const p = path ?? configPath(process.env as Record<string, string | undefined>)
   if (!existsSync(p)) return
   const lines = readFileSync(p, 'utf-8').split('\n')
   if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()

@@ -1033,7 +1033,7 @@ export interface WorkspaceArgs {
   kernelMounts: Record<string, [MountBackend, string | undefined]>
 }
 
-function buildIndex(
+function buildIndexConfig(
   block: RamIndexBlock | RedisIndexBlock | null | undefined,
 ): IndexConfig | undefined {
   if (block === null || block === undefined) return undefined
@@ -1143,7 +1143,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
     const m = coerceMountMode(block.mode, wsMode)
     // Already validated by the sync entry point (validateReadBlock).
     const read = block.read === undefined ? defaultRead : resolveReadSpec(block.read, block.ttl)
-    const mountIndex = buildIndex(block.index)
+    const mountIndex = buildIndexConfig(block.index)
     const write =
       block.write === undefined || block.write === null
         ? defaultWrite
@@ -1159,7 +1159,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
     const backend = (block.backend ?? MountBackend.WORKSPACE) as MountBackend
     if (KERNEL_BACKENDS.includes(backend)) kernelMounts[prefix] = [backend, block.mountpoint]
   }
-  const index = buildIndex(cfg.index)
+  const index = buildIndexConfig(cfg.index)
   const stateStore = buildStateStore(cfg.store)
   const cliEntries =
     cfg.clis !== undefined && cfg.clis !== null

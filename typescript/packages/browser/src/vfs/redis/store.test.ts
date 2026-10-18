@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { createFakeUpstash } from '../../test-utils.ts'
+import { createFakeUpstash } from '../../../tests/test-utils.ts'
 import { UpstashRedisStore } from './store.ts'
 
 const ENC = new TextEncoder()

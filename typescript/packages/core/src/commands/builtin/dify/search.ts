@@ -15,7 +15,7 @@
 import { VFSName } from '../../../types.ts'
 import { makeSearch } from '../generic/search.ts'
 
-export const DIFY_SEARCH = makeSearch(VFSName.DIFY, (fl) => ({
+export const search = makeSearch(VFSName.DIFY, (fl) => ({
   top_k: fl.asInt('top_k') ?? 10,
   method: fl.asStr('method', 'semantic'),
   threshold: fl.asFloat('threshold') ?? 0,

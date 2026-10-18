@@ -1138,7 +1138,7 @@ export class Workspace {
     try {
       const reparse = (text: string): TSNodeLike => parser.parse(text)
       const root = parser.parse(line)
-      const wholeLine = this.runtimeWorld.wholeLineFor(null) !== null
+      const wholeLine = this.runtimeWorld.wholeLine(null) !== null
       const judged = await explainLine(
         root,
         session,

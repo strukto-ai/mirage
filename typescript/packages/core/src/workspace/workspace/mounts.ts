@@ -24,7 +24,7 @@ import { normalizeIndexConfig, type IndexConfig } from '../../cache/index/config
 import type { MountEntry } from '../mount/mount.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
-import { withCacheMutation } from '../../cache/file/io.ts'
+import { mutationLock } from '../../cache/file/io.ts'
 import { checkReadCapability } from '../mount/read_policy.ts'
 import { checkWriteCapability, coerceWritePolicy } from '../mount/write_policy.ts'
 
@@ -125,7 +125,7 @@ async function clearMountCache(
     for (const index of new Set(indices)) await index.invalidatePrefix(prefix.slice(0, -1))
   }
   if (cache === null) return clearIndices()
-  await withCacheMutation(cache, async () => {
+  await mutationLock(cache, async () => {
     await cache.remove(prefix.slice(0, -1))
     await cache.evictPrefix(prefix)
     await clearIndices()

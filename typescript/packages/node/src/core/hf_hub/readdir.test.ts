@@ -17,7 +17,7 @@ import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } fr
 import * as client from './client.ts'
 import * as repo from './repo.ts'
 import { readdir } from './readdir.ts'
-import { codeOf, ps, walking } from './_test_util.ts'
+import { codeOf, ps, walking } from '../../../tests/core/hf_hub/_test_util.ts'
 
 function names(listing: DirListing): string[] {
   return listing.entries.map((row) => row.name)

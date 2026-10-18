@@ -329,9 +329,9 @@ wiki.
 To make the backend constructible by name (workspace config, snapshots, the daemon), register a factory:
 
 ```ts
-import { registerVfsFactory } from '@struktoai/mirage-node'
+import { registerVfs } from '@struktoai/mirage-node'
 
-registerVfsFactory('jira', (config) => Promise.resolve(new JiraVFS(config)))
+registerVfs('jira', (config) => Promise.resolve(new JiraVFS(config)))
 ```
 
 The constructor uses `parseConfigWithSchema` to validate raw configuration at runtime and refuse unknown keys; a type assertion does not validate input. Keep the same validation when loading through a static `create` method.

@@ -13,6 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Command } from '../../config.ts'
-import { CHROMA_SEARCH } from './search.ts'
+import { search } from './search.ts'
 
-export const CHROMA_COMMANDS: readonly Command[] = [...CHROMA_SEARCH]
+export const CHROMA_COMMANDS: readonly Command[] = [...search]

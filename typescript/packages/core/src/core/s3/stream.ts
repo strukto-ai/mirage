@@ -17,7 +17,7 @@ import { concat } from '../../utils/bytes.ts'
 import { recordStream, revisionFor } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
-import { createS3Client, isNotFoundError, loadS3Module, s3Key } from './client.ts'
+import { createS3Client, isNotFound, loadS3Module, s3Key } from './client.ts'
 import { fpRevFromS3Response, read } from './read.ts'
 import { enoent } from '../../errors/fs.ts'
 
@@ -78,7 +78,7 @@ export async function* readStream(
       }
     }
   } catch (err) {
-    if (isNotFoundError(err)) {
+    if (isNotFound(err)) {
       throw enoent(path)
     }
     throw err

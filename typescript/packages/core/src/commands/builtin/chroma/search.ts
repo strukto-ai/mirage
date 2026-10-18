@@ -15,8 +15,6 @@
 import { VFSName } from '../../../types.ts'
 import { makeSearch } from '../generic/search.ts'
 
-export const CHROMA_SEARCH = makeSearch(
-  VFSName.CHROMA,
-  (fl) => ({ top_k: fl.asInt('top_k') ?? 10 }),
-  { name: 'chroma-query' },
-)
+export const search = makeSearch(VFSName.CHROMA, (fl) => ({ top_k: fl.asInt('top_k') ?? 10 }), {
+  name: 'chroma-query',
+})

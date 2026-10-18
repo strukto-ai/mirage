@@ -19,7 +19,7 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import { AirtableVFS } from '../../vfs/airtable/airtable.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
-import { FakeAirtable, makeAccessor } from './_test_util.ts'
+import { FakeAirtable, makeAccessor } from '../../../tests/core/airtable/_test_util.ts'
 import type { AirtableConfig } from './config.ts'
 import { readdir } from './readdir.ts'
 

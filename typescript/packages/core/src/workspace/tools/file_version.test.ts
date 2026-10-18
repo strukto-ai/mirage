@@ -16,7 +16,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { Files } from '../files.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { FileVersionTracker, StaleMirageFileError, fingerprint } from './file_version.ts'
 

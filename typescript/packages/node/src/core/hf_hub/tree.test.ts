@@ -37,7 +37,7 @@ import { keepListing } from '@struktoai/mirage-core/workspace/mount/listing'
 import * as client from './client.ts'
 import * as repo from './repo.ts'
 import type { TreeEntry } from './tree_entry.ts'
-import { handle } from './_test_util.ts'
+import { handle } from '../../../tests/core/hf_hub/_test_util.ts'
 
 // Every accessor here points at the real Hub, so the head a refill asks for
 // before its walk is answered locally: '' by default, which walks the branch

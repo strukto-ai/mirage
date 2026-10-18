@@ -19,7 +19,7 @@ import {
   makeWorkspace,
   stdoutBytes,
   stdoutStr,
-} from './fixtures/workspace_fixture.ts'
+} from '../../tests/workspace/fixtures/workspace_fixture.ts'
 
 describe('workspace: env set / unset / printenv', () => {
   it('unset removes env var', async () => {

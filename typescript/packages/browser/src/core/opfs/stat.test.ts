@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { FileType } from '@struktoai/mirage-core/types'
-import { makeMockAccessor, spec } from '../../test-utils.ts'
+import { makeMockAccessor, spec } from '../../../tests/test-utils.ts'
 import { mkdir } from './mkdir.ts'
 import { stat } from './stat.ts'
 import { write } from './write.ts'

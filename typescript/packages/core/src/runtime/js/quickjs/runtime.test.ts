@@ -17,9 +17,9 @@ import { QuickJsRuntime } from './runtime.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
-import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { Context } from '../../../commands/config.ts'
-import { context } from '../../../workspace/fixtures/context.ts'
+import { context } from '../../../../tests/workspace/fixtures/context.ts'
 
 function execute(rt: QuickJsRuntime, code: string, extra: Partial<Context> = {}) {
   return rt.execute([], [], context({ flags: { c: code }, ...extra }))

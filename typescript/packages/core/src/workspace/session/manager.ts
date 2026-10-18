@@ -26,7 +26,7 @@ import type { ShellVar } from '../../shell/variable.ts'
 import type { MountMode } from '../../types.ts'
 import { KeyLock } from '../../cache/lock.ts'
 
-type StoredSession = Parameters<typeof SessionState.fromJSON>[0]
+type StoredSession = Parameters<typeof SessionState.fromDict>[0]
 
 /** Whether any of the session's variables carries a pointer. */
 function holdsManaged(session: SessionState): boolean {
@@ -151,7 +151,7 @@ export class SessionManager extends SessionOwner {
   async setProfile(sessionId: string, compiled: CompiledProfile): Promise<SessionState> {
     return this.persistLock.withLock(sessionId, async () => {
       const session = this.get(sessionId)
-      const candidate = SessionState.fromJSON(session.toJSON() as StoredSession)
+      const candidate = SessionState.fromDict(session.toDict() as StoredSession)
       narrow(candidate, compiled)
       await this.flushOne(candidate)
       narrow(session, compiled)
@@ -273,7 +273,7 @@ export class SessionManager extends SessionOwner {
   private async hydrate(): Promise<void> {
     const entries = await this.sessionStore.load()
     for (const [sid, fields] of entries) {
-      const stored = SessionState.fromJSON(fields as StoredSession)
+      const stored = SessionState.fromDict(fields as StoredSession)
       if (sid === this.defaultId) {
         const dflt = this.defaultSession()
         setCwd(dflt, stored.cwd)
@@ -300,7 +300,7 @@ export class SessionManager extends SessionOwner {
         dflt.generation = stored.generation
         // Hydrated sessions start clean: baseline what the store
         // holds so the next flush skips them.
-        this.persisted.set(sid, JSON.stringify(dflt.toJSON()))
+        this.persisted.set(sid, JSON.stringify(dflt.toDict()))
         // The document outranks the record for the fields no line can
         // edit; stamped after the baseline so a stale record is
         // rewritten on the next flush.
@@ -313,7 +313,7 @@ export class SessionManager extends SessionOwner {
       }
       if (this.sessions.has(sid)) continue
       this.sessions.set(sid, stored)
-      this.persisted.set(sid, JSON.stringify(stored.toJSON()))
+      this.persisted.set(sid, JSON.stringify(stored.toDict()))
       mergeSeedVars(stored, this.seedVarsInternal)
       this.hasManaged = this.hasManaged || holdsManaged(stored)
     }
@@ -343,11 +343,11 @@ export class SessionManager extends SessionOwner {
   private async flushOne(session: SessionState): Promise<void> {
     const sid = session.sessionId
     // Clean: the store already has exactly this state.
-    if (JSON.stringify(session.toJSON()) === this.persisted.get(sid)) return
+    if (JSON.stringify(session.toDict()) === this.persisted.get(sid)) return
     for (let attempt = 0; attempt < CAS_MAX_RETRIES; attempt++) {
       const expected = session.generation
       session.generation = expected + 1
-      const fields = session.toJSON() as SessionFields
+      const fields = session.toDict() as SessionFields
       if (await this.sessionStore.casSet(sid, fields, expected)) {
         this.persisted.set(sid, JSON.stringify(fields))
         return
@@ -372,9 +372,9 @@ export class SessionManager extends SessionOwner {
     this.loaded = true
     this.loadPromise = Promise.resolve()
     const entries = new Map<string, SessionFields>()
-    for (const s of this.sessions.values()) entries.set(s.sessionId, s.toJSON() as SessionFields)
+    for (const s of this.sessions.values()) entries.set(s.sessionId, s.toDict() as SessionFields)
     for (const s of sessions) {
-      entries.set(s.sessionId, s.toJSON() as SessionFields)
+      entries.set(s.sessionId, s.toDict() as SessionFields)
       this.hasManaged = this.hasManaged || holdsManaged(s)
     }
     await this.sessionStore.replaceAll(entries)

@@ -15,7 +15,7 @@
 import {
   GCSVFS,
   GDocsVFS,
-  GDriveVFS,
+  GoogleDriveVFS,
   GSheetsVFS,
   GSlidesVFS,
   GitHubVFS,
@@ -350,7 +350,7 @@ async function main(): Promise<void> {
       clientSecret: googleClientSecret,
       refreshToken: googleRefreshToken,
     })
-    mounts['/gdrive/'] = new GDriveVFS({
+    mounts['/gdrive/'] = new GoogleDriveVFS({
       clientId: googleClientId,
       clientSecret: googleClientSecret,
       refreshToken: googleRefreshToken,

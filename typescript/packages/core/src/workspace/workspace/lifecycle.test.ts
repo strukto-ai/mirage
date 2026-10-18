@@ -28,7 +28,7 @@ import {
 import type { ShellParser } from '../../shell/parse/index.ts'
 import { MountMode } from '../../types.ts'
 import { ExecutionNode } from '../types.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import { dropMountCaches } from '../executor/command/run.ts'

@@ -16,7 +16,7 @@ import { readFile, symlink, writeFile, readdir, chmod, stat } from 'node:fs/prom
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { spec, tmpRoot } from '../../test-utils.ts'
+import { spec, tmpRoot } from '../../../tests/test-utils.ts'
 import { write, writeStream } from './write.ts'
 
 let root: string

@@ -23,7 +23,7 @@ import type { MountRegistry } from '../../../mount/registry.ts'
 import { SessionState } from '../../../session/session.ts'
 import { handleType, handleWhich } from './lookup.ts'
 import { ParseScope } from '../../../../shell/parse/scope.ts'
-import { getTestParser } from '../../../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 // Mirrors python/tests/workspace/executor/builtins/lookup/test_handle.py.
 

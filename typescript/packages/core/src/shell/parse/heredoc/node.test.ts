@@ -14,7 +14,7 @@
 
 import { expect, it } from 'vitest'
 import type { TSNodeLike } from '../../types.ts'
-import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 function substitution(root: TSNodeLike): TSNodeLike {
   const stack = [root]

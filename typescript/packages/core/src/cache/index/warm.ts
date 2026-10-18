@@ -16,7 +16,7 @@ import type { FileStat } from '../../types.ts'
 import { isEnoent } from '../../errors/fs.ts'
 import { LookupStatus } from './config.ts'
 import type { IndexCacheStore } from './store.ts'
-import { withIndexLock } from './lock.ts'
+import { indexLock } from './lock.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
 /**
@@ -52,7 +52,7 @@ export async function entryOrWarm(
   warm: (() => Promise<unknown>) | null,
 ): Promise<FileStat | null> {
   const parent = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
-  return withIndexLock(index, parent, async () => {
+  return indexLock(index, parent, async () => {
     let listing = await index.listDir(parent)
     if (listing.entries != null && !listing.entries.includes(virtualKey)) return null
     const hit = await index.get(virtualKey)

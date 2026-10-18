@@ -19,7 +19,7 @@ import {
   stdoutBytes,
   stdoutStr,
   stderrStr,
-} from './fixtures/workspace_fixture.ts'
+} from '../../tests/workspace/fixtures/workspace_fixture.ts'
 
 describe('workspace: general commands (seq/expr/bc/date/echo)', () => {
   it('seq N', async () => {

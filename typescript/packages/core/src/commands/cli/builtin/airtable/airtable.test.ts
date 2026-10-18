@@ -22,8 +22,8 @@ import {
   OPS,
   ROADMAP,
   TOKEN,
-} from '../../../../core/airtable/_test_util.ts'
-import { getTestParser } from '../../../../workspace/fixtures/workspace_fixture.ts'
+} from '../../../../../tests/core/airtable/_test_util.ts'
+import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { UsageStyle } from '../../../spec/types.ts'
 import { cliSpecFor } from '../../specs.ts'

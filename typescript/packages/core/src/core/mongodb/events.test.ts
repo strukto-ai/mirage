@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { FileChangeKind, type JsonValue, PathSpec } from '../../types.ts'
 import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
-import { stubMongoDriver } from './_test_util.ts'
+import { stubMongoDriver } from '../../../tests/core/mongodb/_test_util.ts'
 import { MongoDBEventHook } from './events.ts'
 
 const ROOT = PathSpec.fromStrPath('/m', '')

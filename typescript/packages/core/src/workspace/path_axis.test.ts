@@ -18,7 +18,11 @@ import { type FileStat, MountMode, type PathSpec } from '../types.ts'
 import { parseSessionProfile } from '../policy/profile.ts'
 import type { Action, VfsContext, VfsResultContext, Policy } from '../policy/index.ts'
 import { runWithSession } from '../context/session_context.ts'
-import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
+import {
+  getTestParser,
+  stderrStr,
+  stdoutStr,
+} from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Session, Workspace } from './workspace/workspace.ts'
 
 const DEC = new TextDecoder()

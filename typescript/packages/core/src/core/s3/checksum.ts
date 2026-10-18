@@ -16,7 +16,7 @@ import { rawPathOf } from '../../utils/key_prefix.ts'
 import { record, revisionFor, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
-import { createS3Client, isNotFoundError, loadS3Module, s3Key } from './client.ts'
+import { createS3Client, isNotFound, loadS3Module, s3Key } from './client.ts'
 import { enoent } from '../../errors/fs.ts'
 import { fpRevFromS3Response } from './read.ts'
 
@@ -64,7 +64,7 @@ export async function checksum(
       new HeadObjectCommand(input),
     )
   } catch (err) {
-    if (isNotFoundError(err)) throw enoent(path)
+    if (isNotFound(err)) throw enoent(path)
     throw err
   } finally {
     ;(client as unknown as { destroy?: () => void }).destroy?.()

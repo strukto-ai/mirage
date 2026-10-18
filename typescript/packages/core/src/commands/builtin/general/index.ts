@@ -20,8 +20,8 @@ import { GENERAL_EXPR } from './expr.ts'
 import { GENERAL_GETCONF } from './getconf.ts'
 import { GENERAL_HOSTNAME } from './hostname.ts'
 import { GENERAL_ID } from './id.ts'
-import { GENERAL_JS, GENERAL_NODE } from './js.ts'
-import { GENERAL_PYTHON, GENERAL_PYTHON3 } from './python.ts'
+import { GENERAL_JS, node } from './js.ts'
+import { pythonCmd, python3 } from './python.ts'
 import { GENERAL_SEQ } from './seq.ts'
 import { GENERAL_UNAME } from './uname.ts'
 import { GENERAL_WGET } from './wget.ts'
@@ -35,9 +35,9 @@ export const GENERAL_COMMANDS: readonly Command[] = [
   ...GENERAL_HOSTNAME,
   ...GENERAL_ID,
   ...GENERAL_JS,
-  ...GENERAL_NODE,
-  ...GENERAL_PYTHON,
-  ...GENERAL_PYTHON3,
+  ...node,
+  ...pythonCmd,
+  ...python3,
   ...GENERAL_SEQ,
   ...GENERAL_UNAME,
   ...GENERAL_WGET,

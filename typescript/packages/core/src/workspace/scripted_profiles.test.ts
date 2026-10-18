@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import { MountMode } from '../types.ts'
-import { getTestParser } from './fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 // Mirrors the profile policy cases in

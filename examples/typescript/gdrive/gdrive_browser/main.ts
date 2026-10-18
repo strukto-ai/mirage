@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GDriveVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { GoogleDriveVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
@@ -46,11 +46,11 @@ async function run(ws: Workspace, cmd: string): Promise<string> {
 async function main(): Promise<void> {
   const cfg = buildConfig()
   console.log('Loading Google Drive via @struktoai/mirage-browser …')
-  const vfs = new GDriveVFS(cfg)
+  const vfs = new GoogleDriveVFS(cfg)
   const ws = new Workspace({ '/gdrive': vfs }, { mode: MountMode.WRITE })
   try {
     console.log(
-      '=== BROWSER MODE: GDriveVFS → drive/docs/sheets/slides googleapis.com (CORS) ===\n',
+      '=== BROWSER MODE: GoogleDriveVFS → drive/docs/sheets/slides googleapis.com (CORS) ===\n',
     )
 
     await run(ws, 'ls /gdrive/')

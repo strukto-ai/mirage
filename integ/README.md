@@ -233,6 +233,10 @@ for their shared evaluator. `integ/unix/bc/` runs the GNU bc 1.07.1 arithmetic
 and math precision cases. The following paths select
 additional jobs:
 
+Shared TypeScript fixtures under `packages/*/tests/` and the
+`packages/agents/src/openai_agents/` adapter remain covered by the whole-host
+TypeScript filters. Integration runners import some of those fixtures.
+
 | Changed                                                                                                      | Also sets                         |
 | ------------------------------------------------------------------------------------------------------------ | --------------------------------- |
 | python or typescript source, except the runtime drop list below                                              | runtime                           |

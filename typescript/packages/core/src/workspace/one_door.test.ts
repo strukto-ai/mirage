@@ -29,7 +29,11 @@ import { BaseVFS, type VFSOptions } from '../vfs/base.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Dispatcher } from './dispatcher/dispatcher.ts'
 import { Files } from './files.ts'
-import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
+import {
+  getTestParser,
+  stderrStr,
+  stdoutStr,
+} from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const ENC = new TextEncoder()

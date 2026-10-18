@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { type DirListing, PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
-import { spec, tmpRoot } from '../../test-utils.ts'
+import { spec, tmpRoot } from '../../../tests/test-utils.ts'
 import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
 

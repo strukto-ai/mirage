@@ -17,15 +17,19 @@ import type * as DriveModule from '../google/drive.ts'
 
 vi.mock('../google/drive.ts', async () => {
   const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  const { driveModuleMock } = await import('./_test_util.ts')
+  const { driveModuleMock } = await import('../../../tests/core/gdrive/_test_util.ts')
   return driveModuleMock(actual)
 })
 
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
-import { GDriveVFS } from '../../vfs/gdrive/gdrive.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { DOC_MIME, makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
+import {
+  DOC_MIME,
+  makeGDriveAccessor,
+  resetFakeDrive,
+} from '../../../tests/core/gdrive/_test_util.ts'
 import { statFromItem } from './readdir.ts'
 import { stat } from './stat.ts'
 
@@ -33,7 +37,7 @@ const STAMP = '2026-04-01T00:00:00.000Z'
 const accessor = makeGDriveAccessor()
 
 async function workspace(): Promise<Workspace> {
-  const vfs = new GDriveVFS({ clientId: 'x', refreshToken: 'y' })
+  const vfs = new GoogleDriveVFS({ clientId: 'x', refreshToken: 'y' })
   Object.assign(vfs, { accessor })
   return new Workspace(
     { '/drive/': vfs },

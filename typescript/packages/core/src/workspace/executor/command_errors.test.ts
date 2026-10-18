@@ -8,7 +8,7 @@ import { type FileStat, PathSpec } from '../../types.ts'
 import { eacces } from '../../errors/fs.ts'
 import { MountEntry } from '../mount/mount.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()

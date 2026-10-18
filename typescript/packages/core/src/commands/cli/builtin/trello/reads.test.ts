@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { TrelloAccessor } from '../../../../accessor/trello.ts'
 import type { TrelloTransport } from '../../../../core/trello/client.ts'
 import { materialize } from '../../../../io/types.ts'
-import { context } from '../../../../workspace/fixtures/context.ts'
+import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 import type { CLIVerbFn } from '../../types.ts'
 import { TRELLO } from './index.ts'
 

@@ -41,9 +41,9 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./openai": {
-      "types": "./dist/openai/index.d.ts",
-      "import": "./dist/openai/index.js"
+    "./openai_agents": {
+      "types": "./dist/openai_agents/index.d.ts",
+      "import": "./dist/openai_agents/index.js"
     },
     "./langchain": {
       "types": "./dist/langchain/index.d.ts",

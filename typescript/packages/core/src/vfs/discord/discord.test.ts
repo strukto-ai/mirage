@@ -2,10 +2,10 @@ import { expect, it, vi } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
 import { NodeDiscordTransport } from '../../core/discord/client.ts'
 import { FileStat, FileType } from '../../types.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { DiscordVFSBase } from './discord.ts'
-import { seedChannel } from './_test_util.ts'
+import { seedChannel } from '../../../tests/vfs/discord/_test_util.ts'
 
 it.each([false, true])(
   'aborting cat releases a stalled attachment body (prefix=%s)',

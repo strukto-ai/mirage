@@ -19,7 +19,7 @@ import type { PathSpec } from '../../types.ts'
 import { rawPathOf } from '../../utils/key_prefix.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { makeCopy, settleCopy } from '../object_store/copy.ts'
-import { createS3Client, isNotFoundError, loadS3Module, s3Key } from './client.ts'
+import { createS3Client, isNotFound, loadS3Module, s3Key } from './client.ts'
 import { DRIVER } from './driver.ts'
 import { exists } from './exists.ts'
 
@@ -73,7 +73,7 @@ export async function copyFrom(
       }),
     )
   } catch (err) {
-    if (isNotFoundError(err)) throw enoent(src)
+    if (isNotFound(err)) throw enoent(src)
     if ((err as { $metadata?: unknown }).$metadata !== undefined) throw exdev(dst)
     throw err
   } finally {

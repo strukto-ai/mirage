@@ -14,7 +14,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
-import { makeEnv, NATIVE_BACKENDS } from './native_fixture.ts'
+import { makeEnv, NATIVE_BACKENDS } from '../../tests/commands/native_fixture.ts'
 
 const ENC = new TextEncoder()
 // mirage follows GNU fmt; macOS ships BSD fmt's greedy fill. Mirrors

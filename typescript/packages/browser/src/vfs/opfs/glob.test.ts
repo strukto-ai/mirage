@@ -19,7 +19,7 @@ import { SCOPE_ERROR } from '../../core/opfs/constants.ts'
 import { readdir } from '../../core/opfs/readdir.ts'
 import { write } from '../../core/opfs/write.ts'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
-import { makeMockAccessor, spec } from '../../test-utils.ts'
+import { makeMockAccessor, spec } from '../../../tests/test-utils.ts'
 
 // The glob walk takes child paths; this backend lists rows.
 async function listedPaths(accessor: OPFSAccessor, path: PathSpec): Promise<string[]> {

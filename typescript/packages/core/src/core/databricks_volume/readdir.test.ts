@@ -22,7 +22,7 @@ import {
   routedFetch,
   spec,
   TEST_ROOT,
-} from './_test_util.ts'
+} from '../../../tests/core/databricks_volume/_test_util.ts'
 
 afterEach(() => {
   vi.unstubAllGlobals()

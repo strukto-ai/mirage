@@ -17,7 +17,7 @@ import { defineConfig } from 'tsup'
 export default defineConfig({
   entry: [
     'src/index.ts',
-    'src/openai/index.ts',
+    'src/openai_agents/index.ts',
     'src/langchain/index.ts',
     'src/pi/index.ts',
     'src/vercel/index.ts',

@@ -22,7 +22,7 @@ import {
   makeWorkspace,
   stderrStr,
   stdoutStr,
-} from '../../../workspace/fixtures/workspace_fixture.ts'
+} from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
 const PYODIDE = { runtimes: ['pyodide', 'workspace'] }

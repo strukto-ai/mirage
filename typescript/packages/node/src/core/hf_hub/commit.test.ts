@@ -14,7 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import * as client from './client.ts'
-import { handle } from './_test_util.ts'
+import { handle } from '../../../tests/core/hf_hub/_test_util.ts'
 import { COMMIT_CHUNK } from './constants.ts'
 import { LfsRequiredError, commit, commitUrl, payload, preupload } from './commit.ts'
 

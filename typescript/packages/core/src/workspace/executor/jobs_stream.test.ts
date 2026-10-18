@@ -19,7 +19,7 @@ import { JobStatus } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
 import { eacces } from '../../errors/fs.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import type { Dispatcher } from '../dispatcher/dispatcher.ts'
 

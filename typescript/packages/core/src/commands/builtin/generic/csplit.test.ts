@@ -20,7 +20,7 @@ import { runWithMountGate } from '../../../context/session_context.ts'
 import { Files } from '../../../workspace/files.ts'
 import type { Context } from '../../config.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { csplitGeneric } from './csplit.ts'
 

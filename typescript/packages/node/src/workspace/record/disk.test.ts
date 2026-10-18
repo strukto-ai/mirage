@@ -27,7 +27,7 @@ it('releases the lock and handle when writing the owner fails', async () => {
   const root = await fs.mkdtemp(join(tmpdir(), 'mirage-record-'))
   try {
     const client = new DiskRecordClient(root, '')
-    const lock = `${client.recordPath('record')}.lock`
+    const lock = `${client.path('record')}.lock`
     const handle = await fs.open(lock, 'wx')
     vi.spyOn(handle, 'write').mockRejectedValueOnce(new Error('write failed'))
     vi.mocked(fs.open).mockResolvedValueOnce(handle)

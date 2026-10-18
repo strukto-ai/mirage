@@ -15,7 +15,7 @@
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { spec } from '../../test-utils.ts'
+import { spec } from '../../../tests/test-utils.ts'
 import { Workspace } from '../../workspace.ts'
 import { RedisVFS } from './redis.ts'
 

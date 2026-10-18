@@ -17,7 +17,7 @@ import { GitHubAccount } from '../../../../accessor/github.ts'
 import type * as PullModule from '../../../../core/github/pull.ts'
 import type { Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { context } from '../../../../workspace/fixtures/context.ts'
+import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 
 let ROWS: Record<string, unknown>[] = []
 // What real gh 2.85 printed for `gh pr diff --name-only` over this diff: the

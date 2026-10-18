@@ -123,7 +123,7 @@ export async function runWholeLine(
               command,
               stderr: await materialize(result.stderr),
               exitCode: result.exitCode,
-            }).toJSON(),
+            }).toDict(),
           },
           claimant,
           signal,

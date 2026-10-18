@@ -27,7 +27,7 @@ import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { afterEach, describe, expect, it } from 'vitest'
-import { FakeGraph, ME, serveGraph } from '../../core/msgraph/_test_util.ts'
+import { FakeGraph, ME, serveGraph } from '../../../tests/core/msgraph/_test_util.ts'
 import { Workspace } from '../../workspace.ts'
 import { buildVfs } from '../registry.ts'
 

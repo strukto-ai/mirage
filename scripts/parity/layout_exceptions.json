@@ -7,7 +7,6 @@
    "runtime/python/host": "The `with ws:` entry point: the host interpreter's own builtins.open, io.open and os functions patched onto a workspace (fs, open, file, list, stat, constants), plus the re-entrancy bypass (host_io) the mount path sets so a backend serving an op reaches the host. Both ride the runtimes' file API (runtime/files RuntimeFiles) over ws.vfs. Its node twin is runtime/js/host (fs and constants, excused there): an npm consumer holds promises, not file objects, so file, open and the stat and listing shapes have nothing to mirror, and node needs no host_io because the patch swaps only the CommonJS fs and fs.promises functions, which every node backend's ESM node:fs/promises import never reaches (pinned by fs.test.ts, 'a disk root at its own prefix does not re-enter').",
    "bridge": "sync.py exists to run an event loop on a worker thread for the FUSE callbacks, which python needs because its FUSE loop is threaded and node's is not.",
    "agents/agno": "Ecosystem split: agno is a python-only framework.",
-   "agents/openai_agents": "Twin of the typescript agents/openai: the python package is named after the openai-agents SDK and the npm subpath after @openai/agents, so the two never pair by name. Each module added to both sides is excused under modules.agents/openai.",
    "agents/openhands": "Ecosystem split: openhands is a python-only framework.",
    "agents/pydantic_ai": "Ecosystem split: pydantic-ai is a python-only framework.",
    "runtime/python/wasi": "CPython on Wasmtime is a Python host adapter. TypeScript hosts CPython through Pyodide, whose engine-specific subtree is excused separately."
@@ -21,7 +20,6 @@
    "server/bin": "Same npm bin convention as cli/bin.",
    "runtime/python/pyodide/worker": "Pyodide worker transport for synchronous WASM filesystem callbacks. Python bridges WASI from a native thread and has no JavaScript worker transport.",
    "runtime/python/pyodide/fs": "The Emscripten filesystem adapter for Pyodide. Python uses the shared WASI host or native filesystem integration instead.",
-   "agents/openai": "Twin of the python agents/openai_agents (excused there): the npm subpath is named after @openai/agents and the python package after the openai-agents SDK.",
    "agents/pi": "Ecosystem split: pi is an npm-only coding agent.",
    "workspace/tools/read_file": "Constants (the MIME tables) of the TypeScript-only read_file tool; see modules.workspace/tools.typescript_only.read_file."
   }
@@ -66,11 +64,13 @@
     "json_canonical": "Folds integral floats in pymongo/asyncpg rows to int so json.dumps prints 1, not 1.0. JavaScript has one number type and JSON.stringify already prints 1."
    }
   },
-  "agents/openai": {
+  "agents/openai_agents": {
    "typescript_only": {
-    "capability": "Twin of agents/openai_agents/capability.py (MirageCapability); see directories.python_only.agents/openai_agents for why the directories do not pair.",
-    "constants": "Twin of agents/openai_agents/constants.py; see directories.python_only.agents/openai_agents.",
-    "sandbox": "Twin of agents/openai_agents/sandbox.py (MirageSandboxClient); see directories.python_only.agents/openai_agents."
+    "read_file": "The @openai/agents tool adapter that turns a read into an image, file or text output; the Python SDK attaches files through MirageRunner instead, so there is no tool module to mirror.",
+    "tools": "The @openai/agents function-tool factories over the workspace tools; Python exposes its workspace tools through its SDK adapters."
+   },
+   "python_only": {
+    "runner": "MirageRunner resolves a turn's multimodal attachments before Runner.run; the @openai/agents adapter returns them from its read_file tool instead."
    }
   },
   "core/discord": {

@@ -19,7 +19,7 @@ import * as client from './client.ts'
 import { read, rowToken } from './read.ts'
 import * as repo from './repo.ts'
 import { parseEntry, rowOf } from './tree.ts'
-import { codeOf, handle, ps, rowAt, walking } from './_test_util.ts'
+import { codeOf, handle, ps, rowAt, walking } from '../../../tests/core/hf_hub/_test_util.ts'
 
 const PATH = new PathSpec({ virtual: '/m/m/k.txt', vfsPath: 'm/k.txt', directory: '/m/m/' })
 // The row the listing of /m/m names for k.txt.

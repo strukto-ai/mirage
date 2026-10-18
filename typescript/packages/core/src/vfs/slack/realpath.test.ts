@@ -17,7 +17,7 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../io/types.ts'
 import { PathSpec } from '../../types.ts'
-import { FakeSlackTransport, makeFakeVfs } from './_test_util.ts'
+import { FakeSlackTransport, makeFakeVfs } from '../../../tests/vfs/slack/_test_util.ts'
 import { generic } from '../../commands/builtin/generic_bind/factory.ts'
 
 const SLACK_REALPATH = [generic('realpath')]

@@ -21,7 +21,7 @@ import { RAMVFS } from './ram.ts'
 import { PathSpec } from '../../types.ts'
 import { gzip as gzipUtil, gunzip as gunzipUtil } from '../../utils/compress.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 const RAM_GZIP = GENERIC_COMMANDS.filter((c) => c.name === 'gzip' && c.filetype == null)
 const RAM_GUNZIP = GENERIC_COMMANDS.filter((c) => c.name === 'gunzip' && c.filetype == null)

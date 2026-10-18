@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ConditionLostError } from '../object_store/errors.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
-import { LOST_CODES, sdkError } from './_test_util.ts'
+import { LOST_CODES, sdkError } from '../../../tests/core/s3/_test_util.ts'
 import type { S3Module } from './types.ts'
 import { DRIVER } from './driver.ts'
 import type { S3Conn } from './types.ts'

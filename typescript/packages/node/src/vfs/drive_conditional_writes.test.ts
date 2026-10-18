@@ -22,8 +22,8 @@ import {
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
-import { InlineBox } from './fixtures/box.ts'
-import { InlineDropbox } from './fixtures/dropbox.ts'
+import { InlineBox } from '../../tests/vfs/fixtures/box.ts'
+import { InlineDropbox } from '../../tests/vfs/fixtures/dropbox.ts'
 import { buildVfs } from './registry.ts'
 
 const STALE = 'changed since it was read; read it again before writing'

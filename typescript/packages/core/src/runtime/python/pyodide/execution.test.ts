@@ -29,8 +29,8 @@ import { PyodideExecution } from './execution.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
-import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
-import { context } from '../../../workspace/fixtures/context.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { context } from '../../../../tests/workspace/fixtures/context.ts'
 
 /** Run a resolved program; pyodide has no engine, so the run queues at the call. */
 function interpret(

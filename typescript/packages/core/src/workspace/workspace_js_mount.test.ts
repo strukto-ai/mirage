@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { makeWorkspace, stdoutStr } from './fixtures/workspace_fixture.ts'
+import { makeWorkspace, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 
 // The quickjs runtime's `std.open`/`os.readdir` bridge to the workspace
 // dispatch, so sandboxed JS reaches mounts the same way python3 does.

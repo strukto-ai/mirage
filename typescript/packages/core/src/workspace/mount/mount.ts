@@ -35,7 +35,7 @@ import { coerceWritePolicy, writeConditions } from './write_policy.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { type IndexConfig, LookupStatus } from '../../cache/index/config.ts'
 import { buildIndex } from '../../cache/index/factory.ts'
-import { withIndexLock } from '../../cache/index/lock.ts'
+import { indexLock } from '../../cache/index/lock.ts'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { Command, type CommandFnResult, type Context } from '../../commands/config.ts'
@@ -454,7 +454,7 @@ export class MountEntry {
     return this.use(async () => {
       const manager = this.cacheManager
       if (manager === null) return this.runGlob(paths, prefix, this.indexStore, access)
-      return manager.withMutation(async () => {
+      return manager.mutation(async () => {
         await this.ensureReady()
         return this.runGlob(paths, prefix, manager.scopeIndexLocked(this.indexStore), access)
       })
@@ -1454,7 +1454,7 @@ export class MountEntry {
     // One listing of a folder at a time: a reader arriving while another
     // lists it waits, then answers from what that one kept.
     if (name === 'readdir' && this.lists) {
-      return withIndexLock(index, indexKey(this.prefix, scope), answer)
+      return indexLock(index, indexKey(this.prefix, scope), answer)
     }
     return answer()
   }

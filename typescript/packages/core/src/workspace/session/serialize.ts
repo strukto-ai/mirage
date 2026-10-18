@@ -25,7 +25,7 @@ import { METHODS } from '../../policy/constants.ts'
 import type { Scope } from '../../policy/types.ts'
 import { ScriptSource } from '../../runtime/types.ts'
 import { snakeToCamel } from '../../utils/normalize.ts'
-import type { RuntimeLanguage } from '../../runtime/types.ts'
+import type { Language } from '../../runtime/types.ts'
 
 /** A compiled command tier as the session record stores it (the Python spelling). */
 export interface CommandsJSON {
@@ -41,7 +41,7 @@ export interface RuleJSON {
   mount?: string
 }
 
-export function ruleToJSON(rule: CommandRule): RuleJSON {
+export function ruleToDict(rule: CommandRule): RuleJSON {
   const out: RuleJSON = {
     reason: rule.reason,
     commands: [...(rule.commands ?? [])],
@@ -51,7 +51,7 @@ export function ruleToJSON(rule: CommandRule): RuleJSON {
   return out
 }
 
-export function ruleFromJSON(data: RuleJSON): CommandRule {
+export function ruleFromDict(data: RuleJSON): CommandRule {
   return {
     reason: data.reason,
     commands: data.commands ?? [],
@@ -60,19 +60,19 @@ export function ruleFromJSON(data: RuleJSON): CommandRule {
   }
 }
 
-export function commandsToJSON(spec: AdmissionRules): CommandsJSON {
+export function commandsToDict(spec: AdmissionRules): CommandsJSON {
   return {
     allow: spec.allow === null ? null : [...spec.allow],
-    ask: spec.ask.map(ruleToJSON),
-    deny: spec.deny.map(ruleToJSON),
+    ask: spec.ask.map(ruleToDict),
+    deny: spec.deny.map(ruleToDict),
   }
 }
 
-export function commandsFromJSON(data: CommandsJSON): AdmissionRules {
+export function commandsFromDict(data: CommandsJSON): AdmissionRules {
   return {
     allow: data.allow ?? null,
-    ask: data.ask.map(ruleFromJSON),
-    deny: data.deny.map(ruleFromJSON),
+    ask: data.ask.map(ruleFromDict),
+    deny: data.deny.map(ruleFromDict),
   }
 }
 
@@ -85,7 +85,7 @@ export interface ScriptJSON {
   config?: Record<string, unknown>
 }
 
-export function scriptToJSON(entry: ProfileScript): ScriptJSON {
+export function scriptToDict(entry: ProfileScript): ScriptJSON {
   return {
     profile: entry.profile,
     language: entry.script.language,
@@ -95,10 +95,10 @@ export function scriptToJSON(entry: ProfileScript): ScriptJSON {
   }
 }
 
-export function scriptFromJSON(data: ScriptJSON): ProfileScript {
+export function scriptFromDict(data: ScriptJSON): ProfileScript {
   return {
     profile: data.profile,
-    script: new ScriptSource(data.source, data.language as RuntimeLanguage),
+    script: new ScriptSource(data.source, data.language as Language),
     runtime: data.runtime,
     config: { ...(data.config ?? {}) },
   }
@@ -109,7 +109,7 @@ export function scriptsToJSON(scripts: ProfileScripts): Record<string, ScriptJSO
   return Object.fromEntries(
     Object.entries(scripts).map(([method, entries]) => [
       METHODS[method as ScriptMethod],
-      entries.map(scriptToJSON),
+      entries.map(scriptToDict),
     ]),
   )
 }
@@ -117,7 +117,7 @@ export function scriptsToJSON(scripts: ProfileScripts): Record<string, ScriptJSO
 /** A session's policy programs read back from a record, keyed by the document's method names. */
 export function scriptsFromJSON(data: Record<string, ScriptJSON[]>): ProfileScripts {
   return Object.fromEntries(
-    Object.entries(data).map(([key, entries]) => [snakeToCamel(key), entries.map(scriptFromJSON)]),
+    Object.entries(data).map(([key, entries]) => [snakeToCamel(key), entries.map(scriptFromDict)]),
   )
 }
 
@@ -136,7 +136,7 @@ export interface DecisionJSON {
   note: string
 }
 
-export function decisionToJSON(record: Decision): DecisionJSON {
+export function decisionToDict(record: Decision): DecisionJSON {
   return {
     id: record.id,
     session_id: record.sessionId,
@@ -145,14 +145,14 @@ export function decisionToJSON(record: Decision): DecisionJSON {
     cwd: record.cwd,
     paths: [...record.paths],
     reason: record.reason,
-    rule: ruleToJSON(record.rule),
+    rule: ruleToDict(record.rule),
     outcome: record.outcome,
     scope: record.scope,
     note: record.note,
   }
 }
 
-export function decisionFromJSON(data: DecisionJSON): Decision {
+export function decisionFromDict(data: DecisionJSON): Decision {
   return {
     id: data.id,
     sessionId: data.session_id,
@@ -161,7 +161,7 @@ export function decisionFromJSON(data: DecisionJSON): Decision {
     cwd: data.cwd,
     paths: data.paths,
     reason: data.reason,
-    rule: ruleFromJSON(data.rule),
+    rule: ruleFromDict(data.rule),
     outcome: data.outcome !== null ? (data.outcome as Outcome) : null,
     scope: data.scope as Scope,
     note: data.note,

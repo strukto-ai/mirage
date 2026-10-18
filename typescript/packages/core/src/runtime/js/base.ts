@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { LanguageRuntime } from '../language.ts'
-import type { RuntimeLanguage } from '../types.ts'
+import type { Language } from '../types.ts'
 import type { RuntimeOptions } from '../config.ts'
 
 /**
@@ -25,7 +25,7 @@ import type { RuntimeOptions } from '../config.ts'
  * LanguageRuntime.
  */
 export abstract class JsRuntime<E = unknown> extends LanguageRuntime<E> {
-  readonly language: RuntimeLanguage = 'js'
+  readonly language: Language = 'js'
   /** The tier's head words: the class-default captures of every js engine. */
   static override readonly commands: readonly string[] = ['node', 'js'] as const
 

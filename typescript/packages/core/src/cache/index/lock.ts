@@ -18,7 +18,7 @@ import type { IndexCacheStore } from './store.ts'
 const locks = new WeakMap<IndexCacheStore, KeyLock>()
 
 /** Serialize an in-process refresh and its lookup for one index scope. */
-export function withIndexLock<T>(
+export function indexLock<T>(
   index: IndexCacheStore,
   path: string,
   fn: () => Promise<T>,

@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { exists } from './exists.ts'
-import { makeFakeAccessor } from './_test_utils.ts'
+import { makeFakeAccessor } from '../../../tests/core/ssh/_test_utils.ts'
 import { read } from './read.ts'
 import { rename } from './rename.ts'
 

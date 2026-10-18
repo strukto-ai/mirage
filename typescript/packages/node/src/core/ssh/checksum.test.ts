@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '@struktoai/mirage-core/types'
-import { RunAccessor, type RunAnswer } from './_test_utils.ts'
+import { RunAccessor, type RunAnswer } from '../../../tests/core/ssh/_test_utils.ts'
 import { checksum } from './checksum.ts'
 
 const ENC = new TextEncoder()

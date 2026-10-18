@@ -18,7 +18,7 @@ import { dirname, resolve } from 'node:path'
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { Agent } from '@mastra/core/agent'
 import { mirageTools } from '@struktoai/mirage-agents/mastra'
-import { buildSystemPrompt } from '@struktoai/mirage-agents/openai'
+import { buildSystemPrompt } from '@struktoai/mirage-agents/openai_agents'
 
 loadEnv({
   path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../../.env.development'),

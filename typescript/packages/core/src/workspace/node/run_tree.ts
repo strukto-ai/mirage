@@ -166,7 +166,7 @@ export async function runCommandTree(
             producer,
             exitCode: io.exitCode,
             output: await materialize(materialized),
-            results: execNode.toJSON(),
+            results: execNode.toDict(),
           },
           claimantFor(node, handed),
           deps.signal,

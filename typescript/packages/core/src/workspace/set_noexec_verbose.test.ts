@@ -13,7 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { makeWorkspace, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
+import {
+  makeWorkspace,
+  stderrStr,
+  stdoutStr,
+} from '../../tests/workspace/fixtures/workspace_fixture.ts'
 
 // Pinned against GNU bash 5.2.37 on debian:stable-slim.
 const NOEXEC: [string, string][] = [

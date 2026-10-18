@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { FakeDiscordTransport } from './_test_util.ts'
-import { runDiscord } from '../../workspace/fixtures/chat_fixture.ts'
+import { FakeDiscordTransport } from '../../../tests/vfs/discord/_test_util.ts'
+import { runDiscord } from '../../../tests/workspace/fixtures/chat_fixture.ts'
 
 const CHAT = '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl'
 

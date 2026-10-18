@@ -22,7 +22,7 @@ vi.mock('../google/drive.ts', async () => {
 
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import * as drive from '../google/drive.ts'
-import { makeGDriveAccessor } from './_test_util.ts'
+import { makeGDriveAccessor } from '../../../tests/core/gdrive/_test_util.ts'
 import { setAttrs } from './set_attrs.ts'
 
 const MTIME = '2020-01-01T00:00:00+00:00'

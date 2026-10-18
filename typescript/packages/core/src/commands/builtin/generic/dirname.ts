@@ -21,7 +21,7 @@ import { gnuDirname } from '../../../utils/path.ts'
 
 const ENC = new TextEncoder()
 
-export const dirnameFn: CommandFn = (_accessor, _paths, texts, ctx) => {
+export const dirname: CommandFn = (_accessor, _paths, texts, ctx) => {
   if (texts.length === 0) throw missingOperandError('dirname', null)
   const lines = texts.map((t) => gnuDirname(t))
   const fl = new FlagView(ctx.flags, specOf('dirname'))

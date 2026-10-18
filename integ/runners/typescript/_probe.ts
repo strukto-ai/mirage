@@ -1,7 +1,7 @@
 import {
   installFakeNavigator,
   makeMockRoot,
-} from '../../../typescript/packages/browser/src/test-utils.ts'
+} from '../../../typescript/packages/browser/tests/test-utils.ts'
 import {
   OPFSVFS,
   Workspace as BrowserWorkspace,

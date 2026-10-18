@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 
 import { GIT } from './index.ts'
 import { filterWords, listModeOption, withoutFilterValues } from './ref_filter.ts'
-import { context } from '../../../../workspace/fixtures/context.ts'
+import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 
 function words(verb: string, argv: string[]): ReturnType<typeof filterWords> {
   const spec = GIT.spec.subcommands.find((node) => node.name === verb)

@@ -18,7 +18,7 @@ import {
   makeWorkspace,
   stdoutBytes,
   stdoutStr,
-} from './fixtures/workspace_fixture.ts'
+} from '../../tests/workspace/fixtures/workspace_fixture.ts'
 
 describe('workspace: basic commands', () => {
   it('cat reads a file', async () => {

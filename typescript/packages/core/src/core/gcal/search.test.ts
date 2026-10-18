@@ -14,9 +14,16 @@
 
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { JsonValue } from '../../types.ts'
-import { API, CLIENT, PRIMARY, event, makeAccessor, spec } from './_test_util.ts'
+import {
+  API,
+  CLIENT,
+  PRIMARY,
+  event,
+  makeAccessor,
+  spec,
+} from '../../../tests/core/gcal/_test_util.ts'
 
-vi.mock('./client.ts', async () => (await import('./_test_util.ts')).CLIENT)
+vi.mock('./client.ts', async () => (await import('../../../tests/core/gcal/_test_util.ts')).CLIENT)
 
 const { filesContaining } = await import('./search.ts')
 const { PAGE_LIMIT } = await import('./client.ts')

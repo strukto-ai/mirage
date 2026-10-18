@@ -16,7 +16,7 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { spec, tmpRoot } from '../../test-utils.ts'
+import { spec, tmpRoot } from '../../../tests/test-utils.ts'
 import { readStream } from './stream.ts'
 
 let root: string

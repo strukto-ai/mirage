@@ -21,7 +21,7 @@ import { FileStat, FileType, MountMode } from '../../../../types.ts'
 import { eacces } from '../../../../errors/fs.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()

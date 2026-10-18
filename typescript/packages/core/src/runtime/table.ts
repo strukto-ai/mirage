@@ -95,7 +95,7 @@ const BUILTIN_RUNTIMES: ReadonlySet<string> = new Set([
 
 /**
  * Register a runtime class under a config name. Host-side only, like
- * `registerVfsFactory` and `registerCliSpec`: the embedding program
+ * `registerVfs` and `registerCliSpec`: the embedding program
  * calls it, never a line the agent types. Once registered the name works
  * everywhere a builtin's does: a `runtimes:` entry in workspace config, a
  * string in `new Workspace(..., { runtimes })`, and `execute({ runtime })`.

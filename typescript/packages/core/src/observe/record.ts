@@ -190,6 +190,10 @@ export class OpRecord {
   }
 
   toJSON(): Record<string, unknown> {
+    return this.toDict()
+  }
+
+  toDict(): Record<string, unknown> {
     return {
       op: this.op,
       path: this.path,

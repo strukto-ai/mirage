@@ -15,7 +15,7 @@
 import { chmod, mkdir, realpath, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { spec, tmpRoot } from '../../test-utils.ts'
+import { spec, tmpRoot } from '../../../tests/test-utils.ts'
 import { basename, norm, parent, resolveInside, resolveSafe } from './utils.ts'
 
 describe('resolveSafe', () => {

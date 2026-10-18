@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import type { FileEntryWithStats } from 'ssh2'
 import { type FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
-import { type FakeSftp, makeFakeAccessor } from './_test_utils.ts'
+import { type FakeSftp, makeFakeAccessor } from '../../../tests/core/ssh/_test_utils.ts'
 import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
 

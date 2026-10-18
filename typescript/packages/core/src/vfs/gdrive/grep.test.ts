@@ -8,9 +8,9 @@ vi.mock('../../core/google/client.ts', async (importOriginal) => ({
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { googleGet, type TokenManager } from '../../core/google/client.ts'
 import { FileStat, FileType, MountMode } from '../../types.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { GDriveVFS } from './gdrive.ts'
+import { GoogleDriveVFS } from './gdrive.ts'
 
 const DEC = new TextDecoder()
 const TM = { config: { clientId: 'test', refreshToken: 'test' } } as TokenManager
@@ -21,7 +21,7 @@ const TM = { config: { clientId: 'test', refreshToken: 'test' } } as TokenManage
 describe('Drive grep through a mount', () => {
   it.each(['gdoc', 'gsheet', 'gslide'])('-I keeps rendered %s JSON', async (kind) => {
     vi.mocked(googleGet).mockResolvedValue({ title: 'needle\0tail' })
-    const vfs = new GDriveVFS({ clientId: 'test', refreshToken: 'test' })
+    const vfs = new GoogleDriveVFS({ clientId: 'test', refreshToken: 'test' })
     Object.assign(vfs, { accessor: new GDriveAccessor({ tokenManager: TM }) })
     const ws = new Workspace(
       { '/drive/': vfs },

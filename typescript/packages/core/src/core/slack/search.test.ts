@@ -23,7 +23,7 @@ vi.mock('./history.ts', async (importOriginal) => {
 import { SlackAccessor } from '../../accessor/slack.ts'
 import { MountMode } from '../../types.ts'
 import { SlackVFSBase } from '../../vfs/slack/slack.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import {

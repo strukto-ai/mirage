@@ -36,7 +36,7 @@ import {
   ROADMAP,
   TOKEN,
   makeAccessor,
-} from './_test_util.ts'
+} from '../../../tests/core/airtable/_test_util.ts'
 
 const FIRST = 'rec00000000000001'
 

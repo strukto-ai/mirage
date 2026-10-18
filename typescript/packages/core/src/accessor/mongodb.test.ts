@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { stubMongoDriver } from '../core/mongodb/_test_util.ts'
+import { stubMongoDriver } from '../../tests/core/mongodb/_test_util.ts'
 import { resolveMongoDBConfig } from '../vfs/mongodb/config.ts'
 import { MongoDBAccessor } from './mongodb.ts'
 

@@ -22,7 +22,7 @@ import { Limit, MountMode, type PathSpec, WritePolicy } from '../../types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { Handed } from '../../vfs/types.ts'
-import { getTestParser, stdoutStr } from '../fixtures/workspace_fixture.ts'
+import { getTestParser, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Mount } from '../mount/spec.ts'
 import { Workspace } from '../workspace/workspace.ts'
 

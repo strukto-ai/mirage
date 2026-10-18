@@ -20,7 +20,7 @@ import { RAMVFS } from './ram.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import type { Context } from '../../commands/config.ts'
 import { mktempGeneric } from '../../commands/builtin/generic/mktemp.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 const RAM_MKTEMP = GENERIC_COMMANDS.filter((c) => c.name === 'mktemp' && c.filetype == null)
 

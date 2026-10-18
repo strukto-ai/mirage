@@ -19,7 +19,7 @@ import { materialize } from '../../io/types.ts'
 import { RAMVFS } from './ram.ts'
 import { PathSpec } from '../../types.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 const RAM_ICONV = GENERIC_COMMANDS.filter((c) => c.name === 'iconv' && c.filetype == null)
 

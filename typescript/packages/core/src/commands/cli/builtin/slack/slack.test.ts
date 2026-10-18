@@ -24,7 +24,7 @@ import { listPins } from './list_pins.ts'
 import { readMessages } from './read_messages.ts'
 import { search } from './search.ts'
 import { sendMessage } from './send_message.ts'
-import { context } from '../../../../workspace/fixtures/context.ts'
+import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 
 function leafContext(leaf: string, flags: Record<string, string> = {}): Context {
   const spec = SLACK.spec.subcommands.find((s) => s.name === leaf)

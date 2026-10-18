@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
-import { getTestParser, stdoutStr } from './fixtures/workspace_fixture.ts'
+import { getTestParser, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 // GNU find/tree/du/ls typed bare behave exactly as if `.` had been

@@ -17,7 +17,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
-  GDriveVFS,
+  GoogleDriveVFS,
   MountMode,
   patchNodeFs,
   Workspace,
@@ -41,7 +41,7 @@ function buildConfig(): GDriveConfig {
 }
 
 async function main(): Promise<void> {
-  const vfs = new GDriveVFS(buildConfig())
+  const vfs = new GoogleDriveVFS(buildConfig())
   const ws = new Workspace({ '/gdrive/': vfs }, { mode: MountMode.READ })
   const restore = patchNodeFs(ws)
   try {

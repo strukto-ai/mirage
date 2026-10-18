@@ -15,13 +15,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as s3ClientModule from '../../core/s3/client.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
-import { currentFakeS3, installFakeS3 } from '../fixtures/s3_fake.ts'
+import { currentFakeS3, installFakeS3 } from '../../../tests/workspace/fixtures/s3_fake.ts'
 import { RAMWorkspaceStateStore } from './ram.ts'
 import { S3WorkspaceStateStore } from './s3.ts'
 
 vi.mock('../../core/s3/client.ts', async (importOriginal) => {
   const original = await importOriginal<typeof s3ClientModule>()
-  const fake = await import('../fixtures/s3_fake.ts')
+  const fake = await import('../../../tests/workspace/fixtures/s3_fake.ts')
   return {
     ...original,
     createS3Client: () => Promise.resolve(fake.currentFakeS3() as never),

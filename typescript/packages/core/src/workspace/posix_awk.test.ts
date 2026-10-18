@@ -1,10 +1,10 @@
-import { getTestParser } from './fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { makeIntegrationWS, runResult } from './fixtures/integration_fixture.ts'
+import { makeIntegrationWS, runResult } from '../../tests/workspace/fixtures/integration_fixture.ts'
 
 interface Case {
   id: string

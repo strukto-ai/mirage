@@ -30,7 +30,7 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import { ScriptSource } from '../runtime/types.ts'
-import type { RuntimeLanguage } from '../runtime/types.ts'
+import type { Language } from '../runtime/types.ts'
 import { Workspace } from './workspace/workspace.ts'
 import type { NOOPAccessor } from '../accessor/base.ts'
 
@@ -220,7 +220,7 @@ function buildScriptWorkspace(): Workspace {
   )
 }
 
-function pagerSpec(source: string, language: RuntimeLanguage = 'python'): CLI {
+function pagerSpec(source: string, language: Language = 'python'): CLI {
   return new CLI({
     spec: new CommandSpec({ name: 'pager' }),
     script: new ScriptSource(source, language),

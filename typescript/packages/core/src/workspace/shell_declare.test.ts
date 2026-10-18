@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { makeIntegrationWS, run } from './fixtures/integration_fixture.ts'
+import { makeIntegrationWS, run } from '../../tests/workspace/fixtures/integration_fixture.ts'
 
 describe('declare/typeset scoping', () => {
   it('assigns at top level', async () => {

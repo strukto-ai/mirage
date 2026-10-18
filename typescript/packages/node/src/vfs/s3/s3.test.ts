@@ -26,8 +26,8 @@ import { HttpsProxyAgent } from 'https-proxy-agent'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { S3VFS } from './s3.ts'
 import type { S3Config } from './config.ts'
-import { installS3Mock, type S3Mock } from './mock.ts'
-import { s3Vfs } from '../../test-utils.ts'
+import { installS3Mock, type S3Mock } from '../../../tests/vfs/s3/mock.ts'
+import { s3Vfs } from '../../../tests/test-utils.ts'
 
 // S3 tests run against an in-memory mock of the AWS SDK v3 S3Client (via
 // aws-sdk-client-mock). No external service required.

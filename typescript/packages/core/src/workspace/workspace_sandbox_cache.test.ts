@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../types.ts'
-import { getTestParser } from './fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const ENC = new TextEncoder()

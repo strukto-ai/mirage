@@ -319,7 +319,7 @@ export function compileCommands(profile: SessionProfile): AdmissionRules | null 
  * for the whole session and nothing in it remembers which section an
  * entry came from (`anchored`).
  */
-function hiddenOf(profile: SessionProfile): HiddenPaths | null {
+function hidden(profile: SessionProfile): HiddenPaths | null {
   const entries = [...(profile.paths?.hide ?? [])]
   for (const [prefix, entry] of profile.mounts ?? new Map<string, ProfileMount>()) {
     entries.push(...anchored(entry.paths?.hide ?? [], norm(prefix)))
@@ -332,7 +332,7 @@ function hiddenOf(profile: SessionProfile): HiddenPaths | null {
  * section's, one list, since a show entry is absolute wherever it is
  * written and the compiled axis has no sections.
  */
-function shownOf(profile: SessionProfile): ShownPaths | null {
+function shown(profile: SessionProfile): ShownPaths | null {
   const entries: ShowEntry[] = [...(profile.paths?.show ?? [])]
   for (const entry of profile.mounts?.values() ?? []) {
     entries.push(...(entry.paths?.show ?? []))
@@ -365,7 +365,7 @@ function hideReasonsOf(profile: SessionProfile): readonly HideReason[] {
  * declares in the workspace's `mounts:`; the map only narrows, it never
  * grants.
  */
-function modesOf(profile: SessionProfile): Map<string, MountMode> | null {
+function modes(profile: SessionProfile): Map<string, MountMode> | null {
   const modes = new Map<string, MountMode>()
   for (const [prefix, entry] of profile.mounts ?? new Map<string, ProfileMount>()) {
     if (entry.mode !== null && entry.mode !== undefined) modes.set(prefix, entry.mode)
@@ -425,14 +425,14 @@ export function compileProfile(effective: SessionProfile | null, name = ''): Com
   return {
     setup: { env: effective.env ?? null, cwd: effective.cwd ?? null },
     visibility: {
-      paths: hiddenOf(effective),
-      shown: shownOf(effective),
+      paths: hidden(effective),
+      shown: shown(effective),
       vars: classifyVars(effective.vars?.hide ?? []),
       processes: processes.list,
       commands: commands?.allow ?? null,
     },
     policies: {
-      mountModes: modesOf(effective),
+      mountModes: modes(effective),
       commands,
       scripts: compileScripts(effective, name),
       commandLimits: effective.commandLimits ?? null,

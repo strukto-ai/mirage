@@ -14,7 +14,7 @@
 
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
-import { HfHubError, encodePath, etagValue, hubPost } from '../hf_hub/client.ts'
+import { HfHubError, quotePath, etagValue, hubPost } from '../hf_hub/client.ts'
 
 type Row = Record<string, unknown>
 
@@ -39,7 +39,7 @@ export function pathsInfoUrl(accessor: HfBucketsAccessor): string {
  * a name holding a "#" pasted raw truncates at the fragment.
  */
 export function resolveUrl(accessor: HfBucketsAccessor, rel: string): string {
-  return `${base(accessor)}/buckets/${accessor.repoId}/resolve/${encodePath(accessor.bucketPath(rel))}`
+  return `${base(accessor)}/buckets/${accessor.repoId}/resolve/${quotePath(accessor.bucketPath(rel))}`
 }
 
 /**

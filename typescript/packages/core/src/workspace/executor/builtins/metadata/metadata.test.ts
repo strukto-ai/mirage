@@ -17,7 +17,7 @@ import { BaseVFS } from '../../../../vfs/base.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import type { FileStat } from '../../../../types.ts'
 import { MountMode } from '../../../../types.ts'
-import { getTestParser } from '../../../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
 import { parseGroup, parseOwner, parseTouchStamp } from './metadata.ts'
 

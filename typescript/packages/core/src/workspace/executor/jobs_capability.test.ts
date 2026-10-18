@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { makeWorkspace, stdoutStr } from '../fixtures/workspace_fixture.ts'
+import { makeWorkspace, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 describe("background jobs respect the session's hides (regression)", () => {
   // This passes both before and after the SessionState.fork() migration: the

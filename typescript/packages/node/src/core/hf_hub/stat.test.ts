@@ -19,7 +19,7 @@ import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import * as client from './client.ts'
 import * as repo from './repo.ts'
 import { stat } from './stat.ts'
-import { codeOf, ps, rowAt, walking } from './_test_util.ts'
+import { codeOf, ps, rowAt, walking } from '../../../tests/core/hf_hub/_test_util.ts'
 
 beforeEach(() => {
   vi.spyOn(repo, 'headCommit').mockResolvedValue('')

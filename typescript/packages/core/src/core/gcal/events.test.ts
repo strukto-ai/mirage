@@ -16,7 +16,15 @@ import { expect, it, vi } from 'vitest'
 import { FileChangeKind } from '../../types.ts'
 import type { JsonValue } from '../../types.ts'
 import type * as ClientModule from './client.ts'
-import { API, EVENTS, event, HK, makeAccessor, PRIMARY, spec } from './_test_util.ts'
+import {
+  API,
+  EVENTS,
+  event,
+  HK,
+  makeAccessor,
+  PRIMARY,
+  spec,
+} from '../../../tests/core/gcal/_test_util.ts'
 
 const syncs = vi.hoisted(() => ({
   answers: new Map<string | null, unknown>(),
@@ -24,7 +32,7 @@ const syncs = vi.hoisted(() => ({
 }))
 
 vi.mock('./client.ts', async () => ({
-  ...(await import('./_test_util.ts')).CLIENT,
+  ...(await import('../../../tests/core/gcal/_test_util.ts')).CLIENT,
   listed: (await vi.importActual<typeof ClientModule>('./client.ts')).listed,
   syncEvents: (_tm: unknown, calendarId: string, token: string | null) => {
     expect(calendarId).toBe(PRIMARY.id)

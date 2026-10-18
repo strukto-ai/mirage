@@ -23,8 +23,8 @@ import { ContentDriftError } from '@struktoai/mirage-core/workspace/snapshot/dri
 import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
-import { FakeHub, serveHub, xetHash } from '../../core/hf_hub/_test_util.ts'
-import { type FakeHfOperator, fakeHfOperator } from '../../core/hf_buckets/mock.ts'
+import { FakeHub, serveHub, xetHash } from '../../../tests/core/hf_hub/_test_util.ts'
+import { type FakeHfOperator, fakeHfOperator } from '../../../tests/core/hf_buckets/mock.ts'
 import { Workspace } from '../../workspace.ts'
 import { buildVfs } from '../registry.ts'
 

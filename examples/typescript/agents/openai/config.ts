@@ -7,10 +7,10 @@ import {
 } from '@openai/agents'
 import {
   MirageEditor,
-  MirageShell,
+  MirageShellExecutor,
   mirageReadFileTool,
   mirageTools,
-} from '@struktoai/mirage-agents/openai'
+} from '@struktoai/mirage-agents/openai_agents'
 
 export function configureOpenAIExample(ws: Workspace, defaultModel: string) {
   const baseURL = process.env.OPENAI_BASE_URL?.trim() ?? ''
@@ -27,7 +27,7 @@ export function configureOpenAIExample(ws: Workspace, defaultModel: string) {
 
   const hostedTools = [
     mirageReadFileTool(ws),
-    shellTool({ shell: new MirageShell(ws) }),
+    shellTool({ shell: new MirageShellExecutor(ws) }),
     applyPatchTool({ editor: new MirageEditor(ws) }),
   ]
   const compatibleTools = mirageTools(ws)

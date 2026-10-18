@@ -25,7 +25,7 @@ import { jsonlBytes } from '../render/json.ts'
 import { materialize } from '../../io/types.ts'
 import { NotionVFSBase } from '../../vfs/notion/notion.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { concat } from '../../utils/bytes.ts'
 
 class FakeTransport implements NotionTransport {

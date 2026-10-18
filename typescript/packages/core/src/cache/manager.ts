@@ -25,7 +25,7 @@ import type { Evicted } from './index/config.ts'
 import { CHECKED_LIMIT, LISTING_TRUST_WINDOW, PROBED_LIMIT } from './index/constants.ts'
 import { commandStarted, soleCommandStarted, tick } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
-import { withCacheMutation, latestFingerprint } from './file/io.ts'
+import { mutationLock, latestFingerprint } from './file/io.ts'
 
 /**
  * Post-mutation cache coherence for one mount.
@@ -90,8 +90,8 @@ export class CacheManager {
   }
 
   /** Drain raw backend index access before mount cache eviction. */
-  withMutation<T>(call: () => Promise<T>): Promise<T> {
-    return this.fileCache === null ? call() : withCacheMutation(this.fileCache, call)
+  mutation<T>(call: () => Promise<T>): Promise<T> {
+    return this.fileCache === null ? call() : mutationLock(this.fileCache, call)
   }
 
   /**
@@ -102,7 +102,7 @@ export class CacheManager {
    * running command's probes saw.
    */
   clearIndex(index: IndexCacheStore | undefined): Promise<void> {
-    return this.withMutation(async () => {
+    return this.mutation(async () => {
       this.retire()
       if (this.ownsPath(this.prefix || '/')) await index?.clear()
     })
@@ -167,7 +167,7 @@ export class CacheManager {
       onGone: locked
         ? (gone: readonly Evicted[]) => this.goneLocked(gone)
         : (gone: readonly Evicted[]) =>
-            this.withMutation(() => this.goneLocked(gone.filter((c) => this.ownsPath(c.path)))),
+            this.mutation(() => this.goneLocked(gone.filter((c) => this.ownsPath(c.path)))),
       ...(this.mayServeListing === undefined ? {} : { mayServeListing: this.mayServeListing }),
       noteWritten: (folder) => {
         this.noteWritten(folder)
@@ -377,7 +377,7 @@ export class CacheManager {
     entry: FileStat,
   ): Promise<void> {
     const key = this.cacheKey(path)
-    return this.withMutation(async () => {
+    return this.mutation(async () => {
       if (generation !== this.readGeneration || !this.ownsPath(key) || this.index === null) return
       await this.scopeIndexLocked(this.index).replaceIfUnchanged(key, predecessor, entry)
     })
@@ -459,7 +459,7 @@ export class CacheManager {
     const cache = this.fileCache
     if (cache === null || !this.ownsPath(key)) return
     try {
-      await withCacheMutation(cache, () => cache.keepFingerprints({ [key]: version }))
+      await mutationLock(cache, () => cache.keepFingerprints({ [key]: version }))
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       console.warn(`version not kept for ${key}: ${msg}`)
@@ -595,7 +595,7 @@ export class CacheManager {
     token: () => string | null,
   ): Promise<void> {
     if (data.byteLength > cache.cacheLimit) return
-    await withCacheMutation(cache, async () => {
+    await mutationLock(cache, async () => {
       if (
         this.ownsPath(key) &&
         generation === this.readGeneration &&

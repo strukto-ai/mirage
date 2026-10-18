@@ -22,11 +22,11 @@ import {
   OPS,
   ROADMAP,
   TOKEN,
-} from '../../../../core/airtable/_test_util.ts'
+} from '../../../../../tests/core/airtable/_test_util.ts'
 import { MountMode } from '../../../../types.ts'
 import { AirtableVFS } from '../../../../vfs/airtable/airtable.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { AIRTABLE } from './index.ts'
 

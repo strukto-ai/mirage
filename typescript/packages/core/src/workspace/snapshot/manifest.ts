@@ -188,10 +188,10 @@ export function resolveManifest(
   manifest: unknown,
   blobReader: (path: string) => Uint8Array,
 ): unknown {
-  return resolveNode(manifest, blobReader)
+  return resolve(manifest, blobReader)
 }
 
-function resolveNode(node: unknown, blobReader: (path: string) => Uint8Array): unknown {
+function resolve(node: unknown, blobReader: (path: string) => Uint8Array): unknown {
   if (isDict(node)) {
     const keys = Object.keys(node)
     if (keys.length === 1 && keys[0] === BLOB_REF_KEY) {
@@ -200,9 +200,9 @@ function resolveNode(node: unknown, blobReader: (path: string) => Uint8Array): u
       return blobReader(path)
     }
     const out: AnyDict = {}
-    for (const [k, v] of Object.entries(node)) out[k] = resolveNode(v, blobReader)
+    for (const [k, v] of Object.entries(node)) out[k] = resolve(v, blobReader)
     return out
   }
-  if (Array.isArray(node)) return (node as unknown[]).map((v) => resolveNode(v, blobReader))
+  if (Array.isArray(node)) return (node as unknown[]).map((v) => resolve(v, blobReader))
   return node
 }

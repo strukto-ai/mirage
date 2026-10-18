@@ -22,7 +22,7 @@ import {
   toStateDict,
 } from '@struktoai/mirage-node'
 import { Agent, run } from '@openai/agents'
-import { buildSystemPrompt } from '@struktoai/mirage-agents/openai'
+import { buildSystemPrompt } from '@struktoai/mirage-agents/openai_agents'
 import { configureOpenAIExample } from './config.ts'
 
 loadEnv({

@@ -10,7 +10,7 @@ import { MountMode } from '../../types.ts'
 import { CLI, CLIHandler } from '../../commands/cli/types.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 vi.mock('../../utils/async_context.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof AsyncContext>()

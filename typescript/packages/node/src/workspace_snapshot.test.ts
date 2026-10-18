@@ -28,9 +28,9 @@ import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { MountKey } from '@struktoai/mirage-core/workspace/snapshot/keys'
 import { buildMountArgs, toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
-import { buildVfs, register } from './vfs/registry.ts'
+import { buildVfs, registerVfs } from './vfs/registry.ts'
 import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapshot/types'
-import { conditionalS3, s3Vfs } from './test-utils.ts'
+import { conditionalS3, s3Vfs } from '../tests/test-utils.ts'
 import { Workspace } from './workspace.ts'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 
@@ -120,7 +120,7 @@ class SeededRAM extends RAMVFS {}
 
 describe('snapshot rebuild through the registry', () => {
   it('rebuilds a registered content VFS from its saved state, no override', async () => {
-    register('notes-test', () => Promise.resolve(new Notes()))
+    registerVfs('notes-test', () => Promise.resolve(new Notes()))
     const ws = new Workspace({ '/n/': new Notes({ 'a.md': 'one\n' }) }, { mode: MountMode.READ })
     const state = await toStateDict(ws)
     await ws.close()
@@ -164,7 +164,7 @@ describe('snapshot rebuild through the registry', () => {
   })
 
   it('rebuilds an alias over a builtin through its ref, not its type', async () => {
-    register('seeded-test', () => Promise.resolve(new SeededRAM()))
+    registerVfs('seeded-test', () => Promise.resolve(new SeededRAM()))
     const ws = new Workspace(
       { '/s/': new Mount(await buildVfs('seeded-test'), { vfsRef: 'seeded-test' }) },
       { mode: MountMode.WRITE },

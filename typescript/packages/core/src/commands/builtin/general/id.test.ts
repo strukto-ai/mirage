@@ -15,7 +15,7 @@
 import { expect, it } from 'vitest'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
 // A workspace with no agent id has no identity: GNU id's shapes with a dash in

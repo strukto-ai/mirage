@@ -4,7 +4,7 @@ import { test } from 'node:test'
 
 for (const [name, className] of [
   ['box', 'BoxVFS'],
-  ['gdrive', 'GDriveVFS'],
+  ['gdrive', 'GoogleDriveVFS'],
 ] as const) {
   for (const stage of ['baseline', 'delta', 'completed']) {
     test(`${name} closes on Ctrl-C during ${stage} pull`, { timeout: 15_000 }, async () => {

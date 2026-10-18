@@ -16,11 +16,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
 import { ContentType, type FileStat, FileType, PathSpec } from '../../types.ts'
-import { entryAt } from '../../workspace/fixtures/handed.ts'
+import { entryAt } from '../../../tests/workspace/fixtures/handed.ts'
 import { GitHubApiError, type GitHubTransport } from './client.ts'
 import { readdir } from './readdir.ts'
 import { stat, tree } from './stat.ts'
-import { blobSha, FakeGitHub, servedAccessor } from './_test_util.ts'
+import { blobSha, FakeGitHub, servedAccessor } from '../../../tests/core/github/_test_util.ts'
 
 const ROOT = new PathSpec({ vfsPath: '', virtual: '/gh', directory: '/gh' })
 const FILES = { 'src/main.py': 'x'.repeat(120), 'README.md': 'y'.repeat(50) }

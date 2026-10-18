@@ -258,7 +258,7 @@ async function checkStream(
         stderr: parsed.checkQuiet
           ? null
           : concat([
-              ENC.encode(`sort: ${labelOf(path)}:${error.message}: disorder: `),
+              ENC.encode(`sort: ${label(path)}:${error.message}: disorder: `),
               error.output,
               Uint8Array.of(recordSeparator(parsed.zeroTerminated)),
             ]),
@@ -269,13 +269,13 @@ async function checkStream(
     const stage = inputStage(strerror, false)
     return new IOResult({
       exitCode: 2,
-      stderr: stepFailure(stageVerb(stage, true), labelOf(path), strerror),
+      stderr: stepFailure(stageVerb(stage, true), label(path), strerror),
     })
   }
   return new IOResult()
 }
 
-function labelOf(path: PathSpec | null): string {
+function label(path: PathSpec | null): string {
   return path === null ? '-' : path.rawPath
 }
 
@@ -442,7 +442,7 @@ async function externalRecords(
         refused = earliest(
           refused,
           stage,
-          stepFailure(stageVerb(stage, false), labelOf(path), strerror),
+          stepFailure(stageVerb(stage, false), label(path), strerror),
         )
         if (stage === InputStage.ACCESS) break
       } finally {

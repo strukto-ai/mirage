@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { RedisResourceBase } from '@struktoai/mirage-core/vfs/redis/redis'
+import { RedisVFS as CoreRedisVFS } from '@struktoai/mirage-core/vfs/redis/redis'
 import type { RedisClientType } from 'redis'
 import { RedisStore } from './store.ts'
 
@@ -31,11 +31,11 @@ export interface RedisModule {
 /**
  * The node redis mount: the shared VFS over a RESP client.
  *
- * Everything filesystem-shaped lives in core's `RedisResourceBase`; this class
+ * Everything filesystem-shaped lives in core's `RedisVFS`; this class
  * only knows how to reach a server from a redis URL and hands the raw client
  * to the subclasses that need one, such as the file cache.
  */
-export class RedisVFS extends RedisResourceBase {
+export class RedisVFS extends CoreRedisVFS {
   declare readonly store: RedisStore
 
   constructor(options: RedisVFSOptions = {}) {

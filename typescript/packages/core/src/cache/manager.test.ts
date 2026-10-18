@@ -20,7 +20,7 @@ import { mountKey } from '../utils/key_prefix.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DEFAULT_READ_TTL, FileStat, FileType, PathSpec } from '../types.ts'
-import { withCacheMutation } from './file/io.ts'
+import { mutationLock } from './file/io.ts'
 import { RAMFileCacheStore } from './file/ram.ts'
 import { LookupStatus } from './index/config.ts'
 import { CHECKED_LIMIT, LISTING_TRUST_WINDOW, PROBED_LIMIT } from './index/constants.ts'
@@ -29,7 +29,7 @@ import { RedisIndexCacheStore } from './index/redis.ts'
 import { runInCommandScope } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
 import { CacheManager } from './manager.ts'
-import { RefusingStore, shiftPerformanceNow } from './_test_util.ts'
+import { RefusingStore, shiftPerformanceNow } from '../../tests/cache/_test_util.ts'
 
 const built = vi.hoisted((): number[] => [])
 vi.mock('../observe/record.ts', async (importOriginal) => {
@@ -519,7 +519,7 @@ describe('CacheManager index views', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
-    const held = withCacheMutation(cache, () => gate)
+    const held = mutationLock(cache, () => gate)
     try {
       const pending = shared.get('/data/x')
       expect(await settleWithin(pending, 20)).toBe('pending')
@@ -859,7 +859,7 @@ it.each(['none', 'write', 'replace', 'unmount'])(
     old = (await index.get('/data/a')).entry ?? old
     const generation = manager.generation
     let pending: Promise<void> | undefined
-    await manager.withMutation(async () => {
+    await manager.mutation(async () => {
       pending = manager.retainResolvedEntry(
         PathSpec.fromStrPath('/data/a'),
         generation,
@@ -896,7 +896,7 @@ it.each(['replace', 'delete'])(
     let interferences = 0
     const originalReplace = index.replaceIfUnchanged.bind(index)
     const interfere = () =>
-      peer.withMutation(async () => {
+      peer.mutation(async () => {
         interferences++
         const view = peer.scopeIndexLocked(index)
         if (interference === 'replace') await view.put(path.virtual, latest)

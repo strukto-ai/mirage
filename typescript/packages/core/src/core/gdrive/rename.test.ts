@@ -17,15 +17,19 @@ import type * as DriveModule from '../google/drive.ts'
 
 vi.mock('../google/drive.ts', async () => {
   const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  const { driveModuleMock } = await import('./_test_util.ts')
+  const { driveModuleMock } = await import('../../../tests/core/gdrive/_test_util.ts')
   return driveModuleMock(actual)
 })
 
 import { PathSpec } from '../../types.ts'
-import { handedAt } from '../../workspace/fixtures/handed.ts'
+import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
 import { readdir } from './readdir.ts'
-import type { FakeDrive } from './_test_util.ts'
-import { DOC_MIME, makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
+import type { FakeDrive } from '../../../tests/core/gdrive/_test_util.ts'
+import {
+  DOC_MIME,
+  makeGDriveAccessor,
+  resetFakeDrive,
+} from '../../../tests/core/gdrive/_test_util.ts'
 import { rename } from './rename.ts'
 
 const ENC = new TextEncoder()

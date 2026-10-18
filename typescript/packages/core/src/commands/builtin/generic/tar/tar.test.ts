@@ -22,7 +22,7 @@ import { readTar } from '../../tar_helper.ts'
 import { expect, it } from 'vitest'
 import { PathSpec, FileStat, FileType, MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 
 const ENC = new TextEncoder()

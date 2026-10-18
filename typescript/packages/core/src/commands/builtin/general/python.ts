@@ -69,7 +69,7 @@ async function pythonCommand(
   return runInterpreter(label, runtime, paths, texts, { ...ctx, flags: switches }, script)
 }
 
-export const GENERAL_PYTHON3 = command({
+export const python3 = command({
   name: 'python3',
   vfs: null,
   spec: specOf('python3'),
@@ -77,7 +77,7 @@ export const GENERAL_PYTHON3 = command({
   fn: pythonCommand,
 })
 
-export const GENERAL_PYTHON = command({
+export const pythonCmd = command({
   name: 'python',
   vfs: null,
   spec: specOf('python'),

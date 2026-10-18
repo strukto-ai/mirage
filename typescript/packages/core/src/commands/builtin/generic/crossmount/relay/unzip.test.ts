@@ -2,7 +2,7 @@ import { expect, it } from 'vitest'
 import { MountMode } from '../../../../../types.ts'
 import { RAMVFS } from '../../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

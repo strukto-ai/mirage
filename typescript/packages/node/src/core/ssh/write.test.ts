@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { runWithRecording } from '@struktoai/mirage-core/observe/context'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import { makeFakeAccessor } from './_test_utils.ts'
+import { makeFakeAccessor } from '../../../tests/core/ssh/_test_utils.ts'
 import { read } from './read.ts'
 import { write, writeStream } from './write.ts'
 

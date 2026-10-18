@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import * as client from './client.ts'
-import { handle } from './_test_util.ts'
+import { handle } from '../../../tests/core/hf_hub/_test_util.ts'
 import { classifyAbsence, headCommit, revisionUrl } from './repo.ts'
 
 describe('headCommit', () => {

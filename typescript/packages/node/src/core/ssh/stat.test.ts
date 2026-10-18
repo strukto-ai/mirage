@@ -14,7 +14,11 @@
 
 import { describe, expect, it } from 'vitest'
 import { ContentType, FileType, PathSpec } from '@struktoai/mirage-core/types'
-import { RunAccessor, makeFakeAccessor, type RunAnswer } from './_test_utils.ts'
+import {
+  RunAccessor,
+  makeFakeAccessor,
+  type RunAnswer,
+} from '../../../tests/core/ssh/_test_utils.ts'
 import { attrsToFileStat, stat, tree, treeCommand } from './stat.ts'
 
 function spec(p: string): PathSpec {

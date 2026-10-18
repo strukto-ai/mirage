@@ -18,7 +18,7 @@ import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts
 import { Command } from '../../commands/config.ts'
 import { describe, expect, it } from 'vitest'
 import { MountMode } from '../../types.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../ram/ram.ts'
 import { BinViewVFS } from './bin.ts'

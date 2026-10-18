@@ -251,10 +251,10 @@ it('keeps profile limits on the session across storage and forks', async () => {
     }
     const result = await ws.shell('head -n 4 /data/n', { sessionId: 'large' })
     expect(DEC.decode(result.stdout).trim().split('\n')).toHaveLength(4)
-    const restored = SessionState.fromJSON({ ...small.toJSON(), session_id: small.sessionId })
+    const restored = SessionState.fromDict({ ...small.toDict(), session_id: small.sessionId })
     expect(restored.commandLimits.head?.maxLines).toBe(2)
     expect(restored.fork().commandLimits.head?.maxLines).toBe(2)
-    expect(small.toJSON()).not.toHaveProperty('terminalOutput')
+    expect(small.toDict()).not.toHaveProperty('terminalOutput')
   } finally {
     await ws.close()
   }

@@ -48,8 +48,8 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import type { GridFSAccessor } from '../accessor/gridfs.ts'
 import type { HfBucketsAccessor } from '../accessor/hf_buckets.ts'
-import { fakeHfOperator } from '../core/hf_buckets/mock.ts'
-import { FakeHub, blobOid, serveHub, xetHash } from '../core/hf_hub/_test_util.ts'
+import { fakeHfOperator } from '../../tests/core/hf_buckets/mock.ts'
+import { FakeHub, blobOid, serveHub, xetHash } from '../../tests/core/hf_hub/_test_util.ts'
 import { readdir as hfReaddir } from '../core/hf_hub/readdir.ts'
 import type { HfHubVFS } from './hf_hub/base.ts'
 import {
@@ -59,10 +59,10 @@ import {
   ME,
   SITE_NAME,
   serveGraph,
-} from '../core/msgraph/_test_util.ts'
+} from '../../tests/core/msgraph/_test_util.ts'
 import { Workspace } from '../workspace.ts'
 import { buildVfs, knownVfsNames } from './registry.ts'
-import { installS3Mock, type S3Mock } from './s3/mock.ts'
+import { installS3Mock, type S3Mock } from '../../tests/vfs/s3/mock.ts'
 import { AliyunVFS } from './aliyun/aliyun.ts'
 import { BackblazeVFS } from './backblaze/backblaze.ts'
 import { CephVFS } from './ceph/ceph.ts'
@@ -78,7 +78,7 @@ import { SeaweedFSVFS } from './seaweedfs/seaweedfs.ts'
 import { SupabaseVFS } from './supabase/supabase.ts'
 import { TencentVFS } from './tencent/tencent.ts'
 import { WasabiVFS } from './wasabi/wasabi.ts'
-import { GDriveVFS } from '@struktoai/mirage-core/vfs/gdrive/gdrive'
+import { GoogleDriveVFS } from '@struktoai/mirage-core/vfs/gdrive/gdrive'
 import { makeFilename as docFilename } from '@struktoai/mirage-core/vfs/gdocs/doc_entry'
 import { makeFilename as sheetFilename } from '@struktoai/mirage-core/vfs/gsheets/sheet_entry'
 import { makeFilename as slideFilename } from '@struktoai/mirage-core/vfs/gslides/slide_entry'
@@ -88,9 +88,9 @@ import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { checkReadCapability } from '@struktoai/mirage-core/workspace/mount/read_policy'
 import { DEFAULT_READ_TTL, ReadPolicy } from '@struktoai/mirage-core/types'
-import { InlineBox } from './fixtures/box.ts'
-import { InlineDropbox } from './fixtures/dropbox.ts'
-import { InlineGitHub, blobSha } from './fixtures/github.ts'
+import { InlineBox } from '../../tests/vfs/fixtures/box.ts'
+import { InlineDropbox } from '../../tests/vfs/fixtures/dropbox.ts'
+import { InlineGitHub, blobSha } from '../../tests/vfs/fixtures/github.ts'
 
 interface GDriveItem {
   id: string
@@ -514,7 +514,7 @@ describe('a backend that caches but cannot revalidate refuses fresh', () => {
   it('gdrive declares the flag and is allowed fresh', () => {
     // The other side of the pair: one backend refused, one allowed, so the
     // verdict is shown to discriminate rather than merely to refuse.
-    const vfs = new GDriveVFS({ clientId: 'c', clientSecret: 's', refreshToken: 'r' })
+    const vfs = new GoogleDriveVFS({ clientId: 'c', clientSecret: 's', refreshToken: 'r' })
     expect(vfs.cachesReads).toBe(true)
     expect(vfs.readRevalidatable).toBe(true)
     expect(() => {
@@ -983,7 +983,7 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
   }
   if (HARNESSES[name] === 'gdrive') {
     const item = gdriveAdd(key, data)
-    const vfs = (await buildVfs('gdrive', GDRIVE_CONFIG)) as GDriveVFS
+    const vfs = (await buildVfs('gdrive', GDRIVE_CONFIG)) as GoogleDriveVFS
     const accessor = vfs.accessor
     expect(vfs.readRevalidatable).toBe(true)
     // An id-addressed backend reads the row its parent's listing names, so

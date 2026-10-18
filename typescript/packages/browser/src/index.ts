@@ -238,7 +238,7 @@ export {
   type GSlidesConfig,
   type GSlidesConfigRedacted,
 } from '@struktoai/mirage-core/vfs/gslides/config'
-export { GDriveVFS, type GDriveVFSState } from '@struktoai/mirage-core/vfs/gdrive/gdrive'
+export { GoogleDriveVFS, type GDriveVFSState } from '@struktoai/mirage-core/vfs/gdrive/gdrive'
 export {
   normalizeGDriveConfig,
   redactGDriveConfig,
@@ -277,12 +277,7 @@ export { RedisVFS, type RedisVFSOptions, type RedisVFSState } from './vfs/redis/
 export { UpstashRedisStore, type UpstashRedisStoreOptions } from './vfs/redis/store.ts'
 export { PROMPT as REDIS_PROMPT } from '@struktoai/mirage-core/vfs/redis/prompt'
 export { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
-export {
-  buildVfs,
-  knownVfsNames,
-  register as registerVfsFactory,
-  type VFSFactory,
-} from './vfs/registry.ts'
+export { buildVfs, knownVfsNames, registerVfs, type VFSFactory } from './vfs/registry.ts'
 
 // The authoring surface: what a host reaches for to bring its own
 // VFS, CLI, policy or runtime, and the types the Workspace's own

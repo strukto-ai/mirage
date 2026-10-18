@@ -14,7 +14,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
-import { makeWorkspace, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
+import { makeWorkspace, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 
 // Direct port of tests/shell/test_last_exit_code.py. The Python fixture
 // (tests/shell/conftest.py) diffs mirage against real /bin/sh via

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { DiskVFS } from '../vfs/disk/disk.ts'
 import { SSHVFS } from '../vfs/ssh/ssh.ts'
-import { makeFakeAccessor } from '../core/ssh/_test_utils.ts'
+import { makeFakeAccessor } from '../../tests/core/ssh/_test_utils.ts'
 import * as diskUtils from '../core/disk/utils.ts'
 import { Workspace } from '../workspace.ts'
 

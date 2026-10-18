@@ -15,7 +15,11 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
-import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
+import {
+  getTestParser,
+  stderrStr,
+  stdoutStr,
+} from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 
 // Direct port of tests/shell/test_quoting_coverage.py.

@@ -37,7 +37,7 @@ import { Consumer, SHELL_NAMES, lookup, lookupAll } from '../../lookup/index.ts'
 import { SessionState } from '../../session/session.ts'
 import { sleep } from '../../../utils/abort.ts'
 import { Workspace } from '../../workspace/workspace.ts'
-import { getTestParser } from '../../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

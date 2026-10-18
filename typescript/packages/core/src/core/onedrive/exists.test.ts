@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import { type FileStat, MountMode, PathSpec } from '../../types.ts'
 import { OneDriveVFS } from '../../vfs/onedrive/onedrive.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { exists } from './exists.ts'
 

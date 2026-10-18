@@ -20,7 +20,7 @@ import { PartialOutputError, UsageError } from '../../../errors.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { crc32 } from '../../../../utils/compress.ts'
 import { runViewCmd, workflowViewCmd } from './actions.ts'
-import { context } from '../../../../workspace/fixtures/context.ts'
+import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

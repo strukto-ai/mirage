@@ -27,7 +27,7 @@ import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
 import { PathSpec, type DirListing, type FileStat } from '../../types.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
 import * as client from './client.ts'
-import { stubMongoDriver } from './_test_util.ts'
+import { stubMongoDriver } from '../../../tests/core/mongodb/_test_util.ts'
 import { readdir } from './readdir.ts'
 
 function names(listed: readonly FileStat[] | DirListing): string[] {

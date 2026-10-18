@@ -20,7 +20,7 @@ import { tokenUrl } from '@struktoai/mirage-core/core/google/client'
 import type { TokenManager } from '@struktoai/mirage-core/core/google/client'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { TrelloVFS } from '@struktoai/mirage-core/vfs/trello/trello'
-import { buildVfs, knownVfsNames, register } from './registry.ts'
+import { buildVfs, knownVfsNames, registerVfs } from './registry.ts'
 
 describe('browser VFS registry', () => {
   // The four Drive-family VFS used to redeclare core's GoogleConfig
@@ -264,7 +264,7 @@ describe('browser VFS registry', () => {
   })
 
   it('supports registering a custom factory', async () => {
-    register('mock-fs', async () => {
+    registerVfs('mock-fs', async () => {
       const { RAMVFS } = await import('@struktoai/mirage-core/vfs/ram/ram')
       return new RAMVFS()
     })

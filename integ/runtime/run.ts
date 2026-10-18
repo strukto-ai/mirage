@@ -59,7 +59,7 @@ import {
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import { EXTERNAL_COMMANDS, PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core'
-import type { RuntimeLanguage } from '@struktoai/mirage-core/runtime/types'
+import type { Language } from '@struktoai/mirage-core/runtime/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 
@@ -139,7 +139,7 @@ interface MountSpecJson {
 
 interface CliSpecJson {
   script: string
-  language?: RuntimeLanguage
+  language?: Language
   runtime?: string
   config?: Record<string, unknown>
 }

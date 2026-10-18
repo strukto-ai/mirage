@@ -220,7 +220,7 @@ export class JobTable {
   }
 
   /** Insert a finished job restored from a snapshot into its session. */
-  loadJob(job: Job): void {
+  load(job: Job): void {
     this.sessionJobs(job.sessionId).set(job.id, job)
     if (job.id >= (this.nextIds.get(job.sessionId) ?? 1)) {
       this.nextIds.set(job.sessionId, job.id + 1)

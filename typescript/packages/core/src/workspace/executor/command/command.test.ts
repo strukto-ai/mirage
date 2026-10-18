@@ -26,7 +26,7 @@ import type { ExecuteNodeFn } from './types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { handleCommand } from './command.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 
 class StubVFS extends BaseVFS {

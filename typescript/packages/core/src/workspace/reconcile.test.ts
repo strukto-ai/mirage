@@ -17,7 +17,7 @@ import { GitHubAccessor, GitHubAccount } from '../accessor/github.ts'
 import { read as githubRead } from '../core/github/read.ts'
 import { stat as githubStat } from '../core/github/stat.ts'
 import { LISTING_TRUST_WINDOW } from '../cache/index/constants.ts'
-import { shiftPerformanceNow } from '../cache/_test_util.ts'
+import { shiftPerformanceNow } from '../../tests/cache/_test_util.ts'
 import { ListingCheckStore, RAMIndexCacheStore } from '../cache/index/ram.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
@@ -38,7 +38,7 @@ import { Reconciler } from './reconcile.ts'
 import { runInCommandScope } from '../cache/index/scope.ts'
 import { ops } from '../test-utils.ts'
 import { Workspace } from './workspace/workspace.ts'
-import { VersionedVFS, versionedWorkspace } from './fixtures/versioned_vfs.ts'
+import { VersionedVFS, versionedWorkspace } from '../../tests/workspace/fixtures/versioned_vfs.ts'
 
 function enoent(path: string): Error {
   return Object.assign(new Error(path), { code: 'ENOENT' })
@@ -540,7 +540,7 @@ it('batches a thousand vanished children in one cleanup', async () => {
     await ws.namespace.setAttrs('/data/keeper', { mode: 0o640 })
     const manager = mount.cacheManager
     if (manager === null) throw new Error('mount has no cache manager')
-    const lock = vi.spyOn(manager, 'withMutation')
+    const lock = vi.spyOn(manager, 'mutation')
     const scans = vi.spyOn(ws.namespace.nodes, Symbol.iterator)
     await mount.index.setDir('/data', [])
     expect(lock).toHaveBeenCalledTimes(1)

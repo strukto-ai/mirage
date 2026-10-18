@@ -24,7 +24,7 @@ import { addLabel } from './issue/add_label.ts'
 import { create } from './issue/create.ts'
 import { setProject } from './issue/set_project.ts'
 import * as reads from './reads.ts'
-import { context } from '../../../../workspace/fixtures/context.ts'
+import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 
 const DEC = new TextDecoder()
 

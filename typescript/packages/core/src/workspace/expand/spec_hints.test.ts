@@ -17,7 +17,11 @@ import { BUILTIN_SPECS, specOf } from '../../commands/spec/builtins.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { MountMode } from '../../types.ts'
 import { markGlobs } from '../../utils/glob_walk.ts'
-import { makeIntegrationWS, run, runResult } from '../fixtures/integration_fixture.ts'
+import {
+  makeIntegrationWS,
+  run,
+  runResult,
+} from '../../../tests/workspace/fixtures/integration_fixture.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { specForCommand, specWordKinds } from './spec_hints.ts'
 

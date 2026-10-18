@@ -19,13 +19,18 @@ import { DeviceInput, IOResult, materialize } from '../../io/types.ts'
 import { Redirect, RedirectKind } from '../../shell/types.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { makeIntegrationWS, run, runExit, runResult } from '../fixtures/integration_fixture.ts'
+import {
+  makeIntegrationWS,
+  run,
+  runExit,
+  runResult,
+} from '../../../tests/workspace/fixtures/integration_fixture.ts'
 import { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { JobRoute, handleRedirect } from './redirect.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'

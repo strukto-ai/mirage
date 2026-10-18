@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { HandOff, Occurrence } from '../../policy/types.ts'
 import { commandNodes } from '../../runtime/routing/index.ts'
 import { NodeType, type TSNodeLike } from '../../shell/types.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import {
   argvFrame,
   bodyFrame,

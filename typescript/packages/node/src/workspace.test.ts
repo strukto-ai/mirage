@@ -23,9 +23,9 @@ import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { DiskAccessor } from './accessor/disk.ts'
 import { DiskEventHook } from './core/disk/events/hook.ts'
 import { DiskVFS } from './vfs/disk/disk.ts'
-import { InlineGitHub } from './vfs/fixtures/github.ts'
+import { InlineGitHub } from '../tests/vfs/fixtures/github.ts'
 import { buildVfs } from './vfs/registry.ts'
-import { conditionalS3, s3Vfs, tmpRoot } from './test-utils.ts'
+import { conditionalS3, s3Vfs, tmpRoot } from '../tests/test-utils.ts'
 import { Workspace } from './workspace.ts'
 
 describe('@struktoai/mirage-node Workspace', () => {

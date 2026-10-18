@@ -21,7 +21,7 @@ import { MountMode } from '../../types.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { applyStateDict, toStateDict } from '../snapshot/state.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const DEC = new TextDecoder()
 

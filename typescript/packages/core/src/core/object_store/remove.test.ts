@@ -14,7 +14,13 @@
 
 import { describe, expect, it } from 'vitest'
 import { runWithRecording } from '../../observe/context.ts'
-import { codeOf, FakeAccessor, FakeStore, makeDriver, spec } from './fakes.ts'
+import {
+  codeOf,
+  FakeAccessor,
+  FakeStore,
+  makeDriver,
+  spec,
+} from '../../../tests/core/object_store/fakes.ts'
 import { makeRemovePrefix, makeRmdir, makeUnlink } from './remove.ts'
 
 const accessor = new FakeAccessor()

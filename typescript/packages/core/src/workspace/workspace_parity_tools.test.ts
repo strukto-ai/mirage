@@ -18,7 +18,7 @@ import {
   makeWorkspace,
   stdoutBytes,
   stdoutStr,
-} from './fixtures/workspace_fixture.ts'
+} from '../../tests/workspace/fixtures/workspace_fixture.ts'
 
 describe('workspace: grep/awk/sed/jq/wc/head/tail/cut/uniq/tr', () => {
   it('grep pattern', async () => {

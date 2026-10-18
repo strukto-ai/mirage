@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { FakeGitHub, blobSha } from '../../core/github/_test_util.ts'
+import { FakeGitHub, blobSha } from '../../../tests/core/github/_test_util.ts'
 import { LISTING_TRUST_WINDOW } from '../../cache/index/constants.ts'
-import { shiftPerformanceNow } from '../../cache/_test_util.ts'
+import { shiftPerformanceNow } from '../../../tests/cache/_test_util.ts'
 import { DEFAULT_READ_TTL, MountMode, ReadPolicy } from '../../types.ts'
 import type { BaseVFS } from '../base.ts'
 import { RAMVFS } from '../ram/ram.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
 import { ContentDriftError } from '../../workspace/snapshot/drift.ts'
 import { toStateDict } from '../../workspace/snapshot/state.ts'

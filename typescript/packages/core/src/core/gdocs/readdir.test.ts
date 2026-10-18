@@ -24,7 +24,7 @@ vi.mock('../google/drive.ts', async () => {
 import { GDocsAccessor } from '../../accessor/gdocs.ts'
 import { PathSpec, type FileStat } from '../../types.ts'
 import { GDocsVFS } from '../../vfs/gdocs/gdocs.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { TokenManager } from '../google/client.ts'
 import * as drive from '../google/drive.ts'

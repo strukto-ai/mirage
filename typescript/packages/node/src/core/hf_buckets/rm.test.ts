@@ -15,7 +15,7 @@
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
-import { fakeHfOperator, installFakeOperator } from './mock.ts'
+import { fakeHfOperator, installFakeOperator } from '../../../tests/core/hf_buckets/mock.ts'
 import { rmR } from './rm.ts'
 
 async function accessorWith(files: Record<string, string | Buffer>) {

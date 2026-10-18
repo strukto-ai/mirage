@@ -30,7 +30,7 @@ import {
 } from '../../../types.ts'
 import { DIR_SIZE } from '../../../utils/stat_view.ts'
 import { parseSessionProfile } from '../../../policy/profile.ts'
-import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { statGeneric } from './stat.ts'
 import { Files } from '../../../workspace/files.ts'

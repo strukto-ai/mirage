@@ -167,7 +167,7 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
       : []
   const sessions: SessionSnapshot[] = ws.sessionManager
     .list()
-    .map((s) => s.toJSON() as unknown as SessionSnapshot)
+    .map((s) => s.toDict() as unknown as SessionSnapshot)
   // Output is stored per channel rather than chunk by chunk: the manifest
   // externalizes byte fields into tar entries, so keeping chunks would
   // write one entry per write a job ever made. The cost is that a restored
@@ -653,7 +653,7 @@ async function gateRestoredState(
   ws: WorkspaceLike,
   state: WorkspaceStateDict,
 ): Promise<[SessionState[], Record<string, ShellVar> | null]> {
-  const sessions = state.sessions.map((s) => SessionState.fromJSON(s))
+  const sessions = state.sessions.map((s) => SessionState.fromDict(s))
   for (const fields of sessions) {
     await gateRestoredVars(ws.registry.policies, fields.sessionId, fields.vars)
   }
@@ -764,7 +764,7 @@ function restoredConsole(j: JobSnapshot): JobConsole {
 
 function restoreJobs(ws: WorkspaceLike, state: WorkspaceStateDict): void {
   for (const j of state.jobs) {
-    ws.jobTable.loadJob(
+    ws.jobTable.load(
       new Job({
         id: j.id,
         command: j.command,

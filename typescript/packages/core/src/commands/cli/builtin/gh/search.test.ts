@@ -5,7 +5,7 @@ import { GitHubApiError } from '../../../../core/github/client.ts'
 import { search } from '../../../../core/github/search.ts'
 import { materialize } from '../../../../io/types.ts'
 import { searchSpec, searchHandlers } from './search.ts'
-import { context } from '../../../../workspace/fixtures/context.ts'
+import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 
 vi.mock('../../../../core/github/search.ts', () => ({ search: vi.fn(() => Promise.resolve([])) }))
 

@@ -18,7 +18,7 @@ import type { RunResult } from '../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 class ProcessRuntime extends PythonRuntime {
   readonly name = 'custom-process'

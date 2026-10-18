@@ -17,7 +17,7 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { HfAccountAccessor } from '../../accessor/hf_hub.ts'
 import * as client from './client.ts'
-import { handle } from './_test_util.ts'
+import { handle } from '../../../tests/core/hf_hub/_test_util.ts'
 import { readStream } from './stream.ts'
 import { parseEntry, rowOf } from './tree.ts'
 

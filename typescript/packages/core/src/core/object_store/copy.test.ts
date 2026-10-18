@@ -16,7 +16,13 @@ import { describe, expect, it } from 'vitest'
 import { runWithRecording } from '../../observe/context.ts'
 import { makeCopy } from './copy.ts'
 import { makeExists } from './exists.ts'
-import { codeOf, FakeAccessor, FakeStore, makeDriver, spec } from './fakes.ts'
+import {
+  codeOf,
+  FakeAccessor,
+  FakeStore,
+  makeDriver,
+  spec,
+} from '../../../tests/core/object_store/fakes.ts'
 import { makeStat } from './stat.ts'
 
 const accessor = new FakeAccessor()

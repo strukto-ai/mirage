@@ -36,7 +36,12 @@ import { ScriptSource, type RunResult } from '../runtime/types.ts'
 import { MountMode, PathSpec, VFSName } from '../types.ts'
 import { cliSpecFor } from '../commands/cli/specs.ts'
 import { parseSessionProfile, type SessionProfile } from '../policy/profile.ts'
-import { getTestParser, stderrStr, stdoutStr, voicedStderr } from './fixtures/workspace_fixture.ts'
+import {
+  getTestParser,
+  stderrStr,
+  stdoutStr,
+  voicedStderr,
+} from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const ENC = new TextEncoder()
@@ -2205,7 +2210,7 @@ describe('ask end to end', () => {
     expect(ws.decisions.pending()).toEqual([])
     // The grant is session state: on the record, and not another
     // session's.
-    const record = ws.sessionManager.get(ws.sessionManager.defaultId).toJSON() as {
+    const record = ws.sessionManager.get(ws.sessionManager.defaultId).toDict() as {
       decisions: { outcome: string; scope: string }[]
     }
     expect(record.decisions[0]?.scope).toBe('session')

@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { BaseVFS } from '../../vfs/base.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { type FileStat, MountMode } from '../../types.ts'
-import { getTestParser, stdoutStr } from '../fixtures/workspace_fixture.ts'
+import { getTestParser, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 // A glob lists what its directory holds, nested mount roots and symlinks

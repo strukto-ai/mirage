@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { command, Command } from './config.ts'
 import { CommandSpec } from './spec/types.ts'
 import { IOResult, materialize } from '../io/types.ts'
-import { context } from '../workspace/fixtures/context.ts'
+import { context } from '../../tests/workspace/fixtures/context.ts'
 
 const noopFn = (): Promise<[Uint8Array, IOResult]> =>
   Promise.resolve([new Uint8Array(), new IOResult()])

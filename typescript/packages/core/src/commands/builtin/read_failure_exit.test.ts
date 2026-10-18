@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 
 // The twin of python's tests/commands/builtin/test_read_failure_exit.py.

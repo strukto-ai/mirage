@@ -15,7 +15,7 @@
 import { assert, describe, expect, it } from 'vitest'
 
 import { getParts } from '../../shell/helpers.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { innerLines, innerReadable, readWord, wordValue, type Word } from './inner_lines.ts'
 
 // Mirrors python/tests/workspace/node/test_inner_lines.py.

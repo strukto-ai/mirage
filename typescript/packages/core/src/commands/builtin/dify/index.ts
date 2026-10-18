@@ -13,6 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Command } from '../../config.ts'
-import { DIFY_SEARCH } from './search.ts'
+import { search } from './search.ts'
 
-export const DIFY_COMMANDS: readonly Command[] = [...DIFY_SEARCH]
+export const DIFY_COMMANDS: readonly Command[] = [...search]

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
-import { makeIntegrationWS } from '../fixtures/integration_fixture.ts'
+import { makeIntegrationWS } from '../../../tests/workspace/fixtures/integration_fixture.ts'
 
 // A fresh shell's PIPESTATUS is empty (pinned on bash 5.2 in an isolated
 // run), and a loop that never iterates leaves the record as it stood,

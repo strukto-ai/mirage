@@ -125,7 +125,7 @@ export async function isView(
   return false
 }
 
-export async function listIndexes(
+export async function getIndexes(
   accessor: MongoDBAccessor,
   database: string,
   collection: string,

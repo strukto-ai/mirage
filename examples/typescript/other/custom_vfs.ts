@@ -31,7 +31,7 @@ import {
   IOResult,
   MountMode,
   type PathSpec,
-  registerVfsFactory,
+  registerVfs,
   Workspace,
 } from "@struktoai/mirage-node";
 import { mountedPath } from "@struktoai/mirage-core/utils/key_prefix";
@@ -271,7 +271,7 @@ async function show(ws: Workspace, line: string, prompt = "$"): Promise<void> {
 async function main(): Promise<void> {
   // Registered up front: the name is what a snapshot rebuilds the mount
   // through, the same way workspace config names it.
-  registerVfsFactory("wiki", () => Promise.resolve(new WikiVFS()));
+  registerVfs("wiki", () => Promise.resolve(new WikiVFS()));
   const ws = new Workspace(
     {
       "/wiki/": new WikiVFS(),

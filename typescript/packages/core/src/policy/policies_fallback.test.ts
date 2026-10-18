@@ -17,7 +17,7 @@ import type * as asyncContextModule from '../utils/async_context.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { type JsonValue, MountMode } from '../types.ts'
 import { Session, Workspace } from '../workspace/workspace/workspace.ts'
-import { getTestParser } from '../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import type { Policy } from './base.ts'
 import {

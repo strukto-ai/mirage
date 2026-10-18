@@ -17,7 +17,7 @@ import { DriftPolicy, MountMode } from '@struktoai/mirage-core/types'
 import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { S3Config } from '../vfs/s3/config.ts'
-import { installS3Mock, type S3Mock } from '../vfs/s3/mock.ts'
+import { installS3Mock, type S3Mock } from '../../tests/vfs/s3/mock.ts'
 import { S3VFS } from '../vfs/s3/s3.ts'
 import { Workspace } from '../workspace.ts'
 

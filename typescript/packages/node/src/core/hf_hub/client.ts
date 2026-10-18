@@ -201,7 +201,7 @@ export function resolveUrl(
 ): string {
   const segment = RESOLVE_SEGMENTS[repoType] ?? ''
   const base = `${rstripSlash(endpoint)}/${segment === '' ? '' : `${segment}/`}`
-  return `${base}${repoId}/resolve/${revSegment(revision)}/${encodePath(path)}`
+  return `${base}${repoId}/resolve/${revSegment(revision)}/${quotePath(path)}`
 }
 
 /**
@@ -210,7 +210,7 @@ export function resolveUrl(
  * A Hub repo or bucket may hold a file whose name carries a space or a "#",
  * and pasting it raw truncates the URL at the fragment.
  */
-export function encodePath(path: string): string {
+export function quotePath(path: string): string {
   return lstripSlash(path)
     .split('/')
     .map((part) => encodeURIComponent(part))

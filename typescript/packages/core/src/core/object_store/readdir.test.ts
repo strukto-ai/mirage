@@ -14,7 +14,13 @@
 
 import { describe, expect, it } from 'vitest'
 import { FileType } from '../../types.ts'
-import { codeOf, FakeAccessor, FakeStore, makeDriver, spec } from './fakes.ts'
+import {
+  codeOf,
+  FakeAccessor,
+  FakeStore,
+  makeDriver,
+  spec,
+} from '../../../tests/core/object_store/fakes.ts'
 import { makeReaddir, makeTree } from './readdir.ts'
 
 const accessor = new FakeAccessor()

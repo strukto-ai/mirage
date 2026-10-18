@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Limit, MountMode, PathSpec } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'

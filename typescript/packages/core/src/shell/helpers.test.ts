@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { Language, Parser } from 'web-tree-sitter'
 import { assert, beforeAll, describe, expect, it } from 'vitest'
-import { getTestParser } from '../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { ShellParser } from './parse/index.ts'
 import type { TSNodeLike } from './types.ts'
 import {

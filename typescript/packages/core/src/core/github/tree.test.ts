@@ -24,7 +24,7 @@ import { PathSpec } from '../../types.ts'
 import { keepListing } from '../../workspace/mount/listing.ts'
 import { readdir } from './readdir.ts'
 import { pointRow, treeRows } from './tree.ts'
-import { FakeGitHub, blobSha, servedAccessor } from './_test_util.ts'
+import { FakeGitHub, blobSha, servedAccessor } from '../../../tests/core/github/_test_util.ts'
 
 function root(prefix: string): PathSpec {
   return new PathSpec({ virtual: prefix, directory: prefix, vfsPath: '' })

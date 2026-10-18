@@ -19,8 +19,13 @@ import { enoent, errorVirtualPath } from '../../errors/fs.ts'
 import { materialize } from '../../io/types.ts'
 import { FileType } from '../../types.ts'
 import type { ObjectStoreDriver } from './driver.ts'
-import type { FakeStore as Store } from './fakes.ts'
-import { FakeAccessor, FakeStore, makeDriver, spec } from './fakes.ts'
+import type { FakeStore as Store } from '../../../tests/core/object_store/fakes.ts'
+import {
+  FakeAccessor,
+  FakeStore,
+  makeDriver,
+  spec,
+} from '../../../tests/core/object_store/fakes.ts'
 import { makeCreate, makeMkdir, makeTruncate, makeWrite, makeWriteStream } from './write.ts'
 
 const accessor = new FakeAccessor()

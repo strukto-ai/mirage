@@ -4,11 +4,11 @@ description: Run @openai/agents against a Mirage workspace with shell, editor, f
 icon: /images/openai-logo.svg
 ---
 
-The OpenAI Agents SDK ([@openai/agents](https://github.com/openai/openai-agents-js)) ships `shellTool` and `applyPatchTool` primitives that take pluggable `Shell` and `Editor` backends. Mirage provides `MirageShell` and `MirageEditor` implementations that route every command and patch through your `Workspace` instead of the host shell. `mirageReadFileTool` adds agent-initiated file reads with structured model input for text, images, and PDFs.
+The OpenAI Agents SDK ([@openai/agents](https://github.com/openai/openai-agents-js)) ships `shellTool` and `applyPatchTool` primitives that take pluggable `Shell` and `Editor` backends. Mirage provides `MirageShellExecutor` and `MirageEditor` implementations that route every command and patch through your `Workspace` instead of the host shell. `mirageReadFileTool` adds agent-initiated file reads with structured model input for text, images, and PDFs.
 
 ## Install
 
-`@struktoai/mirage-agents/openai` is runtime-agnostic. Pair it with `@struktoai/mirage-node` for Node or `@struktoai/mirage-browser` for the browser.
+`@struktoai/mirage-agents/openai_agents` is runtime-agnostic. Pair it with `@struktoai/mirage-node` for Node or `@struktoai/mirage-browser` for the browser.
 
 <CodeGroup>
 ```bash Node
@@ -26,10 +26,10 @@ import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { Agent, applyPatchTool, run, shellTool } from '@openai/agents'
 import {
   MirageEditor,
-  MirageShell,
+  MirageShellExecutor,
   buildSystemPrompt,
   mirageReadFileTool,
-} from '@struktoai/mirage-agents/openai'
+} from '@struktoai/mirage-agents/openai_agents'
 
 const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 
@@ -41,7 +41,7 @@ const agent = new Agent({
   }),
   tools: [
     mirageReadFileTool(ws),
-    shellTool({ shell: new MirageShell(ws) }),
+    shellTool({ shell: new MirageShellExecutor(ws) }),
     applyPatchTool({ editor: new MirageEditor(ws) }),
   ],
 })
@@ -58,7 +58,7 @@ For an OpenAI-compatible provider without the Responses API, give the agent `mir
 ```ts
 import { run } from '@openai/agents'
 import { Capabilities, SandboxAgent } from '@openai/agents/sandbox'
-import { MirageCapability, MirageSandboxClient } from '@struktoai/mirage-agents/openai'
+import { MirageCapability, MirageSandboxClient } from '@struktoai/mirage-agents/openai_agents'
 
 const agent = new SandboxAgent({
   name: 'Mirage Sandbox Agent',
@@ -83,7 +83,7 @@ How the session behaves:
 | --- | --- |
 | `mirageTools(ws, options?)` | Mirage's seven function tools (`shell`, `read`, `write`, `edit`, `ls`, `grep`, `glob`), the same table MCP serves; `read` hands images and PDFs over as model input. Works with Chat Completions and Responses. |
 | `mirageReadFileTool(ws)` | Adds a `read_file` function tool. Text becomes `input_text`, images become `input_image`, and PDFs become `input_file`. |
-| `MirageShell` | `Shell` implementation; pass to `shellTool({ shell })`. |
+| `MirageShellExecutor` | `Shell` implementation; pass to `shellTool({ shell })`. |
 | `MirageEditor` | `Editor` implementation; pass to `applyPatchTool({ editor })`. |
 | `MirageSandboxClient` | `SandboxClient` for `SandboxAgent`; pass as `run(agent, input, { sandbox: { client } })`. |
 | `MirageSandboxSession` | Per-conversation session bound to a workspace. |

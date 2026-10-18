@@ -179,7 +179,10 @@ export function registryCapabilities(
 ): Record<string, Capabilities | null> {
   const classes = collectClasses(packagesRoot, pkgs)
   const variant = pkgs[pkgs.length - 1] as string
-  const names = registryClasses(resolve(packagesRoot, variant, 'src', 'vfs', 'registry.ts'))
+  const names = registryClasses(
+    resolve(packagesRoot, variant, 'src', 'vfs', 'registry.ts'),
+    packagesRoot,
+  )
   const out: Record<string, Capabilities | null> = {}
   for (const [vfs, className] of names) {
     out[vfs] = className === null ? null : capabilitiesOf(className, classes)
@@ -188,30 +191,75 @@ export function registryCapabilities(
 }
 
 /**
- * Every VFS class a variant can reach, keyed by class name.
- *
- * Duplicate names across the scanned packages would make the extends walk
- * ambiguous, so they are refused rather than resolved by import order.
+ * Resolve VFS declarations through their modules and import aliases.
+ * Shared implementations and host wrappers can use the same class name.
  */
+function classResolver(packagesRoot: string): (file: string, name: string) => string | undefined {
+  const sources = new Map<string, ts.SourceFile>()
+  const find = (file: string, name: string, seen: Set<string>): string | undefined => {
+    const key = `${file}#${name}`
+    if (seen.has(key)) throw new Error(`cyclic VFS class reference: ${key}`)
+    const next = new Set([...seen, key])
+    let source = sources.get(file)
+    if (source === undefined) {
+      source = parse(file)
+      sources.set(file, source)
+    }
+    for (const statement of source.statements) {
+      if (ts.isClassDeclaration(statement) && statement.name?.text === name) return key
+    }
+    for (const statement of source.statements) {
+      if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
+        const bindings = statement.importClause?.namedBindings
+        if (bindings === undefined || !ts.isNamedImports(bindings)) continue
+        const binding = bindings.elements.find((entry) => entry.name.text === name)
+        if (binding === undefined) continue
+        const target = moduleFile(file, statement.moduleSpecifier.text, packagesRoot)
+        return target === undefined
+          ? undefined
+          : find(target, (binding.propertyName ?? binding.name).text, next)
+      }
+      if (ts.isExportDeclaration(statement)) {
+        const target =
+          statement.moduleSpecifier !== undefined && ts.isStringLiteral(statement.moduleSpecifier)
+            ? moduleFile(file, statement.moduleSpecifier.text, packagesRoot)
+            : file
+        if (target === undefined) continue
+        if (statement.exportClause === undefined) {
+          const found = find(target, name, next)
+          if (found !== undefined) return found
+        } else if (ts.isNamedExports(statement.exportClause)) {
+          const binding = statement.exportClause.elements.find((entry) => entry.name.text === name)
+          if (binding !== undefined)
+            return find(target, (binding.propertyName ?? binding.name).text, next)
+        }
+      }
+    }
+    return undefined
+  }
+  return (file, name) => find(file, name, new Set())
+}
+
 export function collectClasses(
   packagesRoot: string,
   pkgs: readonly string[],
 ): Map<string, ClassInfo> {
   const out = new Map<string, ClassInfo>()
+  const reference = classResolver(packagesRoot)
   for (const pkg of pkgs) {
     for (const file of sourceFiles(resolve(packagesRoot, pkg, 'src', 'vfs'))) {
       const source = parse(file)
       ts.forEachChild(source, (node) => {
         if (!ts.isClassDeclaration(node) || node.name === undefined) return
-        const name = node.name.text
+        const name = `${file}#${node.name.text}`
         const seen = out.get(name)
         if (seen !== undefined) {
-          throw new Error(
-            `two VFS classes named ${name}: ${seen.source.fileName} and ${file}; ` +
-              `the capability walk cannot tell which one a registry entry means`,
-          )
+          throw new Error(`duplicate VFS declaration ${name}`)
         }
-        out.set(name, { decl: node, source, parent: heritageName(node) })
+        const parent = heritageName(node)
+        const parentKey =
+          parent === undefined ? undefined : (reference(file, parent) ?? `${file}#${parent}`)
+        out.set(name, { decl: node, source, parent: parentKey })
       })
     }
   }
@@ -225,7 +273,7 @@ function chain(className: string, classes: Map<string, ClassInfo>): ClassInfo[] 
   while (name !== undefined && !seen.has(name)) {
     seen.add(name)
     const info: ClassInfo | undefined = classes.get(name)
-    if (info === undefined) break
+    if (info === undefined) throw new Error(`cannot resolve VFS ancestor ${name}`)
     out.push(info)
     name = info.parent
   }
@@ -482,8 +530,12 @@ function refuses(node: ts.Node): boolean {
  * Args:
  *   registryFile: absolute path to the variant's `VFS/registry.ts`.
  */
-export function registryClasses(registryFile: string): Map<string, string | null> {
+export function registryClasses(
+  registryFile: string,
+  packagesRoot: string,
+): Map<string, string | null> {
   const source = parse(registryFile)
+  const reference = classResolver(packagesRoot)
   const out = new Map<string, string | null>()
   const visit = (node: ts.Node): void => {
     if (
@@ -497,7 +549,34 @@ export function registryClasses(registryFile: string): Map<string, string | null
         if (!ts.isPropertyAssignment(prop)) continue
         const name = prop.name.getText(source).replace(/^['"]|['"]$/g, '')
         const classes = new Set<string>()
+        const imports = new Map<string, { file: string; name: string }>()
         const scan = (child: ts.Node): void => {
+          if (
+            ts.isVariableDeclaration(child) &&
+            ts.isObjectBindingPattern(child.name) &&
+            child.initializer !== undefined
+          ) {
+            const value = ts.isAwaitExpression(child.initializer)
+              ? child.initializer.expression
+              : child.initializer
+            if (
+              ts.isCallExpression(value) &&
+              value.expression.kind === ts.SyntaxKind.ImportKeyword
+            ) {
+              const specifier = value.arguments[0]
+              if (specifier !== undefined && ts.isStringLiteral(specifier)) {
+                const file = moduleFile(registryFile, specifier.text, packagesRoot)
+                if (file !== undefined)
+                  for (const binding of child.name.elements) {
+                    if (ts.isIdentifier(binding.name))
+                      imports.set(binding.name.text, {
+                        file,
+                        name: (binding.propertyName ?? binding.name).getText(source),
+                      })
+                  }
+              }
+            }
+          }
           if (ts.isNewExpression(child) && ts.isIdentifier(child.expression)) {
             classes.add(child.expression.text)
           }
@@ -507,15 +586,27 @@ export function registryClasses(registryFile: string): Map<string, string | null
           if (
             ts.isPropertyAccessExpression(child) &&
             child.name.text === 'create' &&
-            ts.isIdentifier(child.expression) &&
-            child.expression.text.endsWith('VFS')
+            ts.isIdentifier(child.expression)
           ) {
             classes.add(child.expression.text)
           }
           ts.forEachChild(child, scan)
         }
         scan(prop.initializer)
-        const vfsClasses = [...classes].filter((c) => c.endsWith('VFS'))
+        const vfsClasses = [
+          ...new Set(
+            [...classes].flatMap((name) => {
+              const imported = imports.get(name)
+              const found =
+                imported === undefined
+                  ? reference(registryFile, name)
+                  : reference(imported.file, imported.name)
+              if (found === undefined && name.endsWith('VFS'))
+                throw new Error(`${registryFile}: cannot resolve VFS class ${name}`)
+              return found?.endsWith('VFS') === true ? [found] : []
+            }),
+          ),
+        ]
         if (vfsClasses.length === 0 && refuses(prop.initializer)) {
           // Registered so the name resolves and the error explains why,
           // but there is no class to read capabilities from — the browser

@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { Parser, Tree } from 'web-tree-sitter'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { ParseScope } from './scope.ts'
 
 afterEach(() => vi.restoreAllMocks())

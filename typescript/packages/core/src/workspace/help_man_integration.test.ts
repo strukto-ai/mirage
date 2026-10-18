@@ -18,7 +18,11 @@ import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
-import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
+import {
+  getTestParser,
+  stderrStr,
+  stdoutStr,
+} from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 async function makeWs(): Promise<Workspace> {

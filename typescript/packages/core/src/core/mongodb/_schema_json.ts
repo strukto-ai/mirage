@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import { getValidator, isView, listCollections, listIndexes } from './client.ts'
+import { getValidator, isView, listCollections, getIndexes } from './client.ts'
 import { sampleFieldTypes, type SampledField } from './_sampler.ts'
 import { EntityKind, IndexType, PRIMARY_KEY } from './types.ts'
 
@@ -75,7 +75,7 @@ export async function buildCollectionSchemaJson(
   const fields = await sampleFieldTypes(accessor, database, collection, sampleSize)
   let enrichedIndexes: CollectionSchemaIndex[] = []
   if (!view) {
-    const indexes = await listIndexes(accessor, database, collection)
+    const indexes = await getIndexes(accessor, database, collection)
     enrichedIndexes = indexes.map((idx) => ({
       name: idx.name as string | undefined,
       keys: (idx.key as Record<string, unknown> | undefined) ?? {},

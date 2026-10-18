@@ -21,7 +21,7 @@ import { ContentDriftError } from '@struktoai/mirage-core/workspace/snapshot/dri
 import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
-import { FakeHub, blobOid, rowAt, serveHub } from '../../core/hf_hub/_test_util.ts'
+import { FakeHub, blobOid, rowAt, serveHub } from '../../../tests/core/hf_hub/_test_util.ts'
 import { read } from '../../core/hf_hub/read.ts'
 import { Workspace } from '../../workspace.ts'
 import { buildVfs } from '../registry.ts'

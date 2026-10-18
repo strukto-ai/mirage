@@ -49,7 +49,7 @@ export interface GDriveVFSState {
   config: GDriveConfigRedacted
 }
 
-export class GDriveVFS extends BaseVFS {
+export class GoogleDriveVFS extends BaseVFS {
   override readonly name: string = VFSName.GDRIVE
   override readonly cachesReads: boolean = true
   override readonly supportsSnapshot: boolean = true

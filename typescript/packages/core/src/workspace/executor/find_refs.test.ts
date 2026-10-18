@@ -15,7 +15,7 @@
 import { type PathSpec, FileStat, FileType, MountMode } from '../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { resolveNewerRefs } from './find_refs.ts'
 

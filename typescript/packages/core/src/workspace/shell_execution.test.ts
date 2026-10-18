@@ -8,7 +8,7 @@ import { ExecutionScope } from './execution.ts'
 import { ShellExecution } from './shell_execution.ts'
 import { ExecuteResult } from './workspace/types.ts'
 import { Workspace } from './workspace/workspace.ts'
-import { getTestParser } from './fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const enc = new TextEncoder()
 const empty = (): ExecuteResult => new ExecuteResult(new Uint8Array(), new Uint8Array(), 0)

@@ -100,7 +100,7 @@ export async function createS3Client(config: S3Config): Promise<S3Client> {
   return new mod.S3Client(options)
 }
 
-export function isNotFoundError(err: unknown): boolean {
+export function isNotFound(err: unknown): boolean {
   if (err === null || typeof err !== 'object') return false
   const e = err as { name?: string; $metadata?: { httpStatusCode?: number }; Code?: string }
   if (e.name === 'NoSuchKey' || e.name === 'NotFound') return true

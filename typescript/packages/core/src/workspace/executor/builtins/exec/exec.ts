@@ -246,7 +246,7 @@ async function route(
     return [null, null, true]
   }
   if (target === CLOSED) await discardStreams(data)
-  else await appendTo(dispatch, session, target, data)
+  else await append(dispatch, session, target, data)
   return [null, null, false]
 }
 
@@ -554,7 +554,7 @@ async function routed(
   return failed
 }
 
-async function appendTo(
+async function append(
   dispatch: DispatchFn,
   session: SessionState,
   target: string,

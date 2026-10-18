@@ -872,7 +872,7 @@ async function runParsedLine(
   // for the tree: a question put to a host has to answer to both, and
   // both admission passes below can put one.
   const killed = mergeSignals(deps.signal, context.frame.abortSignal)
-  const lineRuntime = env.runtimes.wholeLineFor(deps.routingDecision ?? null)
+  const lineRuntime = env.runtimes.wholeLine(deps.routingDecision ?? null)
   // Filled only after the applicable line-tier admission (a refused
   // line must never reach a secret store) and before expansion or the
   // runtime's env snapshot reads the vars. The prejudge pass leaves

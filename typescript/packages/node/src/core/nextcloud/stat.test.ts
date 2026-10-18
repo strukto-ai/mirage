@@ -1,7 +1,7 @@
 import { ContentType, FileStat, FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it, vi } from 'vitest'
 import { NextcloudAccessor } from '../../accessor/nextcloud.ts'
-import { FakeNextcloudOperator, installFakeOperator } from './mock.ts'
+import { FakeNextcloudOperator, installFakeOperator } from '../../../tests/core/nextcloud/mock.ts'
 import type { SearchEntry } from './search/index.ts'
 import { stat, tree } from './stat.ts'
 

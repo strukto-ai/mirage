@@ -132,7 +132,7 @@ export class Runtimes {
    * everything else walks the executor's tree. The common world has no
    * such runtime, so this is a cheap scan.
    */
-  wholeLineFor(decision: RouteDecision<Runtime> | null): (Runtime & LineExecutor) | null {
+  wholeLine(decision: RouteDecision<Runtime> | null): (Runtime & LineExecutor) | null {
     const candidates = this.entries.some((entry) => isLineExecutor(entry))
     if (!candidates) return null
     const bindings: Record<string, Runtime | null> =

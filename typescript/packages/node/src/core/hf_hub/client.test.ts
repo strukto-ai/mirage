@@ -19,7 +19,7 @@ import {
   HfHubConnectionError,
   HfHubError,
   apiUrl,
-  encodePath,
+  quotePath,
   errorOf,
   etagValue,
   hubBytes,
@@ -256,7 +256,7 @@ describe('the download wire', () => {
 
 describe('encodePath', () => {
   it('encodes each segment without a leading slash', () => {
-    expect(encodePath('/a dir/f#1.txt')).toBe('a%20dir/f%231.txt')
+    expect(quotePath('/a dir/f#1.txt')).toBe('a%20dir/f%231.txt')
   })
 })
 

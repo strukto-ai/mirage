@@ -34,7 +34,7 @@ import { search } from './search.ts'
 import { send } from './send.ts'
 import { serverInfo } from './server_info.ts'
 import { threadCreate } from './thread_create.ts'
-import { context } from '../../../../workspace/fixtures/context.ts'
+import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 
 function leafContext(leaf: string, flags: Record<string, FlagValue> = {}): Context {

@@ -97,7 +97,7 @@ import { sessionView } from '../../session/state.ts'
 import { optionError, parseFlags } from './flags.ts'
 import type { HandOff } from '../../../policy/types.ts'
 import type { ParseScope } from '../../../shell/parse/scope.ts'
-import { executeShellFunction } from './functions.ts'
+import { runShellFunction } from './functions.ts'
 import {
   CWD_DEFAULT_RAW,
   defaultCwdOperand,
@@ -294,7 +294,7 @@ export async function handleCommand(
   const funcBody = session.functions[cmdName]
   if (funcBody !== undefined) {
     if (parser === undefined) throw new Error('function invocation requires a parse scope')
-    return executeShellFunction(
+    return runShellFunction(
       executeNode,
       cmdName,
       funcBody,

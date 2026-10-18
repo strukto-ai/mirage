@@ -17,7 +17,7 @@ import type * as DriveModule from '../../core/google/drive.ts'
 
 vi.mock('../../core/google/drive.ts', async () => {
   const actual = await vi.importActual<typeof DriveModule>('../../core/google/drive.ts')
-  const { driveModuleMock } = await import('../../core/gdrive/_test_util.ts')
+  const { driveModuleMock } = await import('../../../tests/core/gdrive/_test_util.ts')
   return driveModuleMock(actual)
 })
 
@@ -44,19 +44,19 @@ vi.mock('../../core/gdrive/versions.ts', async () => {
   }
 })
 
-import type { FakeDrive } from '../../core/gdrive/_test_util.ts'
-import { resetFakeDrive } from '../../core/gdrive/_test_util.ts'
+import type { FakeDrive } from '../../../tests/core/gdrive/_test_util.ts'
+import { resetFakeDrive } from '../../../tests/core/gdrive/_test_util.ts'
 import { MountMode, ReadPolicy } from '../../types.ts'
 import { md5Hex } from '../../utils/hash.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import {
   ContentDriftError,
   captureFingerprints,
   checkDrift,
 } from '../../workspace/snapshot/drift.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { GDriveVFS } from './gdrive.ts'
+import { GoogleDriveVFS } from './gdrive.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -67,7 +67,7 @@ beforeEach(() => {
   held.fake = fake
 })
 
-describe('GDriveVFS re-list cleanup', () => {
+describe('GoogleDriveVFS re-list cleanup', () => {
   // The first read of an expired folder can be a stat of one child; the
   // re-list it warms still has to find the sibling that went away, which it
   // cannot if the old listing is thrown out before warming.
@@ -76,7 +76,7 @@ describe('GDriveVFS re-list cleanup', () => {
     fake.add('a.txt', dir, undefined, ENC.encode('alpha\n'))
     const b = fake.add('b.txt', dir, undefined, ENC.encode('bravo\n'))
     const ws = new Workspace(
-      { '/gd': new GDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
+      { '/gd': new GoogleDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
       { mode: MountMode.READ, shellParser: await getTestParser() },
     )
     try {
@@ -105,7 +105,7 @@ describe('GDriveVFS re-list cleanup', () => {
     fake.add('a.txt', dir, undefined, ENC.encode('alpha\n'))
     const b = fake.add('b.txt', dir, undefined, ENC.encode('bravo\n'))
     const ws = new Workspace(
-      { '/gd': new GDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
+      { '/gd': new GoogleDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
       {
         mode: MountMode.READ,
         read: { policy: ReadPolicy.FRESH, ttl: 600 },
@@ -130,7 +130,7 @@ describe('GDriveVFS re-list cleanup', () => {
 
 function freshWs(parser: Awaited<ReturnType<typeof getTestParser>>): Workspace {
   return new Workspace(
-    { '/gd': new GDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
+    { '/gd': new GoogleDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
     { mode: MountMode.READ, read: { policy: ReadPolicy.FRESH, ttl: 600 }, shellParser: parser },
   )
 }
@@ -152,7 +152,7 @@ async function warmFile(ws: Workspace, depth: number): Promise<string> {
   return path
 }
 
-describe('GDriveVFS warm read under fresh', () => {
+describe('GoogleDriveVFS warm read under fresh', () => {
   // Cost is the contract, and the routing probe is the cost. A warm named
   // operand is probed at routing, with a fresh index, so the probe walks the
   // parent listings: one per level. The command's own stat and the gate both
@@ -187,7 +187,7 @@ describe('GDriveVFS warm read under fresh', () => {
     ]) {
       fake = resetFakeDrive()
       const ws = new Workspace(
-        { '/gd': new GDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
+        { '/gd': new GoogleDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
         { mode: MountMode.READ, read, shellParser: parser },
       )
       try {
@@ -202,14 +202,14 @@ describe('GDriveVFS warm read under fresh', () => {
   })
 })
 
-describe('GDriveVFS snapshot capture on a written path', () => {
+describe('GoogleDriveVFS snapshot capture on a written path', () => {
   // A read stamps a pin with a revision; the write after it must replace
   // that pin whole with the upload reply's md5, so a replay checks the
   // written bytes rather than pinning the pre-write revision.
   it('pins the write token and replays against it', async () => {
     const id = fake.add('file.txt', 'root', undefined, ENC.encode('v1'))
     const ws = new Workspace(
-      { '/gd': new GDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
+      { '/gd': new GoogleDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
       {
         mode: MountMode.WRITE,
         read: { policy: ReadPolicy.FRESH, ttl: 600 },

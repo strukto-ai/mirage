@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { FakeAirtable, ROADMAP, makeAccessor } from './_test_util.ts'
+import { FakeAirtable, ROADMAP, makeAccessor } from '../../../tests/core/airtable/_test_util.ts'
 import { linesContaining } from './search.ts'
 
 const ROOT = '/at'

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { makeMockRoot } from '../../test-utils.ts'
+import { makeMockRoot } from '../../../tests/test-utils.ts'
 import {
   basename,
   dirname,

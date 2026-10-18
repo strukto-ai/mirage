@@ -16,9 +16,13 @@ import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
 import { HfHubError } from '../hf_hub/client.ts'
-import { type FakeHub, xetHash } from '../hf_hub/_test_util.ts'
+import { type FakeHub, xetHash } from '../../../tests/core/hf_hub/_test_util.ts'
 import { DRIVER, type HfConn } from './driver.ts'
-import { type FakeHfOperator, fakeHfOperator, installFakeOperator } from './mock.ts'
+import {
+  type FakeHfOperator,
+  fakeHfOperator,
+  installFakeOperator,
+} from '../../../tests/core/hf_buckets/mock.ts'
 import { stat } from './stat.ts'
 
 interface Mounted {

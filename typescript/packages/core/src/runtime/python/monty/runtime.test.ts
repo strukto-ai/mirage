@@ -18,12 +18,12 @@ import type { Context } from '../../../commands/config.ts'
 import type { BridgeDispatchFn, Program, RunResult } from '../../types.ts'
 import { MontyRuntime } from './index.ts'
 import { MontyUnavailableError } from './errors.ts'
-import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { PrefixResolver } from '../../resolver.ts'
-import { context } from '../../../workspace/fixtures/context.ts'
+import { context } from '../../../../tests/workspace/fixtures/context.ts'
 
 function makeBridge(
   seed: Record<string, Uint8Array>,

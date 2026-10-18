@@ -39,7 +39,7 @@ import { sliceWindow, spliceWindow } from '../../utils/ranges.ts'
 import { ident } from '../../utils/stat_view.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { FileStat, FileType, Limit, MountMode, OnExceed, PathSpec } from '../../types.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { SessionState } from '../session/session.ts'
 import { Workspace } from '../workspace/workspace.ts'
 

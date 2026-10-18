@@ -20,7 +20,7 @@ import { makeResolveGlob } from '@struktoai/mirage-core/utils/glob_walk'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { SCOPE_ERROR } from '../../core/disk/constants.ts'
 import { readdir } from '../../core/disk/readdir.ts'
-import { spec, tmpRoot } from '../../test-utils.ts'
+import { spec, tmpRoot } from '../../../tests/test-utils.ts'
 
 async function listed(accessor: DiskAccessor, path: PathSpec): Promise<string[]> {
   const listing = await readdir(accessor, path)

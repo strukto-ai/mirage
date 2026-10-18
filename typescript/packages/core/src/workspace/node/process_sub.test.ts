@@ -3,7 +3,7 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 function barrier(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void

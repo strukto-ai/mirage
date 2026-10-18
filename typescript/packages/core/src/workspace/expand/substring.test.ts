@@ -1,5 +1,5 @@
 import { assert, expect, it, vi } from 'vitest'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { substringOperands } from './substring.ts'
 
 it('expands operands only when requested', async () => {

@@ -19,7 +19,7 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { RAMSessionStore } from '../session/ram.ts'
 import { applyStateDict, toStateDict } from '../snapshot/state.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser, stdoutStr } from '../fixtures/workspace_fixture.ts'
+import { getTestParser, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { ExecuteOptions, SessionExecuteOptions } from './types.ts'
 import { Session, Workspace } from './workspace.ts'
 

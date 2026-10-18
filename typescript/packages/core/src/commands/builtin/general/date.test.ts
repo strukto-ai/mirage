@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { GENERAL_DATE } from './date.ts'
 

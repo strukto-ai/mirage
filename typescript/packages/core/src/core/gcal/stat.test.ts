@@ -17,9 +17,9 @@ import type { GCalAccessor } from '../../accessor/gcal.ts'
 import type { Workspace } from '../../workspace/workspace/workspace.ts'
 import { ContentType, FileType, MountMode, type PathSpec, type FileStat } from '../../types.ts'
 import { compactJsonBytes } from '../render/json.ts'
-import { API, EVENTS, makeAccessor, spec } from './_test_util.ts'
+import { API, EVENTS, makeAccessor, spec } from '../../../tests/core/gcal/_test_util.ts'
 
-vi.mock('./client.ts', async () => (await import('./_test_util.ts')).CLIENT)
+vi.mock('./client.ts', async () => (await import('../../../tests/core/gcal/_test_util.ts')).CLIENT)
 
 const { GCalVFS } = await import('../../vfs/gcal/gcal.ts')
 const { Workspace: MountWorkspace } = await import('../../workspace/workspace/workspace.ts')

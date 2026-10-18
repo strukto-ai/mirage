@@ -63,7 +63,7 @@ export interface RedisVFSState {
  * fetch. Everything a mount does, ops table and commands included, lives here
  * once, because none of it depends on the transport.
  */
-export class RedisResourceBase extends BaseVFS {
+export class RedisVFS extends BaseVFS {
   override readonly name: string = VFSName.REDIS
   override readonly cachesReads: boolean = false
   // byte store: stat() sizes every file from metadata

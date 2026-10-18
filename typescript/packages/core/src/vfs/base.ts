@@ -74,7 +74,7 @@ export interface VFSOptions<A extends Accessor = Accessor> {
   /**
    * VFS name commands register under, and the `type` key `getState`
    * writes into a snapshot. Also the registry key when the backend is
-   * exposed through `registerVfsFactory`.
+   * exposed through `registerVfs`.
    */
   name?: string
   /** Backend handle the functions use. */

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { makeMockAccessor, spec } from '../../test-utils.ts'
+import { makeMockAccessor, spec } from '../../../tests/test-utils.ts'
 import { mkdir } from './mkdir.ts'
 import { readdir } from './readdir.ts'
 import { write } from './write.ts'

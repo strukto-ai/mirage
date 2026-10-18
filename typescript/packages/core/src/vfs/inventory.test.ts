@@ -20,7 +20,7 @@ import { ChromaVFS } from './chroma/chroma.ts'
 import { DropboxVFS } from './dropbox/dropbox.ts'
 import { GCalVFS } from './gcal/gcal.ts'
 import { GDocsVFS } from './gdocs/gdocs.ts'
-import { GDriveVFS } from './gdrive/gdrive.ts'
+import { GoogleDriveVFS } from './gdrive/gdrive.ts'
 import { GitHubVFS } from './github/github.ts'
 import { GmailVFS } from './gmail/gmail.ts'
 import { GSheetsVFS } from './gsheets/gsheets.ts'
@@ -32,7 +32,7 @@ import { Mem0VFS } from './mem0/mem0.ts'
 import { OneDriveVFS } from './onedrive/onedrive.ts'
 import { QdrantVFS } from './qdrant/qdrant.ts'
 import { RAMVFS } from './ram/ram.ts'
-import { RedisResourceBase } from './redis/redis.ts'
+import { RedisVFS } from './redis/redis.ts'
 import { SharePointVFS } from './sharepoint/sharepoint.ts'
 import { TrelloVFS } from './trello/trello.ts'
 
@@ -107,7 +107,7 @@ const SERVED: [string, { prototype: BaseVFS }, string[]][] = [
   ['gdocs', GDocsVFS, ['glob', 'readdir', 'rename', 'stat', 'unlink']],
   [
     'gdrive',
-    GDriveVFS,
+    GoogleDriveVFS,
     [
       'append',
       'create',
@@ -175,7 +175,7 @@ const SERVED: [string, { prototype: BaseVFS }, string[]][] = [
   ],
   [
     'redis',
-    RedisResourceBase,
+    RedisVFS,
     [
       'append',
       'create',

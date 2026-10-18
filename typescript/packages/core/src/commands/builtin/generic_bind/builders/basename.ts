@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { basenameFn } from '../../generic/basename.ts'
+import { basename as basenameFn } from '../../generic/basename.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 

@@ -22,7 +22,12 @@ import type { DispatchFn } from '../runtime/types.ts'
 import type { Namespace } from './mount/namespace/namespace.ts'
 import type { SessionState } from './session/session.ts'
 import type { Workspace } from './workspace/workspace.ts'
-import { makeIntegrationWS, run, runExit, runResult } from './fixtures/integration_fixture.ts'
+import {
+  makeIntegrationWS,
+  run,
+  runExit,
+  runResult,
+} from '../../tests/workspace/fixtures/integration_fixture.ts'
 
 let ws: Workspace
 

@@ -27,7 +27,7 @@ import { vfsStateRequiresOverride } from '@struktoai/mirage-core/vfs/secrets'
 import { MountMode, VFSName } from '@struktoai/mirage-core/types'
 import { Workspace } from '../workspace.ts'
 import { normalizeS3Config } from './s3/config.ts'
-import { buildVfs, knownVfsNames, register } from './registry.ts'
+import { buildVfs, knownVfsNames, registerVfs } from './registry.ts'
 
 // Captured before any test calls register(), which is the public hook for
 // custom VFS and legitimately adds names with no VFSName.
@@ -305,7 +305,7 @@ describe('node VFS registry', () => {
   })
 
   it('supports registering a custom factory', async () => {
-    register('mock-fs', async () => {
+    registerVfs('mock-fs', async () => {
       const { RAMVFS } = await import('@struktoai/mirage-core/vfs/ram/ram')
       return new RAMVFS()
     })

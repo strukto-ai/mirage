@@ -13,7 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { makeIntegrationWS, run, runResult } from './fixtures/integration_fixture.ts'
+import {
+  makeIntegrationWS,
+  run,
+  runResult,
+} from '../../tests/workspace/fixtures/integration_fixture.ts'
 
 describe('set -u (nounset)', () => {
   it('makes an unset variable fatal', async () => {

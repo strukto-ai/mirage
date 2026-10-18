@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { ChildEntry, ObjectMeta, TreeEntry } from './driver.ts'
-import { FakeAccessor, FakeStore, makeDriver } from './fakes.ts'
+import { FakeAccessor, FakeStore, makeDriver } from '../../../tests/core/object_store/fakes.ts'
 
 describe('object_store driver', () => {
   it('entry fields the store omits stay unset for the kit to default', () => {

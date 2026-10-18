@@ -17,18 +17,18 @@ import type * as DriveModule from '../google/drive.ts'
 
 vi.mock('../google/drive.ts', async () => {
   const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  const { driveModuleMock } = await import('./_test_util.ts')
+  const { driveModuleMock } = await import('../../../tests/core/gdrive/_test_util.ts')
   return driveModuleMock(actual)
 })
 
 import { MountMode, PathSpec } from '../../types.ts'
-import { GDriveVFS } from '../../vfs/gdrive/gdrive.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { handedAt } from '../../workspace/fixtures/handed.ts'
+import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
 import { readdir } from './readdir.ts'
-import type { FakeDrive } from './_test_util.ts'
-import { makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
+import type { FakeDrive } from '../../../tests/core/gdrive/_test_util.ts'
+import { makeGDriveAccessor, resetFakeDrive } from '../../../tests/core/gdrive/_test_util.ts'
 import { FOLDER_MIME } from '../google/drive.ts'
 import { mkdir } from './mkdir.ts'
 
@@ -41,7 +41,7 @@ beforeEach(() => {
 })
 
 async function workspace(): Promise<Workspace> {
-  const vfs = new GDriveVFS({ clientId: 'x', refreshToken: 'y' })
+  const vfs = new GoogleDriveVFS({ clientId: 'x', refreshToken: 'y' })
   Object.assign(vfs, { accessor })
   return new Workspace(
     { '/d/': vfs },

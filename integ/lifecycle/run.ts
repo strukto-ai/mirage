@@ -18,12 +18,12 @@ import type { ShellExecution } from '@struktoai/mirage-core'
 import {
   Workspace as NodeWorkspace,
   buildVfs as buildNodeVfs,
-  registerVfsFactory as registerNodeVfs,
+  registerVfs as registerNodeVfs,
 } from '@struktoai/mirage-node'
 import {
   Workspace as BrowserWorkspace,
   buildVfs as buildBrowserVfs,
-  registerVfsFactory as registerBrowserVfs,
+  registerVfs as registerBrowserVfs,
 } from '@struktoai/mirage-browser'
 import { Limit, MountMode, type PathSpec } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'

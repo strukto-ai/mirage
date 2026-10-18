@@ -37,7 +37,7 @@ import { ConditionLostError } from '../object_store/errors.ts'
 import {
   createS3Client,
   isConditionLost,
-  isNotFoundError,
+  isNotFound,
   loadS3Module,
   streamToBuffer,
 } from './client.ts'
@@ -157,7 +157,7 @@ async function head(conn: S3Conn, key: string): Promise<ObjectMeta | null> {
       new conn.mod.HeadObjectCommand({ Bucket: conn.config.bucket, Key: key }),
     )) as typeof resp
   } catch (err) {
-    if (isNotFoundError(err)) return null
+    if (isNotFound(err)) return null
     throw err
   }
   const etag = etagOf(resp)
@@ -223,7 +223,7 @@ function isMissingBucket(err: unknown): boolean {
  * Python's `_lost_condition`.
  */
 function lostCondition(err: unknown, matched: boolean): boolean {
-  return isConditionLost(err) || (matched && isNotFoundError(err) && !isMissingBucket(err))
+  return isConditionLost(err) || (matched && isNotFound(err) && !isMissingBucket(err))
 }
 
 async function guarded<T>(key: string, call: Promise<T>, matched = false): Promise<T> {
@@ -387,7 +387,7 @@ async function getVersioned(
       }),
     )) as typeof resp
   } catch (err) {
-    if (isNotFoundError(err)) {
+    if (isNotFound(err)) {
       if (revision === null) return null
       if (isMissingBucket(err)) throw err
       // A pinned revision gone from the store is no file, not absence.
@@ -410,7 +410,7 @@ async function copyIf(
   } catch (err) {
     // A 404 is lost only while the source is still there.
     let lost = isConditionLost(err)
-    if (!lost && cond.ifMatch !== undefined && isNotFoundError(err) && !isMissingBucket(err)) {
+    if (!lost && cond.ifMatch !== undefined && isNotFound(err) && !isMissingBucket(err)) {
       try {
         lost = (await head(conn, srcKey)) !== null
       } catch (probeErr) {
@@ -736,7 +736,7 @@ async function moveFile(conn: S3Conn, srcKey: string, dstKey: string): Promise<b
   try {
     await conn.send(new conn.mod.HeadObjectCommand({ Bucket: conn.config.bucket, Key: srcKey }))
   } catch (err) {
-    if (!isNotFoundError(err)) throw err
+    if (!isNotFound(err)) throw err
     return false
   }
   await copyFile(conn, srcKey, dstKey)
@@ -831,5 +831,5 @@ export const DRIVER: ObjectStoreDriver<S3Accessor, S3Conn> = {
   moveFileIf,
   movePrefixIf,
   deletePrefixIf,
-  isNotFound: isNotFoundError,
+  isNotFound: isNotFound,
 }

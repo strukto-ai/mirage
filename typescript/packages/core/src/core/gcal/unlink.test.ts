@@ -16,9 +16,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GCalAccessor } from '../../accessor/gcal.ts'
 import type { Workspace } from '../../workspace/workspace/workspace.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
-import { API, makeAccessor, spec } from './_test_util.ts'
+import { API, makeAccessor, spec } from '../../../tests/core/gcal/_test_util.ts'
 
-vi.mock('./client.ts', async () => (await import('./_test_util.ts')).CLIENT)
+vi.mock('./client.ts', async () => (await import('../../../tests/core/gcal/_test_util.ts')).CLIENT)
 
 const { GCalVFS } = await import('../../vfs/gcal/gcal.ts')
 const { Workspace: MountWorkspace } = await import('../../workspace/workspace/workspace.ts')

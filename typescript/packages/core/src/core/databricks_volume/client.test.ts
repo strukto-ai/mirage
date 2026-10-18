@@ -16,7 +16,7 @@ import {
 import { read } from './read.ts'
 import { stat } from './stat.ts'
 import { DatabricksVolumeVFSBase } from '../../vfs/databricks_volume/databricks_volume.ts'
-import { jsonResponse, spec } from './_test_util.ts'
+import { jsonResponse, spec } from '../../../tests/core/databricks_volume/_test_util.ts'
 
 const BASE = {
   catalog: 'main',

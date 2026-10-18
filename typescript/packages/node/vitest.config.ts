@@ -17,7 +17,7 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
     // This package's tests do real I/O: temp directories, Redis connections,
     // and the lazy `redis` import the first case in a worker pays for.
     // Vitest's 5s default is sized for pure computation, and the first Redis

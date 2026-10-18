@@ -19,7 +19,7 @@ import { materialize } from '../../io/types.ts'
 import { RAMVFS } from './ram.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 const RAM_XXD = GENERIC_COMMANDS.filter((c) => c.name === 'xxd' && c.filetype == null)
 
 const ENC = new TextEncoder()

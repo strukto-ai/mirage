@@ -14,14 +14,7 @@
 
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import {
-  buildVfs,
-  Mount,
-  MountMode,
-  RAMVFS,
-  registerVfsFactory,
-  Workspace,
-} from '@struktoai/mirage-node'
+import { buildVfs, Mount, MountMode, RAMVFS, registerVfs, Workspace } from '@struktoai/mirage-node'
 
 class PortableRAM extends RAMVFS {}
 
@@ -101,7 +94,7 @@ async function read(path: string): Promise<void> {
   }
 }
 
-registerVfsFactory('portable-ram', () => Promise.resolve(new PortableRAM()))
+registerVfs('portable-ram', () => Promise.resolve(new PortableRAM()))
 const [role, path] = process.argv.slice(2)
 assert(path !== undefined, 'snapshot path is required')
 if (role === 'write') await write(path)

@@ -19,22 +19,22 @@ function idOf(entity: Record<string, unknown>): string {
   return String(entity.id)
 }
 
-function labelOf(entity: Record<string, unknown>): string {
+function label(entity: Record<string, unknown>): string {
   const name = entity.name
   return typeof name === 'string' && name !== '' ? name : idOf(entity)
 }
 
 /** `<Base_Name>__app...`, the one spelling of a base directory. */
 export function baseDirname(base: Record<string, unknown>): string {
-  return makeIdName(labelOf(base), idOf(base))
+  return makeIdName(label(base), idOf(base))
 }
 
 /** `<Table_Name>__tbl...`, the one spelling of a table directory. */
 export function tableDirname(table: Record<string, unknown>): string {
-  return makeIdName(labelOf(table), idOf(table))
+  return makeIdName(label(table), idOf(table))
 }
 
 /** `<View_Name>__viw....jsonl`, the one spelling of a view file. */
 export function viewFilename(view: Record<string, unknown>): string {
-  return makeIdName(labelOf(view), idOf(view), false, VIEW_SUFFIX)
+  return makeIdName(label(view), idOf(view), false, VIEW_SUFFIX)
 }

@@ -88,7 +88,8 @@ describe('OpRecord', () => {
       revision: 'v1',
       mountId: 'internal-mount',
     })
-    expect(Object.keys(r.toJSON()).sort()).toEqual(
+    expect(JSON.parse(JSON.stringify(r))).toEqual(r.toDict())
+    expect(Object.keys(r.toDict()).sort()).toEqual(
       [
         'bytes',
         'durationMs',
@@ -119,14 +120,14 @@ describe('ExecutionNode records', () => {
       durationMs: 10,
     })
     const node = new ExecutionNode({ command: 'cat /s3/a.txt', exitCode: 0, records: [r] })
-    const d = node.toJSON() as { records: Record<string, unknown>[] }
+    const d = node.toDict() as { records: Record<string, unknown>[] }
     expect(d.records).toHaveLength(1)
     expect(d.records[0]?.op).toBe('read')
   })
 
   it('omits records key in toJSON output when empty', () => {
     const node = new ExecutionNode({ command: 'cat /x', exitCode: 0 })
-    const d = node.toJSON()
+    const d = node.toDict()
     expect(d).not.toHaveProperty('records')
   })
 })

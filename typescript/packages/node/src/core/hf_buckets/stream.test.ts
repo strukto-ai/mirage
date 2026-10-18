@@ -17,8 +17,12 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
 import { HfHubError } from '../hf_hub/client.ts'
-import { type FakeHub, NO_ETAG, xetHash } from '../hf_hub/_test_util.ts'
-import { type FakeHfOperator, fakeHfOperator, installFakeOperator } from './mock.ts'
+import { type FakeHub, NO_ETAG, xetHash } from '../../../tests/core/hf_hub/_test_util.ts'
+import {
+  type FakeHfOperator,
+  fakeHfOperator,
+  installFakeOperator,
+} from '../../../tests/core/hf_buckets/mock.ts'
 import { readStream } from './stream.ts'
 
 const BIG = Buffer.from(`${'x'.repeat(1023)}\n`.repeat(300))

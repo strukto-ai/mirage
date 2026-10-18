@@ -18,7 +18,7 @@ import { PyodideRuntime } from './runtime.ts'
 import type { BridgeDispatchFn, RunResult } from '../../types.ts'
 import { ContentType, FileStat, FileType } from '../../../types.ts'
 import { PrefixResolver } from '../../resolver.ts'
-import { context } from '../../../workspace/fixtures/context.ts'
+import { context } from '../../../../tests/workspace/fixtures/context.ts'
 
 /** Run `code` at `/` with empty stdin. */
 function interpret(rt: PyodideRuntime, code: string): Promise<RunResult> {

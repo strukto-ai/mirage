@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { dirnameFn } from '../../generic/dirname.ts'
+import { dirname as dirnameFn } from '../../generic/dirname.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 

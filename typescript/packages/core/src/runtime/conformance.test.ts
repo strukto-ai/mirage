@@ -21,7 +21,7 @@ import { QuickJsRuntime } from './js/quickjs/runtime.ts'
 import type { Runtime } from './base.ts'
 import type { BridgeDispatchFn, RunResult } from './types.ts'
 import { PrefixResolver } from './resolver.ts'
-import { context } from '../workspace/fixtures/context.ts'
+import { context } from '../../tests/workspace/fixtures/context.ts'
 
 interface CountingBridge {
   dispatch: BridgeDispatchFn

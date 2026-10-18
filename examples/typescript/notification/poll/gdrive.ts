@@ -1,5 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises'
-import { GDriveVFS, PathSpec, Workspace } from '@struktoai/mirage-node'
+import { GoogleDriveVFS, PathSpec, Workspace } from '@struktoai/mirage-node'
 import { runWithShutdown } from './dropbox.ts'
 
 function required(name: string): string {
@@ -9,7 +9,7 @@ function required(name: string): string {
 }
 
 async function main(): Promise<void> {
-  const vfs = new GDriveVFS({
+  const vfs = new GoogleDriveVFS({
     clientId: required('GOOGLE_CLIENT_ID'),
     clientSecret: required('GOOGLE_CLIENT_SECRET'),
     refreshToken: required('GOOGLE_REFRESH_TOKEN'),

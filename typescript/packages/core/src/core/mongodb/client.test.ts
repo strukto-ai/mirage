@@ -20,10 +20,10 @@ import {
   findDocuments,
   listCollections,
   listDatabases,
-  listIndexes,
+  getIndexes,
 } from './client.ts'
 import type { MongoDriver } from './_driver.ts'
-import { stubMongoDriver } from './_test_util.ts'
+import { stubMongoDriver } from '../../../tests/core/mongodb/_test_util.ts'
 
 function makeDriver(overrides: Partial<MongoDriver> = {}): MongoDriver {
   return stubMongoDriver({
@@ -118,6 +118,6 @@ describe('countDocuments / listIndexes', () => {
     })
     const accessor = makeAccessor(driver)
     expect(await countDocuments(accessor, 'app', 'users')).toBe(42)
-    expect(await listIndexes(accessor, 'app', 'users')).toEqual([{ name: '_id_' }])
+    expect(await getIndexes(accessor, 'app', 'users')).toEqual([{ name: '_id_' }])
   })
 })

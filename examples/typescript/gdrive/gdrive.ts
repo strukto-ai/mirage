@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GDriveVFS, GWS, MountMode, Workspace, type FileStat, type GDriveConfig } from '@struktoai/mirage-node'
+import { GoogleDriveVFS, GWS, MountMode, Workspace, type FileStat, type GDriveConfig } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development'), override: true })
@@ -47,7 +47,7 @@ function printOut(label: string, out: string, err: string, max = 500): void {
 
 async function main(): Promise<void> {
   const config = buildConfig()
-  const vfs = new GDriveVFS(config)
+  const vfs = new GoogleDriveVFS(config)
   const ws = new Workspace({ '/gdrive': vfs }, { mode: MountMode.WRITE })
   // The gws verbs are a CLI install, separate from the mount.
   ws.registerCli('gws', GWS, { ...config })

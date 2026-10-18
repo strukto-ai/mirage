@@ -17,7 +17,7 @@ import type { Handed } from '../../../vfs/types.ts'
 import { enotsup, walkDeclined } from '../../../errors/fs.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { treeWalk } from './tree.ts'
 

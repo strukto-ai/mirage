@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { ContentType, FileType, type FileStat } from '../../types.ts'
 import { AirtableVFS } from '../../vfs/airtable/airtable.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { FakeAirtable, makeAccessor } from './_test_util.ts'
+import { FakeAirtable, makeAccessor } from '../../../tests/core/airtable/_test_util.ts'
 
 const ROOT = '/at'
 const BASE = `${ROOT}/bases/Product_Roadmap__appRoadmapBase001`

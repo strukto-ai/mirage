@@ -17,7 +17,11 @@ import { runWithSession } from '../context/session_context.ts'
 import { RAMSessionStore } from './session/ram.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { FileType, MountMode, type FileStat } from '../types.ts'
-import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
+import {
+  getTestParser,
+  stderrStr,
+  stdoutStr,
+} from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { parseSessionProfile } from '../policy/profile.ts'
 import { Workspace } from './workspace/workspace.ts'
 

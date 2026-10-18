@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { ParseScope } from '../../shell/parse/scope.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { EvaluationContext } from '../evaluation.ts'
 import { SessionState } from '../session/session.ts'
 import { diagnosticStderr } from './diagnostics.ts'

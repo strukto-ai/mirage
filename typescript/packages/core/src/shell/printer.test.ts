@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
-import { getTestParser } from '../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { getFunctionBody } from './helpers.ts'
 import { ParseScope } from './parse/scope.ts'
 import { functionText, storedFunctionText } from './printer.ts'

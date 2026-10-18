@@ -14,7 +14,7 @@
 
 import { IOResult } from '../../../../io/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../../types.ts'
-import { cpWalk } from '../../generic/cp.ts'
+import { walk } from '../../generic/cp.ts'
 import { removeTree, rmWithoutOperands } from '../../generic/rm_cmd.ts'
 import { formatRecords } from '../../utils/output.ts'
 import { mountPoints } from '../../utils/operands.ts'
@@ -84,7 +84,7 @@ const rm: CommandFn = async (_accessor, paths, _texts, ctx) => {
           // dispatcher declines for the caller's view.
           const unlisted: string[] = []
           let listed = verbose
-            ? (await cpWalk(listing, probe, p, 'rm', unlisted)).map(({ path, kind }) => ({
+            ? (await walk(listing, probe, p, 'rm', unlisted)).map(({ path, kind }) => ({
                 path,
                 isDir: kind === FileType.DIRECTORY,
               }))

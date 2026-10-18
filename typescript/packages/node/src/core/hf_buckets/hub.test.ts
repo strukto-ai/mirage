@@ -16,9 +16,20 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
 import { HfHubError } from '../hf_hub/client.ts'
-import { FakeHub, INVALID_PATHS, NO_ETAG, lfsOid, serveHub, xetHash } from '../hf_hub/_test_util.ts'
+import {
+  FakeHub,
+  INVALID_PATHS,
+  NO_ETAG,
+  lfsOid,
+  serveHub,
+  xetHash,
+} from '../../../tests/core/hf_hub/_test_util.ts'
 import { fetchRow, pathsInfoUrl, readToken, resolveUrl } from './hub.ts'
-import { DEAD_ENDPOINT, fakeHfOperator, installFakeOperator } from './mock.ts'
+import {
+  DEAD_ENDPOINT,
+  fakeHfOperator,
+  installFakeOperator,
+} from '../../../tests/core/hf_buckets/mock.ts'
 import { read } from './read.ts'
 
 function offline(keyPrefix?: string): HfBucketsAccessor {

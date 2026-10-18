@@ -14,7 +14,7 @@
 
 import { DeleteObjectsCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { installS3Mock, S3MockStore, type S3Mock } from './mock.ts'
+import { installS3Mock, S3MockStore, type S3Mock } from '../../../tests/vfs/s3/mock.ts'
 
 describe('the S3 mount mock tripwire', () => {
   let mock: S3Mock

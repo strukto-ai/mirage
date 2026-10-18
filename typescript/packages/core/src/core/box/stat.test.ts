@@ -23,7 +23,7 @@ vi.mock('./api.ts', async () => {
 import { BoxAccessor } from '../../accessor/box.ts'
 import { ListingCheckStore, RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { entryAt } from '../../workspace/fixtures/handed.ts'
+import { entryAt } from '../../../tests/workspace/fixtures/handed.ts'
 import * as api from './api.ts'
 import { BoxApiError, type BoxTokenManager } from './client.ts'
 import { readdir } from './readdir.ts'

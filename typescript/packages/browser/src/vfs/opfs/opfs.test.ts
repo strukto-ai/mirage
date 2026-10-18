@@ -20,7 +20,7 @@ import { copy as copyCore } from '../../core/opfs/copy.ts'
 import { exists as existsCore } from '../../core/opfs/exists.ts'
 import { rmR as rmRCore } from '../../core/opfs/rm.ts'
 import { readStream as streamCore } from '../../core/opfs/stream.ts'
-import { installFakeNavigator, makeMockRoot, spec } from '../../test-utils.ts'
+import { installFakeNavigator, makeMockRoot, spec } from '../../../tests/test-utils.ts'
 import { OPFSVFS } from './opfs.ts'
 
 let res: OPFSVFS

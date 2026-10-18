@@ -18,7 +18,7 @@ import { OpRecord } from '../../observe/record.ts'
 import type { CacheFacts } from '../../types.ts'
 import { latestFingerprint, setCached } from './io.ts'
 import { RAMFileCacheStore } from './ram.ts'
-import { RefusingStore } from '../_test_util.ts'
+import { RefusingStore } from '../../../tests/cache/_test_util.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

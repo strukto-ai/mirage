@@ -19,12 +19,12 @@ import { DatabricksVolumeVFSBase } from './databricks_volume/databricks_volume.t
 import { DifyVFS } from './dify/dify.ts'
 import { DiscordVFSBase } from './discord/discord.ts'
 import { DropboxVFS } from './dropbox/dropbox.ts'
-import { GDriveVFS } from './gdrive/gdrive.ts'
+import { GoogleDriveVFS } from './gdrive/gdrive.ts'
 import { NotionVFSBase } from './notion/notion.ts'
 import { OneDriveVFS } from './onedrive/onedrive.ts'
 import { PostgresVFSBase } from './postgres/postgres.ts'
 import { RAMVFS } from './ram/ram.ts'
-import { RedisResourceBase } from './redis/redis.ts'
+import { RedisVFS } from './redis/redis.ts'
 import { S3VFSBase } from './s3/s3.ts'
 import { SharePointVFS } from './sharepoint/sharepoint.ts'
 import { SlackVFSBase } from './slack/slack.ts'
@@ -45,10 +45,10 @@ const NATIVE: [string, () => BaseVFS][] = [
   ['dify', () => new DifyVFS({ apiKey: 'k', baseUrl: 'http://dify.test', datasetId: 'd' })],
   ['discord', () => new DiscordVFSBase()],
   ['dropbox', () => new DropboxVFS({ clientId: 'i', refreshToken: 'r' })],
-  ['gdrive', () => new GDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' })],
+  ['gdrive', () => new GoogleDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' })],
   ['onedrive', () => new OneDriveVFS({ accessToken: 'tok' })],
   ['ram', () => new RAMVFS()],
-  ['redis', () => new RedisResourceBase({ url: 'redis://test' } as never)],
+  ['redis', () => new RedisVFS({ url: 'redis://test' } as never)],
   ['s3', () => new S3VFSBase()],
   ['sharepoint', () => new SharePointVFS({ accessToken: 'tok' })],
   ['slack', () => new SlackVFSBase()],

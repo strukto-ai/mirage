@@ -17,7 +17,7 @@ import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 import { type DirListing, FileType, PathSpec } from '../../types.ts'
 import { readdir } from './readdir.ts'
 import { GitHubApiError, type GitHubTransport } from './client.ts'
-import { BASE, FakeGitHub, servedAccessor } from './_test_util.ts'
+import { BASE, FakeGitHub, servedAccessor } from '../../../tests/core/github/_test_util.ts'
 
 const TREE = [
   { path: 'src', type: 'tree', sha: 'aaa' },

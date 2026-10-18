@@ -21,8 +21,13 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MountCore } from '../../mount/core.ts'
 import { MinIOVFS } from '../minio/minio.ts'
-import { inFlightConflict, installS3Mock, MUTATIONS, type S3Mock } from './mock.ts'
-import { s3Vfs } from '../../test-utils.ts'
+import {
+  inFlightConflict,
+  installS3Mock,
+  MUTATIONS,
+  type S3Mock,
+} from '../../../tests/vfs/s3/mock.ts'
+import { s3Vfs } from '../../../tests/test-utils.ts'
 import { Workspace } from '../../workspace.ts'
 
 const STALE = 'changed since it was read; read it again before writing'

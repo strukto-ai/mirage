@@ -25,7 +25,7 @@ import { PathSpec } from '../../types.ts'
 import * as client from './client.ts'
 import type { DropboxTokenManager } from './client.ts'
 import { rmdir } from './rmdir.ts'
-import { FakeDropboxRpc, fileEntry, folderEntry } from './_test_util.ts'
+import { FakeDropboxRpc, fileEntry, folderEntry } from '../../../tests/core/dropbox/_test_util.ts'
 
 const STUB_TM = {} as DropboxTokenManager
 

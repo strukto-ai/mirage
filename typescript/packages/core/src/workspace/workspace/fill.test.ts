@@ -36,7 +36,11 @@ import { parseSessionProfile, type SessionProfile } from '../../policy/profile.t
 import type { RouteContext } from '../../policy/types.ts'
 import type { AskHandler } from '../../policy/decisions.ts'
 import { Outcome, Scope, type Decision, type SessionContext } from '../../policy/types.ts'
-import { getTestParser, stderrStr, stdoutStr } from '../fixtures/workspace_fixture.ts'
+import {
+  getTestParser,
+  stderrStr,
+  stdoutStr,
+} from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { guestBound } from './fill.ts'
 import { Workspace } from './workspace.ts'
 
@@ -348,7 +352,7 @@ describe('fillEnv through execute', () => {
       const afterWrite = calls.length
       expect(stdoutStr(await ws.shell('echo $TOKEN'))).toBe('mine\n')
       expect(calls.length).toBe(afterWrite)
-      const data = ws.getSession(ws.defaultSessionId).toJSON()
+      const data = ws.getSession(ws.defaultSessionId).toDict()
       expect((data.env as Record<string, string>).TOKEN).toBe('mine')
       expect('managed' in data).toBe(false)
     } finally {

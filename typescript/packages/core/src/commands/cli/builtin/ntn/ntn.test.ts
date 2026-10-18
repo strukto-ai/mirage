@@ -28,7 +28,7 @@ import { query } from './datasources/query.ts'
 import { whoamiRow } from './whoami.ts'
 import { notionTransport, propertyCell } from './util.ts'
 import { yieldBytes } from '../../../../io/stream.ts'
-import { context } from '../../../../workspace/fixtures/context.ts'
+import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
