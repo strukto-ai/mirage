@@ -9,36 +9,22 @@ Create a key in [W&B User Settings](https://wandb.ai/settings) and store it in
 `WANDB_API_KEY`. Set `entities` to the username or team segment from a project
 URL; Mirage does not discover entities from the key.
 
-## First read with Python
-
 ```python
-import asyncio
 import os
-import shlex
 
-from mirage import MountMode, Workspace
+from mirage import Workspace, MountMode
 from mirage.vfs.wandb import WandbConfig, WandbVFS
 
-entity = "my-team"
 ws = Workspace({
     "/wandb": WandbVFS(WandbConfig(
-        entities=[entity],
+        entities=["my-team"],
         api_key=os.environ["WANDB_API_KEY"],
     )),
 }, mode=MountMode.READ)
-
-
-async def main():
-    result = await ws.shell(
-        f"find /wandb/{entity} -name run.json | head -n 1"
-    )
-    run_path = (await result.stdout_str()).strip()
-    result = await ws.shell(f"head -n 20 {shlex.quote(run_path)}")
-    print(await result.stdout_str())
-
-
-asyncio.run(main())
 ```
+
+After mounting, `find /wandb/my-team -name run.json` discovers available run
+paths.
 
 The mount exposes `/<entity>/<project>/<run-id>/` with `run.json`,
 `config.json`, `summary.json`, `history.jsonl`, and `files/`.
