@@ -195,21 +195,29 @@ impl Program {
                 && options.null_data
                 && non_matching.contains(terminator)
                 && !non_matching.contains(b'\n'),
-            required_terms: required_terms.map(|(mut texts, whole_word)| {
-                let folded = texts[0].to_ascii_lowercase();
-                let ignore_case = texts.len() > 1
-                    && folded.is_ascii()
-                    && texts
-                        .iter()
-                        .all(|text| text.is_ascii() && text.eq_ignore_ascii_case(&folded));
-                if ignore_case {
-                    texts = vec![folded];
+            required_terms: required_terms.and_then(|(mut texts, whole_word)| {
+                let mut ignore_case = false;
+                if texts.iter().all(|text| text.is_ascii()) {
+                    let mut folded = Vec::new();
+                    for text in &texts {
+                        let text = text.to_ascii_lowercase();
+                        if !folded.contains(&text) {
+                            folded.push(text);
+                        }
+                    }
+                    if folded.len() < texts.len() {
+                        texts = folded;
+                        ignore_case = true;
+                    }
                 }
-                SearchHints {
+                if texts.len() > 16 {
+                    return None;
+                }
+                Some(SearchHints {
                     texts,
                     whole_word,
                     ignore_case,
-                }
+                })
             }),
         })
     }

@@ -109,7 +109,7 @@ impl RegexMatcherBuilder {
                 .literals()
                 .is_some_and(|literals| literals.iter().all(|literal| literal.is_exact()));
         let terms = prefixes.literals().and_then(|literals| {
-            if literals.is_empty() || literals.len() > 16 {
+            if literals.is_empty() {
                 return None;
             }
             literals

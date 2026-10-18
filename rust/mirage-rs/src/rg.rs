@@ -739,7 +739,7 @@ impl Printed {
             if config.trim {
                 while self.trim_at < self.range.end
                     && *budget > 0
-                    && self.data[self.trim_at].is_ascii_whitespace()
+                    && matches!(self.data[self.trim_at], b'\t'..=b'\r' | b' ')
                 {
                     self.trim_at += 1;
                     *budget -= 1;
@@ -1497,6 +1497,7 @@ impl RegionJob {
             printed.range = begin..end;
             printed.trim_at = begin;
             printed.terminated = false;
+            printed.cr = false;
             printed.offset = mat.start as u64;
             printed.spans = Spans::One(begin, end);
             printed.count = 1;
