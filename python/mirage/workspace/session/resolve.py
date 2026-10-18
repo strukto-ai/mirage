@@ -405,7 +405,7 @@ def compile_commands(profile: SessionProfile) -> AdmissionRules | None:
     return AdmissionRules(allow=allow, ask=tuple(ask), deny=tuple(deny))
 
 
-def _hidden(profile: SessionProfile) -> HiddenPaths | None:
+def _hidden_of(profile: SessionProfile) -> HiddenPaths | None:
     """Every path the profile hides: its own entries, and each mount
     entry's anchored to the mount it was written under, since the set
     is one list for the whole session and nothing in it remembers which
@@ -423,7 +423,7 @@ def _hidden(profile: SessionProfile) -> HiddenPaths | None:
     return classify_paths(entries)
 
 
-def _shown(profile: SessionProfile) -> ShownPaths | None:
+def _shown_of(profile: SessionProfile) -> ShownPaths | None:
     """Every show entry the profile states: its own and each mount
     section's, one list, since a show entry is absolute wherever it is
     written and the compiled axis has no sections.
@@ -463,7 +463,7 @@ def _hide_reasons_of(profile: SessionProfile) -> tuple[HideReason, ...]:
     return tuple(groups)
 
 
-def _modes(profile: SessionProfile) -> dict[str, MountMode] | None:
+def _modes_of(profile: SessionProfile) -> dict[str, MountMode] | None:
     """The mode each mount section states, None when none does.
 
     A mount the profile does not name is absent from the map and keeps
@@ -533,8 +533,8 @@ def compile_profile(
             cwd=effective.cwd,
         ),
         visibility=Visibility(
-            paths=_hidden(effective),
-            shown=_shown(effective),
+            paths=_hidden_of(effective),
+            shown=_shown_of(effective),
             vars=classify_vars(
                 effective.vars.hide if effective.vars is not None else ()
             ),
@@ -542,7 +542,7 @@ def compile_profile(
             commands=commands.allow if commands is not None else None,
         ),
         policies=ProfilePolicies(
-            mount_modes=_modes(effective),
+            mount_modes=_modes_of(effective),
             commands=commands,
             scripts=compile_scripts(effective, name),
             command_limits=effective.command_limits,
