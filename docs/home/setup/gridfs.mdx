@@ -19,6 +19,13 @@ MONGODB_URI=mongodb://localhost:27017
 
 #### MongoDB Atlas (Cloud)
 
+Before copying the URI, create a database user with access to the GridFS
+database and allow the application host through Atlas network access. Atlas
+walks through both prerequisites in its
+[connection guide](https://www.mongodb.com/docs/atlas/connect-to-database-deployment/).
+Percent-encode special characters in the username or password before placing
+them in the URI.
+
 1. Go to https://cloud.mongodb.com
 1. Select your cluster -> **Connect** -> **Drivers**
 1. Copy the connection string:

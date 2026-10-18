@@ -11,6 +11,15 @@ Both Python and TypeScript require an explicit workspace host and token.
 The token can be a personal access token, an OAuth access token, or a callback
 that supplies the current access token. No extra Python package is required.
 
+For a local first connection, create a personal access token in the workspace
+under **Settings → Developer → Access tokens**. If the control is unavailable,
+ask the workspace administrator to enable or issue credentials. See
+[Databricks personal access token authentication](https://docs.databricks.com/aws/en/dev-tools/auth/pat).
+If the workspace uses scoped tokens, include the
+[`files` API scope](https://docs.databricks.com/api/files/v2/file).
+For deployed applications, prefer an OAuth flow or credential broker that can
+rotate tokens.
+
 ### Set the workspace host
 
 Use your workspace origin, such as
@@ -18,6 +27,19 @@ Use your workspace origin, such as
 `https://adb-xxxxxxxxxxxx.xx.azuredatabricks.net` on Azure.
 The host accepts HTTP or HTTPS and rejects a path, query, fragment, or userinfo.
 A trailing slash is allowed.
+
+### Find a readable volume
+
+Open **Catalog** in the workspace sidebar, then browse to a volume in Catalog
+Explorer. Its three-level name supplies the `catalog`, `schema`, and `volume`
+config fields. A volume path such as
+`/Volumes/main/default/agent_files/reports/q1.csv` maps those fields to
+`main`, `default`, and `agent_files`.
+
+The principal needs `USE CATALOG`, `USE SCHEMA`, and `READ VOLUME` for a
+read-only mount; a write mount also needs `WRITE VOLUME`. See
+[Explore files in volumes](https://docs.databricks.com/aws/en/discover/files)
+and [volume permissions](https://docs.databricks.com/aws/en/volumes/utility-commands).
 
 ### Supply a token
 
@@ -42,4 +64,4 @@ caches. Token refresh for the same principal and scope can use the existing VFS.
 
 See the [Python Databricks Volume VFS](/python/vfs/databricks_volume) or
 [TypeScript Databricks Volume VFS](/typescript/setup/databricks_volume) page for
-configuration examples.
+configuration and first-read examples.

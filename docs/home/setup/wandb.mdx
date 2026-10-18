@@ -3,17 +3,55 @@ title: "Weights & Biases"
 description: "Read experiment runs, configuration, summaries, history, and run files."
 ---
 
+## Credentials
+
+Create a key in [W&B User Settings](https://wandb.ai/settings) and store it in
+`WANDB_API_KEY`. The entity is the W&B username or team that owns the projects
+you want to expose; it is the first segment in a project URL such as
+`https://wandb.ai/<entity>/<project>`.
+
+The key must be able to view every entity you configure. Mirage does not
+discover entities from the key.
+
+## First read with Python
+
 ```python
+import asyncio
 import os
-from mirage import Workspace, MountMode
+import shlex
+
+from mirage import MountMode, Workspace
 from mirage.vfs.wandb import WandbConfig, WandbVFS
 
+entity = "my-team"
 ws = Workspace({
     "/wandb": WandbVFS(WandbConfig(
-        entities=["my-team"],
+        entities=[entity],
         api_key=os.environ["WANDB_API_KEY"],
     )),
 }, mode=MountMode.READ)
+
+
+async def main():
+    entity_path = f"/wandb/{entity}"
+    result = await ws.shell(f"ls {shlex.quote(entity_path)} | head -n 1")
+    projects = (await result.stdout_str()).strip().splitlines()
+    if not projects:
+        raise RuntimeError(f"No W&B projects are visible under {entity}")
+
+    project = projects[0]
+    project_path = f"{entity_path}/{project}"
+    result = await ws.shell(f"ls {shlex.quote(project_path)} | head -n 1")
+    runs = (await result.stdout_str()).strip().splitlines()
+    if not runs:
+        raise RuntimeError(f"No W&B runs are visible under {entity}/{project}")
+
+    run_path = f"{project_path}/{runs[0]}/run.json"
+    result = await ws.shell(f"cat {shlex.quote(run_path)}")
+    print(await result.stdout_str())
+
+
+asyncio.run(main())
 ```
 
 The mount exposes `/<entity>/<project>/<run-id>/` with `run.json`,
@@ -21,6 +59,10 @@ The mount exposes `/<entity>/<project>/<run-id>/` with `run.json`,
 Configure one or more entities explicitly; project and run listings are fetched
 on demand and follow service pagination. Run IDs identify directories; duplicate
 display names remain separate runs.
+
+For TypeScript, use the [Node and browser example](/typescript/setup/wandb).
+
+## Run data reference
 
 `run.json` contains the run metadata exposed by the supported W&B API fields:
 

@@ -146,37 +146,48 @@ async def main():
     r = await ws.shell("ls /discord/")
     print(await r.stdout_str())
 
-    guild = r.stdout_str().strip().split("\n")[0].strip()
+    guilds = (await r.stdout_str()).strip().splitlines()
+    if not guilds:
+        raise RuntimeError("No Discord guilds are visible to this bot")
+    guild = guilds[0]
 
     # List channels
     r = await ws.shell(f'ls "/discord/{guild}/channels/"')
     print(await r.stdout_str())
 
-    ch = r.stdout_str().strip().splitlines()[0].strip()
+    channels = (await r.stdout_str()).strip().splitlines()
+    if not channels:
+        raise RuntimeError(f"No text channels are visible in {guild}")
+    ch = channels[0]
     base = f"/discord/{guild}/channels/{ch}"
 
-    # Read messages from a specific date
-    r = await ws.shell(f'cat "{base}/2026-04-04/chat.jsonl" | head -n 3')
+    # Discover an available day, then read a few messages
+    r = await ws.shell(f'ls "{base}/" | tail -n 1')
+    day = (await r.stdout_str()).strip()
+    if not day:
+        raise RuntimeError(f"No message days are visible under {base}")
+    r = await ws.shell(f'head -n 3 "{base}/{day}/chat.jsonl"')
     print(await r.stdout_str())
 
     # Extract usernames with jq
     r = await ws.shell(
-        f'jq -r ".author.username" "{base}/2026-04-04/chat.jsonl"')
+        f'jq -r ".author.username" "{base}/{day}/chat.jsonl"')
     print(await r.stdout_str())
 
     # Count messages per user
     r = await ws.shell(
-        f'cat "{base}/2026-04-04/chat.jsonl"'
+        f'cat "{base}/{day}/chat.jsonl"'
         ' | jq -r ".author.username" | sort | uniq -c')
     print(await r.stdout_str())
 
     # List attachments for a day and download one
-    r = await ws.shell(f'ls "{base}/2026-04-04/files/"')
+    r = await ws.shell(f'ls "{base}/{day}/files/"')
     print(await r.stdout_str())
-    r = await ws.shell(
-        f'cat "{base}/2026-04-04/files/screenshot__1488111222333444555.png"')
-    blob = await r.materialize_stdout()
-    print(f"downloaded {len(blob)} bytes")
+    attachments = (await r.stdout_str()).strip().splitlines()
+    if attachments:
+        r = await ws.shell(f'cat "{base}/{day}/files/{attachments[0]}"')
+        blob = await r.materialize_stdout()
+        print(f"downloaded {len(blob)} bytes")
 
     # Search every day of the channel
     r = await ws.shell(f'grep -r hello "{base}/"')

@@ -286,6 +286,8 @@ await session.explain.vfs.<call>(...) -> VfsExplanation
 What `session.shell` or a `session.vfs` call would do, without running it: a line's verdict and parse tree, a VFS call's verdict and error, each with every policy's answer. See [Explain](/home/policy/explain).
 
 ```python
+from mirage import CommandExplanation
+
 shell_res = await session.explain.shell("rm /data/x")
 print(shell_res.exit_code, shell_res.reason)
 for node in shell_res.node.children:

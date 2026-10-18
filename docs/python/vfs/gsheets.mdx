@@ -83,6 +83,10 @@ file cache; a rendered read through FUSE, `ws.vfs`, a
 
 ## Example
 
+The spreadsheet names and IDs below illustrate the path format. Replace them
+with values returned by `ls /gsheets/owned/`; the linked repository example
+discovers an available spreadsheet automatically.
+
 ```python
 import asyncio
 import os
@@ -155,7 +159,7 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-See `examples/gsheets/gsheets.py` for the full working example.
+See [`examples/python/gsheets/gsheets.py`](https://github.com/StruktoAI/mirage/blob/main/examples/python/gsheets/gsheets.py) for the full working example.
 
 ## Shell Commands
 

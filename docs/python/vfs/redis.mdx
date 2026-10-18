@@ -91,7 +91,7 @@ async def main():
     await ws.shell("mv /redis/data/copy.txt /redis/data/renamed.txt")
 
     # Search
-    r = await ws.shell('grep "hello" /redis/data/')
+    r = await ws.shell('grep -r "hello" /redis/data/')
     print(await r.stdout_str())
 
     # Clean up

@@ -83,6 +83,10 @@ file cache; a rendered read through FUSE, `ws.vfs`, a
 
 ## Example
 
+The document names and IDs below illustrate the path format. Replace them with
+values returned by `ls /gdocs/owned/`; the linked repository example discovers
+an available document automatically.
+
 ```python
 import asyncio
 import os
@@ -149,7 +153,7 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-See `examples/gdocs/gdocs.py` for the full working example.
+See [`examples/python/gdocs/gdocs.py`](https://github.com/StruktoAI/mirage/blob/main/examples/python/gdocs/gdocs.py) for the full working example.
 
 ## Shell Commands
 

@@ -77,7 +77,7 @@ find /knowledge/ -type f
 cat /knowledge/guides/quickstart.md
 head -n 20 /knowledge/guides/quickstart.md
 tail -n 20 /knowledge/guides/quickstart.md
-grep -in "billing" /knowledge/
+grep -rin "billing" /knowledge/
 ```
 
 ## Exact Search with Grep
@@ -88,8 +88,8 @@ chunks joined by line breaks, so no match can span two chunks and the answer is
 exact. `$contains` matches case, so `-i` reads every page.
 
 ```bash
-grep "refund" /knowledge/policies/
-grep -i "quickstart" /knowledge/
+grep -r "refund" /knowledge/policies/
+grep -ri "quickstart" /knowledge/
 grep -n "API key" /knowledge/guides/quickstart.md
 ```
 

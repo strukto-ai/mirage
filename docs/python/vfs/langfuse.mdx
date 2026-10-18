@@ -178,10 +178,10 @@ async def main():
     print(await r.stdout_str())
 
     # Read a specific trace
-    traces = r.stdout_str().strip().splitlines()
+    traces = (await r.stdout_str()).strip().splitlines()
     if traces:
         r = await ws.shell(f'cat "/langfuse/traces/{traces[0]}"')
-        print(r.stdout_str()[:500])
+        print((await r.stdout_str())[:500])
 
     # List prompts
     r = await ws.shell("ls /langfuse/prompts/")

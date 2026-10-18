@@ -9,6 +9,7 @@ description: Mount a Postgres database as a read-only filesystem of schemas, tab
 ## Config
 
 ```python
+from mirage import MountMode, Workspace
 from mirage.vfs.postgres import PostgresConfig, PostgresVFS
 
 vfs = PostgresVFS(PostgresConfig(
@@ -18,6 +19,47 @@ vfs = PostgresVFS(PostgresConfig(
     max_read_rows=10_000,
     max_read_bytes=10 * 1024 * 1024,
 ))
+ws = Workspace({"/pg": vfs}, mode=MountMode.READ)
+```
+
+For DSN format and permissions, see [Postgres Setup](/home/setup/postgres).
+
+## First read
+
+Schemas appear at the mount root. Each table and view has `schema.json`,
+`semantic.json`, and a line-delimited `rows.jsonl` file:
+
+```text
+/pg/
+  database.json
+  public/
+    tables/
+      users/
+        schema.json
+        semantic.json
+        rows.jsonl
+    views/
+```
+
+Discover a table from the connected database before reading it; names such as
+`public.users` above are illustrative:
+
+```python
+import asyncio
+import shlex
+
+
+async def main():
+    result = await ws.shell("find /pg/ -name rows.jsonl | head -n 1")
+    rows_path = (await result.stdout_str()).strip()
+    if not rows_path:
+        raise RuntimeError("No readable Postgres tables or views were found")
+
+    result = await ws.shell(f"head -n 3 {shlex.quote(rows_path)}")
+    print(await result.stdout_str())
+
+
+asyncio.run(main())
 ```
 
 | Field | Default | Notes |
@@ -27,8 +69,6 @@ vfs = PostgresVFS(PostgresConfig(
 | `default_row_limit` | `1000` | Rows a windowed read returns when it passes an offset but no limit. |
 | `max_read_rows` | `10_000` | Hard ceiling per read. A whole read past it is refused, and so is a `head -n` / `tail -n` count past it on a table that long (`File too large`); `wc -l` counts past it. |
 | `max_read_bytes` | `10 MiB` | Hard ceiling per read. |
-
-For DSN format and permissions, see [Postgres Setup](/home/setup/postgres).
 
 ## Mount mode
 
