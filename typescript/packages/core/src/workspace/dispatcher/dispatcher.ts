@@ -421,7 +421,13 @@ function wholeRead(kwargs: OpKwargs): OpKwargs {
  */
 async function sized(mount: MountEntry, path: PathSpec, row: unknown): Promise<unknown> {
   const manager = mount.cacheManager
-  if (!(row instanceof FileStat) || row.size !== null || manager === null) return row
+  if (
+    !(row instanceof FileStat) ||
+    row.type !== FileType.FILE ||
+    row.size !== null ||
+    manager === null
+  )
+    return row
   const size = await manager.cachedSize(path)
   return size === null ? row : row.with({ size })
 }
@@ -1056,7 +1062,7 @@ export class Dispatcher {
         const batched = mount.vfs.supports('readMany')
         const wanted: PathSpec[] = []
         for (const p of paths) {
-          if (!(await manager.isCached(p)) && (await fitsReadAhead(mount, p, batched))) {
+          if ((await fitsReadAhead(mount, p, batched)) && !(await manager.isCached(p))) {
             wanted.push(p)
           }
         }

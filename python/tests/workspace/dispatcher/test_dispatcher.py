@@ -1539,6 +1539,22 @@ async def test_a_stat_with_no_size_takes_the_cached_length():
         await ws.close()
 
 
+@pytest.mark.asyncio
+async def test_a_directory_stat_does_not_probe_cached_bytes():
+    vfs = _UnsizedRAM()
+    vfs._store.dirs.update({"/", "/d"})
+    ws = Workspace({"/api": vfs})
+    try:
+        await ws.cache.set("/api/d", b"not a file")
+        get = AsyncMock(wraps=ws.cache.get)
+        ws.cache.get = get
+        row = await ws.vfs.stat("/api/d")
+        assert (row.type, row.size) == (FileType.DIRECTORY, None)
+        assert get.call_args_list == []
+    finally:
+        await ws.close()
+
+
 def _counted_workspace(
     race: bool = False, filetype: str | None = None
 ) -> tuple[Workspace, list[str]]:
@@ -2569,6 +2585,33 @@ async def test_a_read_ahead_reads_only_the_files_listed_small():
         assert vfs.reads == ["/r/a"]
         await ws.dispatch("read", _path("/r/a"))
         assert vfs.reads == ["/r/a"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_read_ahead_skips_cache_probes_for_known_directories():
+    vfs = BatchedRAM()
+    vfs._store.dirs.add("/empty")
+    ws = Workspace({"/r": vfs})
+    try:
+        await ws.mount("/r").index.set_dir(
+            "/r",
+            [
+                ("a", FileStat(name="a", type=FileType.FILE, size=2)),
+                ("secret", FileStat(name="secret", type=FileType.DIRECTORY)),
+                ("empty", FileStat(name="empty", type=FileType.DIRECTORY)),
+            ],
+        )
+        exists = AsyncMock(wraps=ws.cache.exists)
+        ws.cache.exists = exists
+        await ws.dispatch(
+            "read_many",
+            _path("/r/a"),
+            paths=[_path("/r/secret"), _path("/r/empty")],
+        )
+        assert [call.args[0] for call in exists.call_args_list] == ["/r/a"]
+        assert vfs.batches == [["/r/a"]]
     finally:
         await ws.close()
 

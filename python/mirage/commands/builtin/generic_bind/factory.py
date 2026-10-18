@@ -37,7 +37,7 @@ from mirage.commands.config import (
 from mirage.commands.spec import SPECS
 from mirage.errors.fs import eisdir
 from mirage.io.cooperative import chunks
-from mirage.types import PathSpec
+from mirage.types import FileType, PathSpec
 
 
 def _cached_stat(
@@ -62,6 +62,7 @@ async def _cached_stat_result(
     result = await stat(accessor, path, *args, **kwargs)
     if (
         result is not None
+        and result.type is FileType.FILE
         and getattr(result, "size", None) is None
         and manager is not None
     ):

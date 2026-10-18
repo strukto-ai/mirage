@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from mirage.cache.context import push_cache_manager
 from mirage.commands.builtin.generic.find import (
     apply_mount_prefix,
     parse_find_args,
@@ -23,7 +24,9 @@ from mirage.types import (
     FindType,
     PathSpec,
 )
+from mirage.workspace import Workspace
 from mirage.workspace.files import Files
+from tests.fixtures.vfs_io import BatchedRAM
 
 
 async def find_walk_generic(*args, **kwargs):
@@ -552,6 +555,30 @@ async def test_find_implicit_directory_start_point_is_walked():
     )
     assert io.exit_code == 0
     assert stdout == b"/mnt/logs\n/mnt/logs/child.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_find_directory_start_does_not_probe_cached_bytes():
+    ws = Workspace({"/mnt": BatchedRAM()})
+    try:
+        get = AsyncMock(wraps=ws.cache.get)
+        ws.cache.get = get
+        previous = push_cache_manager(ws.mount("/mnt").cache_manager)
+        try:
+            stdout, io = await _walk(
+                [_file_spec(virtual="/mnt/logs", key="logs")],
+                stat_path=_stat_path(
+                    FileStat(name="logs", type=FileType.DIRECTORY)
+                ),
+                readdir=AsyncMock(return_value=[]),
+            )
+        finally:
+            push_cache_manager(previous)
+        assert io.exit_code == 0
+        assert stdout == b"/mnt/logs\n"
+        assert get.call_args_list == []
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

@@ -100,7 +100,10 @@ async function statEntry(
   if (deps.unstatted?.has(path) === true) return null
   try {
     const row = await deps.stat(spec, index)
-    const size = row.size === null ? await activeCacheManager()?.cachedSize(spec) : null
+    const size =
+      row.type === FileType.FILE && row.size === null
+        ? await activeCacheManager()?.cachedSize(spec)
+        : null
     return size == null ? row : row.with({ size })
   } catch (err) {
     // Missing entries resolve to null. Any other failure does too when the

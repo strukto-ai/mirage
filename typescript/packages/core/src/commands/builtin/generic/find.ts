@@ -427,7 +427,10 @@ export function findGeneric(
           missing.push(`find: '${label}': ${await missingStartDetail(root, missingStat ?? stat)}`)
           continue
         }
-        const cachedSize = start.size === null ? await cacheManager?.cachedSize(root) : null
+        const cachedSize =
+          start.type === FileType.FILE && start.size === null
+            ? await cacheManager?.cachedSize(root)
+            : null
         if (cachedSize != null) start = start.with({ size: cachedSize })
         if (start.type !== FileType.DIRECTORY && root.rawPath.endsWith('/')) {
           // POSIX reads `x/` as `x/.`, so an operand typed with a trailing

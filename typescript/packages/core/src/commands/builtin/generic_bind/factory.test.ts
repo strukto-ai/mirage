@@ -12,7 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { runWithCacheManager } from '../../../cache/context.ts'
+import { BatchedRAM } from '../../../test-utils.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import { requireOp } from './adapter.ts'
 import type { CommandIO } from '../../config.ts'
@@ -32,6 +35,30 @@ function makeOps(overrides: Partial<CommandIO> = {}): CommandIO {
     ...overrides,
   }
 }
+
+describe('withStatCache', () => {
+  it.each([FileType.FILE, FileType.DIRECTORY, FileType.SYMLINK])(
+    'backfills only file sizes for %s',
+    async (type) => {
+      const ws = new Workspace({ '/mnt': new BatchedRAM() })
+      try {
+        await ws.cache.set('/mnt/a.txt', new TextEncoder().encode('rendered'))
+        const get = vi.spyOn(ws.cache, 'get')
+        const row = new FileStat({ name: 'a.txt', type })
+        const guarded = withStatCache(makeOps({ stat: () => Promise.resolve(row) }))
+        const result = await runWithCacheManager(ws.mount('/mnt').cacheManager, () =>
+          guarded.stat(new FakeAccessor(), spec('/a.txt')),
+        )
+        expect(result.size).toBe(type === FileType.FILE ? 8 : null)
+        expect(get.mock.calls.map(([path]) => path)).toEqual(
+          type === FileType.FILE ? ['/mnt/a.txt'] : [],
+        )
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+})
 
 describe('GENERIC_COMMANDS', () => {
   it('has every builder whatever the backend lacks', () => {

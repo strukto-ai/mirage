@@ -13,9 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import replace
+from unittest.mock import AsyncMock
 
 import pytest
 
+from mirage.cache.context import push_cache_manager
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.commands.builtin.generic_bind.factory import (
     GENERIC_COMMANDS,
@@ -25,9 +27,11 @@ from mirage.commands.builtin.generic_bind.factory import (
     with_stat_cache,
 )
 from mirage.commands.config import CommandIO, Context
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.workspace import Workspace
 from mirage.workspace.files import Files
+from tests.fixtures.vfs_io import BatchedRAM
 
 
 class _CountingBackend:
@@ -73,6 +77,39 @@ def _spec() -> PathSpec:
 
 async def _drain(source) -> bytes:
     return b"".join([c async for c in source])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kind", [FileType.FILE, FileType.DIRECTORY, FileType.SYMLINK]
+)
+async def test_stat_cache_backfills_only_file_sizes(kind):
+    ws = Workspace({"/s3": BatchedRAM()})
+    try:
+        await ws.cache.set("/s3/a.txt", b"rendered")
+        get = AsyncMock(wraps=ws.cache.get)
+        ws.cache.get = get
+        row = FileStat(name="a.txt", type=kind)
+
+        async def stat(accessor, path, index=None):
+            return row
+
+        guarded = with_stat_cache(
+            replace(_ops(_CountingBackend(b"")), stat=stat)
+        )
+        previous = push_cache_manager(ws.mount("/s3").cache_manager)
+        try:
+            result = await guarded.stat(None, _spec())
+        finally:
+            push_cache_manager(previous)
+        assert result.size == (
+            len(b"rendered") if kind is FileType.FILE else None
+        )
+        assert [call.args[0] for call in get.call_args_list] == (
+            ["/s3/a.txt"] if kind is FileType.FILE else []
+        )
+    finally:
+        await ws.close()
 
 
 def test_the_generic_set_has_every_builder_whatever_the_backend_lacks():

@@ -178,6 +178,7 @@ async def _sized(mount: MountEntry, path: PathSpec, row: Any) -> Any:
     manager = mount.cache_manager
     if (
         not isinstance(row, FileStat)
+        or row.type is not FileType.FILE
         or row.size is not None
         or manager is None
     ):
@@ -1219,8 +1220,8 @@ class Dispatcher:
                 wanted = [
                     p
                     for p in paths
-                    if not await manager.is_cached(p)
-                    and await _fits_read_ahead(mount, p, batched)
+                    if await _fits_read_ahead(mount, p, batched)
+                    and not await manager.is_cached(p)
                 ]
                 if not wanted:
                     continue

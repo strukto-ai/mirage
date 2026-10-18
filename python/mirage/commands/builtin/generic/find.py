@@ -280,7 +280,11 @@ async def resolve_start(
     if start is None:
         return await _missing_start(search, stat)
     manager = active_cache_manager()
-    if start.size is None and manager is not None:
+    if (
+        start.type is FileType.FILE
+        and start.size is None
+        and manager is not None
+    ):
         cached_size = await manager.cached_size(search)
         if cached_size is not None:
             start = start.model_copy(update={"size": cached_size})

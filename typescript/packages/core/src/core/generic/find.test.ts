@@ -13,7 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '../../utils/key_prefix.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { runWithCacheManager } from '../../cache/context.ts'
+import { RAMFileCacheStore } from '../../cache/file/ram.ts'
+import { CacheManager } from '../../cache/manager.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { modifiedTs, walkFind, type WalkFindDeps } from './find.ts'
 import { isEnoent } from '../../errors/fs.ts'
@@ -55,6 +58,52 @@ function makeDeps(
 const ROOT = new PathSpec({ vfsPath: '', virtual: '/', directory: '/' })
 
 describe('walkFind', () => {
+  it.each([FileType.DIRECTORY, FileType.SYMLINK])(
+    'does not read cached bytes for a %s',
+    async (type) => {
+      const cache = new RAMFileCacheStore()
+      const get = vi.spyOn(cache, 'get')
+      const manager = new CacheManager(cache, null, '', true)
+      const stats = new Map([
+        ['/', new FileStat({ name: '', type: FileType.DIRECTORY, size: 0 })],
+        ['/entry', new FileStat({ name: 'entry', type })],
+      ])
+      const deps: WalkFindDeps = {
+        readdir: (path) => Promise.resolve(path.virtual === '/' ? ['/entry'] : []),
+        stat: (path) => {
+          const row = stats.get(path.virtual)
+          return row === undefined ? Promise.reject(enoent(path.virtual)) : Promise.resolve(row)
+        },
+      }
+      const result = await runWithCacheManager(manager, () => walkFind(ROOT, deps))
+      expect(result).toEqual(['/', '/entry'])
+      expect(get.mock.calls).toEqual([])
+    },
+  )
+
+  it('backfills an unknown file size from cached bytes', async () => {
+    const cache = new RAMFileCacheStore()
+    await cache.set('/entry', new TextEncoder().encode('cached'))
+    const get = vi.spyOn(cache, 'get')
+    const manager = new CacheManager(cache, null, '', true)
+    const stats = new Map([
+      ['/', new FileStat({ name: '', type: FileType.DIRECTORY, size: 0 })],
+      ['/entry', new FileStat({ name: 'entry', type: FileType.FILE })],
+    ])
+    const deps: WalkFindDeps = {
+      readdir: (path) => Promise.resolve(path.virtual === '/' ? ['/entry'] : []),
+      stat: (path) => {
+        const row = stats.get(path.virtual)
+        return row === undefined ? Promise.reject(enoent(path.virtual)) : Promise.resolve(row)
+      },
+    }
+    const result = await runWithCacheManager(manager, () =>
+      walkFind(ROOT, deps, { minSize: 6, maxSize: 6 }),
+    )
+    expect(result).toEqual(['/entry'])
+    expect(get.mock.calls.length).toBeGreaterThan(0)
+  })
+
   it('does not classify an unknown-size file as empty', async () => {
     const deps: WalkFindDeps = {
       readdir: () => Promise.resolve([]),

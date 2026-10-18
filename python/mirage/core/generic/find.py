@@ -42,7 +42,11 @@ async def _stat_entry(
     try:
         row = await stat(spec, index)
         manager = active_cache_manager()
-        if row.size is None and manager is not None:
+        if (
+            row.type is FileType.FILE
+            and row.size is None
+            and manager is not None
+        ):
             size = await manager.cached_size(spec)
             if size is not None:
                 row = row.model_copy(update={"size": size})

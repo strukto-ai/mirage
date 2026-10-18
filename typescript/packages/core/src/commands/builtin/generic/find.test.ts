@@ -15,7 +15,10 @@
 import { materialize, IOResult } from '../../../io/types.ts'
 
 import { stripSlash } from '../../../utils/slash.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { runWithCacheManager } from '../../../cache/context.ts'
+import { BatchedRAM } from '../../../test-utils.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import type { FindOptions } from '../../../vfs/types.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
@@ -66,6 +69,22 @@ function optsWith(stat: FileStat | null, flags: Record<string, unknown> = {}): C
 }
 
 describe('generic command find', () => {
+  it('does not probe cached bytes for a directory start point', async () => {
+    const ws = new Workspace({ '/mnt': new BatchedRAM() })
+    try {
+      const get = vi.spyOn(ws.cache, 'get')
+      const row = new FileStat({ name: 'logs', type: FileType.DIRECTORY })
+      const result = await runWithCacheManager(ws.mount('/mnt').cacheManager, () =>
+        findGeneric([spec('/mnt/logs')], [], optsWith(row), () => Promise.resolve([])),
+      )
+      expect(result?.[1].exitCode).toBe(0)
+      expect(DEC.decode(result?.[0] ?? undefined)).toBe('/mnt/logs\n')
+      expect(get.mock.calls).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('skips roots whose find raises ENOENT', async () => {
     const result = await findGeneric([spec('/missing'), spec('/')], [], makeOpts(), fakeFind)
     expect(result).not.toBeNull()

@@ -17,7 +17,7 @@ import { guardInput } from '../utils/limit.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import type { PathSpec } from '../../../types.ts'
+import { FileType, type PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
 import {
   type CommandFn,
@@ -36,7 +36,7 @@ import { BUILDERS } from './builders/index.ts'
 function cachedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
   return async (accessor: A, path: PathSpec, index?: IndexCacheStore) => {
     const result = await stat(accessor, path, index)
-    if (result.size !== null) return result
+    if (result.type !== FileType.FILE || result.size !== null) return result
     const manager = activeCacheManager()
     if (manager === null) return result
     // The length alone: this backfill runs only when the backend

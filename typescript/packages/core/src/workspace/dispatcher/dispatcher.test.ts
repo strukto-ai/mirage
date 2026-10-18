@@ -2690,6 +2690,22 @@ class UnsizedRAM extends RAMVFS {
 }
 
 describe('a stat with no size', () => {
+  it('does not probe cached bytes for a directory', async () => {
+    const vfs = new UnsizedRAM()
+    vfs.store.dirs.add('/')
+    vfs.store.dirs.add('/d')
+    const ws = new Workspace({ '/api': vfs })
+    try {
+      await ws.cache.set('/api/d', ENC.encode('not a file'))
+      const get = vi.spyOn(ws.cache, 'get')
+      const row = await ws.vfs.stat('/api/d')
+      expect([row.type, row.size]).toEqual([FileType.DIRECTORY, null])
+      expect(get.mock.calls).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('takes the cached length once a read kept the bytes', async () => {
     // An API mount cannot size a file without fetching it; once a read kept
     // its bytes, every caller of the dispatcher sees their length.
@@ -2905,6 +2921,27 @@ describe('a hide filters a one-call read', () => {
       expect(vfs.reads).toEqual(['/r/a'])
       await ws.dispatch('read', '/r/a')
       expect(vfs.reads).toEqual(['/r/a'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('skips cache probes for index-known directories', async () => {
+    const vfs = new BatchedRAM()
+    vfs.store.dirs.add('/empty')
+    const ws = new Workspace({ '/r': vfs })
+    try {
+      await ws.mount('/r').index.setDir('/r', [
+        ['a', new FileStat({ name: 'a', type: FileType.FILE, size: 2 })],
+        ['secret', new FileStat({ name: 'secret', type: FileType.DIRECTORY })],
+        ['empty', new FileStat({ name: 'empty', type: FileType.DIRECTORY })],
+      ])
+      const exists = vi.spyOn(ws.cache, 'exists')
+      await ws.dispatch('read_many', '/r/a', [], {
+        paths: [PathSpec.fromStrPath('/r/secret'), PathSpec.fromStrPath('/r/empty')],
+      })
+      expect(exists.mock.calls.map(([path]) => path)).toEqual(['/r/a'])
+      expect(vfs.batches).toEqual([['/r/a']])
     } finally {
       await ws.close()
     }
