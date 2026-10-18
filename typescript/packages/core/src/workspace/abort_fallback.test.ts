@@ -19,6 +19,9 @@ import { recordStatus } from './executor/statement.ts'
 import { SessionState } from './session/session.ts'
 import { newStatusWriter } from './abort.ts'
 import { currentCaller, lineSignal, runWithCaller } from '../context/session_context.ts'
+import { Glob } from '../rs/glob.ts'
+import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from './workspace/workspace.ts'
 
 // The browser-runtime branch under node's test runner: the mock forces
 // the real FallbackStorage (no task isolation, one frame stack per
@@ -90,4 +93,40 @@ describe('the status write on the fallback storage', () => {
     expect(refusedB).toMatchObject({ name: 'AbortError' })
     expect(b.lastExitCode).toBe(0)
   })
+})
+
+describe('a nested line on the fallback storage', () => {
+  it.each(["eval 'x=${X//+(?)/x}; touched=yes'", 'f() { x=${X//+(?)/x}; touched=yes; }; f'])(
+    "answers to the typed line's signal: %s",
+    async (line) => {
+      const ws = new Workspace({}, { shellParser: await getTestParser() })
+      const controller = new AbortController()
+      const spansSpy = vi.spyOn(Glob.prototype, 'spans')
+      let work: ReturnType<typeof ws.shell> | undefined
+      try {
+        await ws.shell('shopt -s extglob')
+        work = ws.shell(line, { signal: controller.signal, env: { X: 'a'.repeat(2_000_000) } })
+        const aborted = expect(work).rejects.toMatchObject({ name: 'AbortError' })
+        await expect.poll(() => spansSpy.mock.calls.length).toBe(1)
+        const result = spansSpy.mock.results[0]
+        if (result?.type !== 'return') throw new Error('the matcher did not return a promise')
+        const settled = result.value.then(
+          () => 'done',
+          (err: unknown) => (err as { name?: string }).name,
+        )
+        controller.abort()
+        await aborted
+        expect(
+          await Promise.race([settled, new Promise((r) => setTimeout(r, 2000, 'running'))]),
+        ).toBe('AbortError')
+        const peer = await ws.shell('printf "%s\\n" "${touched-unset}"')
+        expect(new TextDecoder().decode(peer.stdout)).toBe('unset\n')
+      } finally {
+        controller.abort()
+        await work?.catch(() => undefined)
+        spansSpy.mockRestore()
+        await ws.close()
+      }
+    },
+  )
 })

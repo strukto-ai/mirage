@@ -233,10 +233,18 @@ export function lineFrames(): LineAbortFrame[] {
   ]
 }
 
-/** The active line's cancellation channel, when it can be attributed to this session. */
+/**
+ * The active line's cancellation channel, when it can be attributed to this
+ * session: the one line live on it, or the one signal every live line on it
+ * answers to, as an `eval` or `source` line carries the line that runs it.
+ */
 export function lineSignal(session: SessionState): AbortSignal | undefined {
-  const frames = lineFrames().filter((frame) => frame.sessions.includes(session))
-  return frames.length === 1 ? frames[0]?.signal : undefined
+  const signals = new Set(
+    lineFrames()
+      .filter((frame) => frame.sessions.includes(session))
+      .map((frame) => frame.signal),
+  )
+  return signals.size === 1 ? [...signals][0] : undefined
 }
 
 /**
