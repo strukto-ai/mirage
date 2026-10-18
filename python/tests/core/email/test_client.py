@@ -197,6 +197,21 @@ async def test_list_message_uids(accessor):
     assert uids == ["101", "102", "103", "104", "105"]
 
 
+@pytest.mark.asyncio
+async def test_list_message_uids_skips_a_uid_line_with_no_value(accessor):
+    mock_imap = AsyncMock()
+    mock_imap.select.return_value = MagicMock(result="OK")
+    mock_imap.search.return_value = MagicMock(result="OK", lines=[b"1 2 3"])
+    mock_imap.fetch.return_value = MagicMock(
+        lines=[b"1 FETCH (UID 101)", b"2 FETCH (UID)", b"3 FETCH (UID 103)"]
+    )
+    accessor._imap = mock_imap
+    accessor._imap.protocol = True
+
+    uids = await list_message_uids(accessor, "INBOX")
+    assert uids == ["101", "103"]
+
+
 class OneSelection:
     """A connection with one selected mailbox, as a server keeps it."""
 

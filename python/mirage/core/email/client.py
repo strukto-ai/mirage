@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -20,6 +21,8 @@ from typing import Any
 from mirage.accessor.email import EmailAccessor
 from mirage.accessor.imap import IMAPClient, IMAPResponse
 from mirage.core.email._parse import parse_rfc822, parse_with_payloads
+
+logger = logging.getLogger(__name__)
 
 INTERNAL_DATE_KEY = "internal_date"
 INTERNAL_DATE_RE = re.compile(r'INTERNALDATE "([^"]*)"')
@@ -213,9 +216,11 @@ async def list_message_uids(
                         rest = line[uid_idx:].strip()
                         uid_val = rest.split(")")[0].split()[0]
                         uids.append(uid_val)
-                    except (ValueError, IndexError):
+                    except (ValueError, IndexError) as exc:
                         # tolerant IMAP parse: skip lines that do not match
-                        pass
+                        logger.debug(
+                            "no UID value in FETCH line %r: %s", line, exc
+                        )
     return uids
 
 
@@ -372,9 +377,9 @@ def _parse_multi_fetch(
                     else len(line)
                 )
                 current_uid = line[uid_idx:uid_end].strip(")")
-            except (ValueError, IndexError):
+            except (ValueError, IndexError) as exc:
                 # tolerant IMAP parse: skip lines that do not match the shape
-                pass
+                logger.debug("no UID value in FETCH line %r: %s", line, exc)
             if "FLAGS" in line:
                 current_flags = _extract_flags_from_line(line)
             current_internal = _internal_date_from_line(line)
