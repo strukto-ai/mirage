@@ -38,16 +38,22 @@ from mirage.vfs.ram import RAMVFS
 
 async def main() -> None:
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
-    await ws.shell('echo "hello mirage" > /data/hello.txt')
-    result = await ws.shell("cat /data/hello.txt")
-    print(await result.stdout_str(), end="")
+    await ws.shell('echo \'{"name": "alice"}\' > /data/user.json')
+    for command in (
+        "ls /data",
+        'jq -r ".name" /data/user.json',
+        "grep alice /data/user.json",
+    ):
+        result = await ws.shell(command)
+        print(await result.stdout_str(), end="")
     await ws.close()
 
 
 asyncio.run(main())
 ```
 
-Run `python quickstart.py`; it prints `hello mirage`.
+Run `python quickstart.py`; it lists `user.json`, prints `alice`, then prints
+the matching JSON document.
 
 Shell failures are returned in the result; check `exit_code` and `stderr_str()`
 when needed. See the [in-app API reference](/python/access/in-app#session-shell).
