@@ -722,9 +722,7 @@
   },
   "commands/spec/types": {
    "typescript_only": {
-    "ArgumentInit": "TypeScript describes the Argument constructor options with an interface; Python spells them as constructor keyword parameters.",
-    "ArgumentAction": "TypeScript names the action string union; Python writes the same Literal union on Argument fields and constructor parameters.",
-    "Nargs": "TypeScript names the arity union; Python writes the same integer and Literal union on Argument fields and constructor parameters."
+    "ArgumentInit": "TypeScript describes the Argument constructor options with an interface; Python spells them as constructor keyword parameters."
    }
   },
   "commands/builtin/utils/limit": {
