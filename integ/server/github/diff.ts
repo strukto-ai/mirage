@@ -76,322 +76,420 @@ function isBinary(data: Buffer): boolean {
   return data.subarray(0, BINARY_PROBE).includes(0)
 }
 
-// xdiff's constants, as git ships them.
-const SNAKE_CNT = 20
-const HEUR_MIN_COST = 256
-const MAX_COST_MIN = 256
-const K_HEUR = 4
-const LINE_MAX = Number.MAX_SAFE_INTEGER
-const MAX_EQLIMIT = 1024
-const SIMSCAN_WINDOW = 100
-const KPDIS_RUN = 4
-
-function bogosqrt(n: number): number {
-  let i = 1
-  for (let rest = n; rest > 0; rest = Math.floor(rest / 4)) i *= 2
-  return i
+// One side of a line diff: its lines, each numbered by its content so that
+// comparing two lines compares two numbers, and which of them the diff changed.
+interface Side {
+  lines: string[]
+  ids: Int32Array
+  changed: Uint8Array
 }
 
-interface Split {
-  i1: number
-  i2: number
-  minLo: boolean
-  minHi: boolean
-}
-
-interface Env {
-  kf: number[]
-  kb: number[]
-  o: number
-  mxcost: number
-}
-
-// xdl_split: Myers' middle snake over the box (off1, off2)..(lim1, lim2),
-// walked from both corners at once, with xdiff's cut-offs for a costly box.
-function split(
-  ha1: number[],
-  off1: number,
-  lim1: number,
-  ha2: number[],
-  off2: number,
-  lim2: number,
-  needMin: boolean,
-  env: Env,
-): Split {
-  const { kf, kb, o } = env
-  const at = (k: number[], d: number): number => k[d + o] ?? 0
-  const dmin = off1 - lim2
-  const dmax = lim1 - off2
-  const fmid = off1 - off2
-  const bmid = lim1 - lim2
-  const odd = ((fmid - bmid) & 1) !== 0
-  let fmin = fmid
-  let fmax = fmid
-  let bmin = bmid
-  let bmax = bmid
-  kf[fmid + o] = off1
-  kb[bmid + o] = lim1
-  for (let ec = 1; ; ec += 1) {
-    let gotSnake = false
-    if (fmin > dmin) kf[--fmin - 1 + o] = -1
-    else fmin += 1
-    if (fmax < dmax) kf[++fmax + 1 + o] = -1
-    else fmax -= 1
-    for (let d = fmax; d >= fmin; d -= 2) {
-      let i1 = at(kf, d - 1) >= at(kf, d + 1) ? at(kf, d - 1) + 1 : at(kf, d + 1)
-      const prev1 = i1
-      let i2 = i1 - d
-      while (i1 < lim1 && i2 < lim2 && ha1[i1] === ha2[i2]) {
-        i1 += 1
-        i2 += 1
-      }
-      if (i1 - prev1 > SNAKE_CNT) gotSnake = true
-      kf[d + o] = i1
-      if (odd && bmin <= d && d <= bmax && at(kb, d) <= i1) {
-        return { i1, i2, minLo: true, minHi: true }
-      }
-    }
-    if (bmin > dmin) kb[--bmin - 1 + o] = LINE_MAX
-    else bmin += 1
-    if (bmax < dmax) kb[++bmax + 1 + o] = LINE_MAX
-    else bmax -= 1
-    for (let d = bmax; d >= bmin; d -= 2) {
-      let i1 = at(kb, d - 1) < at(kb, d + 1) ? at(kb, d - 1) : at(kb, d + 1) - 1
-      const prev1 = i1
-      let i2 = i1 - d
-      while (i1 > off1 && i2 > off2 && ha1[i1 - 1] === ha2[i2 - 1]) {
-        i1 -= 1
-        i2 -= 1
-      }
-      if (prev1 - i1 > SNAKE_CNT) gotSnake = true
-      kb[d + o] = i1
-      if (!odd && fmin <= d && d <= fmax && i1 <= at(kf, d)) {
-        return { i1, i2, minLo: true, minHi: true }
-      }
-    }
-    if (needMin) continue
-    if (gotSnake && ec > HEUR_MIN_COST) {
-      let best = 0
-      let found: Split | null = null
-      for (let d = fmax; d >= fmin; d -= 2) {
-        const dd = d > fmid ? d - fmid : fmid - d
-        const i1 = at(kf, d)
-        const i2 = i1 - d
-        const v = i1 - off1 + (i2 - off2) - dd
-        if (
-          v > K_HEUR * ec &&
-          v > best &&
-          off1 + SNAKE_CNT <= i1 &&
-          i1 < lim1 &&
-          off2 + SNAKE_CNT <= i2 &&
-          i2 < lim2
-        ) {
-          for (let k = 1; ha1[i1 - k] === ha2[i2 - k]; k += 1) {
-            if (k === SNAKE_CNT) {
-              best = v
-              found = { i1, i2, minLo: true, minHi: false }
-              break
-            }
-          }
-        }
-      }
-      if (found !== null) return found
-      best = 0
-      for (let d = bmax; d >= bmin; d -= 2) {
-        const dd = d > bmid ? d - bmid : bmid - d
-        const i1 = at(kb, d)
-        const i2 = i1 - d
-        const v = lim1 - i1 + (lim2 - i2) - dd
-        if (
-          v > K_HEUR * ec &&
-          v > best &&
-          off1 < i1 &&
-          i1 <= lim1 - SNAKE_CNT &&
-          off2 < i2 &&
-          i2 <= lim2 - SNAKE_CNT
-        ) {
-          for (let k = 0; ha1[i1 + k] === ha2[i2 + k]; k += 1) {
-            if (k === SNAKE_CNT - 1) {
-              best = v
-              found = { i1, i2, minLo: false, minHi: true }
-              break
-            }
-          }
-        }
-      }
-      if (found !== null) return found
-    }
-    if (ec >= env.mxcost) {
-      let fbest = -1
-      let fbest1 = -1
-      for (let d = fmax; d >= fmin; d -= 2) {
-        let i1 = Math.min(at(kf, d), lim1)
-        let i2 = i1 - d
-        if (lim2 < i2) {
-          i1 = lim2 + d
-          i2 = lim2
-        }
-        if (fbest < i1 + i2) {
-          fbest = i1 + i2
-          fbest1 = i1
-        }
-      }
-      let bbest = LINE_MAX
-      let bbest1 = LINE_MAX
-      for (let d = bmax; d >= bmin; d -= 2) {
-        let i1 = Math.max(off1, at(kb, d))
-        let i2 = i1 - d
-        if (i2 < off2) {
-          i1 = off2 + d
-          i2 = off2
-        }
-        if (i1 + i2 < bbest) {
-          bbest = i1 + i2
-          bbest1 = i1
-        }
-      }
-      if (lim1 + lim2 - bbest < fbest - (off1 + off2)) {
-        return { i1: fbest1, i2: fbest - fbest1, minLo: true, minHi: false }
-      }
-      return { i1: bbest1, i2: bbest - bbest1, minLo: false, minHi: true }
-    }
-  }
-}
-
-interface Reduced {
-  ha: number[]
-  rindex: number[]
-  side: Side
-}
-
-// xdl_recs_cmp: shrink the box past its matching ends, mark whatever is left
-// when one side runs out, and otherwise split it and recurse into both halves.
-function recsCmp(
-  one: Reduced,
-  from1: number,
-  to1: number,
-  two: Reduced,
-  from2: number,
-  to2: number,
-  needMin: boolean,
-  env: Env,
-): void {
-  let off1 = from1
-  let lim1 = to1
-  let off2 = from2
-  let lim2 = to2
-  while (off1 < lim1 && off2 < lim2 && one.ha[off1] === two.ha[off2]) {
-    off1 += 1
-    off2 += 1
-  }
-  while (off1 < lim1 && off2 < lim2 && one.ha[lim1 - 1] === two.ha[lim2 - 1]) {
-    lim1 -= 1
-    lim2 -= 1
-  }
-  if (off1 === lim1) {
-    for (; off2 < lim2; off2 += 1) mark(two.side, two.rindex[off2] ?? 0, true)
-  } else if (off2 === lim2) {
-    for (; off1 < lim1; off1 += 1) mark(one.side, one.rindex[off1] ?? 0, true)
-  } else {
-    const spl = split(one.ha, off1, lim1, two.ha, off2, lim2, needMin, env)
-    recsCmp(one, off1, spl.i1, two, off2, spl.i2, spl.minLo, env)
-    recsCmp(one, spl.i1, lim1, two, spl.i2, lim2, spl.minHi, env)
-  }
-}
-
-// xdl_clean_mmatch: a line with many matches is left out of the search only
-// in the middle of a run of lines with none.
-function cleanMmatch(dis: Uint8Array, i: number, start: number, end: number): boolean {
-  const s = i - start > SIMSCAN_WINDOW ? i - SIMSCAN_WINDOW : start
-  const e = end - i > SIMSCAN_WINDOW ? i + SIMSCAN_WINDOW : end
-  let rdis0 = 0
-  let rpdis0 = 1
-  for (let r = 1; i - r >= s; r += 1) {
-    const v = dis[i - r]
-    if (v === 0) rdis0 += 1
-    else if (v === 2) rpdis0 += 1
-    else break
-  }
-  if (rdis0 === 0) return false
-  let rdis1 = 0
-  let rpdis1 = 1
-  for (let r = 1; i + r <= e; r += 1) {
-    const v = dis[i + r]
-    if (v === 0) rdis1 += 1
-    else if (v === 2) rpdis1 += 1
-    else break
-  }
-  if (rdis1 === 0) return false
-  rdis1 += rdis0
-  rpdis1 += rpdis0
-  return rpdis1 * KPDIS_RUN < rpdis1 + rdis1
-}
-
-// xdl_prepare_env and xdl_do_diff: every line is classed by its content, the
-// matching ends are trimmed, a line the other side never has is changed
-// outright, and Myers' search runs over the rest. The result is which lines
-// of each side the diff changed.
-function lineOps(a: string[], b: string[]): Op[] {
-  const classes = new Map<string, number>()
-  const classOf = (line: string): number => {
-    const known = classes.get(line)
+function sidesOf(a: string[], b: string[]): [Side, Side] {
+  const ids = new Map<string, number>()
+  const id = (line: string): number => {
+    const known = ids.get(line)
     if (known !== undefined) return known
-    classes.set(line, classes.size)
-    return classes.size - 1
+    ids.set(line, ids.size)
+    return ids.size - 1
   }
-  const ha1 = a.map(classOf)
-  const ha2 = b.map(classOf)
-  const count = (ha: number[]): Map<number, number> => {
-    const out = new Map<number, number>()
-    for (const h of ha) out.set(h, (out.get(h) ?? 0) + 1)
-    return out
-  }
-  const in1 = count(ha1)
-  const in2 = count(ha2)
-  const old: Side = { recs: a, chg: new Uint8Array(a.length + 2) }
-  const neu: Side = { recs: b, chg: new Uint8Array(b.length + 2) }
-  const lim = Math.min(a.length, b.length)
-  let dstart = 0
-  while (dstart < lim && ha1[dstart] === ha2[dstart]) dstart += 1
-  let tail = 0
-  while (tail < lim - dstart && ha1[a.length - 1 - tail] === ha2[b.length - 1 - tail]) tail += 1
-  const reduce = (ha: number[], side: Side, others: Map<number, number>): Reduced => {
-    const dend = ha.length - tail - 1
-    const mlim = Math.min(bogosqrt(ha.length), MAX_EQLIMIT)
-    const dis = new Uint8Array(ha.length + 1)
-    for (let i = dstart; i <= dend; i += 1) {
-      const nm = others.get(ha[i] ?? -1) ?? 0
-      dis[i] = nm === 0 ? 0 : nm >= mlim ? 2 : 1
+  const side = (lines: string[]): Side => ({
+    lines,
+    ids: Int32Array.from(lines, id),
+    changed: new Uint8Array(lines.length),
+  })
+  return [side(a), side(b)]
+}
+
+function countsOf(ids: Int32Array): Map<number, number> {
+  const out = new Map<number, number>()
+  for (const id of ids) out.set(id, (out.get(id) ?? 0) + 1)
+  return out
+}
+
+// Before it searches, git sets aside the lines it will call changed whatever
+// the search finds: a line the other side never holds, and a line the other
+// side holds often that stands among such lines. As measured against git
+// 2.50's output, often is 4 copies below 16 lines on this side, doubling each
+// time the length quadruples (8 below 64, 16 below 256), up to 1024; a side
+// too short for the run below never sets a line aside this way. Such a line
+// is set aside when the lines around it, read each way to the nearest line
+// with an ordinary count, no further than 100 lines and not into the two
+// files' matching ends, hold missing lines on both sides, and more of them
+// than three times one more than the often-held lines there, itself included.
+// That is why git's diff of a new block with blank lines in it can be longer
+// than the shortest one.
+const MISSING = 0
+const ORDINARY = 1
+const OFTEN = 2
+const OFTEN_CAP = 1024
+const RUN_REACH = 100
+
+function oftenFrom(length: number): number {
+  let often = 1
+  for (let rest = length; rest > 0; rest = Math.floor(rest / 4)) often *= 2
+  return Math.min(often, OFTEN_CAP)
+}
+
+function amidMissing(kinds: Uint8Array, at: number): boolean {
+  let missing = 0
+  let often = 1
+  for (const step of [-1, 1]) {
+    let near = 0
+    for (let i = at + step, read = 0; read < RUN_REACH; i += step, read += 1) {
+      const kind = kinds[i]
+      if (kind === MISSING) near += 1
+      else if (kind === OFTEN) often += 1
+      else break
     }
-    const out: Reduced = { ha: [], rindex: [], side }
-    for (let i = dstart; i <= dend; i += 1) {
-      if (dis[i] === 1 || (dis[i] === 2 && !cleanMmatch(dis, i, dstart, dend))) {
-        out.rindex.push(i)
-        out.ha.push(ha[i] ?? -1)
-      } else {
-        mark(side, i, true)
+    if (near === 0) return false
+    missing += near
+  }
+  return missing > 3 * (often + 1)
+}
+
+// The lines of `side` between `from` and `to` that the search sees, by index.
+// The rest of that span is marked changed.
+function searchedLines(
+  side: Side,
+  others: Map<number, number>,
+  from: number,
+  to: number,
+): number[] {
+  const often = oftenFrom(side.lines.length)
+  const kinds = new Uint8Array(to - from)
+  for (let i = from; i < to; i += 1) {
+    const count = others.get(side.ids[i] ?? -1) ?? 0
+    kinds[i - from] = count === 0 ? MISSING : count >= often ? OFTEN : ORDINARY
+  }
+  const out: number[] = []
+  for (let i = from; i < to; i += 1) {
+    const kind = kinds[i - from]
+    if (kind === ORDINARY || (kind === OFTEN && !amidMissing(kinds, i - from))) out.push(i)
+    else side.changed[i] = 1
+  }
+  return out
+}
+
+// The searched lines of both sides, the furthest-reaching paths along each
+// diagonal k = x - y, and which searched lines the search changed.
+interface Search {
+  a: Int32Array
+  b: Int32Array
+  forward: Int32Array
+  reverse: Int32Array
+  offset: number
+  goneA: Uint8Array
+  goneB: Uint8Array
+}
+
+// Myers' middle snake (1986, "An O(ND) Difference Algorithm and Its
+// Variations", section 4b) for the box a[aLo..aHi) by b[bLo..bHi): paths of D
+// edits grown from the top-left corner and from the bottom-right one, D going
+// up by one each round, until a forward path and a reverse one overlap on a
+// diagonal. The snake found there splits the box. The paper walks a round's
+// diagonals from the lowest; git's output shows them walked from the highest,
+// which picks a different edit among the shortest. The answer is the snake's
+// two ends, as absolute line numbers: x, y, u, v.
+function middleSnake(
+  s: Search,
+  aLo: number,
+  aHi: number,
+  bLo: number,
+  bHi: number,
+): [number, number, number, number] {
+  const { a, b, forward: fw, reverse: rv, offset } = s
+  const n = aHi - aLo
+  const m = bHi - bLo
+  const delta = n - m
+  const odd = (delta & 1) !== 0
+  const at = (v: Int32Array, k: number): number => v[k + offset] ?? 0
+  const same = (x: number, y: number): boolean => a[aLo + x] === b[bLo + y]
+  let x0 = 0
+  while (x0 < n && x0 < m && same(x0, x0)) x0 += 1
+  fw[offset] = x0
+  let r0 = n
+  while (r0 > 0 && r0 - delta > 0 && same(r0 - 1, r0 - delta - 1)) r0 -= 1
+  rv[delta + offset] = r0
+  let fLo = 0
+  let fHi = 0
+  let rLo = delta
+  let rHi = delta
+  for (;;) {
+    let lo = n + 1
+    let hi = -m - 1
+    for (let k = fHi < n ? fHi + 1 : fHi - 1; k >= (fLo > -m ? fLo - 1 : fLo + 1); k -= 2) {
+      let x = -1
+      if (k - 1 >= fLo && k - 1 <= fHi && at(fw, k - 1) < n) x = at(fw, k - 1) + 1
+      if (k + 1 >= fLo && k + 1 <= fHi && at(fw, k + 1) - k <= m) x = Math.max(x, at(fw, k + 1))
+      if (x < 0) continue
+      const sx = x
+      while (x < n && x - k < m && same(x, x - k)) x += 1
+      fw[k + offset] = x
+      lo = Math.min(lo, k)
+      hi = Math.max(hi, k)
+      if (odd && k >= rLo && k <= rHi && x >= at(rv, k)) {
+        return [aLo + sx, bLo + sx - k, aLo + x, bLo + x - k]
       }
     }
-    return out
+    fLo = lo
+    fHi = hi
+    lo = n + 1
+    hi = -m - 1
+    for (let k = rHi < n ? rHi + 1 : rHi - 1; k >= (rLo > -m ? rLo - 1 : rLo + 1); k -= 2) {
+      let x = n + 1
+      if (k + 1 >= rLo && k + 1 <= rHi && at(rv, k + 1) > 0) x = at(rv, k + 1) - 1
+      if (k - 1 >= rLo && k - 1 <= rHi && at(rv, k - 1) - k >= 0) x = Math.min(x, at(rv, k - 1))
+      if (x > n) continue
+      const ex = x
+      while (x > 0 && x - k > 0 && same(x - 1, x - k - 1)) x -= 1
+      rv[k + offset] = x
+      lo = Math.min(lo, k)
+      hi = Math.max(hi, k)
+      if (!odd && k >= fLo && k <= fHi && x <= at(fw, k)) {
+        return [aLo + x, bLo + x - k, aLo + ex, bLo + ex - k]
+      }
+    }
+    rLo = lo
+    rHi = hi
   }
-  const one = reduce(ha1, old, in2)
-  const two = reduce(ha2, neu, in1)
-  const ndiags = one.ha.length + two.ha.length + 3
-  const env: Env = {
-    kf: new Array<number>(ndiags).fill(0),
-    kb: new Array<number>(ndiags).fill(0),
-    o: two.ha.length + 1,
-    mxcost: Math.max(bogosqrt(ndiags), MAX_COST_MIN),
+}
+
+// The shortest edit of a box: its matching ends taken off first, then a side
+// left empty is all inserted or all removed, and any other box is split at
+// its middle snake and each half searched in turn.
+function searchBox(s: Search, aFrom: number, aTo: number, bFrom: number, bTo: number): void {
+  let aLo = aFrom
+  let aHi = aTo
+  let bLo = bFrom
+  let bHi = bTo
+  while (aLo < aHi && bLo < bHi && s.a[aLo] === s.b[bLo]) {
+    aLo += 1
+    bLo += 1
   }
-  recsCmp(one, 0, one.ha.length, two, 0, two.ha.length, false, env)
-  compact(old, neu)
-  compact(neu, old)
+  while (aLo < aHi && bLo < bHi && s.a[aHi - 1] === s.b[bHi - 1]) {
+    aHi -= 1
+    bHi -= 1
+  }
+  if (aLo === aHi) s.goneB.fill(1, bLo, bHi)
+  else if (bLo === bHi) s.goneA.fill(1, aLo, aHi)
+  else {
+    const [x, y, u, v] = middleSnake(s, aLo, aHi, bLo, bHi)
+    searchBox(s, aLo, x, bLo, y)
+    searchBox(s, u, aHi, v, bHi)
+  }
+}
+
+// How git weighs an edge of a run that could sit at several places, measured
+// against git 2.50's output. A line's indent counts a space as one column and
+// a tab as far as the next multiple of eight, skips carriage returns, ends at
+// any other byte and stops at 200; a line of nothing else is blank. Blank
+// lines are counted up to 20 each way.
+const BLANK = -1
+const MOST_INDENT = 200
+const MOST_BLANKS = 20
+
+function indentOf(line: string): number {
+  let indent = 0
+  for (const c of line) {
+    if (c === ' ') indent += 1
+    else if (c === '\t') indent += 8 - (indent % 8)
+    else if (c !== '\r' && c !== '\n') return indent
+    if (indent >= MOST_INDENT) return MOST_INDENT
+  }
+  return BLANK
+}
+
+interface Score {
+  level: number
+  penalty: number
+}
+
+// The edge just above `lines[at]`. Its level is that line's indent, or the
+// next nonblank line's when it is blank. Each blank line above the edge
+// counts -30, and each from the edge down -24; the end of the file -3 and the
+// start of it +1. Against the nearest nonblank line above, a deeper level
+// costs -4, or 10 with blank lines around the edge, and a shallower one 23,
+// or 24 when the line after it goes deeper again, or 17 with blank lines
+// around.
+function edgeAt(lines: string[], at: number, score: Score): void {
+  const end = at >= lines.length
+  const here = end ? BLANK : indentOf(lines[at] ?? '')
+  let above = BLANK
+  let blanksAbove = 0
+  for (let i = at - 1; i >= 0; i -= 1) {
+    above = indentOf(lines[i] ?? '')
+    if (above !== BLANK) break
+    blanksAbove += 1
+    if (blanksAbove === MOST_BLANKS) {
+      above = 0
+      break
+    }
+  }
+  let below = BLANK
+  let blanksBelow = 0
+  for (let i = at + 1; i < lines.length; i += 1) {
+    below = indentOf(lines[i] ?? '')
+    if (below !== BLANK) break
+    blanksBelow += 1
+    if (blanksBelow === MOST_BLANKS) {
+      below = 0
+      break
+    }
+  }
+  const blanksFrom = here === BLANK && !end ? 1 + blanksBelow : 0
+  const level = here === BLANK ? below : here
+  let penalty = -30 * blanksAbove - 24 * blanksFrom
+  if (end) penalty -= 3
+  if (above === BLANK && blanksAbove === 0) penalty += 1
+  if (level !== BLANK && above !== BLANK) {
+    const blanks = blanksAbove + blanksFrom > 0
+    if (level > above) penalty += blanks ? 10 : -4
+    else if (level < above) penalty += blanks ? 17 : below > level ? 24 : 23
+  }
+  score.level += level
+  score.penalty += penalty
+}
+
+// A lower level wins unless its penalty is higher by more than 60; at one
+// level, the lower penalty wins.
+function weigh(a: Score, b: Score): number {
+  return 60 * Math.sign(a.level - b.level) + a.penalty - b.penalty
+}
+
+// Where a run of `size` changed lines that can end anywhere from `top` to
+// `bottom` ends, by its two edges: git reads its places from the highest to
+// the lowest, only the lowest size + 2 of them and never more than 100, and
+// moves to each one that weighs no worse than the best before it.
+const MOST_PLACES = 100
+
+function bestEnd(lines: string[], top: number, bottom: number, size: number): number {
+  let best = bottom
+  let bestScore: Score | null = null
+  const first = Math.max(top, bottom - size - 1, bottom - MOST_PLACES + 1)
+  for (let end = first; end <= bottom; end += 1) {
+    const score = { level: 0, penalty: 0 }
+    edgeAt(lines, end - size, score)
+    edgeAt(lines, end, score)
+    if (bestScore === null || weigh(score, bestScore) <= 0) {
+      best = end
+      bestScore = score
+    }
+  }
+  return best
+}
+
+// A run of changed lines can move up a line when the line above it equals its
+// last line, and down a line when the line below equals its first, and the
+// diff is as long either way. As git's output shows, each run, on the old side
+// and then on the new, moves as far up and then as far down as it goes,
+// merging with any run it meets, until it stops growing. It then ends at the
+// lowest place where it sits against a change on the other side, so the two
+// print as one change, or, with no such place, where bestEnd puts it.
+function settle(side: Side, other: Side): void {
+  const { ids, changed, lines } = side
+  const n = ids.length
+  const kept: number[] = []
+  other.changed.forEach((c, j) => {
+    if (c === 0) kept.push(j)
+  })
+  // Whether a run with `above` unchanged lines over it sits against a change
+  // on the other side: the other side's lines between the unchanged lines on
+  // either side of it are not all kept.
+  const meets = (above: number): boolean => {
+    const from = above === 0 ? 0 : (kept[above - 1] ?? 0) + 1
+    const to = above < kept.length ? (kept[above] ?? 0) : other.changed.length
+    return to > from
+  }
+  let start = 0
+  let above = 0
+  while (start < n) {
+    if (changed[start] === 0) {
+      start += 1
+      above += 1
+      continue
+    }
+    let end = start
+    while (end < n && changed[end] === 1) end += 1
+    let size: number
+    let top: number
+    let meetEnd: number
+    do {
+      size = end - start
+      while (start > 0 && ids[start - 1] === ids[end - 1]) {
+        start -= 1
+        end -= 1
+        changed[start] = 1
+        changed[end] = 0
+        above -= 1
+        while (start > 0 && changed[start - 1] === 1) start -= 1
+      }
+      top = end
+      meetEnd = meets(above) ? end : -1
+      while (end < n && ids[start] === ids[end]) {
+        changed[start] = 0
+        changed[end] = 1
+        start += 1
+        end += 1
+        above += 1
+        while (end < n && changed[end] === 1) end += 1
+        if (meets(above)) meetEnd = end
+      }
+    } while (end - start !== size)
+    let to = end
+    if (meetEnd !== -1) to = meetEnd
+    else if (top !== end) to = bestEnd(lines, top, end, size)
+    while (end > to) {
+      start -= 1
+      end -= 1
+      changed[start] = 1
+      changed[end] = 0
+      above -= 1
+    }
+    start = end
+  }
+}
+
+// Which lines of `a` and `b` changed, in order: the two files' matching ends
+// are kept, the lines set aside are changed, the rest go to the search, and
+// every run of changes then settles where git puts it. Past about 500 changed
+// lines in one file git stops short of the shortest edit and this search does
+// not, so the two can differ there; no fixture comes near.
+function lineOps(a: string[], b: string[]): Op[] {
+  const [old, neu] = sidesOf(a, b)
+  const shorter = Math.min(a.length, b.length)
+  let head = 0
+  while (head < shorter && old.ids[head] === neu.ids[head]) head += 1
+  let tail = 0
+  while (tail < shorter - head && old.ids[a.length - 1 - tail] === neu.ids[b.length - 1 - tail]) {
+    tail += 1
+  }
+  const fromOld = searchedLines(old, countsOf(neu.ids), head, a.length - tail)
+  const fromNew = searchedLines(neu, countsOf(old.ids), head, b.length - tail)
+  const diagonals = fromOld.length + fromNew.length + 3
+  const s: Search = {
+    a: Int32Array.from(fromOld, (i) => old.ids[i] ?? -1),
+    b: Int32Array.from(fromNew, (j) => neu.ids[j] ?? -1),
+    forward: new Int32Array(diagonals),
+    reverse: new Int32Array(diagonals),
+    offset: fromNew.length + 1,
+    goneA: new Uint8Array(fromOld.length),
+    goneB: new Uint8Array(fromNew.length),
+  }
+  searchBox(s, 0, fromOld.length, 0, fromNew.length)
+  fromOld.forEach((i, r) => {
+    if (s.goneA[r] === 1) old.changed[i] = 1
+  })
+  fromNew.forEach((j, r) => {
+    if (s.goneB[r] === 1) neu.changed[j] = 1
+  })
+  settle(old, neu)
+  settle(neu, old)
   const out: Op[] = []
   let i = 0
   let j = 0
   while (i < a.length || j < b.length) {
-    if (i < a.length && changed(old, i)) out.push({ kind: '-', text: a[i++] ?? '' })
-    else if (j < b.length && changed(neu, j)) out.push({ kind: '+', text: b[j++] ?? '' })
+    if (i < a.length && old.changed[i] === 1) out.push({ kind: '-', text: a[i++] ?? '' })
+    else if (j < b.length && neu.changed[j] === 1) out.push({ kind: '+', text: b[j++] ?? '' })
     else {
       out.push({ kind: ' ', text: a[i] ?? '' })
       i += 1
@@ -399,190 +497,6 @@ function lineOps(a: string[], b: string[]): Op[] {
     }
   }
   return out
-}
-
-// One side of a diff as xdiff compacts it: its lines, and which of them the
-// diff changed, kept one slot past either end so the edges read unchanged.
-interface Side {
-  recs: string[]
-  chg: Uint8Array
-}
-
-interface Group {
-  start: number
-  end: number
-}
-
-const changed = (side: Side, line: number): boolean => side.chg[line + 1] === 1
-
-function mark(side: Side, line: number, on: boolean): void {
-  side.chg[line + 1] = on ? 1 : 0
-}
-
-function groupFirst(side: Side): Group {
-  const g = { start: 0, end: 0 }
-  while (changed(side, g.end)) g.end += 1
-  return g
-}
-
-function groupNext(side: Side, g: Group): boolean {
-  if (g.end === side.recs.length) return false
-  g.start = g.end + 1
-  g.end = g.start
-  while (changed(side, g.end)) g.end += 1
-  return true
-}
-
-function groupPrevious(side: Side, g: Group): boolean {
-  if (g.start === 0) return false
-  g.end = g.start - 1
-  g.start = g.end
-  while (changed(side, g.start - 1)) g.start -= 1
-  return true
-}
-
-function slideDown(side: Side, g: Group): boolean {
-  if (g.end >= side.recs.length || side.recs[g.start] !== side.recs[g.end]) return false
-  mark(side, g.start, false)
-  mark(side, g.end, true)
-  g.start += 1
-  g.end += 1
-  while (changed(side, g.end)) g.end += 1
-  return true
-}
-
-function slideUp(side: Side, g: Group): boolean {
-  if (g.start === 0 || side.recs[g.start - 1] !== side.recs[g.end - 1]) return false
-  g.start -= 1
-  g.end -= 1
-  mark(side, g.start, true)
-  mark(side, g.end, false)
-  while (changed(side, g.start - 1)) g.start -= 1
-  return true
-}
-
-// xdiff's indent heuristic, its constants as git ships them: where a block of
-// added or removed lines could sit at several places, the place whose two
-// edges fall best against the surrounding indentation and blank lines wins.
-const MAX_INDENT = 200
-const MAX_BLANKS = 20
-const INDENT_HEURISTIC_MAX_SLIDING = 100
-const INDENT_WEIGHT = 60
-
-function indentOf(line: string | undefined): number {
-  let indent = 0
-  for (const c of line ?? '') {
-    if (c === ' ') indent += 1
-    else if (c === '\t') indent += 8 - (indent % 8)
-    else if (!'\n\v\f\r'.includes(c)) return indent
-    if (indent >= MAX_INDENT) return MAX_INDENT
-  }
-  return -1
-}
-
-interface Score {
-  effectiveIndent: number
-  penalty: number
-}
-
-function scoreSplit(recs: string[], split: number, score: Score): void {
-  const endOfFile = split >= recs.length
-  const indent = endOfFile ? -1 : indentOf(recs[split])
-  let preBlank = 0
-  let preIndent = -1
-  for (let i = split - 1; i >= 0; i -= 1) {
-    preIndent = indentOf(recs[i])
-    if (preIndent !== -1) break
-    preBlank += 1
-    if (preBlank === MAX_BLANKS) {
-      preIndent = 0
-      break
-    }
-  }
-  let postBlank = 0
-  let postIndent = -1
-  for (let i = split + 1; i < recs.length; i += 1) {
-    postIndent = indentOf(recs[i])
-    if (postIndent !== -1) break
-    postBlank += 1
-    if (postBlank === MAX_BLANKS) {
-      postIndent = 0
-      break
-    }
-  }
-  if (preIndent === -1 && preBlank === 0) score.penalty += 1
-  if (endOfFile) score.penalty += 21
-  const blankAfter = indent === -1 ? 1 + postBlank : 0
-  const totalBlank = preBlank + blankAfter
-  score.penalty += -30 * totalBlank + 6 * blankAfter
-  const effective = indent !== -1 ? indent : postIndent
-  const anyBlanks = totalBlank !== 0
-  score.effectiveIndent += effective
-  if (effective === -1 || preIndent === -1 || effective === preIndent) return
-  if (effective > preIndent) score.penalty += anyBlanks ? 10 : -4
-  else if (postIndent !== -1 && postIndent > effective) score.penalty += anyBlanks ? 17 : 24
-  else score.penalty += anyBlanks ? 17 : 23
-}
-
-function scoreCompare(a: Score, b: Score): number {
-  const indents =
-    Number(a.effectiveIndent > b.effectiveIndent) - Number(a.effectiveIndent < b.effectiveIndent)
-  return INDENT_WEIGHT * indents + (a.penalty - b.penalty)
-}
-
-// xdl_change_compact: each block of changed lines slides up as far as it can
-// and then down as far as it can, merging with any block it meets, and ends
-// either lined up with the last change on the other side it can meet or
-// where the indent heuristic puts it. That is how git picks one diff among
-// the minimal ones, and the reason its output is the same on every machine.
-function compact(side: Side, other: Side): void {
-  const g = groupFirst(side)
-  const go = groupFirst(other)
-  for (;;) {
-    if (g.end !== g.start) {
-      let size: number
-      let earliestEnd: number
-      let endMatchingOther: number
-      do {
-        size = g.end - g.start
-        endMatchingOther = -1
-        while (slideUp(side, g)) groupPrevious(other, go)
-        earliestEnd = g.end
-        if (go.end > go.start) endMatchingOther = g.end
-        while (slideDown(side, g)) {
-          groupNext(other, go)
-          if (go.end > go.start) endMatchingOther = g.end
-        }
-      } while (size !== g.end - g.start)
-      if (g.end === earliestEnd) {
-        // nothing could move
-      } else if (endMatchingOther !== -1) {
-        while (go.end === go.start) {
-          slideUp(side, g)
-          groupPrevious(other, go)
-        }
-      } else {
-        let shift = Math.max(earliestEnd, g.end - size - 1, g.end - INDENT_HEURISTIC_MAX_SLIDING)
-        let best = -1
-        let bestScore: Score = { effectiveIndent: 0, penalty: 0 }
-        for (; shift <= g.end; shift += 1) {
-          const score = { effectiveIndent: 0, penalty: 0 }
-          scoreSplit(side.recs, shift, score)
-          scoreSplit(side.recs, shift - size, score)
-          if (best === -1 || scoreCompare(score, bestScore) <= 0) {
-            bestScore = score
-            best = shift
-          }
-        }
-        while (g.end > best) {
-          slideUp(side, g)
-          groupPrevious(other, go)
-        }
-      }
-    }
-    if (!groupNext(side, g)) break
-    groupNext(other, go)
-  }
 }
 
 // git's default funcname: the nearest line above the hunk, in the old file,
@@ -599,7 +513,7 @@ function hunkRange(start: number, count: number): string {
 }
 
 // The hunks of one file: changes closer than twice the context apart share a
-// hunk, as xdiff joins them, and each line that ends without a newline is
+// hunk, as git joins them, and each line that ends without a newline is
 // followed by git's marker for it.
 function hunksOf(ops: Op[], before: string[]): string[] {
   const changed = ops.flatMap((op, i) => (op.kind === ' ' ? [] : [i]))

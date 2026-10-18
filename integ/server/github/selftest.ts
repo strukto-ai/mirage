@@ -837,6 +837,37 @@ async function diffsMatchGit(): Promise<void> {
     if (!unifiedDiff(diffTrees(before, after)).equals(theirs)) differ.push(run)
   }
   eq('forty random tree pairs diff as git diffs them', differ, [])
+  // The shape a new function takes: blocks of fresh lines with blank lines and
+  // braces among them, added, removed and replaced. Git leaves a line that
+  // common out of the search where fresh lines surround it, so its diff is
+  // longer than the shortest one, and these pin which lines it sets aside.
+  const common = ['', '}', '    }', '  return x']
+  let fresh = 0
+  const freshLines = (n: number): string[] =>
+    Array.from({ length: n }, () => (rand() < 0.4 ? pick(common) : `line ${String(fresh++)}`))
+  const asFile = (lines: string[]): Buffer => Buffer.from(lines.map((l) => `${l}\n`).join(''))
+  const blocks: number[] = []
+  for (let run = 0; run < 10; run += 1) {
+    const before = new Map<string, Buffer>()
+    const after = new Map<string, Buffer>()
+    for (let file = 0; file < 4; file += 1) {
+      const was = freshLines(Math.floor(rand() * 200))
+      const now = [...was]
+      for (let k = 1 + Math.floor(rand() * 6); k > 0; k -= 1) {
+        const at = Math.floor(rand() * (now.length + 1))
+        const size = 1 + Math.floor(rand() * 60)
+        const r = rand()
+        if (r < 0.4) now.splice(at, 0, ...freshLines(size))
+        else if (r < 0.8) now.splice(at, size)
+        else now.splice(at, size, ...freshLines(size))
+      }
+      before.set(`f${String(file)}.py`, asFile(was))
+      after.set(`f${String(file)}.py`, asFile(now))
+    }
+    const theirs = await gitDiff(before, after)
+    if (!unifiedDiff(diffTrees(before, after)).equals(theirs)) blocks.push(run)
+  }
+  eq('ten tree pairs of block edits diff as git diffs them', blocks, [])
 }
 
 // What used to answer fixed or missing, each now read off the rows the fake
