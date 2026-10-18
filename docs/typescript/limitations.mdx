@@ -243,6 +243,16 @@ working data. Whole-byte results still collect output. Custom whole-byte
 compression codecs also retain their buffering behavior; the Node XZ and
 bzip2 decoders use incremental codecs.
 
+The standard `rg` engine on Python, Node and Browser limits requested scratch
+storage for each search to 64 MiB. This covers both state tables, their capture rows,
+start and candidate capture slots, and the closure stack. Compiled expressions,
+input, emitted matches and captures, printer output, and allocator overhead are
+outside that limit. Ordinary search retains only whole-match captures.
+Replacement templates containing `$` conservatively retain all capture groups
+when the selected output uses replacement. A pattern whose scratch storage
+would exceed the limit is refused before searching. `--regex-size-limit`
+controls compilation separately and does not raise the search scratch limit.
+
 Native write paths cover disk, SSH, OPFS, GridFS and the upload-session APIs for
 Drive, Dropbox, OneDrive, SharePoint and Box. Uploads that require a length or
 replay stage their input first. Provider sessions are cleaned up where the API

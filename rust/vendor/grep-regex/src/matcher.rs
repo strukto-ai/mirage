@@ -87,6 +87,7 @@ impl RegexMatcherBuilder {
     pub fn build_nfa<P: AsRef<str>>(
         &self,
         patterns: &[P],
+        captures: regex_automata::nfa::thompson::WhichCaptures,
     ) -> Result<
         (
             regex_automata::nfa::thompson::NFA,
@@ -128,7 +129,7 @@ impl RegexMatcherBuilder {
         let config = regex_automata::nfa::thompson::Config::new()
             .utf8(false)
             .shrink(false)
-            .which_captures(regex_automata::nfa::thompson::WhichCaptures::All)
+            .which_captures(captures)
             .look_matcher(look_matcher)
             .nfa_size_limit(Some(chir.config().size_limit));
         let compiler = regex_automata::nfa::thompson::Compiler::new();

@@ -120,3 +120,26 @@ it('closes a quiet match source without reading the next chunk', async () => {
     program.stream.close()
   }
 })
+
+it.each([false, true])('searches without retaining unused captures (quiet=%s)', async (quiet) => {
+  const f = flagsOf({ line_regexp: true, quiet, text: true })
+  const program = await openRg('(a)'.repeat(10000), false, f)
+  const tally: Tally = { selected: false }
+  const data = ENC.encode('a'.repeat(10000) + '\n')
+  async function* source(): AsyncIterable<Uint8Array> {
+    yield await Promise.resolve(data)
+  }
+  try {
+    const output = await materialize(searchInput(source(), program, f, 'f', null, tally))
+    expect(output).toEqual(quiet ? new Uint8Array() : data)
+    expect(tally.selected).toBe(true)
+  } finally {
+    program.stream.close()
+  }
+})
+
+it('reports a capture memory refusal as a usage error', async () => {
+  const opening = openRg('(a)'.repeat(10000), false, flagsOf({ replace: '$1' }))
+  await expect(opening).rejects.toBeInstanceOf(UsageError)
+  await expect(opening).rejects.toThrow(/working memory/)
+})

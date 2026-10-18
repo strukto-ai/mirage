@@ -7,14 +7,69 @@ use std::ops::Deref;
 
 use grep_regex::RegexMatcherBuilder;
 use regex_automata::PatternID;
-use regex_automata::nfa::thompson::{NFA, State};
+use regex_automata::nfa::thompson::{NFA, State, WhichCaptures};
 use regex_automata::util::primitives::StateID;
 use serde::Serialize;
 
 use crate::StreamError;
 
 #[derive(Clone, Copy, Debug)]
+pub(crate) enum CaptureRequirement {
+    WholeMatch,
+    All,
+}
+
+struct SearchMemoryLimit(usize);
+
+const SEARCH_MEMORY_LIMIT: SearchMemoryLimit = SearchMemoryLimit(64 * 1024 * 1024);
+
+impl SearchMemoryLimit {
+    fn check(&self, nfa: &NFA) -> Result<(), StreamError> {
+        let states = nfa.states().len();
+        let consuming = nfa
+            .states()
+            .iter()
+            .filter(|state| {
+                matches!(
+                    state,
+                    State::Match { .. }
+                        | State::ByteRange { .. }
+                        | State::Sparse(_)
+                        | State::Dense(_)
+                )
+            })
+            .count();
+        let slots = nfa.group_info().slot_len();
+        if Self::required_bytes(states, consuming, slots).is_some_and(|bytes| bytes <= self.0) {
+            return Ok(());
+        }
+        Err(StreamError::new(format!(
+            "regex search working memory exceeds the {} byte limit",
+            self.0
+        )))
+    }
+
+    fn required_bytes(states: usize, consuming: usize, slots: usize) -> Option<usize> {
+        let tables = states.checked_mul(2)?.checked_mul(
+            std::mem::size_of::<StateID>()
+                + std::mem::size_of::<u64>()
+                + std::mem::size_of::<Vec<Option<usize>>>(),
+        )?;
+        let captures = consuming
+            .checked_add(1)?
+            .checked_mul(2)?
+            .checked_mul(slots)?
+            .checked_mul(std::mem::size_of::<Option<usize>>())?;
+        let frames = states
+            .checked_mul(2)?
+            .checked_mul(std::mem::size_of::<Frame>())?;
+        tables.checked_add(captures)?.checked_add(frames)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct Options {
+    pub(crate) capture_requirement: CaptureRequirement,
     pub(crate) ignore_case: bool,
     pub(crate) smart_case: bool,
     pub(crate) unicode: bool,
@@ -33,6 +88,7 @@ pub(crate) struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            capture_requirement: CaptureRequirement::All,
             ignore_case: false,
             smart_case: false,
             unicode: true,
@@ -108,21 +164,27 @@ impl Program {
         if options.ban_nul {
             builder.ban_byte(Some(0));
         }
-        let (nfa, non_matching, required_terms) = builder.build_nfa(patterns).map_err(|err| {
-            let mut message = err.to_string();
-            if message.contains("the literal") && message.contains("not allowed") {
-                message.push_str("\n\nUse --multiline (-U) to match newline characters.");
-            }
-            if message.contains("look-around")
-                || message.contains("backreferences are not supported")
-            {
-                message.push_str("\n\nUse --pcre2 (-P) for look-around and backreferences.");
-            }
-            if message.contains("pattern contains \"\\0\"") {
-                message.push_str("\n\nMatching NUL requires --text (-a).");
-            }
-            StreamError::new(message)
-        })?;
+        let captures = match options.capture_requirement {
+            CaptureRequirement::WholeMatch => WhichCaptures::Implicit,
+            CaptureRequirement::All => WhichCaptures::All,
+        };
+        let (nfa, non_matching, required_terms) =
+            builder.build_nfa(patterns, captures).map_err(|err| {
+                let mut message = err.to_string();
+                if message.contains("the literal") && message.contains("not allowed") {
+                    message.push_str("\n\nUse --multiline (-U) to match newline characters.");
+                }
+                if message.contains("look-around")
+                    || message.contains("backreferences are not supported")
+                {
+                    message.push_str("\n\nUse --pcre2 (-P) for look-around and backreferences.");
+                }
+                if message.contains("pattern contains \"\\0\"") {
+                    message.push_str("\n\nMatching NUL requires --text (-a).");
+                }
+                StreamError::new(message)
+            })?;
+        SEARCH_MEMORY_LIMIT.check(&nfa)?;
         let terminator = if options.null_data { 0 } else { b'\n' };
         Ok(Self {
             nfa,
@@ -769,6 +831,10 @@ mod tests {
 
     fn compare(patterns: &[&str], hay: &[u8], options: rg_matcher::Options, budget: usize) {
         let sources: Vec<String> = patterns.iter().map(|p| (*p).to_owned()).collect();
+        let group_limit = match options.capture_requirement {
+            rg_matcher::CaptureRequirement::WholeMatch => 1,
+            rg_matcher::CaptureRequirement::All => usize::MAX,
+        };
         let original = builder(options).build_many(patterns).unwrap();
         let mut captures = original.new_captures().unwrap();
         let mut expected = Vec::new();
@@ -780,7 +846,7 @@ mod tests {
                         start: found.start(),
                         end: found.end(),
                     },
-                    (0..caps.len())
+                    (0..caps.len().min(group_limit))
                         .map(|i| caps.get(i).map(|m| (m.start(), m.end())))
                         .collect::<Vec<_>>(),
                 ));
@@ -932,6 +998,33 @@ mod tests {
             },
             1,
         );
+    }
+
+    #[test]
+    fn differential_whole_match_compilation_preserves_priority() {
+        for pattern in [
+            "(a|ab)",
+            "((a*)*)",
+            "(a+)?b",
+            "(?<letter>a|ab)(b)?",
+            "(a?)(b?)",
+            "(a|b)*",
+            "(é|e)+",
+        ] {
+            for haystack in [b"".as_slice(), b"aab ab bba", "ééa e".as_bytes()] {
+                for budget in [1, 17] {
+                    compare(
+                        &[pattern],
+                        haystack,
+                        rg_matcher::Options {
+                            capture_requirement: rg_matcher::CaptureRequirement::WholeMatch,
+                            ..rg_matcher::Options::default()
+                        },
+                        budget,
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -1215,5 +1308,77 @@ mod tests {
         }
         assert!(calls > 400 * 400);
         assert_eq!(search.take_matches().group_count, 401);
+    }
+
+    #[test]
+    fn whole_match_search_discards_ten_thousand_explicit_capture_slots() {
+        let program = rg_matcher::Program::with_options(
+            &["(a)".repeat(10_000)],
+            rg_matcher::Options {
+                capture_requirement: rg_matcher::CaptureRequirement::WholeMatch,
+                ..rg_matcher::Options::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(program.nfa.group_info().slot_len(), 2);
+        assert!(
+            rg_matcher::SearchMemoryLimit::required_bytes(
+                program.nfa.states().len(),
+                program.nfa.states().len(),
+                program.nfa.group_info().slot_len(),
+            )
+            .unwrap()
+                < 4 * 1024 * 1024
+        );
+    }
+
+    #[test]
+    fn capture_scratch_limit_checks_the_complete_product_before_searching() {
+        let program = rg_matcher::Program::with_options(
+            &["(a?)".repeat(400)],
+            rg_matcher::Options::default(),
+        )
+        .unwrap();
+        let states = program.nfa.states().len();
+        let consuming = program
+            .nfa
+            .states()
+            .iter()
+            .filter(|state| {
+                matches!(
+                    state,
+                    regex_automata::nfa::thompson::State::Match { .. }
+                        | regex_automata::nfa::thompson::State::ByteRange { .. }
+                        | regex_automata::nfa::thompson::State::Sparse(_)
+                        | regex_automata::nfa::thompson::State::Dense(_)
+                )
+            })
+            .count();
+        let required = rg_matcher::SearchMemoryLimit::required_bytes(
+            states,
+            consuming,
+            program.nfa.group_info().slot_len(),
+        )
+        .unwrap();
+        assert!(
+            rg_matcher::SearchMemoryLimit(required)
+                .check(&program.nfa)
+                .is_ok()
+        );
+        assert!(
+            rg_matcher::SearchMemoryLimit(required - 1)
+                .check(&program.nfa)
+                .is_err()
+        );
+        assert!(rg_matcher::SearchMemoryLimit::required_bytes(usize::MAX, 1, 2).is_none());
+        assert!(rg_matcher::SearchMemoryLimit::required_bytes(1, usize::MAX, 2).is_none());
+        assert!(rg_matcher::SearchMemoryLimit::required_bytes(1, 1, usize::MAX).is_none());
+        let error = rg_matcher::Program::with_options(
+            &["(a)".repeat(10_000)],
+            rg_matcher::Options::default(),
+        )
+        .err()
+        .unwrap();
+        assert!(error.message.contains("regex search working memory"));
     }
 }

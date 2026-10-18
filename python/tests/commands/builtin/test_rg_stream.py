@@ -111,3 +111,29 @@ async def test_quiet_match_closes_source_before_the_next_chunk() -> None:
     assert tally.selected
     assert reads == 1
     assert closed
+
+
+@pytest.mark.parametrize("quiet", [False, True])
+@pytest.mark.asyncio
+async def test_unused_capture_groups_do_not_block_an_ordinary_search(
+    quiet: bool,
+) -> None:
+    f = _flags(line_regexp=True, quiet=quiet, text=True)
+    program = open_rg("(a)" * 10000, False, f)
+    tally = Tally()
+    data = b"a" * 10000 + b"\n"
+
+    async def source() -> AsyncIterator[bytes]:
+        yield data
+
+    chunks = [
+        chunk
+        async for chunk in search_input(source(), program, f, "f", None, tally)
+    ]
+    assert b"".join(chunks) == (b"" if quiet else data)
+    assert tally.selected
+
+
+def test_capture_memory_refusal_is_a_usage_error() -> None:
+    with pytest.raises(UsageError, match="working memory"):
+        open_rg("(a)" * 10000, False, _flags(replace="$1"))

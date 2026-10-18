@@ -1139,6 +1139,96 @@
         "stdout": "X\r\r\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "rg_shared_multiline_crlf_replacement_records",
+      "seq": 13470300,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a\\r\\nb\\r\\n' | rg --crlf -U -r X 'a\\r?\\nb' | od -An -tx1 | tr -d ' \\n'; echo; printf 'a\\r\\nb\\r' | rg --crlf -U -r X 'a\\r?\\nb' | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "580d0a\n580d0d0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_multiline_crlf_replacement_modes",
+      "seq": 13470301,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a\\r\\nb\\r\\n' | rg --crlf -U -o -r '$0' 'a\\r?\\nb' | od -An -tx1 | tr -d ' \\n'; echo; printf 'a\\nb\\r' | rg --crlf -U --vimgrep --no-filename -r X 'a\\r?\\nb' | od -An -tx1 | tr -d ' \\n'; echo; printf 'a\\nb\\n' | rg --crlf -U -M2 -r X 'a\\r?\\nb' | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "610d0a620d0a\n313a313a580d0d0a\n580d0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_null_data_crlf_keeps_record_carriage_return",
+      "seq": 13470302,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a\\r\\nb\\r\\0' | rg --crlf --null-data -U -r X 'a\\r?\\nb' | od -An -tx1 | tr -d ' \\n'; echo; printf 'a\\r\\nb\\r\\0' | rg --crlf --null-data -r X b | od -An -tx1 | tr -d ' \\n'; echo; printf 'a\\r\\nb\\r\\0' | rg --crlf --null-data -U 'a\\r?\\nb' | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "580d00\n610d0a580d00\n610d0a620d00\n",
+        "stderr": ""
+      }
     }
   ]
 }

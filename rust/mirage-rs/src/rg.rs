@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::rg_matcher::{Matches, Options, Program, Search};
+use crate::rg_matcher::{CaptureRequirement, Matches, Options, Program, Search};
 use crate::{Stream, StreamError, parse_config};
 
 const WORK: usize = 16 * 1024;
@@ -405,6 +405,7 @@ impl Piece {
 struct Buffer<T: Copy> {
     values: Vec<T>,
     previous: Option<Vec<T>>,
+    start: usize,
 }
 
 impl<T: Copy> Buffer<T> {
@@ -412,6 +413,7 @@ impl<T: Copy> Buffer<T> {
         Self {
             values: Vec::new(),
             previous: None,
+            start: 0,
         }
     }
 
@@ -422,7 +424,6 @@ impl<T: Copy> Buffer<T> {
                     return true;
                 }
                 let capacity = self
-                    .values
                     .len()
                     .saturating_mul(2)
                     .saturating_add(additional)
@@ -433,17 +434,16 @@ impl<T: Copy> Buffer<T> {
                 ));
             }
             let previous = self.previous.as_ref().unwrap();
-            let end = previous
-                .len()
-                .min(self.values.len().saturating_add(*budget));
-            let copied = end - self.values.len();
-            self.values
-                .extend_from_slice(&previous[self.values.len()..end]);
+            let start = self.start + self.values.len();
+            let end = previous.len().min(start.saturating_add(*budget));
+            let copied = end - start;
+            self.values.extend_from_slice(&previous[start..end]);
             *budget -= copied;
             if end < previous.len() {
                 return false;
             }
             self.previous = None;
+            self.start = 0;
         }
     }
 
@@ -459,7 +459,18 @@ impl<T: Copy> Buffer<T> {
 
     fn take(&mut self) -> Vec<T> {
         debug_assert!(self.previous.is_none());
+        debug_assert_eq!(self.start, 0);
         std::mem::take(&mut self.values)
+    }
+
+    fn consume(&mut self, count: usize) {
+        debug_assert!(self.previous.is_none());
+        debug_assert!(count <= self.len());
+        self.start += count;
+        if self.start == self.values.len() {
+            self.values.clear();
+            self.start = 0;
+        }
     }
 }
 
@@ -467,7 +478,7 @@ impl<T: Copy> Deref for Buffer<T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
-        self.previous.as_deref().unwrap_or(&self.values)
+        &self.previous.as_deref().unwrap_or(&self.values)[self.start..]
     }
 }
 
@@ -686,6 +697,7 @@ struct Printed {
     selected: bool,
     terminated: bool,
     cr: bool,
+    use_configured_ending: bool,
     spans: Spans,
     count: usize,
     trim_at: usize,
@@ -706,6 +718,7 @@ impl Printed {
             selected,
             terminated: record.terminated,
             cr: record.cr,
+            use_configured_ending: false,
             spans: Spans::None,
             count: 0,
             trim_at: record.content.start,
@@ -823,7 +836,12 @@ impl Printed {
             pieces.push_back(Piece::slice(self.data.clone(), self.range.clone()));
         }
         pieces.push_back(Piece::bytes(
-            if config.crlf && self.terminated && !self.cr {
+            if config.crlf
+                && !config.null_data
+                && self.terminated
+                && !self.cr
+                && !self.use_configured_ending
+            {
                 b"\n".to_vec()
             } else {
                 config.end().to_vec()
@@ -1351,7 +1369,11 @@ impl RegionJob {
                 self.replacement_number += 1;
                 return false;
             }
+            let replaced = self.replaced.is_some();
+            let terminated = self.replacement_end < end;
             let cr = config.crlf
+                && !config.null_data
+                && (!replaced || terminated)
                 && self.replacement_end > self.replacement_at
                 && data[self.replacement_end - 1] == b'\r';
             let content_end = self.replacement_end - usize::from(cr);
@@ -1369,8 +1391,8 @@ impl RegionJob {
             printed.trim_at = self.replacement_at;
             printed.number = self.region.first as u64 + self.replacement_number as u64 + 1;
             printed.offset = (base + self.replacement_at) as u64;
-            printed.cr = cr;
-            printed.terminated = full_end > self.replacement_end;
+            printed.cr = cr && !replaced;
+            printed.terminated = terminated && !replaced;
             printed.count = 1;
             printed.spans = Spans::One(begin, finish);
             self.printed = Some(printed);
@@ -1425,9 +1447,15 @@ impl RegionJob {
                     },
                 );
                 printed.data = data.clone();
-                printed.range = self.replacement_at..self.replacement_end;
+                let cr = config.crlf
+                    && !config.null_data
+                    && self.replacement_end > self.replacement_at
+                    && data.get(self.replacement_end) == Some(&config.terminator())
+                    && data[self.replacement_end - 1] == b'\r';
+                printed.range = self.replacement_at..self.replacement_end - usize::from(cr);
                 printed.trim_at = self.replacement_at;
                 printed.terminated = false;
+                printed.cr = false;
                 printed.offset = first.start as u64 + start as u64;
                 printed.number = self.region.first as u64
                     + self.rendered_prefix_lines as u64
@@ -1507,11 +1535,20 @@ impl RegionJob {
                 },
             );
             printed.data = data.clone();
-            printed.range = self.replacement_at..self.replacement_end;
+            let terminated = self.replacement_end < data.len();
+            let cr = config.crlf
+                && !config.null_data
+                && terminated
+                && self.replacement_end > self.replacement_at
+                && data[self.replacement_end - 1] == b'\r';
+            printed.range = self.replacement_at..self.replacement_end - usize::from(cr);
             printed.trim_at = self.replacement_at;
             printed.number = index as u64 + 1;
-            printed.terminated = false;
-            printed.count = 1;
+            printed.terminated = terminated;
+            printed.cr = cr;
+            printed.use_configured_ending = true;
+            printed.spans = Spans::Replaced(self.spans.clone());
+            printed.count = self.spans.len();
             self.printed = Some(printed);
             self.replacement_number += 1;
             self.replacement_at = self.replacement_end.saturating_add(1);
@@ -1600,7 +1637,10 @@ impl Multi {
                 self.at += 1;
                 *budget -= 1;
                 if self.data[at] == config.terminator() {
-                    let cr = config.crlf && at > self.line_start && self.data[at - 1] == b'\r';
+                    let cr = config.crlf
+                        && !config.null_data
+                        && at > self.line_start
+                        && self.data[at - 1] == b'\r';
                     self.growing_lines.values.push(Line {
                         start: self.line_start,
                         end: at - usize::from(cr),
@@ -1619,7 +1659,7 @@ impl Multi {
                 }
                 *budget -= 1;
                 let end = self.data.len();
-                let cr = config.crlf && self.data[end - 1] == b'\r';
+                let cr = config.crlf && !config.null_data && self.data[end - 1] == b'\r';
                 self.growing_lines.values.push(Line {
                     start: self.line_start,
                     end: end - usize::from(cr),
@@ -1774,7 +1814,6 @@ struct Input {
     searched_override: Option<u64>,
     pending: Buffer<u8>,
     queued: VecDeque<u8>,
-    record_start: usize,
     record: Vec<u8>,
     scan: usize,
     record_end: Option<usize>,
@@ -1823,7 +1862,6 @@ impl Input {
             searched_override: None,
             pending: Buffer::new(),
             queued: VecDeque::new(),
-            record_start: 0,
             record: Vec::new(),
             scan: 0,
             record_end: None,
@@ -1867,7 +1905,7 @@ impl Input {
                 .pending
                 .values
                 .capacity()
-                .saturating_sub(self.pending.len())
+                .saturating_sub(self.pending.values.len())
                 >= input.len()
         {
             self.pending.values.extend_from_slice(input);
@@ -2088,6 +2126,17 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         config.pattern.split('\n').map(str::to_owned).collect()
     };
     let options = Options {
+        capture_requirement: if !config.summary()
+            && !config.json
+            && config
+                .replace
+                .as_ref()
+                .is_some_and(|template| template.contains(&b'$'))
+        {
+            CaptureRequirement::All
+        } else {
+            CaptureRequirement::WholeMatch
+        },
         ignore_case: config.ignore_case,
         smart_case: config.smart_case,
         unicode: config.unicode,
@@ -2430,15 +2479,15 @@ impl Rg {
             let end = input.record_end.unwrap_or(input.pending.len());
             let next = end + usize::from(terminated);
             let last = next == input.pending.len();
-            let mut data = if input.record_start == 0 && last {
+            let mut data = if input.pending.start == 0 && last {
                 let mut data = input.pending.take();
                 data.truncate(end);
                 data
             } else {
                 if input.record.capacity() == 0 {
-                    input.record = Vec::with_capacity(end - input.record_start);
+                    input.record = Vec::with_capacity(end);
                 }
-                let start = input.record_start + input.record.len();
+                let start = input.record.len();
                 let copied = (end - start).min(budget);
                 input
                     .record
@@ -2447,16 +2496,11 @@ impl Rg {
                 if start + copied < end {
                     break;
                 }
+                input.pending.consume(next);
                 std::mem::take(&mut input.record)
             };
-            input.record_start = if last {
-                input.pending.values.clear();
-                0
-            } else {
-                next
-            };
             let raw_len = data.len();
-            let cr = config.crlf && data.last() == Some(&b'\r');
+            let cr = config.crlf && !config.null_data && data.last() == Some(&b'\r');
             if cr {
                 data.pop();
             }
@@ -2467,7 +2511,7 @@ impl Rg {
             input.searching_terminated = terminated;
             input.offset += raw_len as u64 + u64::from(terminated);
             input.tally.searched = input.offset;
-            input.scan = input.record_start;
+            input.scan = 0;
             input.record_end = None;
             let all = !(config.quiet || config.files_only || config.files_without_match)
                 || config.counts();
@@ -2668,6 +2712,28 @@ mod tests {
         }
         assert!(pauses > 2048);
         assert_eq!(buffer.take(), expected);
+    }
+
+    #[test]
+    fn buffer_growth_copies_only_unconsumed_values_within_its_budget() {
+        let mut buffer = super::Buffer::new();
+        let values = (0..4096).collect::<Vec<_>>();
+        assert_eq!(buffer.append(&values, &mut 4096), 4096);
+        buffer.consume(2048);
+        let mut calls = 0;
+        loop {
+            let mut budget = 1;
+            let complete = buffer.reserve(4096, &mut budget);
+            assert_eq!(&*buffer, &values[2048..]);
+            calls += 1;
+            if complete {
+                break;
+            }
+            assert_eq!(budget, 0);
+            assert!(calls < 2048);
+        }
+        assert_eq!(calls, 2048);
+        assert_eq!(buffer.take(), values[2048..]);
     }
 
     #[test]
@@ -3004,6 +3070,66 @@ mod tests {
     }
 
     #[test]
+    fn ten_thousand_groups_search_without_unused_captures() {
+        let pattern = "(a)".repeat(10_000);
+        let data = [vec![b'a'; 10_000], vec![b'\n']].concat();
+        for quiet in [false, true] {
+            let (out, tally, _) = run(
+                &data,
+                json!({"pattern":pattern, "quiet":quiet, "line_regexp":true}),
+            );
+            assert_eq!(out, if quiet { Vec::new() } else { data.clone() });
+            assert_eq!(tally["selected"], true);
+        }
+        let (out, _, _) = run(
+            &data,
+            json!({"pattern":pattern, "replace":"literal", "line_regexp":true}),
+        );
+        assert_eq!(out, b"literal\n");
+        for mode in [
+            "quiet",
+            "files_only",
+            "files_without_match",
+            "count_only",
+            "count_matches",
+            "json",
+        ] {
+            let mut config = json!({"pattern":pattern, "replace":"$1"});
+            config[mode] = json!(true);
+            assert!(
+                open(&serde_json::to_vec(&config).unwrap()).is_ok(),
+                "{mode}"
+            );
+        }
+    }
+
+    #[test]
+    fn capture_replacement_reports_scratch_refusal_before_searching() {
+        let config = serde_json::to_vec(&json!({
+            "pattern":"(a)".repeat(10_000), "replace":"$1",
+        }))
+        .unwrap();
+        let error = open(&config).err().unwrap();
+        assert_eq!(
+            error.message,
+            "regex search working memory exceeds the 67108864 byte limit"
+        );
+    }
+
+    #[test]
+    fn replacement_preserves_whole_named_and_unmatched_capture_priority() {
+        let (out, _, _) = run(
+            b"a ab\n",
+            json!({
+                "pattern":"(?<first>a|ab)(?<optional>b)?",
+                "replace":"<$0|${first}|$2|${optional}>",
+                "only_matching":true,
+            }),
+        );
+        assert_eq!(out, b"<a|a||>\n<ab|a|b|b>\n");
+    }
+
+    #[test]
     fn unterminated_final_empty_matches_select_without_a_submatch() {
         let (out, metadata, _) = run(b"x", json!({"pattern":"$","only_matching":true}));
         assert_eq!(out, b"x\n");
@@ -3131,6 +3257,130 @@ mod tests {
             json!({"pattern":"x$","replace":"long","crlf":true,"line_numbers":true,"byte_offsets":true,"column":true}),
         );
         assert_eq!(out, b"1:2:0:along\r\n2:2:4:blong\r\n");
+    }
+
+    #[test]
+    fn multiline_crlf_replacements_frame_the_rendered_records() {
+        for (data, replacement, expected) in [
+            (b"a\r\nb\r\n".as_slice(), "X", b"X\r\n".as_slice()),
+            (b"a\nb\n".as_slice(), "X", b"X\r\n".as_slice()),
+            (b"a\r\nb".as_slice(), "X", b"X\r\n".as_slice()),
+            (b"a\r\nb\r".as_slice(), "X", b"X\r\r\n".as_slice()),
+            (b"a\r\nb\r\n".as_slice(), "X\r\nY", b"X\r\nY\r\n".as_slice()),
+            (b"a\r\nb\r\n".as_slice(), "$0", b"a\r\nb\r\n".as_slice()),
+        ] {
+            let (out, _, _) = run(
+                data,
+                json!({"pattern":"a\\r?\\nb","replace":replacement,"crlf":true,"multiline":true}),
+            );
+            assert_eq!(out, expected, "{data:?}, replace={replacement:?}");
+        }
+    }
+
+    #[test]
+    fn multiline_crlf_match_replacements_keep_only_literal_final_crs() {
+        for vimgrep in [false, true] {
+            for (data, replacement, expected) in [
+                (b"a\nb\n".as_slice(), "X\r", b"X\r\n".as_slice()),
+                (b"a\nb".as_slice(), "X\r", b"X\r\r\n".as_slice()),
+                (b"a\r\nb\r\n".as_slice(), "X\r\nY", b"X\r\nY\r\n".as_slice()),
+                (b"a\r\nb\r\n".as_slice(), "$0", b"a\r\nb\r\n".as_slice()),
+            ] {
+                let (out, _, _) = run(
+                    data,
+                    json!({"pattern":"a\\r?\\nb","replace":replacement,"crlf":true,"multiline":true,"only_matching":true,"vimgrep":vimgrep}),
+                );
+                assert_eq!(
+                    out, expected,
+                    "{data:?}, replace={replacement:?}, vimgrep={vimgrep}"
+                );
+            }
+        }
+        for (data, replacement, expected) in [
+            (b"a\nb\n".as_slice(), "X", b"X\r\n".as_slice()),
+            (b"a\nb".as_slice(), "X\r", b"X\r\r\n".as_slice()),
+            (b"a\r\nb\r".as_slice(), "X", b"X\r\r\n".as_slice()),
+        ] {
+            let (out, _, _) = run(
+                data,
+                json!({"pattern":"a\\r?\\nb","replace":replacement,"crlf":true,"multiline":true,"vimgrep":true}),
+            );
+            assert_eq!(out, expected, "{data:?}, replace={replacement:?}");
+        }
+    }
+
+    #[test]
+    fn multiline_crlf_replacement_limits_measure_rendered_records() {
+        for preview in [false, true] {
+            for (data, maximum) in [(b"a\r\nb\r\n".as_slice(), 3), (b"a\nb\n".as_slice(), 2)] {
+                let config = json!({"pattern":"a\\r?\\nb","replace":"X","crlf":true,"multiline":true,"max_columns":maximum,"max_columns_preview":preview});
+                let (out, _, _) = run(data, config.clone());
+                assert_eq!(out, b"X\r\n", "{data:?}, M={maximum}, preview={preview}");
+                let mut limited = config;
+                limited["max_columns"] = json!(maximum - 1);
+                let (out, _, _) = run(data, limited);
+                assert_ne!(
+                    out,
+                    b"X\r\n",
+                    "{data:?}, M={}, preview={preview}",
+                    maximum - 1
+                );
+                assert!(out.ends_with(b"\r\n"));
+            }
+        }
+    }
+
+    #[test]
+    fn multiline_replacement_limits_count_all_matches_in_the_region() {
+        for (maximum, preview, expected) in [(3, false, b"2"), (1, true, b"1")] {
+            let (out, _, _) = run(
+                b"a\r\nba\r\nb\r\n",
+                json!({"pattern":"a\\r?\\nb","replace":"X","crlf":true,"multiline":true,"max_columns":maximum,"max_columns_preview":preview}),
+            );
+            let counts = out
+                .iter()
+                .copied()
+                .filter(|byte| byte.is_ascii_digit())
+                .collect::<Vec<_>>();
+            assert_eq!(counts, expected);
+            assert!(out.ends_with(b"\r\n"));
+        }
+    }
+
+    #[test]
+    fn multiline_null_replacements_preserve_cr_as_record_content() {
+        for only_matching in [false, true] {
+            for replacement in ["X\r", "X\r\nY"] {
+                let (out, _, _) = run(
+                    b"a\r\nb\0",
+                    json!({"pattern":"a\\r?\\nb","replace":replacement,"crlf":true,"multiline":true,"null_data":true,"ban_nul":false,"only_matching":only_matching}),
+                );
+                assert_eq!(out, [replacement.as_bytes(), b"\0"].concat());
+            }
+        }
+        for multiline in [false, true] {
+            let pattern = if multiline { "a\\r?\\nb" } else { "b" };
+            for vimgrep in [false, true] {
+                for replace in [None, Some("X")] {
+                    let data = b"a\r\nb\r\0";
+                    let (out, _, _) = run(
+                        data,
+                        json!({"pattern":pattern,"replace":replace,"crlf":true,"multiline":multiline,"null_data":true,"ban_nul":false,"vimgrep":vimgrep}),
+                    );
+                    let expected = if replace.is_none() {
+                        data.as_slice()
+                    } else if multiline {
+                        b"X\r\0".as_slice()
+                    } else {
+                        b"a\r\nX\r\0".as_slice()
+                    };
+                    assert_eq!(
+                        out, expected,
+                        "multiline={multiline}, vimgrep={vimgrep}, replace={replace:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
