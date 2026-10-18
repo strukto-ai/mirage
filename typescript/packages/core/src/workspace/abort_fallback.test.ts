@@ -14,11 +14,11 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type * as asyncContextModule from '../utils/async_context.ts'
-import { lineSignal, runWithLineAbort } from './abort.ts'
+import { runWithLineAbort } from './abort.ts'
 import { recordStatus } from './executor/statement.ts'
 import { SessionState } from './session/session.ts'
 import { newStatusWriter } from './abort.ts'
-import { currentCaller, runWithCaller } from '../context/session_context.ts'
+import { currentCaller, lineSignal, runWithCaller } from '../context/session_context.ts'
 
 // The browser-runtime branch under node's test runner: the mock forces
 // the real FallbackStorage (no task isolation, one frame stack per

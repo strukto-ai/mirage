@@ -75,7 +75,7 @@ import {
   type HandlerVoice,
 } from '../executor/command/handler.ts'
 import { CLI, type CLIHandler, noopAccessor } from '../../commands/cli/types.ts'
-import { callerSignal } from '../abort.ts'
+import { callerSignal } from '../../context/session_context.ts'
 import { runWithMountContext, runWithRevisions, withMountContext } from '../../observe/context.ts'
 import { uuid7 } from '../../utils/ids.ts'
 import { Activity } from '../../utils/activity.ts'

@@ -14,7 +14,7 @@
 
 import MIRAGE_RS_WASM from '../generated/mirage_rs.ts'
 import { chunks } from '../io/cooperative.ts'
-import type { JsonValue } from '../types.ts'
+import type { util } from 'zod'
 import { concat } from '../utils/bytes.ts'
 import { decodeBase64 } from '../utils/base64.ts'
 import { StreamRefusal } from './errors.ts'
@@ -123,7 +123,7 @@ export class OpenStream {
   }
 
   /** Start the next input of a stream that reads one after another. */
-  begin(config: Readonly<Record<string, JsonValue>>): void {
+  begin(config: Readonly<Record<string, util.JSONType>>): void {
     const bytes = encoder.encode(JSON.stringify(config))
     if (bytes.byteLength > this.capacity)
       throw new StreamRefusal('stream input configuration too large', new Uint8Array())
@@ -210,7 +210,7 @@ export class OpenStream {
 /** Open the mirage-rs stream `kind`. Mirrors Python's open_stream. */
 export async function openStream(
   kind: string,
-  config: Readonly<Record<string, JsonValue>>,
+  config: Readonly<Record<string, util.JSONType>>,
 ): Promise<OpenStream> {
   const exports = await instance()
   return open(exports, kind, config)
@@ -219,7 +219,7 @@ export async function openStream(
 /** Open a stream for synchronous pure utilities, initializing Wasm on first use. */
 export function openStreamSync(
   kind: string,
-  config: Readonly<Record<string, JsonValue>>,
+  config: Readonly<Record<string, util.JSONType>>,
 ): OpenStream {
   compiledSync ??= new WebAssembly.Module(decodeBase64(MIRAGE_RS_WASM) as BufferSource)
   compiled ??= Promise.resolve(compiledSync)
@@ -230,7 +230,7 @@ export function openStreamSync(
 function open(
   exports: Exports,
   kind: string,
-  config: Readonly<Record<string, JsonValue>>,
+  config: Readonly<Record<string, util.JSONType>>,
 ): OpenStream {
   const kindBytes = encoder.encode(kind)
   const configBytes = encoder.encode(JSON.stringify(config))
@@ -260,7 +260,7 @@ function open(
  */
 export async function* runStream(
   kind: string,
-  config: Readonly<Record<string, JsonValue>>,
+  config: Readonly<Record<string, util.JSONType>>,
   source: Uint8Array | AsyncIterable<Uint8Array>,
   signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {

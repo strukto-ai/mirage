@@ -54,6 +54,7 @@ enum Phase {
 
 struct Frame {
     key: Key,
+    retain_runs: bool,
     position: usize,
     pending: BTreeMap<usize, BTreeSet<usize>>,
     seen: BTreeSet<usize>,
@@ -71,9 +72,10 @@ enum Progress {
 }
 
 impl Frame {
-    fn new(key: Key) -> Self {
+    fn new(key: Key, retain_runs: bool) -> Self {
         Self {
             key,
+            retain_runs,
             position: key.2,
             pending: BTreeMap::from([(key.2, BTreeSet::from([key.0]))]),
             seen: BTreeSet::new(),
@@ -122,7 +124,7 @@ impl Frame {
                 self.position = position;
                 self.seen = seen;
                 self.active.clear();
-                if self.pending.is_empty() && self.seen.len() <= 64 {
+                if self.retain_runs && self.pending.is_empty() && self.seen.len() <= 64 {
                     let run = *runs
                         .entry((
                             self.key.0,
@@ -372,10 +374,10 @@ pub(super) struct Evaluator {
 }
 
 impl Evaluator {
-    pub(super) fn start(&mut self, key: Key) {
+    pub(super) fn start(&mut self, key: Key, retain_runs: bool) {
         self.answer = self.memo.get(&key).cloned();
         if self.answer.is_none() {
-            self.frames.push(Frame::new(key));
+            self.frames.push(Frame::new(key, retain_runs));
         }
     }
     pub(super) fn step(&mut self, program: &Program, subject: &[u32], reverse: bool, period: bool) {
@@ -397,7 +399,7 @@ impl Evaluator {
                     self.frames.push(frame);
                 } else {
                     self.frames.push(frame);
-                    self.frames.push(Frame::new(key));
+                    self.frames.push(Frame::new(key, true));
                 }
             }
             Progress::Done(answer) => {
@@ -409,5 +411,34 @@ impl Evaluator {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::glob::compile::{Compiler, Dialect};
+
+    #[test]
+    fn boolean_match_retains_bounded_run_history() {
+        let mut compiler = Compiler::new(vec![u32::from(b'*')], Dialect::Shell, false);
+        while !compiler.done() {
+            compiler.step();
+        }
+        let subject = vec![u32::from(b'a'); 32_768];
+        let mut evaluator = Evaluator::default();
+        evaluator.start((0, 1, 0), false);
+        while evaluator.answer.is_none() {
+            evaluator.step(&compiler.program, &subject, false, false);
+        }
+        assert_eq!(
+            evaluator.answer.as_deref().unwrap().last(),
+            Some(&(0, subject.len() + 1))
+        );
+        assert!(
+            evaluator.runs.len() <= 1,
+            "a single boolean match retained {} run histories",
+            evaluator.runs.len()
+        );
     }
 }

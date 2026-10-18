@@ -12,40 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeAbortError, mergeSignals } from '../utils/abort.ts'
+import { makeAbortError } from '../utils/abort.ts'
 import {
   type CallerDispatchFn,
   currentCaller,
-  getCurrentEvaluation,
-  getCurrentSession,
-  liveCallers,
+  lineFrames,
   runWithCaller,
 } from '../context/session_context.ts'
 import type { StatusWriter } from './types.ts'
 import type { SessionState } from './session/session.ts'
-
-/**
- * One running line: its signal and the sessions its statements stamp
- * on (the target session and the per-call fork, one object when the
- * call named no cwd or env). Bound by `shell` for the line's duration
- * and read at the status write. It rides the async context rather than
- * the session, so two lines on one session each see their own, and a
- * statement that settles after its caller was released still reads the
- * signal of the line that produced it.
- */
-export interface LineAbortFrame {
-  signal: AbortSignal | undefined
-  sessions: readonly SessionState[]
-  writer: StatusWriter
-}
-
-// The line's abort on the caller: added here, where LineAbortFrame lives,
-// so the caller's module imports no workspace module.
-declare module '../context/session_context.ts' {
-  interface Caller {
-    readonly lineAbort: LineAbortFrame | null
-  }
-}
 
 /**
  * Run `fn` as the body of the line `signal` belongs to. Everything the
@@ -75,25 +50,6 @@ export function runWithLineAbort<T>(
 export function lineStatusWriter(session: SessionState): StatusWriter | null {
   const frames = lineFrames().filter((f) => f.sessions.includes(session))
   return frames.length === 1 ? (frames[0]?.writer ?? null) : null
-}
-
-/** The active line's cancellation channel, when it can be attributed to this session. */
-export function lineSignal(session: SessionState): AbortSignal | undefined {
-  const frames = lineFrames().filter((frame) => frame.sessions.includes(session))
-  return frames.length === 1 ? frames[0]?.signal : undefined
-}
-
-/**
- * The signal the current call answers to: its evaluation frame's and its
- * line's, which withdraw a pipe read or copy that waits; Python cancels the
- * awaiting task instead.
- */
-export function callerSignal(): AbortSignal | undefined {
-  const session = getCurrentSession()
-  return mergeSignals(
-    getCurrentEvaluation()?.frame.abortSignal,
-    session === null ? undefined : lineSignal(session),
-  )
 }
 
 /**
@@ -137,18 +93,6 @@ export function guardDispatch(
     if (signal.aborted) return Promise.reject(makeAbortError(signal))
     return dispatch(op, path, args, kwargs, report, caller)
   }
-}
-
-/**
- * Every line frame live in this context, oldest first, each once: on the
- * fallback storage the layers of one line each copy its frame.
- */
-function lineFrames(): LineAbortFrame[] {
-  return [
-    ...new Set(
-      liveCallers().flatMap((caller) => (caller.lineAbort === null ? [] : [caller.lineAbort])),
-    ),
-  ]
 }
 
 /** A fresh line identity. */

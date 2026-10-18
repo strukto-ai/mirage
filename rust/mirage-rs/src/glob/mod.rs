@@ -197,8 +197,9 @@ impl Glob {
     fn query_step(&mut self, start: usize, longest: bool, reverse: bool) -> Option<Option<usize>> {
         let period = self.period && self.subject.first() == Some(&u32::from(b'.')) && !reverse;
         if !self.query {
+            let retain_runs = !matches!(self.operation, Operation::Matches);
             let (program, evaluator) = self.selected(reverse);
-            evaluator.start((0, program.units.len(), start));
+            evaluator.start((0, program.units.len(), start), retain_runs);
             self.query = true;
             return None;
         }

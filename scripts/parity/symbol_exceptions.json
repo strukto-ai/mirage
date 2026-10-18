@@ -119,12 +119,6 @@
     "captureExecutionContext": "Deferred TypeScript callbacks restore the execution async-local store explicitly; Python contextvars travel with the copied context."
    }
   },
-  "workspace/abort": {
-   "typescript_only": {
-    "callerSignal": "TypeScript hands the current call's AbortSignal to a read or copy of a live pipe, so a reader that gives up (timeout) withdraws its claim on the pipe; Python cancels the awaiting task, which the pipe's shielded pull answers directly.",
-    "lineSignal": "TypeScript must pass a line's AbortSignal into fetch to interrupt an outstanding response body read; Python task cancellation interrupts the awaited HTTP read directly."
-   }
-  },
   "workspace/workspace/workspace": {
    "typescript_only": {
     "refuseWrite": "Without async task isolation (the browser fallback) a hook cannot run as a policy deciding, so its session view refuses writes by hand; Python's contextvars always isolate tasks."
@@ -506,7 +500,9 @@
    },
    "typescript_only": {
     "CallerDispatchFn": "TypeScript's DispatchFn lives in the runtime types, which import no workspace module and so cannot name the Caller; the dispatcher and the workspace functions that hand it a caller take this type. Python's DispatchFn carries the caller through its keywords.",
-    "runWithEvaluation": "TypeScript scopes the evaluation's session binding around a callback; Python set_current_evaluation returns a ContextVar token."
+    "runWithEvaluation": "TypeScript scopes the evaluation's session binding around a callback; Python set_current_evaluation returns a ContextVar token.",
+    "callerSignal": "TypeScript hands the current call's AbortSignal to a read or copy of a live pipe, so a reader that gives up (timeout) withdraws its claim on the pipe; Python cancels the awaiting task, which the pipe's shielded pull answers directly.",
+    "lineSignal": "TypeScript must pass a line's AbortSignal into fetch to interrupt an outstanding response body read; Python task cancellation interrupts the awaited HTTP read directly."
    }
   },
   "cli/vfs": {

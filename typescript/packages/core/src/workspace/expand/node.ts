@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { lineSignal } from '../abort.ts'
+import { lineSignal } from '../../context/session_context.ts'
 import { mergeSignals } from '../../utils/abort.ts'
 import type { ExecuteFn } from './types.ts'
 import type { ProcessSubLine } from '../frame.ts'

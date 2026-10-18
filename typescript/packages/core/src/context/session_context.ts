@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mergeSignals } from '../utils/abort.ts'
 import type { SessionAccess } from '../view/types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { ContextCall } from '../utils/async_context.ts'
@@ -65,6 +66,21 @@ export type RedirectRunner = (
 ) => Promise<RedirectResult>
 
 /**
+ * One running line: its signal and the sessions its statements stamp
+ * on (the target session and the per-call fork, one object when the
+ * call named no cwd or env). Bound by `shell` for the line's duration
+ * and read at the status write. It rides the async context rather than
+ * the session, so two lines on one session each see their own, and a
+ * statement that settles after its caller was released still reads the
+ * signal of the line that produced it.
+ */
+export interface LineAbortFrame {
+  signal: AbortSignal | undefined
+  sessions: readonly SessionState[]
+  writer: symbol
+}
+
+/**
  * Who makes a call, and what every check on it needs to know: the
  * session, and the line, job, command and file call it runs in.
  *
@@ -76,11 +92,12 @@ export type RedirectRunner = (
  * workspace; `evaluation` the evaluation running on the session, which a
  * layer bound to another session never carries. The fields whose type
  * lives in a module that reads the caller (the ledger's call, the
- * policies, the line's abort, the recording and the cache bindings) are
+ * policies, the recording and the cache bindings) are
  * added in that module, so this one imports none of them. Mirrors
  * Python's Caller.
  */
 export interface Caller {
+  readonly lineAbort: LineAbortFrame | null
   readonly session: SessionState | null
   readonly owner: SessionOwner | null
   readonly evaluation: EvaluationContext | null
@@ -202,6 +219,37 @@ export function runWithSession<T>(
 
 export function getCurrentSession(): SessionState | null {
   return currentCaller().session
+}
+
+/**
+ * Every line frame live in this context, oldest first, each once: on the
+ * fallback storage the layers of one line each copy its frame.
+ */
+export function lineFrames(): LineAbortFrame[] {
+  return [
+    ...new Set(
+      liveCallers().flatMap((caller) => (caller.lineAbort === null ? [] : [caller.lineAbort])),
+    ),
+  ]
+}
+
+/** The active line's cancellation channel, when it can be attributed to this session. */
+export function lineSignal(session: SessionState): AbortSignal | undefined {
+  const frames = lineFrames().filter((frame) => frame.sessions.includes(session))
+  return frames.length === 1 ? frames[0]?.signal : undefined
+}
+
+/**
+ * The signal the current call answers to: its evaluation frame's and its
+ * line's, which withdraw a pipe read or copy that waits; Python cancels the
+ * awaiting task instead.
+ */
+export function callerSignal(): AbortSignal | undefined {
+  const session = getCurrentSession()
+  return mergeSignals(
+    getCurrentEvaluation()?.frame.abortSignal,
+    session === null ? undefined : lineSignal(session),
+  )
 }
 
 /** Bind an evaluation with its session, as one binding. */

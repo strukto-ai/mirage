@@ -14,7 +14,7 @@
 
 import { asyncChain, discardStreams } from '../../../../io/stream.ts'
 import { PipeInput, SharedInput, share } from '../../../../io/async_line_iterator.ts'
-import { callerSignal } from '../../../abort.ts'
+import { callerSignal } from '../../../../context/session_context.ts'
 import { PipeClosed } from '../../../../io/errors.ts'
 import { IOResult, materialize, PipeStream } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'

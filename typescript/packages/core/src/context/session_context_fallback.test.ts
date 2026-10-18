@@ -39,7 +39,9 @@ import { CLI } from '../commands/cli/types.ts'
 import { IOResult, materialize } from '../io/types.ts'
 import { handleXargs as streamXargs } from '../workspace/executor/builtins/xargs/xargs.ts'
 import { seedVar, sessionView } from '../workspace/session/state.ts'
-import { MountMode, PathSpec } from '../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../types.ts'
+import { searchScope } from '../core/slug_tree/search.ts'
+import { SlugTree } from '../core/slug_tree/tree.ts'
 import {
   type Action,
   type CommandRule,
@@ -1452,3 +1454,51 @@ it('glob traversal keeps its captured signal across overlapping fallback session
     await overlap
   }
 })
+
+it.each([true, false])(
+  'search scope keeps its owning cancellation while the tree loads (signal %s)',
+  async (withSignal) => {
+    const first = new SessionState({ sessionId: 'search-first' })
+    const other = new SessionState({ sessionId: 'search-other' })
+    const wanted = new AbortController()
+    const unwanted = new AbortController()
+    unwanted.abort()
+    const [loaded, announce] = gate()
+    const [hold, release] = gate()
+    const [otherHold, releaseOther] = gate()
+    const tree = new SlugTree(async () => {
+      announce()
+      await hold
+      return new Map([['/', [new FileStat({ name: 'doc.txt', type: FileType.FILE, size: 1 })]]])
+    })
+    const work = runWithLineAbort(
+      withSignal ? wanted.signal : undefined,
+      [first],
+      newStatusWriter(),
+      () =>
+        runWithEvaluation(new EvaluationContext(first), () =>
+          searchScope(tree, null, [
+            new PathSpec({
+              virtual: '/root/*.txt',
+              vfsPath: '/*.txt',
+              directory: '/root',
+              pattern: '*.txt',
+              resolved: false,
+            }),
+          ]),
+        ),
+    )
+    await loaded
+    const overlap = runWithLineAbort(unwanted.signal, [other], newStatusWriter(), () =>
+      runWithEvaluation(new EvaluationContext(other), () => otherHold),
+    )
+    try {
+      release()
+      expect((await work)[0].map((path) => path.virtual)).toEqual(['/root/doc.txt'])
+    } finally {
+      release()
+      releaseOther()
+      await overlap
+    }
+  },
+)

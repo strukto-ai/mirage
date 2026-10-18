@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { callerSignal } from '../../context/session_context.ts'
 import { enoent } from '../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec } from '../../types.ts'
 import { DEFAULT_MAX_GLOB_MATCHES, resolveGlobWith } from '../../utils/glob_walk.ts'
@@ -71,13 +72,25 @@ export async function searchScope<A>(
   if (first === undefined) throw new Error('search: at least one scope is required')
   const prefix = mountPrefixOf(first.virtual, first.vfsPath)
   if (paths.some((p) => stripSlash(p.vfsPath) === '')) return [[], prefix]
+  const signal = callerSignal() ?? null
   const rows = await tree.load(accessor)
   const listed = (_accessor: A, path: PathSpec): Promise<string[]> => {
     const base = rstripSlash(path.virtual)
     return Promise.resolve(listingAt(rows, path).entries.map((row) => `${base}/${row.name}`))
   }
   return [
-    await resolveGlobWith(listed, accessor, paths, undefined, DEFAULT_MAX_GLOB_MATCHES),
+    await resolveGlobWith(
+      listed,
+      accessor,
+      paths,
+      undefined,
+      DEFAULT_MAX_GLOB_MATCHES,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      signal,
+    ),
     prefix,
   ]
 }

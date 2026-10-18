@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { callerSignal } from '../workspace/abort.ts'
+import { callerSignal } from '../context/session_context.ts'
 import { dotglobActive, extglobActive, sessionVisibility } from '../context/session_context.ts'
 import { pathVisible } from './hidden.ts'
 import type { FollowOperands, SessionAccess } from '../view/types.ts'
@@ -393,8 +393,8 @@ export async function resolveGlobWith<A, I>(
   targetStat?: TargetStat,
   access?: SessionAccess,
   follow?: FollowOperands,
+  signal: AbortSignal | null = callerSignal() ?? null,
 ): Promise<PathSpec[]> {
-  const signal = callerSignal() ?? null
   const result: PathSpec[] = []
   const vis = sessionVisibility(access)
   for (const p of paths) {
