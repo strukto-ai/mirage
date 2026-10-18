@@ -872,10 +872,11 @@ class HostFs:
         while parent and parent != "/":
             try:
                 self.rmdir(parent)
-            except OSError:
+            except OSError as exc:
                 # CPython's own contract: the walk up stops at the
                 # first parent that will not go, and that is not an
                 # error for the caller.
+                logger.debug("removedirs stopped at %s: %s", parent, exc)
                 break
             parent = posixpath.dirname(parent)
 
@@ -981,10 +982,12 @@ class HostFs:
             if head:
                 try:
                     self.removedirs(head)
-                except OSError:
+                except OSError as exc:
                     # CPython ignores a parent that will not prune here
                     # too: the rename is what the caller asked for.
-                    pass
+                    logger.debug(
+                        "renames kept the parent at %s: %s", head, exc
+                    )
 
     def symlink(
         self,

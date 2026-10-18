@@ -395,6 +395,13 @@ class TestWrites:
         assert patched.path.exists("/data/other/deep/c.txt") is True
         assert patched.path.isdir("/data/dir/sub") is False
 
+    def test_renames_keeps_a_source_parent_that_still_holds_entries(self):
+        # CPython's renames leaves a parent that will not prune.
+        _, patched = seeded()
+        patched.renames("/data/dir/a.txt", "/data/b.txt")
+        assert patched.path.exists("/data/b.txt") is True
+        assert sorted(patched.listdir("/data/dir")) == ["sub"]
+
     def test_a_rename_off_the_mount_is_exdev(self, tmp_path):
         _, patched = seeded()
         with pytest.raises(OSError) as caught:
