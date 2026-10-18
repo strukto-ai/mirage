@@ -969,6 +969,23 @@ mod tests {
             (
                 "ada",
                 rg_matcher::Options {
+                    line_regexp: true,
+                    ..Default::default()
+                },
+                Some((vec!["ada"], true, false)),
+            ),
+            (
+                "ada",
+                rg_matcher::Options {
+                    whole_word: true,
+                    line_regexp: true,
+                    ..Default::default()
+                },
+                Some((vec!["ada"], true, false)),
+            ),
+            (
+                "ada",
+                rg_matcher::Options {
                     ignore_case: true,
                     ..Default::default()
                 },

@@ -1049,6 +1049,96 @@
         "stdout": "3100\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "rg_shared_crlf_replacement_limit",
+      "seq": 13470235,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a\\r\\n' | rg --crlf -M1 -r X a",
+      "expect": {
+        "exit": 0,
+        "stdout": "X\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_crlf_replacement_preview",
+      "seq": 13470236,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a\\r\\n' | rg --crlf -M1 --max-columns-preview -r X a",
+      "expect": {
+        "exit": 0,
+        "stdout": "X\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_unterminated_cr_replacement",
+      "seq": 13470237,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a\\r' | rg --crlf -M2 -r X a",
+      "expect": {
+        "exit": 0,
+        "stdout": "X\r\r\n",
+        "stderr": ""
+      }
     }
   ]
 }

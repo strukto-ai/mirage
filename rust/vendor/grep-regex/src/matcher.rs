@@ -96,8 +96,8 @@ impl RegexMatcherBuilder {
         Error,
     > {
         let mut chir = self.config.build_many(patterns)?;
-        let whole_word =
-            chir.config().word && !chir.config().whole_line && chir.hir().properties().is_literal();
+        let whole_word = (chir.config().word || chir.config().whole_line)
+            && chir.hir().properties().is_literal();
         if chir.config().whole_line {
             chir = chir.into_whole_line();
         } else if chir.config().word {

@@ -251,6 +251,7 @@ const EVERY = 'a.txt b.txt c.txt sub/d.txt z.txt'
 it.each<[string, string, string | null, string, boolean]>([
   ['grep -rc ada /d', 'files', 'a.txt sub/d.txt', 'ada', false],
   ['rg -lw ada /d', 'files', 'a.txt sub/d.txt', 'ada -w', false],
+  ['rg -x bob /d', 'files', 'b.txt', 'bob -w', false],
   ["grep -rE 'conn.*refused' /d", 'files', 'b.txt', 'refused', false],
   ['grep -ra ada /d', 'files', 'a.txt sub/d.txt w.bin', 'ada', true],
   ['grep -r ada /d /d/c.txt', 'files', 'a.txt c.txt c.txt sub/d.txt', 'ada', false],

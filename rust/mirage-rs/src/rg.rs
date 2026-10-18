@@ -1006,10 +1006,12 @@ impl LineJob {
         }
         let has_matches = (self.selected != config.invert) && !self.record.found.is_empty();
         if self.stage == 0 && has_matches && config.replace.is_some() {
+            let end =
+                self.record.content.end + usize::from(self.record.cr && !self.record.terminated);
             self.replacement = Some(Replacement::new(
                 self.record.clone(),
                 config.replace.clone().unwrap(),
-                self.record.content.clone(),
+                self.record.content.start..end,
                 self.record.found.clone(),
                 config.max_capture_name,
             ));
@@ -1081,6 +1083,7 @@ impl LineJob {
                 printed.range = 0..data.len();
                 printed.trim_at = 0;
                 printed.terminated = false;
+                printed.cr = false;
                 printed.spans = Spans::Replaced(self.spans.clone());
             } else if has_matches && config.granular() {
                 printed.spans =
@@ -1771,6 +1774,8 @@ struct Input {
     searched_override: Option<u64>,
     pending: Buffer<u8>,
     queued: VecDeque<u8>,
+    record_start: usize,
+    record: Vec<u8>,
     scan: usize,
     record_end: Option<usize>,
     search: Option<Search>,
@@ -1818,6 +1823,8 @@ impl Input {
             searched_override: None,
             pending: Buffer::new(),
             queued: VecDeque::new(),
+            record_start: 0,
+            record: Vec::new(),
             scan: 0,
             record_end: None,
             search: None,
@@ -1985,6 +1992,9 @@ impl Input {
                     self.done = true;
                 }
             }
+            return;
+        }
+        if self.binary_converted && !hit && !config.count_only && !config.count_matches {
             return;
         }
         if !hit && self.stop_armed {
@@ -2418,11 +2428,33 @@ impl Rg {
                 break;
             }
             let end = input.record_end.unwrap_or(input.pending.len());
-            let mut data = input.pending.take();
-            if terminated {
-                input.pending.values = data.split_off(end + 1);
-                data.pop();
-            }
+            let next = end + usize::from(terminated);
+            let last = next == input.pending.len();
+            let mut data = if input.record_start == 0 && last {
+                let mut data = input.pending.take();
+                data.truncate(end);
+                data
+            } else {
+                if input.record.capacity() == 0 {
+                    input.record = Vec::with_capacity(end - input.record_start);
+                }
+                let start = input.record_start + input.record.len();
+                let copied = (end - start).min(budget);
+                input
+                    .record
+                    .extend_from_slice(&input.pending[start..start + copied]);
+                budget -= copied;
+                if start + copied < end {
+                    break;
+                }
+                std::mem::take(&mut input.record)
+            };
+            input.record_start = if last {
+                input.pending.values.clear();
+                0
+            } else {
+                next
+            };
             let raw_len = data.len();
             let cr = config.crlf && data.last() == Some(&b'\r');
             if cr {
@@ -2435,7 +2467,7 @@ impl Rg {
             input.searching_terminated = terminated;
             input.offset += raw_len as u64 + u64::from(terminated);
             input.tally.searched = input.offset;
-            input.scan = 0;
+            input.scan = input.record_start;
             input.record_end = None;
             let all = !(config.quiet || config.files_only || config.files_without_match)
                 || config.counts();
@@ -2655,6 +2687,69 @@ mod tests {
         while !input.collect(&mut 1) {}
         assert_eq!(input.pending.take(), expected);
         assert!(input.queued.is_empty());
+    }
+
+    #[test]
+    fn ordinary_records_preserve_offsets_across_feeds_while_busy() {
+        let data = [
+            b"x\r\n".to_vec(),
+            b"a".repeat(70_000),
+            b"needle\r\nneedle\r\n".to_vec(),
+            b"b".repeat(1_000),
+            b"needle\r".to_vec(),
+        ]
+        .concat();
+        let config = serde_json::to_vec(&json!({
+            "pattern":"(needle)", "replace":"<$1>", "only_matching":true,
+            "crlf":true, "line_numbers":true, "byte_offsets":true, "column":true, "stats":true,
+        }))
+        .unwrap();
+        for chunk_size in [7, 16_381, 64 * 1024, super::INPUT_LIMIT] {
+            for drain_feeds in [false, true] {
+                let mut stream = open(&config).unwrap();
+                stream.begin(b"{}").unwrap();
+                let mut out = Vec::new();
+                for chunk in data.chunks(chunk_size) {
+                    let before = out.len();
+                    stream.feed(chunk, &mut out).unwrap();
+                    assert!(out.len() - before <= WORK);
+                    while drain_feeds && stream.busy() {
+                        let before = out.len();
+                        stream.drain(&mut out).unwrap();
+                        assert!(out.len() - before <= WORK);
+                    }
+                }
+                stream.finish(&mut out).unwrap();
+                while stream.busy() {
+                    let before = out.len();
+                    stream.drain(&mut out).unwrap();
+                    assert!(out.len() - before <= WORK);
+                }
+                assert_eq!(
+                    out,
+                    b"2:70001:70003:<needle>\r\n3:1:70011:<needle>\r\n4:1001:71019:<needle>\r\n",
+                    "chunk_size={chunk_size}, drain_feeds={drain_feeds}",
+                );
+                let mut metadata = Vec::new();
+                stream.metadata(&mut metadata);
+                let tally: Value = serde_json::from_slice(&metadata).unwrap();
+                assert_eq!(tally["searched"], data.len());
+                assert_eq!(tally["matched_lines"], 3);
+                assert_eq!(tally["matches"], 3);
+            }
+        }
+    }
+
+    #[test]
+    fn many_short_records_do_not_lose_the_last_record() {
+        let data = [b"a\r\n".repeat(32_768), b"needle\r\n".to_vec()].concat();
+        let (out, tally, _) = run(
+            &data,
+            json!({"pattern":"needle", "crlf":true, "line_numbers":true, "byte_offsets":true, "stats":true}),
+        );
+        assert_eq!(out, b"32769:98304:needle\r\n");
+        assert_eq!(tally["searched"], data.len());
+        assert_eq!(tally["matches"], 1);
     }
 
     fn matched_record(data: Vec<u8>, program: &super::Program) -> super::Record {
@@ -2973,6 +3068,60 @@ mod tests {
         let record: Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(record["data"]["lines"]["bytes"], "/3gK");
         assert_eq!(record["data"]["submatches"][0]["start"], 1);
+    }
+
+    #[test]
+    fn converted_binary_suppresses_passthru_nonmatching_lines() {
+        for (data, expected) in [
+            (
+                b"before\nneedle\ntail\n".as_slice(),
+                b"binary file matches (found \"\\0\" byte around offset 13)\n".as_slice(),
+            ),
+            (b"before\nafter\n".as_slice(), b"".as_slice()),
+        ] {
+            let mut stream = open(br#"{"pattern":"needle","passthru":true}"#).unwrap();
+            stream
+                .begin(br#"{"name":"file","binary_mode":"convert","binary_offset":13,"binary_converted":true}"#)
+                .unwrap();
+            let mut out = Vec::new();
+            stream.feed(data, &mut out).unwrap();
+            while stream.busy() {
+                stream.drain(&mut out).unwrap();
+            }
+            stream.finish(&mut out).unwrap();
+            while stream.busy() {
+                stream.drain(&mut out).unwrap();
+            }
+            assert_eq!(out, expected);
+        }
+    }
+
+    #[test]
+    fn crlf_replacement_column_limit_counts_replaced_bytes() {
+        for preview in [false, true] {
+            for data in [b"a\r\n".as_slice(), b"a\n".as_slice(), b"a\r".as_slice()] {
+                for maximum in [0, 1, 2] {
+                    let (out, _, _) = run(
+                        data,
+                        json!({"pattern":"a","replace":"X","crlf":true,"max_columns":maximum,"max_columns_preview":preview}),
+                    );
+                    let expected = if data == b"a\r" {
+                        if maximum == 1 {
+                            if preview {
+                                b"X [... 0 more matches]\r\n".as_slice()
+                            } else {
+                                b"[Omitted long line with 1 matches]\r\n".as_slice()
+                            }
+                        } else {
+                            b"X\r\r\n".as_slice()
+                        }
+                    } else {
+                        b"X\r\n".as_slice()
+                    };
+                    assert_eq!(out, expected, "{data:?}, M={maximum}, preview={preview}");
+                }
+            }
+        }
     }
 
     #[test]

@@ -252,6 +252,7 @@ EVERY = "a.txt b.txt c.txt sub/d.txt z.txt"
         # the rest from the walk. A regex asks the text every match holds.
         ("grep -rc ada /d", "files", "a.txt sub/d.txt", "ada", None),
         ("rg -lw ada /d", "files", "a.txt sub/d.txt", "ada -w", None),
+        ("rg -x bob /d", "files", "b.txt", "bob -w", None),
         ("grep -rE 'conn.*refused' /d", "files", "b.txt", "refused", None),
         # -a reads the binary-extension file no search vouches for, asking
         # the mount first, and a named file is read whatever the search said

@@ -13,12 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '../../../utils/key_prefix.ts'
-import { expect, it, vi } from 'vitest'
+import { expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { materialize } from '../../../io/types.ts'
 import type { Context } from '../../config.ts'
-import { ByteCursor } from '../rg_search.ts'
 import { rgGeneric } from './rg.ts'
 
 const ENC = new TextEncoder()
@@ -67,27 +66,20 @@ it.each([
   const data = ENC.encode('hello '.repeat(100000) + '\n')
   let timer: ReturnType<typeof setTimeout> | undefined
   let closed = false
+  let reads = 0
   async function* source(): AsyncIterable<Uint8Array> {
     try {
+      reads += 1
+      timer = setTimeout(() => {
+        controller.abort()
+      }, 0)
       yield await Promise.resolve(data)
+      reads += 1
       throw new Error('read beyond the matching line')
     } finally {
       closed = true
     }
   }
-  // Every match's offset is one step of the line's byte cursor; the
-  // original is only ever called with the cursor it came from.
-  // eslint-disable-next-line @typescript-eslint/unbound-method
-  const original = ByteCursor.prototype.at
-  const offset = vi.spyOn(ByteCursor.prototype, 'at').mockImplementation(function (
-    this: ByteCursor,
-    index: number,
-  ) {
-    timer ??= setTimeout(() => {
-      controller.abort()
-    }, 0)
-    return original.call(this, index)
-  })
   async function scan(): Promise<void> {
     const result = await rgGeneric(
       paths.map(spec),
@@ -106,11 +98,9 @@ it.each([
   }
   try {
     await expect(scan()).rejects.toMatchObject({ name: 'AbortError' })
-    expect(offset.mock.calls.length).toBeGreaterThan(0)
-    expect(offset.mock.calls.length).toBeLessThan(100000)
+    expect(reads).toBe(1)
     expect(closed).toBe(true)
   } finally {
     clearTimeout(timer)
-    offset.mockRestore()
   }
 })
