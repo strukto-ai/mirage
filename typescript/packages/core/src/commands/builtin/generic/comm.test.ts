@@ -6,6 +6,47 @@ import { commGeneric } from './comm.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
+it.each([
+  ['', '', false, []],
+  ['a\n', '', true, [97, 10]],
+  ['', 'b\n', false, [255, 98, 10]],
+  ['a\n', 'a\n', false, [255, 255, 97, 10]],
+] as const)(
+  'keeps a raw output separator for %j and %j',
+  async (left, right, suppressed, expected) => {
+    async function* read(path: PathSpec): AsyncIterable<Uint8Array> {
+      yield await Promise.resolve(ENC.encode(path.virtual === '/left' ? left : right))
+    }
+    const result = commGeneric(
+      [PathSpec.fromStrPath('/left'), PathSpec.fromStrPath('/right')],
+      {
+        flags: { output_delimiter: '\udcff', '2': suppressed, '3': suppressed },
+        stdin: null,
+        cwd: PathSpec.fromStrPath('/'),
+      },
+      read,
+    )
+    if (result === null) throw new Error('missing comm result')
+    expect(await materialize(result[0])).toEqual(Uint8Array.from(expected))
+    expect(result[1].exitCode).toBe(0)
+    expect(await materialize(result[1].stderr)).toEqual(new Uint8Array())
+  },
+)
+
+it('prints Unicode output separators', async () => {
+  async function* read(path: PathSpec): AsyncIterable<Uint8Array> {
+    yield await Promise.resolve(ENC.encode(path.virtual === '/left' ? 'a\n' : 'b\n'))
+  }
+  const result = commGeneric(
+    [PathSpec.fromStrPath('/left'), PathSpec.fromStrPath('/right')],
+    { flags: { output_delimiter: 'λ' }, stdin: null, cwd: PathSpec.fromStrPath('/') },
+    read,
+  )
+  if (result === null) throw new Error('missing comm result')
+  expect(await materialize(result[0])).toEqual(ENC.encode('a\nλb\n'))
+  expect(result[1].exitCode).toBe(0)
+})
+
 it('defers the disorder summary until the consumer resumes past total', async () => {
   async function* read(path: PathSpec): AsyncIterable<Uint8Array> {
     yield await Promise.resolve(ENC.encode(path.virtual === '/left' ? 'b\na\n' : 'z\n'))

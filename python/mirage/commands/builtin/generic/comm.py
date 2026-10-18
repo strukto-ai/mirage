@@ -20,6 +20,7 @@ from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs.stream import close_stream, open_stream
+from mirage.shell.bytes import byte_view
 from mirage.types import PathSpec, PolymorphicReadFn
 
 
@@ -78,7 +79,7 @@ async def _comm_stream(
         {
             "suppressed": list(suppressed),
             "check_order": check_order,
-            "delimiter": delimiter,
+            "delimiter": byte_view(delimiter),
             "total": total,
             "terminator": separator[0],
         },

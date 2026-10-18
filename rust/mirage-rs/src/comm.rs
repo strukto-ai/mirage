@@ -12,7 +12,8 @@ use crate::{Stream, StreamError, parse_config};
 struct Config {
     suppressed: [bool; 3],
     check_order: Option<bool>,
-    delimiter: String,
+    #[serde(deserialize_with = "crate::latin1")]
+    delimiter: Vec<u8>,
     total: bool,
     terminator: u8,
 }
@@ -88,7 +89,7 @@ fn compare(
 
 pub(crate) fn open(bytes: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: Config = parse_config(bytes)?;
-    let delimiter = Arc::new(Bytes::new(config.delimiter.as_bytes()));
+    let delimiter = Arc::new(Bytes::new(&config.delimiter));
     let terminator = Arc::new(Bytes::new(&[config.terminator]));
     Ok(Box::new(Comm {
         config,

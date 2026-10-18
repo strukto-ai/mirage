@@ -29,7 +29,7 @@ import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 import { CommandName, type ParsedFlagValue } from '../../spec/types.ts'
 import { byteView } from '../../../shell/bytes.ts'
 import { unsignedDecimal } from '../utils/strtol.ts'
-import { neverOpened, stdinStream } from '../utils/stream.ts'
+import { isStdin, neverOpened, stdinStream } from '../utils/stream.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 
@@ -475,6 +475,7 @@ async function* joinStream(
   try {
     let unreadable: { side: 0 | 1; error: unknown } | undefined
     for (const side of [0, 1] as const) {
+      if (isStdin(paths[side])) continue
       try {
         await abortable(readers[side].peek(), signal)
       } catch (error) {

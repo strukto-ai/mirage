@@ -48,6 +48,46 @@ function view(raw: Uint8Array): string {
   return String.fromCharCode(...raw)
 }
 
+it.each([
+  ['/dir', '-'],
+  ['-', '/dir'],
+  ['/dir', '/dev/stdin'],
+  ['/dev/stdin', '/dir'],
+])('reports a directory error before reading open stdin (%j, %j)', async (first, second) => {
+  async function* read(_path: PathSpec): AsyncIterable<Uint8Array> {
+    yield await Promise.reject(Object.assign(new Error('directory'), { code: 'EISDIR' }))
+  }
+  async function* stdin(): AsyncIterable<Uint8Array> {
+    yield await Promise.reject(new Error('stdin was read before reporting a directory error'))
+  }
+  const [output, result] = join([PathSpec.fromStrPath(first), PathSpec.fromStrPath(second)], {
+    read,
+    stdin: stdin(),
+    flags: parseFlags({}),
+  })
+  expect(await materialize(output)).toEqual(new Uint8Array())
+  expect(view(await materialize(result.stderr))).toBe('join: read error: Is a directory\n')
+  expect(result.exitCode).toBe(1)
+})
+
+it('reports a later open error before an earlier directory read error', async () => {
+  async function* read(path: PathSpec): AsyncIterable<Uint8Array> {
+    yield await Promise.reject(
+      Object.assign(new Error('read failed'), {
+        code: path.virtual === '/dir' ? 'EISDIR' : 'ENOENT',
+      }),
+    )
+  }
+  const [output, result] = join([PathSpec.fromStrPath('/dir'), PathSpec.fromStrPath('/missing')], {
+    read,
+    stdin: null,
+    flags: parseFlags({}),
+  })
+  expect(await materialize(output)).toEqual(new Uint8Array())
+  expect(view(await materialize(result.stderr))).toBe('join: /missing: No such file or directory\n')
+  expect(result.exitCode).toBe(1)
+})
+
 async function shell(
   mounts: Record<string, Record<string, string>>,
   cmd: string,

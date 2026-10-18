@@ -16,6 +16,7 @@ import { chunks } from '../../../io/cooperative.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { closeStream, openStream } from '../../../rs/stream.ts'
+import { byteView } from '../../../shell/bytes.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -103,7 +104,7 @@ async function* commStream(
   const stream = await openStream('comm', {
     suppressed: [flags.suppress1, flags.suppress2, flags.suppress3],
     check_order: flags.checkOrder,
-    delimiter: flags.outputDelimiter,
+    delimiter: byteView(flags.outputDelimiter),
     total: flags.total,
     terminator: separator,
   })

@@ -43,6 +43,30 @@
         "stdout": "b\n",
         "stderr": "comm: file 1 is not in sorted order\n"
       }
+    },
+    {
+      "id": "comm_raw_unused_separator",
+      "seq": 17020312,
+      "command": "printf 'a\\n' > /data/record-left; printf '' > /data/record-right; comm -23 --output-delimiter=$'\\xff' /data/record-left /data/record-right",
+      "expect": {"exit": 0, "stdout": "a\n", "stderr": ""}
+    },
+    {
+      "id": "comm_raw_separator_empty_files",
+      "seq": 17020313,
+      "command": "printf '' > /data/record-left; printf '' > /data/record-right; comm --output-delimiter=$'\\xff' /data/record-left /data/record-right",
+      "expect": {"exit": 0, "stdout": "", "stderr": ""}
+    },
+    {
+      "id": "comm_raw_printed_separator",
+      "seq": 17020314,
+      "command": "printf 'a\\n' > /data/record-left; printf 'a\\nb\\n' > /data/record-right; comm --output-delimiter=$'\\xff' /data/record-left /data/record-right | od -An -tx1",
+      "expect": {"exit": 0, "stdout": " ff ff 61 0a ff 62 0a\n", "stderr": ""}
+    },
+    {
+      "id": "comm_raw_total_separator",
+      "seq": 17020315,
+      "command": "printf '' > /data/record-left; printf '' > /data/record-right; comm --total --output-delimiter=$'\\xff' /data/record-left /data/record-right | od -An -tx1",
+      "expect": {"exit": 0, "stdout": " 30 ff 30 ff 30 ff 74 6f 74 61 6c 0a\n", "stderr": ""}
     }
   ]
 }

@@ -1,4 +1,5 @@
 import asyncio
+import errno
 from contextlib import aclosing
 
 import pytest
@@ -38,6 +39,57 @@ GNU = [
         b"join: a:2: is not sorted: a two\njoin: input is not in sorted order\n",
     ),
 ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "operands",
+    [
+        ("/dir", "-"),
+        ("-", "/dir"),
+        ("/dir", "/dev/stdin"),
+        ("/dev/stdin", "/dir"),
+    ],
+)
+async def test_directory_error_does_not_read_open_stdin(operands):
+    async def read(_path):
+        raise IsADirectoryError(errno.EISDIR, "Is a directory")
+        yield b""
+
+    async def stdin():
+        raise AssertionError(
+            "stdin was read before reporting a directory error"
+        )
+        yield b""
+
+    output, io = await join(
+        [PathSpec.from_str_path(path) for path in operands],
+        read_stream=read,
+        stdin=stdin(),
+    )
+    assert await _drain(output) == b""
+    assert await _drain(io.stderr) == b"join: read error: Is a directory\n"
+    assert io.exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_later_open_error_precedes_directory_read_error():
+    async def read(path):
+        if path.virtual == "/dir":
+            raise IsADirectoryError(errno.EISDIR, "Is a directory")
+        raise FileNotFoundError(errno.ENOENT, "No such file or directory")
+        yield b""
+
+    output, io = await join(
+        [PathSpec.from_str_path("/dir"), PathSpec.from_str_path("/missing")],
+        read_stream=read,
+    )
+    assert await _drain(output) == b""
+    assert (
+        await _drain(io.stderr)
+        == b"join: /missing: No such file or directory\n"
+    )
+    assert io.exit_code == 1
 
 
 async def _drain(source) -> bytes:

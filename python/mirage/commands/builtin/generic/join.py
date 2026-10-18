@@ -10,7 +10,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from mirage.commands.builtin.utils.lines import record_separator
-from mirage.commands.builtin.utils.stream import never_opened, stdin_stream
+from mirage.commands.builtin.utils.stream import (
+    is_stdin,
+    never_opened,
+    stdin_stream,
+)
 from mirage.commands.builtin.utils.strtol import unsigned_decimal
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
@@ -489,6 +493,8 @@ async def _join_stream(
     try:
         unreadable: tuple[int, BaseException] | None = None
         for which, reader in enumerate(readers):
+            if is_stdin(paths[which]):
+                continue
             try:
                 await reader.peek()
             except FS_ERRORS as exc:

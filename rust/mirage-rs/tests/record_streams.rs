@@ -161,6 +161,33 @@ fn comm_columns_totals_and_order_checks_survive_arbitrary_chunks() {
 }
 
 #[test]
+fn comm_output_delimiters_preserve_wire_bytes() {
+    for (delimiter, bytes) in [
+        ("\u{ff}", b"\xff".as_slice()),
+        ("\u{ce}\u{bb}", "λ".as_bytes()),
+    ] {
+        let mut config = comm_config();
+        config["delimiter"] = json!(delimiter);
+        for size in 1..=8 {
+            let mut expected = b"a\n".to_vec();
+            expected.extend_from_slice(bytes);
+            expected.extend_from_slice(b"b\n");
+            assert_eq!(
+                run("comm", &config, [b"a\n", b"b\n"], size),
+                (expected, vec![], 0)
+            );
+        }
+        config["total"] = json!(true);
+        let mut expected = b"0".to_vec();
+        for value in [b"0".as_slice(), b"0", b"total\n"] {
+            expected.extend_from_slice(bytes);
+            expected.extend_from_slice(value);
+        }
+        assert_eq!(run("comm", &config, [b"", b""], 1), (expected, vec![], 0));
+    }
+}
+
+#[test]
 fn comm_keeps_replacement_decoding_and_bounds_giant_records() {
     for size in 1..=8 {
         assert_eq!(

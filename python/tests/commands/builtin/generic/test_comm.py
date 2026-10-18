@@ -9,6 +9,37 @@ from mirage.types import PathSpec
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "delimiter,encoded", [("\udcff", b"\xff"), ("λ", b"\xce\xbb")]
+)
+@pytest.mark.parametrize(
+    "left,right,suppressed,expected",
+    [
+        (b"", b"", False, b""),
+        (b"a\n", b"", True, b"a\n"),
+        (b"", b"b\n", False, b"\xffb\n"),
+        (b"a\n", b"a\n", False, b"\xff\xffa\n"),
+    ],
+)
+async def test_raw_output_separator(
+    left, right, suppressed, expected, delimiter, encoded
+):
+    async def read(path):
+        yield left if path.virtual == "/left" else right
+
+    output, io = await comm(
+        [PathSpec.from_str_path("/left"), PathSpec.from_str_path("/right")],
+        read_stream=read,
+        output_delimiter=delimiter,
+        suppress2=suppressed,
+        suppress3=suppressed,
+    )
+    assert await materialize(output) == expected.replace(b"\xff", encoded)
+    assert io.exit_code == 0
+    assert not await materialize(io.stderr)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("size", [1, 3, 65536])
 async def test_shared_stdin_owns_one_record_cursor_and_refuses_before_total(
     size,
