@@ -1,0 +1,158 @@
+{
+  "targets": [
+    "git-ram",
+    "git-disk"
+  ],
+  "cases": [
+    {
+      "id": "git_graph_setup",
+      "seq": 17400100,
+      "command": "(export GIT_AUTHOR_NAME=A GIT_AUTHOR_EMAIL=a@example.com GIT_COMMITTER_NAME=A GIT_COMMITTER_EMAIL=a@example.com && git init -q -b main /repo/graph && cd /repo/graph && tr_() { git add -A && git commit -q --allow-empty -m snap && git rev-parse 'HEAD^{tree}'; } && c() { s=$1 t=$2 w=$3; shift 3; { printf 'tree %s\\n' $t; for p in \"$@\"; do printf 'parent %s\\n' $p; done; printf 'author A <a@example.com> %s +0000\\ncommitter A <a@example.com> %s +0000\\n\\n%s\\n' $w $w \"$s\"; } | git hash-object -w -t commit --stdin; } && t0=$(tr_) && printf 'needle\\n' > f && t1=$(tr_) && printf 'needle\\nneedle\\n' > f && t2=$(tr_) && o_B=$(c oB $t0 1700000100) && o_P=$(c oP $t0 1700000200 $o_B) && o_Q2=$(c oQ2 $t0 1700000300 $o_B) && o_Q1=$(c oQ1 $t0 1700000400 $o_B) && o_Q0=$(c oQ0 $t0 1700000500 $o_B) && o_S=$(c oS $t0 1700000600 $o_B) && o_M=$(c oM $t0 1700000700 $o_Q0 $o_Q1 $o_Q2) && o_K=$(c oK $t0 1700000800 $o_P $o_M $o_S) && printf '%s\\n' $o_K > .git/refs/heads/o && n_B=$(c nB $t0 1700000900) && n_P=$(c nP $t0 1700001000 $n_B) && n_Q2=$(c nQ2 $t0 1700001100 $n_B) && n_Q1=$(c nQ1 $t0 1700001200 $n_B) && n_S=$(c nS $t0 1700001300 $n_B) && n_M=$(c nM $t0 1700001400 $n_P $n_Q1 $n_Q2) && n_K=$(c nK $t0 1700001500 $n_P $n_M $n_S) && printf '%s\\n' $n_K > .git/refs/heads/n && r_B=$(c rB $t0 1700001600) && r_P=$(c rP $t0 1700001700 $r_B) && r_Q1=$(c rQ1 $t0 1700001800 $r_B) && r_S=$(c rS $t0 1700001900 $r_B) && r_M=$(c rM $t0 1700002000 $r_P $r_Q1 $r_S) && r_K=$(c rK $t0 1700002100 $r_P $r_M $r_S) && printf '%s\\n' $r_K > .git/refs/heads/r && s_B=$(c sB $t0 1700002200) && s_P=$(c sP $t0 1700002300 $s_B) && s_Q3=$(c sQ3 $t0 1700002400 $s_B) && s_Q2=$(c sQ2 $t0 1700002500 $s_B) && s_Q1=$(c sQ1 $t0 1700002600 $s_B) && s_S=$(c sS $t0 1700002700 $s_B) && s_M=$(c sM $t0 1700002800 $s_P $s_Q1 $s_Q2 $s_Q3) && s_K=$(c sK $t0 1700002900 $s_P $s_M $s_S) && printf '%s\\n' $s_K > .git/refs/heads/s && g_B=$(c gB $t0 1700003000) && g_P=$(c gP $t0 1700003100 $g_B) && g_Q2=$(c gQ2 $t0 1700003200 $g_B) && g_Q1=$(c gQ1 $t0 1700003300 $g_B) && g_R2=$(c gR2 $t0 1700003400 $g_B) && g_R1=$(c gR1 $t0 1700003500 $g_B) && g_S=$(c gS $t0 1700003600 $g_B) && g_M=$(c gM $t0 1700003700 $g_P $g_Q1 $g_Q2) && g_I=$(c gI $t0 1700003800 $g_S $g_R1 $g_R2) && g_J=$(c gJ $t0 1700003900 $g_S) && g_K=$(c gK $t0 1700004000 $g_P $g_M) && printf '%s\\n' $g_I > .git/refs/heads/gi && printf '%s\\n' $g_J > .git/refs/heads/gj && printf '%s\\n' $g_K > .git/refs/heads/gk && x_Z=$(c xZ $t1 1700004100) && x_A=$(c xA $t1 1700004200 $x_Z) && x_B=$(c xB $t2 1700004300 $x_Z) && x_T=$(c xT $t2 1700004400 $x_A) && printf '%s\\n' $x_B > .git/refs/heads/xb && printf '%s\\n' $x_T > .git/refs/heads/x && m_A=$(c mA $t0 1700004500) && m_C=$(c mC $t0 1700004600 $m_A) && m_B=$(c mB $t1 1700004700 $m_A) && m_M=$(c mM $t2 1700004800 $m_C $m_B) && printf '%s\\n' $m_M > .git/refs/heads/m && w_A=$(c wA $t0 1700004900) && w_B=$(c wB $t0 1700005000) && w_D=$(c wD $t0 1700005100) && w_C=$(c wC $t0 1700005200) && w_M=$(c wM $t0 1700005300 $w_A $w_B $w_D $w_C) && w_K=$(c wK $t0 1700005400 $w_A $w_B $w_M $w_C) && printf '%s\\n' $w_K > .git/refs/heads/w && fp_Z=$(c fpZ $t0 1700005500) && fp_A=$(c fpA $t0 1700005600 $fp_Z) && fp_Y=$(c fpY $t0 1700005700 $fp_Z) && fp_B=$(c fpB $t0 1700005800 $fp_Y) && fp_M=$(c fpM $t0 1700005900 $fp_A $fp_B) && printf '%s\\n' $fp_B > .git/refs/heads/fpb && printf '%s\\n' $fp_A > .git/refs/heads/fpa && printf '%s\\n' $fp_M > .git/refs/heads/fp && l_c5=$(c lc5 $t0 1700006000) && l_c4=$(c lc4 $t0 1700006100) && l_c8=$(c lc8 $t0 1700006200) && l_c7=$(c lc7 $t0 1700006300 $l_c8) && l_c3=$(c lc3 $t0 1700006400 $l_c5 $l_c4 $l_c7) && l_c2=$(c lc2 $t0 1700006500 $l_c7 $l_c3) && l_c1=$(c lc1 $t0 1700006600 $l_c2 $l_c8) && l_c0=$(c lc0 $t0 1700006700 $l_c7) && printf '%s\\n' $l_c1 > .git/refs/heads/lc1 && printf '%s\\n' $l_c0 > .git/refs/heads/l && d_c9=$(c dc9 $t0 1700006800) && d_c7=$(c dc7 $t0 1700006900) && d_c8=$(c dc8 $t0 1700007000) && d_c6=$(c dc6 $t0 1700007100) && d_c5=$(c dc5 $t0 1700007200 $d_c9 $d_c7 $d_c8 $d_c6) && d_c3=$(c dc3 $t0 1700007300 $d_c6 $d_c7 $d_c8) && d_c2=$(c dc2 $t0 1700007400 $d_c9) && printf '%s\\n' $d_c5 > .git/refs/heads/dc5 && printf '%s\\n' $d_c3 > .git/refs/heads/dc3 && printf '%s\\n' $d_c2 > .git/refs/heads/d)",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_graph_spreads_lines_right_of_an_octopus",
+      "seq": 17400101,
+      "command": "git -C /repo/graph log --graph --format=%s o",
+      "expect": {
+        "exit": 0,
+        "stdout": "*-.   oK\n|\\ \\  \n| | * oS\n| | |     \n| |  \\    \n| *-. \\   oM\n| |\\ \\ \\  \n| | | * | oQ2\n| | | |/  \n| | * / oQ1\n| | |/  \n| * / oQ0\n| |/  \n* / oP\n|/  \n* oB\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_graph_separator_stands_lines_a_cell_over",
+      "seq": 17400102,
+      "command": "git -C /repo/graph log --graph --format=format:%s%n%s%n n",
+      "expect": {
+        "exit": 0,
+        "stdout": "*-.   nK\n|\\ \\  nK\n| | | \n| | * nS\n| | | nS\n| |  |  \n| * |   nM\n|/|\\ \\  nM\n| | | | \n| | * | nQ2\n| | |/  nQ2\n| | | \n| * | nQ1\n| |/  nQ1\n| | \n* | nP\n|/  nP\n| \n* nB\n  nB\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_graph_separator_widens_for_a_reaching_line",
+      "seq": 17400103,
+      "command": "git -C /repo/graph log --graph --format=format:%s%n%s%n r",
+      "expect": {
+        "exit": 0,
+        "stdout": "*-.   rK\n|\\ \\  rK\n| |  | \n| * | rM\n|/|\\| rM\n| | | \n| | * rS\n| | | rS\n| | | \n| * | rQ1\n| |/  rQ1\n| | \n* | rP\n|/  rP\n| \n* rB\n  rB\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_graph_separator_is_an_octopus_first_row",
+      "seq": 17400104,
+      "command": "git -C /repo/graph log --graph --format=format:%s%n%s%n s",
+      "expect": {
+        "exit": 0,
+        "stdout": "*-.   sK\n|\\ \\  sK\n| | | \n| | * sS\n| | | sS\n| | |     \n| |  \\    \n| *-. \\   sM\n|/|\\ \\ \\  sM\n| | | | | \n| | | * | sQ3\n| | | |/  sQ3\n| | | | \n| | * | sQ2\n| | |/  sQ2\n| | | \n| * | sQ1\n| |/  sQ1\n| | \n* | sP\n|/  sP\n| \n* sB\n  sB\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_graph_medium_before_an_octopus",
+      "seq": 17400105,
+      "command": "git -C /repo/graph log --graph --format=medium s",
+      "expect": {
+        "exit": 0,
+        "stdout": "*-.   commit 939609e48676423df80f585036af03c87af15b37\n|\\ \\  Merge: c57d006 091b36e d5c05e1\n| | | Author: A <a@example.com>\n| | | Date:   Tue Nov 14 23:01:40 2023 +0000\n| | | \n| | |     sK\n| | | \n| | * commit d5c05e105c90028ab4016723494c8bff3a960ab4\n| | | Author: A <a@example.com>\n| | | Date:   Tue Nov 14 22:58:20 2023 +0000\n| | | \n| | |     sS\n| | |     \n| |  \\    \n| *-. \\   commit 091b36e1be333f657c10b39d6db0c918ac996914\n|/|\\ \\ \\  Merge: c57d006 13947f1 a68b9d8 0634168\n| | | | | Author: A <a@example.com>\n| | | | | Date:   Tue Nov 14 23:00:00 2023 +0000\n| | | | | \n| | | | |     sM\n| | | | | \n| | | * | commit 06341684f067c6820d2971fd6ac33cbb4d431232\n| | | |/  Author: A <a@example.com>\n| | | |   Date:   Tue Nov 14 22:53:20 2023 +0000\n| | | |   \n| | | |       sQ3\n| | | | \n| | * | commit a68b9d8b3ea6c9ad7a3b16f4ae898d064a1d0ce4\n| | |/  Author: A <a@example.com>\n| | |   Date:   Tue Nov 14 22:55:00 2023 +0000\n| | |   \n| | |       sQ2\n| | | \n| * | commit 13947f1e4e9c0089365f617f03476ee5dcc44fde\n| |/  Author: A <a@example.com>\n| |   Date:   Tue Nov 14 22:56:40 2023 +0000\n| |   \n| |       sQ1\n| | \n* | commit c57d006ff3501702cf82b5b47a99ca38e8b64db9\n|/  Author: A <a@example.com>\n|   Date:   Tue Nov 14 22:51:40 2023 +0000\n|   \n|       sP\n| \n* commit 2a96e7cf77148ee1abb428412d1e33ee919a8fc9\n  Author: A <a@example.com>\n  Date:   Tue Nov 14 22:50:00 2023 +0000\n  \n      sB\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_graph_glides_under_standing_columns",
+      "seq": 17400106,
+      "command": "git -C /repo/graph log --graph --format=%s gi gj gk",
+      "expect": {
+        "exit": 0,
+        "stdout": "*   gK\n|\\  \n| *   gM\n|/|\\  \n| | * gQ2\n| * | gQ1\n| |/  \n* / gP\n|/  \n| * gJ\n| | *   gI\n| |/|\\  \n| | | * gR2\n| |_|/  \n|/| |   \n| | * gR1\n| |/  \n|/|   \n| * gS\n|/  \n* gB\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_graph_marks_skipped_commits",
+      "seq": 17400107,
+      "command": "git -C /repo/graph log --graph -Sneedle --format=%s x xb",
+      "expect": {
+        "exit": 0,
+        "stdout": "* xT\n... \n| * xB\n|/  \n* xZ\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_graph_skip_row_stands_for_the_separator",
+      "seq": 17400108,
+      "command": "git -C /repo/graph log --graph -Sneedle --format=format:%s%n%s%n x xb",
+      "expect": {
+        "exit": 0,
+        "stdout": "* xT\n| xT\n... \n| * xB\n|/  xB\n| \n* xZ\n  xZ\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_graph_pads_each_merge_block_header",
+      "seq": 17400109,
+      "command": "git -C /repo/graph log --graph -m --name-status --format=%s m",
+      "expect": {
+        "exit": 0,
+        "stdout": "*   mM\n|\\  \n| | \n| | A\tf\n| | mM\n| | \n| | M\tf\n| * mB\n| | \n| | A\tf\n* | mC\n|/  \n* mA\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_graph_widens_rows_for_an_octopus_spreading_past_its_parents",
+      "seq": 17400110,
+      "command": "git -C /repo/graph log --graph --format=%s w",
+      "expect": {
+        "exit": 0,
+        "stdout": "*---.   wK\n|\\ \\ \\  \n| | | \\   \n| | |  \\  \n| | *-. | wM\n| |/|\\ \\| \n|/| | |/  \n| | | * wC\n| | * wD\n| * wB\n* wA\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_graph_follows_only_a_walked_first_parent",
+      "seq": 17400111,
+      "command": "git -C /repo/graph log --graph --first-parent --format=%s%n%s fp fpb ^fpa",
+      "expect": {
+        "exit": 0,
+        "stdout": "* fpM\n  fpM\n* fpB\n| fpB\n* fpY\n  fpY\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_graph_leans_lines_right_of_a_merge_row",
+      "seq": 17400112,
+      "command": "git -C /repo/graph log --graph --format=%s l lc1",
+      "expect": {
+        "exit": 0,
+        "stdout": "* lc0\n| *   lc1\n| |\\  \n| * | lc2\n|/| | \n| | \\     \n| |  \\    \n| *-. \\   lc3\n| |\\ \\ \\  \n| |_|/ /  \n|/| | |   \n* | | | lc7\n| |_|/  \n|/| |   \n* | | lc8\n / /  \n| * lc4\n* lc5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_graph_slides_under_a_standing_column",
+      "seq": 17400113,
+      "command": "git -C /repo/graph log --graph --format=%s d dc3 dc5",
+      "expect": {
+        "exit": 0,
+        "stdout": "* dc2\n| *-.   dc3\n| |\\ \\  \n| | | | *-.   dc5\n| |_|_|/|\\ \\  \n|/| | |/ / /  \n| | |/| / /   \n| | | |/ /    \n| | |_| /     \n| |/| |       \n| * | | dc6\n|  / /  \n| | * dc8\n| * dc7\n* dc9\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_graph_cleanup",
+      "seq": 17400114,
+      "command": "rm -rf /repo/graph",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

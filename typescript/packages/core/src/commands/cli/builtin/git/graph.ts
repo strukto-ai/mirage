@@ -14,433 +14,506 @@
 
 import type { CommitFacts } from './format.ts'
 
-// What the next line of output draws. A commit's lines run SKIP (when the one
-// before it never finished), PRE_COMMIT (room for an octopus), COMMIT,
-// POST_MERGE (a merge's edges), COLLAPSING (branch lines moving left) and
-// PADDING, the resting state between commits.
-type GraphState = 'padding' | 'skip' | 'preCommit' | 'commit' | 'postMerge' | 'collapsing'
-
-const MERGE_CHARS = ['/', '|', '\\']
+export const SKIPPED = '...'
 
 /**
- * The `--graph` column drawer: git's graph.c, one commit at a time.
- *
- * Each column holds the commit its branch line leads to. A commit takes its
- * own column (or a new one at the right), its interesting parents take its
- * place in the next row's columns, and `mapping` says where each edge of the
- * current row lands in the next, two screen cells per column. Lines are drawn
- * until every edge has collapsed into its column, which is when the commit is
- * finished and the next one may start. Pinned line for line against git 2.50.1
- * on generated histories, trailing spaces included: every line is padded to
- * the row's width so text after the graph stays aligned.
+ * One line of the graph: the edge from a printed commit to the commit it
+ * leads to. `at` is the cell it is drawn in, two per column, so an odd cell
+ * lies between two columns; `goal` the cell of the column it settles in;
+ * `heading` -1 while it moves left, 1 while it moves right, 0 at rest.
+ * Mirrors _Line in graph.py.
+ */
+interface Line {
+  readonly sha: string
+  at: number
+  goal: number
+  heading: number
+}
+
+/**
+ * How a commit's parents reach the graph's columns: the ones that open a
+ * column, the first in the commit's own; a first parent already waiting to
+ * the left, whose line leaves straight for it; every parent but that one,
+ * which a merge's fan and an octopus's dashes count; whether the last parent
+ * is the one the column right of the commit waits for; and whether the second
+ * parent waits in the column left of the commit and leaves with the first.
+ * Mirrors _Parents in graph.py.
+ */
+interface Parents {
+  readonly opened: readonly string[]
+  readonly lead: string | null
+  readonly drawn: readonly string[]
+  readonly reach: boolean
+  readonly beside: boolean
+}
+
+/**
+ * Where a commit lands in the graph: its column; the columns there are before
+ * it; how its parents reach them; the columns after it, before lines leading
+ * to the same commit join; the parents an octopus draws past a merge's two;
+ * whether it is an octopus with lines to its right, which it moves right
+ * before its own row; and the width of its rows. Mirrors _Shape in graph.py.
+ */
+interface Shape {
+  readonly col: number
+  readonly columns: number
+  readonly parents: Parents
+  readonly after: readonly string[]
+  readonly extra: number
+  readonly spreads: boolean
+  readonly width: number
+}
+
+function line(sha: string, at: number, goal: number): Line {
+  return { sha, at, goal, heading: 0 }
+}
+
+/**
+ * The `--graph` column to the left of a log, one commit at a time. Every
+ * walked commit moves the graph on; a commit the log does not print draws
+ * nothing, and the next printed one is preceded by a `...` row. Lines move
+ * one cell per row, skipping a column another line stands in, and slide under
+ * a run of standing columns with `_`; a printed commit owes the rows its
+ * lines need to settle. Mirrors CommitGraph in graph.py.
  */
 export class CommitGraph {
-  private readonly interesting: (oid: string) => boolean
-  private readonly firstParentOnly: boolean
-  private commit: CommitFacts | null = null
-  private parents: string[] = []
-  private state: GraphState = 'padding'
-  private prevState: GraphState = 'padding'
-  private commitIndex = 0
-  private prevCommitIndex = 0
-  private mergeLayout = 0
-  private edgesAdded = 0
-  private prevEdgesAdded = 0
+  private lines: Line[] = []
+  private pending: CommitFacts | null = null
+  private skipped = false
+  private owed: string[] = []
+  private ahead: string[] = []
   private width = 0
-  private expansionRow = 0
-  private columns: string[] = []
-  private newColumns: string[] = []
-  private mapping: number[] = []
-  private oldMapping: number[] = []
-  private mappingSize = 0
+  private mergedAt: number | null = null
 
-  /**
-   * @param interesting whether a parent is one the walk shows, which is the
-   *   only kind of parent a line is drawn to
-   * @param firstParentOnly `--first-parent`: a merge draws its first parent
-   *   alone
-   */
-  constructor(interesting: (oid: string) => boolean, firstParentOnly: boolean) {
-    this.interesting = interesting
-    this.firstParentOnly = firstParentOnly
-  }
+  constructor(
+    private readonly interesting: (oid: string) => boolean,
+    private readonly firstParent: boolean,
+  ) {}
 
-  /** Start the next commit's lines; the previous commit's are abandoned. */
-  update(commit: CommitFacts): void {
-    this.commit = commit
-    const first = commit.parents[0]
-    if (this.firstParentOnly) {
-      this.parents = first !== undefined && this.interesting(first) ? [first] : []
-    } else {
-      this.parents = commit.parents.filter((parent) => this.interesting(parent))
-    }
-    this.prevCommitIndex = this.commitIndex
-    this.updateColumns()
-    this.expansionRow = 0
-    // Not updateState: no line of the new state has been drawn, so the one
-    // before it stays whatever was drawn last.
-    if (this.state !== 'padding') this.state = 'skip'
-    else if (this.needsPreCommitLine()) this.state = 'preCommit'
-    else this.state = 'commit'
-  }
-
-  /** Whether every edge of the current commit has settled. */
-  isFinished(): boolean {
-    return this.state === 'padding'
-  }
-
-  /** The next line and whether it was the commit's own. */
-  nextLine(): [string, boolean] {
-    let line: string
-    let shown = false
-    switch (this.state) {
-      case 'padding':
-        line = this.paddingRow()
-        break
-      case 'skip':
-        line = this.skipLine()
-        break
-      case 'preCommit':
-        line = this.preCommitLine()
-        break
-      case 'commit':
-        line = this.commitLine()
-        shown = true
-        break
-      case 'postMerge':
-        line = this.postMergeLine()
-        break
-      case 'collapsing':
-        line = this.collapsingLine()
-        break
-    }
-    return [line.padEnd(this.width), shown]
-  }
-
-  /**
-   * A line that leaves every branch as it is, for text that runs past the
-   * commit's own lines; while the commit line is still due it draws the
-   * current columns, else it is simply the next line.
-   */
-  paddingLine(): string {
-    if (this.state !== 'commit') return this.nextLine()[0]
-    let line = ''
-    for (const column of this.columns) {
-      line += '|'
-      line +=
-        column === this.commit?.oid && this.parents.length > 2
-          ? ' '.repeat((this.parents.length - 2) * 2)
-          : ' '
-    }
-    this.prevState = 'padding'
-    return line.padEnd(this.width)
-  }
-
-  /** Every line up to and including the commit's own, which ends unterminated. */
-  showCommit(): string {
-    if (this.isFinished()) return this.paddingLine()
-    let out = ''
-    let shown = false
-    while (!shown && !this.isFinished()) {
-      const [line, commit] = this.nextLine()
-      out += line
-      shown = commit
-      if (!shown) out += '\n'
-    }
-    return out
-  }
-
-  /**
-   * A commit's text after its first line, each further line behind the next
-   * graph line, then whatever lines the commit still owes.
-   */
-  showMessage(text: string): string {
-    const parts = text.split('\n')
-    let out = ''
-    parts.forEach((part, index) => {
-      out += part
-      if (index < parts.length - 1) {
-        out += '\n'
-        if (index < parts.length - 2 || parts[parts.length - 1] !== '') out += this.nextLine()[0]
+  /** Move on to the next walked commit, printed or not. */
+  walk(commit: CommitFacts): void {
+    if (this.pending !== null) {
+      const rows = this.place(this.pending)
+      while (rows.next().done !== true) {
+        // each row is drawn and dropped
       }
-    })
-    if (this.isFinished()) return out
-    const terminated = text.endsWith('\n')
-    if (!terminated) out += '\n'
-    out += this.remainder()
-    if (terminated) out += '\n'
-    return out
-  }
-
-  /** The lines a commit still owes, the last one unterminated. */
-  private remainder(): string {
-    let out = ''
-    while (!this.isFinished()) {
-      out += this.nextLine()[0]
-      if (!this.isFinished()) out += '\n'
+      this.owed = []
+      this.skipped = true
     }
-    return out
-  }
-
-  private updateState(state: GraphState): void {
-    this.prevState = this.state
-    this.state = state
+    this.pending = commit
   }
 
   /**
-   * The parents an octopus draws dashes to: every one past the first two,
-   * one fewer when the merge leans left, since its first parent then takes
-   * the column beside it.
+   * The rows before the walked commit's own, each with its newline, then the
+   * cells of its own row, to be followed by its first line; once the commit is
+   * drawn, the cells in front of a further header.
    */
-  private dashedParents(): number {
-    return this.parents.length + this.mergeLayout - 3
-  }
-
-  /** Two rows of room for each dashed parent, while there is a column to its right. */
-  private needsPreCommitLine(): boolean {
+  leadIn(): string {
+    const commit = this.pending
+    if (commit === null) return this.rest(this.width)
+    this.pending = null
+    const out = this.skipped ? this.skipRow(commit) + '\n' : ''
+    const rows = this.ahead.length > 0 ? this.ahead : [...this.place(commit)]
+    this.ahead = []
+    const star = rows.findIndex((row) => row.includes('*'))
+    this.owed = rows.slice(star + 1)
     return (
-      this.parents.length >= 3 &&
-      this.commitIndex < this.columns.length - 1 &&
-      this.expansionRow < this.dashedParents() * 2
+      out +
+      rows
+        .slice(0, star)
+        .map((row) => row + '\n')
+        .join('') +
+      (rows[star] ?? '')
     )
   }
 
-  private isMappingCorrect(): boolean {
-    for (let i = 0; i < this.mappingSize; i += 1) {
-      const target = this.mapping[i] ?? -1
-      if (target >= 0 && target !== Math.floor(i / 2)) return false
-    }
-    return true
+  /** The cells in front of the commit's next line of text. */
+  nextRow(): string {
+    return this.owed.shift() ?? this.rest(this.width)
   }
 
   /**
-   * The cells one row draws, by column: every column, then this commit's own
-   * when it is in none of them.
+   * The cells in front of a line once the commit's rows are out. Before a
+   * walked commit yet to be drawn it is the `...` row when commits were
+   * skipped, the commit's first row when it spreads the lines to its right,
+   * and otherwise a row as wide as the commit's where the lines stop. Before a
+   * commit leaving with a lead and two or more parents besides, the lines
+   * right of it stand a cell over, and the row widens by the octopus's dashes
+   * and a cell.
    */
-  private *row(oid: string): Generator<[number, string]> {
-    yield* this.columns.entries()
-    if (!this.columns.includes(oid)) yield [this.columns.length, oid]
+  filler(): string {
+    const commit = this.pending
+    if (commit === null) return this.rest(this.width)
+    if (this.skipped) return this.skipRow(commit)
+    const shape = this.shape(commit)
+    if (shape.spreads) {
+      this.ahead = [...this.place(commit)]
+      return this.ahead.shift() ?? ''
+    }
+    const { parents } = shape
+    if (parents.lead === null || parents.drawn.length < 2) return this.rest(shape.width, true)
+    const width = Math.max(shape.width, 2 * (shape.columns + shape.extra) + 1)
+    return this.rest(width, true, 2 * shape.col)
   }
 
   /**
-   * Lay out the next row: the columns after this commit, and where each edge
-   * of this row lands in them.
+   * The commit's text with the graph in front of each further line, then the
+   * rows the commit still owes; when the text ends with a newline the owed
+   * rows end with one too.
    */
-  private updateColumns(): void {
-    const oid = this.commit?.oid ?? ''
-    this.columns = this.newColumns
-    this.newColumns = []
-    this.mappingSize = 2 * (this.columns.length + this.parents.length)
-    this.mapping = new Array<number>(this.mappingSize).fill(-1)
-    this.width = 0
-    this.prevEdgesAdded = this.edgesAdded
-    this.edgesAdded = 0
-    for (const [i, column] of this.row(oid)) {
-      if (column === oid) {
-        this.commitIndex = i
-        this.mergeLayout = -1
-        for (const parent of this.parents) this.insertColumn(parent, i)
-        // A commit takes two cells even when nothing leaves it.
-        if (this.parents.length === 0) this.width += 2
-      } else {
-        this.insertColumn(column, -1)
-      }
+  around(text: string): string {
+    const lines = text.split('\n')
+    let out = lines[0] ?? ''
+    for (const piece of lines.slice(1, -1)) out += '\n' + this.nextRow() + piece
+    if (lines.length > 1) {
+      const tail = lines[lines.length - 1] ?? ''
+      out += tail === '' ? '\n' : '\n' + this.nextRow()
+      out += tail
     }
-    while (this.mappingSize > 1 && (this.mapping[this.mappingSize - 1] ?? -1) < 0) {
-      this.mappingSize -= 1
-    }
+    const owed = this.owed
+    this.owed = []
+    if (text.endsWith('\n')) return out + owed.map((row) => row + '\n').join('')
+    return out + owed.map((row) => '\n' + row).join('')
   }
 
-  /**
-   * Give a commit a column in the next row, reusing one that already leads
-   * there, and record where the edge from this row lands.
-   *
-   * The first parent of a merge picks the merge's layout: whether its edges
-   * start one cell left of the commit (the parent sits to the left) or at it.
-   * An edge the merge added that lands on the last column already taken joins
-   * it at once rather than running beside it for a row.
-   */
-  private insertColumn(oid: string, index: number): void {
-    let i = this.newColumns.indexOf(oid)
-    if (i < 0) {
-      i = this.newColumns.length
-      this.newColumns.push(oid)
-    }
-    let at: number
-    if (this.parents.length > 1 && index > -1 && this.mergeLayout === -1) {
-      const distance = index - i
-      const shift = distance > 1 ? 2 * distance - 3 : 1
-      this.mergeLayout = distance > 0 ? 0 : 1
-      this.edgesAdded = this.parents.length + this.mergeLayout - 2
-      at = this.width + (this.mergeLayout - 1) * shift
-      this.width += 2 * this.mergeLayout
-    } else if (this.edgesAdded > 0 && i === this.mapping[this.width - 2]) {
-      at = this.width - 2
-      this.edgesAdded = -1
-    } else {
-      at = this.width
-      this.width += 2
-    }
-    this.mapping[at] = i
+  private skipRow(commit: CommitFacts): string {
+    const columns = this.columns()
+    const width = 2 * (columns.length + (columns.includes(commit.oid) ? 0 : 1))
+    this.rest(width, true)
+    this.skipped = false
+    return SKIPPED.padEnd(Math.max(SKIPPED.length, width))
   }
 
-  private paddingRow(): string {
-    return '| '.repeat(this.newColumns.length)
+  private columns(): string[] {
+    const order = [...this.lines].sort((a, b) => a.goal - b.goal)
+    return [...new Set(order.map((each) => each.sha))]
   }
 
-  private skipLine(): string {
-    this.updateState(this.needsPreCommitLine() ? 'preCommit' : 'commit')
-    return '...'
-  }
-
-  /** One of the rows that widen the space around an octopus merge. */
-  private preCommitLine(): string {
-    let line = ''
-    let seenThis = false
-    this.columns.forEach((column, i) => {
-      if (column === this.commit?.oid) {
-        seenThis = true
-        line += `|${' '.repeat(this.expansionRow)}`
-      } else if (seenThis && this.expansionRow === 0) {
-        line += this.prevState === 'postMerge' && this.prevCommitIndex < i ? '\\' : '|'
-      } else if (seenThis && this.expansionRow > 0) {
-        line += '\\'
-      } else {
-        line += '|'
-      }
-      line += ' '
+  private parentsOf(commit: CommitFacts, columns: string[], col: number): Parents {
+    const followed = this.firstParent ? commit.parents.slice(0, 1) : commit.parents
+    const parents = [...new Set(followed.filter((p) => this.interesting(p)))]
+    const where = new Map(columns.map((sha, i) => [sha, i]))
+    const opened: string[] = []
+    let lead: string | null = null
+    let reach = false
+    let beside = false
+    const last = parents.length - 1
+    parents.forEach((parent, i) => {
+      const j = where.get(parent)
+      if (j !== undefined && i === 0 && j < col) lead = parent
+      else if (j !== undefined && i === 1 && lead !== null && j === col - 1 && parents.length >= 3)
+        beside = true
+      else if (
+        j !== undefined &&
+        i === last &&
+        opened.length > 0 &&
+        j === col + 1 &&
+        where.has(commit.oid)
+      )
+        reach = true
+      else opened.push(parent)
     })
-    this.expansionRow += 1
-    if (!this.needsPreCommitLine()) this.updateState('commit')
-    return line
+    const drawn = parents.filter((p) => p !== lead)
+    return { opened, lead, drawn, reach, beside }
   }
 
-  private commitLine(): string {
-    const oid = this.commit?.oid ?? ''
-    let line = ''
-    let seenThis = false
-    for (const [i, column] of this.row(oid)) {
-      if (column === oid) {
-        seenThis = true
-        line += '*'
-        if (this.parents.length > 2) line += this.octopusDashes()
-      } else if (seenThis && this.edgesAdded > 1) {
-        line += '\\'
-      } else if (seenThis && this.edgesAdded === 1) {
-        line +=
-          this.prevState === 'postMerge' && this.prevEdgesAdded > 0 && this.prevCommitIndex < i
-            ? '\\'
-            : '|'
-      } else if (
-        this.prevState === 'collapsing' &&
-        this.oldMapping[2 * i + 1] === i &&
-        (this.mapping[2 * i] ?? -1) < i
-      ) {
-        line += '/'
-      } else {
-        line += '|'
-      }
-      line += ' '
-    }
-    if (this.parents.length > 1) this.updateState('postMerge')
-    else if (this.isMappingCorrect()) this.updateState('padding')
-    else this.updateState('collapsing')
-    return line
-  }
-
-  private octopusDashes(): string {
-    const dashed = this.dashedParents()
-    let out = ''
-    for (let i = 0; i < dashed; i += 1) out += i === dashed - 1 ? '-.' : '--'
-    return out
-  }
-
-  private postMergeLine(): string {
-    const oid = this.commit?.oid ?? ''
-    const firstParent = this.parents[0]
-    let line = ''
-    let seenThis = false
-    let parentSeen = false
-    for (const [i, column] of this.row(oid)) {
-      if (column === oid) {
-        seenThis = true
-        let at = this.mergeLayout
-        this.parents.forEach((_, j) => {
-          line += MERGE_CHARS[at] ?? ''
-          if (at === 2) {
-            if (this.edgesAdded > 0 || j < this.parents.length - 1) line += ' '
-          } else {
-            at += 1
-          }
-        })
-        if (this.edgesAdded === 0) line += ' '
-      } else if (seenThis) {
-        line += this.edgesAdded > 0 ? '\\ ' : '| '
-      } else {
-        line += '|'
-        if (this.mergeLayout !== 0 || i !== this.commitIndex - 1) line += parentSeen ? '_' : ' '
-      }
-      if (column === firstParent) parentSeen = true
-    }
-    this.updateState(this.isMappingCorrect() ? 'padding' : 'collapsing')
-    return line
+  private shape(commit: CommitFacts): Shape {
+    const columns = this.columns()
+    const known = columns.includes(commit.oid)
+    const col = known ? columns.indexOf(commit.oid) : columns.length
+    const parents = this.parentsOf(commit, columns, col)
+    const after = [...columns.slice(0, col), ...parents.opened, ...columns.slice(col + 1)]
+    const extra = Math.max(parents.drawn.length - 2, 0)
+    const spreads =
+      extra > 0 && this.lines.some((each) => each.sha !== commit.oid && each.goal > 2 * col)
+    // Spreading moves the rightmost line two cells per extra parent, past the
+    // columns its parents take when some reach or leave with the lead.
+    const width =
+      2 *
+      Math.max(columns.length + (known ? 0 : 1), after.length, spreads ? columns.length + extra : 0)
+    return { col, columns: columns.length, parents, after, extra, spreads, width }
   }
 
   /**
-   * Move every edge not yet in its column one cell left, crossing at most one
-   * other edge; a single edge may instead run horizontally (`_`) across the
-   * columns between it and its target.
+   * Move the lines through a commit's rows, each row yielded as it is drawn,
+   * so that a commit the log skips holds none of them.
    */
-  private collapsingLine(): string {
-    let horizontalEdge = -1
-    let horizontalTarget = -1
-    let usedHorizontal = false
-    ;[this.mapping, this.oldMapping] = [this.oldMapping, this.mapping]
-    for (let i = 0; i < this.mappingSize; i += 1) this.mapping[i] = -1
-    for (let i = 0; i < this.mappingSize; i += 1) {
-      const target = this.oldMapping[i] ?? -1
-      if (target < 0) continue
-      if (target * 2 === i) {
-        this.mapping[i] = target
-      } else if ((this.mapping[i - 1] ?? -1) < 0) {
-        this.mapping[i - 1] = target
-        if (horizontalEdge === -1) {
-          horizontalEdge = i
-          horizontalTarget = target
-          for (let j = target * 2 + 3; j < i - 2; j += 2) this.mapping[j] = target
-        }
-      } else if (this.mapping[i - 1] === target) {
-        continue
-      } else {
-        this.mapping[i - 2] = target
-        if (horizontalEdge === -1) {
-          horizontalTarget = target
-          horizontalEdge = i - 1
-          for (let j = target * 2 + 3; j < i - 2; j += 2) this.mapping[j] = target
+  private *place(commit: CommitFacts): Generator<string, void, undefined> {
+    const shape = this.shape(commit)
+    const { parents, width, extra } = shape
+    const here = 2 * shape.col
+    const final = [...new Set(shape.after)]
+    const goalOf = new Map(final.map((sha, i) => [sha, 2 * i]))
+    const goal = (sha: string): number => goalOf.get(sha) ?? 0
+    this.width = width
+    const opened = parents.opened.length
+    const spread = 2 * Math.max(opened - 1, 0)
+    const others = this.lines.filter((each) => each.sha !== commit.oid)
+    const right = new Set(others.filter((each) => each.goal > here))
+    const base = new Map<Line, number>()
+    for (const each of right) base.set(each, each.at + (each.at % 2 ? each.heading : 0))
+    const lift = shape.spreads ? 2 * extra : 0
+    if (lift) yield* this.spreadRows(others, right, base, here, width, lift)
+    yield this.commitRow(others, right, base, here, width, lift, spread, goal, extra)
+    const born = parents.opened.map((sha) => line(sha, here, goal(sha)))
+    const led = parents.lead === null ? [] : [line(parents.lead, here, goal(parents.lead))]
+    for (const each of others) each.goal = goal(each.sha)
+    const merging = parents.drawn.length + (parents.lead === null ? 0 : 1) >= 2
+    if (merging) yield this.mergeRow(others, right, base, born, led, here, width, spread, parents)
+    // A reach's edge takes the fan's next cell after the opened parents. That
+    // is the spread column's own cell unless a beside parent left the fan a
+    // cell short, and then the edge stays a line of its own.
+    const reached: Line[] = []
+    const reach = parents.drawn[parents.drawn.length - 1]
+    if (parents.reach && parents.beside && lift && reach !== undefined)
+      reached.push(line(reach, here + 2 * opened, goal(reach)))
+    this.lines = [...others, ...born, ...led, ...reached]
+    this.join()
+    this.mergedAt = merging && this.settled() ? here : null
+    while (!this.settled()) yield this.collapseRow(width)
+  }
+
+  private *spreadRows(
+    others: Line[],
+    right: Set<Line>,
+    base: Map<Line, number>,
+    here: number,
+    width: number,
+    lift: number,
+  ): Generator<string, void, undefined> {
+    for (let step = 0; step < lift; step++) {
+      const cells = new Array<string>(width).fill(' ')
+      cells[here] = '|'
+      for (const each of others) {
+        if (right.has(each)) {
+          const moving =
+            step > 0 || each.heading > 0 || (this.mergedAt !== null && each.at > this.mergedAt)
+          each.at = (base.get(each) ?? each.at) + step
+          cells[each.at] = moving ? '\\' : '|'
+        } else {
+          if (each.at % 2) each.at += each.heading
+          each.heading = 0
+          cells[each.at] = '|'
         }
       }
+      yield cells.join('')
     }
-    this.oldMapping = this.mapping.slice(0, this.mappingSize)
-    if ((this.mapping[this.mappingSize - 1] ?? -1) < 0) this.mappingSize -= 1
-    let line = ''
-    for (let i = 0; i < this.mappingSize; i += 1) {
-      const target = this.mapping[i] ?? -1
-      if (target < 0) {
-        line += ' '
-      } else if (target * 2 === i) {
-        line += '|'
-      } else if (target === horizontalTarget && i !== horizontalEdge - 1) {
-        // Only the first segment of a horizontal run carries into the next
-        // line; the rest were drawn here and are done.
-        if (i !== target * 2 + 3) this.mapping[i] = -1
-        usedHorizontal = true
-        line += '_'
+  }
+
+  private commitRow(
+    others: Line[],
+    right: Set<Line>,
+    base: Map<Line, number>,
+    here: number,
+    width: number,
+    lift: number,
+    spread: number,
+    goal: (sha: string) => number,
+    extra: number,
+  ): string {
+    const cells = new Array<string>(width).fill(' ')
+    const merging = spread > 0
+    for (const each of others) {
+      const target = goal(each.sha)
+      const onRight = right.has(each)
+      let glyph: string
+      if (onRight && lift) {
+        each.at = (base.get(each) ?? each.at) + lift
+        const moving = lift < spread
+        glyph = moving ? '\\' : '|'
+        each.heading = moving ? 1 : 0
+      } else if (each.at % 2 || each.heading) {
+        if (each.at % 2) each.at += each.heading
+        if (each.heading < 0 && target < each.at && !(onRight && merging)) glyph = '/'
+        else if (each.heading > 0 && onRight && merging) glyph = '\\'
+        else {
+          glyph = '|'
+          each.heading = 0
+        }
       } else {
-        if (usedHorizontal && i < horizontalEdge) this.mapping[i] = -1
-        line += '/'
+        glyph = '|'
+        each.heading = 0
+      }
+      cells[each.at] = glyph
+    }
+    cells[here] = '*'
+    if (extra) {
+      for (let i = 0; i < 2 * extra - 1; i++) cells[here + 1 + i] = '-'
+      cells[here + 2 * extra] = '.'
+    }
+    return cells.join('')
+  }
+
+  private mergeRow(
+    others: Line[],
+    right: Set<Line>,
+    base: Map<Line, number>,
+    born: Line[],
+    led: Line[],
+    here: number,
+    width: number,
+    spread: number,
+    parents: Parents,
+  ): string {
+    const cells = new Array<string>(width).fill(' ')
+    for (const each of others) {
+      if (right.has(each) && each.at < (base.get(each) ?? each.at) + spread) {
+        each.at += 1
+        each.heading = 1
+        cells[each.at] = '\\'
+      } else cells[each.at] = '|'
+    }
+    if (born.length) cells[here] = '|'
+    for (let k = 1; k < parents.drawn.length; k++) cells[here + 2 * k - 1] = '\\'
+    const settle = parents.reach && parents.drawn.length > 2
+    born.slice(1).forEach((each, index) => {
+      const i = index + 1
+      if (settle) {
+        each.at = here + 2 * i
+        return
+      }
+      each.at = here + 2 * i - 1
+      each.heading = 1
+    })
+    if (parents.beside) cells[here - 1] = '/'
+    const standing = new Set(
+      [...others, ...born]
+        .filter((each) => each.at === each.goal && each.heading === 0)
+        .map((each) => each.at),
+    )
+    for (const each of led) {
+      for (const [cell, glyph] of this.step(each, standing, true)) cells[cell] = glyph
+      if (each.at === each.goal + 1) {
+        each.at = each.goal
+        each.heading = 0
       }
     }
-    if (this.isMappingCorrect()) this.updateState('padding')
-    return line
+    return cells.join('')
+  }
+
+  private settled(): boolean {
+    return this.lines.every(
+      (each) =>
+        each.at === each.goal ||
+        (each.at === each.goal + 1 && each.heading < 0) ||
+        (each.at === each.goal - 1 && each.heading > 0),
+    )
+  }
+
+  /**
+   * Move a line one row toward its column: the cells it draws and their
+   * glyphs. `standing` holds the cells of columns whose lines stand still this
+   * row, which a moving line passes under; `glide` whether it may slide under
+   * a run of them; `taken` the cells lines start a collapsing row in.
+   */
+  private step(
+    each: Line,
+    standing: Set<number>,
+    glide: boolean,
+    taken: ReadonlySet<number> = new Set(),
+  ): [number, string][] {
+    if (each.at === each.goal) {
+      each.heading = 0
+      return [[each.at, '|']]
+    }
+    if (each.heading > 0 && each.goal > each.at) {
+      each.at += 1
+      if (each.at === each.goal) {
+        each.heading = 0
+        return [[each.at, '|']]
+      }
+      return [[each.at, '\\']]
+    }
+    if (each.heading > 0) each.at += 1
+    each.heading = -1
+    let marks: [number, string][]
+    if (each.at % 2) {
+      each.at -= 1
+      if (each.at !== each.goal && standing.has(each.at)) each.at -= 1
+      if (each.at === each.goal) {
+        each.heading = 0
+        return [[each.at, '|']]
+      }
+      marks = [[each.at, '/']]
+      if (each.at % 2 === 0) {
+        // Landing beside a column whose line already stands there, with the
+        // cell past it free, the line slides under it on the same row.
+        const under = each.at - 2
+        if (
+          !(
+            glide &&
+            taken.has(under) &&
+            !taken.has(under - 1) &&
+            standing.has(under) &&
+            under > each.goal + 2
+          )
+        )
+          return marks
+        each.at = under - 1
+        marks.push([each.at, '_'])
+      }
+    } else {
+      each.at -= 1
+      marks = [[each.at, '/']]
+    }
+    while (glide && standing.has(each.at - 1) && each.at - 1 > each.goal + 2) {
+      each.at -= 2
+      marks.push([each.at, '_'])
+    }
+    return marks
+  }
+
+  private collapseRow(width: number): string {
+    const cells = new Array<string>(width).fill(' ')
+    const standing = new Set(
+      this.lines
+        .filter(
+          (each) =>
+            each.at === each.goal || (each.at % 2 !== 0 && each.at + each.heading === each.goal),
+        )
+        .map((each) => each.goal),
+    )
+    const busy = this.lines
+      .filter((each) => each.at % 2 !== 0 && each.heading < 0 && each.at - 1 !== each.goal)
+      .map((each) => each.at)
+    const taken = new Set(this.lines.map((each) => each.at))
+    for (const each of [...this.lines].sort((a, b) => a.at - b.at)) {
+      const glide = !busy.some((at) => at < each.at)
+      for (const [cell, glyph] of this.step(each, standing, glide, taken))
+        if (cells[cell] === ' ' || glyph !== '|') cells[cell] = glyph
+    }
+    this.join()
+    return cells.join('')
+  }
+
+  private join(): void {
+    const kept: Line[] = []
+    const seen = new Set<string>()
+    const ordered = [...this.lines].sort(
+      (a, b) => a.at - b.at || Number(a.heading !== 0) - Number(b.heading !== 0),
+    )
+    for (const each of ordered) {
+      const key = `${each.sha} ${String(each.at)}`
+      if (each.at === each.goal && seen.has(key)) continue
+      if (each.at === each.goal) seen.add(key)
+      kept.push(each)
+    }
+    this.lines = kept
+  }
+
+  /**
+   * A row of every line in its column; with `settle` the lines stop too,
+   * otherwise a line still on its way keeps going on the next commit's row;
+   * with `past` the lines right of that cell are drawn a cell further right.
+   */
+  private rest(width: number, settle = false, past: number | null = null): string {
+    this.mergedAt = null
+    const cells = new Array<string>(width).fill(' ')
+    for (const each of this.lines) {
+      if (each.at % 2) each.at += each.heading
+      if (settle) each.heading = 0
+      cells[each.at + (past !== null && each.at > past ? 1 : 0)] = '|'
+    }
+    return cells.join('')
   }
 }

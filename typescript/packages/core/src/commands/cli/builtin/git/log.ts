@@ -118,7 +118,7 @@ async function graphed(
   let shownOne = false
   let missingNewline = false
   for (const { commit, shown } of walk.steps) {
-    graph.update(commit)
+    graph.walk(commit)
     if (!shown) continue
     const bodies = diff === null ? [] : await commitOutput(repo, commit, diff)
     const blocks: [string | null, string][] = []
@@ -129,11 +129,11 @@ async function graphed(
     if (!blocks.length) blocks.push([null, ''])
     for (const [parent, body] of blocks) {
       if (shownOne && !terminated) {
-        if (!missingNewline) out += graph.paddingLine()
+        if (!missingNewline) out += graph.filler()
         out += '\n'
       }
       shownOne = true
-      out += graph.showCommit()
+      out += graph.leadIn()
       const from =
         !user && parent !== null
           ? ` (from ${parent.slice(0, fmt.kind === 'oneline' ? length : FULL_SHA)})`
@@ -148,19 +148,19 @@ async function graphed(
         text = renderTemplate(fmt.template ?? '', commit, width, decor, flags.date, flags.mailmap)
       } else {
         const [head = '', ...rest] = presetBlock(commit, fmt.kind, width, flags.date, mailmap)
-        out += `${head}${from}${labels}\n${graph.nextLine()[0]}`
+        out += `${head}${from}${labels}\n${graph.nextRow()}`
         text = rest.map((line) => `${line}\n`).join('')
       }
       missingNewline = !text.endsWith('\n')
-      out += graph.showMessage(text)
+      out += graph.around(text)
       if (terminated && !empty) {
-        if (!missingNewline) out += graph.paddingLine()
+        if (!missingNewline) out += graph.filler()
         out += '\n'
       }
       if (body === '' || diff === null) continue
       const separator = empty ? null : separatorLine(commit, fmt.kind, diff)
-      if (separator !== null) out += `${graph.paddingLine()}${separator}\n`
-      for (const line of body.split('\n').slice(0, -1)) out += `${graph.paddingLine()}${line}\n`
+      if (separator !== null) out += `${graph.filler()}${separator}\n`
+      for (const line of body.split('\n').slice(0, -1)) out += `${graph.filler()}${line}\n`
     }
   }
   return out

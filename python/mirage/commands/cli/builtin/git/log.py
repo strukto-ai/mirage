@@ -176,7 +176,7 @@ def _graphed(
     missing_newline = False
     for step in walk.steps:
         commit = step.commit
-        graph.update(commit)
+        graph.walk(commit)
         if not step.shown:
             continue
         bodies = commit_output(repo, commit, diff) if diff is not None else []
@@ -191,10 +191,10 @@ def _graphed(
         for parent, body in blocks or [(None, "")]:
             if shown_one and not terminated:
                 if not missing_newline:
-                    out += graph.padding_line()
+                    out += graph.filler()
                 out += "\n"
             shown_one = True
-            out += graph.show_commit()
+            out += graph.lead_in()
             source = ""
             if not user and parent is not None:
                 cut = length if fmt.kind == "oneline" else FULL_SHA
@@ -223,13 +223,13 @@ def _graphed(
                 head, *rest = preset_block(
                     commit, fmt.kind, width, flags.date, mailmap
                 )
-                out += f"{head}{source}{labels}\n{graph.next_line()[0]}"
+                out += f"{head}{source}{labels}\n{graph.next_row()}"
                 text = "".join(f"{line}\n" for line in rest)
             missing_newline = not text.endswith("\n")
-            out += graph.show_message(text)
+            out += graph.around(text)
             if terminated and not empty:
                 if not missing_newline:
-                    out += graph.padding_line()
+                    out += graph.filler()
                 out += "\n"
             if body == "" or diff is None:
                 continue
@@ -237,9 +237,9 @@ def _graphed(
                 None if empty else separator_line(commit, fmt.kind, diff)
             )
             if separator is not None:
-                out += f"{graph.padding_line()}{separator}\n"
+                out += f"{graph.filler()}{separator}\n"
             for line in body.split("\n")[:-1]:
-                out += f"{graph.padding_line()}{line}\n"
+                out += f"{graph.filler()}{line}\n"
     return encode_text(out)
 
 
