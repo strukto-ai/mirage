@@ -513,6 +513,60 @@ def test_rg_complete_literal_words_avoid_a_refused_full_scan(line, terms):
     assert vfs.scans == []
 
 
+@pytest.mark.parametrize(
+    "line, terms, output",
+    [
+        ("rg -iw alpha /d", ["alpha"], ["ALPHA", "Alpha"]),
+        ("rg -Sw alpha /d", ["alpha"], ["ALPHA", "Alpha"]),
+        ("rg -w '(?i:alpha)' /d", ["alpha"], ["ALPHA", "Alpha"]),
+        ("rg -ix alpha /d", ["alpha"], ["ALPHA", "Alpha"]),
+        (
+            "rg -iw 'alpha|bravo' /d",
+            ["alpha", "bravo"],
+            ["ALPHA", "Alpha", "BrAvO"],
+        ),
+        (
+            "rg -iw -e alpha -e bravo /d",
+            ["alpha", "bravo"],
+            ["ALPHA", "Alpha", "BrAvO"],
+        ),
+        ("rg -iw -e foo -e bar /d", ["foo", "bar"], ["FOO", "bar"]),
+        (
+            "rg -w '(?i:alpha)|bravo' /d",
+            ["alpha", "bravo"],
+            ["ALPHA", "Alpha"],
+        ),
+    ],
+)
+def test_rg_caseless_literal_words_avoid_a_refused_full_scan(
+    line, terms, output
+):
+    vfs = SearchRAM(lines=None, refuse=RuntimeError)
+    vfs._store.files["/d/caseless.txt"] = (
+        b"ALPHA\nAlpha\nBrAvO\nFOO\nbar\nalphabet\n"
+    )
+    queries = []
+    original = vfs.files_containing
+
+    async def indexed(
+        path, text, *, whole_word, ignore_case, index=NULL_INDEX
+    ):
+        queries.append((text, whole_word, ignore_case))
+        return await original(
+            path,
+            text,
+            whole_word=whole_word,
+            ignore_case=ignore_case,
+            index=index,
+        )
+
+    vfs.files_containing = indexed
+    expected = "".join(f"/d/caseless.txt:{text}\n" for text in output).encode()
+    assert _run(vfs, line) == (expected, b"", 0)
+    assert queries == [(term, True, True) for term in terms]
+    assert vfs.scans == []
+
+
 def test_rg_truncated_literal_prefix_never_requests_a_whole_word():
     vfs = SearchRAM(lines=None)
     word = "a" * 101

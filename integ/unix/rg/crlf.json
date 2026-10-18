@@ -74,6 +74,46 @@
         "x",
         "n"
       ]
+    },
+    {
+      "id": "rg_crlf_multiline_match_width_uses_rendered_content",
+      "seq": 14490228,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'a\\r\\nb\\r\\n' | rg --crlf -U -o -M1 'a\\r?\\nb' | od -An -tx1 | tr -d ' \\n'; echo; printf 'a\\r\\nb\\r\\n' | rg --crlf -U -o -M1 --max-columns-preview 'a\\r?\\nb' | od -An -tx1 | tr -d ' \\n'; echo; printf 'xxa\\r\\nbb\\r\\n' | rg --crlf -U -o -n --column -b -M1 'a\\r?\\nb' | od -An -tx1 | tr -d ' \\n'; echo; printf 'a\\r\\nb\\rc\\r\\n' | rg --crlf -U -o 'a\\r?\\nb\\r' | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "610d0a620d0a\n610d0a620d0a\n313a333a323a610d0a323a333a323a620d0a\n610d0a620d0d0a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "crlf",
+        "U",
+        "o",
+        "M",
+        "max_columns_preview",
+        "n",
+        "column",
+        "b"
+      ]
     }
   ]
 }

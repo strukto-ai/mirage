@@ -36,6 +36,46 @@
         "o",
         "C"
       ]
+    },
+    {
+      "id": "rg_trim_includes_vertical_tab_and_retains_source_offsets",
+      "seq": 15200072,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf '\\vbefore\\n\\t\\valpha\\n\\f\\vafter\\n' | rg --trim -n --column -b -C1 alpha; printf '\\valpha\\n' | rg --trim -o -n --column -b '(\\valpha)'; printf '\\valpha\\n' | rg --trim -o -n --column -b -r '$1' '(\\valpha)'; printf '\\valpha\\n' | rg alpha | od -An -tx1 | tr -d ' \\n'; echo; printf '\\valpha\\0' | rg --trim --null-data alpha | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "1-0-before\n2:3:8:alpha\n3-16-after\n1:1:0:alpha\n1:1:0:alpha\n0b616c7068610a\n616c70686100\n",
+        "stderr": ""
+      },
+      "flags": [
+        "trim",
+        "n",
+        "column",
+        "b",
+        "C",
+        "o",
+        "r",
+        "null_data"
+      ]
     }
   ]
 }

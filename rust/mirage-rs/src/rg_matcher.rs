@@ -1177,6 +1177,104 @@ mod tests {
     }
 
     #[test]
+    fn caseless_backend_hints_collapse_before_the_query_limit() {
+        for (pattern, options, expected) in [
+            (
+                "alpha",
+                rg_matcher::Options {
+                    ignore_case: true,
+                    whole_word: true,
+                    ..Default::default()
+                },
+                Some((vec!["alpha"], true)),
+            ),
+            (
+                "alpha",
+                rg_matcher::Options {
+                    smart_case: true,
+                    whole_word: true,
+                    ..Default::default()
+                },
+                Some((vec!["alpha"], true)),
+            ),
+            (
+                "(?i:alpha)",
+                rg_matcher::Options {
+                    whole_word: true,
+                    ..Default::default()
+                },
+                Some((vec!["alpha"], true)),
+            ),
+            (
+                "foobar",
+                rg_matcher::Options {
+                    ignore_case: true,
+                    line_regexp: true,
+                    ..Default::default()
+                },
+                Some((vec!["foobar"], true)),
+            ),
+            (
+                "alpha.*bravo",
+                rg_matcher::Options {
+                    ignore_case: true,
+                    whole_word: true,
+                    ..Default::default()
+                },
+                Some((vec!["alpha"], false)),
+            ),
+            (
+                "alpha|bravo",
+                rg_matcher::Options {
+                    ignore_case: true,
+                    whole_word: true,
+                    ..Default::default()
+                },
+                Some((vec!["alpha", "bravo"], true)),
+            ),
+            (
+                "(?i:alpha)|bravo",
+                rg_matcher::Options {
+                    whole_word: true,
+                    ..Default::default()
+                },
+                Some((vec!["alpha", "bravo"], true)),
+            ),
+            (
+                "(?i:kilo)",
+                rg_matcher::Options {
+                    whole_word: true,
+                    ..Default::default()
+                },
+                None,
+            ),
+            ("[ab]{5}", rg_matcher::Options::default(), None),
+        ] {
+            let program =
+                rg_matcher::Program::with_options(&[pattern.to_owned()], options).unwrap();
+            let hints = program
+                .required_terms
+                .map(|hints| (hints.texts, hints.whole_word, hints.ignore_case));
+            let expected = expected
+                .map(|(texts, word)| (texts.into_iter().map(str::to_owned).collect(), word, true));
+            assert_eq!(hints, expected, "{pattern}");
+        }
+        let program = rg_matcher::Program::with_options(
+            &["a".repeat(101)],
+            rg_matcher::Options {
+                ignore_case: true,
+                whole_word: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let hints = program.required_terms.unwrap();
+        assert!(!hints.whole_word);
+        assert!(hints.ignore_case);
+        assert!(hints.texts.iter().all(|text| text.len() < 101));
+    }
+
+    #[test]
     fn limits_and_refusals() {
         let options = rg_matcher::Options {
             regex_size_limit: Some(1),

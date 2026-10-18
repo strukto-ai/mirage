@@ -3260,6 +3260,66 @@ mod tests {
     }
 
     #[test]
+    fn multiline_crlf_match_slices_measure_only_rendered_content() {
+        for preview in [false, true] {
+            for vimgrep in [false, true] {
+                let (out, _, _) = run(
+                    b"a\r\nb\r\n",
+                    json!({"pattern":"a\\r?\\nb","crlf":true,"multiline":true,"only_matching":true,"vimgrep":vimgrep,"max_columns":1,"max_columns_preview":preview}),
+                );
+                assert_eq!(out, b"a\r\nb\r\n", "preview={preview}, vimgrep={vimgrep}");
+            }
+        }
+    }
+
+    #[test]
+    fn multiline_crlf_match_slices_preserve_offsets_and_record_content() {
+        let (out, _, _) = run(
+            b"xxa\r\nbb\r\n",
+            json!({"pattern":"a\\r?\\nb","crlf":true,"multiline":true,"only_matching":true,"line_numbers":true,"column":true,"byte_offsets":true,"max_columns":1}),
+        );
+        assert_eq!(out, b"1:3:2:a\r\n2:3:2:b\r\n");
+        let (out, _, _) = run(
+            b"a\r\nb\rc\r\n",
+            json!({"pattern":"a\\r?\\nb\\r","crlf":true,"multiline":true,"only_matching":true}),
+        );
+        assert_eq!(out, b"a\r\nb\r\r\n");
+        let (out, _, _) = run(
+            b"a\r\nb\r\0",
+            json!({"pattern":"a\\r?\\nb\\r","crlf":true,"multiline":true,"only_matching":true,"null_data":true,"ban_nul":false}),
+        );
+        assert_eq!(out, b"a\r\nb\r\0");
+    }
+
+    #[test]
+    fn trim_removes_vertical_tab_from_selected_and_context_records() {
+        let data = b"\x0bbefore\n\t\x0balpha\n\x0c\x0bafter\n";
+        let (out, _, _) = run(
+            data,
+            json!({"pattern":"alpha","trim":true,"line_numbers":true,"column":true,"byte_offsets":true,"context_before":1,"context_after":1}),
+        );
+        assert_eq!(out, b"1-0-before\n2:3:8:alpha\n3-16-after\n");
+        let (out, _, _) = run(b"\x0balpha\n", json!({"pattern":"alpha"}));
+        assert_eq!(out, b"\x0balpha\n");
+        let (out, _, _) = run(
+            b"\x0balpha\0",
+            json!({"pattern":"alpha","trim":true,"null_data":true,"ban_nul":false}),
+        );
+        assert_eq!(out, b"alpha\0");
+    }
+
+    #[test]
+    fn trim_removes_vertical_tab_from_matches_and_captures_without_moving_offsets() {
+        for replace in [None, Some("$1")] {
+            let (out, _, _) = run(
+                b"\x0balpha\n",
+                json!({"pattern":"(\\valpha)","replace":replace,"trim":true,"only_matching":true,"line_numbers":true,"column":true,"byte_offsets":true}),
+            );
+            assert_eq!(out, b"1:1:0:alpha\n", "replace={replace:?}");
+        }
+    }
+
+    #[test]
     fn multiline_crlf_replacements_frame_the_rendered_records() {
         for (data, replacement, expected) in [
             (b"a\r\nb\r\n".as_slice(), "X", b"X\r\n".as_slice()),

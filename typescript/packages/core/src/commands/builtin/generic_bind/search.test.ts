@@ -439,6 +439,30 @@ it.each<[string, string[]]>([
   expect(vfs.scans).toEqual([])
 })
 
+it.each<[string, string[], string[]]>([
+  ['rg -iw alpha /d', ['alpha'], ['ALPHA', 'Alpha']],
+  ['rg -Sw alpha /d', ['alpha'], ['ALPHA', 'Alpha']],
+  ["rg -w '(?i:alpha)' /d", ['alpha'], ['ALPHA', 'Alpha']],
+  ['rg -ix alpha /d', ['alpha'], ['ALPHA', 'Alpha']],
+  ["rg -iw 'alpha|bravo' /d", ['alpha', 'bravo'], ['ALPHA', 'Alpha', 'BrAvO']],
+  ['rg -iw -e alpha -e bravo /d', ['alpha', 'bravo'], ['ALPHA', 'Alpha', 'BrAvO']],
+  ['rg -iw -e foo -e bar /d', ['foo', 'bar'], ['FOO', 'bar']],
+  ["rg -w '(?i:alpha)|bravo' /d", ['alpha', 'bravo'], ['ALPHA', 'Alpha']],
+])('avoids a refused full scan for a caseless literal word in %s', async (line, terms, output) => {
+  const vfs = new SearchRAM({ lines: null, refuse: plainError })
+  vfs.store.files.set('/d/caseless.txt', ENC.encode('ALPHA\nAlpha\nBrAvO\nFOO\nbar\nalphabet\n'))
+  const queries: [string, boolean, boolean][] = []
+  const original = vfs.filesContaining.bind(vfs)
+  vfs.filesContaining = (scope, text, opts) => {
+    queries.push([text, opts.wholeWord, opts.ignoreCase])
+    return original(scope, text, opts)
+  }
+  const expected = output.map((text) => `/d/caseless.txt:${text}\n`).join('')
+  expect(await run(vfs, line)).toEqual([expected, '', 0])
+  expect(queries).toEqual(terms.map((term) => [term, true, true]))
+  expect(vfs.scans).toEqual([])
+})
+
 it('does not request a whole word for a truncated literal prefix', async () => {
   const vfs = new SearchRAM({ lines: null })
   const word = 'a'.repeat(101)
