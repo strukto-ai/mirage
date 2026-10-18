@@ -7,8 +7,7 @@ keywords: ["Mirage Python quickstart", "mirage-ai", "virtual filesystem", "AI ag
 
 ## Installation
 
-Use Python 3.11 or newer. In an existing project or virtual environment,
-install Mirage:
+Use Python 3.11 or newer. In an existing project or virtual environment, install Mirage:
 
 ```bash
 uv add mirage-ai
@@ -39,73 +38,19 @@ from mirage.vfs.ram import RAMVFS
 
 async def main() -> None:
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
-    try:
-        await ws.shell('echo "hello mirage" > /data/hello.txt')
-        result = await ws.shell("cat /data/hello.txt")
-        print(await result.stdout_str(), end="")
-    finally:
-        await ws.close()
-
-
-asyncio.run(main())
-```
-
-Run it with `python quickstart.py`. It prints:
-
-```text
-hello mirage
-```
-
-## Run Commands
-
-Once a VFS is mounted, you can use Mirage like a shell over your
-virtual filesystem:
-
-```python
-import asyncio
-
-from mirage import MountMode, Workspace
-from mirage.vfs.ram import RAMVFS
-
-
-async def main() -> None:
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
-
-    await ws.shell('echo \'{"name": "alice"}\' > /data/user.json')
-
-    result = await ws.shell("ls /data/")
-    print(await result.stdout_str())
-
-    result = await ws.shell("cat /data/user.json")
-    print(await result.stdout_str())
-
-    result = await ws.shell('jq ".name" /data/user.json')
-    print(await result.stdout_str())
-
-    result = await ws.shell("grep alice /data/user.json")
-    print(await result.stdout_str())
-
+    await ws.shell('echo "hello mirage" > /data/hello.txt')
+    result = await ws.shell("cat /data/hello.txt")
+    print(await result.stdout_str(), end="")
     await ws.close()
 
 
 asyncio.run(main())
 ```
 
-## Check command failures
+Run `python quickstart.py`; it prints `hello mirage`.
 
-A shell command that exits nonzero still returns a result. Inside `main`,
-before `ws.close()`, check `result.exit_code` and read `result.stderr_str()`
-when the outcome matters:
-
-```python
-result = await ws.shell("cat /data/missing.txt")
-if result.exit_code != 0:
-    print(await result.stderr_str(), end="")
-```
-
-Setup errors, cancellation, and internal failures can still raise exceptions.
-The [in-app API reference](/python/access/in-app#session-shell) describes the
-full result and streaming contracts.
+Shell failures are returned in the result; check `exit_code` and `stderr_str()`
+when needed. See the [in-app API reference](/python/access/in-app#session-shell).
 
 ## Next Steps
 

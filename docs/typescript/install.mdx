@@ -87,26 +87,6 @@ Mirage keeps native and network-heavy dependencies as **optional peers** so cons
 For a browser application, install `@struktoai/mirage-browser` instead and
 follow the [browser quickstart](/typescript/browser-quickstart).
 
-## Verify the Node install
-
-Save this as `verify.mjs`:
-
-```js verify.mjs
-import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-
-const ws = new Workspace(
-  { '/data': new RAMVFS() },
-  { mode: MountMode.WRITE },
-)
-const res = await ws.shell('echo "hello" | tee /data/x.txt')
-console.log(res.stdoutText) // hello
-await ws.close()
-```
-
-Run `node verify.mjs`. If it prints `hello`, the base install is wired up
-correctly. The `.mjs` extension tells Node to run the file as an ES module;
-TypeScript projects can use the complete [Node quickstart](/typescript/quickstart).
-
 ## Install From Source
 
 Contributing to Mirage or exploring the examples directly:

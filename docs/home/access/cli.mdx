@@ -39,13 +39,11 @@ mounts:
 EOF
 
 mirage workspace create workspace.yaml --id demo
-mirage shell -w demo -c 'echo "hello mirage" > /data/hello.txt'
-mirage shell -w demo -c 'grep -n hello /data/hello.txt'
+mirage shell -w demo -c 'echo "hello mirage" > /data/hello.txt && grep -n hello /data/hello.txt'
 ```
 
-The final command prints `1:hello mirage`. The server starts automatically,
-and the workspace remains available as `demo`. Keep it while connecting over
-[MCP](/home/access/mcp) or [RPC](/home/access/rpc).
+This prints `1:hello mirage`. Keep `demo` for the [MCP](/home/access/mcp) or
+[RPC](/home/access/rpc) examples, then remove it with `mirage workspace delete demo`.
 
 ## Exit codes
 
@@ -180,11 +178,3 @@ mirage login
 | `login_client_id` | `MIRAGE_LOGIN_CLIENT_ID` | see [CLI login](/home/access/http#cli-login) |
 
 `MIRAGE_HOME` moves everything under `~/.mirage`.
-
-## Clean up the quickstart
-
-When you no longer need the `demo` workspace:
-
-```bash
-mirage workspace delete demo
-```

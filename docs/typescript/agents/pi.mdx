@@ -7,9 +7,8 @@ icon: /images/pi-logo.svg
 [Pi Coding Agent](https://github.com/earendil-works/pi) is a TypeScript coding agent with seven built-in tools (`read`, `write`, `edit`, `bash`, `grep`, `find`, and `ls`). Mirage provides a native Pi inline extension that replaces their host-filesystem operations with a `Workspace`.
 
 <Note>
-  This integration follows Mirage's Node requirement: Node 22.20+ on Node 22,
-  24.12+ on Node 24, or 25+. Pi is a CLI agent; it uses `process.cwd()`, agent
-  directories, and other Node-only APIs.
+  This integration requires a [supported Node release](/typescript/install#quick-install).
+  Pi uses `process.cwd()`, agent directories, and other Node-only APIs.
 </Note>
 
 ## Install

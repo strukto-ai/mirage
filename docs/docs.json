@@ -163,7 +163,7 @@
             ]
           },
           {
-            "group": "Backend capabilities",
+            "group": "Integration",
             "pages": [
               "home/integration/overview",
               "home/integration/search",

@@ -40,9 +40,8 @@ mode: "frame"
 
 <h2 className="text-2xl font-bold mt-16 mb-6">Try Mirage</h2>
 
-[Install the Python or Node package](/home/install), then create a workspace
-with an in-memory filesystem, write a file, and search it. This example needs
-no credentials or external services.
+[Install Mirage](/home/install), then create a workspace with an in-memory
+filesystem, write a file, and search it. No credentials or services are needed.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -104,19 +103,9 @@ to use the same commands on your own data. Continue with the
     An agent can read a script shared in Slack, run it, save the result to Redis, and post a reply. Here RAM, <Icon icon="database" /> Redis and <Icon icon="slack" /> Slack share one root, <code>python3</code> runs on Monty inside the workspace, and <code>slack</code> is a virtual CLI.
   </p>
   <p className="mt-3 mb-0">
-    Set up <a href="/home/setup/slack">Slack credentials</a> and a Redis connection first. Set <code>SLACK_BOT_TOKEN</code> and <code>REDIS_URL</code>, then replace the example channel and file path with your own. Install the Redis and Monty extras for the SDK you use:
+    Set up <a href="/home/setup/slack">Slack credentials</a> and a Redis connection first. Set <code>SLACK_BOT_TOKEN</code> and <code>REDIS_URL</code>, then replace the example channel and file path with your own. Install the Redis and Monty extras: <code>uv add "mirage-ai[redis,monty]"</code> in Python, or <code>npm install @struktoai/mirage-node redis @pydantic/monty</code> in TypeScript.
   </p>
 </div>
-
-<CodeGroup>
-```bash Python
-uv add "mirage-ai[redis,monty]"
-```
-
-```bash TypeScript
-npm install @struktoai/mirage-node redis @pydantic/monty
-```
-</CodeGroup>
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">

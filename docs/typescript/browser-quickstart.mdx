@@ -5,8 +5,7 @@ description: Run a Mirage RAM workspace in a browser with Vite and @struktoai/mi
 keywords: ["Mirage browser quickstart", "@struktoai/mirage-browser", "virtual filesystem", "Vite"]
 ---
 
-This quickstart runs Mirage entirely in the browser with an in-memory
-filesystem. It needs no credentials or backend service.
+This runs Mirage in the browser with an in-memory filesystem and no credentials.
 
 ## Create the app
 
@@ -15,7 +14,6 @@ This Vite starter needs Node 20.19+ on Node 20, or Node 22.12+:
 ```bash
 npm create vite@7 mirage-browser -- --template vanilla-ts
 cd mirage-browser
-npm install
 npm install @struktoai/mirage-browser
 ```
 
@@ -26,13 +24,10 @@ import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-browser'
 
 async function main(): Promise<void> {
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
-  try {
-    await ws.shell('echo "hello mirage" > /data/hello.txt')
-    const result = await ws.shell('cat /data/hello.txt')
-    document.querySelector<HTMLDivElement>('#app')!.textContent = result.stdoutText
-  } finally {
-    await ws.close()
-  }
+  await ws.shell('echo "hello mirage" > /data/hello.txt')
+  const result = await ws.shell('cat /data/hello.txt')
+  document.querySelector<HTMLDivElement>('#app')!.textContent = result.stdoutText
+  await ws.close()
 }
 
 void main()
@@ -46,10 +41,5 @@ npm run dev
 
 Open the URL Vite prints. The page displays `hello mirage`.
 
-## Next steps
-
-- Read the [browser limitations](/typescript/limitations#browser) before
-  choosing mounts for a production application.
-- Pick a browser-capable backend from the [VFS table](/home/setup/vfs).
-- Use a provider's browser setup page for its authentication or proxy
-  requirements; never put server credentials in a public bundle.
+Before choosing a production mount, review the [browser limitations](/typescript/limitations#browser)
+and browser support in the [VFS table](/home/setup/vfs).

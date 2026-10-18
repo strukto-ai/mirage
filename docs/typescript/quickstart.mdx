@@ -7,7 +7,7 @@ keywords: ["Mirage TypeScript quickstart", "@struktoai/mirage-node", "virtual fi
 
 ## Installation
 
-Use Node 22.20+ on Node 22, 24.12+ on Node 24, or 25+. Install the Node runtime:
+Use a [supported Node release](/typescript/install#quick-install), then install the runtime:
 
 ```bash
 pnpm add @struktoai/mirage-node
@@ -25,71 +25,23 @@ import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 async function main(): Promise<void> {
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
-  try {
-    await ws.shell('echo "hello mirage" > /data/hello.txt')
-    const result = await ws.shell('cat /data/hello.txt')
-    process.stdout.write(result.stdoutText)
-  } finally {
-    await ws.close()
-  }
-}
-
-main()
-```
-
-Run it:
-
-```bash
-pnpm tsx quickstart.ts
-```
-
-It prints:
-
-```text
-hello mirage
-```
-
-## Run Commands
-
-Once a VFS is mounted, you can use Mirage like a shell over your virtual filesystem:
-
-```ts
-import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-
-async function main(): Promise<void> {
-  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
-
-  await ws.shell(`echo '{"name": "alice"}' | tee /data/user.json`)
-
-  const files = await ws.shell('ls /data/')
-  process.stdout.write(files.stdoutText)
-
-  const name = await ws.shell('jq ".name" /data/user.json')
-  process.stdout.write(name.stdoutText)
-
-  const match = await ws.shell('grep alice /data/user.json')
-  process.stdout.write(match.stdoutText)
-
+  await ws.shell('echo "hello mirage" > /data/hello.txt')
+  const result = await ws.shell('cat /data/hello.txt')
+  process.stdout.write(result.stdoutText)
   await ws.close()
 }
 
 main()
 ```
 
-## Check command failures
+Run it; it prints `hello mirage`:
 
-A shell command that exits nonzero still returns a result. Inside `main`,
-before `ws.close()`, check `exitCode` and `stderrText` when the outcome
-matters:
-
-```ts
-const result = await ws.shell('cat /data/missing.txt')
-if (result.exitCode !== 0) process.stderr.write(result.stderrText)
+```bash
+pnpm tsx quickstart.ts
 ```
 
-Setup errors, cancellation, and internal failures can still throw. The
-[in-app API reference](/typescript/access/in-app#session-shell) describes the
-full result and streaming contracts.
+Shell failures are returned in the result; check `exitCode` and `stderrText`
+when needed. See the [in-app API reference](/typescript/access/in-app#session-shell).
 
 ## Next Steps
 
