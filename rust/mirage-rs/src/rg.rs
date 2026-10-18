@@ -1660,12 +1660,11 @@ impl Multi {
                 }
                 *budget -= 1;
                 let end = self.data.len();
-                let cr = config.crlf && !config.null_data && self.data[end - 1] == b'\r';
                 self.growing_lines.values.push(Line {
                     start: self.line_start,
-                    end: end - usize::from(cr),
+                    end,
                     full_end: end,
-                    cr,
+                    cr: false,
                 });
             }
             self.lines = Arc::new(self.growing_lines.take());
@@ -1820,6 +1819,7 @@ struct Input {
     record_end: Option<usize>,
     search: Option<Search>,
     scratch: Option<Search>,
+    selecting_cr: Option<(usize, Matches)>,
     searching_number: u64,
     searching_offset: u64,
     searching_cr: bool,
@@ -1868,6 +1868,7 @@ impl Input {
             record_end: None,
             search: None,
             scratch: None,
+            selecting_cr: None,
             searching_number: 0,
             searching_offset: 0,
             searching_cr: false,
@@ -2243,6 +2244,24 @@ impl Rg {
                 let mut search = input.search.take().unwrap();
                 let mut matches = search.take_matches();
                 let mut data = search.take_haystack();
+                let mut cr_selected = false;
+                if let Some((content, rendered)) = input.selecting_cr.take() {
+                    cr_selected = !matches.is_empty();
+                    matches = rendered;
+                    data.truncate(content);
+                } else if !config.multiline
+                    && matches.is_empty()
+                    && input.searching_cr
+                    && input.searching_terminated
+                    && program.cr_selects()
+                    && !config.passthru
+                {
+                    input.selecting_cr = Some((data.len(), matches));
+                    data.extend_from_slice(b"\r\n");
+                    search.reset(data, false);
+                    input.search = Some(search);
+                    break;
+                }
                 input.scratch = Some(search);
                 if config.multiline {
                     input.multi = Some(Multi::new(data, matches));
@@ -2254,7 +2273,7 @@ impl Rg {
                     if input.searching_terminated {
                         data.push(config.terminator());
                     }
-                    let matched = !matches.is_empty();
+                    let matched = cr_selected || !matches.is_empty();
                     if !input.searching_terminated
                         && !input.searching_cr
                         && matches
@@ -2501,7 +2520,7 @@ impl Rg {
                 std::mem::take(&mut input.record)
             };
             let raw_len = data.len();
-            let cr = config.crlf && !config.null_data && data.last() == Some(&b'\r');
+            let cr = config.crlf && !config.null_data && data.last() == Some(&b'\r') && terminated;
             if cr {
                 data.pop();
             }
@@ -2941,6 +2960,62 @@ mod tests {
                 json!({"pattern":"a","crlf":true,"max_columns":3,"max_columns_preview":preview}),
             );
             assert_eq!(out, expected);
+        }
+    }
+
+    #[test]
+    fn crlf_terminator_cr_selects_a_line_it_does_not_render() {
+        for (config, expected) in [
+            (
+                json!({"pattern":"\\r","crlf":true,"multiline":true,"line_numbers":true,"column":true}),
+                b"1:a\r\n2:b\r\n4:1:\rd\r\n".as_slice(),
+            ),
+            (
+                json!({"pattern":"\\r","crlf":true,"multiline":true,"only_matching":true}),
+                b"a\r\nb\r\n\r\r\n".as_slice(),
+            ),
+            (
+                json!({"pattern":"\\r","crlf":true,"multiline":true,"line_numbers":true,"replace":"X"}),
+                b"1:a\r\n2:b\r\n4:Xd\r\n".as_slice(),
+            ),
+            (
+                json!({"pattern":"\\r","crlf":true,"multiline":true,"count_only":true}),
+                b"3\r\n".as_slice(),
+            ),
+            (
+                json!({"pattern":"\\r","crlf":true,"multiline":true,"invert":true,"line_numbers":true}),
+                b"3:c\n".as_slice(),
+            ),
+            (
+                json!({"pattern":"\\r","crlf":true,"multiline":true,"invert":true,"passthru":true,"line_numbers":true}),
+                b"1:a\r\n2:b\r\n3:c\n4-\rd\r\n".as_slice(),
+            ),
+        ] {
+            assert_eq!(run(b"a\r\nb\r\nc\n\rd\r\n", config).0, expected);
+        }
+    }
+
+    #[test]
+    fn crlf_keeps_an_unterminated_final_cr_as_content() {
+        for (config, expected) in [
+            (
+                json!({"pattern":"a","crlf":true,"line_numbers":true}),
+                b"2:a\r\r\n".as_slice(),
+            ),
+            (
+                json!({"pattern":"a$","crlf":true,"multiline":true,"line_numbers":true}),
+                b"2:a\r\r\n".as_slice(),
+            ),
+            (
+                json!({"pattern":"\\r","crlf":true,"multiline":true,"only_matching":true}),
+                b"x\r\n\r\r\n".as_slice(),
+            ),
+            (
+                json!({"pattern":"\\r","crlf":true,"multiline":true,"line_numbers":true,"column":true}),
+                b"1:x\r\n2:2:a\r\r\n".as_slice(),
+            ),
+        ] {
+            assert_eq!(run(b"x\r\na\r", config).0, expected);
         }
     }
 

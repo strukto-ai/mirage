@@ -114,6 +114,85 @@
         "column",
         "b"
       ]
+    },
+    {
+      "id": "rg_crlf_U_selects_a_line_by_its_final_cr",
+      "seq": 14490246,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'a\\r\\nb\\r\\nc\\n\\rd\\r\\n' | rg --crlf -U -n --column '\\r' | od -An -tx1 | tr -d ' \\n'; echo; printf 'a\\r\\nb\\r\\nc\\n\\rd\\r\\n' | rg --crlf -U -o '\\r' | od -An -tx1 | tr -d ' \\n'; echo; printf 'a\\r\\nb\\r\\nc\\n\\rd\\r\\n' | rg --crlf -U -n -r X '\\r' | od -An -tx1 | tr -d ' \\n'; echo; printf 'a\\r\\nb\\r\\nc\\n\\rd\\r\\n' | rg --crlf -U -c '\\r' | tr '\\r' '@'; printf 'a\\r\\nb\\r\\nc\\n\\rd\\r\\n' | rg --crlf -U -n -v '\\r'; printf 'a\\r\\nb\\r\\nc\\n\\rd\\r\\n' | rg --crlf -U -n -v --passthru '\\r' | tr '\\r' '@'; printf 'a\\r\\n' | rg --crlf -U --count-matches 'a\\r' | tr '\\r' '@'",
+      "expect": {
+        "exit": 0,
+        "stdout": "313a610d0a323a620d0a343a313a0d640d0a\n610d0a620d0a0d0d0a\n313a610d0a323a620d0a343a58640d0a\n3@\n3:c\n1:a@\n2:b@\n3:c\n4-@d@\n0@\n",
+        "stderr": ""
+      },
+      "flags": [
+        "crlf",
+        "U",
+        "n",
+        "column",
+        "o",
+        "r",
+        "c",
+        "v",
+        "passthru",
+        "count_matches"
+      ]
+    },
+    {
+      "id": "rg_crlf_keeps_an_unterminated_final_cr",
+      "seq": 14490247,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'x\\r\\na\\r' | rg --crlf -n a | od -An -tx1 | tr -d ' \\n'; echo; printf 'x\\r\\na\\r' | rg --crlf -U -n 'a$' | od -An -tx1 | tr -d ' \\n'; echo; printf 'x\\r\\na\\r' | rg --crlf -U -n -o '\\r' | od -An -tx1 | tr -d ' \\n'; echo; printf 'x\\r\\na\\r' | rg --crlf -U -n --column '\\r' | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "323a610d0d0a\n323a610d0d0a\n313a780d0a323a0d0d0a\n313a780d0a323a323a610d0d0a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "crlf",
+        "U",
+        "n",
+        "o",
+        "column"
+      ]
     }
   ]
 }

@@ -116,6 +116,7 @@ pub(crate) struct SearchHints {
 pub(crate) struct Program {
     nfa: NFA,
     multiline: bool,
+    cr_selects: bool,
     record_context: bool,
     pub(crate) required_terms: Option<SearchHints>,
 }
@@ -127,6 +128,7 @@ impl Program {
                 nfa: NFA::never_match(),
                 required_terms: None,
                 multiline: false,
+                cr_selects: false,
                 record_context: false,
             });
         }
@@ -186,11 +188,17 @@ impl Program {
             })?;
         SEARCH_MEMORY_LIMIT.check(&nfa)?;
         let terminator = if options.null_data { 0 } else { b'\n' };
+        let multiline = options.multiline
+            && (!non_matching.contains(terminator)
+                || options.null_data && !non_matching.contains(b'\n'));
         Ok(Self {
             nfa,
-            multiline: options.multiline
-                && (!non_matching.contains(terminator)
-                    || options.null_data && !non_matching.contains(b'\n')),
+            multiline,
+            cr_selects: options.multiline
+                && !multiline
+                && options.crlf
+                && !options.null_data
+                && !non_matching.contains(b'\r'),
             record_context: options.multiline
                 && options.null_data
                 && non_matching.contains(terminator)
@@ -232,6 +240,13 @@ impl Program {
 
     pub(crate) fn uses_record_context(&self) -> bool {
         self.record_context
+    }
+
+    /// Whether a line's final CR can select it although no rendered match
+    /// reaches it, as the upstream line search keeps the CRLF it trims when
+    /// printing.
+    pub(crate) fn cr_selects(&self) -> bool {
+        self.cr_selects
     }
 
     pub(crate) fn capture_names(&self) -> impl Iterator<Item = (&str, usize)> {
@@ -1432,6 +1447,27 @@ mod tests {
         assert!(spanning.is_multiline());
         let anchored = rg_matcher::Program::with_options(&[r"\Afoo".to_owned()], options).unwrap();
         assert!(anchored.is_multiline());
+    }
+
+    #[test]
+    fn crlf_line_search_selects_through_the_cr_it_trims() {
+        let crlf = rg_matcher::Options {
+            multiline: true,
+            crlf: true,
+            ..rg_matcher::Options::default()
+        };
+        let program = |pattern: &str, options| {
+            rg_matcher::Program::with_options(&[pattern.to_owned()], options).unwrap()
+        };
+        assert!(program(r"\r", crlf).cr_selects());
+        assert!(program(r"a\r", crlf).cr_selects());
+        assert!(!program("a", crlf).cr_selects());
+        assert!(!program(r"a\r?\nb", crlf).cr_selects());
+        let plain = rg_matcher::Options {
+            multiline: true,
+            ..rg_matcher::Options::default()
+        };
+        assert!(!program(r"\r", plain).cr_selects());
     }
 
     #[test]
