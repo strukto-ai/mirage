@@ -18,9 +18,9 @@ import os
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.commands.config import Context
 from mirage.runtime.sandbox.microsandbox import MicrosandboxRuntime
 from mirage.runtime.table import build_runtime
-from mirage.runtime.types import ProcessExecution, ShellRequest
 from mirage.types import PathSpec
 
 
@@ -56,15 +56,19 @@ async def test_refuses_unusable_status_before_exec(
     runtime = build_runtime("microsandbox", config={"sandbox": "box"})
     with pytest.raises(RuntimeError, match=message):
         await runtime.execute(
-            ShellRequest(
-                line="touch /must-not-exist", cwd=PathSpec.from_str_path("/")
-            )
+            [],
+            [],
+            Context(
+                flags={"c": "touch /must-not-exist"},
+                cwd=PathSpec.from_str_path("/"),
+            ),
+            kind="line",
         )
-    assert calls == [["inspect", "box", "--format", "json"]]
+    assert calls == [["status", "box", "--format", "json"]]
 
 
 @pytest.mark.asyncio
-async def test_inspect_failure_preserves_cli_error(monkeypatch):
+async def test_status_failure_preserves_cli_error(monkeypatch):
     async def invoke(executable, hint, args, stdin):
         return b"", b"sandbox not found", 1
 
@@ -84,7 +88,7 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch):
 
     async def invoke(executable, hint, args, stdin):
         calls.append((executable, args, stdin))
-        if args[0] == "inspect":
+        if args[0] == "status":
             return b'{"status":"Running"}', b"", 0
         return b"output", b"diagnostic", 7
 
@@ -96,15 +100,16 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch):
     )
     words = ("python3", "a b", "$(literal)", "", "--flag")
     result = await runtime.execute(
-        ProcessExecution(
-            argv=words,
+        [],
+        list(words),
+        Context(
             cwd=PathSpec.from_str_path("/work"),
             env={"MARK": "request"},
             stdin=b"input",
-        )
+        ),
+        kind="process",
     )
-    assert calls == [
-        ("msb", ["inspect", "box", "--format", "json"], None),
+    assert [call for call in calls if call[1][:2] == ["exec", "box"]] == [
         (
             "msb",
             [
@@ -113,10 +118,15 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch):
                 "--quiet",
                 "--no-tty",
                 "-w",
-                "/work",
+                "/",
                 "-e",
                 "MARK=request",
                 "--",
+                "sh",
+                "-c",
+                'CDPATH= cd -- "$1" && shift && exec "$@"',
+                "sh",
+                "/work",
                 *words,
             ],
             b"input",
@@ -143,8 +153,9 @@ async def test_real_guest_process_shell_and_fuse():
     payload = b"input\x00\xff\r\n"
     words = ("a b", "$(echo literal)", "", "--flag")
     result = await runtime.execute(
-        ProcessExecution(
-            argv=(
+        [],
+        list(
+            (
                 "python3",
                 "-c",
                 "import json,os,sys; "
@@ -153,24 +164,27 @@ async def test_real_guest_process_shell_and_fuse():
                 "[os.getcwd(),os.environ['MARK'],sys.argv[1:]])); "
                 "sys.exit(7)",
                 *words,
-            ),
-            cwd=cwd,
-            env={"MARK": "request"},
-            stdin=payload,
-        )
+            )
+        ),
+        Context(cwd=cwd, env={"MARK": "request"}, stdin=payload),
+        kind="process",
     )
     assert result.stdout == payload
     assert json.loads(result.stderr) == ["/data", "request", list(words)]
     assert result.exit_code == 7
     shell = await runtime.execute(
-        ShellRequest(line='printf "%s" "$MARK"; pwd', cwd=cwd)
+        [],
+        [],
+        Context(flags={"c": 'printf "%s" "$MARK"; pwd'}, cwd=cwd),
+        kind="line",
     )
     assert shell.stdout == b"config/data\n"
     assert shell.stderr == b""
     assert shell.exit_code == 0
     files = await runtime.execute(
-        ProcessExecution(
-            argv=(
+        [],
+        list(
+            (
                 "python3",
                 "-c",
                 "from pathlib import Path; "
@@ -180,9 +194,10 @@ async def test_real_guest_process_shell_and_fuse():
                 "Path('python.txt').write_text('python adapter\\n'); "
                 "assert Path('python.txt').read_text() == 'python adapter\\n'; "
                 "print('Mirage FUSE read/write passed')",
-            ),
-            cwd=cwd,
-        )
+            )
+        ),
+        Context(cwd=cwd),
+        kind="process",
     )
     assert files.stdout == b"Mirage FUSE read/write passed\n"
     assert files.stderr == b""
@@ -278,9 +293,13 @@ async def test_real_stopped_guest_is_not_started():
     runtime = MicrosandboxRuntime(config={"sandbox": STOPPED_SANDBOX})
     with pytest.raises(RuntimeError, match="status: Stopped"):
         await runtime.execute(
-            ShellRequest(
-                line="echo must-not-run", cwd=PathSpec.from_str_path("/")
-            )
+            [],
+            [],
+            Context(
+                flags={"c": "echo must-not-run"},
+                cwd=PathSpec.from_str_path("/"),
+            ),
+            kind="line",
         )
     with pytest.raises(RuntimeError, match="status: Stopped"):
         await MicrosandboxRuntime(

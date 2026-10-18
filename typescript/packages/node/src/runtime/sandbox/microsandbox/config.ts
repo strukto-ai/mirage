@@ -12,18 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SandboxConfig } from '@struktoai/mirage-core/runtime/sandbox/config'
-import type { MountType } from '@struktoai/mirage-core/runtime/types'
+import { BASE_CONFIG_KEYS, type SandboxConfig } from '@struktoai/mirage-core/runtime/sandbox/config'
 
 /** How to reach the user's running microVM. */
 export interface MicrosandboxConfig extends SandboxConfig {
   /** Name of a running sandbox whose guest serves the workspace paths. */
   sandbox: string
-  /** `ssh` serves the host workspace to guest sshfs; `fuse` uses guest
-   * Mirage mounts; `both` serves prefixes the guest does not mount itself.
-   * Unset leaves file setup to the user.
-   */
-  mountType?: MountType
 }
 
-export const MICROSANDBOX_CONFIG_KEYS: readonly string[] = ['env', 'sandbox', 'mountType']
+export const MICROSANDBOX_CONFIG_KEYS: readonly string[] = [...BASE_CONFIG_KEYS, 'sandbox']

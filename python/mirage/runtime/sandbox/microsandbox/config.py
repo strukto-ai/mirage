@@ -16,10 +16,8 @@ from dataclasses import dataclass
 
 from mirage.runtime.sandbox.config import (
     SandboxConfig,
-    check_mount_type,
     require_id,
 )
-from mirage.runtime.types import MountType
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -30,15 +28,9 @@ class MicrosandboxConfig(SandboxConfig):
         sandbox (str): name of a running sandbox created and started
             by the user. Serve the workspace inside the guest at the
             same mount paths as the host.
-        mount_type (MountType | None): ``ssh`` serves the host workspace
-            over SFTP to guest sshfs, ``fuse`` uses the guest's own
-            Mirage mounts, and ``both`` serves prefixes the guest does
-            not mount itself. None leaves file setup to the user.
     """
 
     sandbox: str
-    mount_type: MountType | None = None
 
     def __post_init__(self) -> None:
         require_id("microsandbox", "sandbox", self.sandbox)
-        check_mount_type("microsandbox", self.mount_type)

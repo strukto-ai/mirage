@@ -18,6 +18,8 @@ MICROSANDBOX_CLI_HINT = (
 )
 
 RUNNING_STATE = "Running"
+INSPECT_TIMEOUT_SECONDS = 10
+PRELUDE = 'CDPATH= cd -- "$1" && shift && exec "$@"'
 
 
 def not_running_hint(sandbox: str, state: str) -> str:
@@ -25,7 +27,7 @@ def not_running_hint(sandbox: str, state: str) -> str:
 
     Args:
         sandbox (str): the configured sandbox name.
-        state (str): the status reported by msb inspect.
+        state (str): the status reported by msb status.
     """
     return (
         f"sandbox {sandbox} is not running (status: {state}); "

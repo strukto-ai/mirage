@@ -415,10 +415,31 @@ export class SandboxMounts {
     this.served.set(prefix, entry)
     try {
       const deadline = Date.now() + MOUNT_WAIT_SECONDS * 1000
-      while ((await this.table(signal)).get(prefix) !== 'fuse.sshfs') {
+      for (;;) {
+        try {
+          if ((await this.table(signal)).get(prefix) === 'fuse.sshfs') return
+        } catch (error) {
+          signal?.throwIfAborted()
+          const diagnostic = (await pipe.diagnostic?.()) ?? ''
+          if (diagnostic)
+            throw new Error(`${this.runtime}: sshfs did not mount ${prefix}: ${diagnostic}`, {
+              cause: error,
+            })
+          throw error
+        }
         if (entry.ended || Date.now() > deadline) {
-          const written = await this.run(`cat ${log}`, signal)
-          let reason = said(written.stdout) || 'no word from sshfs'
+          const diagnostic = (await pipe.diagnostic?.()) ?? ''
+          let reason = diagnostic
+          try {
+            const written = await this.run(`cat ${log}`, signal)
+            const logText = said(written.stdout)
+            if (logText) reason = logText + (diagnostic ? `; CLI: ${diagnostic}` : '')
+          } catch (error) {
+            signal?.throwIfAborted()
+            console.debug(`${this.runtime}: reading the sshfs log failed`, error)
+            if (!reason) reason = `cannot read the sshfs log: ${String(error)}`
+          }
+          reason ||= 'no word from sshfs'
           if (entry.failure !== null) reason += `; the SFTP server failed: ${entry.failure.message}`
           throw new Error(`${this.runtime}: sshfs did not mount ${prefix}: ${reason}`)
         }

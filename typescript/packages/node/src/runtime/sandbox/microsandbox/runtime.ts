@@ -15,14 +15,23 @@
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { Readable } from 'node:stream'
+import type { Context } from '@struktoai/mirage-core/commands/config'
+import { materialize } from '@struktoai/mirage-core/io/types'
+import type { PathSpec } from '@struktoai/mirage-core/types'
 import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { checkMountType, requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { ProcessExecution, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { MICROSANDBOX_CONFIG_KEYS, type MicrosandboxConfig } from './config.ts'
-import { RUNNING_STATE, MICROSANDBOX_CLI_HINT, notRunningHint } from './constants.ts'
+import {
+  RUNNING_STATE,
+  MICROSANDBOX_CLI_HINT,
+  INSPECT_TIMEOUT_SECONDS,
+  PRELUDE,
+  notRunningHint,
+} from './constants.ts'
 import { type CliResult, runCli } from '../cli.ts'
 
 /**
@@ -33,7 +42,7 @@ import { type CliResult, runCli } from '../cli.ts'
  */
 export class MicrosandboxRuntime
   extends RemoteSandbox<MicrosandboxConfig>
-  implements ProcessExecutor
+  implements ProcessExecutor<undefined>
 {
   readonly [PROCESS_EXECUTOR] = true as const
   readonly name = 'microsandbox'
@@ -54,19 +63,35 @@ export class MicrosandboxRuntime
   }
 
   /** Require a running sandbox before executing any commands. */
-  async connect(): Promise<void> {
-    const result = await this.microsandbox(['inspect', this.config.sandbox, '--format', 'json'])
+  async connect(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted()
+    const deadline = AbortSignal.timeout(INSPECT_TIMEOUT_SECONDS * 1000)
+    const probeSignal = signal === undefined ? deadline : AbortSignal.any([signal, deadline])
+    try {
+      await this.inspect(probeSignal)
+    } catch (error) {
+      signal?.throwIfAborted()
+      if (deadline.aborted)
+        throw new Error('msb runtime inspection timed out after 10 seconds', { cause: error })
+      throw error
+    }
+  }
+
+  private async inspect(signal: AbortSignal): Promise<void> {
+    const args = ['status', this.config.sandbox, '--format', 'json']
+    const result = await this.microsandbox(args, null, signal)
     if (result.code !== 0) {
-      throw new Error(`msb inspect failed: ${DECODER.decode(result.stderr).trim()}`)
+      const detail = DECODER.decode(result.stderr).trim()
+      throw new Error(`msb status failed: ${detail}`)
     }
     let status: unknown
     try {
       status = JSON.parse(DECODER.decode(result.stdout))
     } catch (error) {
-      throw new Error(`msb inspect returned unreadable json: ${String(error)}`)
+      throw new Error(`msb status returned unreadable json: ${String(error)}`)
     }
     if (status === null || typeof status !== 'object' || Array.isArray(status)) {
-      throw new Error('msb inspect returned an invalid status object')
+      throw new Error('msb status returned an invalid status object')
     }
     const state = (status as { status?: unknown }).status
     if (state !== RUNNING_STATE) {
@@ -74,7 +99,7 @@ export class MicrosandboxRuntime
     }
   }
 
-  async execLine(
+  override async execLine(
     line: string,
     stdin: Uint8Array | null,
     env: Record<string, string>,
@@ -84,41 +109,92 @@ export class MicrosandboxRuntime
     return this.execArgv(['sh', '-c', line], stdin, env, cwd, signal)
   }
 
-  async runProcess(request: ProcessExecution): Promise<RunResult> {
-    await this.ensureConnected(request.signal)
-    const refusal = await this.admitMounts(request.signal)
+  override async runProcess(
+    _engine: undefined,
+    _paths: PathSpec[],
+    texts: string[],
+    ctx: Context,
+  ): Promise<RunResult> {
+    ctx.signal?.throwIfAborted()
+    const refusal = await this.admitMounts(ctx.signal)
     if (refusal !== null) return refusal
     return this.execArgv(
-      request.argv,
-      request.stdin,
-      { ...this.config.env, ...request.env },
-      request.cwd.virtual,
-      request.signal,
+      texts,
+      ctx.stdin === null ? null : await materialize(ctx.stdin),
+      { ...this.config.env, ...ctx.env },
+      ctx.cwd.virtual,
+      ctx.signal,
     )
   }
 
-  private async execArgv(
+  /** Admit mounts, then validate the guest immediately before execution. */
+  override async runLine(
+    _engine: undefined,
+    _paths: PathSpec[],
+    _texts: string[],
+    ctx: Context,
+  ): Promise<RunResult> {
+    ctx.signal?.throwIfAborted()
+    const refusal = await this.admitMounts(ctx.signal)
+    if (refusal !== null) return refusal
+    const line = ctx.flags.c
+    return this.execLine(
+      typeof line === 'string' ? line : '',
+      ctx.stdin === null ? null : await materialize(ctx.stdin),
+      { ...this.config.env, ...ctx.env },
+      ctx.cwd.virtual,
+      ctx.signal,
+    )
+  }
+
+  protected override async execArgv(
     argv: readonly string[],
     stdin: Uint8Array | null,
     env: Record<string, string>,
     cwd: string,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    const args = ['exec', this.config.sandbox, '--quiet', '--no-tty', '-w', cwd]
+    // Released msb can still auto-start a guest stopped after this probe.
+    signal?.throwIfAborted()
+    await this.connect(signal)
+    signal?.throwIfAborted()
+    const args = ['exec', this.config.sandbox, '--quiet', '--no-tty', '-w', '/']
     for (const [key, value] of Object.entries(env)) args.push('-e', `${key}=${value}`)
     // `--` ends the flags: the command is a trailing var arg, so a
     // line starting with a dash would otherwise parse as one.
-    args.push('--', ...argv)
+    // Released agents block their event loop during chdir into passive SSHFS.
+    // Defer it until the shell starts, so the agent can serve the mount pipe.
+    args.push('--', 'sh', '-c', PRELUDE, 'sh', cwd, ...argv)
     const result = await this.microsandbox(args, stdin, signal)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
 
   override async openPipe(command: string): Promise<SandboxPipe> {
+    await this.connect()
     const child = spawn(
       'msb',
-      ['exec', this.config.sandbox, '--quiet', '--no-tty', '--stream', '--', 'sh', '-c', command],
-      { stdio: ['pipe', 'pipe', 'ignore'] },
+      [
+        'exec',
+        this.config.sandbox,
+        '--quiet',
+        '--no-tty',
+        '--stream',
+        '-w',
+        '/',
+        '--',
+        'sh',
+        '-c',
+        command,
+      ],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
     )
+    let diagnostics = Buffer.alloc(0)
+    child.stderr.on('data', (chunk: Buffer) => {
+      diagnostics = Buffer.concat([diagnostics, chunk]).subarray(-16384)
+    })
+    child.stderr.on('error', (error: Error) => {
+      console.debug('microsandbox: reading mount pipe stderr failed', error)
+    })
     child.stdin.on('error', (err) => {
       console.debug(`microsandbox: the pipe for ${command} closed`, err)
     })
@@ -134,9 +210,31 @@ export class MicrosandboxRuntime
     return {
       reader: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
       writer: child.stdin,
+      diagnostic: async () => {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        try {
+          await Promise.race([
+            exited,
+            new Promise<void>((resolve) => {
+              timer = setTimeout(resolve, 1000)
+            }),
+          ])
+        } finally {
+          clearTimeout(timer)
+        }
+        return diagnostics.toString('utf8').trim()
+      },
       stop: async () => {
         if (child.exitCode === null && child.signalCode === null) child.kill()
-        await exited
+        const timer = setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+        }, 5000)
+        timer.unref()
+        try {
+          await exited
+        } finally {
+          clearTimeout(timer)
+        }
       },
     }
   }

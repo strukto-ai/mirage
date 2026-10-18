@@ -163,6 +163,9 @@ class RemoteSandbox(Runtime[None], LineExecutorMixin[None]):
 
     async def _prepare(self) -> RunResult | None:
         await self._ensure_connected()
+        return await self._admit_mounts()
+
+    async def _admit_mounts(self) -> RunResult | None:
         if self._mounts is None:
             return None
         refusal = await self._mounts.admit(self._binding)

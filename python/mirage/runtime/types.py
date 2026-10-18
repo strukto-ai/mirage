@@ -332,11 +332,14 @@ class SandboxPipe:
         reader (ByteReader): what the command writes.
         writer (PipeWriter): what the command reads.
         stop (Callable[[], Awaitable[None]]): ends the command.
+        diagnostic (Callable[[], Awaitable[str]] | None): bounded startup diagnostics,
+            when available.
     """
 
     reader: ByteReader
     writer: PipeWriter
     stop: Callable[[], Awaitable[None]]
+    diagnostic: Callable[[], Awaitable[str]] | None = None
 
 
 # What a caller asks of a runtime: run code in its language (``code``),

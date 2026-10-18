@@ -564,6 +564,35 @@ describe('SandboxMounts', () => {
     expect(sandbox.stopped).toEqual(['/data', '/my notes'])
   })
 
+  it('keeps pipe diagnostics when the guest goes away during a mount', async () => {
+    class UnavailableSandbox extends FakeSandbox {
+      override execLine(
+        line: string,
+        stdin: Uint8Array | null,
+        env: Record<string, string>,
+        cwd: string,
+      ) {
+        if (this.pipes.length > 0 && line === 'cat /proc/mounts')
+          return Promise.reject(new Error('guest unavailable'))
+        return super.execLine(line, stdin, env, cwd)
+      }
+
+      override async openPipe(command: string) {
+        const pipe = await super.openPipe(command)
+        pipe.diagnostic = () => Promise.resolve('CLI refused: sandbox is not running')
+        return pipe
+      }
+    }
+    const ws = await workspace(new UnavailableSandbox('ssh', [], true, false))
+    try {
+      const result = await ws.shell('python3 job.py')
+      expect(result.exitCode).toBe(1)
+      expect(DEC.decode(result.stderr)).toContain('CLI refused: sandbox is not running')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('says why a server that fails did', async () => {
     registerPipeServer((files, session) => ({
       ...drain(files, session),

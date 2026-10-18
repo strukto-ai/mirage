@@ -1,0 +1,17 @@
+mode: exec
+mounts:
+  /data:
+    vfs: ram
+    mode: EXEC
+    backend: fuse
+    mountpoint: /data
+  /e2e-guest:
+    vfs: ram
+    mode: EXEC
+    backend: fuse
+    mountpoint: /e2e-guest
+  /e2e-guest/ro:
+    vfs: disk
+    config:
+      root: /tmp/e2e-ro
+    mode: READ

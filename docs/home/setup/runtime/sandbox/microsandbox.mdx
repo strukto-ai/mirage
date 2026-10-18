@@ -21,8 +21,9 @@ to an OCI registry and used by Microsandbox:
 msb create my-registry/mirage-fuse:latest --name mirage-box
 ```
 
-Guest FUSE was verified with Microsandbox 0.7.8 on macOS Apple Silicon,
-using its Linux aarch64 guest kernel. `/dev/fuse` was present and usable
+The integration was verified with released Microsandbox 0.7.8 on macOS
+Apple Silicon, using its stock CLI, firmware and Linux aarch64 guest agent.
+No local Microsandbox patches are required. `/dev/fuse` was present and usable
 as root. If programs run as another user, configure that user's device
 and mount permissions inside the guest.
 
@@ -110,8 +111,8 @@ Mirage holds an `msb exec --stream` pipe open for passive `sshfs`, which
 preserves SFTP bytes without a terminal. This serves files from the host
 to the guest; Microsandbox's separate native SSH/SFTP interfaces serve
 the guest's files to SSH clients. The mount mode needs no SSH listener,
-authorized key, or SSH daemon. `ssh` and `both` reserve the sandbox for
-the first session they serve until the runtime closes. Closing unmounts
+authorized key, or SSH daemon. Each `ssh` or `both` runtime instance serves
+only its first session until it closes. Closing unmounts
 host-served prefixes and leaves the sandbox running.
 
 For `fuse`, put a `sandbox.yaml` in the image or copy it into the sandbox:
@@ -139,14 +140,34 @@ do not automatically apply to guest file operations.
 
 ## Notes
 
-- The first command checks `msb inspect --format json` and requires `Running`.
+- Each command checks `msb status NAME --format json` and requires `Running`.
+  Probes time out after ten seconds; cancellation stops the probe process too.
+- Released `msb exec` can automatically start a stopped guest. Mirage refuses
+  guests already stopped when checked, but if the guest stops between the
+  status check and execution, the CLI may start it again. Avoid stopping or
+  restarting the guest while Mirage is using it. This race remains until a
+  released CLI offers execution without automatic startup.
 - Commands preserve stdin, stdout, stderr, exit status, environment and cwd.
-  Process requests pass argument arrays directly, without shell expansion.
+  Process arguments and the working directory are passed as separate arguments,
+  not interpolated into shell code.
+- As a temporary workaround for released agents blocking during startup in an
+  SSHFS directory, Mirage starts a shell in `/`, changes to the requested
+  directory inside that shell, then replaces it with the requested program.
+  The guest needs a POSIX `sh`; a failed directory change stops execution.
+  This delayed-`cd` workaround can be removed once nonblocking guest startup
+  is released and required.
+- Passive SSHFS symlink handling is explicit; Mirage does not pretend to be
+  OpenSSH or change the SSH identification banner.
 - Closing the runtime leaves the user's sandbox running.
 - Each sandbox shares files and processes across its commands. Use a
   separate sandbox per tenant.
-- A Mirage timeout cancels the host CLI call; do not rely on it to kill
-  every guest process. Use Microsandbox's own limits when required.
+- Environment variables passed with `-e` are visible in the host's process
+  arguments. Do not pass secrets this way on a host shared with untrusted users.
+- Mount startup errors retain a bounded tail of CLI stderr. Closing a mount
+  pipe escalates to a forced kill after five seconds if the CLI does not exit.
+- A Mirage timeout cancels the host CLI call. The guest agent cleans up that
+  connection's commands; kernel-blocked filesystem cleanup may take longer.
+  Use Microsandbox's own limits when required.
 
 ## Real guest checks
 
@@ -186,3 +207,35 @@ INTEG_RUNTIMES=microsandbox MIRAGE_INTEG_MICROSANDBOX_SANDBOX=mirage-box \
 INTEG_RUNTIMES=microsandbox MIRAGE_INTEG_MICROSANDBOX_SANDBOX=mirage-box \
   pnpm --dir typescript --filter @struktoai/mirage-integ run runtime sandbox
 ```
+
+The extended live matrix covers `fuse`, `ssh` and `both`, including mounted
+working directories, symlinks, binary files, seeking, truncation, open files
+across rename/unlink, concurrent file operations, session rules and cleanup.
+Use dedicated guests: setup installs packages and seeds test files. The runners
+stop and restart the guests and temporarily hide `/dev/fuse` to check mount
+errors, restoring the device afterward.
+Build the Node packages first, then run from the repository root:
+
+```bash
+uv build --wheel python --out-dir /tmp/mirage-wheels
+msb create python:3.12-slim-bookworm --name mirage-e2e-python --memory 1G
+msb create python:3.12-slim-bookworm --name mirage-e2e-typescript --memory 1G
+bash integ/runtime/microsandbox/setup.sh mirage-e2e-python /tmp/mirage-wheels/mirage_ai-0.0.7a2-py3-none-any.whl
+bash integ/runtime/microsandbox/setup.sh mirage-e2e-typescript /tmp/mirage-wheels/mirage_ai-0.0.7a2-py3-none-any.whl
+MIRAGE_E2E_SANDBOX=mirage-e2e-python python/.venv/bin/python integ/runtime/microsandbox/live.py
+MIRAGE_E2E_SANDBOX=mirage-e2e-typescript integ/node_modules/.bin/tsx integ/runtime/microsandbox/live.ts
+msb remove --force mirage-e2e-python
+msb remove --force mirage-e2e-typescript
+```
+
+Use the wheel filename produced by your checkout. The runners leave their
+guests running; the final two commands explicitly remove the test guests.
+If the checkout's `mirage-rs` dependency is not published yet, build its
+guest-compatible wheel from `rust/python` on Linux and pass it as the third
+argument to `setup.sh` before running these checks.
+
+The matrix also checks cancellation, forced pipe cleanup, bounded startup
+diagnostics, storage-lock contention, and refusal of guests stopped before
+the status check. It deliberately stops a guest between the check and launch
+to demonstrate the released CLI's automatic-start race. Use the released CLI,
+firmware and guest agent without local build overrides for these checks.

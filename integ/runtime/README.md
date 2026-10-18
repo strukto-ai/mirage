@@ -139,5 +139,31 @@ bash integ/runtime/cli.sh python/.venv/bin/mirage "node typescript/packages/cli/
 | `S3_ENDPOINT`                                | `s3` variants and `backend/` on the typescript host |
 
 With `INTEG_RUNTIME_STRICT=1` an unmet requirement fails instead of
-skipping. `MIRAGE_INTEG_BOX_MOUNTS` says the docker or e2b box has sshfs,
-FUSE, and a mount of its own at `/boxdata` holding `own.txt` (`box`).
+skipping. `MIRAGE_INTEG_BOX_MOUNTS` says the docker, e2b or microsandbox
+guest has sshfs, FUSE, and a mount of its own at `/boxdata` holding `own.txt`
+(`box`).
+
+## Microsandbox live matrix
+
+`microsandbox/setup.sh` provisions a dedicated running guest using a locally
+built Mirage wheel. If its `mirage-rs` dependency has not been published,
+pass a matching guest-compatible native wheel as the third argument; build it
+from this checkout's `rust/python` on Linux. `microsandbox/live.py` and
+`microsandbox/live.ts` exercise
+`fuse`, `ssh`, and `both`, including mounted cwd, symlinks, binary I/O, session
+rules, cancellation, stopped guests, storage-lock contention, and cleanup.
+They stop/restart the guest and temporarily hide `/dev/fuse`; do not use a
+guest containing work you want to keep.
+
+From the repository root, after provisioning each guest:
+
+```bash
+MIRAGE_E2E_SANDBOX=python-box python/.venv/bin/python integ/runtime/microsandbox/live.py
+MIRAGE_E2E_SANDBOX=typescript-box integ/node_modules/.bin/tsx integ/runtime/microsandbox/live.ts
+```
+
+See `docs/home/setup/runtime/sandbox/microsandbox.mdx` for setup and guest
+removal. These runners work with released Microsandbox 0.7.8, using its
+stock CLI, firmware and guest agent. They exercise the delayed-`cd` workaround
+and demonstrate the documented automatic-start race if a guest stops between
+the running-state check and execution. Hosted CI does not provision these guests.

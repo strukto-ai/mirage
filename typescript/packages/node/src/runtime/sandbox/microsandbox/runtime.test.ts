@@ -45,22 +45,26 @@ describe('MicrosandboxRuntime', () => {
     try {
       const runtime = buildRuntime('microsandbox', { config: { sandbox: 'box' } })
       await expect(
-        runtime.execute({
-          kind: 'shell',
-          line: 'touch /must-not-exist',
-          cwd: PathSpec.fromStrPath('/'),
-          env: {},
-          stdin: null,
-        }),
+        runtime.execute(
+          [],
+          [],
+          {
+            flags: { c: 'touch /must-not-exist' },
+            cwd: PathSpec.fromStrPath('/'),
+            env: {},
+            stdin: null,
+          },
+          { kind: 'line' },
+        ),
       ).rejects.toThrow(message)
       expect(invoke).toHaveBeenCalledOnce()
-      expect(invoke.mock.calls[0]?.[2]).toEqual(['inspect', 'box', '--format', 'json'])
+      expect(invoke.mock.calls[0]?.[2]).toEqual(['status', 'box', '--format', 'json'])
     } finally {
       invoke.mockRestore()
     }
   })
 
-  it('preserves the inspect CLI error', async () => {
+  it('preserves the status CLI error', async () => {
     const invoke = vi.spyOn(cli, 'runCli').mockResolvedValue({
       stdout: new Uint8Array(),
       stderr: ENC.encode('sandbox not found'),
@@ -89,35 +93,36 @@ describe('MicrosandboxRuntime', () => {
   })
 
   it('maps process requests to the msb CLI contract', async () => {
-    const invoke = vi
-      .spyOn(cli, 'runCli')
-      .mockResolvedValueOnce({
-        stdout: ENC.encode('{"status":"Running"}'),
-        stderr: new Uint8Array(),
-        code: 0,
-      })
-      .mockResolvedValueOnce({
+    const invoke = vi.spyOn(cli, 'runCli').mockImplementation((_exe, _hint, args) => {
+      if (args[0] === 'status')
+        return Promise.resolve({
+          stdout: ENC.encode('{"status":"Running"}'),
+          stderr: new Uint8Array(),
+          code: 0,
+        })
+      return Promise.resolve({
         stdout: ENC.encode('output'),
         stderr: ENC.encode('diagnostic'),
         code: 7,
       })
+    })
     try {
       const runtime = buildRuntime('microsandbox', {
         config: { sandbox: 'box', env: { MARK: 'config' } },
       })
       const words = ['python3', 'a b', '$(literal)', '', '--flag'] as const
       const input = ENC.encode('input')
-      const result = await runtime.execute({
-        kind: 'process',
-        argv: words,
-        cwd: PathSpec.fromStrPath('/work'),
-        env: { MARK: 'request' },
-        stdin: input,
-      })
+      const result = await runtime.execute(
+        [],
+        words,
+        { flags: {}, cwd: PathSpec.fromStrPath('/work'), env: { MARK: 'request' }, stdin: input },
+        { kind: 'process' },
+      )
       expect(
-        invoke.mock.calls.map(([executable, _hint, args, stdin]) => [executable, args, stdin]),
+        invoke.mock.calls
+          .filter(([, , args]) => args[0] === 'exec' && args[1] === 'box')
+          .map(([executable, _hint, args, stdin]) => [executable, args, stdin]),
       ).toEqual([
-        ['msb', ['inspect', 'box', '--format', 'json'], null],
         [
           'msb',
           [
@@ -126,10 +131,15 @@ describe('MicrosandboxRuntime', () => {
             '--quiet',
             '--no-tty',
             '-w',
-            '/work',
+            '/',
             '-e',
             'MARK=request',
             '--',
+            'sh',
+            '-c',
+            'CDPATH= cd -- "$1" && shift && exec "$@"',
+            'sh',
+            '/work',
             ...words,
           ],
           input,
@@ -139,6 +149,56 @@ describe('MicrosandboxRuntime', () => {
       expect(DEC.decode(result.stderr)).toBe('diagnostic')
       expect(result.exitCode).toBe(7)
     } finally {
+      invoke.mockRestore()
+    }
+  })
+
+  it.each(['initial', 'revalidation'] as const)('cancels the actual %s probe', async (phase) => {
+    let probeSignal: AbortSignal | undefined
+    let started: () => void = () => undefined
+    const probing = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const invoke = vi
+      .spyOn(cli, 'runCli')
+      .mockImplementation((_exe, _hint, _args, _stdin, options) => {
+        probeSignal = options?.signal
+        started()
+        return new Promise((_resolve, reject) => {
+          probeSignal?.addEventListener(
+            'abort',
+            () => {
+              reject(new DOMException('probe aborted', 'AbortError'))
+            },
+            { once: true },
+          )
+        })
+      })
+    const controller = new AbortController()
+    try {
+      const runtime = new MicrosandboxRuntime({ config: { sandbox: 'box' } })
+      const pending =
+        phase === 'initial'
+          ? runtime.execute(
+              [],
+              ['true'],
+              {
+                flags: {},
+                cwd: PathSpec.fromStrPath('/'),
+                env: {},
+                stdin: null,
+                signal: controller.signal,
+              },
+              { kind: 'process' },
+            )
+          : runtime.execLine('true', null, {}, '/', controller.signal)
+      const refused = expect(pending).rejects.toThrow()
+      await probing
+      controller.abort()
+      expect(probeSignal?.aborted).toBe(true)
+      await refused
+    } finally {
+      controller.abort()
       invoke.mockRestore()
     }
   })
@@ -207,13 +267,12 @@ describe.skipIf(!MOUNT_SANDBOX)('real guest workspace mounts', () => {
 it.skipIf(!STOPPED_SANDBOX)('does not start a real stopped guest', async () => {
   const runtime = new MicrosandboxRuntime({ config: { sandbox: STOPPED_SANDBOX } })
   await expect(
-    runtime.execute({
-      kind: 'shell',
-      line: 'echo must-not-run',
-      cwd: PathSpec.fromStrPath('/'),
-      env: {},
-      stdin: null,
-    }),
+    runtime.execute(
+      [],
+      [],
+      { flags: { c: 'echo must-not-run' }, cwd: PathSpec.fromStrPath('/'), env: {}, stdin: null },
+      { kind: 'line' },
+    ),
   ).rejects.toThrow('status: Stopped')
   await expect(
     new MicrosandboxRuntime({ config: { sandbox: STOPPED_SANDBOX } }).connect(),
@@ -229,35 +288,33 @@ describe.skipIf(!SANDBOX)('MicrosandboxRuntime real guest', () => {
     const cwd = PathSpec.fromStrPath('/data')
     const payload = new Uint8Array([105, 110, 112, 117, 116, 0, 255, 13, 10])
     const words = ['a b', '$(echo literal)', '', '--flag']
-    const result = await runtime.execute({
-      kind: 'process',
-      argv: [
+    const result = await runtime.execute(
+      [],
+      [
         'python3',
         '-c',
         'import json,os,sys; sys.stdout.buffer.write(sys.stdin.buffer.read()); ' +
           "sys.stderr.write(json.dumps([os.getcwd(),os.environ['MARK'],sys.argv[1:]])); sys.exit(7)",
         ...words,
       ],
-      cwd,
-      env: { MARK: 'request' },
-      stdin: payload,
-    })
-    expect(result.stdout).toEqual(payload)
+      { flags: {}, cwd: cwd, env: { MARK: 'request' }, stdin: payload },
+      { kind: 'process' },
+    )
+    expect(new Uint8Array(result.stdout)).toEqual(payload)
     expect(JSON.parse(DEC.decode(result.stderr))).toEqual(['/data', 'request', words])
     expect(result.exitCode).toBe(7)
-    const shell = await runtime.execute({
-      kind: 'shell',
-      line: 'printf "%s" "$MARK"; pwd',
-      cwd,
-      env: {},
-      stdin: null,
-    })
+    const shell = await runtime.execute(
+      [],
+      [],
+      { flags: { c: 'printf "%s" "$MARK"; pwd' }, cwd: cwd, env: {}, stdin: null },
+      { kind: 'line' },
+    )
     expect(DEC.decode(shell.stdout)).toBe('config/data\n')
     expect(DEC.decode(shell.stderr)).toBe('')
     expect(shell.exitCode).toBe(0)
-    const files = await runtime.execute({
-      kind: 'process',
-      argv: [
+    const files = await runtime.execute(
+      [],
+      [
         'python3',
         '-c',
         'from pathlib import Path; ' +
@@ -267,10 +324,9 @@ describe.skipIf(!SANDBOX)('MicrosandboxRuntime real guest', () => {
           "assert Path('typescript.txt').read_text() == 'typescript adapter\\n'; " +
           "print('Mirage FUSE read/write passed')",
       ],
-      cwd,
-      env: {},
-      stdin: null,
-    })
+      { flags: {}, cwd: cwd, env: {}, stdin: null },
+      { kind: 'process' },
+    )
     expect(DEC.decode(files.stdout)).toBe('Mirage FUSE read/write passed\n')
     expect(DEC.decode(files.stderr)).toBe('')
     expect(files.exitCode).toBe(0)

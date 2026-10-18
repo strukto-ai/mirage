@@ -17,6 +17,8 @@ export const MICROSANDBOX_CLI_HINT =
   'start the sandbox before connecting'
 
 export const RUNNING_STATE = 'Running'
+export const INSPECT_TIMEOUT_SECONDS = 10
+export const PRELUDE = 'CDPATH= cd -- "$1" && shift && exec "$@"'
 
 /** Explain why the configured sandbox cannot take a command. */
 export function notRunningHint(sandbox: string, state: string): string {

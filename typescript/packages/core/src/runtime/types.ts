@@ -218,6 +218,8 @@ export interface SandboxPipe {
   readonly writer: PipeWriter
   /** Ends the command. */
   stop(): Promise<void>
+  /** Bounded startup diagnostics, when available. */
+  diagnostic?(): Promise<string>
 }
 
 /** Outcome of one interpreter execution. */

@@ -412,15 +412,49 @@ class SandboxMounts:
         self._served[prefix] = (pipe, task, server)
         try:
             deadline = asyncio.get_running_loop().time() + MOUNT_WAIT_SECONDS
-            while (await self._table()).get(prefix) != "fuse.sshfs":
+            while True:
+                try:
+                    if (await self._table()).get(prefix) == "fuse.sshfs":
+                        return
+                except Exception as error:
+                    diagnostic = (
+                        await pipe.diagnostic()
+                        if pipe.diagnostic is not None
+                        else ""
+                    )
+                    if diagnostic:
+                        raise RuntimeError(
+                            f"{self._runtime}: sshfs did not mount {prefix}: "
+                            f"{diagnostic}"
+                        ) from error
+                    raise
                 if task.done() or asyncio.get_running_loop().time() > deadline:
-                    written = await self._run(f"cat {log}")
                     failed = (
                         task.exception()
                         if task.done() and not task.cancelled()
                         else None
                     )
-                    reason = said(written.stdout) or "no word from sshfs"
+                    diagnostic = (
+                        await pipe.diagnostic()
+                        if pipe.diagnostic is not None
+                        else ""
+                    )
+                    reason = diagnostic
+                    try:
+                        written = await self._run(f"cat {log}")
+                        if log_text := said(written.stdout):
+                            reason = log_text + (
+                                f"; CLI: {diagnostic}" if diagnostic else ""
+                            )
+                    except Exception as error:
+                        logger.debug(
+                            "%s: reading the sshfs log failed",
+                            self._runtime,
+                            exc_info=True,
+                        )
+                        if not reason:
+                            reason = f"cannot read the sshfs log: {error}"
+                    reason = reason or "no word from sshfs"
                     if failed is not None:
                         reason += f"; the SFTP server failed: {failed}"
                     raise RuntimeError(
