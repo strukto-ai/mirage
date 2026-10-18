@@ -43,6 +43,7 @@ interface Replace {
   anchor: string | null
 }
 type Operation = Plain | End | Suffix | Replace
+type Reply = boolean | number | null | number[] | number[][]
 
 function* encodedUnits(text: string): Generator<Uint8Array> {
   let buffer = new Uint8Array(16 * 1024)
@@ -102,16 +103,16 @@ export class Glob {
     return reuse
   }
 
-  private run(name: string, operation: Operation): unknown {
+  private run(name: string, operation: Operation): Reply {
     if (!this.prepare(name, operation)) {
       for (const part of encodedUnits(name)) this.stream.feed(part)
     }
     let out = decoder.decode(this.stream.finish())
     while (this.stream.busy()) out += decoder.decode(this.stream.drain())
-    return JSON.parse(out)
+    return JSON.parse(out) as Reply
   }
 
-  private async runAsync(name: string, operation: Operation): Promise<unknown> {
+  private async runAsync(name: string, operation: Operation): Promise<Reply> {
     const budget = this.budget
     if (!this.prepare(name, operation)) {
       for (const part of encodedUnits(name)) {
@@ -126,7 +127,7 @@ export class Glob {
       if (pending !== undefined) await pending
       out += decoder.decode(this.stream.drain())
     }
-    return JSON.parse(out)
+    return JSON.parse(out) as Reply
   }
 
   matches(name: string): boolean {
