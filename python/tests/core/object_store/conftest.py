@@ -76,95 +76,107 @@ def spec(mount_path: str) -> PathSpec:
     )
 
 
+def key_prefix_of(accessor: FakeAccessor) -> str:
+    return accessor.key_prefix
+
+
+async def list_children(
+    conn: FakeStore, pfx: str
+) -> AsyncIterator[ChildEntry]:
+    for key in conn.under(pfx):
+        if key == pfx:
+            yield ChildEntry(key=key, kind="marker")
+            continue
+        relative = key[len(pfx) :].rstrip("/")
+        slash = relative.find("/")
+        if slash == -1 and not key.endswith("/"):
+            yield ChildEntry(
+                key=key,
+                kind="f",
+                size=len(conn.objects[key]),
+                modified=MODIFIED,
+            )
+        else:
+            child = pfx + (relative[:slash] if slash != -1 else relative)
+            yield ChildEntry(key=child, kind="d")
+
+
+async def list_tree(conn: FakeStore, pfx: str) -> AsyncIterator[TreeEntry]:
+    for key in conn.under(pfx):
+        yield TreeEntry(key=key, size=len(conn.objects[key]))
+
+
+async def list_subtree(conn: FakeStore, stem: str) -> AsyncIterator[TreeEntry]:
+    for key in conn.under(""):
+        if not stem or key == stem or key.startswith(stem + "/"):
+            yield TreeEntry(key=key, size=len(conn.objects[key]))
+
+
+async def head(conn: FakeStore, key: str) -> ObjectMeta | None:
+    if key not in conn.objects:
+        return None
+    return replace(fake_meta(key, conn.objects[key]), modified=MODIFIED)
+
+
+async def get(conn: FakeStore, key: str) -> bytes | None:
+    return conn.objects.get(key)
+
+
+async def put(conn: FakeStore, key: str, data: bytes) -> ObjectMeta | None:
+    conn.objects[key] = data
+    conn.puts.append((key, data))
+    return fake_meta(key, data)
+
+
+async def delete_file(conn: FakeStore, key: str) -> None:
+    conn.objects.pop(key, None)
+    conn.deletes.append(key)
+
+
+async def delete_prefix(conn: FakeStore, pfx: str) -> None:
+    for key in conn.under(pfx):
+        conn.objects.pop(key)
+        conn.deletes.append(key)
+
+
+async def move_file(conn: FakeStore, src_key: str, dst_key: str) -> bool:
+    if src_key not in conn.objects:
+        return False
+    conn.objects[dst_key] = conn.objects.pop(src_key)
+    return True
+
+
+async def move_prefix(conn: FakeStore, src_pfx: str, dst_pfx: str) -> bool:
+    keys = conn.under(src_pfx)
+    if not keys:
+        return False
+    for key in keys:
+        conn.objects[dst_pfx + key[len(src_pfx) :]] = conn.objects.pop(key)
+    return True
+
+
+async def copy_file(conn: FakeStore, src_key: str, dst_key: str) -> bool:
+    if src_key not in conn.objects:
+        return False
+    conn.objects[dst_key] = conn.objects[src_key]
+    return True
+
+
+async def probe_prefix(conn: FakeStore, pfx: str) -> bool:
+    return bool(conn.under(pfx))
+
+
+def is_not_found(exc: Exception) -> bool:
+    return isinstance(exc, KeyError)
+
+
 def make_driver(
     store: FakeStore,
 ) -> ObjectStoreDriver[FakeAccessor, FakeStore]:
-    def key_prefix_of(accessor: FakeAccessor) -> str:
-        return accessor.key_prefix
-
     @asynccontextmanager
     async def connect(accessor: FakeAccessor) -> AsyncIterator[FakeStore]:
         store.connects += 1
         yield store
-
-    async def list_children(
-        conn: FakeStore, pfx: str
-    ) -> AsyncIterator[ChildEntry]:
-        for key in conn.under(pfx):
-            if key == pfx:
-                yield ChildEntry(key=key, kind="marker")
-                continue
-            relative = key[len(pfx) :].rstrip("/")
-            slash = relative.find("/")
-            if slash == -1 and not key.endswith("/"):
-                yield ChildEntry(
-                    key=key,
-                    kind="f",
-                    size=len(conn.objects[key]),
-                    modified=MODIFIED,
-                )
-            else:
-                child = pfx + (relative[:slash] if slash != -1 else relative)
-                yield ChildEntry(key=child, kind="d")
-
-    async def list_tree(conn: FakeStore, pfx: str) -> AsyncIterator[TreeEntry]:
-        for key in conn.under(pfx):
-            yield TreeEntry(key=key, size=len(conn.objects[key]))
-
-    async def list_subtree(
-        conn: FakeStore, stem: str
-    ) -> AsyncIterator[TreeEntry]:
-        for key in conn.under(""):
-            if not stem or key == stem or key.startswith(stem + "/"):
-                yield TreeEntry(key=key, size=len(conn.objects[key]))
-
-    async def head(conn: FakeStore, key: str) -> ObjectMeta | None:
-        if key not in conn.objects:
-            return None
-        return replace(fake_meta(key, conn.objects[key]), modified=MODIFIED)
-
-    async def get(conn: FakeStore, key: str) -> bytes | None:
-        return conn.objects.get(key)
-
-    async def put(conn: FakeStore, key: str, data: bytes) -> ObjectMeta | None:
-        conn.objects[key] = data
-        conn.puts.append((key, data))
-        return fake_meta(key, data)
-
-    async def delete_file(conn: FakeStore, key: str) -> None:
-        conn.objects.pop(key, None)
-        conn.deletes.append(key)
-
-    async def delete_prefix(conn: FakeStore, pfx: str) -> None:
-        for key in conn.under(pfx):
-            conn.objects.pop(key)
-            conn.deletes.append(key)
-
-    async def move_file(conn: FakeStore, src_key: str, dst_key: str) -> bool:
-        if src_key not in conn.objects:
-            return False
-        conn.objects[dst_key] = conn.objects.pop(src_key)
-        return True
-
-    async def move_prefix(conn: FakeStore, src_pfx: str, dst_pfx: str) -> bool:
-        keys = conn.under(src_pfx)
-        if not keys:
-            return False
-        for key in keys:
-            conn.objects[dst_pfx + key[len(src_pfx) :]] = conn.objects.pop(key)
-        return True
-
-    async def copy_file(conn: FakeStore, src_key: str, dst_key: str) -> bool:
-        if src_key not in conn.objects:
-            return False
-        conn.objects[dst_key] = conn.objects[src_key]
-        return True
-
-    async def probe_prefix(conn: FakeStore, pfx: str) -> bool:
-        return bool(conn.under(pfx))
-
-    def is_not_found(exc: Exception) -> bool:
-        return isinstance(exc, KeyError)
 
     return ObjectStoreDriver(
         vfs="fake",
