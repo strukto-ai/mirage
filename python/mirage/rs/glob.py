@@ -12,19 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from __future__ import annotations
-
 import json
 import struct
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Literal, TypeAlias, TypedDict, cast
+from typing import Literal, TypeAlias, TypedDict, cast
 
 from mirage_rs import Stream
 
 from mirage.io.yield_budget import YieldBudget
-
-if TYPE_CHECKING:
-    from mirage.types import JsonValue
 
 
 class _Plain(TypedDict):
@@ -49,6 +44,7 @@ class _Replace(TypedDict):
 
 
 _Operation: TypeAlias = _Plain | _End | _Suffix | _Replace
+_Reply: TypeAlias = bool | int | None | list[int] | list[list[int]]
 
 
 def _encoded_units(text: str) -> Iterator[bytes]:
@@ -57,14 +53,14 @@ def _encoded_units(text: str) -> Iterator[bytes]:
         yield struct.pack("<" + "I" * len(part), *(ord(ch) for ch in part))
 
 
-def _position(result: JsonValue) -> int | None:
+def _position(result: _Reply) -> int | None:
     assert result is None or (
         isinstance(result, int) and not isinstance(result, bool)
     )
     return result
 
 
-def _text(result: JsonValue) -> str:
+def _text(result: _Reply) -> str:
     assert isinstance(result, list)
     assert all(
         isinstance(unit, int) and not isinstance(unit, bool) for unit in result
@@ -120,7 +116,7 @@ class Glob:
         self._subject = name
         return stream
 
-    def _run(self, name: str, operation: _Operation) -> JsonValue:
+    def _run(self, name: str, operation: _Operation) -> _Reply:
         reuse = self._subject == name
         stream = self._prepare(name, operation)
         if not reuse:
@@ -129,9 +125,9 @@ class Glob:
         out = bytearray(stream.finish())
         while stream.busy():
             out.extend(stream.drain())
-        return cast("JsonValue", json.loads(out))
+        return cast(_Reply, json.loads(out))
 
-    async def _run_async(self, name: str, operation: _Operation) -> JsonValue:
+    async def _run_async(self, name: str, operation: _Operation) -> _Reply:
         reuse = self._subject == name
         stream = self._prepare(name, operation)
         try:
@@ -144,7 +140,7 @@ class Glob:
             while stream.busy():
                 await budget.run()
                 out.extend(stream.drain())
-            return cast("JsonValue", json.loads(out))
+            return cast(_Reply, json.loads(out))
         finally:
             del stream
 
