@@ -23,6 +23,7 @@ from mirage.cache.index.constants import (
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.workspace.mount.listing import stored_stat
 
 
 @pytest_asyncio.fixture(params=["fake", "redis"])
@@ -1223,6 +1224,99 @@ async def test_authoritative_add_fences_captured_directory_generation(
     monkeypatch.setattr(writer, "_eval_complete", publish_after_write)
     await writer.set_dir("/dir", [("a", old)])
     assert (await writer.list_dir("/dir")).status == LookupStatus.EXPIRED
+
+
+@pytest.mark.asyncio
+async def test_batch_entry_lookup_uses_one_mget(rolling_client, monkeypatch):
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    row = FileStat(name="a", type=FileType.FILE, size=3)
+    await store.put("/dir/a", row)
+    read = MagicMock(wraps=client.get)
+    batch = MagicMock(wraps=client.mget)
+    monkeypatch.setattr(client, "get", read)
+    monkeypatch.setattr(client, "mget", batch)
+    assert await store.get_many([]) == {}
+    assert await store.get_many(["/dir/a", "/dir/missing", "/dir/a"]) == {
+        "/dir/a": row
+    }
+    read.assert_not_called()
+    batch.assert_called_once_with(
+        [
+            prefix + ENTRY_PREFIX + "/dir/a",
+            prefix + ENTRY_PREFIX + "/dir/missing",
+        ]
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("peer_name", ["a", "b"])
+@pytest.mark.parametrize("own_listing", [False, True])
+async def test_delayed_authoritative_add_preserves_a_newer_publication(
+    rolling_client, monkeypatch, peer_name, own_listing
+):
+    client, prefix = rolling_client
+    writer = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    peer = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    old = FileStat(name="a", type=FileType.FILE, size=3, fingerprint="old")
+    new = FileStat(
+        name=peer_name, type=FileType.FILE, size=11, fingerprint="new"
+    )
+    await writer.set_dir("/dir", [("a", old)])
+    if own_listing:
+        await writer.set_dir("/dir/a", [])
+    pipeline = client.pipeline
+    inserted = False
+    listing_key = prefix + CHILDREN_PREFIX + "/dir"
+    generation_key = prefix + "mirage:idx:generation:/dir"
+    expected_listing = None
+    expected_generation = None
+
+    def delayed_pipeline(*args, **kwargs):
+        pipe = pipeline(*args, **kwargs)
+        execute = pipe.execute
+
+        async def execute_after_peer(*args, **kwargs):
+            nonlocal inserted, expected_listing, expected_generation
+            if not inserted and any(
+                str(command[0][0]).lower() == "eval"
+                and command[0][1] == redis_index._ADD_ENTRY
+                for command in pipe.command_stack
+            ):
+                inserted = True
+                captured = await client.get(generation_key)
+                await CacheManager(None, peer, "/dir/", True).keep_created(
+                    PathSpec.from_str_path(f"/{peer_name}"), new
+                )
+                expected_generation = await client.get(generation_key)
+                assert expected_generation != captured
+                assert (await peer.get(f"/dir/{peer_name}")).entry == new
+                expected_listing = await client.get(listing_key)
+            return await execute(*args, **kwargs)
+
+        pipe.execute = execute_after_peer
+        return pipe
+
+    with monkeypatch.context() as patch:
+        patch.setattr(client, "pipeline", delayed_pipeline)
+        await CacheManager(None, writer, "/dir/", True).keep_created(
+            PathSpec.from_str_path("/a"), old
+        )
+    assert inserted
+    assert (await writer.get(f"/dir/{peer_name}")).entry == new
+    listing = await writer.list_dir("/dir")
+    assert listing.entries is None
+    assert listing.partial_entries == ([] if peer_name == "a" else ["/dir/b"])
+    assert listing.version is None
+    assert not listing.window
+    assert await stored_stat(writer, "/dir/a") is None
+    if own_listing:
+        assert (await writer.list_dir("/dir/a")).status == LookupStatus.EXPIRED
+    assert (
+        json.loads(await client.get(listing_key))["expires_at"]
+        == json.loads(expected_listing)["expires_at"]
+    )
+    assert await client.get(generation_key) != expected_generation
 
 
 @pytest.mark.asyncio

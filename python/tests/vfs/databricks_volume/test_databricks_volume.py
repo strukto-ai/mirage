@@ -18,7 +18,6 @@ import pytest
 from pydantic import ValidationError
 
 from mirage import MountMode, Workspace
-from mirage.cache.index import LookupStatus
 from mirage.core.databricks_volume.exists import exists
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.read import read
@@ -291,46 +290,34 @@ async def test_workspace_write_mode_uses_file_write_ops():
 
 
 @pytest.mark.asyncio
-async def test_workspace_write_mode_invalidates_parent_directory_index():
+async def test_workspace_write_mode_preserves_sibling_index_rows():
     files = FakeFiles()
     root = "/Volumes/main/default/agent_files/root"
     seed_directory(files, root)
     ws = Workspace({"/dbx/": make_vfs(files)}, mode=MountMode.WRITE)
     index = ws.mount("/dbx/").index_store
 
-    await index.set_dir(
-        "/dbx",
-        [
-            (
-                "old.txt",
-                FileStat(
-                    name="old.txt",
-                    type=FileType.FILE,
-                    fingerprint="/dbx/old.txt",
-                ),
-            )
-        ],
+    old = FileStat(
+        name="old.txt", type=FileType.FILE, fingerprint="/dbx/old.txt"
     )
+    await index.set_dir("/dbx", [("old.txt", old)])
     assert (await index.list_dir("/dbx")).entries == ["/dbx/old.txt"]
 
     await ws.vfs.write("/dbx/new.txt", b"hello")
-    assert (await index.list_dir("/dbx")).status == (LookupStatus.NOT_FOUND)
+    listing = await index.list_dir("/dbx")
+    assert listing.entries is None
+    assert listing.partial_entries == ["/dbx/old.txt"]
+    assert (await index.get("/dbx/old.txt")).entry == old
 
-    await index.set_dir(
-        "/dbx",
-        [
-            (
-                "new.txt",
-                FileStat(
-                    name="new.txt",
-                    type=FileType.FILE,
-                    fingerprint="/dbx/new.txt",
-                ),
-            )
-        ],
+    new = FileStat(
+        name="new.txt", type=FileType.FILE, fingerprint="/dbx/new.txt"
     )
+    await index.set_dir("/dbx", [("new.txt", new)])
     await ws.vfs.create("/dbx/empty.txt")
-    assert (await index.list_dir("/dbx")).status == (LookupStatus.NOT_FOUND)
+    listing = await index.list_dir("/dbx")
+    assert listing.entries is None
+    assert listing.partial_entries == ["/dbx/new.txt"]
+    assert (await index.get("/dbx/new.txt")).entry == new
 
     await index.set_dir(
         "/dbx",
@@ -346,7 +333,10 @@ async def test_workspace_write_mode_invalidates_parent_directory_index():
         ],
     )
     await ws.vfs.unlink("/dbx/empty.txt")
-    assert (await index.list_dir("/dbx")).status == (LookupStatus.NOT_FOUND)
+    listing = await index.list_dir("/dbx")
+    assert listing.entries is None
+    assert listing.partial_entries == []
+    assert (await index.get("/dbx/empty.txt")).entry is None
 
 
 @pytest.mark.asyncio

@@ -343,19 +343,15 @@ def _answer_paths(result: Any) -> list[str] | None:
     return named
 
 
-async def _fits_read_ahead(
-    mount: MountEntry, path: PathSpec, batched: bool
-) -> bool:
-    """Whether a read-ahead fetches ``path``, asked of the mount's index
-    alone: a file its listing sizes within ``READ_AHEAD_BYTES``, and where
+def _fits_read_ahead(entry: FileStat | None, batched: bool) -> bool:
+    """Whether a read-ahead fetches a retained entry: a file its listing
+    sizes within ``READ_AHEAD_BYTES``, and where
     the store reads a batch, also a file the listing does not size.
 
     Args:
-        mount (MountEntry): the mount serving the path.
-        path (PathSpec): the file, as a virtual path.
+        entry (FileStat | None): the retained index row, if any.
         batched (bool): whether the store reads a batch.
     """
-    entry = (await mount.index.get(path.virtual)).entry
     if entry is not None and entry.type is FileType.DIRECTORY:
         return False
     if entry is None or entry.size is None:
@@ -1217,10 +1213,13 @@ class Dispatcher:
             for mount, manager, paths in batches.values():
                 await mount.ensure_ready()
                 batched = mount.vfs.supports("read_many")
+                entries = await mount.index.get_many(
+                    [p.virtual for p in paths]
+                )
                 wanted = [
                     p
                     for p in paths
-                    if await _fits_read_ahead(mount, p, batched)
+                    if _fits_read_ahead(entries.get(p.virtual), batched)
                     and not await manager.is_cached(p)
                 ]
                 if not wanted:

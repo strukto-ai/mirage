@@ -303,6 +303,7 @@ function holdMutation(cache: RAMFileCacheStore): {
 const FENCED: [string, (view: IndexView) => Promise<unknown>][] = [
   ['replaceIfUnchanged', (view) => view.replaceIfUnchanged('/data/a', JSON.stringify(ROW), ROW)],
   ['get', (view) => view.get('/data/a')],
+  ['getMany', (view) => view.getMany(['/data/a'])],
   ['listDir', (view) => view.listDir('/data')],
   ['put', (view) => view.put('/data/a', ROW)],
   ['setDir', (view) => view.setDir('/data', [['a', ROW]])],
@@ -376,6 +377,52 @@ describe('a lock-held view', () => {
       await cache.close()
     }
   })
+})
+
+it('filters batch paths before and after the read', async () => {
+  const store = new RAMIndexCacheStore()
+  const owned = new Set(['/data/a', '/data/retired', '/data/unrequested'])
+  let enter = (): void => undefined
+  let release = (): void => undefined
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve
+  })
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const getMany = vi.spyOn(store, 'getMany').mockImplementation(async () => {
+    enter()
+    await gate
+    return new Map([
+      ['/data/a', ROW],
+      ['/data/retired', ROW.with({ name: 'retired' })],
+      ['/data/nested/f', ROW.with({ name: 'f' })],
+      ['/data/unrequested', ROW.with({ name: 'unrequested' })],
+    ])
+  })
+  const view = new IndexView(store, new RAMFileCacheStore(), '/data', (key) => owned.has(key))
+  const reading = view.getMany(['/data/a', '/data/nested/f', '/data/retired', '/data/a'])
+  try {
+    expect(await settleWithin(entered, 1000)).toBe('done')
+    expect(getMany.mock.calls).toEqual([[['/data/a', '/data/retired']]])
+    owned.delete('/data/retired')
+    release()
+    expect(await reading).toEqual(new Map([['/data/a', ROW]]))
+  } finally {
+    release()
+    await reading
+  }
+})
+
+it('never forwards an empty or retired batch to the store', async () => {
+  const store = new RAMIndexCacheStore()
+  const getMany = vi.spyOn(store, 'getMany')
+  const cache = new RAMFileCacheStore()
+  const active = new IndexView(store, cache, '/data', () => true)
+  const retired = new IndexView(store, cache, '/data', () => false)
+  expect(await active.getMany([])).toEqual(new Map())
+  expect(await retired.getMany(['/data/a'])).toEqual(new Map())
+  expect(getMany).not.toHaveBeenCalled()
 })
 
 const T0 = new Date('2026-01-01T00:00:00Z')

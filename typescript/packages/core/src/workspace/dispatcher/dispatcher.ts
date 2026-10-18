@@ -216,12 +216,7 @@ function visibleAnswer(
  * batch, also a file the listing does not size. Mirrors Python's
  * `_fits_read_ahead`.
  */
-async function fitsReadAhead(
-  mount: MountEntry,
-  path: PathSpec,
-  batched: boolean,
-): Promise<boolean> {
-  const entry = (await mount.index.get(path.virtual)).entry ?? null
+function fitsReadAhead(entry: FileStat | null, batched: boolean): boolean {
   if (entry !== null && entry.type === FileType.DIRECTORY) return false
   const size = entry?.size ?? null
   return size === null ? batched : size <= READ_AHEAD_BYTES
@@ -1060,9 +1055,13 @@ export class Dispatcher {
       for (const [mount, manager, paths] of batches.values()) {
         await mount.ensureReady()
         const batched = mount.vfs.supports('readMany')
+        const entries = await mount.index.getMany(paths.map((p) => p.virtual))
         const wanted: PathSpec[] = []
         for (const p of paths) {
-          if ((await fitsReadAhead(mount, p, batched)) && !(await manager.isCached(p))) {
+          if (
+            fitsReadAhead(entries.get(p.virtual) ?? null, batched) &&
+            !(await manager.isCached(p))
+          ) {
             wanted.push(p)
           }
         }

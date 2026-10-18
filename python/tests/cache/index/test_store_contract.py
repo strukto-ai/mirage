@@ -175,6 +175,55 @@ def folder(name):
 
 
 @pytest.mark.asyncio
+async def test_batch_returns_only_requested_retained_rows(store):
+    assert await store.get_many([]) == {}
+    store.seed(
+        {
+            "/dir/a": entry(),
+            "/dir/sub": folder("sub"),
+            "/dir/other": entry("other"),
+        },
+        {"/dir": ["/dir/a", "/dir/sub", "/dir/other"]},
+        datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    assert await store.get_many([]) == {}
+    assert await store.get_many(
+        ["/dir/a", "/dir/missing", "/dir/sub", "/dir/a"]
+    ) == {"/dir/a": entry(), "/dir/sub": folder("sub")}
+
+
+@pytest.mark.asyncio
+async def test_batch_keeps_rows_after_their_parent_listing_expires(store):
+    past = datetime.now(timezone.utc) - timedelta(seconds=1)
+    await store.set_dir("/dir", [("a", entry())], past)
+    assert await store.get_many(["/dir/a", "/dir/missing"]) == {
+        "/dir/a": entry()
+    }
+    assert (await store.get("/dir/a")).entry == entry()
+    assert (await store.list_dir("/dir")).status == LookupStatus.EXPIRED
+
+
+@pytest.mark.asyncio
+async def test_default_batch_reads_each_distinct_path_once(monkeypatch):
+    store = RAMIndexCacheStore()
+    await store.put("/dir/a", entry())
+    asked = []
+    original = store.get
+
+    async def get(key):
+        asked.append(key)
+        return await original(key)
+
+    monkeypatch.setattr(store, "get", get)
+    assert await IndexCacheStore.get_many(
+        store, ["/dir/a", "/dir/missing", "/dir/a"]
+    ) == {"/dir/a": entry()}
+    assert asked == ["/dir/a", "/dir/missing"]
+    assert await IndexCacheStore.get_many(store, []) == {}
+    assert asked == ["/dir/a", "/dir/missing"]
+
+
+@pytest.mark.asyncio
 async def test_first_listing_evicts_nothing(store):
     assert await store.set_dir("/dir", [("a", entry())]) == []
 
@@ -743,14 +792,27 @@ async def test_narrow_tombstones_survive_partial_overwrite(store, after):
 
 
 @pytest.mark.asyncio
-async def test_authoritative_add_preserves_replaced_folder_evidence(store):
-    await store.set_dir("/dir", [("sub", folder("sub"))])
+@pytest.mark.parametrize("window", [False, True])
+async def test_authoritative_add_demotes_replaced_folder_listing(
+    store, window
+):
+    await store.set_dir(
+        "/dir",
+        [("sub", folder("sub")), ("sibling", entry("sibling"))],
+        version="v1",
+        window=window,
+    )
     await store.put("/dir/sub/stray", entry("stray"))
     await store.add_entry("/dir/sub", entry("sub"))
-    await store.invalidate_dir("/dir")
-    assert await store.set_dir("/dir", [("sub", entry("sub"))]) == [
-        Evicted("/dir/sub", folder=True)
-    ]
+    listing = await store.list_dir("/dir")
+    assert listing.entries is None
+    assert listing.partial_entries == ["/dir/sub", "/dir/sibling"]
+    assert listing.version is None
+    assert not listing.window
+    assert (await store.get("/dir/sibling")).entry == entry("sibling")
+    assert await store.set_dir(
+        "/dir", [("sub", entry("sub")), ("sibling", entry("sibling"))]
+    ) == [Evicted("/dir/sub", folder=True)]
     assert (await store.get("/dir/sub/stray")).status == LookupStatus.NOT_FOUND
 
 

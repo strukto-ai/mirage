@@ -562,7 +562,7 @@ async def test_a_same_parent_rename_still_finds_the_folders_listing():
 @pytest.mark.parametrize(
     ("paths", "expected"),
     [
-        (("/x/t/s1/f", "/x/t/s1", "/x/t"), 0),
+        (("/x/t/s1/f", "/x/t/s1", "/x/t"), 2),
         (("/x/t", "/x/t/s1", "/x/t/s1/f"), 1),
     ],
     ids=["children-first", "folder-first"],
@@ -585,5 +585,11 @@ async def test_delete_stream_drops_only_retained_subtrees(paths, expected):
                 await hub.notify(_change(FileChangeKind.DELETE, path))
         assert evict.call_count == expected
         assert drop.call_count == expected
+        assert (await index.list_dir("/x/t")).status == LookupStatus.NOT_FOUND
+        assert (
+            await index.list_dir("/x/t/s1")
+        ).status == LookupStatus.NOT_FOUND
+        assert await index.holds_subtree("/x/t") is False
+        assert await cache.exists("/x/t/s1/f") is False
     finally:
         await hub.close()

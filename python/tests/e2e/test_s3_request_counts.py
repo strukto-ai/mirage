@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from mirage.cache.index.config import IndexConfig
-from mirage.types import MountMode, ReadSpec
+from mirage.types import MountMode, PathSpec, ReadSpec
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
@@ -103,6 +103,30 @@ async def test_recursive_walks_share_complete_index(counted_s3):
     found_text = await found.stdout_str()
     assert "a.txt" in found_text and "b.txt" in found_text
     assert counts == {}
+
+
+@pytest.mark.asyncio
+async def test_writing_an_object_preserves_its_existing_prefix_in_walks():
+    objects = {"a/child": b"hello"}
+    session = MultiBucketSession({"bucket": objects})
+    with patch_s3_session(session):
+        ws = Workspace({"/s3": (_s3_vfs(), MountMode.WRITE)})
+        try:
+            assert await ws.vfs.readdir("/s3") == ["/s3/a"]
+            await ws.vfs.write("/s3/a", b"file")
+            assert objects == {"a": b"file", "a/child": b"hello"}
+            assert await ws.vfs.read("/s3/a/child") == b"hello"
+            tree, _ = await ws.dispatch(
+                "read_tree", PathSpec.from_str_path("/s3")
+            )
+            assert tree is None
+            for _ in range(2):
+                result = await ws.shell("find /s3 -type f")
+                assert result.exit_code == 0
+                assert await result.stderr_str() == ""
+                assert await result.stdout_str() == "/s3/a/child\n"
+        finally:
+            await ws.close()
 
 
 @pytest.mark.asyncio

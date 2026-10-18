@@ -144,6 +144,20 @@ class IndexView(IndexCacheStore):
                 else LookupResult(status=LookupStatus.NOT_FOUND)
             )
 
+    async def get_many(self, vfs_paths: Sequence[str]) -> dict[str, FileStat]:
+        async with self._fence():
+            paths = [
+                path for path in dict.fromkeys(vfs_paths) if self._owns(path)
+            ]
+            if not paths:
+                return {}
+            rows = await self._store.get_many(paths)
+            return {
+                path: rows[path]
+                for path in paths
+                if self._owns(path) and path in rows
+            }
+
     async def list_dir(self, vfs_path: str) -> ListResult:
         result = await self._fenced_list_dir(vfs_path)
         # Asked outside the fence, since a gate may reach the backend, and

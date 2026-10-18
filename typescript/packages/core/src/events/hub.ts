@@ -59,7 +59,7 @@ export class EventHub implements EventRuntime {
   }
 
   /**
-   * Evict a changed path, its affected subtree and ancestor listings.
+   * Invalidate a changed path, its affected subtree and ancestor entries.
    *
    * The chain itself is the cache manager's to walk, not this class's: it
    * already walks one for the keyed stores that materialize a missing level on

@@ -35,11 +35,22 @@ export abstract class IndexCacheStore {
   }
   abstract entries(): Promise<Map<string, FileStat>>
   abstract get(vfsPath: string): Promise<LookupResult>
+  /** Read retained rows by path, omitting missing entries. */
+  async getMany(vfsPaths: readonly string[]): Promise<Map<string, FileStat>> {
+    const rows = new Map<string, FileStat>()
+    for (const path of new Set(vfsPaths)) {
+      const entry = (await this.get(path)).entry
+      if (entry != null) rows.set(path, entry)
+    }
+    return rows
+  }
   abstract put(vfsPath: string, entry: FileStat): Promise<void>
   /**
    * Keep a row a create just made, named in its parent's listing. A listing
    * held for the parent gains the name, in order, and stays what it was: a
    * complete one stays complete, since the create is the only change to it.
+   * Replacing a directory with a file leaves the parent partial so a
+   * coexisting prefix can be listed again.
    * With none held, the parent gets a partial listing that names the one
    * entry, which proves it without proving anything absent; `expiredAt` is
    * the latest that listing may live, null for the store's own lifetime.

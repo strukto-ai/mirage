@@ -1,5 +1,5 @@
 import { FileStat, FileType } from '../../types.ts'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LookupStatus } from './config.ts'
 import { RAMIndexCacheStore } from './ram.ts'
 import { RedisIndexCacheStore } from './redis.ts'
@@ -49,6 +49,35 @@ for (const backend of ['ram', 'redis']) {
       afterEach(async () => {
         await store.clear()
         await store.close()
+      })
+
+      it('returns only requested retained rows in a batch', async () => {
+        expect(await store.getMany([])).toEqual(new Map())
+        store.seed(
+          new Map([
+            ['/dir/a', entry()],
+            ['/dir/sub', folder('sub')],
+            ['/dir/other', entry('other')],
+          ]),
+          new Map([['/dir', ['/dir/a', '/dir/sub', '/dir/other']]]),
+          new Date(Date.now() + 3_600_000),
+        )
+        expect(await store.getMany([])).toEqual(new Map())
+        expect(await store.getMany(['/dir/a', '/dir/missing', '/dir/sub', '/dir/a'])).toEqual(
+          new Map([
+            ['/dir/a', entry()],
+            ['/dir/sub', folder('sub')],
+          ]),
+        )
+      })
+
+      it('keeps batched rows after their parent listing expires', async () => {
+        await store.setDir('/dir', [['a', entry()]], new Date(Date.now() - 1000))
+        expect(await store.getMany(['/dir/a', '/dir/missing'])).toEqual(
+          new Map([['/dir/a', entry()]]),
+        )
+        expect((await store.get('/dir/a')).entry).toEqual(entry())
+        expect((await store.listDir('/dir')).status).toBe(LookupStatus.EXPIRED)
       })
 
       it.each([false, true])(
@@ -191,16 +220,35 @@ for (const backend of ['ram', 'redis']) {
         },
       )
 
-      it('authoritative add preserves replaced folder evidence', async () => {
-        await store.setDir('/dir', [['sub', folder('sub')]])
-        await store.put('/dir/sub/stray', entry('stray'))
-        await store.addEntry('/dir/sub', entry('sub'))
-        await store.invalidateDir('/dir')
-        expect(await store.setDir('/dir', [['sub', entry('sub')]])).toEqual([
-          { path: '/dir/sub', folder: true },
-        ])
-        expect((await store.get('/dir/sub/stray')).status).toBe(LookupStatus.NOT_FOUND)
-      })
+      it.each([false, true])(
+        'authoritative add demotes replaced folder listing (window=%s)',
+        async (window) => {
+          await store.setDir(
+            '/dir',
+            [
+              ['sub', folder('sub')],
+              ['sibling', entry('sibling')],
+            ],
+            undefined,
+            { version: 'v1', window },
+          )
+          await store.put('/dir/sub/stray', entry('stray'))
+          await store.addEntry('/dir/sub', entry('sub'))
+          const listing = await store.listDir('/dir')
+          expect(listing.entries ?? null).toBeNull()
+          expect(listing.partialEntries).toEqual(['/dir/sub', '/dir/sibling'])
+          expect(listing.version ?? null).toBeNull()
+          expect(listing.window ?? false).toBe(false)
+          expect((await store.get('/dir/sibling')).entry).toEqual(entry('sibling'))
+          expect(
+            await store.setDir('/dir', [
+              ['sub', entry('sub')],
+              ['sibling', entry('sibling')],
+            ]),
+          ).toEqual([{ path: '/dir/sub', folder: true }])
+          expect((await store.get('/dir/sub/stray')).status).toBe(LookupStatus.NOT_FOUND)
+        },
+      )
 
       it('concurrent narrow mutations merge history', async () => {
         await store.setDir('/dir', [
@@ -973,3 +1021,15 @@ for (const backend of ['ram', 'redis']) {
     },
   )
 }
+
+it('the default batch reads each distinct path once', async () => {
+  const store = new RAMIndexCacheStore()
+  await store.put('/dir/a', entry())
+  const get = vi.spyOn(store, 'get')
+  expect(
+    await IndexCacheStore.prototype.getMany.call(store, ['/dir/a', '/dir/missing', '/dir/a']),
+  ).toEqual(new Map([['/dir/a', entry()]]))
+  expect(get.mock.calls).toEqual([['/dir/a'], ['/dir/missing']])
+  expect(await IndexCacheStore.prototype.getMany.call(store, [])).toEqual(new Map())
+  expect(get.mock.calls).toEqual([['/dir/a'], ['/dir/missing']])
+})

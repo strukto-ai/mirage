@@ -229,6 +229,7 @@ _FENCED = {
         "/data/a", _row().model_dump_json(), _row("new")
     ),
     "get": lambda view: view.get("/data/a"),
+    "get_many": lambda view: view.get_many(["/data/a"]),
     "list_dir": lambda view: view.list_dir("/data"),
     "put": lambda view: view.put("/data/a", _row()),
     "set_dir": lambda view: view.set_dir("/data", [("a", _row())]),
@@ -270,6 +271,65 @@ async def test_an_unlocked_view_waits_for_the_mutation_lock(method):
         if lock.locked():
             lock.release()
         await asyncio.gather(call, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_batch_filters_requested_paths_before_and_after_the_read(
+    monkeypatch,
+):
+    store = RAMIndexCacheStore()
+    owned = {"/data/a", "/data/retired", "/data/unrequested"}
+    asked = []
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def get_many(keys):
+        asked.append(list(keys))
+        entered.set()
+        await release.wait()
+        return {
+            "/data/a": _row(),
+            "/data/retired": _row("retired"),
+            "/data/nested/f": _row("f"),
+            "/data/unrequested": _row("unrequested"),
+        }
+
+    monkeypatch.setattr(store, "get_many", get_many)
+    view = IndexView(
+        store, RAMFileCacheStore(), "/data", lambda key: key in owned
+    )
+    reading = asyncio.create_task(
+        view.get_many(
+            ["/data/a", "/data/nested/f", "/data/retired", "/data/a"]
+        )
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        assert asked == [["/data/a", "/data/retired"]]
+        owned.remove("/data/retired")
+        release.set()
+        assert await asyncio.wait_for(reading, 1) == {"/data/a": _row()}
+    finally:
+        release.set()
+        await asyncio.gather(reading, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_empty_or_retired_batch_never_reaches_the_store(monkeypatch):
+    store = RAMIndexCacheStore()
+    asked = []
+
+    async def get_many(keys):
+        asked.append(list(keys))
+        return {"/data/a": _row()}
+
+    monkeypatch.setattr(store, "get_many", get_many)
+    cache = RAMFileCacheStore()
+    active = IndexView(store, cache, "/data", _owns_all)
+    retired = IndexView(store, cache, "/data", _owns_none)
+    assert await active.get_many([]) == {}
+    assert await retired.get_many(["/data/a"]) == {}
+    assert asked == []
 
 
 @pytest.mark.asyncio

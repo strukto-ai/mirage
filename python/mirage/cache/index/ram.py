@@ -116,6 +116,9 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                 self._bury(folder, tuple(children))
             if was_folder and entry.type is not FileType.DIRECTORY:
                 self._bury(folder, (vfs_path,))
+                self._partial.add(folder)
+                self._windows.discard(folder)
+                self._versions.pop(folder, None)
             self._entries[vfs_path] = entry
             if stale:
                 lifetime = now + timedelta(seconds=self._ttl)

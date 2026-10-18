@@ -116,6 +116,32 @@ describe('S3 cache consistency (mocked)', () => {
     })
   }
 
+  it('writing an object preserves its existing prefix in walks', async () => {
+    mock.store.objects(BUCKET).clear()
+    mock.store.set(BUCKET, 'a/child', ENC.encode('hello'))
+    const ws = new Workspace({ '/s3': new S3VFS(makeConfig()) }, { mode: MountMode.WRITE })
+    try {
+      expect(await ws.vfs.readdir('/s3')).toEqual(['/s3/a'])
+      await ws.vfs.write('/s3/a', ENC.encode('file'))
+      expect(mock.store.objects(BUCKET)).toEqual(
+        new Map([
+          ['a', ENC.encode('file')],
+          ['a/child', ENC.encode('hello')],
+        ]),
+      )
+      expect(DEC.decode(await ws.vfs.read('/s3/a/child'))).toBe('hello')
+      expect(await ws.dispatch('read_tree', '/s3')).toBeNull()
+      for (let pass = 0; pass < 2; pass++) {
+        const result = await ws.shell('find /s3 -type f')
+        expect(result.exitCode).toBe(0)
+        expect(DEC.decode(result.stderr)).toBe('')
+        expect(DEC.decode(result.stdout)).toBe('/s3/a/child\n')
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('fresh re-list keeps the deletion baseline after stat', async () => {
     mock.store.set(BUCKET, 'sub/a', ENC.encode('a'))
     mock.store.set(BUCKET, 'sub/b', ENC.encode('b'))

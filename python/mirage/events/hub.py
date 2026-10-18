@@ -115,7 +115,7 @@ class EventHub:
     async def _evict(
         self, entry: EventMount, path: PathSpec, kind: FileChangeKind
     ) -> None:
-        """Evict a changed path, its affected subtree and ancestor listings.
+        """Invalidate a changed path, its affected subtree and ancestor entries.
 
         The whole ancestor chain is invalidated, not just the path: an
         external change is often the only signal mirage gets, and a

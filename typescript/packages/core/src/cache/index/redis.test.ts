@@ -18,6 +18,7 @@ import { IndexDirectorySchema, LookupStatus } from './config.ts'
 import { CacheManager } from '../manager.ts'
 import { REGISTRY_PAGE } from './constants.ts'
 import { RedisIndexCacheStore, type RedisClientLike } from './redis.ts'
+import { storedStat } from '../../workspace/mount/listing.ts'
 
 describe('RedisIndexCacheStore default keyPrefix', () => {
   it('namespaces keys under mirage:index: by default', () => {
@@ -752,6 +753,98 @@ ${script}`,
       spy.mockRestore()
     }
   })
+
+  it('batch entry lookup uses one MGET', async () => {
+    const entry = new FileStat({ name: 'a', type: FileType.FILE, size: 3 })
+    await store.put('/dir/a', entry)
+    const client = await redis()
+    const read = vi.spyOn(client, 'get')
+    const batch = vi.spyOn(client, 'mGet')
+    try {
+      expect(await store.getMany([])).toEqual(new Map())
+      expect(await store.getMany(['/dir/a', '/dir/missing', '/dir/a'])).toEqual(
+        new Map([['/dir/a', entry]]),
+      )
+      expect(read).not.toHaveBeenCalled()
+      expect(batch).toHaveBeenCalledExactlyOnceWith([
+        `${prefix}mirage:idx:entry:/dir/a`,
+        `${prefix}mirage:idx:entry:/dir/missing`,
+      ])
+    } finally {
+      read.mockRestore()
+      batch.mockRestore()
+    }
+  })
+
+  it.each([
+    ['a', false],
+    ['b', false],
+    ['a', true],
+    ['b', true],
+  ] as const)(
+    'delayed authoritative add preserves a newer publication (%s, own listing=%s)',
+    async (peerName, ownListing) => {
+      const old = new FileStat({ name: 'a', type: FileType.FILE, size: 3, fingerprint: 'old' })
+      const next = new FileStat({
+        name: peerName,
+        type: FileType.FILE,
+        size: 11,
+        fingerprint: 'new',
+      })
+      await store.setDir('/dir', [['a', old]])
+      if (ownListing) await store.setDir('/dir/a', [])
+      const client = await redis()
+      const peer = new RedisIndexCacheStore({ client, keyPrefix: prefix })
+      const listingKey = `${prefix}mirage:idx:directory:/dir`
+      const generationKey = `${prefix}mirage:idx:generation:/dir`
+      const multi = client.multi.bind(client)
+      let inserted = false
+      let expectedListing = ''
+      let expectedGeneration: string | null = null
+      const spy = vi.spyOn(client, 'multi').mockImplementation(() => {
+        const pipe = multi()
+        const evaluate = pipe.eval.bind(pipe)
+        let publishesAdd = false
+        pipe.eval = (script, options) => {
+          if (options.keys.length === 5 && options.arguments[2] === '/dir/a') publishesAdd = true
+          return evaluate(script, options)
+        }
+        const exec = pipe.exec.bind(pipe)
+        pipe.exec = async () => {
+          if (publishesAdd && !inserted) {
+            inserted = true
+            const captured = await client.get(generationKey)
+            await new CacheManager(null, peer, '/dir/', true).keepCreated(`/${peerName}`, next)
+            expectedGeneration = await client.get(generationKey)
+            expect(expectedGeneration).not.toBe(captured)
+            expect((await peer.get(`/dir/${peerName}`)).entry).toEqual(next)
+            expectedListing = (await client.get(listingKey)) ?? ''
+          }
+          return exec()
+        }
+        return pipe
+      })
+      try {
+        await new CacheManager(null, store, '/dir/', true).keepCreated('/a', old)
+      } finally {
+        spy.mockRestore()
+        await peer.close()
+      }
+      expect(inserted).toBe(true)
+      expect((await store.get(`/dir/${peerName}`)).entry).toEqual(next)
+      const listing = await store.listDir('/dir')
+      expect(listing.entries ?? null).toBeNull()
+      expect(listing.partialEntries).toEqual(peerName === 'a' ? [] : ['/dir/b'])
+      expect(listing.version ?? null).toBeNull()
+      expect(listing.window ?? false).toBe(false)
+      expect(await storedStat(store, '/dir/a')).toBeNull()
+      if (ownListing) expect((await store.listDir('/dir/a')).status).toBe(LookupStatus.EXPIRED)
+      expect(
+        IndexDirectorySchema.parse(JSON.parse((await client.get(listingKey)) ?? '')).expires_at,
+      ).toBe(IndexDirectorySchema.parse(JSON.parse(expectedListing)).expires_at)
+      expect(await client.get(generationKey)).not.toBe(expectedGeneration)
+    },
+  )
 
   it('authoritative add preserves the exact live deadline', async () => {
     const deadline = new Date(Date.now() + 3600000)

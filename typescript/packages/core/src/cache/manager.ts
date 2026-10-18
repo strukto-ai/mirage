@@ -700,15 +700,15 @@ export class CacheManager {
    * otherwise this is `invalidateAfterUnlink`.
    *
    * The body goes before the index is asked, so an index that cannot answer
-   * still leaves the removed file unserved. The own and parent listing
-   * evictions are attempted even if the probe or subtree drop fails; failures
+   * still leaves the removed file unserved. The own and parent
+   * invalidations are attempted even if the probe or subtree drop fails; failures
    * remain visible to the caller. A folder with no listing cached at
    * or under it keeps any bodies cached beneath it until their ttl: nothing
-   * there was listed, or every such listing was evicted since. Each event
-   * evicts the listing of the changed path's folder and of every folder above
-   * it, not their other subfolders, and a write evicts at least its own
-   * folder's listing. Without an index no listing is known, so a removal reads
-   * as a file and bodies beneath it stay until their ttl.
+   * there was listed, or every such listing was evicted since. Invalidating
+   * an entry preserves unaffected siblings and leaves its parent listing
+   * partial. Those retained listings still count as cached subtrees, even
+   * when empty. Without an index no listing is known, so a removal reads as
+   * a file and bodies beneath it stay until their ttl.
    *
    * Mirrors Python `CacheManager.invalidate_after_remove`.
    */
@@ -728,13 +728,14 @@ export class CacheManager {
   }
 
   /**
-   * Evict the listing of every directory above `path`'s parent.
+   * Invalidate ancestor entries above `path`'s parent.
    *
    * `invalidateAfterWrite` refreshes the immediate parent only. A keyed store
    * materializes every missing level of a key in a single put, so the listings
    * further up gained entries too and would keep serving the pre-write view
    * until the index TTL expires. A backend with real directories cannot gain a
-   * level that way, so there this is a handful of spare evictions.
+   * level that way. Each affected listing becomes partial and retains its
+   * unaffected siblings.
    */
   async invalidateAncestors(path: string | PathSpec): Promise<void> {
     if (this.index === null) return

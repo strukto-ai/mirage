@@ -116,19 +116,12 @@ async def test_a_file_created_after_the_listing_is_found(line, after):
             0,
             ["get_metadata", "upload"] * 3,
         ),
-        (
-            "",
-            "echo /dbx/* >> /dbx/new",
-            0,
-            ["list_folder", "upload", "list_folder", "download", "upload"],
-        ),
     ],
     ids=[
         "cold",
         "glob-in-this-command",
         "earlier-line",
         "bulk-create",
-        "glob-then-append",
     ],
 )
 async def test_a_miss_asks_dropbox_only_past_an_earlier_listing(
@@ -152,6 +145,25 @@ async def test_a_miss_asks_dropbox_only_past_an_earlier_listing(
     assert [
         route for route, _ in dbx.log[start:] if route != "token"
     ] == routes
+
+
+@pytest.mark.asyncio
+async def test_glob_append_preserves_listed_sibling_metadata():
+    with serve(FakeDropbox(files={"f": b"one\n"})) as dbx:
+        ws = _workspace(dbx)
+        try:
+            r = await ws.shell("echo /dbx/* >> /dbx/new")
+            err = await r.stderr_str()
+        finally:
+            await ws.close()
+    assert (r.exit_code, err) == (0, "")
+    assert dbx.read("new") == b"/dbx/f\n"
+    assert [route for route, _ in dbx.log if route != "token"] == [
+        "list_folder",
+        "upload",
+        "download",
+        "upload",
+    ]
 
 
 @pytest.mark.asyncio

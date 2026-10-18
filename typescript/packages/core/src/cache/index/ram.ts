@@ -112,7 +112,12 @@ export class RAMIndexCacheStore extends IndexCacheStore {
         this.folderFlags.get(folder)?.get(vfsPath) === true
       const stale = !this.children.has(folder) || exp === undefined || now >= exp
       if (stale) this.bury(folder, children)
-      if (wasFolder && entry.type !== FileType.DIRECTORY) this.bury(folder, [vfsPath])
+      if (wasFolder && entry.type !== FileType.DIRECTORY) {
+        this.bury(folder, [vfsPath])
+        this.partial.add(folder)
+        this.windowed.delete(folder)
+        this.versions.delete(folder)
+      }
       this.entryMap.set(vfsPath, entry)
       if (stale) {
         const lifetime = now + this.ttl * 1000

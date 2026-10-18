@@ -2947,6 +2947,21 @@ describe('a hide filters a one-call read', () => {
     }
   })
 
+  it('batches metadata lookups for warm read-ahead', async () => {
+    const vfs = new BatchedRAM()
+    const ws = new Workspace({ '/r': vfs })
+    try {
+      await ws.dispatch('read_many', '/r/a', [], { paths: [PathSpec.fromStrPath('/r/b')] })
+      const lookup = vi.spyOn(ws.mount('/r').index, 'getMany')
+      await ws.dispatch('read_many', '/r/a', [], { paths: [PathSpec.fromStrPath('/r/b')] })
+      expect(lookup).toHaveBeenCalledExactlyOnceWith(['/r/a', '/r/b'])
+      expect(vfs.batches).toEqual([['/r/a', '/r/b']])
+      expect(await ws.dispatch('read', '/r/a')).toEqual(ENC.encode('a\n'))
+    } finally {
+      await ws.close()
+    }
+  })
+
   // Twin of test_a_read_ahead_fetches_nothing_a_policy_could_refuse.
   it('reads ahead nothing a policy could refuse', async () => {
     const vfs = new BatchedRAM()

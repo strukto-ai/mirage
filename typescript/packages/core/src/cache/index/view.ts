@@ -145,6 +145,20 @@ export class IndexView extends IndexCacheStore {
     })
   }
 
+  override getMany(vfsPaths: readonly string[]): Promise<Map<string, FileStat>> {
+    return this.fence(async () => {
+      const paths = [...new Set(vfsPaths)].filter((path) => this.owns(path))
+      if (paths.length === 0) return new Map<string, FileStat>()
+      const rows = await this.inner.getMany(paths)
+      const kept = new Map<string, FileStat>()
+      for (const path of paths) {
+        const entry = rows.get(path)
+        if (this.owns(path) && entry !== undefined) kept.set(path, entry)
+      }
+      return kept
+    })
+  }
+
   async get(path: string): Promise<LookupResult> {
     // Index lookups may flush queued state; keep them inside the write fence too.
     return this.fence(async () => {

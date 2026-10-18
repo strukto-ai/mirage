@@ -51,6 +51,19 @@ class IndexCacheStore:
     async def get(self, vfs_path: str) -> LookupResult:
         raise NotImplementedError
 
+    async def get_many(self, vfs_paths: Sequence[str]) -> dict[str, FileStat]:
+        """Read retained rows by path, omitting missing entries.
+
+        Args:
+            vfs_paths (Sequence[str]): mount-absolute entry keys.
+        """
+        rows: dict[str, FileStat] = {}
+        for path in dict.fromkeys(vfs_paths):
+            entry = (await self.get(path)).entry
+            if entry is not None:
+                rows[path] = entry
+        return rows
+
     def seed(
         self,
         entries: dict[str, FileStat],
@@ -86,7 +99,9 @@ class IndexCacheStore:
 
         A listing held for the parent gains the name, in order, and stays
         what it was: a complete one stays complete, since the create is
-        the only change to it. With none held, the parent gets a partial
+        the only change to it. Replacing a directory with a file leaves
+        the parent partial so a coexisting prefix can be listed again.
+        With none held, the parent gets a partial
         listing that names the one entry, which proves it without proving
         anything absent.
 

@@ -75,19 +75,24 @@ describe('dropbox listing miss', () => {
       0,
       ['get_metadata', 'upload', 'get_metadata', 'upload', 'get_metadata', 'upload'],
     ],
-    [
-      'glob-then-append',
-      '',
-      'echo /dbx/* >> /dbx/new',
-      0,
-      ['list_folder', 'upload', 'list_folder', 'download', 'upload'],
-    ],
   ])('asks Dropbox only past an earlier listing (%s)', async (_id, setup, line, code, routes) => {
     if (setup !== '') await ws.shell(setup)
     const start = dbx.log.length
     const r = await ws.shell(line)
     expect(r.exitCode).toBe(code)
     expect(dbx.log.slice(start).filter((route) => route !== 'token')).toEqual(routes)
+  })
+
+  it('appends expanded paths without relisting preserved siblings', async () => {
+    const r = await ws.shell('echo /dbx/* >> /dbx/new')
+    expect([r.exitCode, DEC.decode(r.stderr)]).toEqual([0, ''])
+    expect(dbx.read('new')).toEqual(ENC.encode('/dbx/f\n'))
+    expect(dbx.log.filter((route) => route !== 'token')).toEqual([
+      'list_folder',
+      'upload',
+      'download',
+      'upload',
+    ])
   })
 
   // FUSE and programmatic calls belong to no command, so no listing is

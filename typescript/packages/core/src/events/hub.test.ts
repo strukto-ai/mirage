@@ -300,7 +300,7 @@ describe('EventHub', () => {
     })
 
     it.each([
-      { order: 'children-first', paths: ['/x/t/s1/f', '/x/t/s1', '/x/t'], expected: 0 },
+      { order: 'children-first', paths: ['/x/t/s1/f', '/x/t/s1', '/x/t'], expected: 2 },
       { order: 'folder-first', paths: ['/x/t', '/x/t/s1', '/x/t/s1/f'], expected: 1 },
     ])('drops only retained subtrees in a $order stream', async ({ paths, expected }) => {
       const { hub, cache, index } = realHub()
@@ -313,6 +313,10 @@ describe('EventHub', () => {
         for (const path of paths) await hub.notify(change(FileChangeKind.DELETE, path))
         expect(evict).toHaveBeenCalledTimes(expected)
         expect(drop).toHaveBeenCalledTimes(expected)
+        expect((await index.listDir('/x/t')).status).toBe(LookupStatus.NOT_FOUND)
+        expect((await index.listDir('/x/t/s1')).status).toBe(LookupStatus.NOT_FOUND)
+        expect(await index.holdsSubtree('/x/t')).toBe(false)
+        expect(await cache.exists('/x/t/s1/f')).toBe(false)
       } finally {
         await hub.close()
       }

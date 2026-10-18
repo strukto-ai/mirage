@@ -17,7 +17,7 @@ import dataclasses
 import errno
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -2612,6 +2612,25 @@ async def test_a_read_ahead_skips_cache_probes_for_known_directories():
         )
         assert [call.args[0] for call in exists.call_args_list] == ["/r/a"]
         assert vfs.batches == [["/r/a"]]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_warm_read_ahead_batches_metadata_lookups():
+    vfs = BatchedRAM()
+    ws = Workspace({"/r": vfs})
+    try:
+        await ws.dispatch("read_many", _path("/r/a"), paths=[_path("/r/b")])
+        index = ws.mount("/r").index
+        with patch.object(index, "get_many", wraps=index.get_many) as lookup:
+            await ws.dispatch(
+                "read_many", _path("/r/a"), paths=[_path("/r/b")]
+            )
+        lookup.assert_awaited_once_with(["/r/a", "/r/b"])
+        assert vfs.batches == [["/r/a", "/r/b"]]
+        data, _ = await ws.dispatch("read", _path("/r/a"))
+        assert data == b"a\n"
     finally:
         await ws.close()
 

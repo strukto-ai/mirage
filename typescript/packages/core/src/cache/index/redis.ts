@@ -172,6 +172,31 @@ const ADD_ENTRY =
 local raw = redis.call('GET', KEYS[1])
 local current = redis.call('GET', KEYS[2])
 local directory = redis.call('GET', KEYS[3])
+local fresh = cjson.decode(ARGV[4])
+if not current or not directory or fresh.generation ~= current .. ':' .. directory then
+  redis.call('SET', KEYS[5], ARGV[6])
+  if raw and current and directory then
+    local listing = cjson.decode(raw)
+    if listing.generation == current .. ':' .. directory
+        and tonumber(ARGV[5]) < listing.expires_at then
+      for i, path in ipairs(listing.entries) do
+        if path == ARGV[3] then
+          bury(KEYS[4], {entries = {path}, folders = {listing.folders[i]}})
+          table.remove(listing.entries, i)
+          table.remove(listing.folders, i)
+          break
+        end
+      end
+      listing.partial = true
+      listing.version = cjson.null
+      listing.window = false
+      listing.generation = current .. ':' .. ARGV[6]
+      redis.call('SET', KEYS[3], ARGV[6])
+      redis.call('SET', KEYS[1], encode_listing(listing, raw))
+    end
+  end
+  return 0
+end
 local old = redis.call('GET', ARGV[1])
 redis.call('SET', KEYS[3], ARGV[6])
 local folder = cjson.decode(ARGV[2]).type == 'directory' and 1 or 0
@@ -184,11 +209,19 @@ if raw then
   if current and directory and listing.generation == current .. ':' .. directory
       and tonumber(ARGV[5]) < listing.expires_at then
     listing.generation = current .. ':' .. ARGV[6]
+    if old and cjson.decode(old).type == 'directory' and folder == 0 then
+      listing.partial = true
+      listing.version = cjson.null
+      listing.window = false
+    end
     local position = #listing.entries + 1
     for i, path in ipairs(listing.entries) do
       if path == ARGV[3] then
         if listing.folders[i] == 1 and folder == 0 then
           bury(KEYS[4], {entries = {ARGV[3]}, folders = {1}})
+          listing.partial = true
+          listing.version = cjson.null
+          listing.window = false
         end
         listing.folders[i] = folder
         redis.call('SET', KEYS[1], encode_listing(listing, raw))
@@ -203,10 +236,7 @@ if raw then
   end
   bury(KEYS[4], listing)
 end
-local fresh = cjson.decode(ARGV[4])
-if current and directory and fresh.generation == current .. ':' .. directory then
-  fresh.generation = current .. ':' .. ARGV[6]
-end
+fresh.generation = current .. ':' .. ARGV[6]
 redis.call('SET', KEYS[1], encode_listing(fresh, ARGV[4]))
 return 1
 `
@@ -794,6 +824,20 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     return { entry: row(raw) }
   }
 
+  override async getMany(vfsPaths: readonly string[]): Promise<Map<string, FileStat>> {
+    const paths = [...new Set(vfsPaths)]
+    if (paths.length === 0) return new Map()
+    await this.flushSeed()
+    const c = await this.client()
+    const rows = await c.mGet(paths.map((path) => this.entryKey(path)))
+    const found = new Map<string, FileStat>()
+    for (const [i, path] of paths.entries()) {
+      const raw = rows[i]
+      if (raw != null) found.set(path, row(raw))
+    }
+    return found
+  }
+
   async put(vfsPath: string, entry: FileStat): Promise<void> {
     await this.flushSeed()
     const c = await this.client()
@@ -832,6 +876,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
         this.generationKey,
         `${this.generationKey}:${folder}`,
         this.tombstonePrefix + folder,
+        `${this.generationKey}:${vfsPath}`,
       ],
       arguments: [
         this.entryKey(vfsPath),
