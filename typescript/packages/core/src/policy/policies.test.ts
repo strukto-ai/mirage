@@ -1274,6 +1274,24 @@ describe('what a method sees', () => {
     }
   })
 
+  it('postExecute sees the stderr bc writes as its output drains', async () => {
+    // bc reports a runtime error and goes on, so the line exits 0 and
+    // only bc's node says the division failed.
+    const spy = new SeeLine()
+    const ws = executableWorkspace(undefined, [spy])
+    try {
+      const run = await ws.shell("printf '1/0\\n2\\n' | bc")
+      expect(run.stdoutText).toBe('2\n')
+      expect(run.exitCode).toBe(0)
+      const [, bc] = (spy.seen.at(-1)?.results.children ?? []) as Record<string, unknown>[]
+      expect(bc?.command).toBe('bc')
+      expect(bc?.exitCode).toBe(0)
+      expect(bc?.stderr).toBe('Runtime error (func=(main), adr=3): Divide by zero\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   class SeeRoute implements Policy {
     readonly seen: [string, string, string | undefined][][] = []
 

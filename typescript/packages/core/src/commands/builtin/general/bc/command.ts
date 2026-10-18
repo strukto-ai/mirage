@@ -19,6 +19,7 @@ import { IOResult } from '../../../../io/types.ts'
 import { YieldBudget } from '../../../../io/yield_budget.ts'
 import { openStream, type OpenStream } from '../../../../rs/stream.ts'
 import type { PathSpec } from '../../../../types.ts'
+import { concat } from '../../../../utils/bytes.ts'
 import { command, type CommandFnResult, type Context } from '../../../config.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -93,6 +94,9 @@ export function bc(
       }
       yield* drained(stream, stream.finish(), io, budget, errors)
     } finally {
+      // Snapshots serve reads while output drains; once it stops, the
+      // command record copies stderr only as bytes, so join it once.
+      if (errors.length > 0) io.stderr = concat(errors)
       stream.close()
     }
   }

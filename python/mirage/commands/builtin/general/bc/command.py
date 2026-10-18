@@ -86,20 +86,26 @@ async def bc(
     async def output() -> AsyncGenerator[bytes, None]:
         stream = open_stream("bc", config)
         budget = YieldBudget()
-        async with aclosing(chunks(source)) as bounded:
-            async for chunk in bounded:
-                await budget.run()
-                async with aclosing(
-                    drained(stream, stream.feed(chunk), io, budget, errors)
-                ) as produced:
-                    async for part in produced:
-                        yield part
-                if stream.done():
-                    break
-        async with aclosing(
-            drained(stream, stream.finish(), io, budget, errors)
-        ) as produced:
-            async for part in produced:
-                yield part
+        try:
+            async with aclosing(chunks(source)) as bounded:
+                async for chunk in bounded:
+                    await budget.run()
+                    async with aclosing(
+                        drained(stream, stream.feed(chunk), io, budget, errors)
+                    ) as produced:
+                        async for part in produced:
+                            yield part
+                    if stream.done():
+                        break
+            async with aclosing(
+                drained(stream, stream.finish(), io, budget, errors)
+            ) as produced:
+                async for part in produced:
+                    yield part
+        finally:
+            # Snapshots serve reads while output drains; once it stops, the
+            # command record copies stderr only as bytes, so join it once.
+            if errors:
+                io.stderr = b"".join(errors)
 
     return OutputStream(output(), partial(close_quietly, source)), io

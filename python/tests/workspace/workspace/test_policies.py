@@ -1778,6 +1778,26 @@ async def test_post_execute_sees_the_line_its_output_and_each_result():
         await ws.close()
 
 
+@pytest.mark.asyncio
+async def test_post_execute_sees_the_stderr_bc_writes_as_its_output_drains():
+    # bc reports a runtime error and goes on, so the line exits 0 and
+    # only bc's node says the division failed.
+    spy = SeeLine()
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[spy])
+    try:
+        run = await ws.shell("printf '1/0\\n2\\n' | bc")
+        assert run.stdout == b"2\n"
+        assert run.exit_code == 0
+        _, bc = spy.seen[-1].results["children"]
+        assert bc["command"] == "bc"
+        assert bc["exit_code"] == 0
+        assert bc["stderr"] == (
+            "Runtime error (func=(main), adr=3): Divide by zero\n"
+        )
+    finally:
+        await ws.close()
+
+
 class SeeRoute(Policy):
     def __init__(self) -> None:
         self.seen: list[list[tuple[str, str, str | None]]] = []
