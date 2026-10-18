@@ -98,6 +98,26 @@ async def test_diagnostics_are_recorded_before_the_consumer_stops():
 
 
 @pytest.mark.asyncio
+async def test_diagnostic_snapshots_remain_cumulative_across_reads():
+    async def source() -> AsyncGenerator[bytes, None]:
+        for value in (1, 2, 3):
+            yield f"1/0\n{value}\n".encode()
+
+    output, io = await invoke(source())
+    notice = b"Runtime error (func=(main), adr=3): Divide by zero\n"
+    try:
+        assert await anext(output) == b"1\n"
+        first = io.stderr
+        for count in (2, 3):
+            assert await anext(output) == f"{count}\n".encode()
+            assert await io.materialize_stderr() == notice * count
+        assert await materialize(first) == notice
+        assert await io.materialize_stderr() == notice * 3
+    finally:
+        await output.aclose()
+
+
+@pytest.mark.asyncio
 async def test_finish_executes_the_last_line_without_a_newline():
     async def source() -> AsyncGenerator[bytes, None]:
         yield b"scale=3;"

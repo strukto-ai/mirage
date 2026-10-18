@@ -22,14 +22,28 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.cooperative import chunks
 from mirage.io.stream import OutputStream, close_quietly
-from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs.stream import OpenStream, open_stream
 from mirage.types import JsonValue, PathSpec
 
 
+async def diagnostics(
+    parts: list[bytes], count: int
+) -> AsyncGenerator[bytes, None]:
+    for part in parts:
+        if count == 0:
+            return
+        count -= 1
+        yield part
+
+
 async def drained(
-    stream: OpenStream, output: bytes, io: IOResult, budget: YieldBudget
+    stream: OpenStream,
+    output: bytes,
+    io: IOResult,
+    budget: YieldBudget,
+    errors: list[bytes],
 ) -> AsyncGenerator[bytes, None]:
     """Collect diagnostics before yielding output and drain pending work.
 
@@ -38,11 +52,13 @@ async def drained(
         output (bytes): the last call's output.
         io (IOResult): receives status and diagnostics immediately.
         budget (YieldBudget): schedules cancellation between Rust calls.
+        errors (list[bytes]): retains diagnostic chunks for snapshots.
     """
     while True:
         io.exit_code = stream.status()
         if notice := stream.take_stderr():
-            io.stderr = (await materialize(io.stderr)) + notice
+            errors.append(notice)
+            io.stderr = diagnostics(errors, len(errors))
         if output:
             yield output
         if not stream.busy():
@@ -65,6 +81,7 @@ async def bc(
     }
     source = ctx.stdin if ctx.stdin is not None else b""
     io = IOResult()
+    errors: list[bytes] = []
 
     async def output() -> AsyncGenerator[bytes, None]:
         stream = open_stream("bc", config)
@@ -73,14 +90,14 @@ async def bc(
             async for chunk in bounded:
                 await budget.run()
                 async with aclosing(
-                    drained(stream, stream.feed(chunk), io, budget)
+                    drained(stream, stream.feed(chunk), io, budget, errors)
                 ) as produced:
                     async for part in produced:
                         yield part
                 if stream.done():
                     break
         async with aclosing(
-            drained(stream, stream.finish(), io, budget)
+            drained(stream, stream.finish(), io, budget, errors)
         ) as produced:
             async for part in produced:
                 yield part

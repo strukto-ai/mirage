@@ -104,6 +104,50 @@ describe('bc stream lifecycle', () => {
     expect(closed).toBe(true)
   })
 
+  it('keeps diagnostic snapshots cumulative across reads', async () => {
+    async function* source() {
+      await Promise.resolve()
+      for (const value of [1, 2, 3]) yield encoder.encode(`1/0\n${String(value)}\n`)
+    }
+    const { output, io } = await invoke(source())
+    const iterator = cursor(output)
+    const notice = 'Runtime error (func=(main), adr=3): Divide by zero\n'
+    try {
+      expect(await iterator.next()).toEqual({ done: false, value: encoder.encode('1\n') })
+      const first = io.stderr
+      for (const count of [2, 3]) {
+        expect(await iterator.next()).toEqual({
+          done: false,
+          value: encoder.encode(`${String(count)}\n`),
+        })
+        expect(await io.stderrStr()).toBe(notice.repeat(count))
+      }
+      expect(decoder.decode(await materialize(first))).toBe(notice)
+      expect(await io.stderrStr()).toBe(notice.repeat(3))
+    } finally {
+      await iterator.return?.()
+    }
+  })
+
+  it('preserves diagnostics when a read overlaps the next output', async () => {
+    async function* source() {
+      await Promise.resolve()
+      yield encoder.encode('1/0\n1\n')
+      yield encoder.encode('1/0\n2\n')
+    }
+    const { output, io } = await invoke(source())
+    const iterator = cursor(output)
+    try {
+      await iterator.next()
+      await Promise.all([io.stderrStr(), iterator.next()])
+      expect(await io.stderrStr()).toBe(
+        'Runtime error (func=(main), adr=3): Divide by zero\n'.repeat(2),
+      )
+    } finally {
+      await iterator.return?.()
+    }
+  })
+
   it('executes the final line without a newline at EOF', async () => {
     async function* source() {
       await Promise.resolve()
@@ -154,6 +198,56 @@ describe('bc stream lifecycle', () => {
     expect(decoder.decode(await materialize(next.output))).toBe('4\n')
   })
 
+  it('cancels a stalled input read without waiting for its cleanup', async () => {
+    let beginRead: () => void = () => undefined
+    const reading = new Promise<void>((resolve) => {
+      beginRead = resolve
+    })
+    let releaseRead: () => void = () => undefined
+    const waiting = new Promise<void>((resolve) => {
+      releaseRead = resolve
+    })
+    let closed = false
+    async function* source() {
+      try {
+        yield encoder.encode('1\n')
+        beginRead()
+        await waiting
+      } finally {
+        closed = true
+      }
+    }
+    const controller = new AbortController()
+    const { output } = await invoke(source(), controller.signal)
+    const iterator = cursor(output)
+    expect(await iterator.next()).toEqual({ done: false, value: encoder.encode('1\n') })
+    const pending = iterator.next()
+    await reading
+    const reason = new Error('cancelled stalled input')
+    controller.abort(reason)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const outcome = await Promise.race([
+        pending.then(
+          () => 'read unexpectedly completed',
+          (error: unknown) => error,
+        ),
+        new Promise<string>((resolve) => {
+          timer = setTimeout(() => {
+            resolve('cancellation remained pending')
+          }, 250)
+        }),
+      ])
+      expect(outcome).toMatchObject({ name: 'AbortError', cause: reason })
+    } finally {
+      clearTimeout(timer)
+      releaseRead()
+      await pending.catch(() => undefined)
+      await iterator.return?.()
+    }
+    expect(closed).toBe(true)
+  })
+
   it('keeps concurrent invocation registers and variables isolated', async () => {
     async function evaluate(program: string) {
       const { output, io } = await invoke(encoder.encode(program))
@@ -165,6 +259,25 @@ describe('bc stream lifecycle', () => {
       ['9\n3\n', ''],
       ['0\n0\n10\n', ''],
     ])
+  })
+
+  it('closes the source when opening its input iterator fails', async () => {
+    let closed = false
+    const source: AsyncIterableIterator<Uint8Array> = {
+      [Symbol.asyncIterator]() {
+        throw new Error('input iterator failed')
+      },
+      next() {
+        return Promise.reject(new Error('input must remain unread'))
+      },
+      return() {
+        closed = true
+        return Promise.resolve({ done: true, value: undefined })
+      },
+    }
+    const { output } = await invoke(source)
+    await expect(materialize(output)).rejects.toThrow('input iterator failed')
+    expect(closed).toBe(true)
   })
 
   it('closes an output that was never consumed', async () => {
