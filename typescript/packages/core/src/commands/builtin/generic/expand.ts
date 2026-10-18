@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { UINTMAX } from '../constants.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
@@ -24,22 +23,32 @@ import { reportedStream } from '../utils/operands.ts'
 import { asyncChain } from '../../../io/stream.ts'
 import { mapStream } from '../utils/lines.ts'
 import { quoteText } from '../../quote.ts'
+import { boundedDecimal } from '../utils/strtol.ts'
 import { TAB_WIDTH } from '../../../utils/width.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
 
-// GNU's scanner is `c_isdigit`, which is ASCII. A unicode-aware test (a `\d`
+// A tab stop's digits are ASCII only: GNU reports U+0663 and the other
+// non-ASCII digits as invalid characters, which a unicode-aware test (a `\d`
 // class with the `u` flag, JavaScript's `Number.parseInt` on a full-width
-// digit) accepts U+0663 and friends, which GNU reports as invalid characters.
+// digit) would accept.
 const DIGITS = new Set(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'])
+
+// What may lead a number to make it a size rather than a stop.
+const SPECIFIERS = new Set(['+', '/'])
+
+// GNU 9.7 refuses a tab stop at or past 2**63, quoting its digits as typed:
+// `-t 9223372036854775807` is accepted and `-t 9223372036854775808` is "tab
+// stop is too large '9223372036854775808'".
+const TOO_LARGE = 2n ** 63n
 
 // `isblank` in the C locale, which is space and TAB and nothing else. A
 // newline, a carriage return, a vertical tab and a form feed are all invalid
 // characters rather than separators.
 const BLANKS = new Set([' ', '\t'])
 
-// One resolved -t/--tabs list, as gnulib models it.
+// One resolved -t/--tabs list.
 //
 // Three independent pieces, because `-t 2,/4` and `-t 2,+4` differ only in
 // which of the last two is set. `stops` are the explicit columns in the order
@@ -57,152 +66,178 @@ export interface ExpandFlags {
   readonly initialOnly: boolean
 }
 
-// The state gnulib keeps ACROSS -t occurrences.
-//
-// `-t 2,4 -t 6` is byte-identical to `-t 2,4,6` and `-t 6 -t 2,4` refuses as
-// non-ascending, so the stop list and the two specifier sizes outlive one
-// occurrence. What does NOT outlive it is the per-scan state (a pending
-// value, having seen `/` or `+`), which is why `-t '+4,2'` refuses but
-// `-t +4 -t 2` does not.
-interface TabAccumulator {
-  stops: number[]
+// The tab list as the -t values read so far have built it: the explicit stops
+// in typed order, `/N`'s and `+N`'s sizes (0 when unset) and the diagnostic
+// lines so far. The stops and the two sizes carry over from one -t to the
+// next; what a single value is in the middle of does not (see readTabList).
+// The stops stay bigints until the walk has compared them: 2**63 - 2 and
+// 2**63 - 1 are ascending and the same double. Mirrors Python's _TabList.
+interface TabList {
+  stops: bigint[]
   extend: number
   increment: number
   problems: string[]
 }
 
-// Commit one scanned number, as `/`, `+` or an ordinary stop.
-//
-// `/` wins when both specifiers were seen, matching GNU's `if (extend) ...
-// else if (increment) ...`. Either setter refuses a SECOND non-zero value,
-// which is how `-t '+4,2'` and `-t +4 -t +5` are reported: the value 0 leaves
-// the specifier unset, so `-t '+0,1'` is accepted and means an increment of 1.
-function flushStop(
-  acc: TabAccumulator,
-  value: number,
-  sawExtend: boolean,
-  sawIncrement: boolean,
-): void {
-  if (sawExtend) {
-    if (acc.extend !== 0) {
-      acc.problems.push("expand: '/' specifier only allowed with the last value")
-    }
-    acc.extend = value
-    return
-  }
-  if (sawIncrement) {
-    if (acc.increment !== 0) {
-      acc.problems.push("expand: '+' specifier only allowed with the last value")
-    }
-    acc.increment = value
-    return
-  }
-  acc.stops.push(value)
+function invalid(rest: string): string {
+  return `expand: tab size contains invalid character(s): '${quoteText(rest)}'`
 }
 
-// GNU's two post-scan refusals, in the order it applies them.
+// Settle one number of a -t value: the character that set a size, or null
+// when the number is refused (the line is in `tabs.problems`). A number led by
+// `/` or `+` (or by one still waiting from an earlier element of the same
+// value, `-t 1,+0,3` making 3 the increment) sets that size; `/` wins over `+`
+// when both lead it. A zero sets nothing and leaves the specifier waiting, so
+// `-t +0,0,0` is the default 8. Measured on GNU 9.7:
 //
-// The list is walked in order and each element is tested for zero BEFORE it is
-// tested for ascending, which is the only thing that tells the two messages
-// apart on a list that breaks both rules: `-t 3,0` is `cannot be 0`
-// (element 0 is zero) while `-t 3,1,0` is `must be ascending` (element 1 fails
-// first). Both run only when the scan reported nothing at all, so `-t 0,x`
-// names the `x` and never the zero.
-function checkStops(stops: readonly number[]): string | null {
-  let previous = 0
+//   * a size set twice is refused, even by a zero: `-t +4 -t +0` is "'+'
+//     specifier only allowed with the last value";
+//   * the other size is refused only by a nonzero value: `-t +4 -t /0` is
+//     accepted and `-t +4 -t /3` is "'/' specifier is mutually exclusive with
+//     '+'", in either order;
+//   * a plain number after a size in the same value is refused, naming the
+//     specifier character typed last (`-t /+4,2` names `+`), while `-t +4 -t
+//     2` is two values and accepted.
+//
+// `waiting` holds the specifier characters waiting for a value and is emptied
+// once one is set; `given` is the character that set a size earlier in this
+// value, or empty. Mirrors Python's _give_value.
+function giveValue(tabs: TabList, value: bigint, waiting: string[], given: string): string | null {
+  if (waiting.length === 0) {
+    if (given !== '') {
+      tabs.problems.push(`expand: '${given}' specifier only allowed with the last value`)
+      return null
+    }
+    tabs.stops.push(value)
+    return given
+  }
+  const size = waiting.includes('/') ? '/' : '+'
+  if ((size === '/' ? tabs.extend : tabs.increment) !== 0) {
+    tabs.problems.push(`expand: '${size}' specifier only allowed with the last value`)
+    return null
+  }
+  if (value === 0n) return given
+  if ((size === '/' ? tabs.increment : tabs.extend) !== 0) {
+    tabs.problems.push("expand: '/' specifier is mutually exclusive with '+'")
+    return null
+  }
+  if (size === '/') tabs.extend = Number(value)
+  else tabs.increment = Number(value)
+  const named = waiting[waiting.length - 1] ?? size
+  waiting.length = 0
+  return named
+}
+
+// One number of a -t value, from its first digit at `at` to its end: where it
+// ends, its value (null when a digit run was too large) and the specifier
+// characters misplaced inside it; null when an invalid character ended the
+// parse. Mirrors Python's _read_number.
+function readNumber(
+  raw: string,
+  at: number,
+  tabs: TabList,
+): [number, bigint | null, string[]] | null {
+  let digits = ''
+  const misplaced: string[] = []
+  let oversized = false
+  while (at < raw.length && raw[at] !== ',' && !BLANKS.has(raw.charAt(at))) {
+    const char = raw.charAt(at)
+    if (SPECIFIERS.has(char)) {
+      tabs.problems.push(
+        `expand: '${char}' specifier not at start of number: '${quoteText(raw.slice(at))}'`,
+      )
+      misplaced.push(char)
+      at++
+      continue
+    }
+    if (!DIGITS.has(char)) {
+      tabs.problems.push(invalid(raw.slice(at)))
+      return null
+    }
+    const run = at
+    while (at < raw.length && DIGITS.has(raw.charAt(at))) at++
+    if (boundedDecimal(raw.slice(run, at), TOO_LARGE) === null) {
+      tabs.problems.push(`expand: tab stop is too large '${quoteText(raw.slice(run, at))}'`)
+      oversized = true
+    }
+    digits += raw.slice(run, at)
+  }
+  return [at, oversized ? null : BigInt(digits), misplaced]
+}
+
+// Read one -t value into `tabs`, false when the parse ended here. Numbers are
+// split by commas and blanks (`isblank` in C: space and TAB), and an empty
+// element is skipped. A `/` or `+` after a number's first digit is reported
+// with the rest of the value and the scan goes on (`-t 4+5+6` reports '+5+6'
+// and then '+6'), the character then leading the next number instead, so
+// `-t 4+5,6,7` goes on to refuse the 7 as GNU does. A digit run at or past
+// 2**63 is reported and the scan goes on too (`-t 99999999999999999999,x`
+// reports both). Either leaves the list refused. Any other character ends the
+// whole parse, quoting the rest of the value (`-t 1,x,0` reports 'x,0').
+// Mirrors Python's _read_tab_list.
+function readTabList(raw: string, tabs: TabList): boolean {
+  const waiting: string[] = []
+  let given = ''
+  let at = 0
+  while (at < raw.length) {
+    const char = raw.charAt(at)
+    if (char === ',' || BLANKS.has(char)) {
+      at++
+      continue
+    }
+    if (SPECIFIERS.has(char)) {
+      waiting.push(char)
+      at++
+      continue
+    }
+    if (!DIGITS.has(char)) {
+      tabs.problems.push(invalid(raw.slice(at)))
+      return false
+    }
+    const number = readNumber(raw, at, tabs)
+    if (number === null) return false
+    const [end, value, misplaced] = number
+    at = end
+    if (value !== null) {
+      const named = giveValue(tabs, value, waiting, given)
+      if (named === null) return false
+      given = named
+    }
+    waiting.push(...misplaced)
+  }
+  return true
+}
+
+// GNU's walk over the explicit stops, once every value has scanned: the one
+// diagnostic line, or null when they pass. Each stop is tested for zero before
+// it is tested against the one before it, so `-t 3,0` cannot be 0 and
+// `-t 3,1,0` must be ascending. Mirrors Python's _refused_order.
+function refusedOrder(stops: readonly bigint[]): string | null {
+  let previous = 0n
   for (const stop of stops) {
-    if (stop === 0) return 'expand: tab size cannot be 0'
+    if (stop === 0n) return 'expand: tab size cannot be 0'
     if (stop <= previous) return 'expand: tab sizes must be ascending'
     previous = stop
   }
   return null
 }
 
-// Scan one -t occurrence, gnulib's parse_tab_stops.
-//
-// Character by character, because every one of GNU's messages quotes a
-// position rather than the argument: an invalid character and a misplaced
-// specifier both quote the remainder FROM that character (`-t 1,x` reports
-// 'x' where `-t x,1` reports 'x,1'), and an overflowing number quotes its own
-// digit run. An empty element is skipped in silence, which is why `-t ''`,
-// `-t ','` and `-t '1,,3'` are all accepted.
-//
-// ONE thing ends the scan and two do not. An invalid character breaks it where
-// it stands, so nothing to its right is read and `-t '1,x,0'` reports only the
-// `x,0`. A misplaced `/`/`+` does NOT: it is reported and the scan carries on,
-// so `-t 4+5+6` prints two misplaced lines and `-t 4+x` prints the misplaced
-// one and then the invalid-character one. Neither does an overflowing digit
-// run, so `-t '99999999999999999999,x'` reports both lines. Any of them makes
-// the caller skip checkStops, which is why `-t '1,99999999999999999999,0'`
-// never mentions the zero.
-function scanTabStops(raw: string, acc: TabAccumulator): void {
-  let have = false
-  let value = 0n
-  let digitsAt = 0
-  let sawExtend = false
-  let sawIncrement = false
-  let index = 0
-  while (index < raw.length) {
-    const char = raw[index] ?? ''
-    if (char === '/' || char === '+') {
-      if (have) {
-        // Reported and then CONTINUED, unlike an invalid character:
-        // `-t 4+5+6` prints TWO misplaced-specifier lines and `-t 4+x`
-        // prints the misplaced one and then the invalid-character one. The
-        // specifier is not recorded either, so the `4` in `-t '4+,x'` still
-        // flushes as an ordinary stop.
-        acc.problems.push(
-          `expand: '${char}' specifier not at start of number: '${quoteText(raw.slice(index))}'`,
-        )
-      } else {
-        sawExtend = sawExtend || char === '/'
-        sawIncrement = sawIncrement || char === '+'
-      }
-    } else if (DIGITS.has(char)) {
-      if (!have) {
-        value = 0n
-        have = true
-        digitsAt = index
-      }
-      value = value * 10n + BigInt(char)
-      // The accumulator GNU overflows: a tab stop is read into `uintmax_t`.
-      if (value > UINTMAX) {
-        let end = index
-        while (end < raw.length && DIGITS.has(raw[end] ?? '')) end += 1
-        acc.problems.push(`expand: tab stop is too large '${quoteText(raw.slice(digitsAt, end))}'`)
-        index = end - 1
-      }
-    } else if (char === ',' || BLANKS.has(char)) {
-      if (have) {
-        flushStop(acc, Number(value), sawExtend, sawIncrement)
-        have = false
-      }
-    } else {
-      acc.problems.push(
-        `expand: tab size contains invalid character(s): '${quoteText(raw.slice(index))}'`,
-      )
-      return
+// Every -t/--tabs value one line carried, as one tab list. GNU takes a LIST of
+// tab stops, not a single size, and -t accumulates across occurrences, so this
+// is handed every occurrence in typed order rather than the one value the flag
+// bag kept. A value that leaves any problem ends the parse there: `-t 4+ -t x`
+// reports only the '+'. Returns the stderr text (one newline-terminated line
+// per problem) instead of the list when GNU refuses it.
+export function readTabStops(occurrences: readonly string[]): TabStops | string {
+  const tabs: TabList = { stops: [], extend: 0, increment: 0, problems: [] }
+  for (const raw of occurrences) {
+    if (!readTabList(raw, tabs) || tabs.problems.length > 0) {
+      return tabs.problems.map((line) => `${line}\n`).join('')
     }
-    index += 1
   }
-  if (have && acc.problems.length === 0) {
-    flushStop(acc, Number(value), sawExtend, sawIncrement)
-  }
-}
-
-// Every -t/--tabs value one line carried, as one tab list.
-//
-// GNU takes a LIST of tab stops, not a single size, and -t accumulates across
-// occurrences, so this is handed every occurrence in typed order rather than
-// the one value the flag bag kept. Returns the stderr text (one
-// newline-terminated line per problem) instead of the list when GNU refuses.
-export function parseTabStops(occurrences: readonly string[]): TabStops | string {
-  const acc: TabAccumulator = { stops: [], extend: 0, increment: 0, problems: [] }
-  for (const raw of occurrences) scanTabStops(raw, acc)
-  if (acc.problems.length > 0) return acc.problems.map((line) => `${line}\n`).join('')
-  const bad = checkStops(acc.stops)
-  if (bad !== null) return `${bad}\n`
-  return { stops: acc.stops, extend: acc.extend, increment: acc.increment }
+  const refused = refusedOrder(tabs.stops)
+  if (refused !== null) return `${refused}\n`
+  return { stops: tabs.stops.map(Number), extend: tabs.extend, increment: tabs.increment }
 }
 
 // Read expand's flags once, refusing a tab list GNU refuses. `-t`
@@ -210,7 +245,7 @@ export function parseTabStops(occurrences: readonly string[]): TabStops | string
 // the list it typed.
 export function parseFlags(bag: Record<string, FlagValue>): ExpandFlags | string {
   const fl = new FlagView(bag, specOf('expand'))
-  const tabs = parseTabStops(fl.asList('tabs'))
+  const tabs = readTabStops(fl.asList('tabs'))
   if (typeof tabs === 'string') return tabs
   return { tabs, initialOnly: fl.asBool('initial') }
 }

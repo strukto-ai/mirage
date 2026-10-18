@@ -56,10 +56,6 @@ STAGED = re.compile(r"[0-3]:")
 RANGE = ".."
 SYMMETRIC_DOT = "."
 NEGATION = "^"
-LEFT = 1
-RIGHT = 2
-STALE = 4
-RESULT = 8
 
 
 def split_operators(revision: str) -> tuple[str, tuple[RevOp, ...]]:
@@ -256,18 +252,36 @@ def range_commits(
         raise AmbiguousArgumentError(revision) from exc
 
 
+def _enqueue_by_date(queue: list[Commit], commit: Commit) -> None:
+    """Put ``commit`` in ``queue``: newest first, and in arrival order
+    among equal dates.
+
+    Args:
+        queue (list[Commit]): the queue, newest first.
+        commit (Commit): the commit to place.
+    """
+    at = len(queue)
+    while at and queue[at - 1].commit_time < commit.commit_time:
+        at -= 1
+    queue.insert(at, commit)
+
+
 def merge_bases(
     repo: BaseRepo, one: Commit, other: Commit, *others: Commit
 ) -> list[Commit]:
     """The common ancestors of two commits that nothing shared descends from.
 
-    git's paint walk: each side paints what it reaches, newest first
-    and first queued on a tie, and a commit wearing both colours is a
-    base whose own ancestry goes stale. A separate ancestry pass removes
+    git-merge-base(1)'s best common ancestors: a common ancestor is
+    better than any of its own ancestors, and the bases are the common
+    ancestors nothing is better than. The other side is a hypothetical
+    merge of ``other`` and ``others``. A newest-first climb spreads each
+    side's reach down from its tips and stops where both sides meet:
+    everything beneath a meeting is common and worse, so a second walk
+    marks it for the climb to drop. A separate ancestry pass removes
     redundant candidates without relying on commit timestamps. History
-    shared by every candidate cannot remove any of them. Bases retain
-    the order git lists them
-    (pinned against ``git merge-base --all`` 2.50).
+    shared by every candidate cannot remove any of them. Bases come out
+    newest first, equal dates in the order the climb met them (pinned
+    against ``git merge-base --all`` 2.50.1).
 
     Args:
         repo (BaseRepo): repository whose store holds the commits.
@@ -285,28 +299,56 @@ def merge_bases(
         shallow = set((data or b"").split())
     else:
         shallow = set(repo.get_shallow())
-    paint = {one.id: LEFT}
-    queue = [one]
-    for commit in (other, *others):
-        if commit.id not in paint:
-            queue.append(commit)
-        paint[commit.id] = paint.get(commit.id, 0) | RIGHT
-    bases: list[Commit] = []
-    while any(not paint[commit.id] & STALE for commit in queue):
-        queue.sort(key=lambda commit: -commit.commit_time)
-        commit = queue.pop(0)
-        flags = paint[commit.id] & (LEFT | RIGHT | STALE)
-        if flags == LEFT | RIGHT:
-            if not paint[commit.id] & RESULT:
-                bases.append(commit)
-                paint[commit.id] |= RESULT
-            flags |= STALE
-        for parent_id in () if commit.id in shallow else commit.parents:
-            if paint.get(parent_id, 0) & flags == flags:
-                continue
-            paint[parent_id] = paint.get(parent_id, 0) | flags
-            queue.append(_commit_at(repo, parent_id, parent_id.decode()))
-    bases = [commit for commit in bases if not paint[commit.id] & STALE]
+    known = {commit.id: commit for commit in (one, other, *others)}
+
+    def load(oid: ObjectID) -> Commit:
+        if oid not in known:
+            known[oid] = _commit_at(repo, oid, oid.decode())
+        return known[oid]
+
+    def parents_of(oid: ObjectID) -> list[ObjectID]:
+        return [] if oid in shallow else load(oid).parents
+
+    # What `one` reaches, what the merged side reaches, and what lies
+    # beneath a commit both reach.
+    from_one = {one.id}
+    from_rest = {commit.id for commit in (other, *others)}
+    beneath: set[ObjectID] = set()
+    climbing: list[Commit] = []
+    sinking: list[Commit] = []
+
+    def sink_below(oid: ObjectID) -> None:
+        for parent_id in parents_of(oid):
+            if parent_id not in beneath:
+                beneath.add(parent_id)
+                _enqueue_by_date(sinking, load(parent_id))
+
+    for tip in {c.id: c for c in (one, other, *others)}.values():
+        _enqueue_by_date(climbing, tip)
+    meetings: dict[ObjectID, Commit] = {}
+    while climbing:
+        # Mark what lies beneath the meetings down to the climb's date, so
+        # the climb drops a commit beneath one before it spreads further.
+        while sinking and sinking[0].commit_time >= climbing[0].commit_time:
+            sink_below(sinking.pop(0).id)
+        commit = climbing.pop(0)
+        if commit.id in beneath:
+            continue
+        on_one = commit.id in from_one
+        if on_one and commit.id in from_rest:
+            if commit.id not in meetings:
+                meetings[commit.id] = commit
+                sink_below(commit.id)
+            continue
+        reach = from_one if on_one else from_rest
+        for parent_id in parents_of(commit.id):
+            if parent_id not in reach:
+                reach.add(parent_id)
+                _enqueue_by_date(climbing, load(parent_id))
+    bases = sorted(
+        (c for c in meetings.values() if c.id not in beneath),
+        key=lambda c: -c.commit_time,
+    )
     if len(bases) <= 1:
         return bases
     origins = {commit.id: 1 << i for i, commit in enumerate(bases)}

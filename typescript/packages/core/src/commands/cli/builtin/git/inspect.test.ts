@@ -176,4 +176,18 @@ it('matches native merge-base on criss-cross, unrelated, multi-tip and clock-ske
       native(graphPath, form),
     )
   }
-})
+}, 60_000)
+
+it('lists branches as native git does: markers, tracking, worktrees and widths', async () => {
+  const listingPath = join(tmp, 'branches')
+  const builder = BUILDER.replace('gaps.sh', 'branch.sh')
+  execFileSync('bash', [builder, listingPath], { env: NATIVE_ENV, stdio: 'ignore' })
+  const listing = await mountRepo(listingPath)
+  const forms = JSON.parse(readFileSync(builder.replace('.sh', '.json'), 'utf8')) as string[]
+  for (const form of forms) {
+    const result = await listing.shell(`git -C /repo ${form}`)
+    expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)], form).toEqual(
+      native(listingPath, form),
+    )
+  }
+}, 60_000)

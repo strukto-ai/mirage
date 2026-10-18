@@ -38,6 +38,17 @@ describe('parseRanges accepts what GNU cut accepts', () => {
     expect(parseRanges('2-', 'characters')).toEqual([[2, OPEN_END]])
     expect(parseRanges('-2', 'fields')).toEqual([[1, 2]])
   })
+
+  // GNU 9.7: `cut -c '2-,1'` prints `abc`, an open range may start past any
+  // line (`-c 4294967296-`), and 2**64 - 2 is the largest number it takes.
+  it('reads an open range before a comma and numbers up to 2**64 - 2', () => {
+    expect(parseRanges('2-,1', 'characters')).toEqual([
+      [2, OPEN_END],
+      [1, 1],
+    ])
+    expect(parseRanges('4294967296-', 'characters')).toEqual([[4294967296, OPEN_END]])
+    expect(typeof parseRanges('18446744073709551614', 'fields')).not.toBe('string')
+  })
 })
 
 describe('parseRanges refuses what GNU cut refuses', () => {
@@ -82,14 +93,60 @@ describe('parseRanges refuses what GNU cut refuses', () => {
     expect(parseRanges(spec, 'characters')).toBe(message + TRY)
     expect(parseRanges(spec, 'bytes')).toBe(message + TRY)
   })
+
+  // GNU coreutils 9.7. A dash with neither bound is its own refusal, in no
+  // mode's wording; a number at or past 2**64 - 1 is too large, quoted as
+  // typed; and the first refusal met reading left to right wins, so a zero
+  // low bound is refused at its dash, before the character after it, and a
+  // second dash before the range is closed.
+  it.each([
+    ['-', 'fields', 'cut: invalid range with no endpoint: -\n'],
+    ['1,-', 'characters', 'cut: invalid range with no endpoint: -\n'],
+    ['- 1', 'bytes', 'cut: invalid range with no endpoint: -\n'],
+    ['-,x', 'fields', 'cut: invalid range with no endpoint: -\n'],
+    [
+      '1-0018446744073709551615',
+      'fields',
+      "cut: field number '0018446744073709551615' is too large\n",
+    ],
+    [
+      '99999999999999999999x',
+      'bytes',
+      "cut: byte/character offset '99999999999999999999' is too large\n",
+    ],
+    ['0-x', 'characters', 'cut: byte/character positions are numbered from 1\n'],
+    ['0x', 'fields', "cut: invalid field value 'x'\n"],
+    ['0,x', 'fields', 'cut: fields are numbered from 1\n'],
+    ['-0', 'fields', 'cut: invalid decreasing range\n'],
+    ['3-1-2', 'characters', 'cut: invalid byte or character range\n'],
+    ['3-1 x', 'characters', 'cut: invalid decreasing range\n'],
+    ['1\r', 'fields', "cut: invalid field value '\\r'\n"],
+  ] as [string, CutOptions['mode'], string][])(
+    'refuses %j (%s) as 9.7 does',
+    (spec, mode, message) => {
+      expect(parseRanges(spec, mode)).toBe(message + TRY)
+    },
+  )
+
+  // GNU 9.7: 5,000 zeros before a 2 are still field 2, and a 5,000-digit
+  // value is refused as too large, quoting every digit typed. Mirrors
+  // test_cut_ranges.py.
+  it('reads a bound past any digit limit', () => {
+    const zeros = '0'.repeat(5000)
+    expect(parseRanges(`${zeros}2-${zeros}3`, 'fields')).toEqual([[2, 3]])
+    const nines = '9'.repeat(5000)
+    expect(parseRanges(`1-${nines}`, 'fields')).toBe(
+      `cut: field number '${nines}' is too large\n${TRY}`,
+    )
+  })
 })
 
-// The refused remainder is rendered through gnulib `quote()`, the same rule
-// every other coreutils diagnostic uses -- derived from all 255 reachable
-// bytes in `cut` itself and found identical to `nl`, `expand`, `shuf` and
-// `expr` (ground truth NL3-A). Before this, cut interpolated the raw string,
+// The refused remainder is quoted and escaped by the same rule every other
+// coreutils diagnostic uses -- derived from all 255 reachable bytes in `cut`
+// itself and found identical to `nl`, `expand`, `shuf` and `expr` (ground
+// truth NL3-A). Before this, cut interpolated the raw string,
 // so `cut -f 2-3é` emitted the character where GNU emits two octal escapes.
-describe('cut quotes the remainder through gnulib', () => {
+describe('cut quotes the remainder as diagnostics do', () => {
   const MODES: readonly (readonly ['fields' | 'bytes' | 'characters', string])[] = [
     ['fields', 'invalid field value'],
     ['bytes', 'invalid byte/character position'],

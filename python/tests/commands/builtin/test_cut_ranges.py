@@ -64,6 +64,35 @@ _POSITION_REFUSALS = [
     ("2-3x", "bytes", "invalid byte/character position 'x'"),
 ]
 
+# Measured against GNU coreutils 9.7. A dash with neither bound is its
+# own refusal, in no mode's wording; a number at or past 2**64 - 1 is
+# too large, quoted as typed; and the first refusal met reading left to
+# right wins, so a zero low bound is refused at its dash, before the
+# character after it, and a second dash before the range is closed.
+_GNU_97_REFUSALS = [
+    ("-", "fields", "invalid range with no endpoint: -"),
+    ("1,-", "characters", "invalid range with no endpoint: -"),
+    ("- 1", "bytes", "invalid range with no endpoint: -"),
+    ("-,x", "fields", "invalid range with no endpoint: -"),
+    (
+        "1-0018446744073709551615",
+        "fields",
+        "field number '0018446744073709551615' is too large",
+    ),
+    (
+        "99999999999999999999x",
+        "bytes",
+        "byte/character offset '99999999999999999999' is too large",
+    ),
+    ("0-x", "characters", "byte/character positions are numbered from 1"),
+    ("0x", "fields", "invalid field value 'x'"),
+    ("0,x", "fields", "fields are numbered from 1"),
+    ("-0", "fields", "invalid decreasing range"),
+    ("3-1-2", "characters", "invalid byte or character range"),
+    ("3-1 x", "characters", "invalid decreasing range"),
+    ("1\r", "fields", "invalid field value '\\r'"),
+]
+
 
 class TestParseRanges:
     def test_single(self):
@@ -87,12 +116,26 @@ class TestParseRanges:
     def test_leading_zeros_are_plain_decimal(self):
         assert parse_ranges("03", "fields") == [(3, 3)]
 
+    def test_open_high_before_a_comma(self):
+        assert parse_ranges("2-,1", "characters") == [(2, _OPEN_END), (1, 1)]
+
+    def test_open_range_may_start_past_the_open_end(self):
+        assert parse_ranges("4294967296-", "characters") == [
+            (4294967296, _OPEN_END)
+        ]
+
+    def test_largest_accepted_number(self):
+        assert parse_ranges("18446744073709551614", "fields") == [
+            (18446744073709551614, 18446744073709551614)
+        ]
+
 
 class TestParseRangesRefusals:
     """GNU's four -f messages, -c/-b's own wording, and the two-line stderr."""
 
     @pytest.mark.parametrize(
-        "spec,mode,message", _GNU_REFUSALS + _POSITION_REFUSALS
+        "spec,mode,message",
+        _GNU_REFUSALS + _POSITION_REFUSALS + _GNU_97_REFUSALS,
     )
     def test_message_and_try_line(self, spec, mode, message):
         with pytest.raises(ValueError) as refusal:
@@ -269,10 +312,10 @@ class TestCutRecordFields:
         )
 
 
-# The refused remainder is rendered through gnulib `quote()`, the same
-# rule every other coreutils diagnostic uses -- derived from all 255
-# reachable bytes in `cut` itself and found identical to `nl`, `expand`,
-# `shuf` and `expr` (ground truth NL3-A). Before this, cut interpolated
+# The refused remainder is quoted and escaped by the same rule every
+# other coreutils diagnostic uses -- derived from all 255 reachable bytes
+# in `cut` itself and found identical to `nl`, `expand`, `shuf` and
+# `expr` (ground truth NL3-A). Before this, cut interpolated
 # the raw bytes, so `cut -f 2-3<e-acute>` emitted the character where GNU
 # emits two octal escapes.
 @pytest.mark.parametrize(
@@ -297,10 +340,23 @@ class TestCutRecordFields:
         ("\U0001f600", r"\360\237\230\200"),
     ],
 )
-def test_cut_quotes_the_remainder_through_gnulib(mode, label, spec, quoted):
+def test_cut_quotes_the_remainder_as_diagnostics_do(mode, label, spec, quoted):
     with pytest.raises(ValueError) as refusal:
         parse_ranges(spec, mode)
     assert str(refusal.value).splitlines()[0] == f"cut: {label} '{quoted}'"
+
+
+def test_cut_reads_a_bound_past_the_int_digit_limit():
+    # GNU 9.7: 5,000 zeros before a 2 are still field 2, and a 5,000-digit
+    # value is refused as too large, quoting every digit typed.
+    zeros = "0" * 5000
+    assert parse_ranges(f"{zeros}2-{zeros}3", "fields") == [(2, 3)]
+    nines = "9" * 5000
+    with pytest.raises(ValueError) as refusal:
+        parse_ranges(f"1-{nines}", "fields")
+    assert str(refusal.value).splitlines()[0] == (
+        f"cut: field number '{nines}' is too large"
+    )
 
 
 @pytest.mark.parametrize("spec", ["1-3", "1,2,3", "1-", "-3", "2"])

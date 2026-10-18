@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// The --jq output and the github.com host rule follow go-gh v2.13.0
+// (MIT; see licenses/third_party/go-gh.txt).
+
 import type { GitHubAccount } from '../../../../accessor/github.ts'
 import { GITHUB_API_BASE } from '../../../../core/github/client.ts'
 import { parseRepo, repoHost, type RepoRef } from '../../../../core/github/repo.ts'

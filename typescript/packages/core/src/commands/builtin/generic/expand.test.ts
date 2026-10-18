@@ -19,7 +19,7 @@ import type { FlagValue } from '../../spec/types.ts'
 import type { Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { parseCommand, parseToKwargs } from '../../spec/parser.ts'
-import { expandGeneric, nextTabStop, parseTabStops, type TabStops } from './expand.ts'
+import { expandGeneric, nextTabStop, readTabStops, type TabStops } from './expand.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -111,7 +111,7 @@ function expandBag(...argv: string[]): Line {
 }
 
 function stops(list: string): TabStops {
-  const parsed = parseTabStops([list])
+  const parsed = readTabStops([list])
   if (typeof parsed === 'string') throw new Error(`refused: ${parsed}`)
   return parsed
 }
@@ -124,6 +124,15 @@ function stops(list: string): TabStops {
 // harness ran 2464 more combinations of these lists against the real binary
 // with no mismatch beyond one known diagnostic-quoting gap.
 const ABCDE = 'a\tb\tc\td\te\n'
+
+// GNU 9.7: 5,000 zeros before a number leave the number, and a 5,000-digit
+// stop is too large. Mirrors test_expand_unexpand.py.
+it('reads a stop past any digit limit', () => {
+  const zeros = '0'.repeat(5000)
+  expect(stops(`${zeros}4`)).toEqual({ stops: [4], extend: 0, increment: 0 })
+  expect(stops(`2,/${zeros}4`)).toEqual({ stops: [2], extend: 4, increment: 0 })
+  expect(readTabStops(['9'.repeat(5000)])).toMatch(/^expand: tab stop is too large '9+'\n$/)
+})
 
 describe('expand renders a tab stop list as GNU does', () => {
   it.each([
@@ -218,7 +227,7 @@ describe('expand accumulates tab stops across -t occurrences', () => {
     [['+4', '+5'], "expand: '+' specifier only allowed with the last value\n"],
     [['/4', '/5'], "expand: '/' specifier only allowed with the last value\n"],
   ])('refuses %s across occurrences', (occurrences, message) => {
-    expect(parseTabStops(occurrences)).toBe(message)
+    expect(readTabStops(occurrences)).toBe(message)
   })
 })
 
@@ -279,7 +288,7 @@ const EXPAND_REFUSALS: readonly (readonly [string, string])[] = [
 
 describe('expand refuses a tab list GNU refuses', () => {
   it.each(EXPAND_REFUSALS)('-t %s', (list, message) => {
-    expect(parseTabStops([list])).toBe(message)
+    expect(readTabStops([list])).toBe(message)
   })
 
   // Exit 1, empty stdout, and one line per problem with no hint. The stub
@@ -300,8 +309,9 @@ describe('expand refuses a tab list GNU refuses', () => {
   // else), so it is an invalid character rather than a separator. Python's
   // `$` also matched immediately BEFORE a trailing newline, so it accepted
   // `-t $'8\n'` where this host always refused it (ground truth NL2-A). The
-  // quoted remainder is rendered through gnulib `quote()`, so each of these
-  // is the escape's two characters and never the byte (NL3-A).
+  // remainder is quoted and escaped as every coreutils diagnostic quotes one,
+  // so each of these is the escape's two characters and never the byte
+  // (NL3-A).
   it.each([
     ['8\n', '\\n'],
     ['8\n4', '\\n4'],
@@ -311,7 +321,7 @@ describe('expand refuses a tab list GNU refuses', () => {
     ['8\x07', '\\a'],
     ['8\x01', '\\001'],
   ])('refuses -t %j, a non-blank separator', (list, quoted) => {
-    expect(parseTabStops([list])).toBe(
+    expect(readTabStops([list])).toBe(
       `expand: tab size contains invalid character(s): '${quoted}'\n`,
     )
   })
@@ -320,16 +330,17 @@ describe('expand refuses a tab list GNU refuses', () => {
   // refusal names its BYTES: U+0663 is two of them, so it reads as two octal
   // escapes rather than as the character (NL3-A).
   it.each(['\u0663', '8\u0663'])('refuses -t %j, a non-ASCII digit', (list) => {
-    expect(parseTabStops([list])).toBe(
+    expect(readTabStops([list])).toBe(
       "expand: tab size contains invalid character(s): '\\331\\243'\n",
     )
   })
 })
 
-// `+4` is not a sign: it is gnulib's INCREMENT specifier, and `/4` is its
-// EXTEND one. A bare `+4` and a bare `4` coincide (an increment of 4 from
-// column 0 is the same sequence as a repeating size of 4), which is why an
-// earlier round read `+` as a sign, but they are different parses.
+// `+4` is not a sign: it is the specifier that makes 4 an increment, and
+// `/4` the one that sets stops at multiples of 4 past the last. A bare `+4`
+// and a bare `4` coincide (an increment of 4 from column 0 is the same
+// sequence as a repeating size of 4), which is why an earlier round read `+`
+// as a sign, but they are different parses.
 describe('expand parses the / and + specifiers', () => {
   it.each([
     ['4', { stops: [4], extend: 0, increment: 0 }],
@@ -478,7 +489,7 @@ describe('a misplaced specifier does not end the scan', () => {
     ['+4+5', "expand: '+' specifier not at start of number: '+5'\n"],
     ['+4/5', "expand: '/' specifier not at start of number: '/5'\n"],
   ])('-t %j', (list, message) => {
-    expect(parseTabStops([list])).toBe(message)
+    expect(readTabStops([list])).toBe(message)
   })
 
   // The other direction: one line, and nothing to its right is read.
@@ -490,6 +501,6 @@ describe('a misplaced specifier does not end the scan', () => {
     ['1;3;5', "expand: tab size contains invalid character(s): ';3;5'\n"],
     ['x0', "expand: tab size contains invalid character(s): 'x0'\n"],
   ])('-t %j ends it', (list, message) => {
-    expect(parseTabStops([list])).toBe(message)
+    expect(readTabStops([list])).toBe(message)
   })
 })

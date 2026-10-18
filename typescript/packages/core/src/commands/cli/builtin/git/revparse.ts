@@ -51,10 +51,6 @@ const STAGED = /^[0-3]:/
 const RANGE = '..'
 const SYMMETRIC_DOT = '.'
 const NEGATION = '^'
-const LEFT = 1
-const RIGHT = 2
-const STALE = 4
-const RESULT = 8
 
 /**
  * Split a revision into its base and the operators applied to it.
@@ -488,15 +484,26 @@ export async function rangeCommits(
   return [await commitFacts(repo, left), await commitFacts(repo, right), ends[2]]
 }
 
+/** Put `commit` in `queue`: newest first, and in arrival order among equal dates. */
+function enqueueByDate(queue: CommitFacts[], commit: CommitFacts): void {
+  let at = queue.length
+  while (at > 0 && (queue[at - 1]?.committerTime ?? 0) < commit.committerTime) at -= 1
+  queue.splice(at, 0, commit)
+}
+
 /**
  * The common ancestors of two commits that nothing shared descends from.
  *
- * git's paint walk: each side paints what it reaches, newest first and first
- * queued on a tie, and a commit wearing both colours is a base whose own
- * ancestry goes stale. A separate ancestry pass removes redundant candidates
- * without relying on commit timestamps. History shared by every candidate
- * cannot remove any of them. Bases retain the order git lists them (pinned against
- * `git merge-base --all` 2.50).
+ * git-merge-base(1)'s best common ancestors: a common ancestor is better than
+ * any of its own ancestors, and the bases are the common ancestors nothing is
+ * better than. The other side is a hypothetical merge of `other` and `others`.
+ * A newest-first climb spreads each side's reach down from its tips and stops
+ * where both sides meet: everything beneath a meeting is common and worse, so a
+ * second walk marks it for the climb to drop. A separate ancestry pass removes
+ * redundant candidates without relying on commit timestamps. History shared by
+ * every candidate cannot remove any of them. Bases come out newest first, equal
+ * dates in the order the climb met them (pinned against `git merge-base --all`
+ * 2.50.1).
  *
  * @param repo repository holding the commits
  * @param one one side
@@ -516,33 +523,64 @@ export async function mergeBases(
       .trim()
       .split(/\s+/),
   )
-  const paint = new Map<string, number>([[one.oid, LEFT]])
-  const queue = [one]
-  for (const commit of [other, ...others]) {
-    if (!paint.has(commit.oid)) queue.push(commit)
-    paint.set(commit.oid, (paint.get(commit.oid) ?? 0) | RIGHT)
+  const tips = [one, other, ...others]
+  const known = new Map(tips.map((commit) => [commit.oid, commit]))
+  const load = async (oid: string): Promise<CommitFacts> => {
+    let commit = known.get(oid)
+    if (commit === undefined) {
+      commit = await commitFacts(repo, oid)
+      known.set(oid, commit)
+    }
+    return commit
   }
-  const bases: CommitFacts[] = []
-  while (queue.some((commit) => !((paint.get(commit.oid) ?? 0) & STALE))) {
-    queue.sort((a, b) => b.committerTime - a.committerTime)
-    const commit = queue.shift()
-    if (commit === undefined) break
-    let flags = (paint.get(commit.oid) ?? 0) & (LEFT | RIGHT | STALE)
-    if (flags === (LEFT | RIGHT)) {
-      if (!((paint.get(commit.oid) ?? 0) & RESULT)) {
-        bases.push(commit)
-        paint.set(commit.oid, (paint.get(commit.oid) ?? 0) | RESULT)
+  const parentsOf = async (oid: string): Promise<readonly string[]> =>
+    shallow.has(oid) ? [] : (await load(oid)).parents
+  // What `one` reaches, what the merged side reaches, and what lies beneath a
+  // commit both reach.
+  const fromOne = new Set([one.oid])
+  const fromRest = new Set([other, ...others].map((commit) => commit.oid))
+  const beneath = new Set<string>()
+  const climbing: CommitFacts[] = []
+  const sinking: CommitFacts[] = []
+  const sinkBelow = async (oid: string): Promise<void> => {
+    for (const parentId of await parentsOf(oid)) {
+      if (beneath.has(parentId)) continue
+      beneath.add(parentId)
+      enqueueByDate(sinking, await load(parentId))
+    }
+  }
+  for (const tip of known.values()) enqueueByDate(climbing, tip)
+  const meetings = new Map<string, CommitFacts>()
+  for (let commit = climbing.shift(); commit !== undefined; commit = climbing.shift()) {
+    // Mark what lies beneath the meetings down to the climb's date, so the
+    // climb drops a commit beneath one before it spreads further.
+    for (
+      let low = sinking[0];
+      low !== undefined && low.committerTime >= commit.committerTime;
+      low = sinking[0]
+    ) {
+      sinking.shift()
+      await sinkBelow(low.oid)
+    }
+    if (beneath.has(commit.oid)) continue
+    const onOne = fromOne.has(commit.oid)
+    if (onOne && fromRest.has(commit.oid)) {
+      if (!meetings.has(commit.oid)) {
+        meetings.set(commit.oid, commit)
+        await sinkBelow(commit.oid)
       }
-      flags |= STALE
+      continue
     }
-    for (const parent of shallow.has(commit.oid) ? [] : commit.parents) {
-      const had = paint.get(parent) ?? 0
-      if ((had & flags) === flags) continue
-      paint.set(parent, had | flags)
-      queue.push(await commitFacts(repo, parent))
+    const reach = onOne ? fromOne : fromRest
+    for (const parentId of await parentsOf(commit.oid)) {
+      if (reach.has(parentId)) continue
+      reach.add(parentId)
+      enqueueByDate(climbing, await load(parentId))
     }
   }
-  const candidates = bases.filter((commit) => !((paint.get(commit.oid) ?? 0) & STALE))
+  const candidates = [...meetings.values()]
+    .filter((commit) => !beneath.has(commit.oid))
+    .sort((a, b) => b.committerTime - a.committerTime)
   if (candidates.length <= 1) return candidates
   const origins = new Map(candidates.map((commit, i) => [commit.oid, 1n << BigInt(i)]))
   const reached = new Map(origins)

@@ -1,5 +1,5 @@
 {
-  "baseline": 3504,
+  "baseline": 3498,
  "modules": {
   "core/api/client": {
    "typescript_only": {
@@ -719,6 +719,28 @@
   "commands/builtin/utils/limit": {
    "typescript_only": {
     "deadlineCheck": "A JavaScript generator cannot be cancelled from outside, so a TypeScript scan inside one pull checks the invocation's deadline itself; Python's with_timeout cancels the pull, and the scan stops at its next await."
+   }
+  },
+  "commands/cli/builtin/git/dates": {
+   "python_only": {
+    "LATE_WALL": "A Python datetime holds no year past 9999, so from 9990 on a zone is read 400 years earlier for the standard-time search; a JavaScript Date holds those years.",
+    "HOST_STRETCHES": "Python reads a host zone it cannot name through time.localtime, which gives no tzinfo to key a weak map by, so those stretches are kept under the host's zone names; TypeScript keys every zone, LOCAL_ZONE included, in one WeakMap."
+   },
+   "typescript_only": {
+    "HOST_ZONES": "The host's zone per name Intl gives it, each read through one formatter; Python names the host's zone through its TZ or /etc/localtime and keeps it with functools.cache.",
+    "longNames": "Builds the one Intl formatter per zone that reads its long name; Python's tzinfo answers dst() with no formatter.",
+    "offsetAt": "Reads the host's offset from Date, which needs no formatter, and any other zone's from its parts; Python's tzinfo answers utcoffset() for every zone.",
+    "LONG_NAMES": "One Intl formatter per zone for its long name, the only place Intl says whether an instant is daylight saving time; Python's tzinfo answers dst().",
+    "POSIX_STANDARD": "Reads a POSIX TZ string's standard name, against which Intl's reading of the zone is matched; Python's PosixZone answers dst().",
+    "SEASON_READINGS": "The offsets read around an instant for a zone Intl names only by offset; Python's tzinfo answers dst() for every zone.",
+    "daylightName": "Whether ICU counts an instant as daylight saving time, read off the zone's long name; Python reads tzinfo's dst()."
+   }
+  },
+  "commands/builtin/utils/strftime": {
+   "python_only": {
+    "YEAR_TEXT": "A Python datetime holds no year past 9999, so git's dates past it render whole 400-year cycles earlier and the directives that print a year add the years back; a JavaScript Date holds those years itself.",
+    "year_text": "Renders %F, %c and the year directives with the years a datetime past 9999 was moved back; a JavaScript Date needs no such step.",
+    "year_value": "The number a year directive shows once those years are added back; a JavaScript Date reads it from the date."
    }
   },
   "utils/context_scope": {

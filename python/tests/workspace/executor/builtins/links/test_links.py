@@ -839,3 +839,80 @@ async def test_numbered_backup_counts_namespace_links(command, destination):
     assert (
         await ws.shell(f"cat {destination}/dst {destination}/dst.~2~")
     ).stdout == b"newold"
+
+
+_LOOPS = (
+    "cd /data && ln -s l2 l1 && ln -s l3 l2 && ln -s l4 l3 && ln -s l1 l4"
+    " && ln -s m2 m1 && ln -s m3 m2 && ln -s m1 m3"
+)
+
+
+@pytest.mark.asyncio
+async def test_realpath_and_readlink_refuse_a_loop():
+    ws = _ws()
+    await ws.shell(_LOOPS)
+    result = await ws.shell(
+        "cd /data; realpath /data/l1; echo rc=$?; realpath -e l1; echo rc=$?;"
+        " readlink -f l2; echo rc=$?; readlink -e l2; echo rc=$?"
+    )
+    assert await result.stdout_str() == "rc=1\nrc=1\nrc=1\nrc=1\n"
+    assert await result.stderr_str() == (
+        "realpath: /data/l1: Too many levels of symbolic links\n"
+        "realpath: l1: Too many levels of symbolic links\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_missing_mode_keeps_the_21st_link_of_a_loop():
+    # GNU 9.7 keeps l((20 mod k) + 1) of a loop of k links: l1 of four
+    # (from l1), l3 of four (from l3), m3 of three.
+    ws = _ws()
+    await ws.shell(_LOOPS)
+    result = await ws.shell(
+        "cd /data; realpath -m /data/l1/x /data/m1/x; readlink -m l3"
+    )
+    assert await result.stdout_str() == "/data/l1/x\n/data/m3/x\n/data/l3\n"
+
+
+@pytest.mark.asyncio
+async def test_missing_mode_keeps_the_first_link_of_a_loop_behind_a_chain():
+    # GNU 9.7: behind 25 links (rt1 -> ... -> rt25 -> rq1) the loop's own
+    # first link stays; behind 19 (from rt7) the 21st step lands on rq2.
+    ws = _ws()
+    await ws.shell(
+        "cd /data && ln -s rq2 rq1 && ln -s rq3 rq2 && ln -s rq1 rq3"
+        " && ln -s rq1 rt25 && for i in $(seq 24 -1 1); do"
+        " ln -s rt$((i+1)) rt$i; done"
+    )
+    result = await ws.shell(
+        "cd /data; realpath -m rt1/x; readlink -m rt7; readlink -m"
+        " rt1/../rt3/y; realpath rt1; echo rc=$?"
+    )
+    assert await result.stdout_str() == (
+        "/data/rq1/x\n/data/rq2\n/data/rq1/y\nrc=1\n"
+    )
+    assert await result.stderr_str() == (
+        "realpath: rt1: Too many levels of symbolic links\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_realpath_follows_a_long_chain_up_to_the_link_limit():
+    # GNU 9.7 follows a chain of any length; here 1,024 links resolve and
+    # the 1,025th is refused as a loop, as is a link that grows its path.
+    ws = _ws()
+    await ws.shell(
+        "cd /data && echo z > c0 && for i in $(seq 1025); do"
+        " ln -s c$((i-1)) c$i; done && ln -s g/x g"
+    )
+    result = await ws.shell(
+        "cd /data; realpath c300 c1024; readlink -f /data/c300;"
+        " realpath -m c300/x; realpath c1025 g; echo rc=$?"
+    )
+    assert await result.stdout_str() == (
+        "/data/c0\n/data/c0\n/data/c0\n/data/c0/x\nrc=1\n"
+    )
+    assert await result.stderr_str() == (
+        "realpath: c1025: Too many levels of symbolic links\n"
+        "realpath: g: Too many levels of symbolic links\n"
+    )

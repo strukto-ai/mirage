@@ -20,6 +20,7 @@ from collections.abc import Callable
 from typing import Any
 
 from mirage.commands.builtin.utils.strtod import STRTOD, strtod_double
+from mirage.commands.builtin.utils.strtol import INT_MAX, bounded_decimal
 from mirage.commands.quote import quote_text
 from mirage.commands.spec.help import render_help
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
@@ -42,11 +43,13 @@ from mirage.workspace.executor.builtins.timeout.constants import (
     SELF_KILLING_SIGNALS,
     SIGCHLD,
     SIGKILL,
-    SIGNAL_NAMES,
+    SIGNAL_ALIASES,
+    SIGNALS,
     SIGRTMAX,
     SIGRTMIN,
     SIGSTOP,
     STOP_SIGNALS,
+    TIMEOUT_NAMES,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.lookup.lookup import execs
@@ -56,15 +59,7 @@ from mirage.workspace.types import ExecutionNode
 
 _SYNOPSIS = "timeout [OPTION] DURATION COMMAND [ARG]..."
 
-_LONG = re.compile(r"[ \t\n\v\f\r]*[+-]?[0-9]+")
-
 _UNIT_SECONDS = {"": 1.0, "s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
-
-_UPPER = str.maketrans(
-    "abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-)
-
-_SIGNUM_BOUND = SIGRTMAX
 
 _Run = asyncio.Future[tuple[bytes | None, IOResult]]
 
@@ -122,74 +117,103 @@ def duration_seconds(raw: str) -> float | None:
     return value * _UNIT_SECONDS[suffix]
 
 
-def _strtol(text: str) -> int | None:
-    if not text:
-        return 0
-    return int(text) if _LONG.fullmatch(text) else None
+# The offset after RTMIN or RTMAX: C blanks, then an optional sign, then
+# decimal digits and nothing more (`RTMIN 2`, `RTMAX-01`; not `RTMIN+ 2`).
+_RT_OFFSET = re.compile(r"[ \t\n\v\f\r]*([+-]?)([0-9]+)")
 
 
-def _str2sig(name: str) -> int | None:
-    if name[:1].isdigit():
-        if not (name.isascii() and name.isdigit()):
+def _decimal(digits: str) -> int | None:
+    if not digits.isascii() or not digits.isdigit():
+        return None
+    return bounded_decimal(digits, INT_MAX + 1)
+
+
+def _status_signal(value: int) -> int | None:
+    """The signal a bare number names, as GNU timeout 9.7 reads one.
+
+    0 to 64 name themselves; 128 to 192 are a ``$?`` of 128 plus the
+    signal, and from 256 on only the low byte counts, which must then be
+    0 to 64 (``265`` is KILL, ``384`` nothing).
+
+    Args:
+        value (int): the number.
+    """
+    if value <= SIGRTMAX:
+        return value
+    if value < 256:
+        return value - 128 if 128 <= value <= 128 + SIGRTMAX else None
+    low = value % 256
+    return low if low <= SIGRTMAX else None
+
+
+def _realtime(name: str) -> int | None:
+    for base, start in (("RTMIN", SIGRTMIN), ("RTMAX", SIGRTMAX)):
+        if not name.startswith(base):
+            continue
+        rest = name[len(base) :]
+        if not rest:
+            return start
+        match = _RT_OFFSET.fullmatch(rest)
+        offset = None if match is None else _decimal(match.group(2))
+        if match is None or offset is None:
             return None
-        return int(name) if int(name) <= _SIGNUM_BOUND else None
-    for known, number in SIGNAL_NAMES:
-        if known == name:
-            return number
-    span = SIGRTMAX - SIGRTMIN
-    if name.startswith("RTMIN"):
-        delta = _strtol(name[5:])
-        if delta is not None and 0 <= delta <= span:
-            return SIGRTMIN + delta
-    elif name.startswith("RTMAX"):
-        delta = _strtol(name[5:])
-        if delta is not None and -span <= delta <= 0:
-            return SIGRTMAX + delta
+        value = start - offset if match.group(1) == "-" else start + offset
+        return value if SIGRTMIN <= value <= SIGRTMAX else None
     return None
 
 
 def parse_signal(operand: str) -> int | None:
-    """GNU's operand2sig: the signal a -s value names, None if none.
+    """The signal a ``-s`` value names, None if it names none.
 
-    A number may carry a shell's 128 or 256 offset, as in ``$?``; a
-    name is read in any case, with or without its SIG prefix.
+    Measured on GNU timeout 9.7: a number (decimal digits only, no sign
+    or blank) may carry a shell's 128 or 256 offset, as ``$?`` does; a
+    name is read in any case, with or without ``SIG``, and ``SIG`` before
+    digits takes only 0 to 64. ``RTMIN+n`` and ``RTMAX-n`` stay inside
+    the realtime range.
 
     Args:
         operand (str): the -s value as typed.
     """
-    number: int | None
-    if operand[:1].isdigit() and operand.isascii():
-        if not operand.isdigit() or int(operand) > 2**31 - 1:
-            return None
-        typed = int(operand)
-        number = typed & (0xFF if typed >= 0xFF else 0x7F)
-    else:
-        upper = operand.translate(_UPPER)
-        number = _str2sig(upper)
-        if number is None and upper.startswith("SIG"):
-            number = _str2sig(upper[3:])
-    if number is None or not 0 <= number <= _SIGNUM_BOUND:
+    if not operand.isascii():
         return None
-    return number
+    if operand.isdigit():
+        value = _decimal(operand)
+        return None if value is None else _status_signal(value)
+    name = operand.upper()
+    name = name[3:] if name.startswith("SIG") else name
+    if name.isdigit():
+        value = _decimal(name)
+        return value if value is not None and value <= SIGRTMAX else None
+    if name in SIGNAL_ALIASES:
+        return SIGNAL_ALIASES[name]
+    for number, known in SIGNALS.items():
+        if known == name:
+            return number
+    return _realtime(name)
 
 
 def signal_name(number: int) -> str:
-    """gnulib's sig2str: a signal's name, or its number when it has none.
+    """A signal's name as ``timeout -v`` prints it, or its number.
 
-    The table follows glibc on x86-64 Linux: the first matching name wins
-    (6 is ABRT, 29 is POLL), independently of the host's signal numbers.
+    The realtime range is named from RTMIN up to its middle (RTMIN+15 is
+    49) and from RTMAX above it (50 is RTMAX-14), as GNU 9.7 and bash do.
 
     Args:
         number (int): the signal number.
     """
-    for name, known in SIGNAL_NAMES:
-        if known == number:
-            return name
+    if number in TIMEOUT_NAMES:
+        return TIMEOUT_NAMES[number]
+    if number in SIGNALS:
+        return SIGNALS[number]
     if not SIGRTMIN <= number <= SIGRTMAX:
         return str(number)
-    low = number <= SIGRTMIN + (SIGRTMAX - SIGRTMIN) // 2
-    delta = number - (SIGRTMIN if low else SIGRTMAX)
-    return ("RTMIN" if low else "RTMAX") + (f"{delta:+d}" if delta else "")
+    if number == SIGRTMIN:
+        return "RTMIN"
+    if number == SIGRTMAX:
+        return "RTMAX"
+    if number - SIGRTMIN <= (SIGRTMAX - SIGRTMIN) // 2:
+        return f"RTMIN+{number - SIGRTMIN}"
+    return f"RTMAX-{SIGRTMAX - number}"
 
 
 async def handle_timeout(

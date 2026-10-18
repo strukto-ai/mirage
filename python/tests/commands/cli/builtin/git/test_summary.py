@@ -214,8 +214,226 @@ def test_stat_table_unscaled_when_the_graph_fits():
     ]
 
 
+def test_stat_table_keeps_the_bytes_of_a_cut_character():
+    # git 2.47.3, core.quotePath=false: a name of 40 wide characters cut
+    # 11 bytes in starts with the last byte of the 4th, kept as it is.
+    rows = stat_table([entry_stat("\u754c" * 40, 1, 0)])
+    assert rows[0] == " ...\udc8c" + "\u754c" * 36 + " | 1 +"
+    assert (
+        rows[0].encode("utf-8", "surrogateescape")[:8]
+        == b" ...\x8c\xe7\x95\x8c"
+    )
+
+
 def test_stat_table_mode_only_row_has_no_graph():
     assert stat_table([entry_stat("new.txt", 0, 0)]) == [
         " new.txt | 0",
         " 1 file changed, 0 insertions(+), 0 deletions(-)",
     ]
+
+
+# Tables measured with git 2.50.1 and 2.47.3 (`git diff --stat=<width>`,
+# piped): each case's FileStats and the rows git prints at each width.
+STAT_PROBES = {
+    # graphs scaled into a narrow share, the smaller side first
+    "scaled": (
+        [
+            FileStat(
+                "apefca_/ivayfzwv/l/xuc/iw",
+                99,
+                1,
+                False,
+                0,
+                0,
+            ),
+            FileStat(
+                "mgd_kybwafn/kciklieqza-/prpokhw_lq/qkafb",
+                53,
+                33,
+                False,
+                0,
+                0,
+            ),
+            FileStat(
+                "vzgyn/ytbi-ql/usunncxtsgw",
+                5,
+                3,
+                False,
+                0,
+                0,
+            ),
+        ],
+        {
+            40: [
+                " apefca_/ivayfzwv/l/xuc/iw | 100 +++++-",
+                " .../prpokhw_lq/qkafb      |  86 +++--",
+                " vzgyn/ytbi-ql/usunncxtsgw |   8 +-",
+                " 3 files changed, 157 insertions(+), 37 deletions(-)",
+            ],
+            80: [
+                " apefca_/ivayfzwv/l/xuc/iw                | 100"
+                " ++++++++++++++++++++++++++++++-",
+                " mgd_kybwafn/kciklieqza-/prpokhw_lq/qkafb |  86"
+                " ++++++++++++++++----------",
+                " vzgyn/ytbi-ql/usunncxtsgw                |   8 ++-",
+                " 3 files changed, 157 insertions(+), 37 deletions(-)",
+            ],
+        },
+    ),
+    # a binary row widening the count column and claiming graph room
+    "binary": (
+        [
+            FileStat(
+                "ffqhaygr-rh/ql-sloi/rtxamz-_xqz/qyr/nbp-/srgqnp/lnlarrt",
+                9999,
+                10000,
+                False,
+                0,
+                0,
+            ),
+            FileStat(
+                "zycidpyopumzgd/a_mntyya/oixzhsdkaaau/amvgnxaqh/oprhlhvhy"
+                "ojan/rudfux-jdxkxwq/q_vgjjs/-qms-bph/zmnvflrwyvxl/ov/dyf"
+                "q_mlpx/p",
+                0,
+                0,
+                True,
+                4859,
+                4736,
+            ),
+        ],
+        {
+            80: [
+                " .../ql-sloi/rtxamz-_xqz/qyr/nbp-/srgqnp/lnlarrt    |"
+                " 19999 +++++++++----------",
+                " .../q_vgjjs/-qms-bph/zmnvflrwyvxl/ov/dyfq_mlpx/p   |  "
+                " Bin 4859 -> 4736 bytes",
+                " 2 files changed, 9999 insertions(+), 10000 deletions(-)",
+            ],
+            40: [
+                " .../nbp-/srgqnp/lnlarrt | 19999 +++---",
+                " .../ov/dyfq_mlpx/p      |   Bin 4859 -> 4736 bytes",
+                " 2 files changed, 9999 insertions(+), 10000 deletions(-)",
+            ],
+        },
+    ),
+    # a long name with a small change, at and under the narrowest table
+    "small": (
+        [
+            FileStat(
+                "abcdefghij/klmnopqrst/uvwxyzabcd/efghijklmn/opqrstuvwx",
+                3,
+                0,
+                False,
+                0,
+                0,
+            ),
+        ],
+        {
+            26: [
+                " ...opqrstuvwx | 3 +++",
+                " 1 file changed, 3 insertions(+)",
+            ],
+            27: [
+                " .../opqrstuvwx    | 3 +++",
+                " 1 file changed, 3 insertions(+)",
+            ],
+            20: [
+                " ...rstuvwx | 3 +++",
+                " 1 file changed, 3 insertions(+)",
+            ],
+        },
+    ),
+    # wide characters cut by bytes and padded by columns, renames cut like any path
+    "wide": (
+        [
+            FileStat(
+                "abc/中文名字/x.txt",
+                2,
+                0,
+                False,
+                0,
+                0,
+            ),
+            FileStat(
+                "keep/same/dir/{oldname.txt => newname.txt}",
+                0,
+                0,
+                False,
+                0,
+                0,
+            ),
+            FileStat(
+                "nodirectorybutaverylongfilenamewithoutanyslashesatallrea"
+                "llylong.txt",
+                11,
+                0,
+                False,
+                0,
+                0,
+            ),
+            FileStat(
+                "plain/without/any/wide/characters/at/all/in/this/path/na"
+                "me.txt",
+                0,
+                6,
+                False,
+                0,
+                0,
+            ),
+            FileStat(
+                "ren/{old/place => new/spot}/file.txt",
+                0,
+                0,
+                False,
+                0,
+                0,
+            ),
+            FileStat(
+                "目录/子目录/非常长的文件名字在这里/文件一.txt",
+                10,
+                0,
+                False,
+                0,
+                0,
+            ),
+        ],
+        {
+            40: [
+                " abc/中文名字/x.txt        |  2 ++",
+                " ...me.txt => newname.txt} |  0",
+                " ...hesatallreallylong.txt | 11 +++++++",
+                " .../in/this/path/name.txt |  6 ----",
+                " .../spot}/file.txt        |  0",
+                " .../文件一.txt            | 10 ++++++",
+                " 6 files changed, 23 insertions(+), 6 deletions(-)",
+            ],
+            50: [
+                " abc/中文名字/x.txt               |  2 ++",
+                " .../{oldname.txt => newname.txt} |  0",
+                " ...anyslashesatallreallylong.txt | 11 ++++++++++",
+                " .../at/all/in/this/path/name.txt |  6 -----",
+                " .../place => new/spot}/file.txt  |  0",
+                " .../非常长的文件名字在这里/文件一.txt | 10 +++++++++",
+                " 6 files changed, 23 insertions(+), 6 deletions(-)",
+            ],
+        },
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    "probe,width",
+    [
+        (probe, width)
+        for probe, (_, rows) in STAT_PROBES.items()
+        for width in rows
+    ],
+)
+def test_stat_table_lays_out_as_git_measures(probe, width):
+    stats, rows = STAT_PROBES[probe]
+    assert stat_table(stats, width) == rows[width]
+
+
+def test_stat_table_of_nothing_is_empty():
+    assert stat_table([]) == []

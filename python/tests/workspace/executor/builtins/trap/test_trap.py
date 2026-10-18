@@ -26,10 +26,25 @@ def make_session() -> SessionState:
         ("SIGEXIT", None),
         ("65", None),
         ("FOO", None),
+        # bash 5.2 takes the names `trap -l` lists and no other:
+        # IO and STKFLT, but not the IOT, CLD or POLL timeout also takes.
+        ("IO", TrapEvent.OTHER),
+        ("sigstkflt", TrapEvent.OTHER),
+        ("IOT", None),
+        ("SIGCLD", None),
+        ("POLL", None),
     ],
 )
 def test_event_of_reads_specs_as_bash_does(spec, event):
     assert event_of(spec) is event
+
+
+def test_event_of_reads_numbers_past_the_int_digit_limit():
+    # bash 5.2 reads 5,000 leading zeros as nothing, and 5,000 digits as
+    # no signal.
+    assert event_of("0" * 5000) is TrapEvent.EXIT
+    assert event_of("0" * 5000 + "9") is TrapEvent.OTHER
+    assert event_of("9" * 5000) is None
 
 
 @pytest.mark.asyncio

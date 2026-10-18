@@ -189,6 +189,40 @@
       ]
     },
     {
+      "id": "timeout_signal_aliases_and_offsets",
+      "seq": 15811301,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "timeout -v -s io 0.1 sleep 1; echo code=$?; timeout -v -s 'RTMIN 2' 0.1 sleep 1; echo code=$?; timeout -s 384 1 true; echo code=$?; timeout -s RTMAX2 1 true; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=124\ncode=124\ncode=125\ncode=125\n",
+        "stderr": "timeout: sending signal POLL to command 'sleep'\ntimeout: sending signal RTMIN+2 to command 'sleep'\ntimeout: '384': invalid signal\nTry 'timeout --help' for more information.\ntimeout: 'RTMAX2': invalid signal\nTry 'timeout --help' for more information.\n"
+      }
+    },
+    {
       "id": "timeout_ambiguous_options",
       "seq": 1300098,
       "targets": [
@@ -223,6 +257,43 @@
       },
       "flags": [
         "v"
+      ]
+    },
+    {
+      "id": "timeout_s_numbers_past_five_thousand_digits",
+      "seq": 17300005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "z=$(printf '%05000d' 0); n=$(printf '%05000d' 0 | tr 0 9); timeout -s \"${z}9\" 1 true; echo rc=$?; timeout -s \"RTMIN+${z}2\" 1 true; echo rc=$?; timeout -s \"SIG${z}9\" 1 true; echo rc=$?; timeout -s \"$n\" 1 true 2>/dev/null; echo rc=$?; timeout -s \"$n\" 1 true 2>&1 | head -c 20; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=0\nrc=0\nrc=125\ntimeout: '9999999999\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
       ]
     }
   ]

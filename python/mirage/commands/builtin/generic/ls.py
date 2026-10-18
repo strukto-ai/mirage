@@ -2,11 +2,15 @@ import functools
 import logging
 import posixpath
 import string
-from collections.abc import Awaitable, Callable, Mapping
+import sys
+from collections import deque
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, fields
 from typing import Any
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.commands.builtin.generic.sort import stream_config
+from mirage.commands.builtin.sort_keys import Key, KeyMods, SortConfig
 from mirage.commands.builtin.utils import formatting
 from mirage.commands.builtin.utils.identity import Identity, identity_of
 from mirage.commands.builtin.utils.links import (
@@ -40,10 +44,12 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import DotWalkError, DotWalkLoop, FsCondition
 from mirage.io.types import IOResult
+from mirage.rs import open_stream
 from mirage.types import (
     LINK_TARGET_KEY,
     FileStat,
     FileType,
+    JsonValue,
     LsIndicator,
     LsLinkMode,
     LsSortBy,
@@ -88,9 +94,9 @@ class LsFlags:
     hyperlink: bool = False
 
 
-# GNU's own `sort_args` (coreutils 9.7), in its own order, which is what
-# `--sort=x` lists back. 9.7 added `name`, the order no `--sort` at all
-# means, so `--sort=n` is ambiguous between it and `none`.
+# The words GNU 9.7's `--sort` takes, in the order `ls --sort=x` lists them
+# back. 9.7 added `name`, the order no `--sort` at all means, so
+# `--sort=n` is ambiguous between it and `none`.
 _SORT_WORDS = {
     "none": LsSortBy.NONE,
     "size": LsSortBy.SIZE,
@@ -142,9 +148,9 @@ def _grouped_argument_error(
     groups: tuple[tuple[str, ...], ...],
     kind: WordRefusalKind,
 ) -> UsageError:
-    """GNU's ARGMATCH refusal for an option whose values have aliases,
-    listed one group per line (``--time``, ``--hyperlink``); exit 1, as
-    ls answers it.
+    """The refusal of an ambiguous or invalid choice word for an option
+    whose values have aliases, the valid words listed one group per line
+    (``--time``, ``--hyperlink``); exit 1, as GNU 9.7's ls answers it.
 
     Args:
         option (str): the option's long spelling.
@@ -266,12 +272,12 @@ def _time_style_flag(fl: FlagView) -> str:
     match = match_word(style, formatting.LS_TIME_STYLES)
     if isinstance(match, WordMatch):
         return match.word
-    # ls hand-writes this block rather than letting argmatch print
-    # `time_style_args`, so it is the one ARGMATCH refusal in the repo
-    # whose candidates are neither quoted nor a subset of the words it
-    # accepts -- and the one that exits 2, ls's own `usage (LS_FAILURE)`.
-    # The first line is still argmatch's, so `--time-style=lo` spans
-    # long-iso and locale and reads `ambiguous argument 'lo'`.
+    # GNU 9.7 lists the styles as patterns here, so it is the one such
+    # refusal in the repo whose candidates are neither quoted nor a subset
+    # of the words it accepts -- and the one that exits 2, as `ls -l
+    # --time-style=x` does. The first line is still the usual one, so
+    # `--time-style=lo` spans long-iso and locale and reads `ambiguous
+    # argument 'lo'`.
     raise UsageError(
         f"{word_refusal_line('ls', 'time style', style, match.kind)}\n"
         "Valid arguments are:\n"
@@ -312,7 +318,8 @@ def _indicator_word(dest: str, raw: FlagValue) -> LsIndicator:
 
     ``-F`` and a bare ``--classify`` classify; ``--classify=WHEN`` does
     for ``always`` and never otherwise, since output here is never a
-    terminal. A refused value is GNU's ARGMATCH refusal, exit 1.
+    terminal. An ambiguous or invalid choice word is refused with the
+    valid words listed, exit 1.
 
     Args:
         dest (str): one of the indicator options' dests.
@@ -356,7 +363,7 @@ def indicator_flag(fl: FlagView) -> LsIndicator:
 def link_mode(fl: FlagView) -> LsLinkMode:
     """Which command-line links GNU ls resolves before it lists them.
 
-    ls.c settles it once: the last of ``-L``, ``-H`` and
+    GNU settles it once: the last of ``-L``, ``-H`` and
     ``--dereference-command-line-symlink-to-dir`` wins, and with none of
     them ``-d``, a long format or the classify style resolve no link
     while anything else resolves one that leads to a directory
@@ -392,10 +399,9 @@ def _block_size_error(text: str, refusal: formatting.BlockSizeRefusal) -> str:
     Measured on coreutils 9.7: ``ls: invalid --block-size argument
     'x'``, ``ls: invalid suffix in --block-size argument '1x'`` and
     ``ls: --block-size argument '99999999999999999999' too large``. The
-    word is quoted but NOT escaped, which is GNU's own split (xstrtol's
-    fatal path prints the argument as is, where argmatch's runs it
-    through ``quote()``): ``ls --block-size=1é`` reports the two UTF-8
-    bytes intact.
+    word is quoted but NOT escaped, where a bad ``--sort`` word is both:
+    ``ls --block-size=1é`` reports the two UTF-8 bytes intact, and
+    ``ls --sort=é`` prints ``'\\303\\251'``.
 
     Args:
         text (str): the option value as typed.
@@ -556,8 +562,7 @@ def exit_status_for(warnings: list[LsWarning]) -> int:
 
 
 def type_indicator(entry: FileStat | None, style: LsIndicator) -> str:
-    """The mark GNU appends to a name for a style (ls.c's
-    get_type_indicator, coreutils 9.7).
+    """The mark GNU appends to a name for a style (coreutils 9.7).
 
     A directory is ``/`` in every style but none; ``slash`` marks nothing
     else. A link is ``@`` and a FIFO ``|``; an executable regular file is
@@ -679,143 +684,47 @@ async def link_targets(
     return out
 
 
-def _is_digit(c: int) -> bool:
-    """Whether a byte is an ASCII digit.
+# GNU 9.7's `ls -v` lists names in the order `sort -zV` prints them, ties
+# broken by bytes as sort's last resort does (1,500 random directories
+# agreed), so the names go through mirage-rs's sort with one version key.
+# A run holds every name, so the sort writes one run and never merges.
+_VERSION_SORT: dict[str, JsonValue] = {
+    **stream_config(
+        SortConfig(
+            keys=(Key(1, 1, False, None, None, False, KeyMods(version=True)),),
+            field_sep=None,
+            reverse=False,
+            unique=False,
+            stable=False,
+        ),
+        zero_terminated=True,
+    ),
+    "mode": "sort",
+    "run_bytes": sys.maxsize,
+}
+
+
+def sort_by_version(names: Sequence[str]) -> list[int]:
+    """Indices of ``names`` in ``ls -v`` order.
 
     Args:
-        c (int): one byte.
+        names (Sequence[str]): the names, none holding a NUL.
+
+    Returns:
+        list[int]: each index once; equal names keep their input order.
     """
-    return 0x30 <= c <= 0x39
-
-
-def _is_alpha(c: int) -> bool:
-    """Whether a byte is an ASCII letter.
-
-    Args:
-        c (int): one byte.
-    """
-    return 0x41 <= c <= 0x5A or 0x61 <= c <= 0x7A
-
-
-def _version_order(c: int) -> int:
-    """gnulib ``filevercmp``'s byte order: a tilde sorts before the end
-    of the string, ASCII letters by code, and every other byte after the
-    letters. gnulib classifies in the C locale one byte at a time, so a
-    multibyte letter such as ``é`` is two bytes past the letters, not a
-    letter.
-
-    Args:
-        c (int): one byte.
-    """
-    if _is_digit(c):
-        return 0
-    if _is_alpha(c):
-        return c
-    if c == 0x7E:
-        return -1
-    return c + 256
-
-
-def _verrevcmp(a: bytes, b: bytes) -> int:
-    """Debian's version comparison as gnulib's ``verrevcmp`` runs it:
-    alternating non-digit and digit runs, the digit runs compared as
-    numbers.
-
-    Args:
-        a (bytes): left operand.
-        b (bytes): right operand.
-    """
-    i = j = 0
-    while i < len(a) or j < len(b):
-        while (i < len(a) and not _is_digit(a[i])) or (
-            j < len(b) and not _is_digit(b[j])
-        ):
-            ac = _version_order(a[i]) if i < len(a) else 0
-            bc = _version_order(b[j]) if j < len(b) else 0
-            if ac != bc:
-                return ac - bc
-            i += 1
-            j += 1
-        while i < len(a) and a[i] == 0x30:
-            i += 1
-        while j < len(b) and b[j] == 0x30:
-            j += 1
-        first_diff = 0
-        while (
-            i < len(a) and j < len(b) and _is_digit(a[i]) and _is_digit(b[j])
-        ):
-            if not first_diff:
-                first_diff = a[i] - b[j]
-            i += 1
-            j += 1
-        if i < len(a) and _is_digit(a[i]):
-            return 1
-        if j < len(b) and _is_digit(b[j]):
-            return -1
-        if first_diff:
-            return first_diff
-    return 0
-
-
-def _version_prefix_len(s: bytes) -> int:
-    """How much of a name ``filevercmp`` compares first: everything but
-    a trailing run of suffixes (``.txt``, ``.tar.gz``, ``~``).
-
-    Args:
-        s (bytes): the name.
-    """
-    n = len(s)
-    i = 0
-    prefix = 0
-    while True:
-        if i == n:
-            return prefix
-        i += 1
-        prefix = i
-        while (
-            i + 1 < n
-            and s[i] == 0x2E
-            and (_is_alpha(s[i + 1]) or s[i + 1] == 0x7E)
-        ):
-            i += 2
-            while i < n and (
-                _is_alpha(s[i]) or _is_digit(s[i]) or s[i] == 0x7E
-            ):
-                i += 1
-
-
-def filevercmp(a: str, b: str) -> int:
-    """gnulib's ``filevercmp``, the order behind ``ls -v``: the empty
-    name, ``.`` and ``..`` first, then hidden names, then the names
-    compared as versions with their suffixes set aside, the suffixes
-    breaking a tie. The comparison runs over the names' UTF-8 bytes,
-    which is what GNU sees; a lone surrogate maps back to the byte it
-    was decoded from.
-
-    Args:
-        a (str): left name.
-        b (str): right name.
-    """
-    if a == b:
-        return 0
-    for special in ("", ".", ".."):
-        if a == special:
-            return -1
-        if b == special:
-            return 1
-    a_hidden, b_hidden = a.startswith("."), b.startswith(".")
-    if a_hidden != b_hidden:
-        return -1 if a_hidden else 1
-    ab = a.encode("utf-8", "surrogateescape")
-    bb = b.encode("utf-8", "surrogateescape")
-    result = _verrevcmp(
-        ab[: _version_prefix_len(ab)], bb[: _version_prefix_len(bb)]
-    )
-    if result == 0:
-        result = _verrevcmp(ab, bb)
-    if result == 0:
-        result = (ab > bb) - (ab < bb)
-    return result
+    places: dict[bytes, deque[int]] = {}
+    records = bytearray()
+    for index, name in enumerate(names):
+        raw = name.encode("utf-8", "surrogateescape")
+        places.setdefault(raw, deque()).append(index)
+        records += raw + b"\0"
+    stream = open_stream("sort", _VERSION_SORT)
+    out = bytearray(stream.feed(bytes(records)))
+    out += stream.finish()
+    while stream.busy():
+        out += stream.drain()
+    return [places[raw].popleft() for raw in bytes(out).split(b"\0")[:-1]]
 
 
 def name_width(name: str) -> int:
@@ -869,7 +778,7 @@ def _order_rows(
     stable name sort followed by the primary key reproduces the first half;
     reversing the finished order reproduces the second. `-X` and
     `--sort=width` are stable sorts over the name order too; `-v` is
-    gnulib's version order; `-U` keeps the listing order, and `-r` does
+    ``sort -V``'s order; `-U` keeps the listing order, and `-r` does
     not reverse it (GNU's `-r` reverses while sorting, and `-U` does not
     sort). `--group-directories-first` partitions the finished
     order, so the directories come first in every sort but `-U`, where
@@ -885,11 +794,7 @@ def _order_rows(
     if sort_by is LsSortBy.NONE:
         order = list(range(len(rows)))
     elif sort_by is LsSortBy.VERSION:
-
-        def by_version(i: int, j: int) -> int:
-            return filevercmp(rows[i].name, rows[j].name)
-
-        order = sorted(range(len(rows)), key=functools.cmp_to_key(by_version))
+        order = sort_by_version([row.name for row in rows])
     else:
         order = sorted(range(len(rows)), key=lambda i: rows[i].name)
         if sort_by is LsSortBy.EXTENSION:
@@ -1055,9 +960,9 @@ async def _stat_entries(
     An entry whose stat fails keeps its row and never fails the whole
     directory, whatever the error: a dropped connection on a mount
     whose stat is a request costs that entry alone, as any failed stat
-    does in GNU's gobble_file. It is reported, and the exit is 1, only
+    does in a GNU listing. It is reported, and the exit is 1, only
     when the listing prints something the stat supplies
-    (``stat_needed``). One entry at a time, as GNU's lstat loop goes.
+    (``stat_needed``). One entry at a time, as GNU stats them.
 
     Args:
         path (PathSpec): the directory being listed.
@@ -1233,7 +1138,7 @@ async def probe_operand(
             # simplifies to nor the names the namespace owes it answer.
             # A command-line link whose stat loops is the exception: GNU
             # lstats it then and lists the link itself, unless -L or -H
-            # asked for the target (ls.c's gobble_file, coreutils 9.7).
+            # asked for the target (coreutils 9.7).
             if (
                 isinstance(exc, DotWalkLoop)
                 and command_line_arg
@@ -1257,10 +1162,9 @@ async def probe_operand(
         if row is not None:
             return Operand(path, row, []), warnings
         if child_mounts is None or not child_mounts(path.virtual):
-            # GNU stats an operand before it opens one (ls.c's
-            # gobble_file, coreutils 9.7): a stat that fails is what it
-            # names, and a directory it may not read is worded apart,
-            # the entry being there.
+            # GNU 9.7 stats an operand before it opens one: a stat that
+            # fails is what it names, and a directory it may not read is
+            # worded apart, the entry being there.
             failed = exc if refused is None else refused
             verb = (
                 "cannot open directory"
@@ -1522,9 +1426,8 @@ def stat_needed(
     """Whether GNU's ls would stat a listed entry to print this listing.
 
     That is when a failed stat reaches stderr: the long format, a time
-    or size sort, ``-i``, ``-Z`` and ``--hyperlink`` read the stat
-    (GNU's format_needs_stat), and ``-R``, ``-F`` and
-    ``--group-directories-first`` read the type (format_needs_type),
+    or size sort, ``-i``, ``-Z`` and ``--hyperlink`` read the stat,
+    and ``-R``, ``-F`` and ``--group-directories-first`` read the type,
     which a mirage listing never carries, as a readdir without d_type
     does not. A plain listing prints the names readdir gave and nothing
     else. Mirrors TS ``statNeeded``.

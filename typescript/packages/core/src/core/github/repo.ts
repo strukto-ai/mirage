@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// Repository arguments are read as go-gh v2.13.0 reads them (MIT; see
+// licenses/third_party/go-gh.txt).
+
 import { GitHubApiError, type GitHubTransport } from './client.ts'
 import { GRAPHQL_PATH } from './constants.ts'
 import { decodeBase64 } from '../../utils/base64.ts'

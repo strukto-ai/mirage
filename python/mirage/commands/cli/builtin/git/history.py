@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import heapq
+import itertools
 import logging
 import math
 import re
@@ -193,8 +194,8 @@ def _timestamp(value: str | None, flag: str, now: int) -> float | None:
     Accepts an ISO-8601 date or a bare epoch second. git accepts far
     more (``2 weeks ago``, ``yesterday``); anything else is refused here
     rather than silently ignored, which would quietly widen the window.
-    An empty value is now, as git's approxidate reads a date that says
-    nothing (git 2.47: ``--since=`` lists no past commit).
+    An empty value is now, as git reads a date that says nothing
+    (git 2.47: ``--since=`` lists no past commit).
 
     Args:
         value (str | None): the flag's value.
@@ -729,60 +730,59 @@ def _sort_commits(
     """Order a walk's commits so no parent comes before any of its
     children.
 
-    git's sort_in_topological_order: a commit is emitted once every child
-    in the list has been, children counted only among the commits listed.
-    ``topo`` keeps a stack, so a merge's second parent's line is followed
-    to its end before the first parent's, and the tips come out in walk
-    order; ``date`` takes the newest ready commit instead, ties in the
-    order they became ready.
+    A commit is ready once every child of it in the list is printed;
+    children outside the list do not hold it back, and every parent
+    counts, ``--first-parent`` or not. ``topo`` prints the commit a
+    printed child made ready last before the next tip in walk order, so
+    a merge's last parent's line runs to its end before an earlier
+    parent's: git 2.50.1 prints ``M P2b P2a P1b P1a base`` for a merge
+    ``M`` of ``P1b`` and ``P2b`` whatever their dates. ``date`` prints the
+    newest ready commit, ties in the order they became ready, the tips
+    first in walk order.
 
     Args:
         commits (list[Commit]): the walk, newest first.
-        order (str): which of git's two orders.
+        order (Literal["topo", "date"]): ``--topo-order`` or
+            ``--date-order``.
     """
-    indegree: dict[bytes, int] = {commit.id: 1 for commit in commits}
-    by_id: dict[bytes, Commit] = {commit.id: commit for commit in commits}
-    for commit in commits:
-        for parent in commit.parents:
-            if indegree.get(parent, 0) > 0:
-                indegree[parent] += 1
-    stack: list[Commit] = []
-    heap: list[tuple[int, int, bytes]] = []
-    seq = 0
+    by_id = {commit.id: commit for commit in commits}
+    unprinted_children = dict.fromkeys(by_id, 0)
+    for listed in commits:
+        for parent_id in listed.parents:
+            if parent_id in unprinted_children:
+                unprinted_children[parent_id] += 1
+    tips = [c for c in commits if not unprinted_children[c.id]]
+    printed: list[Commit] = []
 
-    def put(commit: Commit) -> None:
-        nonlocal seq
-        if order == "topo":
-            stack.append(commit)
-        else:
-            heapq.heappush(heap, (-commit.commit_time, seq, commit.id))
-        seq += 1
+    def print_commit(commit: Commit) -> list[Commit]:
+        printed.append(commit)
+        freed = []
+        for parent_id in commit.parents:
+            if parent_id in unprinted_children:
+                unprinted_children[parent_id] -= 1
+                if not unprinted_children[parent_id]:
+                    freed.append(by_id[parent_id])
+        return freed
 
-    def take() -> Commit | None:
-        if order == "topo":
-            return stack.pop() if stack else None
-        return by_id[heapq.heappop(heap)[2]] if heap else None
-
-    for tip in commits:
-        if indegree[tip.id] == 1:
-            put(tip)
-    # The tips come out in the order the walk found them, which a stack
-    # reverses unless it is turned over first.
-    stack.reverse()
-    ordered: list[Commit] = []
-    ready = take()
-    while ready is not None:
-        for parent in ready.parents:
-            count = indegree.get(parent, 0)
-            if count == 0:
-                continue
-            indegree[parent] = count - 1
-            if count - 1 == 1:
-                put(by_id[parent])
-        indegree[ready.id] = 0
-        ordered.append(ready)
-        ready = take()
-    return ordered
+    if order == "topo":
+        freed: list[Commit] = []
+        upcoming = iter(tips)
+        while True:
+            current = freed.pop() if freed else next(upcoming, None)
+            if current is None:
+                return printed
+            freed.extend(print_commit(current))
+    # The ready commits on a heap keyed newest first and then earliest
+    # readied, so the next one to print is at its top.
+    arrivals = itertools.count()
+    ready = [(-tip.commit_time, next(arrivals), tip.id) for tip in tips]
+    heapq.heapify(ready)
+    while ready:
+        for parent in print_commit(by_id[heapq.heappop(ready)[2]]):
+            heapq.heappush(
+                ready, (-parent.commit_time, next(arrivals), parent.id)
+            )
+    return printed
 
 
 def _in_window(commit: Commit, flags: LogFlags) -> bool:

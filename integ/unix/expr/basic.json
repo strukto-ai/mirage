@@ -1487,6 +1487,198 @@
         "stdout": "rc=2\nrc=2\nrc=2\nrc=2\nrc=2\n",
         "stderr": "expr: syntax error: unexpected argument '\\360\\237\\230\\200'\nexpr: syntax error: unexpected argument 'a\\'b'\nexpr: syntax error: unexpected argument 'a\\001b'\nexpr: syntax error: unexpected argument 'a\\nb'\nexpr: syntax error: unexpected argument 'a\"b'\n"
       }
+    },
+    {
+      "id": "expr_or_and_answer_zero_when_both_sides_are_null",
+      "seq": 17200301,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "expr 0 '|' ''; echo rc=$?; expr '' '&' 3; echo rc=$?; expr -0 '|' x; echo rc=$?; expr a '&' b; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\nrc=1\n0\nrc=1\nx\nrc=0\na\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "expr_a_decided_operand_computes_nothing",
+      "seq": 17200302,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "expr 1 '|' a + 1; echo rc=$?; expr 0 '&' abc : '\\('; echo rc=$?; expr 1 '|' a : '['; echo rc=$?; expr 1 '|' substr a x y; echo rc=$?; expr 1 '|' substr abc; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\nrc=0\n0\nrc=1\n1\nrc=0\n1\nrc=0\nrc=2\n",
+        "stderr": "expr: syntax error: missing argument after 'abc'\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "expr_keywords_read_their_operands_at_their_own_level",
+      "seq": 17200303,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "expr length length abc; expr substr length abcde 1 1; expr length + +; expr substr + abc 1 1; expr match abc a : a; expr length 1 + 2; expr $(printf 'length %.0s' $(seq 70)) abc",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n5\n1\na\n0\n3\n1\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "expr_two_thousand_chained_keywords_read_without_recursion",
+      "seq": 17300007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "expr $(printf 'length %.0s' $(seq 2000)) abc; echo rc=$?; expr $(printf 'length %.0s' $(seq 2000)) length; echo rc=$?; expr substr $(printf 'length %.0s' $(seq 2000)) abcdef 1 1; echo rc=$?; expr $(printf 'length %.0s' $(seq 1999)) + length; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\nrc=0\nrc=2\n1\nrc=0\n1\nrc=0\n",
+        "stderr": "expr: syntax error: missing argument after 'length'\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "expr_operator_words_stand_for_themselves",
+      "seq": 17200304,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "expr '*'; expr = = =; expr -; expr '(' = ')'; expr '(' + ')' ')'; expr '|'",
+      "expect": {
+        "exit": 0,
+        "stdout": "*\n1\n-\n=\n)\n|\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "expr_a_value_refused_mid_line_outranks_a_leftover_word",
+      "seq": 17200305,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "expr 1 - - 1; echo rc=$?; expr + + + + + + +; echo rc=$?; expr '(' + ')'; echo rc=$?; expr + length '('; echo rc=$?; expr - 1; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\nrc=2\nrc=2\nrc=2\n",
+        "stderr": "expr: non-integer argument\nexpr: non-integer argument\nexpr: syntax error: expecting ')' after ')'\nexpr: syntax error: unexpected argument '('\nexpr: syntax error: unexpected argument '1'\n"
+      },
+      "flags": []
     }
   ]
 }

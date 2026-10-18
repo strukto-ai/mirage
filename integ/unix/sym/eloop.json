@@ -647,6 +647,74 @@
       }
     },
     {
+      "id": "sym_eloop_missing_mode_keeps_the_21st_link",
+      "seq": 15811201,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && ln -s q2 q1 && ln -s q3 q2 && ln -s q4 q3 && ln -s q1 q4 && realpath -m q1/x && readlink -m q3 && realpath -e q2; echo rc=$?; readlink -f q2; echo rc=$?; rm -f q1 q2 q3 q4)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/q1/x\n/data/q3\nrc=1\nrc=1\n",
+        "stderr": "realpath: q2: Too many levels of symbolic links\n"
+      }
+    },
+    {
+      "id": "sym_eloop_missing_mode_keeps_a_loops_first_link_behind_a_chain",
+      "seq": 15811202,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && ln -s rq2 rq1 && ln -s rq3 rq2 && ln -s rq1 rq3 && ln -s rq1 rt25 && for i in $(seq 24 -1 1); do ln -s rt$((i+1)) rt$i; done && realpath -m rt1/x && readlink -m rt7 && readlink -m rt1/../rt3/y && realpath rt1; echo rc=$?; readlink -f rt2; echo rc=$?; rm -f rq1 rq2 rq3; for i in $(seq 25); do rm -f rt$i; done)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/rq1/x\n/data/rq2\n/data/rq1/y\nrc=1\nrc=1\n",
+        "stderr": "realpath: rt1: Too many levels of symbolic links\n"
+      }
+    },
+    {
       "id": "sym_eloop_realpath",
       "seq": 635,
       "targets": [

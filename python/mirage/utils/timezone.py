@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
-from calendar import monthrange
+from calendar import monthrange, timegm
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone, tzinfo
@@ -186,6 +186,19 @@ class PosixZone(tzinfo):
         as_dst = self._in_dst(wall - self._dst_offset)
         return as_dst and (not as_std or dt.fold == 0)
 
+    def transitions(self, year: int) -> tuple[int, int]:
+        """When daylight saving time starts and ends in a UTC year, as
+        epoch seconds: the instants the two rules lay out in the year the
+        UTC clock reads, the end first when the window wraps the year and
+        the two equal when it is empty.
+
+        Args:
+            year (int): the UTC year.
+        """
+        start = self._start.at(year) - self._std_offset
+        end = self._end.at(year) - self._dst_offset
+        return timegm(start.timetuple()), timegm(end.timetuple())
+
     def utcoffset(self, dt: datetime | None) -> timedelta:
         if dt is not None and self._resolves_dst(dt):
             return self._dst_offset
@@ -215,6 +228,18 @@ class PosixZone(tzinfo):
             f"PosixZone({self._std!r}, {self._std_offset!r}, "
             f"{self._dst!r}, {self._dst_offset!r})"
         )
+
+
+def posix_transitions(zone: tzinfo, year: int) -> tuple[int, int] | None:
+    """When a POSIX TZ zone's daylight saving time starts and ends in a
+    UTC year (see PosixZone.transitions), None for any other zone, whose
+    transitions come from tzdata.
+
+    Args:
+        zone (tzinfo): the zone.
+        year (int): the UTC year.
+    """
+    return zone.transitions(year) if isinstance(zone, PosixZone) else None
 
 
 def zone_from_env(env: Mapping[str, str] | None) -> tzinfo | None:
@@ -293,15 +318,14 @@ def _read_clock(
 
 
 def _read_offset(spec: str, pos: int, dst: bool) -> tuple[int | None, int]:
-    """Read a POSIX offset at ``pos`` as glibc's ``parse_offset`` does:
+    """Read a POSIX offset at ``pos`` as glibc's tzset reads one:
     seconds west of Greenwich, and the position after it.
 
     A standard offset must start with a sign or a digit and read at
     least an hour, else there is none (None, and ``pos`` unmoved). A
     daylight offset takes a sign even when no hours follow, and reads
     as None then, past the sign, for the caller to default. Hours are
-    clamped at 24 and minutes and seconds at 59, glibc's
-    ``compute_offset``.
+    clamped at 24 and minutes and seconds at 59, as glibc clamps them.
 
     Args:
         spec (str): the TZ string.
@@ -335,7 +359,7 @@ def _bounded(seconds: int) -> int:
 def _read_rule(
     spec: str, pos: int, which: int
 ) -> tuple[TransitionRule, int, bool]:
-    """Read one transition rule at ``pos`` as glibc's ``parse_rule`` does.
+    """Read one transition rule at ``pos`` as glibc's tzset reads one.
 
     An optional comma leads. ``Jn`` and ``n`` take a day, ``Mm.w.d`` a
     month, week and weekday, and the end of the string stands for the

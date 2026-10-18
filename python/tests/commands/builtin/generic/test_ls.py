@@ -12,10 +12,10 @@ from mirage.commands.builtin.generic.ls import (
     LS_OK,
     LsWarning,
     exit_status_for,
-    filevercmp,
     ls,
     parse_flags,
     probe_operand,
+    sort_by_version,
     type_indicator,
 )
 from mirage.commands.builtin.utils.formatting import LsColumns
@@ -358,27 +358,64 @@ async def test_a_child_mount_row_falls_back_to_directory_with_no_dispatcher():
 # ── the flag set beyond -l: sort orders, columns, time styles ──────────
 
 
-def test_filevercmp_pins_gnu_corner_cases():
-    assert filevercmp("file2.txt", "file10.txt") < 0
-    assert filevercmp("a.txt", "a.tar.gz") > 0
-    assert filevercmp("", "a") < 0
-    assert filevercmp(".", "..") < 0
-    assert filevercmp(".hidden", "a") < 0
-    assert filevercmp("1.0~rc1", "1.0") < 0
-    assert filevercmp("abc", "abc") == 0
+def _by_version(*names: str) -> list[str]:
+    return [names[i] for i in sort_by_version(names)]
 
 
-def test_filevercmp_orders_bytes_past_the_letters():
+@pytest.mark.parametrize(
+    "first,second",
+    [
+        ("file2.txt", "file10.txt"),
+        ("a.tar.gz", "a.txt"),
+        ("", "a"),
+        (".", ".."),
+        (".hidden", "a"),
+        ("1.0~rc1", "1.0"),
+    ],
+)
+def test_sort_by_version_pins_gnu_corner_cases(first: str, second: str):
+    assert _by_version(second, first) == [first, second]
+    assert _by_version(first, second) == [first, second]
+
+
+def test_sort_by_version_keeps_equal_names_in_input_order():
+    assert sort_by_version(["abc", "abc"]) == [0, 1]
+    assert sort_by_version([]) == []
+
+
+def test_sort_by_version_breaks_ties_by_bytes():
+    # GNU 9.7 `ls -v`: names a version reading cannot tell apart list in
+    # byte order, `a001 a01 a1`, as `sort -V` prints them.
+    assert _by_version("a1", "a01", "a001") == ["a001", "a01", "a1"]
+
+
+def test_sort_by_version_orders_bytes_past_the_letters():
     # Pinned on coreutils 9.7 under LC_ALL=C: `_ { é ÿ Ā €` and
-    # `a- a{ aé`, since gnulib classifies bytes, not code points.
-    assert filevercmp("_", "{") < 0
-    assert filevercmp("{", "é") < 0
-    assert filevercmp("é", "ÿ") < 0
-    assert filevercmp("ÿ", "Ā") < 0
-    assert filevercmp("Ā", "€") < 0
-    assert filevercmp("a-", "a{") < 0
-    assert filevercmp("a{", "aé") < 0
-    assert filevercmp("\uffff", "\U0001d11e") < 0
+    # `a- a{ aé`, since the order classifies bytes, not code points.
+    assert _by_version("€", "Ā", "ÿ", "é", "{", "_") == [
+        "_",
+        "{",
+        "é",
+        "ÿ",
+        "Ā",
+        "€",
+    ]
+    assert _by_version("aé", "a{", "a-") == ["a-", "a{", "aé"]
+    assert _by_version("\U0001d11e", "\uffff") == ["\uffff", "\U0001d11e"]
+
+
+def test_sort_by_version_keeps_a_leading_bom():
+    # GNU 9.7 `ls -v` over a, b, U+FEFF, aU+FEFF and U+FEFFa: the mark's
+    # bytes sort past the letters wherever they sit, and every name lists
+    # once.
+    assert _by_version("a", "\ufeffa", "b", "\ufeff", "a\ufeff") == [
+        "a",
+        "a\ufeff",
+        "b",
+        "\ufeff",
+        "\ufeffa",
+    ]
+    assert sort_by_version(["\ufeffa", "a"]) == [1, 0]
 
 
 @pytest.mark.asyncio
@@ -451,7 +488,7 @@ def test_parse_flags_last_sort_and_time_spelling_win(
     assert parsed.time_kind is time_kind
 
 
-# gnulib's argmatch resolves an unambiguous prefix and answers the
+# A choice word may be any unambiguous prefix, and it answers the
 # canonical word of the value it matched. Every row measured on coreutils
 # 9.7 (`ls --sort=non`, `-l --time=acc`, `--hyperlink=n`,
 # `-l --time-style=full`).
@@ -559,8 +596,8 @@ async def test_dot_entries_respect_mount_boundary(prefix, subdir, namespace):
     ],
 )
 def test_type_indicator_marks_by_style(kind, mode, marks):
-    # ls.c get_type_indicator: slash marks only directories, and only
-    # classify marks an executable.
+    # GNU 9.7's ls: slash marks only directories, and only classify
+    # marks an executable.
     entry = FileStat(name="x", type=kind, mode=mode)
     styles = (
         LsIndicator.NONE,

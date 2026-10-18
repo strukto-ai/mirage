@@ -24,6 +24,7 @@ import {
   type LsIndicator,
   type LsLinkMode,
   type LsSortBy,
+  type JsonValue,
   type LsTimeKind,
 } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
@@ -64,6 +65,9 @@ import { escapeName } from '../../../utils/quote.ts'
 import { charWidth } from '../../../utils/width.ts'
 import { linksOf, mountsOf, owedNames } from '../utils/links.ts'
 import { vfsStatPath } from '../utils/paths.ts'
+import { openStream } from '../../../rs/stream.ts'
+import { concat } from '../../../utils/bytes.ts'
+import { streamConfig } from './sort.ts'
 
 type Readdir = (p: PathSpec) => Promise<string[]>
 type Stat = (p: PathSpec) => Promise<FileStat>
@@ -152,9 +156,8 @@ function childSpec(entryPath: string, prefix: string): PathSpec {
 }
 
 /**
- * The mark GNU appends to a name for a style (ls.c's get_type_indicator,
- * coreutils 9.7). A directory is `/` in every style but none; `slash` marks
- * nothing else. A link is `@` and a FIFO `|`; an executable regular file is
+ * The mark GNU appends to a name for a style (coreutils 9.7). A directory is
+ * `/` in every style but none; `slash` marks nothing else. A link is `@` and a FIFO `|`; an executable regular file is
  * `*`, but only under classify. The mark rides the row's own type and mode, so
  * it needs no separate lookup; a row nothing could stat (a dangling link's
  * target) takes none. Mirrors Python's type_indicator.
@@ -295,97 +298,76 @@ function appendListing(
   stats.forEach((s, i) => lines.push(formatSimple(s, render.indicator, render.columns, names?.[i])))
 }
 
-const isDigit = (c: number | undefined): boolean => c !== undefined && c >= 0x30 && c <= 0x39
-const isAlpha = (c: number | undefined): boolean =>
-  c !== undefined && ((c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a))
-
-// gnulib filevercmp's byte order: a tilde sorts before the end of the
-// string, ASCII letters by code, and every other byte after the letters.
-// gnulib classifies in the C locale one byte at a time, so a multibyte
-// letter such as é is two bytes past the letters, not a letter.
-function versionOrder(c: number): number {
-  if (isDigit(c)) return 0
-  if (isAlpha(c)) return c
-  if (c === 0x7e) return -1
-  return c + 256
-}
-
-// Debian's version comparison as gnulib's verrevcmp runs it: alternating
-// non-digit and digit runs, the digit runs compared as numbers.
-function verrevcmp(a: Uint8Array, b: Uint8Array): number {
-  let i = 0
-  let j = 0
-  while (i < a.length || j < b.length) {
-    while ((i < a.length && !isDigit(a[i])) || (j < b.length && !isDigit(b[j]))) {
-      const ac = i < a.length ? versionOrder(a[i] ?? 0) : 0
-      const bc = j < b.length ? versionOrder(b[j] ?? 0) : 0
-      if (ac !== bc) return ac - bc
-      i += 1
-      j += 1
-    }
-    while (a[i] === 0x30) i += 1
-    while (b[j] === 0x30) j += 1
-    let firstDiff = 0
-    while (isDigit(a[i]) && isDigit(b[j])) {
-      if (firstDiff === 0) firstDiff = (a[i] ?? 0) - (b[j] ?? 0)
-      i += 1
-      j += 1
-    }
-    if (isDigit(a[i])) return 1
-    if (isDigit(b[j])) return -1
-    if (firstDiff !== 0) return firstDiff
-  }
-  return 0
-}
-
-// How much of a name filevercmp compares first: everything but a
-// trailing run of suffixes (.txt, .tar.gz, ~).
-function versionPrefixLen(s: Uint8Array): number {
-  const n = s.length
-  let i = 0
-  let prefix = 0
-  for (;;) {
-    if (i === n) return prefix
-    i += 1
-    prefix = i
-    while (i + 1 < n && s[i] === 0x2e && (isAlpha(s[i + 1]) || s[i + 1] === 0x7e)) {
-      i += 2
-      while (i < n && (isAlpha(s[i]) || isDigit(s[i]) || s[i] === 0x7e)) i += 1
-    }
-  }
-}
-
-// Bytewise order, the tie-break GNU's memcmp gives.
-function compareBytes(a: Uint8Array, b: Uint8Array): number {
-  const n = Math.min(a.length, b.length)
-  for (let i = 0; i < n; i += 1) {
-    const d = (a[i] ?? 0) - (b[i] ?? 0)
-    if (d !== 0) return d
-  }
-  return a.length - b.length
-}
-
 const ENC = new TextEncoder()
+// A name may start with U+FEFF, which a default decoder drops from the front
+// of what it decodes.
+const DEC = new TextDecoder('utf-8', { ignoreBOM: true })
 
-// gnulib's filevercmp, the order behind `ls -v`: the empty name, `.` and
-// `..` first, then hidden names, then the names compared as versions with
-// their suffixes set aside, the suffixes breaking a tie. The comparison
-// runs over the names' UTF-8 bytes, which is what GNU sees.
-export function filevercmp(a: string, b: string): number {
-  if (a === b) return 0
-  for (const special of ['', '.', '..']) {
-    if (a === special) return -1
-    if (b === special) return 1
+// GNU 9.7's `ls -v` lists names in the order `sort -zV` prints them, ties
+// broken by bytes as sort's last resort does (1,500 random directories
+// agreed), so the names go through mirage-rs's sort with one version key.
+// A run holds every name, so the sort writes one run and never merges.
+const VERSION_SORT: Record<string, JsonValue> = {
+  ...streamConfig(
+    {
+      keys: [
+        {
+          startField: 1,
+          startChar: 1,
+          startSkip: false,
+          endField: null,
+          endChar: null,
+          endSkip: false,
+          mods: {
+            numeric: false,
+            human: false,
+            version: true,
+            month: false,
+            fold: false,
+            reverse: false,
+          },
+        },
+      ],
+      fieldSep: null,
+      reverse: false,
+      unique: false,
+      stable: false,
+    },
+    true,
+  ),
+  mode: 'sort',
+  run_bytes: Number.MAX_SAFE_INTEGER,
+}
+
+/**
+ * Indices of `names` (none holding a NUL) in `ls -v` order, each once;
+ * equal names keep their input order. Mirrors sort_by_version in ls.py.
+ */
+export async function sortByVersion(names: readonly string[]): Promise<number[]> {
+  const places = new Map<string, number[]>()
+  names.forEach((name, index) => {
+    const key = DEC.decode(ENC.encode(name))
+    const queue = places.get(key)
+    if (queue === undefined) places.set(key, [index])
+    else queue.push(index)
+  })
+  const stream = await openStream('sort', VERSION_SORT)
+  const out: Uint8Array[] = []
+  try {
+    out.push(stream.feed(ENC.encode(names.map((name) => `${name}\0`).join(''))), stream.finish())
+    while (stream.busy()) out.push(stream.drain())
+  } finally {
+    stream.close()
   }
-  const aHidden = a.startsWith('.')
-  const bHidden = b.startsWith('.')
-  if (aHidden !== bHidden) return aHidden ? -1 : 1
-  const ab = ENC.encode(a)
-  const bb = ENC.encode(b)
-  let result = verrevcmp(ab.subarray(0, versionPrefixLen(ab)), bb.subarray(0, versionPrefixLen(bb)))
-  if (result === 0) result = verrevcmp(ab, bb)
-  if (result === 0) result = compareBytes(ab, bb)
-  return result
+  const sorted = DEC.decode(concat(out)).split('\0')
+  sorted.pop()
+  return sorted.map((key) => {
+    const index = places.get(key)?.shift()
+    if (index === undefined) {
+      throw new Error(`ls: the version sort returned a name it was not given: ${key}`)
+    }
+    return index
+  })
 }
 
 // The columns a name occupies, the key --sort=width compares: GNU
@@ -414,7 +396,7 @@ function primaryValue(entry: FileStat, sortBy: LsSortBy, timeKind: LsTimeKind): 
 // tie, so the order is total. `-r` negates the whole comparison, tie-break
 // included, which is why callers fold the sign into this comparator instead of
 // reversing the finished array. -X and --sort=width are stable sorts over
-// the name order too; -v is gnulib's version order.
+// the name order too; -v goes through sortByVersion instead.
 function compareStats(
   a: FileStat,
   b: FileStat,
@@ -422,7 +404,6 @@ function compareStats(
   timeKind: LsTimeKind,
   escape = false,
 ): number {
-  if (sortBy === 'version') return filevercmp(a.name, b.name)
   if (sortBy === 'extension') {
     const byExt = compareCodePoints(extensionOf(a.name), extensionOf(b.name))
     if (byExt !== 0) return byExt
@@ -445,17 +426,21 @@ function compareStats(
 // reverses while sorting, and -U does not sort);
 // --group-directories-first partitions the finished order, so the
 // directories come first in every sort but -U, where GNU ignores it.
-export function sortStats(
+export async function sortStats(
   stats: readonly FileStat[],
   sortBy: LsSortBy,
   reverse: boolean,
   timeKind: LsTimeKind = 'mtime',
   groupDirsFirst = false,
   escape = false,
-): FileStat[] {
+): Promise<FileStat[]> {
   let ordered: FileStat[]
   if (sortBy === 'none') {
     ordered = [...stats]
+  } else if (sortBy === 'version') {
+    const order = await sortByVersion(stats.map((s) => s.name))
+    ordered = order.flatMap((i) => stats[i] ?? [])
+    if (reverse) ordered.reverse()
   } else {
     const sign = reverse ? -1 : 1
     ordered = [...stats].sort((a, b) => sign * compareStats(a, b, sortBy, timeKind, escape))
@@ -537,10 +522,10 @@ function statFailedRow(entry: string): FileStat {
 // Stat every name in a directory, plus the mounts below it. An entry whose
 // stat fails keeps its row and never fails the whole directory, whatever the
 // error: a dropped connection on a mount whose stat is a request costs that
-// entry alone, as any failed stat does in GNU's gobble_file. It is reported,
+// entry alone, as any failed stat does in a GNU listing. It is reported,
 // and the exit is 1, only when the listing prints something the stat
-// supplies (`statNeeded`). One entry at a time, as GNU's lstat loop and
-// find's walk go: on a mount that keeps no listing index each stat is a
+// supplies (`statNeeded`). One entry at a time, as GNU ls and find stat
+// them: on a mount that keeps no listing index each stat is a
 // backend request, and firing a whole directory's worth together is a burst
 // the backend may refuse. `spell` gives an entry's path as the operand
 // spelled it, for a diagnostic. Mirrors Python ls `_stat_entries`.
@@ -688,8 +673,7 @@ async function probeOperand(
     // The operand did not resolve, so neither the path it simplifies to
     // nor a link standing there answers for it. A command-line link whose
     // stat loops is the exception: GNU lstats it then and lists the link
-    // itself, unless -L or -H asked for the target (ls.c's gobble_file,
-    // coreutils 9.7).
+    // itself, unless -L or -H asked for the target (coreutils 9.7).
     const walkRefused = isDotWalkError(err)
     const looped = walkRefused && (err as { code?: string }).code === 'ELOOP'
     let row: FileStat | null = null
@@ -705,9 +689,9 @@ async function probeOperand(
     if (row !== null) return { path, row, groups: [] }
     const link = looped && commandLineArg && !ctx.followArgs ? linkRow(path, links) : null
     if (link !== null) return { path, row: link, groups: [] }
-    // GNU stats an operand before it opens one (ls.c's gobble_file, coreutils
-    // 9.7): a stat that fails is what it names, and a directory it may not
-    // read is worded apart, the entry being there.
+    // GNU 9.7 stats an operand before it opens one: a stat that fails is what
+    // it names, and a directory it may not read is worded apart, the entry
+    // being there.
     const verb = refused === null && isEacces(err) ? 'cannot open directory' : 'cannot access'
     warnings.push({
       message: `ls: ${verb} '${path.rawPath}': ${errText(refused ?? err)}`,
@@ -725,7 +709,7 @@ async function probeOperand(
     }
     if (row !== null) return { path, row, groups: [] }
   }
-  const entries = sortStats(
+  const entries = await sortStats(
     stats,
     ctx.sortBy,
     ctx.reverse,
@@ -809,6 +793,11 @@ async function sortOperands(
     keyed.push({ key: await operandKey(operand, sortBy, stat), operand })
   }
   if (sortBy === 'none') return keyed.map((k) => k.operand)
+  if (sortBy === 'version') {
+    const order = await sortByVersion(keyed.map((k) => k.key.name))
+    const ordered = order.flatMap((i) => keyed[i]?.operand ?? [])
+    return reverse ? ordered.reverse() : ordered
+  }
   const sign = reverse ? -1 : 1
   keyed.sort((a, b) => sign * compareStats(a.key, b.key, sortBy, timeKind, escape))
   return keyed.map((k) => k.operand)
@@ -834,9 +823,9 @@ export interface LsFlags {
   readonly hyperlink: boolean
 }
 
-// GNU's own `sort_args` (coreutils 9.7), in its own order, which is what
-// `--sort=x` lists back. 9.7 added `name`, the order no `--sort` at all
-// means, so `--sort=n` is ambiguous between it and `none`.
+// The words GNU 9.7's `--sort` takes, in the order `ls --sort=x` lists them
+// back. 9.7 added `name`, the order no `--sort` at all means, so
+// `--sort=n` is ambiguous between it and `none`.
 const SORT_WORDS: Readonly<Record<string, LsSortBy>> = {
   none: 'none',
   size: 'size',
@@ -886,9 +875,10 @@ const DEREF_DESTS = [
   'dereference_command_line_symlink_to_dir',
 ] as const
 
-// GNU's ARGMATCH refusal for an option whose values have aliases, listed
-// one group per line (--time, --hyperlink); exit 1, as ls answers it. The
-// value goes in as typed -- the shared renderer escapes it.
+// The refusal of an ambiguous or invalid choice word for an option whose
+// values have aliases, the valid words listed one group per line (--time,
+// --hyperlink); exit 1, as GNU 9.7's ls answers it. The value goes in as
+// typed -- the shared renderer escapes it.
 function groupedArgumentError(
   option: string,
   value: string,
@@ -979,12 +969,11 @@ function timeStyleFlag(fl: FlagView): string {
   if (style.startsWith('+')) return style
   const match = matchWord(style, LS_TIME_STYLES)
   if (match.matched) return match.word
-  // ls hand-writes this block rather than letting argmatch print
-  // `time_style_args`, so it is the one ARGMATCH refusal in the repo whose
-  // candidates are neither quoted nor a subset of the words it accepts --
-  // and the one that exits 2, ls's own `usage (LS_FAILURE)`. The first line
-  // is still argmatch's, so `--time-style=lo` spans long-iso and locale and
-  // reads `ambiguous argument 'lo'`.
+  // GNU 9.7 lists the styles as patterns here, so it is the one such refusal
+  // in the repo whose candidates are neither quoted nor a subset of the words
+  // it accepts -- and the one that exits 2, as `ls -l --time-style=x` does.
+  // The first line is still the usual one, so `--time-style=lo` spans
+  // long-iso and locale and reads `ambiguous argument 'lo'`.
   throw new UsageError(
     `${wordRefusalLine('ls', 'time style', style, match.kind)}\n` +
       'Valid arguments are:\n' +
@@ -1015,8 +1004,9 @@ function hyperlinkFlag(fl: FlagView): boolean {
 
 // The style one indicator option asks for, checked as GNU checks it: -F and a
 // bare --classify classify; --classify=WHEN does for `always` and never
-// otherwise, since output here is never a terminal. A refused value is GNU's
-// ARGMATCH refusal, exit 1. Mirrors Python's _indicator_word.
+// otherwise, since output here is never a terminal. An ambiguous or invalid
+// choice word is refused with the valid words listed, exit 1. Mirrors Python's
+// _indicator_word.
 function indicatorWord(dest: string, raw: unknown): LsIndicator {
   if (dest === 'p') return 'slash'
   if (dest === 'file_type') return 'file-type'
@@ -1045,7 +1035,7 @@ export function indicatorFlag(fl: FlagView): LsIndicator {
 }
 
 /**
- * Which command-line links GNU ls resolves before it lists them. ls.c settles
+ * Which command-line links GNU ls resolves before it lists them. GNU settles
  * it once: the last of -L, -H and --dereference-command-line-symlink-to-dir
  * wins, and with none of them -d, a long format or the classify style resolve
  * no link while anything else resolves one that leads to a directory
@@ -1083,9 +1073,8 @@ export function linkMode(fl: FlagView): LsLinkMode {
 // coreutils 9.7: `ls: invalid --block-size argument 'x'`, `ls: invalid
 // suffix in --block-size argument '1x'` and `ls: --block-size argument
 // '99999999999999999999' too large`. The word is quoted but NOT escaped,
-// which is GNU's own split (xstrtol's fatal path prints the argument as is,
-// where argmatch's runs it through quote()): `ls --block-size=1é` reports
-// the two UTF-8 bytes intact.
+// where a bad --sort word is both: `ls --block-size=1é` reports the two
+// UTF-8 bytes intact, and `ls --sort=é` prints `'\303\251'`.
 function blockSizeError(text: string, refusal: BlockSizeRefusal): string {
   const quoted = `'${text}'`
   if (refusal === 'too large') return `ls: --block-size argument ${quoted} too large`
@@ -1146,10 +1135,10 @@ export function parseFlags(fl: FlagView): LsFlags {
 
 // Whether GNU's ls would stat a listed entry to print this listing, which
 // is when a failed stat reaches stderr: the long format, a time or size
-// sort, -i, -Z and --hyperlink read the stat (GNU's format_needs_stat), and
-// -R, -F and --group-directories-first read the type (format_needs_type),
-// which a mirage listing never carries, as a readdir without d_type does
-// not. A plain listing prints the names readdir gave and nothing else.
+// sort, -i, -Z and --hyperlink read the stat, and -R, -F and
+// --group-directories-first read the type, which a mirage listing never
+// carries, as a readdir without d_type does not. A plain listing prints the
+// names readdir gave and nothing else.
 function statNeeded(flags: LsFlags): boolean {
   return (
     flags.long ||
@@ -1236,7 +1225,7 @@ export async function lsGeneric(
     const byRow = new Map(collected.map((c) => [c.row, c.href]))
     const rows =
       collected.length > 1
-        ? sortStats(
+        ? await sortStats(
             collected.map((c) => c.row),
             sortBy,
             reverse,
@@ -1322,7 +1311,7 @@ export async function lsGeneric(
           }
           dots.push(row)
         }
-        entries = sortStats(
+        entries = await sortStats(
           [...dots, ...entries],
           sortBy,
           reverse,

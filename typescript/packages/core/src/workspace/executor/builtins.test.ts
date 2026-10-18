@@ -828,11 +828,11 @@ describe('handleSleep', () => {
     },
   )
 
-  // sleep's only options are gnulib's two standard ones, and they go through a
-  // real getopt_long loop: measured on 9.7, `--help`, `--h`, `--version` and
-  // `--v` all print to stdout and exit 0, wherever on the line they sit, and
-  // the first dash word decides (`sleep --help --zzz` is help,
-  // `sleep --zzz --help` is the refusal). Mirrors test_sleep.py.
+  // sleep's only options are the standard --help and --version, read as long
+  // options that take any unambiguous prefix: measured on 9.7, `--help`,
+  // `--h`, `--version` and `--v` all print to stdout and exit 0, wherever on
+  // the line they sit, and the first dash word decides (`sleep --help --zzz`
+  // is help, `sleep --zzz --help` is the refusal). Mirrors test_sleep.py.
   it.each([[['--help']], [['--h']], [['--hel']], [['0', '--help']], [['--help', '--zzz']]])(
     'answers %j with the help page on stdout',
     async (args) => {
@@ -950,8 +950,8 @@ describe('handleSleep', () => {
   })
 
   // The page this arm prints heads with GNU's own
-  // `Usage: sleep NUMBER[SUFFIX]...`, and gnulib's `apply_suffix` is what that
-  // promises: one trailing character, multiplying by 1, 60, 3600 or 86400.
+  // `Usage: sleep NUMBER[SUFFIX]...`, and the SUFFIX it promises is one
+  // trailing character, multiplying by 1, 60, 3600 or 86400.
   // Measured on coreutils 9.7 -- `sleep 0.3s` and `sleep 0.005m` each take
   // 0.3s, `sleep 0.0001h` takes 0.36s -- and asserted on the elapsed time
   // rather than on the parse, because reading the suffix and then dropping the
@@ -978,12 +978,12 @@ describe('handleSleep', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(90)
   })
 
-  // gnulib allows exactly ONE character after the number and switches on it in
-  // lowercase, so everything here is `invalid time interval` on 9.7: an
+  // sleep allows exactly ONE character after the number and reads it in
+  // lowercase only, so everything here is `invalid time interval` on 9.7: an
   // uppercase suffix, two of them, a suffix with anything after it, a letter
   // that is not one, and a bare suffix with no number. Mirrors test_sleep.py.
   it.each(['0S', '0M', '0H', '0D', '0.5S', '0ss', '0sx', '0n', '0b', 's', '1_0s', '0 s'])(
-    'refuses %j, a suffix gnulib does not take',
+    'refuses %j, a suffix sleep does not take',
     async (raw) => {
       const [, io] = await handleSleep(['--', raw])
       expect(io.exitCode).toBe(1)
@@ -1087,8 +1087,8 @@ describe('handleSleep', () => {
     expect(Date.now() - started).toBeLessThan(200)
   })
 
-  // The operand is named through gnulib's `quote()`, like every other
-  // coreutils operand diagnostic: measured on 9.4, `sleep -- é` is
+  // The operand is quoted and escaped like every other coreutils operand
+  // diagnostic: measured on 9.4, `sleep -- é` is
   // `sleep: invalid time interval '\303\251'`. Mirrors test_sleep.py.
   it.each([
     ['xé', 'x\\303\\251'],
@@ -2768,8 +2768,42 @@ describe('handleTimeout', () => {
     ['RTMIN+ 2', null],
     ['RTMAX+1', null],
     ['2147483648', null],
+    ['CLD', 17],
+    ['io', 29],
+    ['SIGPOLL', 29],
+    ['09', 9],
+    ['128', 0],
+    ['192', 64],
+    ['384', null],
+    ['576', 64],
+    ['2147483392', 0],
+    ['SIG128', null],
+    ['+9', null],
+    [' 9', null],
+    ['TERM ', null],
+    ['EMT', null],
+    ['SIGSIGTERM', null],
+    ['RTMIN\t2', 36],
+    ['RTMIN2', 36],
+    ['RTMAX2', null],
+    ['RTMIN-1', null],
+    ['RTMAX-030', 34],
+    ['RTMIN+1 ', null],
   ])('parses signal %j', (operand, number) => {
     expect(parseSignal(operand)).toBe(number)
+  })
+
+  it('parses signal numbers past any digit limit', () => {
+    // GNU 9.7 reads 5,000 leading zeros as nothing, and 5,000 digits as no
+    // signal. Mirrors test_timeout.py.
+    const zeros = '0'.repeat(5000)
+    const nines = '9'.repeat(5000)
+    expect(parseSignal(`${zeros}9`)).toBe(9)
+    expect(parseSignal(`SIG${zeros}9`)).toBe(9)
+    expect(parseSignal(`${zeros}265`)).toBe(9)
+    expect(parseSignal(`RTMIN+${zeros}2`)).toBe(36)
+    expect(parseSignal(nines)).toBeNull()
+    expect(parseSignal(`RTMIN+${nines}`)).toBeNull()
   })
 
   it.each<[number, string]>([
@@ -2784,6 +2818,9 @@ describe('handleTimeout', () => {
     [49, 'RTMIN+15'],
     [50, 'RTMAX-14'],
     [64, 'RTMAX'],
+    [16, 'STKFLT'],
+    [31, 'SYS'],
+    [33, '33'],
   ])('names signal %i', (number, name) => {
     expect(signalName(number)).toBe(name)
   })

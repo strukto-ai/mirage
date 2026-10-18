@@ -1,0 +1,28 @@
+{
+  "targets": [
+    "git-ram",
+    "git-disk"
+  ],
+  "cases": [
+    {
+      "id": "git_diff_stat_scales_a_long_name_and_a_binary_row",
+      "seq": 17100300,
+      "command": "(git init -q -b main /repo/stat && cd /repo/stat && printf '[user]\\n name = T\\n email = t@example.com\\n' >> .git/config && mkdir -p a/very/long/directory/path/that/goes/on/and/on && seq 40 > a/very/long/directory/path/that/goes/on/and/on/with-a-long-file-name.txt && seq 3 > short.txt && printf 'bin\\0ary' > blob.bin && seq 9 > mid.txt && git add -A && git commit -qm one && seq 21 300 > a/very/long/directory/path/that/goes/on/and/on/with-a-long-file-name.txt && seq 2 5 > short.txt && printf 'bin\\0ary2' > blob.bin && seq 4 12 > mid.txt && git diff --stat && git diff --shortstat && git diff --stat -- short.txt mid.txt; status=$?; cd /repo && rm -rf stat; exit $status)",
+      "expect": {
+        "exit": 0,
+        "stdout": " .../that/goes/on/and/on/with-a-long-file-name.txt  | 280 +++++++++++++++++++--\n blob.bin                                           | Bin 7 -> 8 bytes\n mid.txt                                            |   6 +-\n short.txt                                          |   3 +-\n 4 files changed, 265 insertions(+), 24 deletions(-)\n 4 files changed, 265 insertions(+), 24 deletions(-)\n mid.txt   | 6 +++---\n short.txt | 3 ++-\n 2 files changed, 5 insertions(+), 4 deletions(-)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_show_stat_cuts_a_wide_name_inside_a_character",
+      "seq": 17300006,
+      "command": "(git init -q -b main /repo/wide && cd /repo/wide && printf '[user]\\n name = T\\n email = t@example.com\\n' >> .git/config && printf 'x\\n' > 界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界 && git add -A && git commit -qm one && git show --stat --format= HEAD | head -n 1 | cut -c 1-20 && printf '[core]\\n quotePath = false\\n' >> .git/config && git show --stat --format= HEAD | head -c 8 | od -An -tx1 && git show --stat --format= HEAD | head -n 1 | tail -c 7; status=$?; cd /repo && rm -rf wide; exit $status)",
+      "expect": {
+        "exit": 0,
+        "stdout": " ...\\225\\214\\347\\225\n 20 2e 2e 2e 8c e7 95 8c\n | 1 +\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

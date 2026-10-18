@@ -1061,6 +1061,82 @@
       ]
     },
     {
+      "id": "ls_v_breaks_version_ties_by_bytes_and_r_reverses",
+      "seq": 15811001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/lsvt && for n in a1 a01 a001 .b10 .b2 x.txt x.tar.gz 1.0 '1.0~rc1' 1.0.a 1.0a; do printf x > \"/data/lsvt/$n\"; done && ls -vA /data/lsvt && ls -vr /data/lsvt",
+      "expect": {
+        "exit": 0,
+        "stdout": ".b2\n.b10\n1.0~rc1\n1.0\n1.0.a\n1.0a\na001\na01\na1\nx.tar.gz\nx.txt\nx.txt\nx.tar.gz\na1\na01\na001\n1.0a\n1.0.a\n1.0\n1.0~rc1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "v",
+        "A",
+        "r"
+      ]
+    },
+    {
+      "id": "ls_v_lists_each_name_with_a_byte_order_mark_once",
+      "seq": 17300001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/lsbom && for n in a '﻿a' b '﻿' 'a﻿'; do printf x > \"/data/lsbom/$n\"; done && ls -v /data/lsbom",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\na﻿\nb\n﻿\n﻿a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "v"
+      ]
+    },
+    {
       "id": "ls_time_style_quarter_padding",
       "seq": 960136,
       "targets": [

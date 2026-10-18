@@ -1463,6 +1463,40 @@
       }
     },
     {
+      "id": "shell_trap_takes_bash_signal_names_only",
+      "seq": 15811302,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "trap 'echo x' IOT; echo status:$?; trap - IO; echo status:$?; trap - CLD; echo status:$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "status:1\nstatus:0\nstatus:1\n",
+        "stderr": "bash: trap: IOT: invalid signal specification\nbash: trap: CLD: invalid signal specification\n"
+      }
+    },
+    {
       "id": "shell_trap_invalid_option",
       "seq": 512041,
       "targets": [

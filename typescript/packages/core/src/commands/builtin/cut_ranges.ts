@@ -14,6 +14,7 @@
 
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { recordSeparator } from './utils/lines.ts'
+import { boundedDecimal } from './utils/strtol.ts'
 import { quoteText } from '../quote.ts'
 import { usageHint } from '../spec/usage.ts'
 
@@ -52,16 +53,19 @@ interface CutListWords {
   value: string
   range: string
   zero: string
+  large: string
 }
 
 // GNU words the two modes differently and never shares a string between
-// them; only "invalid decreasing range" carries no mode noun.
+// them; only "invalid decreasing range" and "invalid range with no
+// endpoint: -" carry no mode noun.
 function listWords(mode: CutOptions['mode']): CutListWords {
   if (mode === 'fields') {
     return {
       value: 'invalid field value',
       range: 'invalid field range',
       zero: 'fields are numbered from 1',
+      large: 'field number',
     }
   }
   // The two range strings are worded differently from each other on
@@ -71,68 +75,94 @@ function listWords(mode: CutOptions['mode']): CutListWords {
     value: 'invalid byte/character position',
     range: 'invalid byte or character range',
     zero: 'byte/character positions are numbered from 1',
+    large: 'byte/character offset',
   }
 }
 
+// GNU 9.7 refuses a number at or past 2**64 - 1, quoting its digits as
+// typed: `-f 18446744073709551614` is accepted, `-f 0018446744073709551615`
+// reports "field number '0018446744073709551615' is too large".
+const TOO_LARGE = 2n ** 64n - 1n
+
+// What may sit between two list elements: a comma, a space or a TAB. NOT a
+// newline, which is an invalid character here -- `cut -f $'1\n2'` is refused
+// and quotes `'\n2'`, where `-f '1\t2'` selects fields 1 and 2.
+const SEPARATORS = new Set([',', ' ', '\t'])
+
+// The bound's value (null when no digit was typed) and where its digits end.
+function readBound(
+  spec: string,
+  start: number,
+  words: CutListWords,
+): [bigint | null, number] | string {
+  let end = start
+  while (/[0-9]/.test(spec.charAt(end))) end++
+  if (end === start) return [null, end]
+  const typed = spec.slice(start, end)
+  const value = boundedDecimal(typed, TOO_LARGE)
+  if (value === null) return cutError(`${words.large} '${quoteText(typed)}' is too large`)
+  return [value, end]
+}
+
+function closedElement(
+  low: bigint | null,
+  isRange: boolean,
+  high: bigint | null,
+  words: CutListWords,
+): [number, number] | string {
+  if (!isRange) {
+    if (low === null || low === 0n) return cutError(words.zero)
+    return [Number(low), Number(low)]
+  }
+  if (low === null && high === null) return cutError('invalid range with no endpoint: -')
+  const first = low ?? 1n
+  if (high === null) return [Number(first), OPEN_END]
+  if (high < first) return cutError('invalid decreasing range')
+  return [Number(first), Number(high)]
+}
+
 /**
- * GNU's byte/character/field list, parsed the way GNU parses it: one
- * character at a time, where a comma, a blank, a newline or the end of the
- * string closes the position being read. Failure returns the two stderr
- * lines to print (exit 1), never a partially parsed list.
+ * Read a `-b`/`-c`/`-f` list into [first, last] pairs, in the order typed.
+ * Failure returns the two stderr lines to print (exit 1), never a partially
+ * parsed list.
  *
- * The scan is what reproduces GNU's quoting: it refuses at the first
- * character it cannot read and quotes the rest of the string from there, so
- * `-f 2-3x` and `-f 1,2x` both report `'x'` while `-f abc` reports `'abc'`.
- * It is also why `-f '2 '` reports "numbered from 1" rather than naming the
- * blank: the blank closes field 2, and the end of the string then closes a
- * second, empty position. `-b` and `-c` share the scan and differ only in
- * wording, which GNU keeps distinct from `-f`'s.
+ * Each element is `N`, `N-M`, `N-` or `-M`, and elements are split by a
+ * comma, a space or a TAB; an empty element counts as position 0, which is
+ * why `-f '2 '`, `-f 1,` and `-f ''` all report "numbered from 1". The first
+ * refusal met reading left to right wins, so `-f 0,x` is the zero message
+ * while `-f 0x` names `'x'`, and a low bound of 0 is refused at its dash
+ * (`-f 0-x` is the zero message too). A refused character quotes the rest of
+ * the spec from there: `-f 2-3x` and `-f 1,2x` both report `'x'`, `-f abc`
+ * reports `'abc'`. `-b` and `-c` differ from each other only in wording,
+ * which GNU keeps distinct from `-f`'s.
  */
 export function parseRanges(spec: string, mode: CutOptions['mode']): [number, number][] | string {
   const words = listWords(mode)
   const ranges: [number, number][] = []
-  let value = 0
-  let digits = false
-  let lo = 0
-  let dashFound = false
-  for (let index = 0; ; index += 1) {
-    const char = index < spec.length ? spec.charAt(index) : ''
-    if (char >= '0' && char <= '9') {
-      value = value * 10 + ((char.codePointAt(0) ?? 48) - 48)
-      digits = true
-      continue
+  let cursor = 0
+  for (;;) {
+    const lowBound = readBound(spec, cursor, words)
+    if (typeof lowBound === 'string') return lowBound
+    const low = lowBound[0]
+    cursor = lowBound[1]
+    const isRange = spec.charAt(cursor) === '-'
+    let high: bigint | null = null
+    if (isRange) {
+      if (low === 0n) return cutError(words.zero)
+      const highBound = readBound(spec, cursor + 1, words)
+      if (typeof highBound === 'string') return highBound
+      high = highBound[0]
+      cursor = highBound[1]
+      if (spec.charAt(cursor) === '-') return cutError(words.range)
     }
-    if (char === '-') {
-      if (dashFound) return cutError(words.range)
-      // `-2` opens the range at 1; `0-2` gave a zero it did read.
-      if (digits && value === 0) return cutError(words.zero)
-      dashFound = true
-      lo = digits ? value : 1
-      value = 0
-      digits = false
-      continue
+    if (cursor < spec.length && !SEPARATORS.has(spec.charAt(cursor))) {
+      return cutError(`${words.value} '${quoteText(spec.slice(cursor))}'`)
     }
-    // What closes the position being read: a comma, a space, a TAB, or the
-    // end of the string. NOT a newline, which is an invalid character here --
-    // `cut -f $'1\n2'` is refused and quotes `'\n2'`, where `-f '1\t2'`
-    // selects fields 1 and 2. Probed over all 255 bytes: the only separators
-    // are 0x09, 0x20 and 0x2c. Ground truth NL3-G.
-    if (char === '' || char === ',' || char === ' ' || char === '\t') {
-      if (dashFound) {
-        const hi = digits ? value : OPEN_END
-        if (hi < lo) return cutError('invalid decreasing range')
-        ranges.push([lo, hi])
-        dashFound = false
-      } else {
-        if (value === 0) return cutError(words.zero)
-        ranges.push([value, value])
-      }
-      value = 0
-      digits = false
-      if (char === '') return ranges
-      continue
-    }
-    return cutError(`${words.value} '${quoteText(spec.slice(index))}'`)
+    const element = closedElement(low, isRange, high, words)
+    if (typeof element === 'string') return element
+    ranges.push(element)
+    if (cursor === spec.length) return ranges
+    cursor++
   }
 }
 

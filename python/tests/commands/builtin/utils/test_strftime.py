@@ -350,3 +350,22 @@ def test_widths_pad_a_composite_whole(fmt: str, expected: str):
 def test_naive_moment_takes_the_local_zone():
     off = MOMENT.astimezone().strftime("%z")
     assert gnu_strftime(MOMENT, "%:z") == off[:3] + ":" + off[3:]
+
+
+@pytest.mark.parametrize(
+    "fmt,expected",
+    [
+        ("%Y|%C|%G|%y|%g", "10026|100|10026|26|26"),
+        ("%F|%D|%x", "+10026-09-03|09/03/26|09/03/26"),
+        ("%c|%^c", "Thu Sep  3 05:07:09 10026|THU SEP  3 05:07:09 10026"),
+        ("%7Y|%_7Y|%-Y|%+7Y|%3C", "0010026|  10026|10026|+010026|100"),
+        ("%13F|%+13F|%_13F", "0010026-09-03|+010026-09-03|  10026-09-03"),
+        ("%EY|%j|%a", "10026|246|Thu"),
+    ],
+)
+def test_years_put_back_moved_cycles(fmt: str, expected: str):
+    # Pinned against date 9.7 at @254244028029, 8000 years after
+    # SEPTEMBER: a moment held 20 Gregorian cycles earlier keeps its
+    # weekday and day number, every directive that prints the year gets
+    # the years back, and the two-digit years were already right.
+    assert gnu_strftime(SEPTEMBER, fmt, 8000) == expected

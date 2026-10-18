@@ -20,15 +20,23 @@ from dulwich.objects import Blob, Commit, ObjectID
 
 from mirage.commands.cli.builtin.git.dates import plural
 from mirage.commands.cli.builtin.git.format import short
+from mirage.utils.width import text_width
 
 ROOT_COMMIT = "(root-commit) "
-# git's diffstat geometry for piped output: 80 columns total, binary
-# sniffing over the first 8000 bytes, and the 3/8 cap that splits the
-# line between the name column and the +/- graph (diff.c show_stats).
+# A diffstat is 80 columns wide when the output is not a terminal, and a
+# file reads as binary when its first 8000 bytes hold a NUL.
 STAT_WIDTH = 80
 BINARY_SNIFF = 8000
-GRAPH_MIN = 6
-ELLIPSIS = "..."
+# The narrowest name column and graph a diffstat shrinks to, how a cut
+# name starts, and what a binary row puts in the count column.
+NARROWEST_NAME = 10
+NARROWEST_GRAPH = 6
+ELIDED = "..."
+BINARY_COUNT = "Bin"
+# What a row spends besides the name, count and graph: the leading space,
+# " | ", the space after the count, and the last column, left free.
+FRAME = 6
+SLASH = b"/"
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,45 +150,57 @@ def diffstat(
     return stats
 
 
-def _scale(value: int, width: int, max_change: int) -> int:
-    """git's scale_linear: proportional, but never rounding to zero.
+def _marks(count: int, graph: int, largest: int) -> int:
+    """How many graph columns a scaled count takes: one for anything
+    nonzero and its share of the rest, rounded down (git 2.50.1 gives
+    the largest change the whole graph and 1 of 1000 lines in a 21-wide
+    graph one mark).
 
     Args:
-        value (int): the count being scaled.
-        width (int): the graph's column budget.
-        max_change (int): the largest per-file change in the table.
+        count (int): the lines counted.
+        graph (int): the graph's width.
+        largest (int): the largest change in the table.
     """
-    if not value:
-        return 0
-    return 1 + value * (width - 1) // max_change
+    return 1 + count * (graph - 1) // largest if count else 0
 
 
-def _stat_name(path: str, name_width: int) -> str:
-    """A path fitted to the name column, elided from the left.
-
-    git keeps the tail of a long path, advanced to the next component
-    boundary, behind a three-dot prefix.
+def _fitted_name(path: str, column: int) -> str:
+    """A path cut to the name column from the left: ``...`` and the
+    tail from the next ``/`` on. The cut drops as many bytes as the path
+    is columns too wide, which is why git 2.50.1 leaves a path of wide
+    characters wider than the column.
 
     Args:
-        path (str): repository-relative path.
-        name_width (int): the column's width.
+        path (str): the path as the table shows it.
+        column (int): the name column's width.
     """
-    if len(path) <= name_width:
+    shown = text_width(path)
+    if shown <= column:
         return path
-    tail = path[-(name_width - len(ELLIPSIS)) :]
-    slash = tail.find("/")
-    if slash != -1:
+    over = shown - (column - len(ELIDED))
+    tail = path.encode("utf-8", "surrogateescape")[max(over, 0) :]
+    slash = tail.find(SLASH)
+    if slash >= 0:
         tail = tail[slash:]
-    return f"{ELLIPSIS}{tail}"
+    return ELIDED + tail.decode("utf-8", "surrogateescape")
 
 
 def stat_table(stats: list[FileStat], width: int = STAT_WIDTH) -> list[str]:
     """git's diffstat table: one row per path, then the summary line.
 
-    The geometry is diff.c's show_stats pinned against git 2.50 at the
-    piped default of 80 columns: the graph is capped at three eighths
-    of the line, the name column takes what remains, and per-file
-    graphs scale linearly with a floor of one mark per nonzero side.
+    A row is `` <name> | <count> <graph>``, at most ``width - 1``
+    columns, and never narrower than a 10-column name and a 6-column
+    graph allow. The count column fits the largest change, and ``Bin``
+    when a binary row reads ``Bin <old> -> <new> bytes``, whose text
+    after ``Bin`` claims graph room too. When the names and the graph
+    do not both fit, a graph needing no more than its share (three
+    eighths of the width, less the count column and six) keeps what it
+    needs and the names take the rest; a wider one gets that share, at
+    least 6 columns, or more if the names are short, and is scaled into
+    it: the total, and then the smaller side (deletions on a tie), take
+    their marks and the larger side keeps the rest, with two marks at
+    least when both are nonzero. Measured against git 2.50.1 and
+    2.47.3 over 400 tables at 24 widths each.
 
     Args:
         stats (list[FileStat]): per-path counts from ``diffstat``.
@@ -188,69 +208,55 @@ def stat_table(stats: list[FileStat], width: int = STAT_WIDTH) -> list[str]:
     """
     if not stats:
         return []
-    max_len = max(len(stat.path) for stat in stats)
-    max_change = max(
-        (
-            stat.insertions + stat.deletions
-            for stat in stats
-            if not stat.binary
-        ),
-        default=0,
-    )
-    number_width = max(
-        len(str(max_change)) if max_change else 1,
-        3 if any(stat.binary for stat in stats) else 1,
-    )
-    bin_width = max(
-        (
-            len(f"Bin {stat.old_size} -> {stat.new_size} bytes") - 4
-            for stat in stats
-            if stat.binary
-        ),
-        default=0,
-    )
-    width = max(width, 16 + 6 + number_width)
-    graph_width = max_change if max_change > bin_width else bin_width
-    name_width = max_len
-    if name_width + number_width + 6 + graph_width > width:
-        cap = width * 3 // 8 - number_width - 6
-        if graph_width > cap:
-            graph_width = max(cap, GRAPH_MIN)
-        if name_width > width - number_width - 6 - graph_width:
-            name_width = width - number_width - 6 - graph_width
-        else:
-            graph_width = width - number_width - 6 - name_width
-    lines = []
-    total_insertions = 0
-    total_deletions = 0
+    texts = [s for s in stats if not s.binary]
+    largest = max((s.insertions + s.deletions for s in texts), default=0)
+    sizes = [f"{s.old_size} -> {s.new_size} bytes" for s in stats if s.binary]
+    count_column = max(len(str(largest)), len(BINARY_COUNT) if sizes else 0)
+    wanted = max([largest, *map(len, sizes)])
+    widest = max(text_width(s.path) for s in stats)
+    width = max(width, NARROWEST_NAME + NARROWEST_GRAPH + count_column + FRAME)
+    room = width - FRAME - count_column
+    share = width * 3 // 8 - FRAME - count_column
+    if widest + wanted <= room:
+        graph, column = wanted, widest
+    elif wanted <= share:
+        graph, column = wanted, room - wanted
+    else:
+        given = max(NARROWEST_GRAPH, share, room - widest)
+        graph, column = min(wanted, given), min(widest, room - given)
+    rows = []
     for stat in stats:
-        name = _stat_name(stat.path, name_width)
+        name = _fitted_name(stat.path, column)
+        cell = f" {name}{' ' * (column - text_width(name))} | "
         if stat.binary:
-            lines.append(
-                f" {name:<{name_width}} | "
-                f"Bin {stat.old_size} -> {stat.new_size} bytes"
+            rows.append(
+                f"{cell}{BINARY_COUNT:>{count_column}} "
+                f"{stat.old_size} -> {stat.new_size} bytes"
             )
             continue
-        total_insertions += stat.insertions
-        total_deletions += stat.deletions
-        change = stat.insertions + stat.deletions
-        added, removed = stat.insertions, stat.deletions
-        if change and graph_width <= max_change:
-            total = _scale(change, graph_width, max_change)
-            if total < 2 and added and removed:
-                total = 2
-            if added < removed:
-                added = _scale(added, graph_width, max_change)
-                removed = total - added
+        plus, minus = stat.insertions, stat.deletions
+        if largest > graph:
+            total = max(
+                _marks(plus + minus, graph, largest),
+                2 if plus and minus else 0,
+            )
+            if plus < minus:
+                plus = _marks(plus, graph, largest)
+                minus = total - plus
             else:
-                removed = _scale(removed, graph_width, max_change)
-                added = total - removed
-        graph = f" {'+' * added}{'-' * removed}" if change else ""
-        lines.append(
-            f" {name:<{name_width}} | {change:>{number_width}}{graph}"
+                minus = _marks(minus, graph, largest)
+                plus = total - minus
+        bar = "+" * plus + "-" * minus
+        count = f"{stat.insertions + stat.deletions:>{count_column}}"
+        rows.append(f"{cell}{count}{' ' + bar if bar else ''}")
+    rows.append(
+        stat_line(
+            len(stats),
+            sum(s.insertions for s in stats),
+            sum(s.deletions for s in stats),
         )
-    lines.append(stat_line(len(stats), total_insertions, total_deletions))
-    return lines
+    )
+    return rows
 
 
 def stat_line(files: int, insertions: int, deletions: int) -> str:

@@ -276,7 +276,11 @@ function paddedComposite(
   return out.padStart(width, pad === '0' || pad === '+' ? '0' : ' ')
 }
 
-function winningPad(flags: string): string | null {
+/**
+ * The padding flag that counts: the last of `-`, `_`, `0` and `+` typed, null
+ * when none was. Mirrors Python's winning_pad.
+ */
+export function winningPad(flags: string): string | null {
   const padFlags = flags.replace(/[^-_0+]/g, '')
   return padFlags === '' ? null : (padFlags[padFlags.length - 1] ?? null)
 }

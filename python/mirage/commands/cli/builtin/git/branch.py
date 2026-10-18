@@ -48,6 +48,7 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.commands.cli.builtin.git.format import short
 from mirage.commands.cli.builtin.git.io import read_optional, write_file
 from mirage.commands.cli.builtin.git.objects import abbrev_for
+from mirage.commands.cli.builtin.git.ref_fields import parse_field
 from mirage.commands.cli.builtin.git.ref_filter import (
     RefFilter,
     filter_words,
@@ -55,9 +56,11 @@ from mirage.commands.cli.builtin.git.ref_filter import (
     without_filter_values,
 )
 from mirage.commands.cli.builtin.git.ref_format import (
+    ValueTable,
     display_width,
     format_refs,
     listing_format,
+    sort_refs,
     used_fields,
 )
 from mirage.commands.cli.builtin.git.ref_list import (
@@ -100,8 +103,11 @@ from mirage.commands.cli.builtin.git.revparse import (
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import (
     HeadRef,
+    RefContext,
+    RefField,
     RefItem,
     RefKind,
+    RefSortKey,
     RepoLocation,
     Track,
     Upstream,
@@ -490,86 +496,151 @@ async def _delete(
     ).encode()
 
 
-def build_format(verbose: int, width: int, prefix: str) -> str:
-    """git's ``build_format``: the format a branch listing prints with
-    when the line gives none, colors left out as they are off a
-    terminal.
+# What a listing row reads when the line gives no --format.
+ROW_ID = parse_field("objectname:short")
+ROW_SUBJECT = parse_field("contents:subject")
+ROW_TRACK = parse_field("upstream:track")
+ROW_UPSTREAM = parse_field("upstream:short")
+ROW_WORKTREE = parse_field("worktreepath")
+ROW_TARGET = parse_field("symref:short")
 
-    A local branch is marked ``*`` when HEAD is on it and ``+`` when
-    another worktree is; ``-v`` pads every name to one column and adds
-    the id, the upstream's distance and the subject, and ``-vv`` names
-    the upstream (and a worktree the branch is out in) as well.
+
+def row_fields(verbose: int) -> tuple[RefField, ...]:
+    """The fields ``branch`` rows read with ``verbose`` ``-v``.
 
     Args:
         verbose (int): how many ``-v``.
-        width (int): the name column, from ``list_width``.
-        prefix (str): what a remote-tracking branch is labelled with,
-            ``remotes/`` unless only those are listed.
     """
-    label = prefix.replace("%", "%%")
-    local = (
-        "%(if)%(HEAD)%(then)* %(else)%(if)%(worktreepath)%(then)+ "
-        "%(else)  %(end)%(end)"
-    )
-    remote = "  "
-    if verbose:
-        oid = "%(objectname:short)"
-        local += f"%(align:{width},left)%(refname:lstrip=2)%(end) {oid} "
-        if verbose > 1:
-            local += (
-                "%(if:notequals=*)%(HEAD)%(then)%(if)%(worktreepath)"
-                "%(then)(%(worktreepath)) %(end)%(end)"
-                "%(if)%(upstream)%(then)[%(upstream:short)"
-                "%(if)%(upstream:track)%(then): "
-                "%(upstream:track,nobracket)%(end)] %(end)"
-                "%(contents:subject)"
-            )
-        else:
-            local += (
-                "%(if)%(upstream:track)%(then)%(upstream:track) "
-                "%(end)%(contents:subject)"
-            )
-        remote += (
-            f"%(align:{width},left){label}%(refname:lstrip=2)%(end)"
-            "%(if)%(symref)%(then) -> %(symref:short)"
-            f"%(else) {oid} %(contents:subject)%(end)"
-        )
-    else:
-        local += (
-            "%(refname:lstrip=2)%(if)%(symref)%(then) -> %(symref:short)%(end)"
-        )
-        remote += (
-            f"{label}%(refname:lstrip=2)%(if)%(symref)%(then) -> "
-            "%(symref:short)%(end)"
-        )
+    if not verbose:
+        return ROW_WORKTREE, ROW_TARGET
     return (
-        f"%(if:notequals=refs/remotes)%(refname:rstrip=-2)%(then)"
-        f"{local}%(else){remote}%(end)"
+        ROW_WORKTREE,
+        ROW_TARGET,
+        ROW_ID,
+        ROW_SUBJECT,
+        ROW_TRACK,
+        *((ROW_UPSTREAM,) if verbose > 1 else ()),
     )
 
 
-def list_width(items: list[RefItem], bonus: int, description: str) -> int:
-    """``calc_maxwidth``: the widest name a verbose listing pads to.
+def _row_label(item: RefItem, ctx: RefContext, prefix: str) -> str:
+    """A row's name: ``main``, ``remotes/origin/main`` (``origin/main``
+    under ``-r``), or the detached HEAD's description.
 
     Args:
-        items (list[RefItem]): the listed refs.
-        bonus (int): the width of the label a remote-tracking branch
-            carries.
-        description (str): the detached HEAD row's name.
+        item (RefItem): the listed ref.
+        ctx (RefContext): carries the detached HEAD's description.
+        prefix (str): what a remote-tracking branch is labelled with.
     """
-    widest = 0
-    for item in items:
-        if item.kind is RefKind.DETACHED:
-            width = display_width(description)
-        else:
-            name = item.name
-            for prefix in (BRANCH_PREFIX, REMOTE_PREFIX):
-                name = name.removeprefix(prefix)
-            width = display_width(name) + (
-                bonus if item.kind is RefKind.REMOTE else 0
+    if item.kind is RefKind.DETACHED:
+        return ctx.head_description
+    if item.kind is RefKind.REMOTE:
+        return prefix + item.name.removeprefix(REMOTE_PREFIX)
+    return item.name.removeprefix(BRANCH_PREFIX)
+
+
+def _tracking(item: RefItem, table: ValueTable, verbose: int) -> str:
+    """The upstream bracket of a verbose row, with its trailing space.
+
+    git 2.50.1 prints ``[ahead 1, behind 2]`` or ``[gone]`` under ``-v``
+    and nothing for a branch level with its upstream; ``-vv`` names the
+    upstream first, ``[origin/main: ahead 1]``, ``[origin/main]``.
+
+    Args:
+        item (RefItem): the listed ref.
+        table (ValueTable): the listing's field values.
+        verbose (int): how many ``-v``.
+    """
+    upstream = item.upstream
+    if item.kind is not RefKind.BRANCH or upstream is None:
+        return ""
+    if upstream.gone:
+        state = "gone"
+    else:
+        counts = [
+            f"{word} {count}"
+            for word, count in (
+                ("ahead", upstream.ahead),
+                ("behind", upstream.behind),
             )
-        widest = max(widest, width)
-    return widest
+            if count
+        ]
+        state = ", ".join(counts)
+    if verbose == 1:
+        return f"[{state}] " if state else ""
+    name = table.value(item, ROW_UPSTREAM).text
+    return f"[{name}: {state}] " if state else f"[{name}] "
+
+
+def branch_rows(
+    items: list[RefItem],
+    ctx: RefContext,
+    keys: tuple[RefSortKey, ...] | None,
+    verbose: int,
+    prefix: str,
+    icase: bool,
+) -> tuple[str, GitError | None]:
+    """A branch listing as git prints it when the line gives no
+    ``--format``.
+
+    Each row is two columns of marker, ``*`` for the branch HEAD is on
+    (or a detached HEAD) and ``+`` for one another worktree has out,
+    then the name; a symbolic ref adds `` -> `` and its target. ``-v``
+    pads every name to the widest, by display width, and follows it with
+    the abbreviated id, the upstream bracket and the subject, so an
+    empty subject leaves the id's space behind. A remote-tracking
+    symbolic ref keeps only its `` -> `` target there, while a local one
+    reads as the branch it names. ``-vv`` also names the upstream, and
+    puts ``(<path>)`` after the id of a branch another worktree has out.
+
+    Args:
+        items (list[RefItem]): the listed refs, in name order.
+        ctx (RefContext): the listing's facts.
+        keys (tuple[RefSortKey, ...] | None): the sort keys, None for
+            ``--no-sort``.
+        verbose (int): how many ``-v``.
+        prefix (str): what a remote-tracking branch is labelled with,
+            ``remotes/`` unless only those are listed.
+        icase (bool): ``--ignore-case``.
+    """
+    table = ValueTable(
+        (*row_fields(verbose), *(key.field for key in keys or ())), ctx
+    )
+    rows: list[str] = []
+    try:
+        ordered = (
+            sort_refs(items, keys, table, ctx, icase, detached_first=True)
+            if keys
+            else list(items)
+        )
+        labels = [_row_label(item, ctx, prefix) for item in ordered]
+        width = max(map(display_width, labels), default=0)
+        for item, label in zip(ordered, labels, strict=True):
+            current = item.kind is RefKind.DETACHED or item.name == ctx.head
+            elsewhere = item.kind is RefKind.BRANCH and bool(item.worktree)
+            marker = "* " if current else "+ " if elsewhere else "  "
+            target = table.value(item, ROW_TARGET).text if item.symref else ""
+            if not verbose:
+                arrow = f" -> {target}" if target else ""
+                rows.append(f"{marker}{label}{arrow}\n")
+                continue
+            padded = label + " " * (width - display_width(label))
+            if target and item.kind is RefKind.REMOTE:
+                rows.append(f"{marker}{padded} -> {target}\n")
+                continue
+            where = (
+                f"({item.worktree}) "
+                if verbose > 1 and elsewhere and not current
+                else ""
+            )
+            rows.append(
+                f"{marker}{padded} {table.value(item, ROW_ID).text} {where}"
+                f"{_tracking(item, table, verbose)}"
+                f"{table.value(item, ROW_SUBJECT).text}\n"
+            )
+    except GitError as exc:
+        return "".join(rows), exc
+    return "".join(rows), None
 
 
 async def _list_branches(
@@ -586,8 +657,8 @@ async def _list_branches(
 
     The local branches (``-r`` the remote-tracking ones instead, ``-a``
     both) and a detached HEAD, which leads whatever the sort keys say,
-    each printed through ``--format`` or the format ``build_format``
-    makes.
+    each printed through ``--format`` or as ``branch_rows`` lays rows
+    out.
 
     Args:
         ctx (Context): the line's context, for its env.
@@ -615,13 +686,13 @@ async def _list_branches(
         )
         return kind and match_short(name, patterns, icase)
 
-    fmt = listing_format(
-        template if template is not None else build_format(verbose, 0, prefix)
-    )
+    fmt = listing_format(template) if template is not None else None
     items, ref_ctx, errors = await ref_listing(
         repo,
         cfg,
-        used_fields(fmt, keys or ()),
+        used_fields(fmt, keys or ())
+        if fmt is not None
+        else (*row_fields(verbose), *(key.field for key in keys or ())),
         wanted,
         filt,
         date_clock(ctx.env),
@@ -631,24 +702,21 @@ async def _list_branches(
             ref_ctx,
             head_description=await head_description(repo, head),
         )
-    if template is None and verbose:
-        fmt = listing_format(
-            build_format(
-                verbose,
-                list_width(items, len(prefix), ref_ctx.head_description),
-                prefix,
-            )
+    if fmt is None:
+        out, stopped = branch_rows(
+            items, ref_ctx, keys, verbose, prefix, icase
         )
-    out, stopped = format_refs(
-        fmt,
-        items,
-        ref_ctx,
-        keys,
-        omit_empty=fl.as_bool("omit_empty"),
-        icase=icase,
-        detached_first=True,
-        stream=False,
-    )
+    else:
+        out, stopped = format_refs(
+            fmt,
+            items,
+            ref_ctx,
+            keys,
+            omit_empty=fl.as_bool("omit_empty"),
+            icase=icase,
+            detached_first=True,
+            stream=False,
+        )
     return listing_result(out, errors, stopped)
 
 

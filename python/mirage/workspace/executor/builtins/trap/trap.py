@@ -12,11 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.utils.strtol import bounded_decimal
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.workspace.executor.builtins.shared import builtin_error, result
-from mirage.workspace.executor.builtins.timeout.constants import SIGNAL_NAMES
+from mirage.workspace.executor.builtins.timeout.constants import SIGNALS
 from mirage.workspace.executor.builtins.trap.constants import (
-    EXIT_EVENT,
     PSEUDO_SIGNALS,
     RUN_EVENTS,
     SIGNAL_MAX,
@@ -36,17 +36,17 @@ def event_of(spec: str) -> TrapEvent | None:
             or a number.
     """
     if spec.isascii() and spec.isdigit():
-        number = int(spec)
-        if number == 0:
-            return TrapEvent.EXIT
-        return TrapEvent.OTHER if number <= SIGNAL_MAX else None
+        number = bounded_decimal(spec, SIGNAL_MAX + 1)
+        if number is None:
+            return None
+        return TrapEvent.EXIT if number == 0 else TrapEvent.OTHER
     name = spec.upper()
     if name in {event.value for event in RUN_EVENTS}:
         return TrapEvent(name)
     if name in PSEUDO_SIGNALS:
         return TrapEvent.OTHER
     base = name[3:] if name.startswith("SIG") else name
-    if base != EXIT_EVENT and any(known == base for known, _ in SIGNAL_NAMES):
+    if base in SIGNALS.values():
         return TrapEvent.OTHER
     if base.startswith(("RTMIN", "RTMAX")):
         return TrapEvent.OTHER

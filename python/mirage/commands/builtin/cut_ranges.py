@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.lines import record_separator
+from mirage.commands.builtin.utils.strtol import bounded_decimal
 from mirage.commands.quote import quote_text
 from mirage.commands.spec.usage import usage_hint
 from mirage.io.async_line_iterator import AsyncLineIterator
@@ -24,13 +25,17 @@ from mirage.io.async_line_iterator import AsyncLineIterator
 _OPEN_END = 2**31 - 1
 _BLANKS = re.compile(r"[ \t]+")
 _CUT_TRY = usage_hint("cut")
-# What closes the position being read: a comma, a space, a TAB, or the
-# end of the string (the empty sentinel). NOT a newline, which is an
-# invalid character here -- `cut -f $'1\n2'` is refused and quotes
-# `'\n2'`, where `-f '1\t2'` selects fields 1 and 2. Probed over all 255
-# bytes: the only separators are 0x09, 0x20 and 0x2c, and every other
-# non-digit non-dash byte is an invalid field value. Ground truth NL3-G.
-_TERMINATORS = ("", ",", " ", "\t")
+# GNU 9.7 refuses a number at or past 2**64 - 1, quoting its digits as
+# typed: `-f 18446744073709551614` is accepted, `-f 0018446744073709551615`
+# reports "field number '0018446744073709551615' is too large".
+_TOO_LARGE = 2**64 - 1
+# What may sit between two list elements: a comma, a space or a TAB.
+# NOT a newline, which is an invalid character here -- `cut -f $'1\n2'`
+# is refused and quotes `'\n2'`, where `-f '1\t2'` selects fields 1 and
+# 2. Probed over all 255 bytes: the only separators are 0x09, 0x20 and
+# 0x2c, and every other non-digit non-dash byte is an invalid field
+# value. Ground truth NL3-G.
+_SEPARATORS = frozenset(", \t")
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,12 +43,17 @@ class _ListWords:
     value: str
     span: str
     zero: str
+    large: str
 
 
 # GNU words the two modes differently and never shares a string between
-# them; only "invalid decreasing range" carries no mode noun.
+# them; only "invalid decreasing range" and "invalid range with no
+# endpoint: -" carry no mode noun.
 _FIELD_WORDS = _ListWords(
-    "invalid field value", "invalid field range", "fields are numbered from 1"
+    "invalid field value",
+    "invalid field range",
+    "fields are numbered from 1",
+    "field number",
 )
 # The two range strings are worded differently from each other on
 # purpose: the position one joins the nouns with a slash, the range one
@@ -52,6 +62,7 @@ _POSITION_WORDS = _ListWords(
     "invalid byte/character position",
     "invalid byte or character range",
     "byte/character positions are numbered from 1",
+    "byte/character offset",
 )
 
 
@@ -59,73 +70,85 @@ def _cut_error(message: str) -> ValueError:
     return ValueError(f"cut: {message}\n{_CUT_TRY}")
 
 
-def parse_ranges(spec: str, mode: str) -> list[tuple[int, int]]:
-    """GNU's byte/character/field list, read the way GNU reads it.
+def _read_bound(
+    spec: str, start: int, words: _ListWords
+) -> tuple[int | None, int]:
+    # The bound's value (None when no digit was typed) and where its
+    # digits end.
+    end = start
+    while end < len(spec) and "0" <= spec[end] <= "9":
+        end += 1
+    if end == start:
+        return None, end
+    typed = spec[start:end]
+    value = bounded_decimal(typed, _TOO_LARGE)
+    if value is None:
+        raise _cut_error(f"{words.large} '{quote_text(typed)}' is too large")
+    return value, end
 
-    One character at a time, where a comma, a blank, a newline or the end
-    of the string closes the position being read. The scan is what
-    reproduces GNU's quoting: it refuses at the first character it cannot
-    read and quotes the rest of the string from there, so ``-f 2-3x`` and
-    ``-f 1,2x`` both report ``'x'`` while ``-f abc`` reports ``'abc'``. It
-    is also why ``-f '2 '`` reports "numbered from 1" rather than naming
-    the blank: the blank closes field 2, and the end of the string then
-    closes a second, empty position. ``-b`` and ``-c`` share the scan and
-    differ only in wording, which GNU keeps distinct from ``-f``'s.
+
+def _closed_element(
+    low: int | None, is_range: bool, high: int | None, words: _ListWords
+) -> tuple[int, int]:
+    if not is_range:
+        if not low:
+            raise _cut_error(words.zero)
+        return low, low
+    if low is None and high is None:
+        raise _cut_error("invalid range with no endpoint: -")
+    first = 1 if low is None else low
+    if high is None:
+        return first, _OPEN_END
+    if high < first:
+        raise _cut_error("invalid decreasing range")
+    return first, high
+
+
+def parse_ranges(spec: str, mode: str) -> list[tuple[int, int]]:
+    """Read a `-b`/`-c`/`-f` list into (first, last) pairs, as typed.
+
+    Each element is `N`, `N-M`, `N-` or `-M`, and elements are split by
+    a comma, a space or a TAB; an empty element counts as position 0,
+    which is why `-f '2 '`, `-f 1,` and `-f ''` all report "numbered
+    from 1". The first refusal met reading left to right wins, so
+    `-f 0,x` is the zero message while `-f 0x` names `'x'`, and a low
+    bound of 0 is refused at its dash (`-f 0-x` is the zero message
+    too). A refused character quotes the rest of the spec from there:
+    `-f 2-3x` and `-f 1,2x` both report `'x'`, `-f abc` reports
+    `'abc'`. `-b` and `-c` differ from each other only in wording,
+    which GNU keeps distinct from `-f`'s.
 
     Args:
-        spec (str): the raw ``-b``/``-c``/``-f`` list.
-        mode (str): "bytes", "characters" or "fields", which picks the
-            wording of every refusal.
+        spec (str): the list as typed.
+        mode (str): "bytes", "characters" or "fields".
 
     Returns:
-        list[tuple[int, int]]: the inclusive 1-based ranges, in the order
-            they were written; an open end is ``_OPEN_END``.
+        list[tuple[int, int]]: one closed pair per element; an open
+        end is `_OPEN_END`.
 
     Raises:
-        ValueError: the two stderr lines to print, exit 1. Never a
-            partially parsed list.
+        ValueError: the two stderr lines GNU prints, without the final
+            newline.
     """
     words = _FIELD_WORDS if mode == "fields" else _POSITION_WORDS
     ranges: list[tuple[int, int]] = []
-    value = 0
-    digits = False
-    lo = 0
-    dash_found = False
-    for index in range(len(spec) + 1):
-        char = spec[index] if index < len(spec) else ""
-        if "0" <= char <= "9":
-            value = value * 10 + (ord(char) - 48)
-            digits = True
-            continue
-        if char == "-":
-            if dash_found:
-                raise _cut_error(words.span)
-            # `-2` opens the range at 1; `0-2` gave a zero it did read.
-            if digits and value == 0:
+    cursor = 0
+    while True:
+        low, cursor = _read_bound(spec, cursor, words)
+        is_range = spec.startswith("-", cursor)
+        high = None
+        if is_range:
+            if low == 0:
                 raise _cut_error(words.zero)
-            dash_found = True
-            lo = value if digits else 1
-            value = 0
-            digits = False
-            continue
-        if char in _TERMINATORS:
-            if dash_found:
-                hi = value if digits else _OPEN_END
-                if hi < lo:
-                    raise _cut_error("invalid decreasing range")
-                ranges.append((lo, hi))
-                dash_found = False
-            else:
-                if value == 0:
-                    raise _cut_error(words.zero)
-                ranges.append((value, value))
-            value = 0
-            digits = False
-            if char == "":
-                return ranges
-            continue
-        raise _cut_error(f"{words.value} '{quote_text(spec[index:])}'")
-    return ranges
+            high, cursor = _read_bound(spec, cursor + 1, words)
+            if spec.startswith("-", cursor):
+                raise _cut_error(words.span)
+        if cursor < len(spec) and spec[cursor] not in _SEPARATORS:
+            raise _cut_error(f"{words.value} '{quote_text(spec[cursor:])}'")
+        ranges.append(_closed_element(low, is_range, high, words))
+        if cursor == len(spec):
+            return ranges
+        cursor += 1
 
 
 def _select_positions(

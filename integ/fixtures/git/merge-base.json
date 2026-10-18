@@ -17,5 +17,11 @@
   "merge-base shallow-left shallow-right",
   "merge-base --is-ancestor shallow-boundary shallow-left",
   "merge-base --all shallow-left shallow-other",
-  "merge-base --is-ancestor shallow-other shallow-left"
+  "merge-base --is-ancestor shallow-other shallow-left",
+  "merge-base --all order-left order-right",
+  "merge-base order-right order-left",
+  "merge-base --all tie-left tie-right",
+  "merge-base tie-right tie-left",
+  "merge-base --all tie-left tie-near tie-far",
+  "log --format=%s order-left...order-right"
 ]

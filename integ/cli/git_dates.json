@@ -1,0 +1,78 @@
+{
+  "targets": [
+    "git-ram",
+    "git-disk"
+  ],
+  "cases": [
+    {
+      "id": "git_log_date_human_hides_what_now_tells",
+      "seq": 17100200,
+      "command": "TZ=UTC GIT_TEST_DATE_NOW=1767879900 git -C /repo log -1 8ef2542 --date=human --format=%ad; TZ=UTC GIT_TEST_DATE_NOW=1767887100 git -C /repo log -1 8ef2542 --date=human --format=%ad; TZ=UTC GIT_TEST_DATE_NOW=1768056300 git -C /repo log -1 8ef2542 --date=human --format=%ad; TZ=UTC GIT_TEST_DATE_NOW=1768315500 git -C /repo log -1 8ef2542 --date=human --format=%ad; TZ=UTC GIT_TEST_DATE_NOW=1768747500 git -C /repo log -1 8ef2542 --date=human --format=%ad; TZ=UTC GIT_TEST_DATE_NOW=1802443500 git -C /repo log -1 8ef2542 --date=human --format=%ad",
+      "expect": {
+        "exit": 0,
+        "stdout": "in the future\n60 minutes ago\nThu 14:45\nThu Jan 8 14:45\nThu Jan 8 14:45\nJan 8 2026\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_date_relative_rounds_each_unit",
+      "seq": 17100201,
+      "command": "GIT_TEST_DATE_NOW=1767883589 git -C /repo log -1 8ef2542 --date=relative --format=%ad; GIT_TEST_DATE_NOW=1767883590 git -C /repo log -1 8ef2542 --date=relative --format=%ad; GIT_TEST_DATE_NOW=1767888869 git -C /repo log -1 8ef2542 --date=relative --format=%ad; GIT_TEST_DATE_NOW=1767888870 git -C /repo log -1 8ef2542 --date=relative --format=%ad; GIT_TEST_DATE_NOW=1768011269 git -C /repo log -1 8ef2542 --date=relative --format=%ad; GIT_TEST_DATE_NOW=1768011270 git -C /repo log -1 8ef2542 --date=relative --format=%ad; GIT_TEST_DATE_NOW=1769048070 git -C /repo log -1 8ef2542 --date=relative --format=%ad; GIT_TEST_DATE_NOW=1773886470 git -C /repo log -1 8ef2542 --date=relative --format=%ad; GIT_TEST_DATE_NOW=1799374470 git -C /repo log -1 8ef2542 --date=relative --format=%ad; GIT_TEST_DATE_NOW=1800756870 git -C /repo log -1 8ef2542 --date=relative --format=%ad; GIT_TEST_DATE_NOW=1941243270 git -C /repo log -1 8ef2542 --date=relative --format=%ad",
+      "expect": {
+        "exit": 0,
+        "stdout": "89 seconds ago\n2 minutes ago\n89 minutes ago\n2 hours ago\n35 hours ago\n2 days ago\n2 weeks ago\n2 months ago\n1 year ago\n1 year, 1 month ago\n6 years ago\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_date_spellings_git_takes",
+      "seq": 17100202,
+      "command": "TZ=Asia/Kolkata git -C /repo log -1 8ef2542 --date=iso8601-strict-local --format=%ad; TZ=UTC git -C /repo log -1 8ef2542 --date=rfc2822-local --format=%ad; git -C /repo log -1 8ef2542 --date=auto:bogus --format=%ad; git -C /repo log -1 8ef2542 --date=format:-local --format=%ad; git -C /repo log -1 8ef2542 --date=normal --format=%ad; echo rc=$?; git -C /repo log -1 8ef2542 --date=formatx --format=%ad; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-01-08T20:15:00+05:30\nThu, 8 Jan 2026 14:45:00 +0000\nThu Jan 8 14:45:00 2026 +0000\n-local\nrc=128\nrc=128\n",
+        "stderr": "fatal: unknown date format normal\nfatal: date format missing colon separator: formatx\n"
+      }
+    },
+    {
+      "id": "git_log_date_template_reaches_the_c_library",
+      "seq": 17100203,
+      "command": "TZ=UTC git -C /repo log -1 8ef2542 --date='format:%q|%_z|%5z|%-z|%12F|%#Z|%10s|abc%' --format=%ad; TZ=Asia/Kolkata git -C /repo log -1 8ef2542 --date='format-local:%_z|%Ez|%Z|%#Z' --format=%ad",
+      "expect": {
+        "exit": 0,
+        "stdout": "%q|+   0|    +00000|+0|  2026-01-08|gmt|1767883500|abc%\n+ 530|+0530|IST|ist\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_date_template_prints_the_dates_own_year_past_2099",
+      "seq": 17300002,
+      "command": "(git init -q -b main /repo/far && cd /repo/far && t=$(git hash-object -w -t tree --stdin < /dev/null) && for w in '253402300799 +0000' '253402300799 +1400' '4102444800 +0530'; do c=$(printf 'tree %s\\nauthor A <a@example.com> %s\\ncommitter A <a@example.com> %s\\n\\nfar\\n' $t \"$w\" \"$w\" | git hash-object -w -t commit --stdin) && TZ=UTC git log -1 $c --date='format:%Y|%C|%F|%c|%s|%12s|%12F' --format=%ad && TZ=UTC git log -1 $c --date='format-local:%Y|%s' --format=%ad; done)",
+      "expect": {
+        "exit": 0,
+        "stdout": "9999|99|9999-12-31|Fri Dec 31 23:59:59 9999|18446744073709551615|253402300799|  9999-12-31\n9999|18446744073709551615\n10000|100|10000-01-01|Sat Jan  1 13:59:59 10000|18446744073709501215|253402351199| 10000-01-01\n9999|18446744073709551615\n2100|21|2100-01-01|Fri Jan  1 05:30:00 2100|18446744073709531815|  4102464600|  2100-01-01\n2100|18446744073709551615\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_date_template_pads_by_the_last_padding_flag",
+      "seq": 17300008,
+      "command": "(git init -q -b main /repo/flags && cd /repo/flags && t=$(git hash-object -w -t tree --stdin < /dev/null) && mk() { printf 'tree %s\\nauthor A <a@example.com> %s %s\\ncommitter A <a@example.com> %s %s\\n\\nx\\n' $t $1 $2 $1 $2 | git hash-object -w -t commit --stdin; } && c=$(mk 1768561800 +0530) && TZ=UTC git log -1 $c --date='format:%0_12s|%_012s|%0_15F|%_015F|%0_3z|%_03z|%-3I|%1I|%^#p|%#Z|%3%|%-12a|%0-12F|%-6Y|%0^6b' --format=%ad && TZ=Asia/Kolkata git log -1 $c --date='format-local:%0_6z|%-_6z|%_-6z|%0-3H|%-03H|%^#Z' --format=%ad; status=$?; cd /repo && rm -rf flags; exit $status)",
+      "expect": {
+        "exit": 0,
+        "stdout": "  1768581600|001768581600|     2026-01-16|000002026-01-16|  +   0|00+0000|  4|04|pm|gmt|  %|         Fri|  2026-01-16|  2026|000JAN\n     +   530|     +   530|     +   530| 16|016|ist\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_date_padded_epoch_reads_the_nearest_standard_time",
+      "seq": 17300009,
+      "command": "(git init -q -b main /repo/std && cd /repo/std && t=$(git hash-object -w -t tree --stdin < /dev/null) && mk() { printf 'tree %s\\nauthor A <a@example.com> %s %s\\ncommitter A <a@example.com> %s %s\\n\\nx\\n' $t $1 $2 $1 $2 | git hash-object -w -t commit --stdin; } && for w in '1782907200 +0100 Europe/Dublin' '1768561800 +0000 Europe/Dublin' '962971200 +0100 Africa/Windhoek' '1590000000 +0000 Africa/Casablanca' '1768561800 +1100 Australia/Lord_Howe' '1782907200 +0100 IST-1GMT0,M10.5.0,M3.5.0/1'; do set -- $w && c=$(mk $1 $2) && TZ=$3 git log -1 $c --date='format:%12s|%s' --format=%ad; done; status=$?; cd /repo && rm -rf std; exit $status)",
+      "expect": {
+        "exit": 0,
+        "stdout": "  1782907200|1782907200\n  1768558200|1768561800\n   962967600|962971200\n  1589996400|1590000000\n  1768563600|1768561800\n  1782907200|1782907200\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

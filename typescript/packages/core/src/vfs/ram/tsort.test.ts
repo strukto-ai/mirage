@@ -23,7 +23,9 @@ const RAM_TSORT = GENERIC_COMMANDS.filter((c) => c.name === 'tsort' && c.filetyp
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-async function runTsort(stdin: Uint8Array | null): Promise<{ out: string; exitCode: number }> {
+async function runTsort(
+  stdin: Uint8Array | null,
+): Promise<{ out: string; err: string; exitCode: number }> {
   const vfs = new RAMVFS()
   const cmd = RAM_TSORT[0]
   if (cmd === undefined) throw new Error('tsort not registered')
@@ -33,7 +35,7 @@ async function runTsort(stdin: Uint8Array | null): Promise<{ out: string; exitCo
     io: commandIo(vfs),
     cwd: PathSpec.fromStrPath('/'),
   })
-  if (result === null) return { out: '', exitCode: -1 }
+  if (result === null) return { out: '', err: '', exitCode: -1 }
   const [out, ioResult] = result
   const buf =
     out === null
@@ -41,7 +43,14 @@ async function runTsort(stdin: Uint8Array | null): Promise<{ out: string; exitCo
       : out instanceof Uint8Array
         ? out
         : await materialize(out as AsyncIterable<Uint8Array>)
-  return { out: DEC.decode(buf), exitCode: ioResult.exitCode }
+  const err = ioResult.stderr === null ? new Uint8Array() : await materialize(ioResult.stderr)
+  return { out: DEC.decode(buf), err: DEC.decode(err), exitCode: ioResult.exitCode }
+}
+
+function loops(...members: string[][]): string {
+  return members
+    .map((loop) => `tsort: -: input contains a loop:\n${loop.map((m) => `tsort: ${m}\n`).join('')}`)
+    .join('')
 }
 
 describe('tsort', () => {
@@ -54,5 +63,39 @@ describe('tsort', () => {
   it('detects cycle and returns exit code 1', async () => {
     const r = await runTsort(ENC.encode('a b\nb a\n'))
     expect(r.exitCode).toBe(1)
+  })
+
+  it('cuts loops until a name is free', async () => {
+    // GNU 9.7: each cut drops the pair that closed the loop, and the loops
+    // go on until one cut frees a name.
+    const r = await runTsort(ENC.encode('h f\nb f\ng b\nf h\nh b\nh g\nh h\n'))
+    expect([r.out, r.exitCode]).toEqual(['b\nf\nh\ng\n', 1])
+    expect(r.err).toBe(loops(['f', 'h'], ['b', 'f', 'h', 'g'], ['b', 'f', 'h']))
+  })
+
+  it('repeats a loop held by a repeated pair', async () => {
+    const r = await runTsort(ENC.encode('d f\nb c\nc a\nd f\nf d\nc f\nd c\n'))
+    expect([r.out, r.exitCode]).toEqual(['b\nf\nd\nc\na\n', 1])
+    expect(r.err).toBe(loops(['f', 'd', 'c'], ['f', 'd'], ['f', 'd']))
+  })
+
+  it('breaks one loop per component, smallest first', async () => {
+    const r = await runTsort(ENC.encode('q r\nr q\na b\nb a\nm n\n'))
+    expect([r.out, r.exitCode]).toEqual(['m\nn\na\nb\nq\nr\n', 1])
+    expect(r.err).toBe(loops(['a', 'b'], ['q', 'r']))
+  })
+
+  it('walks back to the next name after it', async () => {
+    // The step back from c can take a or g; GNU takes g, the next name
+    // after c, so the loop is a g c rather than a c.
+    const r = await runTsort(ENC.encode('a g a c\nc a h d g c d g\n'))
+    expect([r.out, r.exitCode]).toEqual(['h\nd\na\ng\nc\n', 1])
+    expect(r.err).toBe(loops(['a', 'g', 'c']))
+  })
+
+  it('orders the free names by bytes', async () => {
+    // GNU 9.7: a m x go first, in byte order; c follows them, d waits on c.
+    const r = await runTsort(ENC.encode('m n\nc d\nx y\na d\na c\n'))
+    expect([r.out, r.exitCode]).toEqual(['a\nm\nx\nc\nn\ny\nd\n', 0])
   })
 })

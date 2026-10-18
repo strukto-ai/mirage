@@ -1,0 +1,88 @@
+{
+  "targets": [
+    "git-ram",
+    "git-disk"
+  ],
+  "cases": [
+    {
+      "id": "git_commit_order_setup",
+      "seq": 17100100,
+      "command": "(git init -q -b main /repo/order && cd /repo/order && t=$(git hash-object -w -t tree --stdin < /dev/null) && c() { s=$1 w=$2; shift 2; { printf 'tree %s\\n' $t; for p in \"$@\"; do printf 'parent %s\\n' $p; done; printf 'author A <a@example.com> %s +0000\\ncommitter A <a@example.com> %s +0000\\n\\n%s\\n' $w $w $s; } | git hash-object -w -t commit --stdin; } && base=$(c base 1700000000) && a1=$(c a1 1700000010 $base) && a2=$(c a2 1700000020 $a1) && b1=$(c b1 1700000015 $base) && b2=$(c b2 1700000025 $b1) && m=$(c merge 1700000030 $a2 $b2) && s1=$(c s1 1700000005 $a1) && s2=$(c s2 1700000012 $s1) && d1=$(c d1 1700000040 $m) && t1=$(c t1 1700000040 $b1) && printf '%s\\n' $d1 > .git/refs/heads/main && printf '%s\\n' $s2 > .git/refs/heads/side && printf '%s\\n' $t1 > .git/refs/heads/tie)",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_topo_order_follows_one_line_at_a_time",
+      "seq": 17100101,
+      "command": "git -C /repo/order log --topo-order --format=%s main side; echo; git -C /repo/order log --format=%s main side",
+      "expect": {
+        "exit": 0,
+        "stdout": "d1\nmerge\nb2\nb1\na2\ns2\ns1\na1\nbase\n\nd1\nmerge\nb2\na2\nb1\ns2\na1\ns1\nbase\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_topo_order_takes_tips_in_walk_order",
+      "seq": 17100102,
+      "command": "git -C /repo/order log --topo-order --format=%s main tie side; echo; git -C /repo/order log --topo-order --format=%s tie main side",
+      "expect": {
+        "exit": 0,
+        "stdout": "d1\nmerge\nb2\na2\nt1\nb1\ns2\ns1\na1\nbase\n\nt1\nd1\nmerge\nb2\nb1\na2\ns2\ns1\na1\nbase\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_date_order_holds_a_parent_behind_an_older_child",
+      "seq": 17100103,
+      "command": "git -C /repo/order log --date-order --format=%s main tie side; echo; git -C /repo/order log --date-order --format=%s tie main side",
+      "expect": {
+        "exit": 0,
+        "stdout": "d1\nt1\nmerge\nb2\na2\nb1\ns2\ns1\na1\nbase\n\nt1\nd1\nmerge\nb2\na2\nb1\ns2\ns1\na1\nbase\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_commit_order_reverse_and_limit",
+      "seq": 17100104,
+      "command": "git -C /repo/order log --topo-order --reverse --format=%s main side; echo; git -C /repo/order log --date-order --reverse --format=%s main side; echo; git -C /repo/order log --topo-order -n 4 --format=%s main tie side; echo; git -C /repo/order log --date-order -3 --reverse --format=%s main side",
+      "expect": {
+        "exit": 0,
+        "stdout": "base\na1\ns1\ns2\na2\nb1\nb2\nmerge\nd1\n\nbase\na1\ns1\ns2\nb1\na2\nb2\nmerge\nd1\n\nd1\nmerge\nb2\na2\n\nb2\nmerge\nd1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_commit_order_ranges_and_first_parent",
+      "seq": 17100105,
+      "command": "git -C /repo/order log --topo-order --format=%s side..main; echo; git -C /repo/order log --date-order --format=%s main...side; echo; git -C /repo/order log --topo-order --format=%s --first-parent main side; echo; git -C /repo/order log --date-order --format=%s --first-parent tie main side",
+      "expect": {
+        "exit": 0,
+        "stdout": "d1\nmerge\nb2\nb1\na2\n\nd1\nmerge\nb2\na2\nb1\ns2\ns1\n\nd1\nmerge\na2\ns2\ns1\na1\nbase\n\nt1\nd1\nmerge\na2\nb1\ns2\ns1\na1\nbase\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_graph_draws_in_topo_order",
+      "seq": 17100106,
+      "command": "git -C /repo/order log --graph --format=%s main tie side",
+      "expect": {
+        "exit": 0,
+        "stdout": "* d1\n*   merge\n|\\  \n| * b2\n* | a2\n| | * t1\n| |/  \n| * b1\n| | * s2\n| | * s1\n| |/  \n|/|   \n* | a1\n|/  \n* base\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_commit_order_cleanup",
+      "seq": 17100107,
+      "command": "rm -rf /repo/order",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -31,8 +31,8 @@ LONG_MAX = 2**63 - 1
 ULONG_MAX = 2**64 - 1
 INT_MAX = 2**31 - 1
 UINT_MAX = 2**32 - 1
-# What gnulib appends after a refused number that scanned, measured under
-# LC_ALL=C on glibc: ERANGE for a value outside the option's range and
+# What GNU 9.7 appends after a refused number that scanned, measured under
+# LC_ALL=C: ERANGE for a value outside the option's range and
 # EOVERFLOW for one the program words as too large for its type.
 ERANGE_REASON = "Numerical result out of range"
 EOVERFLOW_REASON = "Value too large for defined data type"
@@ -104,6 +104,25 @@ def strtoul(text: str) -> tuple[int, str]:
     return value, text[match.end() :]
 
 
+def bounded_decimal(digits: str, bound: int) -> int | None:
+    """ASCII decimal ``digits`` as a number, None when it is ``bound`` or
+    more.
+
+    Leading zeros go first and a run longer than the bound is refused by
+    its length, so however many digits are typed, the conversion only
+    ever sees as many as the bound has.
+
+    Args:
+        digits (str): ASCII decimal digits, no sign.
+        bound (int): the least value refused.
+    """
+    significant = digits.lstrip("0")
+    if len(significant) > len(str(bound)):
+        return None
+    value = int(significant or "0")
+    return value if value < bound else None
+
+
 def c_int(value: int) -> int:
     """``value`` as C's ``(int)`` cast leaves it: its low 32 bits, signed.
 
@@ -119,6 +138,7 @@ __all__ = [
     "INT_MAX",
     "UINT_MAX",
     "ULONG_MAX",
+    "bounded_decimal",
     "c_int",
     "signed_decimal",
     "strtol",
