@@ -132,11 +132,11 @@ IN_ORDER_OPERANDS = frozenset({"jq", "join", "unzip"})
 
 # The option words an IN_ORDER_OPERANDS program's own loop reads by their
 # spelling, so the tape keeps each one where it was typed, as (SPELLED,
-# word) just before the occurrence it spells. join.c takes a lone `-j1` or
-# `-j2` (`optarg == argv[optind - 1] + 2`) as the obsolete `-j1 FIELD`
-# until no operand is left for FIELD, while `-j 1` and `-ij1` are always
-# both files' field 1, and it reads every operand after `--` as a file
-# (coreutils 9.7).
+# word) just before the occurrence it spells. GNU join reads a `-j1` or
+# `-j2` typed as a word of its own as the obsolete `-j1 FIELD` when a
+# third operand needs the room (`join -j1 2 a b`), while `-j 1` and
+# `-ij1` are always both files' field 1, and it reads every operand
+# after `--` as a file (coreutils 9.7).
 SPELLED_WORDS = {"join": frozenset({"-j1", "-j2", "--"})}
 
 # The programs whose option loop reads a dash-led word as options only when

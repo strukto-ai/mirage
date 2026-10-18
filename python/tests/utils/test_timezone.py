@@ -143,16 +143,16 @@ def test_posix_strings(spec: str, epoch: int, expected: str) -> None:
         ("", "1970-01-01 00:00:00 +0000 UTC"),
     ],
 )
-def test_glibc_fallbacks(spec: str, expected: str) -> None:
-    # glibc reads an unknown name as a POSIX string with no offset, so
-    # it renders UTC under that name; a name under three letters is
-    # refused and leaves %Z empty; an empty TZ is UTC (glibc spells
-    # that one `Universal`, the one abbreviation here that differs).
+def test_gnu_fallbacks(spec: str, expected: str) -> None:
+    # GNU date reads an unknown name as a POSIX string with no offset,
+    # so it renders UTC under that name; a name under three letters is
+    # refused and leaves %Z empty; an empty TZ is UTC (GNU spells that
+    # one `Universal`, the one abbreviation here that differs).
     assert render(spec, EPOCH) == expected
 
 
-# glibc keeps what it had read of a rule it refuses, never reads the rule
-# after it, and keeps a daylight half whose name it cannot read as
+# GNU date keeps what it had read of a rule it refuses, never reads the
+# rule after it, and keeps a daylight half whose name it cannot read as
 # nameless UTC; nothing falls back to plain UTC. Every line is GNU's.
 @pytest.mark.parametrize(
     "spec,epoch,expected",
@@ -191,7 +191,7 @@ def test_glibc_fallbacks(spec: str, expected: str) -> None:
         ("EST5,M3.2.0,M11.1.0", WINTER, "-0500 EST"),
     ],
 )
-def test_glibc_keeps_what_it_read_of_a_refused_rule(
+def test_gnu_keeps_what_it_read_of_a_refused_rule(
     spec: str, epoch: int, expected: str
 ) -> None:
     assert render(spec, epoch, "%z %Z") == expected
@@ -208,9 +208,9 @@ def test_glibc_keeps_what_it_read_of_a_refused_rule(
 def test_month_outside_the_table_is_the_refused_julian_rule(
     spec: str, epoch: int, expected: str
 ) -> None:
-    # glibc reads past its month table for a month outside 1 to 12;
-    # mirage reads the refused rule as Julian day 0 instead, which is
-    # what Debian's glibc happens to print for these too.
+    # GNU date 9.7 gives a month outside 1 to 12 no stable reading (M0
+    # flips between years); mirage reads the refused rule as Julian day
+    # 0, which is what GNU printed for these.
     assert render(spec, epoch, "%z %Z") == expected
 
 
@@ -223,7 +223,7 @@ def test_month_outside_the_table_is_the_refused_julian_rule(
         ("UTC23:59:59", "1969-12-31 00:00:01 -2359 UTC"),
     ],
 )
-def test_offset_fields_clamp_as_glibc_clamps_them(
+def test_offset_fields_clamp_as_gnu_clamps_them(
     spec: str, expected: str
 ) -> None:
     assert render(spec, EPOCH) == expected
@@ -241,10 +241,192 @@ def test_offset_fields_clamp_as_glibc_clamps_them(
 def test_a_full_day_offset_stops_one_second_short(
     spec: str, expected: str
 ) -> None:
-    # glibc clamps the hours at 24 and prints `-2400` for all of these;
+    # GNU clamps the hours at 24 and prints `-2400` for all of these;
     # a tzinfo cannot carry a full day, so both hosts stop a second
     # short of it, the one documented divergence.
     assert render(spec, EPOCH) == expected
+
+
+# Each numeric field skips blanks and takes one sign, then keeps 16 bits;
+# a rule time takes a leading `-` and no caps; a `J` or `n` day is plain
+# digits. Every line is GNU's.
+@pytest.mark.parametrize(
+    "spec,epoch,expected",
+    [
+        ("UTC-+5", 0, "1970-01-01 05:00:00 +0500 UTC"),
+        ("UTC- 5", 0, "1970-01-01 05:00:00 +0500 UTC"),
+        ("UTC 5", 0, "1970-01-01 00:00:00 +0000 UTC"),
+        ("UTC5:-30", 0, "1969-12-31 18:01:00 -0559 UTC"),
+        ("UTC65559", 0, "1969-12-31 01:00:00 -2300 UTC"),
+        ("UTC4294967301", 0, "1969-12-31 19:00:00 -0500 UTC"),
+        ("UTC--65535", 0, "1970-01-01 01:00:00 +0100 UTC"),
+        ("UTC5:", 1720000000, "2024-07-03 09:46:40 +0000 "),
+        (
+            "AAA5BBB 6,M3.2.0,M11.1.0",
+            1720000000,
+            "2024-07-03 03:46:40 -0600 BBB",
+        ),
+        (
+            "AAA5BBB-,M3.2.0,M11.1.0",
+            1720000000,
+            "2024-07-03 05:46:40 -0400 BBB",
+        ),
+        (
+            "AAA24BBB,M3.2.0,M11.1.0",
+            1720000000,
+            "2024-07-02 10:46:40 -2300 BBB",
+        ),
+        ("ABC5+4,M3.2.0,M11.1.0", 1720000000, "2024-07-03 09:46:40 +0000 "),
+        (
+            "CET-1CEST,M3.5.0/+3,M10.5.0",
+            1711848600,
+            "2024-03-31 02:30:00 +0100 CET",
+        ),
+        (
+            "CET-1CEST,M3.5.0/-,M10.5.0",
+            1711834200,
+            "2024-03-30 23:30:00 +0200 CEST",
+        ),
+        (
+            "CET-1CEST,M3.5.0/-,M10.5.0",
+            1700000000,
+            "2023-11-14 23:13:20 +0100 CET",
+        ),
+        ("CET-1CEST,M3.5.0/", 1711841400, "2024-03-31 01:30:00 +0200 CEST"),
+        ("CET-1CEST,M3.5.0/", 1700000000, "2023-11-15 00:13:20 +0200 CEST"),
+        (
+            "CET-1CEST,M3.5.0/ 3,M10.5.0",
+            1711848600,
+            "2024-03-31 02:30:00 +0100 CET",
+        ),
+        (
+            "CET-1CEST,M3.5.0/65538,M10.5.0",
+            1711848600,
+            "2024-03-31 03:30:00 +0200 CEST",
+        ),
+        (
+            "CET-1CEST,M3.5.0/1:-30,M10.5.0",
+            1714521600,
+            "2024-05-01 01:00:00 +0100 CET",
+        ),
+        (
+            "CET-1CEST,M3.5.0/1:-30,M10.5.0",
+            1720000000,
+            "2024-07-03 11:46:40 +0200 CEST",
+        ),
+        (
+            "CET-1CEST,M+3.5.0,M10.5.0",
+            1711848600,
+            "2024-03-31 03:30:00 +0200 CEST",
+        ),
+        (
+            "CET-1CEST,M3. 5.0,M10.5.0",
+            1700000000,
+            "2023-11-14 23:13:20 +0100 CET",
+        ),
+        (
+            "CET-1CEST,M65539.5.0,M10.5.0",
+            1711848600,
+            "2024-03-31 03:30:00 +0200 CEST",
+        ),
+        (
+            "CET-1CEST,M3.5.65537,M10.5.0",
+            1711330200,
+            "2024-03-25 03:30:00 +0200 CEST",
+        ),
+        (
+            "CET-1CEST,M3.-5.3,M10.5.0",
+            1700000000,
+            "2023-11-15 00:13:20 +0200 CEST",
+        ),
+        ("CET-1CEST,J+60,J300", 1720000000, "2024-07-03 10:46:40 +0100 CET"),
+        (
+            "CET-1CEST,J00060,J300",
+            1720000000,
+            "2024-07-03 11:46:40 +0200 CEST",
+        ),
+    ],
+)
+def test_fields_read_as_gnu_reads_them(
+    spec: str, epoch: int, expected: str
+) -> None:
+    assert render(spec, epoch) == expected
+
+
+# Where GNU date puts a rule's day, refused fields included (week 0, a
+# week past the last, a weekday past 6, J day 0), and which state an
+# instant shows: the year is the UTC one, and a start and end at the
+# same instant leave DST off. Every line is GNU's.
+@pytest.mark.parametrize(
+    "spec,epoch,expected",
+    [
+        (
+            "CET-1CEST,M9.1.7,M10.5.0",
+            1725748200,
+            "2024-09-07 23:30:00 +0100 CET",
+        ),
+        (
+            "CET-1CEST,M9.1.7,M10.5.0",
+            1725751800,
+            "2024-09-08 01:30:00 +0200 CEST",
+        ),
+        (
+            "CET-1CEST,M3.0.0,M10.5.0",
+            1709418600,
+            "2024-03-02 23:30:00 +0100 CET",
+        ),
+        (
+            "CET-1CEST,M3.0.0,M10.5.0",
+            1709422200,
+            "2024-03-03 01:30:00 +0200 CEST",
+        ),
+        (
+            "CET-1CEST,M3.9.3,M10.5.0",
+            1711492200,
+            "2024-03-26 23:30:00 +0100 CET",
+        ),
+        (
+            "CET-1CEST,M3.9.3,M10.5.0",
+            1711495800,
+            "2024-03-27 01:30:00 +0200 CEST",
+        ),
+        (
+            "CET-1CEST,M3.5.100,M10.5.0",
+            1717453800,
+            "2024-06-03 23:30:00 +0100 CET",
+        ),
+        (
+            "CET-1CEST,M3.5.100,M10.5.0",
+            1717457400,
+            "2024-06-04 01:30:00 +0200 CEST",
+        ),
+        (
+            "CET-1CEST,M2.5.9,M10.5.0",
+            1708986600,
+            "2024-02-26 23:30:00 +0100 CET",
+        ),
+        (
+            "CET-1CEST,M2.5.9,M10.5.0",
+            1708990200,
+            "2024-02-27 01:30:00 +0200 CEST",
+        ),
+        ("AAA12BBB,J1/0,J0", 1704108600, "2023-12-31 23:30:00 -1200 AAA"),
+        ("AAA12BBB,J1/0,J0", 1704112200, "2024-01-01 01:30:00 -1100 BBB"),
+        ("CET-1CEST,J59/24,J60", 1709249400, "2024-03-01 01:30:00 +0200 CEST"),
+        ("CET-1CEST,J59/24,J60", 1709251200, "2024-03-01 01:00:00 +0100 CET"),
+        ("CET-1CEST,59,60/24", 1740916800, "2025-03-02 14:00:00 +0200 CEST"),
+        ("ABC5DEF,J1/2,J1/3", 1720000000, "2024-07-03 04:46:40 -0500 ABC"),
+        (
+            "AAA-14BBB,J1/0,J365/24",
+            1735641000,
+            "2025-01-01 00:30:00 +1400 AAA",
+        ),
+    ],
+)
+def test_rule_days_and_dst_state_as_gnu_shows_them(
+    spec: str, epoch: int, expected: str
+) -> None:
+    assert render(spec, epoch) == expected
 
 
 def test_zone_from_env_reads_only_the_command_environment() -> None:
@@ -260,8 +442,8 @@ def test_zone_from_env_reads_only_the_command_environment() -> None:
 
 
 def test_posix_zone_resolves_a_repeated_hour_to_standard_time() -> None:
-    # glibc's mktime: 02:30 on the night CEST ends is the later
-    # instant, 02:30 CET, unless `fold` says the earlier one.
+    # GNU date: 02:30 on the night CEST ends is the later instant,
+    # 02:30 CET, unless `fold` says the earlier one.
     zone = resolve_tz("CET-1CEST,M3.5.0,M10.5.0/3")
     later = datetime(2025, 10, 26, 2, 30, tzinfo=zone, fold=1)
     earlier = datetime(2025, 10, 26, 2, 30, tzinfo=zone)
@@ -304,11 +486,12 @@ def test_transition_rule_shapes() -> None:
     ).at(2025) == datetime(2025, 10, 26, 3)
 
 
-def test_transition_rule_counts_refused_fields_as_glibc_does() -> None:
+def test_transition_rule_counts_refused_fields_as_gnu_does() -> None:
     # Week 0 is the first such weekday; a weekday past 6 counts on from
-    # the month's first day, so 7 is the second Sunday of a month that
-    # starts on one (September 2024) and the first of any other; Julian
-    # day 0 is the day before January 1. All are states glibc leaves.
+    # the Sunday that opens the month's first week, so 7 is the second
+    # Sunday of a month that starts on one (September 2024) and the
+    # first of any other; Julian day 0 is the day before January 1. GNU
+    # date 9.7 places refused rules this way.
     assert TransitionRule("M", month=3, week=0, weekday=0, seconds=0).at(
         2024
     ) == datetime(2024, 3, 3)

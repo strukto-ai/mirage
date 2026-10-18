@@ -741,9 +741,9 @@ def separator_line(commit: Commit, kind: str, flags: DiffFlags) -> str | None:
     for none.
 
     ``---`` when both a diffstat and a patch follow, otherwise an empty
-    line, and none under oneline, which is log-tree's rule. A combined
-    diff (``-c``, ``--cc``) is printed from its own path, which always
-    writes the empty line, oneline included. Pinned against git 2.50.1.
+    line, and none under oneline. A combined diff (``-c``, ``--cc``)
+    always gets the empty line, oneline included. Pinned against git
+    2.50.1.
 
     Args:
         commit (Commit): the commit whose diff follows.

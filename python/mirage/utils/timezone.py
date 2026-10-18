@@ -12,37 +12,85 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from calendar import monthrange, timegm
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta, timezone, tzinfo
+from datetime import date, datetime, timedelta, timezone, tzinfo
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 TZ_VAR = "TZ"
 
-# A POSIX TZ name: `<...>` quotes three or more letters, digits and
-# signs (`<+0530>`), and a bare name is three or more letters (`EST`).
-_NAME_RE = re.compile(r"<([+\-0-9A-Za-z]{3,})>|([A-Za-z]{3,})")
-# An unsigned `h[:m[:s]]` as glibc's `%hu:%hu:%hu` reads it: each field
-# takes any run of digits, and a colon with no digits after it ends the
-# number there.
-_CLOCK_RE = re.compile(r"(\d+)(?::(\d+))?(?::(\d+))?")
-_DIGITS_RE = re.compile(r"\d+")
-# `Mm.w.d`, read as far as it goes: `M3` and `M3.5` are the partial
-# reads glibc keeps when it refuses the rule.
-_MONTH_RULE_RE = re.compile(r"M(?:(\d+)(?:\.(\d+)(?:\.(\d+))?)?)?")
 _HOUR = 3600
 _DAY = timedelta(days=1)
-# glibc clamps a POSIX offset at 24 hours (`UTC24`, and `UTC99` reads
-# the same), one second past what a tzinfo may carry, so both mirage
-# hosts stop there: `TZ=UTC24 date -d @0 +%z` is `-2359` here, `-2400`
-# under GNU, and the wall clock lands one second later.
-_MAX_OFFSET = 24 * _HOUR - 1
+
+# Character classes of a POSIX TZ string, ASCII only as in the C locale:
+# `ÄBC5` has no name GNU accepts.
+_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+_DIGITS = "0123456789"
+_QUOTABLE = _LETTERS + _DIGITS + "+-"
+_BLANKS = " \t\n\v\f\r"
+_SIGNS = "+-"
+
+# A numeric field holds 16 bits: `65536` reads as 0, `-5` as 65531, and
+# anything past 2**64 - 1 as 65535.
+_FIELD_SPAN = 0x10000
+_FIELD_CEILING = "18446744073709551615"
+
+# GNU prints offsets up to ±24:59:59; a Python tzinfo must stay inside a
+# day, so both hosts stop one second short of it.
+_OFFSET_LIMIT = 24 * _HOUR - 1
+
 # The window zone_abbreviations samples: tzdata's post-1970 rules, up to
 # the 32-bit horizon every zone's rules are laid out to.
 _ABBREV_SAMPLE_START = datetime(1970, 1, 1, tzinfo=timezone.utc)
 _ABBREV_SAMPLE_END = datetime(2038, 1, 1, tzinfo=timezone.utc)
+
+
+def _weekday_in_month(year: int, month: int, week: int, weekday: int) -> date:
+    """The day an ``Mm.w.d`` rule names.
+
+    POSIX: week 1 holds the first ``weekday`` of the month and week 5
+    the last. Measured on GNU date 9.7 beyond that: week 0 reads as 1
+    and a week past the last occurrence as the last one; a weekday past
+    6 counts that many days from the Sunday that opens the month's first
+    week (M9.1.7 is 2024-09-08, as September 2024 starts on a Sunday),
+    and a count that runs past the month stays there (M3.5.100 is
+    2024-06-04).
+
+    Args:
+        year (int): the calendar year.
+        month (int): the month, 1 to 12.
+        week (int): the week as read.
+        weekday (int): the weekday as read, 0 for Sunday.
+    """
+    first = date(year, month, 1)
+    opens_on = first.isoweekday() % 7
+    if weekday <= 6:
+        offset = (weekday - opens_on) % 7
+    else:
+        offset = weekday - opens_on
+    last = monthrange(year, month)[1] - 1
+    # How many of that day the month holds from the first one on: one
+    # even when the first already runs past the month.
+    held = 1 + max(0, (last - offset) // 7)
+    nth = min(max(week, 1), held)
+    return first + timedelta(days=offset + 7 * (nth - 1))
+
+
+def _julian_date(year: int, day: int) -> date:
+    """The day a ``Jn`` rule names: the ``day``-th of a year counted as
+    if February always had 28 days, so ``J60`` is March 1 in every year;
+    day 0 is December 31 of the year before.
+
+    Args:
+        year (int): the calendar year.
+        day (int): the day as read, 0 to 365.
+    """
+    if day == 0:
+        return date(year, 1, 1) - _DAY
+    # 2001 has no February 29, so its calendar is the one J counts in.
+    common = date(2001, 1, 1) + timedelta(days=day - 1)
+    return date(year, common.month, common.day)
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,9 +98,9 @@ class TransitionRule:
     """One POSIX DST transition, ``Mm.w.d``, ``Jn`` or ``n``, with the
     local time of day it happens at.
 
-    The fields hold what glibc read, which for a rule it refused may
-    sit outside POSIX's ranges (see ``_read_rule``); ``at`` then counts
-    the way glibc's arithmetic does.
+    A rule GNU date refused keeps the fields read of it (see
+    ``_weekday_rule``), which may sit outside POSIX's ranges; ``at``
+    places those where GNU date 9.7 was measured to put them.
 
     Args:
         kind (str): ``M`` for month/week/weekday, ``J`` for a Julian
@@ -60,9 +108,11 @@ class TransitionRule:
             day of the year that does.
         month (int): the month for an ``M`` rule, 1 to 12.
         week (int): the week for an ``M`` rule, 1 to 5, where 5 is the
-            last such weekday of the month; 0 counts as 1.
+            last such weekday of the month; 0 counts as 1, and a week
+            past the last occurrence as the last.
         weekday (int): the weekday for an ``M`` rule, 0 for Sunday; a
-            value past 6 counts on from the month's first Sunday.
+            value past 6 counts on from the Sunday that opens the
+            month's first week.
         day (int): the day for a ``J`` (1 to 365) or ``D`` (0 to 365)
             rule; ``J`` day 0 is the day before January 1.
         seconds (int): the time of day, in seconds, which POSIX lets run
@@ -83,56 +133,43 @@ class TransitionRule:
             year (int): the calendar year.
         """
         if self.kind == "M":
-            first = datetime(year, self.month, 1)
-            # Python counts Monday as 0; POSIX counts Sunday as 0.
-            day = self.weekday - (first.weekday() + 1) % 7
-            if day < 0:
-                day += 7
-            days = monthrange(year, self.month)[1]
-            for _ in range(1, self.week):
-                if day + 7 >= days:
-                    break
-                day += 7
-            date = first + timedelta(days=day)
+            day = _weekday_in_month(year, self.month, self.week, self.weekday)
         elif self.kind == "J":
-            date = datetime(year, 1, 1) + timedelta(days=self.day - 1)
-            leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
-            if leap and self.day >= 60:
-                date += _DAY
+            day = _julian_date(year, self.day)
         else:
-            date = datetime(year, 1, 1) + timedelta(days=self.day)
-        return date + timedelta(seconds=self.seconds)
+            day = date(year, 1, 1) + timedelta(days=self.day)
+        midnight = datetime(day.year, day.month, day.day)
+        return midnight + timedelta(seconds=self.seconds)
 
 
-# The rules glibc applies when a DST name comes with no `,rule`, or one
-# clause is missing: the US transitions, second Sunday of March and
-# first Sunday of November, at 02:00.
-_US_RULES = (
-    TransitionRule("M", month=3, week=2, weekday=0),
-    TransitionRule("M", month=11, week=1, weekday=0),
-)
-# What glibc leaves in a rule it refused: the state it zeroed before
-# reading, day 0 of the year at 00:00, or, once it had read a `J`,
-# Julian day 0, the day before January 1.
-_ZERO_RULE = TransitionRule("D", day=0, seconds=0)
-_REFUSED_JULIAN = TransitionRule("J", day=0, seconds=0)
+# What a DST zone falls back to when its string names no rule, or only a
+# start: DST from 02:00 on the second Sunday of March to 02:00 on the
+# first Sunday of November.
+_FALLBACK_START = TransitionRule("M", month=3, week=2, weekday=0)
+_FALLBACK_END = TransitionRule("M", month=11, week=1, weekday=0)
+# A rule GNU never read sits at midnight on January 1; a `J` or `Mm` rule
+# whose day or month it refused at midnight on the day before.
+_UNREAD_RULE = TransitionRule("D", day=0, seconds=0)
+_DAY_BEFORE_YEAR = TransitionRule("J", day=0, seconds=0)
 
 
 class PosixZone(tzinfo):
     """A zone read from a POSIX TZ string with a DST half
-    (``CET-1CEST,M3.5.0,M10.5.0/3``), the way glibc reads one.
+    (``CET-1CEST,M3.5.0,M10.5.0/3``).
 
-    The two offsets and the two rules decide everything: an instant is
-    in DST when it lies between the start transition, given in standard
-    wall time, and the end transition, given in DST wall time, both laid
-    out in the year the UTC clock reads, with the window wrapping the
-    year in the southern hemisphere and empty when the two coincide. A
-    wall clock that two instants share (the hour repeated at the end of
-    DST) resolves to the first of them unless ``fold`` says otherwise,
-    and one no instant shows (the hour skipped at its start) reads under
-    the standard offset, which are Python's own conventions for a
-    ``tzinfo``. The DST half may be nameless with a zero offset, which
-    is what glibc keeps when it cannot read its name.
+    The two offsets and the two rules decide everything, as measured on
+    GNU date 9.7: both of a year's transitions are laid out in the year
+    the UTC clock reads, the start in standard wall time and the end in
+    DST wall time, and an instant shows the state the latest of them up
+    to it set, or, before either, the state the year ends in, so a
+    southern window wraps the new year and two transitions at one
+    instant leave DST off. A wall clock that two instants share (the
+    hour repeated at the end of DST) resolves to the first of them
+    unless ``fold`` says otherwise, and one no instant shows (the hour
+    skipped at its start) reads under the standard offset, which are
+    Python's own conventions for a ``tzinfo``. The DST half may be
+    nameless with a zero offset, which is what GNU date shows when it
+    cannot read that name.
 
     Args:
         std (str): the standard-time abbreviation.
@@ -167,14 +204,20 @@ class PosixZone(tzinfo):
         """
         start = self._start.at(utc.year) - self._std_offset
         end = self._end.at(utc.year) - self._dst_offset
-        if start <= end:
-            return start <= utc < end
-        return not end <= utc < start
+        # The year's two changes in order, an end after a start at the
+        # same instant: the latest one passed sets the state, and before
+        # either the year's last change still holds from the year before.
+        early, late = (start, True), (end, False)
+        if end < start:
+            early, late = late, early
+        if utc >= late[0]:
+            return late[1]
+        return early[1] if utc >= early[0] else late[1]
 
     def _resolves_dst(self, dt: datetime) -> bool:
         """Whether a wall-clock reading resolves to daylight time.
 
-        Decided by the rules, never by the offsets, which glibc lets
+        Decided by the rules, never by the offsets, which GNU date lets
         coincide (``CET-1CEST-1,...``) while still naming the halves.
 
         Args:
@@ -263,13 +306,13 @@ def zone_from_env(env: Mapping[str, str] | None) -> tzinfo | None:
 
 
 def resolve_tz(spec: str) -> tzinfo:
-    """The zone a ``TZ`` value names, read as glibc's ``tzset`` reads it.
+    """The zone a ``TZ`` value names, read as GNU date 9.7 reads it.
 
     A leading colon is dropped. An empty value is UTC. A name tzdata
     knows (``Asia/Hong_Kong``, ``UTC``, ``EST5EDT``) is that zone.
     Anything else is a POSIX TZ string (``UTC0``, ``JST-9``,
     ``<+0530>-5:30``, ``CET-1CEST,M3.5.0,M10.5.0/3``), where a bare name
-    with no offset is UTC under that name, which is how glibc renders
+    with no offset is UTC under that name, which is how GNU date renders
     ``TZ=Bogus/Zone`` (``+0000 Bogus``), and a name shorter than three
     letters is refused, leaving ``%Z`` empty.
 
@@ -285,196 +328,329 @@ def resolve_tz(spec: str) -> tzinfo:
         return posix_zone(name)
 
 
-def _read_name(spec: str, pos: int) -> tuple[str, int]:
-    """Read a POSIX TZ name at ``pos``: the name and the position after
-    it, or an empty name and ``pos`` when none starts there.
+def _span_of(spec: str, pos: int, chars: str) -> int:
+    """Where the run of ``chars`` starting at ``pos`` ends.
 
     Args:
         spec (str): the TZ string.
-        pos (int): where to read.
+        pos (int): where the run starts.
+        chars (str): the characters the run may hold.
     """
-    match = _NAME_RE.match(spec, pos)
-    if match is None:
-        return "", pos
-    return match.group(1) or match.group(2), match.end()
-
-
-def _read_clock(
-    spec: str, pos: int
-) -> tuple[tuple[int, int, int] | None, int]:
-    """Read an unsigned ``h[:m[:s]]`` at ``pos`` as glibc's
-    ``%hu:%hu:%hu`` does: the three fields and the position after them,
-    or None and ``pos`` when no digit starts there.
-
-    Args:
-        spec (str): the TZ string.
-        pos (int): where to read.
-    """
-    match = _CLOCK_RE.match(spec, pos)
-    if match is None:
-        return None, pos
-    hours, minutes, seconds = match.groups()
-    return (int(hours), int(minutes or 0), int(seconds or 0)), match.end()
-
-
-def _read_offset(spec: str, pos: int, dst: bool) -> tuple[int | None, int]:
-    """Read a POSIX offset at ``pos`` as glibc's tzset reads one:
-    seconds west of Greenwich, and the position after it.
-
-    A standard offset must start with a sign or a digit and read at
-    least an hour, else there is none (None, and ``pos`` unmoved). A
-    daylight offset takes a sign even when no hours follow, and reads
-    as None then, past the sign, for the caller to default. Hours are
-    clamped at 24 and minutes and seconds at 59, as glibc clamps them.
-
-    Args:
-        spec (str): the TZ string.
-        pos (int): where to read.
-        dst (bool): whether this is the daylight half's offset.
-    """
-    head = spec[pos : pos + 1]
-    if not dst and not (head in ("+", "-") or head.isdigit()):
-        return None, pos
-    sign = 1
-    if head in ("+", "-"):
-        sign = -1 if head == "-" else 1
+    while pos < len(spec) and spec[pos] in chars:
         pos += 1
-    clock, end = _read_clock(spec, pos)
+    return pos
+
+
+def _number_field(spec: str, pos: int) -> tuple[int, int] | None:
+    """A numeric field of an offset, a rule time or an ``M`` rule.
+
+    GNU skips blanks before the digits and takes one sign, then keeps
+    the value in 16 bits: ``UTC65559`` is -23:00, ``UTC--65535`` (the
+    offset's sign, then -65535) is +01:00, and ``UTC99999999999999999999``
+    reads its hours as 65535. None when no digit follows.
+
+    Args:
+        spec (str): the TZ string.
+        pos (int): where the field starts.
+
+    Returns:
+        tuple[int, int] | None: the value, 0 to 65535, and the position
+        after its digits.
+    """
+    start = _span_of(spec, pos, _BLANKS)
+    negative = spec.startswith("-", start)
+    if spec.startswith(tuple(_SIGNS), start):
+        start += 1
+    stop = _span_of(spec, start, _DIGITS)
+    if stop == start:
+        return None
+    digits = spec[start:stop].lstrip("0")
+    if len(digits) > len(_FIELD_CEILING) or (
+        len(digits) == len(_FIELD_CEILING) and digits > _FIELD_CEILING
+    ):
+        return _FIELD_SPAN - 1, stop
+    value = 0
+    for digit in digits:
+        value = (value * 10 + int(digit)) % _FIELD_SPAN
+    return (-value if negative else value) % _FIELD_SPAN, stop
+
+
+def _clock_fields(spec: str, pos: int) -> tuple[list[int], int] | None:
+    """``hh[:mm[:ss]]``, each a numeric field.
+
+    A colon with no field after it is left unread, so ``UTC5:`` is
+    -05:00 followed by ``:``. None when there are no hours.
+
+    Args:
+        spec (str): the TZ string.
+        pos (int): where the hours start.
+
+    Returns:
+        tuple[list[int], int] | None: hours, minutes and seconds (0 when
+        absent), and the position after the last field read.
+    """
+    hours = _number_field(spec, pos)
+    if hours is None:
+        return None
+    fields = [hours[0]]
+    pos = hours[1]
+    while len(fields) < 3 and spec.startswith(":", pos):
+        more = _number_field(spec, pos + 1)
+        if more is None:
+            break
+        fields.append(more[0])
+        pos = more[1]
+    return fields + [0] * (3 - len(fields)), pos
+
+
+def _zone_name(spec: str, pos: int) -> tuple[str, int] | None:
+    """An abbreviation: three or more ASCII letters, or three or more of
+    letters, digits, ``+`` and ``-`` between ``<`` and ``>``.
+
+    Args:
+        spec (str): the TZ string.
+        pos (int): where the name starts.
+
+    Returns:
+        tuple[str, int] | None: the name and the position after it, or
+        None when there is no name GNU accepts there.
+    """
+    if spec.startswith("<", pos):
+        stop = _span_of(spec, pos + 1, _QUOTABLE)
+        if stop - pos - 1 < 3 or not spec.startswith(">", stop):
+            return None
+        return spec[pos + 1 : stop], stop + 1
+    stop = _span_of(spec, pos, _LETTERS)
+    if stop - pos < 3:
+        return None
+    return spec[pos:stop], stop
+
+
+def _utc_offset(spec: str, pos: int) -> tuple[int | None, int]:
+    """An offset ``[+-]hh[:mm[:ss]]``, as seconds east of UTC.
+
+    POSIX counts west, so ``EST5`` is -05:00. GNU caps the hours at 24
+    and the minutes and seconds at 59 (``UTC5:99`` is -05:59,
+    ``UTC24:30`` -24:30).
+
+    Args:
+        spec (str): the TZ string.
+        pos (int): where the offset starts.
+
+    Returns:
+        tuple[int | None, int]: the offset, or None when no hours follow
+        the optional sign, and the position after what was read (a sign
+        is read even then).
+    """
+    west = not spec.startswith("-", pos)
+    if spec.startswith(tuple(_SIGNS), pos):
+        pos += 1
+    clock = _clock_fields(spec, pos)
     if clock is None:
         return None, pos
-    hours, minutes, seconds = clock
-    west = min(hours, 24) * _HOUR + min(minutes, 59) * 60 + min(seconds, 59)
-    return sign * west, end
+    (hours, minutes, seconds), pos = clock
+    total = min(hours, 24) * _HOUR + min(minutes, 59) * 60 + min(seconds, 59)
+    return (-total if west else total), pos
 
 
-def _bounded(seconds: int) -> int:
-    """An offset a tzinfo can carry: within a day, one second short.
+def _rule_time(
+    spec: str, pos: int, rule: TransitionRule
+) -> tuple[TransitionRule, int, bool]:
+    """The ``/time`` after a rule's day, which is 02:00 when absent.
+
+    The time takes a leading ``-`` and no caps (``/-1``, ``/25``,
+    ``/3:99``). What GNU 9.7 does with a broken one, measured: ``/`` at
+    the end of the string is midnight and refused; a ``/`` with no hours
+    after it is 02:00 (``-02:00`` after ``/-``), accepted only when a
+    comma or the end follows; any other character after the day is
+    midnight and refused.
 
     Args:
-        seconds (int): the offset, east positive.
+        spec (str): the TZ string.
+        pos (int): the position after the rule's day.
+        rule (TransitionRule): the rule as read so far, at midnight.
+
+    Returns:
+        tuple[TransitionRule, int, bool]: the rule with its time, the
+        position after it, and whether GNU accepted it.
     """
-    return max(-_MAX_OFFSET, min(_MAX_OFFSET, seconds))
+    if pos == len(spec) or spec[pos] == ",":
+        return replace(rule, seconds=2 * _HOUR), pos, True
+    if spec[pos] != "/" or pos + 1 == len(spec):
+        return rule, pos, False
+    pos += 1
+    sign = -1 if spec[pos] == "-" else 1
+    if sign < 0:
+        pos += 1
+    clock = _clock_fields(spec, pos)
+    seconds = 2 * _HOUR
+    if clock is not None:
+        (hours, minutes, secs), pos = clock
+        seconds = hours * _HOUR + minutes * 60 + secs
+    accepted = pos == len(spec) or spec[pos] == ","
+    return replace(rule, seconds=sign * seconds), pos, accepted
 
 
-def _read_rule(
-    spec: str, pos: int, which: int
+def _year_day_rule(
+    spec: str, pos: int, kind: str, first: int
 ) -> tuple[TransitionRule, int, bool]:
-    """Read one transition rule at ``pos`` as glibc's tzset reads one.
+    """The day of a ``Jn`` (1 to 365) or ``n`` (0 to 365) rule.
 
-    An optional comma leads. ``Jn`` and ``n`` take a day, ``Mm.w.d`` a
-    month, week and weekday, and the end of the string stands for the
-    US rule of that half; ``/time`` may follow, ``h[:m[:s]]`` with an
-    optional ``-``, and is two o'clock when absent or unreadable. glibc
-    refuses a day past 365, ``J0``, a month outside 1 to 12, a week
-    outside 1 to 5, a weekday past 6, anything else where a rule should
-    start, and anything but ``/``, ``,`` or the end after the date part;
-    it keeps what it had read so far, and the time of day, which comes
-    last, is still zero then. The refused rule comes back as glibc
-    leaves it, except that a month outside its table (which glibc reads
-    past) is the refused Julian rule here; the second rule is then
-    never read (see ``posix_zone``).
+    The day is plain digits, no blank or sign; one out of range, or
+    none, is refused as day 0.
+
+    Args:
+        spec (str): the TZ string.
+        pos (int): where the digits start.
+        kind (str): ``J`` or ``D``.
+        first (int): the lowest day the form allows.
+
+    Returns:
+        tuple[TransitionRule, int, bool]: the rule at midnight, the
+        position after the digits, and whether the day was accepted.
+    """
+    stop = _span_of(spec, pos, _DIGITS)
+    digits = spec[pos:stop].lstrip("0")
+    day = int(digits or "0") if len(digits) <= 3 else 1000
+    if stop == pos or not first <= day <= 365:
+        return TransitionRule(kind, day=0, seconds=0), stop, False
+    return TransitionRule(kind, day=day, seconds=0), stop, True
+
+
+def _weekday_rule(spec: str, pos: int) -> tuple[TransitionRule, int, bool]:
+    """The ``m.w.d`` of an ``Mm.w.d`` rule.
+
+    A refused rule keeps all three fields as written: ``M3.6.3`` is the
+    last Wednesday of March, ``M3.5.9`` the last Tuesday, ``M3`` the
+    first Sunday. A month outside 1 to 12 gives GNU dates that follow no
+    rule we measured; mirage reads that rule as Julian day 0.
+
+    Args:
+        spec (str): the TZ string.
+        pos (int): the position after ``M``.
+
+    Returns:
+        tuple[TransitionRule, int, bool]: the rule at midnight, the
+        position after it, and whether all three fields were in range.
+    """
+    fields: list[int] = []
+    while len(fields) < 3:
+        if fields and not spec.startswith(".", pos):
+            break
+        got = _number_field(spec, pos + (1 if fields else 0))
+        if got is None:
+            break
+        fields.append(got[0])
+        pos = got[1]
+    month, week, weekday = fields + [0] * (3 - len(fields))
+    if not 1 <= month <= 12:
+        return _DAY_BEFORE_YEAR, pos, False
+    rule = TransitionRule(
+        "M", month=month, week=week, weekday=weekday, seconds=0
+    )
+    accepted = len(fields) == 3 and 1 <= week <= 5 and weekday <= 6
+    return rule, pos, accepted
+
+
+def _dst_transition(spec: str, pos: int) -> tuple[TransitionRule, int, bool]:
+    """One rule, ``Mm.w.d``, ``Jn`` or ``n``, with its time.
 
     Args:
         spec (str): the TZ string.
         pos (int): where the rule starts.
-        which (int): 0 for the start of DST, 1 for its end.
 
     Returns:
         tuple[TransitionRule, int, bool]: the rule, the position after
-        it, and whether glibc accepts it.
+        it, and whether GNU accepted it; a refused rule keeps what was
+        read of it.
     """
-    if spec[pos : pos + 1] == ",":
-        pos += 1
-    head = spec[pos : pos + 1]
-    if head == "J" or head.isdigit():
-        kind = "J" if head == "J" else "D"
-        refused = _REFUSED_JULIAN if kind == "J" else _ZERO_RULE
-        match = _DIGITS_RE.match(spec, pos + (kind == "J"))
-        if match is None:
-            return refused, pos, False
-        day = int(match.group())
-        if day > 365 or (kind == "J" and day == 0):
-            return refused, pos, False
-        rule = TransitionRule(kind, day=day, seconds=0)
-        pos = match.end()
-    elif head == "M":
-        match = _MONTH_RULE_RE.match(spec, pos)
-        assert match is not None
-        month, week, weekday = (int(field or 0) for field in match.groups())
-        rule = TransitionRule(
-            "M", month=month, week=week, weekday=weekday, seconds=0
-        )
-        if not 1 <= month <= 12:
-            return _REFUSED_JULIAN, pos, False
-        if None in match.groups() or not 1 <= week <= 5 or weekday > 6:
-            return rule, pos, False
-        pos = match.end()
-    elif not head:
-        rule = _US_RULES[which]
+    lead = spec[pos : pos + 1]
+    if lead == "M":
+        rule, pos, accepted = _weekday_rule(spec, pos + 1)
+    elif lead == "J":
+        rule, pos, accepted = _year_day_rule(spec, pos + 1, "J", 1)
+    elif lead and lead in _DIGITS:
+        rule, pos, accepted = _year_day_rule(spec, pos, "D", 0)
     else:
-        return _ZERO_RULE, pos, False
-    tail = spec[pos : pos + 1]
-    if tail not in ("", "/", ","):
+        return _UNREAD_RULE, pos, False
+    if not accepted:
         return rule, pos, False
-    seconds = 2 * _HOUR
-    if tail == "/":
-        pos += 1
-        if pos == len(spec):
-            return rule, pos, False
-        negative = spec[pos] == "-"
-        pos += negative
-        clock, pos = _read_clock(spec, pos)
-        hours, minutes, secs = clock if clock is not None else (2, 0, 0)
-        seconds = (-1 if negative else 1) * (
-            hours * _HOUR + minutes * 60 + secs
-        )
-    return replace(rule, seconds=seconds), pos, True
+    return _rule_time(spec, pos, rule)
+
+
+def _dst_rules(spec: str, pos: int) -> tuple[TransitionRule, TransitionRule]:
+    """The ``,start[,end]`` that follows the DST name and offset.
+
+    With nothing there, or only a comma, both rules fall back; with only
+    a start, the end does. A refused start leaves the end unread, and
+    text other than a comma leaves both unread, which puts DST all year
+    east of UTC (``CET-1CEST,bogus``) and nearly all year west of it.
+
+    Args:
+        spec (str): the TZ string.
+        pos (int): where the rules start.
+
+    Returns:
+        tuple[TransitionRule, TransitionRule]: the start and end rules.
+    """
+    if pos == len(spec) or spec[pos:] == ",":
+        return _FALLBACK_START, _FALLBACK_END
+    if spec[pos] != ",":
+        return _UNREAD_RULE, _UNREAD_RULE
+    start, pos, accepted = _dst_transition(spec, pos + 1)
+    if not accepted:
+        return start, _UNREAD_RULE
+    if pos + 1 >= len(spec):
+        return start, _FALLBACK_END
+    end, _, _ = _dst_transition(spec, pos + 1)
+    return start, end
+
+
+def _clamped(east: int) -> timedelta:
+    """An offset in seconds east as a timedelta a tzinfo may return.
+
+    Args:
+        east (int): the offset GNU would use.
+    """
+    return timedelta(seconds=max(-_OFFSET_LIMIT, min(_OFFSET_LIMIT, east)))
 
 
 def posix_zone(spec: str) -> tzinfo:
-    """The zone a POSIX TZ string names, read as glibc's ``tzset`` reads
-    one.
+    """The zone a POSIX TZ string describes, as GNU 9.7 renders it.
 
-    The grammar is ``std[offset[dst[offset][,start[/time],end[/time]]]]``.
-    POSIX counts an offset west of Greenwich as positive, so ``EST5`` is
-    five hours behind UTC; a missing standard offset is zero and ends
-    the reading (``Bogus/Zone`` is UTC under that name), and a missing
-    daylight offset is one hour ahead of standard. What glibc cannot
-    read it keeps rather than drops. A string with no name at all is UTC
-    with no abbreviation. A daylight half whose name it cannot read is
-    nameless UTC, so ``EST5x`` renders ``+0000`` with an empty ``%Z``
-    nearly all year, its rules being the zero ones. A rule it refuses
-    is kept as far as it was read and the rule after it is never read,
-    so ``CET-1CEST,bogus`` is CEST almost all year and
-    ``CET-1CEST,M3.5.0,M13.1.0`` is CEST from late March to the year's
-    end. A rule that is missing is the US one for that half; glibc
-    consults a ``posixrules`` file for that on hosts that ship one,
-    which is not mirrored.
+    ``std offset [dst [offset] [,start[/time],end[/time]]]``: no DST name
+    gives a fixed zone, and a DST offset defaults to an hour east of the
+    standard one. A string GNU cannot read keeps what it read: no
+    standard name is UTC with an empty name (``AB5``), no standard
+    offset UTC under the name (``XYZ``, ``Bogus/Zone``), and a DST name
+    it cannot read a nameless half at UTC (``EST5x``).
 
     Args:
-        spec (str): the TZ string, colon already dropped.
+        spec (str): the TZ string, without a leading colon.
     """
-    std, pos = _read_name(spec, 0)
-    if not std:
+    std = _zone_name(spec, 0)
+    if std is None:
         return timezone(timedelta(0), "")
-    west, pos = _read_offset(spec, pos, dst=False)
-    if west is None or pos == len(spec):
-        return timezone(timedelta(seconds=_bounded(-(west or 0))), std)
-    std_offset = _bounded(-west)
-    dst, pos = _read_name(spec, pos)
-    dst_offset = 0
-    if dst:
-        dst_west, pos = _read_offset(spec, pos, dst=True)
-        dst_offset = _bounded(
-            std_offset + _HOUR if dst_west is None else -dst_west
-        )
-    start, pos, accepted = _read_rule(spec, pos, 0)
-    end = _read_rule(spec, pos, 1)[0] if accepted else _ZERO_RULE
+    std_name, pos = std
+    if not spec[pos : pos + 1] or spec[pos] not in _SIGNS + _DIGITS:
+        return timezone(timedelta(0), std_name)
+    std_east, pos = _utc_offset(spec, pos)
+    if std_east is None:
+        return timezone(timedelta(0), std_name)
+    if pos == len(spec):
+        return timezone(_clamped(std_east), std_name)
+    dst = _zone_name(spec, pos)
+    dst_name, dst_east = "", 0
+    if dst is not None:
+        dst_name, pos = dst
+        offset, pos = _utc_offset(spec, pos)
+        dst_east = std_east + _HOUR if offset is None else offset
+    start, end = _dst_rules(spec, pos)
     return PosixZone(
-        std,
-        timedelta(seconds=std_offset),
-        dst,
-        timedelta(seconds=dst_offset),
+        std_name,
+        _clamped(std_east),
+        dst_name,
+        _clamped(dst_east),
         start,
         end,
     )

@@ -20,10 +20,10 @@ from collections.abc import (
     AsyncIterator,
     Awaitable,
     Callable,
-    Generator,
 )
 from contextlib import aclosing
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 from mirage.commands.quote import quote_text
 from mirage.commands.spec.help import render_help
@@ -69,481 +69,836 @@ from mirage.workspace.types import ExecutionNode
 logger = logging.getLogger(__name__)
 
 _SYNOPSIS = "xargs [OPTION]... COMMAND [INITIAL-ARGS]..."
-_PROCS_MAX = 2147483647
-_ARG_MAX = 2097152
-_HEADROOM = 2048
-_POSIX_ARG_MIN = 4096
-_DEFAULT_ARG_SIZE = 131072
-_BLANKS = frozenset(b" \t")
-_SPACES = frozenset(b" \t\n\v\f\r")
-_QUOTES = {ord("'"): "single", ord('"'): "double"}
-_NUMBER = re.compile(r"[ \t\n\v\f\r]*[+-]?[0-9]+")
-_ESCAPES = {
-    "a": 7,
-    "b": 8,
-    "f": 12,
-    "n": 10,
-    "r": 13,
-    "t": 9,
-    "v": 11,
-    "\\": 92,
+
+# The sizes GNU findutils 4.10 reports with --show-limits on Linux with
+# an 8 MiB stack: exec takes 2 MiB of arguments and environment, 2 KiB of
+# which xargs leaves unused, and a command line holds 128 KiB unless -s
+# says otherwise. -P takes at most a C int.
+_EXEC_BYTES = 2097152
+_UNUSED_BYTES = 2048
+_POSIX_FLOOR = 4096
+_STANDARD_WIDTH = 131072
+_MOST_JOBS = 2147483647
+
+_INTEGER = re.compile(r"[ \t\n\v\f\r]*[+-]?[0-9]+")
+# Runs of bytes the quoting reader copies as they are: outside quotes,
+# inside a whole -I line once it has begun, and inside each quote.
+_WORD_RUN = re.compile(rb"[^ \t\n'\"\\\x00]+")
+_LINE_RUN = re.compile(rb"[^\n'\"\\\x00]+")
+_QUOTED_RUN = {
+    0x27: re.compile(rb"[^'\n\x00]+"),
+    0x22: re.compile(rb'[^"\n\x00]+'),
 }
-_NUL_WARNING = (
-    "xargs: WARNING: a NUL character occurred in the input.  "
-    "It cannot be passed through in the argument list.  "
-    "Did you mean to use the --null option?\n"
+_QUOTE_WORDS = {0x27: "single", 0x22: "double"}
+# Vertical tab, form feed and carriage return are skipped before a word
+# but kept inside one (GNU 4.10: `\ra \vb\r` gives `a` and `b\r`), and
+# skipping one leaves a line's last blank as it was for -L.
+_SKIPPED_BEFORE_WORD = b"\x0b\x0c\x0d"
+_LETTER_ESCAPES = {
+    0x61: 0x07,
+    0x62: 0x08,
+    0x66: 0x0C,
+    0x6E: 0x0A,
+    0x72: 0x0D,
+    0x74: 0x09,
+    0x76: 0x0B,
+    0x5C: 0x5C,
+}
+_HEX_DIGITS = b"0123456789abcdefABCDEF"
+_OCTAL_DIGITS = b"01234567"
+
+_NUL_IN_INPUT = (
+    "xargs: WARNING: a NUL character occurred in the input.  It cannot be "
+    "passed through in the argument list.  Did you mean to use the --null "
+    "option?\n"
 )
-_NORM, _SPACE, _QUOTE, _BACKSLASH = range(4)
+_NO_TTY = (
+    "xargs: failed to open /dev/tty for reading: No such device or address\n"
+)
+_LINE_TOO_LONG = "xargs: argument line too long\n"
+_LIST_TOO_LONG = "xargs: argument list too long\n"
+_NO_ROOM = (
+    "xargs: cannot fit single argument within argument list size limit\n"
+)
+_TEMPLATE_TOO_LONG = "xargs: command too long\n"
+_CROWDED = "xargs: environment is too large for exec\n"
+_Grouping = Literal["template", "lines", "group"]
+# What a previous -I, -L or -n is called when a later one cancels it.
+_CANCELLED: dict[_Grouping, str] = {
+    "template": "--replace",
+    "lines": "--max-lines",
+    "group": "--max-args",
+}
 
 
-class _Fatal(Exception):
-    """GNU's ``error (EXIT_FAILURE, ...)``: the message ends xargs.
+class _Refusal(Exception):
+    """An option xargs will not run with, refused before any input is read.
 
     Args:
-        message (str): the diagnostic, newline included.
+        text (str): the diagnostic.
         code (int): the exit status.
     """
 
-    def __init__(self, message: str, code: int = 1) -> None:
-        super().__init__(message)
-        self.message = message
+    def __init__(self, text: str, code: int = 1) -> None:
+        super().__init__(text)
+        self.text = text
         self.code = code
 
 
-def _refuse(
-    stderr: str | bytes, exit_code: int = 1
-) -> tuple[None, IOResult, ExecutionNode]:
+def _refusal(stderr: str | bytes, code: int = 1) -> Result:
     data = encode_text(stderr) if isinstance(stderr, str) else stderr
     return (
         None,
-        IOResult(exit_code=exit_code, stderr=data),
-        ExecutionNode(command="xargs", exit_code=exit_code),
+        IOResult(stderr=data, exit_code=code),
+        ExecutionNode(command="xargs", exit_code=code),
     )
 
 
-def _count_error(
-    raw: str, name: str, least: int = 1, most: int | None = None
-) -> str | None:
-    """GNU's parse_num refusal of a count, None for a valid one.
-
-    Args:
-        raw (str): the option's value as typed.
-        name (str): the option letter.
-        least (int): the smallest count the option takes.
-        most (int | None): the largest, None when unbounded.
-    """
-    if not _NUMBER.fullmatch(raw):
-        message = f'invalid number "{raw}" for -{name} option'
-    elif int(raw) < least:
-        message = f"value {raw} for -{name} option should be >= {least}"
-    elif most is not None and int(raw) > most:
-        message = f"value {raw} for -{name} option should be <= {most}"
-    else:
-        return None
-    return f"xargs: {message}\n{usage_hint('xargs')}\n"
-
-
-def _standard_response(
-    option: str, warnings: str
-) -> tuple[ByteSource, IOResult, ExecutionNode]:
-    """xargs's answer to --help or --version: stdout, exit 0.
-
-    Args:
-        option (str): "help" or "version".
-        warnings (str): the option warnings printed before it.
-    """
-    text = (
-        encode_text(
+def _answer(option: str, notes: str) -> Result:
+    # --help and --version answer where they stand, after the warnings of
+    # the options before them.
+    if option == "help":
+        text = encode_text(
             render_help("xargs", SHELL_SPECS["xargs"], synopsis=_SYNOPSIS)
         )
-        if option == "help"
-        else version_line("xargs")
-    )
+    else:
+        text = version_line("xargs")
     return (
         yield_bytes(text),
-        IOResult(stderr=encode_text(warnings) or None),
+        IOResult(stderr=encode_text(notes) or None),
         ExecutionNode(command="xargs", exit_code=0),
     )
 
 
-def _exclusive(option: str, offending: str) -> str:
+def _conflict(option: str, previous: str) -> str:
     return (
-        f"xargs: warning: options {offending} and {option} are mutually "
-        f"exclusive, ignoring previous {offending} value\n"
+        f"xargs: warning: options {previous} and {option} are mutually "
+        f"exclusive, ignoring previous {previous} value\n"
     )
 
 
-def _delimiter(spec: str) -> tuple[int, str]:
-    """GNU's get_input_delimiter: the byte, or its refusal.
-
-    One byte stands for itself; otherwise the value is a C escape (a
-    letter, ``\\`` or an octal or ``\\x`` hex code) and anything else is
-    refused, the empty value included.
+def _whole_number(
+    raw: str, letter: str, floor: int, ceiling: int | None = None
+) -> int:
+    """Read a count option as GNU does: blanks may lead, nothing may trail.
 
     Args:
-        spec (str): the -d value as typed.
+        raw (str): the option's value.
+        letter (str): the option letter the diagnostics name.
+        floor (int): the smallest value taken.
+        ceiling (int | None): the largest value taken; None has no bound,
+            so GNU 4.10 runs ``-n 99999999999999999999``.
+    """
+    hint = usage_hint("xargs")
+    if not _INTEGER.fullmatch(raw):
+        raise _Refusal(
+            f'xargs: invalid number "{raw}" for -{letter} option\n{hint}\n'
+        )
+    value = int(raw)
+    if value < floor:
+        raise _Refusal(
+            f"xargs: value {raw} for -{letter} option should be "
+            f">= {floor}\n{hint}\n"
+        )
+    if ceiling is not None and value > ceiling:
+        raise _Refusal(
+            f"xargs: value {raw} for -{letter} option should be "
+            f"<= {ceiling}\n{hint}\n"
+        )
+    return value
+
+
+def _separator(spec: str) -> int:
+    """The byte -d names: one character, or a backslash escape.
+
+    A letter escape ignores what follows it (GNU 4.10 takes ``\\nX`` as
+    newline); a numeric one (``\\x41``, ``\\101``) reads every digit of
+    its base, so ``\\x411`` is out of range and ``\\x41z`` has a tail.
+
+    Args:
+        spec (str): the option's value.
     """
     raw = encode_text(spec)
     if len(raw) == 1:
-        return raw[0], ""
-    if not spec.startswith("\\"):
-        return 0, (
-            f"xargs: Invalid input delimiter specification {spec}: "
-            "the delimiter must be either a single character or an "
-            "escape sequence starting with \\.\n"
+        return raw[0]
+    if not raw.startswith(b"\\"):
+        raise _Refusal(
+            f"xargs: Invalid input delimiter specification {spec}: the "
+            "delimiter must be either a single character or an escape "
+            "sequence starting with \\.\n"
         )
-    named = _ESCAPES.get(spec[1])
-    if named is not None:
-        return named, ""
-    if spec[1] != "x" and not spec[1].isdigit():
-        return 0, (
-            f"xargs: Invalid escape sequence {spec} in input "
-            "delimiter specification.\n"
+    lead = raw[1]
+    if lead in _LETTER_ESCAPES:
+        return _LETTER_ESCAPES[lead]
+    if lead == 0x78:
+        digits, body, top = _HEX_DIGITS, raw[2:], ("ff", 16)
+    elif 0x30 <= lead <= 0x39:
+        digits, body, top = _OCTAL_DIGITS, raw[1:], ("377", 8)
+    else:
+        raise _Refusal(
+            f"xargs: Invalid escape sequence {spec} in input delimiter "
+            "specification.\n"
         )
-    base, body = (16, spec[2:]) if spec[1] == "x" else (8, spec[1:])
-    match = re.match(r"[0-9a-fA-F]*" if base == 16 else r"[0-7]*", body)
-    digits = match.group(0) if match else ""
-    value = int(digits, base) if digits else 0
-    if value > 255:
-        return 0, (
-            f"xargs: Invalid escape sequence {spec} in input "
-            "delimiter specification; character values must not "
-            f"exceed {'ff' if base == 16 else '377'}.\n"
+    width = 0
+    while width < len(body) and body[width] in digits:
+        width += 1
+    value = int(body[:width], top[1]) if width else 0
+    if value > 0xFF:
+        raise _Refusal(
+            f"xargs: Invalid escape sequence {spec} in input delimiter "
+            f"specification; character values must not exceed {top[0]}.\n"
         )
-    tail = body[len(digits) :]
-    if tail:
-        return 0, (
-            f"xargs: Invalid escape sequence {spec} in input "
-            f"delimiter specification; trailing characters {tail} "
-            "not recognised.\n"
+    if width < len(body):
+        raise _Refusal(
+            f"xargs: Invalid escape sequence {spec} in input delimiter "
+            "specification; trailing characters "
+            f"{decode_text(body[width:])} not recognised.\n"
         )
-    return value, ""
+    return value
 
 
-def _unmatched(quote: int) -> str:
+def _limits_report(environment: int, room: int, width: int) -> str:
     return (
-        f"xargs: unmatched {_QUOTES[quote]} quote; by default quotes are "
-        "special to xargs unless you use the -0 option\n"
-    )
-
-
-def _c_string(word: bytes) -> bytes:
-    return word.split(b"\0", 1)[0]
-
-
-def _limits(env_size: int, posix_max: int, arg_max: int) -> str:
-    return (
-        f"Your environment variables take up {env_size} bytes\n"
+        f"Your environment variables take up {environment} bytes\n"
         "POSIX upper limit on argument length (this system): "
-        f"{posix_max}\n"
+        f"{room}\n"
         "POSIX smallest allowable upper limit on argument length "
-        f"(all systems): {_POSIX_ARG_MIN}\n"
+        f"(all systems): {_POSIX_FLOOR}\n"
         "Maximum length of command we could actually use: "
-        f"{posix_max - env_size}\n"
-        f"Size of command buffer we are actually using: {arg_max}\n"
+        f"{room - environment}\n"
+        f"Size of command buffer we are actually using: {width}\n"
         "Maximum parallelism (--max-procs must be no greater): "
-        f"{_PROCS_MAX}\n"
+        f"{_MOST_JOBS}\n"
     )
 
 
-class _Builder:
-    """GNU xargs's input reader and command builder over one input.
+def _tty_abort(name: bytes) -> str:
+    # GNU 4.10 without a terminal: the child cannot reopen /dev/tty and
+    # dies of SIGABRT, which xargs reports as 125.
+    return (
+        "xargs: '/dev/tty': No such device or address\n"
+        "xargs: xargs.c:1648: wait_for_proc_all: Assertion "
+        "`getpid () == parent' failed.\n"
+        f"xargs: {decode_text(name)}: terminated by signal 6\n"
+    )
 
-    A port of ``read_line``, ``read_string`` and buildcmd.c: words are
-    pushed onto the pending command line until a -n, -L or size limit
-    runs it, and every limit, logical EOF and refusal lands where GNU's
-    does. ``events`` records what GNU does in order, a message (str) or
-    a command line to run (list[bytes]); a refusal raises ``_Fatal``
-    after the events before it.
+
+def _unclosed(mark: int) -> str:
+    return (
+        f"xargs: unmatched {_QUOTE_WORDS[mark]} quote; by default quotes "
+        "are special to xargs unless you use the -0 option\n"
+    )
+
+
+def _before_nul(word: bytes) -> bytes:
+    # An argument is a C string: a NUL ends it, though every byte read
+    # still counts against -s (GNU 4.10: `a\0bbbbbbbbbbbb` needs 15).
+    cut = word.find(b"\0")
+    return word if cut < 0 else word[:cut]
+
+
+@dataclass
+class _Plan:
+    """What the options asked for, in the order they were given.
+
+    -I (``template``), -L/-l (``lines``) and -n (``group``) exclude one
+    another: the last one given holds, with a warning for the one it
+    cancels, except that ``-n 1`` after -I is ignored silently.
 
     Args:
-        data (bytes): the initial input chunk.
-        command (list[bytes]): the command and its initial arguments.
-        delim (int | None): the -0/-d delimiter byte, None for lines.
-        eof (bytes | None): the logical end-of-file word.
-        replace (bytes | None): the -I string.
-        max_args (int): the -n count, 0 when unset.
-        max_lines (int): the -L count, 0 when unset.
-        arg_max (int): the command line size limit (-s).
-        max_argc (int): the most arguments a command line takes.
-        exit_if_exceeded (bool): -x, which -I and -L imply.
-        always_run (bool): run once on empty input (no -r).
-        query (bool): -p, which needs a terminal to ask on.
-        open_tty (bool): -o, which needs a terminal for the command.
+        room (int): what -s may reach once the environment is counted.
+        crowded (bool): the environment alone leaves no room.
+    """
+
+    room: int
+    crowded: bool
+    notes: str = ""
+    width: int = 0
+    separator: int | None = None
+    end_word: str | None = None
+    template: str | None = None
+    lines: int = 0
+    group: int = 0
+    jobs: int = 1
+    source: str = "-"
+    slot_var: str | None = None
+    flags: set[str] = field(default_factory=set)
+
+    def active(self) -> _Grouping | None:
+        if self.template is not None:
+            return "template"
+        if self.lines:
+            return "lines"
+        return "group" if self.group else None
+
+    def warn_over(self, option: str, *kinds: _Grouping) -> None:
+        held = self.active()
+        if held is not None and held in kinds:
+            self.notes += _conflict(option, _CANCELLED[held])
+
+    def take(self, name: str, value: str | None) -> None:
+        if name == "0":
+            self.separator = 0
+        elif name == "d" and value is not None:
+            self.separator = _separator(value)
+        elif name in ("E", "e"):
+            self.end_word = value or None
+        elif name in ("t", "p", "x", "o", "r", "show-limits"):
+            self.flags.add(name)
+        elif name == "a" and value is not None:
+            self.source = value
+        elif name == "process-slot-var" and value is not None:
+            self.take_slot_var(value)
+        elif name == "s" and value is not None:
+            self.take_width(value)
+        elif name in ("I", "i"):
+            self.warn_over("--replace/-I/-i", "group", "lines")
+            self.template = "{}" if value is None else value
+            self.lines = self.group = 0
+        elif name in ("L", "l"):
+            count = _whole_number("1" if value is None else value, name, 1)
+            label = "-L" if name == "L" else "--max-lines/-l"
+            self.warn_over(label, "group", "template")
+            self.template, self.lines, self.group = None, count, 0
+        elif name == "n" and value is not None:
+            self.take_group(_whole_number(value, "n", 1))
+        elif name == "P" and value is not None:
+            self.jobs = _whole_number(value, "P", 0, _MOST_JOBS)
+
+    def take_group(self, count: int) -> None:
+        held = self.active()
+        if held == "template" and count == 1:
+            # GNU reads `-I {} -n1` as plain -I.
+            return
+        self.warn_over("--max-args/-n", "lines", "template")
+        self.template, self.lines, self.group = None, 0, count
+
+    def take_width(self, value: str) -> None:
+        if self.crowded:
+            raise _Refusal(_CROWDED)
+        if not _INTEGER.fullmatch(value):
+            raise _Refusal(
+                f'xargs: invalid number "{value}" for -s option\n'
+                f"{usage_hint('xargs')}\n"
+            )
+        width = int(value)
+        if width < 1:
+            self.notes += (
+                f"xargs: value {value} for -s option should be >= 1\n"
+            )
+            width = 1
+        elif width > self.room:
+            self.notes += (
+                f"xargs: value {value} for -s option should be "
+                f"<= {self.room}\n"
+            )
+            width = self.room
+        self.width = width
+
+    def take_slot_var(self, value: str) -> None:
+        if "=" in value:
+            raise _Refusal(
+                "xargs: option --process-slot-var may not be set to a value "
+                "which includes `='\n"
+            )
+        if not value:
+            raise _Refusal(
+                "xargs: failed to unset environment variable : Invalid "
+                "argument\n"
+            )
+        self.slot_var = value
+
+
+class _Collector:
+    """Where the reader's words go: commands to run and messages to print,
+    in order, and the error that ended the run.
+
+    Args:
+        base (list[bytes]): the command name and its initial arguments.
+        width (int): the -s limit in bytes, a NUL counted per word.
+        flags (set[str]): -p asks first and -o reopens the terminal; there
+            is no terminal, so the first command fails each way.
+    """
+
+    def __init__(self, base: list[bytes], width: int, flags: set[str]) -> None:
+        self.base = base
+        self.width = width
+        self.ask = "p" in flags
+        self.reopen = "o" in flags
+        self.traced = "t" in flags
+        self.out: list[str | list[bytes]] = []
+        self.failure: tuple[str, int] | None = None
+        self.ended = False
+        self.waiting = False
+
+    def halted(self) -> bool:
+        return self.ended
+
+    def holding(self) -> bool:
+        # A built command waits to be run: the reader pauses until it has
+        # been handed on, so one is held at a time.
+        return self.waiting
+
+    def drain(self) -> list[str | list[bytes]]:
+        ready, self.out = self.out, []
+        self.waiting = False
+        return ready
+
+    def note(self, text: str) -> None:
+        self.out.append(text)
+
+    def stop(self, text: str, code: int = 1) -> None:
+        if self.failure is None:
+            self.failure = (text, code)
+        self.ended = True
+
+    def ship(self, line: list[bytes]) -> None:
+        if self.ask:
+            # GNU shows the line it would prompt for, then cannot read
+            # the answer.
+            self.stop(_trace(line)[:-1] + _NO_TTY)
+        elif self.reopen:
+            shown = _trace(line) if self.traced else ""
+            self.stop(shown + _tty_abort(line[0]), 125)
+        else:
+            self.out.append(line)
+            self.waiting = True
+
+    def begin(self) -> None:
+        # Most collectors check nothing before the input.
+        pass
+
+    def word_room(self) -> int:
+        """The most bytes one word may hold; a longer one is ``argument
+        line too long``, which GNU 4.10 reports at the first byte past it,
+        reading no further (with `echo` it stops 131067 bytes into a
+        longer word)."""
+        raise NotImplementedError
+
+    def word(self, word: bytes) -> None:
+        raise NotImplementedError
+
+    def line_done(self) -> None:
+        # Only -L counts lines.
+        pass
+
+    def fail(self, text: str) -> None:
+        self.stop(text)
+
+    def close(self) -> None:
+        self.ended = True
+
+
+class _Packer(_Collector):
+    """Packs words after the initial arguments, as many as -s, -n and -L
+    allow.
+
+    With -x, or -L, a command may not be cut short: a word that does not
+    fit is ``argument list too long`` (with -x only when -n asks for a
+    count), and an error drops the words gathered so far, which otherwise
+    run before xargs stops. A word too long for any command line is
+    ``argument line too long``. Without -r, input with no words still runs
+    the command once.
+
+    Args:
+        base (list[bytes]): the command name and its initial arguments.
+        width (int): the -s limit.
+        flags (set[str]): the toggles given.
+        group (int): -n, words per command; 0 has no count.
+        lines (int): -L, input lines per command; 0 has no count.
+        most_words (int): the most words one command line holds.
     """
 
     def __init__(
         self,
-        data: bytes,
-        command: list[bytes],
+        base: list[bytes],
+        width: int,
+        flags: set[str],
         *,
-        delim: int | None,
-        eof: bytes | None,
-        replace: bytes | None,
-        max_args: int,
-        max_lines: int,
-        arg_max: int,
-        max_argc: int,
-        exit_if_exceeded: bool,
-        always_run: bool,
-        query: bool,
-        open_tty: bool,
+        group: int,
+        lines: int,
+        most_words: int,
     ) -> None:
-        self.data = data
-        self.pos = 0
-        self.command = command
-        self.delim = delim
-        self.eof_word = eof
-        self.replace = replace
-        self.max_args = max_args
-        self.max_lines = max_lines
-        self.arg_max = arg_max
-        self.max_argc = max_argc
-        self.exit_if_exceeded = (
-            exit_if_exceeded or replace is not None or max_lines > 0
-        )
-        self.always_run = always_run
-        self.query = query
-        self.open_tty = open_tty
-        self.events: list[str | list[bytes]] = []
-        self.args: list[bytes] = []
-        self.chars = 0
-        self.initial_chars = 0
-        self.initial_argc = 0
-        self.initial = True
-        self.runs = 0
-        self.lineno = 0
-        self.eof = False
-        self.nul_warned = False
-        self.line = b""
+        super().__init__(base, width, flags)
+        self.group = group
+        self.lines = lines
+        self.most_words = most_words
+        self.strict = "x" in flags
+        self.whole = self.strict or lines > 0
+        self.run_empty = "r" not in flags
+        self.fixed = sum(len(word) + 1 for word in base)
+        self.held: list[bytes] = []
+        self.held_bytes = 0
+        self.lines_held = 0
+        self.shipped = False
 
-    def build(self) -> Generator[str | list[bytes] | None, None, None]:
-        """Yield commands/messages or None to request the next input chunk."""
-        if self.replace is None:
-            for word in self.command:
-                self._push(word, len(word) + 1)
-            self.initial = False
-            self.initial_argc = len(self.args)
-            self.initial_chars = self.chars
-            while (yield from self._read()) != -1:
-                if self.max_lines and self.lineno >= self.max_lines:
-                    self._exec()
-                    self.lineno = 0
-            if len(self.args) != self.initial_argc or (
-                self.always_run and not self.runs
-            ):
-                self._exec()
+    def begin(self) -> None:
+        if self.fixed > self.width:
+            self.stop(_NO_ROOM)
+
+    def flush(self) -> None:
+        line = self.base + [_before_nul(word) for word in self.held]
+        self.held, self.held_bytes, self.lines_held = [], 0, 0
+        self.shipped = True
+        self.ship(line)
+
+    def word_room(self) -> int:
+        return self.width - self.fixed - 1
+
+    def word(self, word: bytes) -> None:
+        size = len(word) + 1
+        if len(word) > self.word_room():
+            # A word with bytes is stopped while it is read; only an empty
+            # one gets here, when -s leaves no room after the command.
+            self.fail(_LINE_TOO_LONG if word else _NO_ROOM)
             return
-        head, rest = self.command[0], self.command[1:]
-        while (length := (yield from self._read())) != -1:
-            line = _c_string(self.line)
-            self.args, self.chars = [], 0
-            self._push(head, len(head) + 1)
-            self.initial = False
-            for arg in rest:
-                self._insert(arg, line, length - 1)
-            self._exec()
-
-    def _read(self) -> Generator[str | list[bytes] | None, None, int]:
-        return (
-            yield from (
-                self._read_line() if self.delim is None else self._read_item()
-            )
-        )
-
-    def _take(self, word: bytes) -> int:
-        self.line = word
-        if self.replace is None:
-            self._push(_c_string(word), len(word) + 1)
-        return len(word) + 1
-
-    def _is_eof(self, word: bytes) -> bool:
-        return self.eof_word is not None and _c_string(word) == self.eof_word
-
-    def _read_char(self) -> Generator[str | list[bytes] | None, None, int]:
-        if self.eof:
-            return -1
-        while self.events:
-            yield self.events.pop(0)
-        if self.pos >= len(self.data):
-            yield None
-        if self.pos >= len(self.data):
-            self.eof = True
-            return -1
-        char = self.data[self.pos]
-        self.pos += 1
-        return char
-
-    def _read_line(self) -> Generator[str | list[bytes] | None, None, int]:
-        state, quote, c, first, seen = _SPACE, 0, -1, True, False
-        buf = bytearray()
-        room = self.arg_max - self.initial_chars - 1
-        while True:
-            prev = c
-            c = yield from self._read_char()
-            if c == -1:
-                if not buf:
-                    return -1
-                if state == _QUOTE:
-                    self._exec_if_possible()
-                    raise _Fatal(_unmatched(quote))
-                if first and self._is_eof(bytes(buf)):
-                    return -1
-                return self._take(bytes(buf))
-            if state == _SPACE:
-                if c in _SPACES:
-                    continue
-                state = _NORM
-            if state == _NORM:
-                if c == 10:
-                    if prev not in _BLANKS:
-                        self.lineno += 1
-                    if not buf and not seen:
-                        state = _SPACE
-                        continue
-                    if self._is_eof(bytes(buf)):
-                        self.eof = True
-                        return -1 if first else len(buf) + 1
-                    return self._take(bytes(buf))
-                seen = True
-                if self.replace is None and c in _BLANKS:
-                    if self._is_eof(bytes(buf)):
-                        self.eof = True
-                        return -1 if first else len(buf) + 1
-                    self._take(bytes(buf))
-                    buf, state, first = bytearray(), _SPACE, False
-                    continue
-                if c == 92:
-                    state = _BACKSLASH
-                    continue
-                if c in _QUOTES:
-                    state, quote = _QUOTE, c
-                    continue
-            elif state == _QUOTE:
-                if c == 10:
-                    self._exec_if_possible()
-                    raise _Fatal(_unmatched(quote))
-                if c == quote:
-                    state, seen = _NORM, True
-                    continue
-            else:
-                state = _NORM
-            if c == 0 and not self.nul_warned:
-                self.events.append(_NUL_WARNING)
-                self.nul_warned = True
-            if len(buf) >= room:
-                self._exec_if_possible()
-                raise _Fatal("xargs: argument line too long\n")
-            buf.append(c)
-
-    def _read_item(self) -> Generator[str | list[bytes] | None, None, int]:
-        buf = bytearray()
-        room = self.arg_max - self.initial_chars - 1
-        while True:
-            c = yield from self._read_char()
-            if c == -1:
-                return self._take(bytes(buf)) if buf else -1
-            if c == self.delim:
-                self.lineno += 1
-                return self._take(bytes(buf))
-            if len(buf) >= room:
-                self._exec_if_possible()
-                raise _Fatal("xargs: argument line too long\n")
-            buf.append(c)
-
-    def _full(self) -> bool:
-        if (
-            not self.initial
-            and self.max_args
-            and len(self.args) - self.initial_argc == self.max_args
+        if self.held and (
+            self.fixed + self.held_bytes + size > self.width
+            or len(self.base) + len(self.held) >= self.most_words
         ):
-            return True
-        return len(self.args) == self.max_argc
+            if self.lines or (self.strict and self.group):
+                self.stop(_LIST_TOO_LONG)
+                return
+            self.flush()
+            if self.halted():
+                return
+        self.held.append(word)
+        self.held_bytes += size
+        if self.group and len(self.held) == self.group:
+            self.flush()
 
-    def _push(self, arg: bytes, length: int) -> None:
-        if self.chars + length > self.arg_max:
-            if self.initial or len(self.args) == self.initial_argc:
-                raise _Fatal(
-                    "xargs: cannot fit single argument within "
-                    "argument list size limit\n"
-                )
-            if self.replace is not None or (
-                self.exit_if_exceeded and (self.max_lines or self.max_args)
-            ):
-                raise _Fatal("xargs: argument list too long\n")
-            self._exec()
-        if self._full():
-            self._exec()
-        self.args.append(arg)
-        self.chars += length
-        if self._full():
-            self._exec()
-        if self.initial:
-            self.initial_chars = self.chars
+    def line_done(self) -> None:
+        if self.lines and self.held:
+            self.lines_held += 1
+            if self.lines_held == self.lines:
+                self.flush()
 
-    def _insert(self, arg: bytes, line: bytes, size: int) -> None:
-        """GNU's bc_do_insert: one initial argument with -I applied.
+    def fail(self, text: str) -> None:
+        if self.held and not self.whole:
+            self.flush()
+        self.stop(text)
+
+    def close(self) -> None:
+        if self.held or (self.run_empty and not self.shipped):
+            self.flush()
+        self.ended = True
+
+
+class _Filler(_Collector):
+    """Runs the command once per -I line, the line put in place of every
+    occurrence of the string in each initial argument (not the name).
+
+    Measured on GNU 4.10: the first line must fit -s on its own and every
+    later one beside the command name, else ``argument line too long``;
+    the name must fit (``cannot fit single argument``); an argument whose
+    filled-in text, with two bytes more, exceeds -s is ``command too
+    long``, as is any initial argument when the string is empty; and the
+    whole line must fit, else ``argument list too long``.
+
+    Args:
+        base (list[bytes]): the command name and its initial arguments.
+        width (int): the -s limit.
+        flags (set[str]): the toggles given.
+        template (bytes): the string -I replaces.
+    """
+
+    def __init__(
+        self, base: list[bytes], width: int, flags: set[str], template: bytes
+    ) -> None:
+        super().__init__(base, width, flags)
+        self.template = template
+        self.later = False
+
+    def word_room(self) -> int:
+        taken = len(self.base[0]) + 1 if self.later else 0
+        return self.width - taken - 1
+
+    def word(self, word: bytes) -> None:
+        name = self.base[0]
+        # The limit is met while bytes arrive, so an empty line passes
+        # (GNU 4.10 runs `-I{} -s 5 echo` on a later empty line).
+        if word and len(word) > self.word_room():
+            self.stop(_LINE_TOO_LONG)
+            return
+        self.later = True
+        if len(name) + 1 > self.width:
+            self.stop(_NO_ROOM)
+            return
+        used = len(name) + 1
+        line = [name]
+        for part in self.base[1:]:
+            if not self.template:
+                self.stop(_TEMPLATE_TOO_LONG)
+                return
+            # The filled-in size is counted before the text is built, so
+            # a long line in a long template costs no more than -s.
+            found = part.count(self.template)
+            size = len(part) + found * (len(word) - len(self.template))
+            if size + 2 > self.width:
+                self.stop(_TEMPLATE_TOO_LONG)
+                return
+            used += size + 1
+            if used > self.width:
+                self.stop(_LIST_TOO_LONG)
+                return
+            line.append(_before_nul(self.fill(part, word)))
+        self.ship(line)
+
+    def fill(self, part: bytes, word: bytes) -> bytes:
+        # Each occurrence, left to right, never overlapping: GNU 4.10
+        # turns `aaa` into `Za` for `-I aa`.
+        return part.replace(self.template, word)
+
+
+class _QuotedReader:
+    """Splits input into words the way xargs does without -0 or -d.
+
+    Blanks and newlines separate words; '...' and "..." keep blanks and
+    take no escapes; a backslash outside them takes the next byte as it
+    is, a newline included. A newline inside quotes is an unmatched quote;
+    so is the end of input inside them, but only once the word holds a
+    byte: GNU 4.10 runs nothing and exits 0 on a lone `'`. A word cut off
+    by the end of input is dropped when it holds no byte.
+
+    A line that ends in a blank goes on into the next one, which -L counts
+    with it, and so does a line with no word on it (GNU 4.10 runs `a b`
+    once for `a <newline><newline>b` with -L1). The -E word ends the input
+    wherever a blank or newline closes it, but cut off by the end of input
+    only as the first word of its line (GNU 4.10 stops at `a<newline>STOP`
+    and passes `a STOP` on). With -I a whole line is one word: blanks
+    inside it stay, leading ones go.
+
+    Args:
+        sink (_Collector): where words go.
+        end_word (bytes | None): the -E string.
+        whole_lines (bool): -I.
+    """
+
+    def __init__(
+        self, sink: _Collector, end_word: bytes | None, whole_lines: bool
+    ) -> None:
+        self.sink = sink
+        self.end_word = end_word
+        self.whole_lines = whole_lines
+        self.word = bytearray()
+        self.begun = False
+        self.quote: int | None = None
+        self.escaped = False
+        self.previous = -1
+        self.line_open = False
+        self.word_on_line = False
+        self.warned = False
+
+    def keep(self, byte: int) -> None:
+        if byte == 0 and not self.warned:
+            self.warned = True
+            self.sink.note(_NUL_IN_INPUT)
+        self.word.append(byte)
+        self.begun = True
+        self.check_room()
+
+    def check_room(self) -> None:
+        if len(self.word) > self.sink.word_room():
+            self.sink.fail(_LINE_TOO_LONG)
+
+    def feed(self, data: bytes, at: int = 0) -> int:
+        """Reads from `at` until the data runs out, xargs stops, or a
+        command is built; returns where it stopped.
 
         Args:
-            arg (bytes): the initial argument.
-            line (bytes): the input line, cut at a NUL as C cuts it.
-            size (int): the line's length as read, NULs included.
+            data (bytes): one chunk of input.
+            at (int): where to resume in it.
         """
-        assert self.replace is not None
-        room = self.arg_max - 1
-        out = bytearray()
-        once = True
-        while once or arg:
-            once = False
-            at = arg.find(self.replace)
-            span = at if at >= 0 else len(arg)
-            if room <= span:
-                break
-            room -= span
-            out += arg[:span]
-            arg = arg[span:]
-            if at < 0:
+        size = len(data)
+        sink = self.sink
+        while at < size and not sink.halted() and not sink.holding():
+            if self.escaped:
+                self.escaped = False
+                self.previous = data[at]
+                self.keep(data[at])
+                at += 1
                 continue
-            if room <= size or not (self.replace or size):
-                break
-            room -= size
-            out += line + b"\0" * (size - len(line))
-            arg = arg[len(self.replace) :]
-        if arg:
-            raise _Fatal("xargs: command too long\n")
-        self._push(_c_string(bytes(out)), len(out) + 1)
+            if self.quote is not None:
+                after = self.copy_run(data, at, _QUOTED_RUN[self.quote])
+                if after > at:
+                    at = after
+                    continue
+                byte = data[at]
+                at += 1
+                self.previous = byte
+                if byte == self.quote:
+                    self.quote = None
+                elif byte == 0x0A:
+                    sink.fail(_unclosed(self.quote))
+                else:
+                    self.keep(byte)
+                continue
+            if not self.begun and data[at] in _SKIPPED_BEFORE_WORD:
+                at += 1
+                continue
+            run = _LINE_RUN if self.whole_lines and self.begun else _WORD_RUN
+            after = self.copy_run(data, at, run)
+            if after > at:
+                self.begun = True
+                at = after
+                continue
+            byte = data[at]
+            at += 1
+            if byte == 0x5C:
+                self.escaped = True
+            elif byte in (0x27, 0x22):
+                self.quote = byte
+                self.begun = True
+            elif byte == 0x0A:
+                carried = not self.whole_lines and self.previous in (
+                    0x20,
+                    0x09,
+                )
+                if self.begun:
+                    self.finish_word(cut_off=False)
+                ends = not carried and self.word_on_line
+                self.word_on_line = False
+                if ends and not sink.halted():
+                    self.line_open = False
+                    sink.line_done()
+            elif byte in (0x20, 0x09):
+                if self.begun and not self.whole_lines:
+                    self.finish_word(cut_off=False)
+            else:
+                self.keep(byte)
+            self.previous = byte
+        return at
 
-    def _exec_if_possible(self) -> None:
-        if (
-            self.replace is not None
-            or self.initial
-            or len(self.args) == self.initial_argc
-            or self.exit_if_exceeded
-        ):
-            return
-        self._exec()
+    def copy_run(self, data: bytes, at: int, run: re.Pattern[bytes]) -> int:
+        # Copies the bytes from `at` that need no decision, but no more
+        # than one past what the word may hold; returns where the next
+        # one starts.
+        most = max(1, self.sink.word_room() - len(self.word) + 1)
+        found = run.match(data, at, at + most)
+        if found is None:
+            return at
+        self.word += found.group()
+        self.previous = data[found.end() - 1]
+        self.check_room()
+        return found.end()
 
-    def _exec(self) -> None:
-        line = list(self.args)
-        if self.query:
-            self.events.append(_trace(line)[:-1])
-            raise _Fatal(
-                "xargs: failed to open /dev/tty for reading: "
-                "No such device or address\n"
-            )
-        if self.open_tty:
-            name = decode_text(line[0])
-            raise _Fatal(
-                "xargs: '/dev/tty': No such device or address\n"
-                "xargs: xargs.c:1648: wait_for_proc_all: Assertion "
-                "`getpid () == parent' failed.\n"
-                f"xargs: {name}: terminated by signal 6\n",
-                125,
-            )
-        self.events.append(line)
-        self.runs += 1
-        del self.args[self.initial_argc :]
-        self.chars = self.initial_chars
+    def finish_word(self, cut_off: bool) -> None:
+        word = bytes(self.word)
+        self.word.clear()
+        self.begun = False
+        if self.end_word is not None and not (cut_off and self.line_open):
+            if _before_nul(word) == self.end_word:
+                self.sink.close()
+                return
+        self.line_open = self.word_on_line = True
+        self.sink.word(word)
+
+    def end(self) -> bool:
+        """Finishes the input; False when it paused with a command built
+        from the last word, to be called again once that has been run."""
+        sink = self.sink
+        if sink.halted():
+            return True
+        if self.word:
+            if self.quote is not None:
+                sink.fail(_unclosed(self.quote))
+                return True
+            self.finish_word(cut_off=True)
+            if sink.holding() and not sink.halted():
+                return False
+        if not sink.halted():
+            sink.close()
+        return True
+
+
+class _SplitReader:
+    """Splits input at one byte (-0, -d): every piece is a word as it
+    stands, an empty one included, and counts as a line for -L; a last
+    piece with no separator after it is a word too when it holds a byte.
+
+    Args:
+        sink (_Collector): where words go.
+        separator (int): the byte.
+    """
+
+    def __init__(self, sink: _Collector, separator: int) -> None:
+        self.sink = sink
+        self.separator = bytes([separator])
+        self.piece = bytearray()
+
+    def feed(self, data: bytes, at: int = 0) -> int:
+        """Reads from `at` until the data runs out, xargs stops, or a
+        command is built; returns where it stopped.
+
+        Args:
+            data (bytes): one chunk of input.
+            at (int): where to resume in it.
+        """
+        while not self.sink.halted() and not self.sink.holding():
+            cut = data.find(self.separator, at)
+            if not self.take(data, at, len(data) if cut < 0 else cut):
+                return len(data)
+            if cut < 0:
+                return len(data)
+            at = cut + 1
+            self.hand_over()
+        return at
+
+    def take(self, data: bytes, start: int, stop: int) -> bool:
+        # Copies no more than one byte past what the word may hold, so an
+        # item that never ends stops at the limit.
+        room = self.sink.word_room()
+        most = max(1, room - len(self.piece) + 1)
+        self.piece += data[start : min(stop, start + most)]
+        if self.piece and len(self.piece) > room:
+            self.sink.fail(_LINE_TOO_LONG)
+            return False
+        return True
+
+    def hand_over(self) -> None:
+        word = bytes(self.piece)
+        self.piece.clear()
+        self.sink.word(word)
+        if not self.sink.halted():
+            self.sink.line_done()
+
+    def end(self) -> bool:
+        """Finishes the input; False when it paused with a command built
+        from the last piece, to be called again once that has been run."""
+        if self.piece and not self.sink.halted():
+            self.hand_over()
+            if self.sink.holding() and not self.sink.halted():
+                return False
+        if not self.sink.halted():
+            self.sink.close()
+        return True
+
+
+def _assemble(
+    plan: _Plan, base: list[bytes], room: int
+) -> tuple[_Collector, _QuotedReader | _SplitReader]:
+    if plan.template is not None:
+        sink: _Collector = _Filler(
+            base, plan.width, plan.flags, encode_text(plan.template)
+        )
+    else:
+        sink = _Packer(
+            base,
+            plan.width,
+            plan.flags,
+            group=plan.group,
+            lines=plan.lines,
+            # GNU 4.10 tries at most room / 8 - 2 words in one line (with
+            # -s 2095097 and 300000 empty -0 items it tries 261885, then
+            # halves what exec refuses; that retry is not modelled).
+            most_words=room // 8 - 2,
+        )
+    if plan.separator is not None:
+        return sink, _SplitReader(sink, plan.separator)
+    end_word = (
+        encode_text(plan.end_word) if plan.end_word is not None else None
+    )
+    return sink, _QuotedReader(sink, end_word, plan.template is not None)
 
 
 def _trace(line: list[bytes]) -> str:
@@ -765,10 +1120,10 @@ async def handle_xargs(
 
     The words are appended to the initial arguments, or with -I each
     input line takes the place of the string in them. Options act in
-    the order given, as GNU's getopt loop reads them: -I, -L and -n
-    cancel each other with GNU's warning, and --help or --version
-    answers where it stands. The spec declares every option GNU's table
-    has, so an abbreviated long option resolves exactly as GNU's does.
+    the order given: -I, -L and -n cancel each other with GNU's warning,
+    and --help or --version answers where it stands. The spec declares
+    every option GNU's table has, so an abbreviated long option
+    resolves exactly as GNU's does.
 
     The limits are GNU's on a Linux system with an 8 MiB stack: the
     environment counts against ARG_MAX (2 MiB) as GNU measures it, and
@@ -792,189 +1147,88 @@ async def handle_xargs(
     """
     session = context.session
     parse = parse_shell_options(SHELL_SPECS["xargs"], args or [])
-    env_size = sum(
+    environment = sum(
         len(encode_text(f"{name}={value}")) + 1
         for name, value in env_snapshot(session).items()
     )
-    posix_max = _ARG_MAX - env_size - _HEADROOM
-    oversized = _HEADROOM + env_size >= _ARG_MAX
-    arg_max = min(_DEFAULT_ARG_SIZE, posix_max)
-    replace: str | None = None
-    max_lines = 0
-    max_args = 0
-    procs = 1
-    warnings = ""
-    delim: int | None = None
-    eof: str | None = None
-    arg_file = "-"
-    slot_var: str | None = None
-    toggles: set[str] = set()
-    for name, value in parse.given:
-        if name in ("help", "version"):
-            return _standard_response(name, warnings)
-        if name == "0":
-            delim = 0
-        if name == "d" and isinstance(value, str):
-            delim, refusal = _delimiter(value)
-            if refusal:
-                return _refuse(warnings + refusal)
-        if name in ("E", "e"):
-            eof = value if isinstance(value, str) and value else None
-        if name in ("t", "p", "x", "o", "r", "show-limits"):
-            toggles.add(name)
-        if name == "a" and isinstance(value, str):
-            arg_file = value
-        if name == "process-slot-var" and isinstance(value, str):
-            if "=" in value:
-                return _refuse(
-                    warnings + "xargs: option --process-slot-var "
-                    "may not be set to a value which includes `='\n"
-                )
-            if not value:
-                return _refuse(
-                    warnings + "xargs: failed to unset environment "
-                    "variable : Invalid argument\n"
-                )
-            slot_var = value
-        if name == "s" and isinstance(value, str):
-            if oversized:
-                return _refuse(
-                    warnings + "xargs: environment is too large for exec\n"
-                )
-            if not _NUMBER.fullmatch(value):
-                return _refuse(
-                    warnings + f'xargs: invalid number "{value}" '
-                    f"for -s option\n{usage_hint('xargs')}\n"
-                )
-            arg_max = int(value)
-            if arg_max < 1:
-                warnings += (
-                    f"xargs: value {value} for -s option should be >= 1\n"
-                )
-                arg_max = 1
-            elif arg_max > posix_max:
-                warnings += (
-                    f"xargs: value {value} for -s option should be "
-                    f"<= {posix_max}\n"
-                )
-                arg_max = posix_max
-        if name in ("I", "i"):
-            if max_args:
-                warnings += _exclusive("--replace/-I/-i", "--max-args")
-            if max_lines:
-                warnings += _exclusive("--replace/-I/-i", "--max-lines")
-            replace = value if isinstance(value, str) else "{}"
-            max_lines, max_args = 0, 0
-            continue
-        if name not in ("L", "l", "n", "P"):
-            continue
-        raw = value if isinstance(value, str) else "1"
-        least, most = (0, _PROCS_MAX) if name == "P" else (1, None)
-        error = _count_error(raw, name, least, most)
-        if error is not None:
-            return _refuse(warnings + error)
-        count = int(raw)
-        if name == "P":
-            procs = count
-            continue
-        if name in ("L", "l"):
-            option = "-L" if name == "L" else "--max-lines/-l"
-            if max_args:
-                warnings += _exclusive(option, "--max-args")
-            if replace is not None:
-                warnings += _exclusive(option, "--replace")
-            replace, max_lines, max_args = None, count, 0
-            continue
-        if max_lines:
-            warnings += _exclusive("--max-args/-n", "--max-lines")
-        max_lines = 0
-        if replace is not None and count == 1:
-            # GNU reads `-I {} -n1` as plain -I.
-            continue
-        if replace is not None:
-            warnings += _exclusive("--max-args/-n", "--replace")
-        replace, max_args = None, count
+    room = _EXEC_BYTES - environment - _UNUSED_BYTES
+    plan = _Plan(room=room, crowded=_UNUSED_BYTES + environment >= _EXEC_BYTES)
+    plan.width = min(_STANDARD_WIDTH, room)
+    try:
+        for name, value in parse.given:
+            if name in ("help", "version"):
+                return _answer(name, plan.notes)
+            plan.take(name, value if isinstance(value, str) else None)
+    except _Refusal as refused:
+        return _refusal(plan.notes + refused.text, refused.code)
+    notes = encode_text(plan.notes)
     if parse.invalid is not None:
         stderr, code = (
             ambiguous_option_error("xargs", parse.invalid, parse.candidates)
             if parse.candidates
             else unknown_option_error("xargs", parse.invalid)
         )
-        return _refuse(encode_text(warnings) + stderr, code)
+        return _refusal(notes + stderr, code)
     if parse.unexpected_value is not None:
         stderr, code = unexpected_value_error("xargs", parse.unexpected_value)
-        return _refuse(encode_text(warnings) + stderr, code)
+        return _refusal(notes + stderr, code)
     if parse.needs_value is not None:
         stderr, code = missing_value_error("xargs", parse.needs_value)
-        return _refuse(encode_text(warnings) + stderr, code)
-    if eof is not None and delim is not None:
-        warnings += (
+        return _refusal(notes + stderr, code)
+    if plan.end_word is not None and plan.separator is not None:
+        plan.notes += (
             "xargs: warning: the -E option has no effect if -0 or -d "
             "is used.\n\n"
         )
-    if oversized:
-        return _refuse(warnings + "xargs: environment is too large for exec\n")
+    if plan.crowded:
+        return _refusal(plan.notes + _CROWDED)
 
     child_stdin: ByteSource | None = None
-    if arg_file == "-":
+    if plan.source == "-":
         data = stdin if stdin is not None else b""
     else:
         try:
             if dispatch is None:
-                raise enoent(arg_file)
-            data = await read_script_bytes(dispatch, arg_file, session.cwd)
+                raise enoent(plan.source)
+            data = await read_script_bytes(dispatch, plan.source, session.cwd)
         except FS_ERRORS as exc:
-            return _refuse(
-                warnings + "xargs: Cannot open input file "
-                f"'{quote_text(arg_file)}': {fs_strerror(exc)}\n"
+            return _refusal(
+                plan.notes + "xargs: Cannot open input file "
+                f"'{quote_text(plan.source)}': {fs_strerror(exc)}\n"
             )
         child_stdin = stdin
-    if "show-limits" in toggles:
-        warnings += _limits(env_size, posix_max, arg_max)
+    if "show-limits" in plan.flags:
+        plan.notes += _limits_report(environment, room, plan.width)
 
-    builder = _Builder(
-        b"",
-        [encode_text(word) for word in parse.operands or ["echo"]],
-        delim=delim,
-        eof=encode_text(eof) if eof is not None else None,
-        replace=encode_text(replace) if replace is not None else None,
-        max_args=max_args,
-        max_lines=max_lines,
-        arg_max=arg_max,
-        max_argc=posix_max // 8 - 2,
-        exit_if_exceeded="x" in toggles,
-        always_run="r" not in toggles,
-        query="p" in toggles,
-        open_tty="o" in toggles,
-    )
-    fatal: _Fatal | None = None
+    base = [encode_text(word) for word in parse.operands or ["echo"]]
+    sink, reader = _assemble(plan, base, room)
 
     async def events() -> AsyncGenerator[str | list[bytes], None]:
-        nonlocal fatal
         source = chunks(data)
-        steps = builder.build()
         try:
-            while True:
-                try:
-                    event = next(steps)
-                except StopIteration:
+            sink.begin()
+            while not sink.halted():
+                chunk = await anext(source, None)
+                # Each command goes to the runner as soon as it is built,
+                # before the rest of the chunk is read.
+                if chunk is None:
+                    finished = False
+                    while not finished:
+                        finished = reader.end()
+                        for event in sink.drain():
+                            yield event
                     break
-                except _Fatal as caught:
-                    fatal = caught
-                    break
-                if event is None:
-                    builder.data = await anext(source, b"")
-                    builder.pos = 0
-                else:
-                    yield event
-            for event in builder.events:
-                yield event
-            builder.events.clear()
+                at = 0
+                while True:
+                    at = reader.feed(chunk, at)
+                    for event in sink.drain():
+                        yield event
+                    if at >= len(chunk) or sink.halted():
+                        break
         finally:
-            steps.close()
             await source.aclose()
 
-    merged = IOResult(stderr=encode_text(warnings) or None)
+    merged = IOResult(stderr=encode_text(plan.notes) or None)
     node = ExecutionNode(command="xargs")
 
     async def output() -> AsyncIterator[bytes]:
@@ -994,9 +1248,9 @@ async def handle_xargs(
             execute_fn,
             events(),
             context,
-            procs,
-            trace="t" in toggles,
-            slot_var=slot_var,
+            plan.jobs,
+            trace="t" in plan.flags,
+            slot_var=plan.slot_var,
             registry=registry,
             stdin=child_stdin,
             torn=torn,
@@ -1015,12 +1269,15 @@ async def handle_xargs(
             # A reader that stops early still sees the runs it reached.
             if stop is not None:
                 merged.exit_code = stop
-            elif fatal is not None:
+            elif sink.failure is not None:
+                text, code = sink.failure
                 combined = await merged.merge(
-                    IOResult(stderr=encode_text(fatal.message))
+                    IOResult(stderr=encode_text(text))
                 )
                 merged.stderr = combined.stderr
-                merged.exit_code = fatal.code
+                # A command that failed outranks xargs's own error: GNU
+                # 4.10 exits 123 on `X1 'c` when X1 fails.
+                merged.exit_code = 123 if failed else code
             else:
                 merged.exit_code = 123 if failed else 0
             node.exit_code = merged.exit_code

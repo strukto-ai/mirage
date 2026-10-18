@@ -1427,6 +1427,130 @@
       }
     },
     {
+      "id": "date_tz_posix_offset_fields_take_blanks_and_signs",
+      "seq": 962394,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "TZ='UTC-+5' date -d @0 '+%T %z'; TZ='UTC- 5' date -d @0 '+%T %z'; TZ='UTC 5' date -d @0 '+%T %z'; TZ='UTC5:-30' date -d @0 '+%T %z'",
+      "expect": {
+        "exit": 0,
+        "stdout": "05:00:00 +0500\n05:00:00 +0500\n00:00:00 +0000\n18:01:00 -0559\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "date_tz_posix_fields_keep_sixteen_bits",
+      "seq": 962395,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "TZ=UTC65559 date -d @0 +%z; TZ=UTC4294967301 date -d @0 +%z; TZ=UTC--65535 date -d @0 +%z; TZ='CET-1CEST,M65539.5.0,M10.5.0' date -d @1711848600 '+%z %Z'",
+      "expect": {
+        "exit": 0,
+        "stdout": "-2300\n-0500\n+0100\n+0200 CEST\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "date_tz_posix_rule_time_forms",
+      "seq": 962396,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "TZ='CET-1CEST,M3.5.0/+3,M10.5.0' date -d @1711848600 '+%z %Z'; TZ='CET-1CEST,M3.5.0/-,M10.5.0' date -d @1711834200 '+%z %Z'; TZ='CET-1CEST,M3.5.0/' date -d @1700000000 '+%z %Z'; TZ='CET-1CEST,M3.5.0/1:-30,M10.5.0' date -d @1714521600 '+%z %Z'",
+      "expect": {
+        "exit": 0,
+        "stdout": "+0100 CET\n+0200 CEST\n+0200 CEST\n+0100 CET\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "date_tz_posix_dst_offset_and_day_edges",
+      "seq": 962397,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "TZ='AAA5BBB 6,M3.2.0,M11.1.0' date -d @1720000000 '+%z %Z'; TZ='AAA5BBB-,M3.2.0,M11.1.0' date -d @1720000000 '+%z %Z'; TZ='ABC5+4,M3.2.0,M11.1.0' date -d @1720000000 '+%z|%Z'; TZ='CET-1CEST,J+60,J300' date -d @1720000000 '+%z %Z'",
+      "expect": {
+        "exit": 0,
+        "stdout": "-0600 BBB\n-0400 BBB\n+0000|\n+0100 CET\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "date_tz_abbrev_moscow_history",
       "seq": 962386,
       "targets": [

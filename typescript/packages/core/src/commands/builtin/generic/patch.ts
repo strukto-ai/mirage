@@ -56,9 +56,9 @@ function labelOf(line: string, stripCount: number): [string, string] {
 }
 
 const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/
-// GNU patch's default fuzz factor: how many context lines at each end of a
-// hunk may be ignored to place it.
-const MAX_FUZZ = 2
+// The fuzz factor the manual gives as patch's default: a hunk may leave up
+// to this many of its outer context lines unmatched to be placed.
+const FUZZ_FACTOR = 2
 
 function span(start: number, count: number): string {
   return count === 1 ? String(start) : `${String(start)},${String(count)}`
@@ -84,10 +84,6 @@ function swapped(hunk: Hunk): Hunk {
   }
 }
 
-function patternOf(hunk: Hunk): string[] {
-  return hunk.body.filter((line) => !line.startsWith('+')).map((line) => line.slice(1))
-}
-
 // Its old and new sides' line counts.
 function sizesOf(hunk: Hunk): [number, number] {
   const old = hunk.body.filter((line) => !line.startsWith('+')).length
@@ -95,28 +91,13 @@ function sizesOf(hunk: Hunk): [number, number] {
   return [old, added]
 }
 
-// The line its old side starts at, GNU's `pch_first`: an empty old side
-// (`-3,0`) goes in after the line it names.
-function firstOf(hunk: Hunk): number {
-  return hunk.oldStart + (patternOf(hunk).length > 0 ? 0 : 1)
-}
-
-// The context lines before a hunk's first change and after its last.
-function contextOf(hunk: Hunk): [number, number] {
-  const kinds = hunk.body.map((line) => line.slice(0, 1))
-  const prefix = kinds.findIndex((k) => k !== ' ')
-  const suffix = [...kinds].reverse().findIndex((k) => k !== ' ')
-  return [prefix === -1 ? kinds.length : prefix, suffix === -1 ? kinds.length : suffix]
-}
-
 // Its lines in a reject file, as GNU writes a hunk back: the `@@` line
-// moved by the output offset (the lines the hunks applied before it
-// added), and each run of changes listing its removed lines before its
-// added ones.
-function rejectedLines(hunk: Hunk, outOffset: number): string[] {
+// moved by `grown` (the lines the hunks placed before it added), and each
+// run of changes listing its removed lines before its added ones.
+function rejectedLines(hunk: Hunk, grown: number): string[] {
   const [old, added] = sizesOf(hunk)
   const lines = [
-    `@@ -${span(hunk.oldStart + outOffset, old)} +${span(hunk.newStart + outOffset, added)} @@${hunk.note}`,
+    `@@ -${span(hunk.oldStart + grown, old)} +${span(hunk.newStart + grown, added)} @@${hunk.note}`,
   ]
   let pending: string[] = []
   for (const line of hunk.body) {
@@ -213,129 +194,209 @@ function parsePatch(patchText: string, stripCount: number): Section[] {
   return sections
 }
 
-function matches(
+// What a hunk looks for in the file: its old side (context and removed
+// lines), the context lines before its first change and after its last, and
+// the line its header says the old side starts at. An empty old side
+// (`-3,0`) goes in after the line it names, so it claims the line after
+// that. Mirrors Python's _Needle.
+interface Needle {
+  readonly old: readonly string[]
+  readonly lead: number
+  readonly trail: number
+  readonly claimed: number
+}
+
+export function needleOf(hunk: Hunk): Needle {
+  const kinds = hunk.body.map((line) => line.slice(0, 1))
+  let lead = 0
+  while (lead < kinds.length && kinds[lead] === ' ') lead += 1
+  let trail = 0
+  while (trail < kinds.length - lead && kinds[kinds.length - 1 - trail] === ' ') trail += 1
+  const old = hunk.body.filter((line) => !line.startsWith('+')).map((line) => line.slice(1))
+  return { old, lead, trail, claimed: hunk.oldStart + (old.length > 0 ? 0 : 1) }
+}
+
+// The context lines still compared above and below at `fuzz`. Fuzz is spent
+// on the longer end first: a hunk with three lines of context above its
+// change and one below compares (3, 1) at fuzz 0, (2, 1) at fuzz 1 and
+// (1, 1) at fuzz 2 (GNU patch 2.8). Mirrors Python's _compared_at.
+function comparedAt(needle: Needle, fuzz: number): [number, number] {
+  const most = Math.max(needle.lead, needle.trail) - fuzz
+  return [Math.max(0, Math.min(needle.lead, most)), Math.max(0, Math.min(needle.trail, most))]
+}
+
+// Whether the hunk's old side, starting at 0-based line `at`, is there,
+// reading only the context `compared` keeps. Lines left out above may hang
+// off the top of the file, but nothing may run past its end except what is
+// left out below. A hunk with less context at one end than at the other was
+// cut short by that end of the file, so while that still holds it must meet
+// it: a short bottom ends on the file's last line, and a short top whose
+// header names line 1 starts on the first. Such a hunk is not found at all,
+// rather than found out of order, where it would reach back into what
+// earlier hunks used up: one meeting the end must start at or after `used`,
+// and one meeting the start must make its first change at or after it (GNU
+// patch 2.8).
+// Mirrors Python's _sits.
+function sits(
   lines: readonly string[],
-  pattern: readonly string[],
-  where: number,
-  prefixFuzz: number,
-  suffixFuzz: number,
+  needle: Needle,
+  at: number,
+  compared: readonly [number, number],
+  used: number,
 ): boolean {
-  for (let k = prefixFuzz; k < pattern.length - suffixFuzz; k++) {
-    const lineNo = where + k
-    if (lineNo < 1 || lineNo > lines.length || lines[lineNo - 1] !== pattern[k]) return false
+  const [above, below] = compared
+  const top = needle.lead - above
+  const stop = needle.old.length - needle.trail + below
+  if (at + stop > lines.length || (top < stop && at + top < 0)) return false
+  if (above > below && (at + needle.old.length !== lines.length || at < used)) return false
+  if (above < below && needle.claimed <= 1 && (at !== 0 || needle.lead < used)) return false
+  for (let index = top; index < stop; index++) {
+    if (lines[at + index] !== needle.old[index]) return false
   }
   return true
 }
 
-// Where a hunk's old side is in `lines`, GNU's `locate_hunk`: the claimed
-// line first, then alternately after and before it. With fuzz, that many
-// context lines at each end go unchecked; a hunk with less context at one
-// end is anchored there (a hunk that starts at the top of the file with no
-// leading context can only match the top, one with no trailing context only
-// the end). Mirrors Python's _locate.
-function locate(
-  lines: readonly string[],
-  hunk: Hunk,
-  inOffset: number,
-  fuzz: number,
-  frozen: number,
-): number | null {
-  const first = firstOf(hunk) + inOffset
-  const pattern = patternOf(hunk)
-  if (pattern.length === 0) return first
-  const [prefix, suffix] = contextOf(hunk)
-  const context = Math.max(prefix, suffix)
-  let prefixFuzz = fuzz + prefix - context
-  const suffixFuzz = fuzz + suffix - context
-  const maxPos = lines.length - (pattern.length - suffixFuzz) + 1 - first
-  const maxNeg = Math.min(first - (frozen + 1 - (prefix - prefixFuzz)), first - 1)
-  if (prefixFuzz < 0) {
-    if (firstOf(hunk) > 1) {
-      prefixFuzz = 0
-    } else {
-      const atTop =
-        frozen <= prefix && 1 - first <= maxPos && matches(lines, pattern, 1, 0, suffixFuzz)
-      return atTop ? 1 : null
-    }
+// The lines a hunk is tried at, in the order GNU patch 2.8 tries them. From
+// an expected line at or past `used` (the lines the hunks placed before it
+// used up) the search fans out: the expected line, one line later, one
+// earlier, two later and so on, so at equal distance the later line wins,
+// and it goes no higher than `used`. From an expected line above `used` it
+// reaches as far above the expected line as `used` is below it, and tries
+// that farthest line first, then `used`, then the lines between them in file
+// order, then the lines after `used`: with 20 lines used and a hunk expected
+// at line 15 it tries 9, 21, 10, 11, ..., 20, 22, ... (1-based). There, a
+// hunk expected past the last line it fits at (`last`) is not tried
+// anywhere. Mirrors Python's _tries.
+export function* tries(expected: number, used: number, last: number): Generator<number> {
+  if (expected < used) {
+    if (expected > last) return
+    const farthest = 2 * expected - used
+    yield farthest
+    yield used
+    for (let at = farthest + 1; at < Math.min(used, last + 1); at++) yield at
+    for (let at = used + 1; at <= last; at++) yield at
+    return
   }
-  if (suffixFuzz < 0) {
-    // GNU's rule, kept on purpose: diff writes a shorter trailing context
-    // only at the end of a file, so a hunk with less context after its
-    // change than before belongs at the end, even where its lines also sit
-    // at the line its header names. GNU patch 2.8 edits the last occurrence
-    // then, and fuzzes or fails a hunk the end of the file no longer
-    // matches. Mirrors Python's _locate.
-    const atEnd = lines.length - pattern.length + 1
-    if (first - atEnd <= maxNeg && matches(lines, pattern, atEnd, prefixFuzz, 0)) return atEnd
-    return null
+  yield expected
+  for (let step = 1; expected + step <= last || expected - step >= used; step++) {
+    if (expected + step <= last) yield expected + step
+    if (expected - step >= used) yield expected - step
   }
-  const maxOffset = Math.max(maxPos, maxNeg)
-  for (let offset = 0; offset <= maxOffset; offset++) {
-    if (offset <= maxPos && matches(lines, pattern, first + offset, prefixFuzz, suffixFuzz))
-      return first + offset
-    if (
-      offset > 0 &&
-      offset <= maxNeg &&
-      matches(lines, pattern, first - offset, prefixFuzz, suffixFuzz)
+}
+
+// Whether `tries` ever reaches line `at`. Mirrors Python's _is_tried.
+export function isTried(at: number, expected: number, used: number, last: number): boolean {
+  if (expected < used) {
+    if (expected > last) return false
+    const farthest = 2 * expected - used
+    return (
+      at === farthest ||
+      at === used ||
+      (farthest < at && at < Math.min(used, last + 1)) ||
+      (used < at && at <= last)
     )
-      return first - offset
   }
+  return at === expected || (expected < at && at <= last) || (used <= at && at < expected)
+}
+
+// The one line a hunk held to an end of the file can start at, or null when
+// the hunk is free to sit anywhere; see `sits` for when it is held. Mirrors
+// Python's _forced_edge.
+function forcedEdge(
+  lines: readonly string[],
+  needle: Needle,
+  compared: readonly [number, number],
+): number | null {
+  const [above, below] = compared
+  if (above > below) return lines.length - needle.old.length
+  if (above < below && needle.claimed <= 1) return 0
   return null
 }
 
-// The first hunk fits only the other way round. Mirrors Python's _Reversed.
-const REVERSED = 'reversed'
-
-// The line and fuzz a hunk applies at, null when it does not. Each fuzz
-// level is tried in turn, and with `probe` a level the hunk misses is tried
-// the other way round too, as GNU does for a file's first hunk: a patch
-// already applied is caught there before more fuzz lets it in somewhere
-// else. Mirrors Python's _place.
-function place(
+// The 0-based line the hunk is found at with `fuzz`, or null. A hunk with no
+// old side is not looked for: it goes where it is expected. One held to an
+// end of the file is tried at that one line, if the search would reach it,
+// instead of at every line the search tries. One that lands on the line
+// before the first, line 0, is taken as not found at all, though one landing
+// higher still is found there (GNU patch 2.8: `-0,0` expected one line up
+// fails plainly, expected two lines up it fails as misordered). Mirrors
+// Python's _seek.
+export function seek(
   lines: readonly string[],
-  hunk: Hunk,
-  inOffset: number,
-  frozen: number,
-  probe: boolean,
-): [number, number] | typeof REVERSED | null {
-  const [prefix, suffix] = contextOf(hunk)
-  const maxFuzz = Math.min(MAX_FUZZ, Math.max(prefix, suffix))
-  for (let fuzz = 0; fuzz <= maxFuzz; fuzz++) {
-    const where = locate(lines, hunk, inOffset, fuzz, frozen)
-    if (where !== null) return [where, fuzz]
-    if (probe && locate(lines, swapped(hunk), inOffset, fuzz, frozen) !== null) return REVERSED
-  }
-  return null
-}
-
-// Copy the file up to a hunk, then the hunk itself; the next line to copy.
-// Context lines are the file's own, as GNU's `apply_hunk` copies them, so a
-// line fuzz let through keeps what the file says. Mirrors Python's _splice.
-function splice(
-  out: string[],
-  lines: readonly string[],
-  src: number,
-  where: number,
-  hunk: Hunk,
-): number {
-  out.push(...lines.slice(src, Math.max(where - 1, src)))
-  let at = where - 1
-  for (const line of hunk.body) {
-    const kind = line.slice(0, 1)
-    if (kind === ' ') {
-      if (at >= src && at < lines.length) out.push(lines[at] ?? '')
-      at += 1
-    } else if (kind === '-') {
-      at += 1
+  needle: Needle,
+  fuzz: number,
+  expected: number,
+  used: number,
+): number | null {
+  let found: number | null = expected
+  if (needle.old.length > 0) {
+    found = null
+    const compared = comparedAt(needle, fuzz)
+    const last = lines.length - (needle.old.length - needle.trail + compared[1])
+    const edge = forcedEdge(lines, needle, compared)
+    if (edge !== null) {
+      if (isTried(edge, expected, used, last) && sits(lines, needle, edge, compared, used)) {
+        found = edge
+      }
     } else {
-      out.push(line.slice(1))
+      for (const at of tries(expected, used, last)) {
+        if (sits(lines, needle, at, compared, used)) {
+          found = at
+          break
+        }
+      }
     }
   }
-  return Math.max(at, src)
+  return found === -1 ? null : found
+}
+
+// The fuzz levels worth trying, each one comparing less than the last.
+// Mirrors Python's _fuzz_steps.
+function* fuzzSteps(needle: Needle): Generator<number> {
+  let seen: readonly [number, number] | null = null
+  for (let fuzz = 0; fuzz <= FUZZ_FACTOR; fuzz++) {
+    const compared = comparedAt(needle, fuzz)
+    if (compared[0] !== seen?.[0] || compared[1] !== seen[1]) {
+      seen = compared
+      yield fuzz
+    }
+  }
+}
+
+// Write the hunk's changes, placed at 0-based line `at`, onto `out`, and
+// return the line after the last one it changed. Only the part from its
+// first change to its last is written: the context around it stays in the
+// file, where a later hunk may still read it, and context between changes is
+// copied from the file rather than from the patch. Mirrors Python's _emit.
+function emit(
+  lines: readonly string[],
+  hunk: Hunk,
+  needle: Needle,
+  at: number,
+  out: string[],
+): number {
+  let source = at + needle.lead
+  for (const line of hunk.body.slice(needle.lead, hunk.body.length - needle.trail)) {
+    const kind = line.slice(0, 1)
+    if (kind === '+') {
+      out.push(line.slice(1))
+      continue
+    }
+    if (kind === ' ') out.push(lines[source] ?? '')
+    source += 1
+  }
+  return source
+}
+
+function placedNote(ordinal: number, line: number, fuzz: number, moved: number): string {
+  let text = `Hunk #${String(ordinal)} succeeded at ${String(line)}`
+  if (fuzz > 0) text += ` with fuzz ${String(fuzz)}`
+  if (moved !== 0) text += ` (offset ${String(moved)} line${moved === 1 ? '' : 's'})`
+  return `${text}.`
 }
 
 // A hunk for the reject file as it was tried (`-R` swaps it), with the
-// output offset it was refused at.
+// lines the hunks placed before it added.
 type Rejected = readonly [Hunk, number]
 
 // What applying one section did: the patched lines (null when skipped), the
@@ -365,13 +426,14 @@ function asTried(hunks: readonly Hunk[], reverse: boolean): Rejected[] {
   return hunks.map((hunk) => [reverse ? swapped(hunk) : hunk, 0] as const)
 }
 
-// Apply one section's hunks to a file's lines, GNU patch's way: a hunk is
-// placed by its context, at an offset or with fuzz when it has to be, and
-// one that fits nowhere is rejected, never forced in. When the first hunk
-// fits only the other way round the file is skipped as already applied (or
-// reversed). Lines are reported in the output file's numbering: the input
-// offset GNU found, plus what the hunks applied so far added. Mirrors
-// Python's _apply_section.
+// Apply one section's hunks to a file's lines, as GNU patch does. Each hunk
+// is looked for where its header and the hunks before it point, at fuzz 0
+// and then with more of its outer context left out; one found nowhere is
+// rejected. A hunk found where its change would land on lines an earlier hunk
+// already changed is rejected too, and no further fuzz is tried for it. When
+// the first hunk is not found but reads at that same fuzz the other way
+// round, the file is skipped as already applied (or reversed). Lines are
+// reported in the patched file's numbering. Mirrors Python's _apply_section.
 function applySection(
   lines: readonly string[],
   hunks: readonly Hunk[],
@@ -381,44 +443,53 @@ function applySection(
   const out: string[] = []
   const notes: string[] = []
   const rejected: Rejected[] = []
-  let src = 0
-  let inOffset = 0
-  let outOffset = 0
   let exact = true
-  for (const [i, hunk] of hunks.entries()) {
-    const number = i + 1
-    const active = reverse ? swapped(hunk) : hunk
-    const placed = place(lines, active, inOffset, src, number === 1)
-    if (placed === REVERSED) {
-      return {
-        lines: null,
-        notes: reversedNotes(reverse, forward),
-        rejected: asTried(hunks, reverse),
-        exact: false,
+  let used = 0
+  let shift = 0
+  let grown = 0
+  for (const [index, given] of hunks.entries()) {
+    const ordinal = index + 1
+    const hunk = reverse ? swapped(given) : given
+    const want = needleOf(hunk)
+    const other = ordinal === 1 ? needleOf(swapped(hunk)) : null
+    const expected = want.claimed - 1 + shift
+    let at: number | null = null
+    let fuzz = 0
+    for (fuzz of fuzzSteps(want)) {
+      at = seek(lines, want, fuzz, expected, used)
+      if (at !== null) break
+      if (other !== null && seek(lines, other, fuzz, other.claimed - 1, 0) !== null) {
+        return {
+          lines: null,
+          notes: reversedNotes(reverse, forward),
+          rejected: asTried(hunks, reverse),
+          exact: false,
+        }
       }
     }
-    if (placed === null) {
-      notes.push(
-        `Hunk #${String(number)} FAILED at ${String(firstOf(active) + inOffset + outOffset)}.`,
-      )
-      rejected.push([active, outOffset])
+    if (at === null || at + want.lead < used) {
+      let line = want.claimed
+      if (at !== null) {
+        notes.push('misordered hunks! output would be garbled')
+        line = at + 1
+        shift = at + 1 - want.claimed
+      }
+      notes.push(`Hunk #${String(ordinal)} FAILED at ${String(line + grown)}.`)
+      rejected.push([hunk, grown])
       exact = false
       continue
     }
-    const [where, fuzz] = placed
-    inOffset = where - firstOf(active)
-    src = splice(out, lines, src, where, active)
-    if (fuzz > 0 || inOffset !== 0) {
+    shift = at + 1 - want.claimed
+    if (fuzz > 0 || shift !== 0) {
+      notes.push(placedNote(ordinal, at + 1 + grown, fuzz, shift))
       exact = false
-      let note = `Hunk #${String(number)} succeeded at ${String(where + outOffset)}`
-      if (fuzz > 0) note += ` with fuzz ${String(fuzz)}`
-      if (inOffset !== 0) note += ` (offset ${String(inOffset)} line${inOffset === 1 ? '' : 's'})`
-      notes.push(note + '.')
     }
-    const [old, added] = sizesOf(active)
-    outOffset += added - old
+    out.push(...lines.slice(used, at + want.lead))
+    used = emit(lines, hunk, want, at, out)
+    const [old, added] = sizesOf(hunk)
+    grown += added - old
   }
-  out.push(...lines.slice(src))
+  out.push(...lines.slice(used))
   return { lines: out, notes, rejected, exact }
 }
 
@@ -429,7 +500,7 @@ function rejectText(section: Section, rejected: readonly Rejected[], reverse: bo
     ? [section.newLabel, section.oldLabel]
     : [section.oldLabel, section.newLabel]
   const lines = [`--- ${first}`, `+++ ${second}`]
-  for (const [hunk, outOffset] of rejected) lines.push(...rejectedLines(hunk, outOffset))
+  for (const [hunk, grown] of rejected) lines.push(...rejectedLines(hunk, grown))
   return ENC.encode(lines.map((line) => `${line}\n`).join(''))
 }
 
@@ -437,15 +508,18 @@ function companion(spec: PathSpec, suffix: string): PathSpec {
   return PathSpec.fromStrPath(spec.virtual + suffix, spec.vfsPath + suffix)
 }
 
-// Where one section's report and bytes go.
+// Where one section's report and bytes go: the lines printed so far, the
+// files this run has written, and each file's `.rej` text so far.
 interface PatchSink {
   readonly report: string[]
   readonly written: Set<string>
+  readonly rejects: Map<string, Uint8Array>
   readonly write: (p: PathSpec, data: Uint8Array) => Promise<void>
 }
 
-// Write the hunks that did not go in to `.rej`, and say so. Mirrors Python's
-// _save_rejects.
+// Write the hunks that did not go in to `.rej`, and say so. A file patched by
+// several sections of one patch keeps one `.rej`: each section's rejects
+// follow the last, under their own names. Mirrors Python's _save_rejects.
 async function saveRejects(
   section: Section,
   rejected: readonly Rejected[],
@@ -460,15 +534,21 @@ async function saveRejects(
     `${String(rejected.length)} out of ${String(total)} hunk${total === 1 ? '' : 's'} ${verb} -- saving rejects to file ${shown}.rej`,
   )
   const reject = companion(spec, '.rej')
-  const data = rejectText(section, rejected, reverse)
+  const earlier = sink.rejects.get(reject.virtual) ?? new Uint8Array()
+  const added = rejectText(section, rejected, reverse)
+  const data = new Uint8Array(earlier.length + added.length)
+  data.set(earlier)
+  data.set(added, earlier.length)
+  sink.rejects.set(reject.virtual, data)
   await sink.write(reject, data)
 }
 
 // Apply one section to its file, GNU patch's way; true when a hunk of it was
 // refused. A file that does not match the patch exactly is backed up to
 // `.orig` the first time this run writes it, and the hunks that did not go
-// in are saved to `.rej`. A file that is not there is not made unless a hunk
-// applied, and a directory is refused whole. Mirrors Python's _patch_file.
+// in are saved to `.rej`, after those an earlier section of this run saved
+// for it. A file that is not there is not made unless a hunk applied, and a
+// directory is refused whole. Mirrors Python's _patch_file.
 async function patchFile(
   section: Section,
   spec: PathSpec,
@@ -558,7 +638,8 @@ async function loadPatchData(
   }
 }
 
-// GNU patch's numeric_string: one sign, then digits to the end of the word.
+// A -p value is one optional sign, then digits to the end of the word:
+// GNU patch 2.8 refuses `3x` and ` 1`, and takes `+0`.
 const STRIP_COUNT = /^[+-]?[0-9]+$/
 
 // `-p` as GNU patch scans it, null for no number. Mirrors Python's
@@ -625,7 +706,12 @@ export async function patchGeneric(
 
   const sections = parsePatch(DEC.decode(loaded), stripCount)
   const orig = paths[0] ?? null
-  const sink: PatchSink = { report: [], written: new Set<string>(), write }
+  const sink: PatchSink = {
+    report: [],
+    written: new Set<string>(),
+    rejects: new Map<string, Uint8Array>(),
+    write,
+  }
   let failed = false
   for (const section of sections) {
     const spec =

@@ -1,14 +1,17 @@
 import asyncio
+import tracemalloc
 
 import pytest
 
 from mirage.io import IOResult
 from mirage.io.pipe import CAPACITY
 from mirage.io.stream import materialize
+from mirage.shell.join import shell_join
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.xargs import (
     handle_xargs as stream_xargs,
 )
+from mirage.workspace.executor.builtins.xargs import xargs as xargs_module
 from mirage.workspace.session import (
     get_current_session,
     reset_current_session,
@@ -1025,3 +1028,330 @@ async def test_early_close_keeps_a_cut_short_childs_status_and_stderr():
     await out.aclose()
     assert io.exit_code == 123
     assert await io.materialize_stderr() == b"oops\n"
+
+
+UNMATCHED_SINGLE = (
+    b"xargs: unmatched single quote; by default quotes are special to "
+    b"xargs unless you use the -0 option\n"
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "args, data, codes, lines, stderr, exit_code",
+    [
+        # A line with no word on it does not end a line a blank carried on.
+        (["-L1", "echo"], b"a \n\nb\n", [], ["echo a b"], b"", 0),
+        # The -E word cut off by the end of input ends it only as the
+        # first word of its line.
+        (["-E", "STOP", "echo"], b"a\nSTOP", [], ["echo a"], b"", 0),
+        (["-E", "STOP", "echo"], b"a STOP", [], ["echo a STOP"], b"", 0),
+        (["-E", "STOP", "echo"], b"a \nSTOP", [], ["echo a STOP"], b"", 0),
+        # An open quote at the end of input is an error once its word
+        # holds a byte.
+        (["echo"], b"x '", [], ["echo x"], b"", 0),
+        (["-I{}", "echo", "{}"], b"x '", [], [], UNMATCHED_SINGLE, 1),
+        (
+            ["-I{}", "-s", "8", "echo", "x{}"],
+            b"abcdef\n",
+            [],
+            [],
+            b"xargs: command too long\n",
+            1,
+        ),
+        (
+            ["-I{}", "-s", "5", "echo"],
+            b"abc\nb\n",
+            [],
+            ["echo"],
+            b"xargs: argument line too long\n",
+            1,
+        ),
+        (
+            ["-I{}", "-s", "4", "echo", "{}"],
+            b"a\n",
+            [],
+            [],
+            b"xargs: cannot fit single argument within argument list "
+            b"size limit\n",
+            1,
+        ),
+        # -x drops the words gathered so far when xargs has to stop.
+        (
+            ["-x", "-n2", "echo"],
+            b"a b c 'd\n",
+            [],
+            ["echo a b"],
+            UNMATCHED_SINGLE,
+            1,
+        ),
+        (
+            ["-x", "-s", "11", "echo"],
+            b"a bbbbbbbbbbbbbbbb\n",
+            [],
+            [],
+            b"xargs: argument line too long\n",
+            1,
+        ),
+        (
+            ["-L3", "-s", "10", "echo"],
+            b"a\nb\nc\n",
+            [],
+            [],
+            b"xargs: argument list too long\n",
+            1,
+        ),
+        # Every byte of a word cut at a NUL counts against -s.
+        (
+            ["-s", "20", "echo"],
+            b"a\0bbbbbbbbbbbb c\n",
+            [],
+            ["echo a", "echo c"],
+            b"xargs: WARNING: a NUL character occurred in the input.  It "
+            b"cannot be passed through in the argument list.  Did you mean "
+            b"to use the --null option?\n",
+            0,
+        ),
+        (["-d", "\\x00ff", "echo"], b"ab\xffc", [], ["echo ab c"], b"", 0),
+        # A command that failed outranks xargs's own error.
+        (["echo"], b"a b 'c", [1], ["echo a b"], UNMATCHED_SINGLE, 123),
+        (
+            ["-L1", "echo"],
+            b"a\nb 'c\n",
+            [1],
+            ["echo a"],
+            UNMATCHED_SINGLE,
+            123,
+        ),
+    ],
+)
+async def test_probed_gnu_behaviour(
+    args, data, codes, lines, stderr, exit_code
+):
+    shell = FakeShell(exit_codes=codes)
+    _, io, _ = await handle_xargs(
+        shell, args, EvaluationContext(make_session()), data
+    )
+    assert shell.lines == lines
+    assert (await materialize(io.stderr) or b"") == stderr
+    assert io.exit_code == exit_code
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "spec, message",
+    [
+        ("\\x411z", "character values must not exceed ff."),
+        ("\\400z", "character values must not exceed 377."),
+        ("\\0x41", "trailing characters x41 not recognised."),
+        ("\\xg", "trailing characters g not recognised."),
+    ],
+)
+async def test_delimiter_numeric_escapes_are_refused(spec, message):
+    shell = FakeShell()
+    _, io, _ = await handle_xargs(
+        shell, ["-d", spec, "echo"], EvaluationContext(make_session()), b"a"
+    )
+    assert io.exit_code == 1
+    assert (
+        await materialize(io.stderr)
+        == (
+            f"xargs: Invalid escape sequence {spec} in input delimiter "
+            f"specification; {message}\n"
+        ).encode()
+    )
+    assert shell.lines == []
+
+
+@pytest.mark.asyncio
+async def test_open_tty_shows_the_trace_first():
+    shell = FakeShell()
+    _, io, _ = await handle_xargs(
+        shell, ["-o", "-t", "echo"], EvaluationContext(make_session()), b"a\n"
+    )
+    assert io.exit_code == 125
+    assert (await materialize(io.stderr)).startswith(
+        b"echo a\nxargs: '/dev/tty': No such device or address\n"
+    )
+
+
+LINE_TOO_LONG = b"xargs: argument line too long\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "args, lead",
+    [
+        (["echo"], b""),
+        (["echo"], b"'"),
+        (["-0", "echo"], b""),
+        (["-d,", "echo"], b""),
+        (["-I{}", "echo", "{}"], b""),
+        (["-L1", "echo"], b""),
+    ],
+    ids=["word", "quoted", "null", "delimiter", "replace", "lines"],
+)
+async def test_an_endless_word_stops_at_the_size_limit(args, lead):
+    # GNU 4.10 reports at the first byte past the limit and reads no
+    # further: 131072 bytes, eight 16 KiB chunks, not the 16 MiB on offer.
+    pulls = 0
+
+    async def endless():
+        nonlocal pulls
+        yield lead
+        for _ in range(1024):
+            pulls += 1
+            yield b"a" * 16384
+
+    shell = FakeShell()
+    _, io, _ = await handle_xargs(
+        shell, args, EvaluationContext(make_session()), endless()
+    )
+    assert io.exit_code == 1
+    assert await materialize(io.stderr) == LINE_TOO_LONG
+    assert shell.lines == []
+    assert pulls <= 9
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "args, data",
+    [
+        # The word is too long before the quote opens, or the NUL or the
+        # -E word arrives.
+        (["echo"], b"a" * 200000 + b"'b"),
+        (["echo"], b"'" + b"a" * 200000 + b"\nb\n"),
+        (["echo"], b"a" * 200000 + b"\0b\n"),
+        (["-s", "100", "-E", "x" * 150, "echo"], b"x" * 150 + b" b\n"),
+    ],
+    ids=["quote-after", "newline-in-quote", "nul-after", "end-word"],
+)
+async def test_a_word_past_the_limit_ends_the_input_there(args, data):
+    shell = FakeShell()
+    _, io, _ = await handle_xargs(
+        shell, args, EvaluationContext(make_session()), data
+    )
+    assert io.exit_code == 1
+    assert await materialize(io.stderr) == LINE_TOO_LONG
+    assert shell.lines == []
+
+
+@pytest.mark.asyncio
+async def test_replacement_size_is_counted_before_it_is_built():
+    # 500 copies of a 100 KB line would be 50 MB before `command too long`.
+    shell = FakeShell()
+    tracemalloc.start()
+    try:
+        _, io, _ = await handle_xargs(
+            shell,
+            ["-I{}", "echo", "{}" * 500],
+            EvaluationContext(make_session()),
+            b"a" * 100000 + b"\n",
+        )
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert io.exit_code == 1
+    assert await materialize(io.stderr) == b"xargs: command too long\n"
+    assert peak < 5 * 2**20
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "args, data, runs",
+    [
+        (["-I{}", "echo", "x{}"], b"a\n" * 1000, 1000),
+        (["-n1", "echo"], b"a " * 1000, 1000),
+        (["-L1", "echo"], b"a\n" * 1000, 1000),
+        (["-0", "-n1", "echo"], b"a\0" * 1000, 1000),
+        # Both commands come from the end of input: the word that does not
+        # fit, then the rest.
+        (["-s", "10", "echo"], b"aaaa bbbb", 2),
+    ],
+    ids=["replace", "args", "lines", "null", "end-of-input"],
+)
+async def test_each_command_runs_before_the_next_is_built(
+    monkeypatch, args, data, runs
+):
+    # The reader pauses once a command is built, so one built command is
+    # held at a time however many one chunk of input makes.
+    built = 0
+    real_ship = xargs_module._Collector.ship
+
+    def counting_ship(self, line):
+        nonlocal built
+        built += 1
+        real_ship(self, line)
+
+    monkeypatch.setattr(xargs_module._Collector, "ship", counting_ship)
+    seen: list[int] = []
+
+    async def execute(line, session_id, stdin=None, sink=None):
+        seen.append(built)
+        return IOResult()
+
+    _, io, _ = await handle_xargs(
+        execute, args, EvaluationContext(make_session()), data
+    )
+    assert io.exit_code == 0
+    assert seen == list(range(1, runs + 1))
+
+
+NO_ROOM = (
+    b"xargs: cannot fit single argument within argument list size limit\n"
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "args, data, words",
+    [
+        # GNU 4.10 skips \v, \f and \r before a word and keeps them in one.
+        (["echo"], b"\rfile\n", [["echo", "file"]]),
+        (["echo"], b"\v\fa \r b\rc\n", [["echo", "a", "b\rc"]]),
+        (["echo"], b"'\ra' b\n", [["echo", "\ra", "b"]]),
+        (["echo"], b"a\\\rb\n", [["echo", "a\rb"]]),
+        # Skipping one leaves the line's last blank in place for -L.
+        (["-L1", "echo"], b"a \v\nb\n", [["echo", "a", "b"]]),
+        (["-I{}", "echo", "<{}>"], b"\r\vfile\n", [["echo", "<file>"]]),
+        (["-E", "STOP", "echo"], b"a \vSTOP b\n", [["echo", "a"]]),
+        # 0x85 and 0xa0 are bytes like any other.
+        (["echo"], b"\xa0a \x85\n", [["echo", "\udca0a", "\udc85"]]),
+    ],
+)
+async def test_vt_ff_and_cr_are_skipped_only_before_a_word(args, data, words):
+    shell = FakeShell()
+    _, io, _ = await handle_xargs(
+        shell, args, EvaluationContext(make_session()), data
+    )
+    assert shell.lines == [shell_join(line) for line in words]
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "args, data, lines, stderr, code",
+    [
+        # With no room after the command, a word with bytes is too long
+        # and an empty one cannot fit at all.
+        (["-0", "-s", "5", "echo"], b"abc", [], LINE_TOO_LONG, 1),
+        (["-d,", "-s", "5", "echo"], b"abc", [], LINE_TOO_LONG, 1),
+        (["-s", "5", "echo"], b"abc", [], LINE_TOO_LONG, 1),
+        (["-0", "-s", "5", "echo"], b"\0", [], NO_ROOM, 1),
+        (["-d,", "-s", "5", "echo"], b",", [], NO_ROOM, 1),
+        (["-s", "5", "echo"], b"''\n", [], NO_ROOM, 1),
+        (["-0", "-s", "5", "echo"], b"", ["echo"], b"", 0),
+        # -I measures a line as its bytes arrive, so a later empty line
+        # passes where one byte would not.
+        (["-I{}", "-s", "5", "echo"], b"a\n''\n", ["echo", "echo"], b"", 0),
+        (["-I{}", "-s", "5", "echo"], b"a\nb\n", ["echo"], LINE_TOO_LONG, 1),
+    ],
+)
+async def test_no_room_after_the_command(args, data, lines, stderr, code):
+    shell = FakeShell()
+    _, io, _ = await handle_xargs(
+        shell, args, EvaluationContext(make_session()), data
+    )
+    assert shell.lines == lines
+    assert (await materialize(io.stderr) or b"") == stderr
+    assert io.exit_code == code

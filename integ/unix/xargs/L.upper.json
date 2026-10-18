@@ -644,6 +644,40 @@
         "stdout": "",
         "stderr": "xargs: warning: options --max-args and -L are mutually exclusive, ignoring previous --max-args value\nxargs: value 0 for -L option should be >= 1\nTry 'xargs --help' for more information.\n"
       }
+    },
+    {
+      "id": "xargs_L_empty_line_keeps_continuation",
+      "seq": 1304208,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a \\n\\nb\\n' | xargs -L1 echo; printf 'a \\n \\nb\\nc\\n' | xargs -L1 echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "a b\na b\nc\n",
+        "stderr": ""
+      }
     }
   ]
 }

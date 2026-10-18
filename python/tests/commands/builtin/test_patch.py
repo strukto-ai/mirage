@@ -16,6 +16,7 @@ import asyncio
 
 import pytest
 
+from mirage.commands.builtin.generic import patch as patch_module
 from mirage.commands.builtin.generic.patch import patch_generic
 from mirage.commands.config import Context
 from mirage.types import MountMode, PathSpec
@@ -145,3 +146,61 @@ async def test_patch_preserves_virtual_paths_for_mounted_io(prefix, source):
     await patch_generic(operands, [], ctx, read, write, True)
     assert "hello.txt" in seen
     assert files["hello.txt"] == b"hello\nuniverse\n"
+
+
+_PREFIX = [f"p{k}" for k in range(100_000)]
+
+
+def _needle(body):
+    return patch_module._needle_of(patch_module._Hunk(1, 1, "", tuple(body)))
+
+
+def _counting_sits(monkeypatch):
+    calls = []
+    real = patch_module._sits
+
+    def counted(*args):
+        calls.append(args[2])
+        return real(*args)
+
+    monkeypatch.setattr(patch_module, "_sits", counted)
+    return calls
+
+
+def test_patch_tries_an_end_held_hunk_at_one_line(monkeypatch):
+    calls = _counting_sits(monkeypatch)
+    needle = _needle([" a", " b", " c", "-d", "+D"])
+    lines = [*_PREFIX, "a", "b", "c", "d"]
+    assert patch_module._seek(lines, needle, 0, 0, 0) == 100_000
+    assert calls == [100_000]
+
+
+def test_patch_tries_a_start_held_hunk_at_one_line(monkeypatch):
+    calls = _counting_sits(monkeypatch)
+    needle = _needle(["-x", "+X", " a", " b", " c"])
+    lines = [*_PREFIX, "x", "a", "b", "c"]
+    for fuzz in range(3):
+        assert patch_module._seek(lines, needle, fuzz, 0, 0) is None
+    assert calls == [0, 0, 0]
+
+
+def test_patch_knows_every_line_the_search_reaches():
+    for expected in range(-6, 12):
+        for used in range(8):
+            for last in range(-3, 12):
+                reached = set(patch_module._tries(expected, used, last))
+                for at in range(-14, 16):
+                    assert patch_module._is_tried(
+                        at, expected, used, last
+                    ) == (at in reached)
+
+
+def test_patch_places_an_end_held_hunk_after_a_long_prefix():
+    text = "".join(f"{line}\n" for line in [*_PREFIX, "a", "b", "c", "d"])
+    ws = _ws(**{"/f": text.encode()})
+    diff_text = "--- f\n+++ f\n@@ -1,4 +1,4 @@\n a\n b\n c\n-d\n+D\n"
+    stdout, io = _run_raw(ws, "patch", cwd="/data", stdin=diff_text.encode())
+    assert _bytes(stdout) == (
+        b"patching file f\nHunk #1 succeeded at 100001 (offset 100000 lines).\n"
+    )
+    assert io.exit_code == 0

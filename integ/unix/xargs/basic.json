@@ -2350,6 +2350,74 @@
         "stdout": "end\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xargs_eof_word_cut_off_by_end_of_input",
+      "seq": 1304209,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nSTOP' | xargs -E STOP echo; printf 'a STOP' | xargs -E STOP echo; printf 'a \\nSTOP' | xargs -E STOP echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\na STOP\na STOP\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xargs_skips_vt_ff_cr_before_a_word",
+      "seq": 1304213,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\rfile\\n' | xargs printf '[%s]\\n'; printf '\\v\\fa \\r b\\rc\\n' | xargs printf '[%s]\\n' | tr '\\r' R; printf 'a \\v\\nb\\n' | xargs -L1 echo; printf '\\r\\vfile\\n' | xargs -I{} echo '<{}>'; printf 'a \\vSTOP b\\n' | xargs -E STOP echo; printf \"'\\ra' b\\n\" | xargs printf '[%s]\\n' | tr '\\r' R",
+      "expect": {
+        "exit": 0,
+        "stdout": "[file]\n[a]\n[bRc]\na b\n<file>\na\n[Ra]\n[b]\n",
+        "stderr": ""
+      }
     }
   ]
 }

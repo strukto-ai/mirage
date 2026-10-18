@@ -2701,6 +2701,109 @@ describe('handleXargs', () => {
       warnings.map(([option, offending]) => warned(option, offending)).join(''),
     )
   })
+
+  const unmatchedSingle =
+    'xargs: unmatched single quote; by default quotes are special to xargs unless you use the -0 option\n'
+
+  it.each<[string[], string, number[], string[], string, number]>([
+    // A line with no word on it does not end a line a blank carried on.
+    [['-L1', 'echo'], 'a \n\nb\n', [], ['echo a b'], '', 0],
+    // The -E word cut off by the end of input ends it only as the first
+    // word of its line.
+    [['-E', 'STOP', 'echo'], 'a\nSTOP', [], ['echo a'], '', 0],
+    [['-E', 'STOP', 'echo'], 'a STOP', [], ['echo a STOP'], '', 0],
+    [['-E', 'STOP', 'echo'], 'a \nSTOP', [], ['echo a STOP'], '', 0],
+    // An open quote at the end of input is an error once its word holds a
+    // byte.
+    [['echo'], "x '", [], ['echo x'], '', 0],
+    [['-I{}', 'echo', '{}'], "x '", [], [], unmatchedSingle, 1],
+    [['-I{}', '-s', '8', 'echo', 'x{}'], 'abcdef\n', [], [], 'xargs: command too long\n', 1],
+    [['-I{}', '-s', '5', 'echo'], 'abc\nb\n', [], ['echo'], 'xargs: argument line too long\n', 1],
+    [
+      ['-I{}', '-s', '4', 'echo', '{}'],
+      'a\n',
+      [],
+      [],
+      'xargs: cannot fit single argument within argument list size limit\n',
+      1,
+    ],
+    // -x drops the words gathered so far when xargs has to stop.
+    [['-x', '-n2', 'echo'], "a b c 'd\n", [], ['echo a b'], unmatchedSingle, 1],
+    [
+      ['-x', '-s', '11', 'echo'],
+      'a bbbbbbbbbbbbbbbb\n',
+      [],
+      [],
+      'xargs: argument line too long\n',
+      1,
+    ],
+    [['-L3', '-s', '10', 'echo'], 'a\nb\nc\n', [], [], 'xargs: argument list too long\n', 1],
+    // Every byte of a word cut at a NUL counts against -s.
+    [
+      ['-s', '20', 'echo'],
+      'a\0bbbbbbbbbbbb c\n',
+      [],
+      ['echo a', 'echo c'],
+      'xargs: WARNING: a NUL character occurred in the input.  It cannot be passed through in the argument list.  Did you mean to use the --null option?\n',
+      0,
+    ],
+    // A command that failed outranks xargs's own error.
+    [['echo'], "a b 'c", [1], ['echo a b'], unmatchedSingle, 123],
+    [['-L1', 'echo'], "a\nb 'c\n", [1], ['echo a'], unmatchedSingle, 123],
+  ])('probed GNU behaviour (%j %j)', async (args, data, codes, lines, stderr, exitCode) => {
+    const shell = fakeShell(codes)
+    const [, io] = await handleXargs(shell.fn, args, new EvaluationContext(session), enc(data))
+    expect(shell.lines).toEqual(lines)
+    expect(decode(await materialize(io.stderr))).toBe(stderr)
+    expect(io.exitCode).toBe(exitCode)
+  })
+
+  it('-d \\x00ff names byte 0xff', async () => {
+    const shell = fakeShell()
+    await handleXargs(
+      shell.fn,
+      ['-d', '\\x00ff', 'echo'],
+      new EvaluationContext(session),
+      new Uint8Array([0x61, 0x62, 0xff, 0x63]),
+    )
+    expect(shell.lines).toEqual(['echo ab c'])
+  })
+
+  it.each([
+    ['\\x411z', 'character values must not exceed ff.'],
+    ['\\400z', 'character values must not exceed 377.'],
+    ['\\0x41', 'trailing characters x41 not recognised.'],
+    ['\\xg', 'trailing characters g not recognised.'],
+  ])('-d %s is refused', async (spec, message) => {
+    const shell = fakeShell()
+    const [, io] = await handleXargs(
+      shell.fn,
+      ['-d', spec, 'echo'],
+      new EvaluationContext(session),
+      enc('a'),
+    )
+    expect(io.exitCode).toBe(1)
+    expect(decode(await materialize(io.stderr))).toBe(
+      `xargs: Invalid escape sequence ${spec} in input delimiter specification; ${message}\n`,
+    )
+    expect(shell.lines).toEqual([])
+  })
+
+  it('-o shows the -t trace first', async () => {
+    const shell = fakeShell()
+    const [, io] = await handleXargs(
+      shell.fn,
+      ['-o', '-t', 'echo'],
+      new EvaluationContext(session),
+      enc('a\n'),
+    )
+    expect(io.exitCode).toBe(125)
+    expect(
+      decode(await materialize(io.stderr)).startsWith(
+        "echo a\nxargs: '/dev/tty': No such device or address\n",
+      ),
+    ).toBe(true)
+  })
 })
 
 describe('handleTimeout', () => {

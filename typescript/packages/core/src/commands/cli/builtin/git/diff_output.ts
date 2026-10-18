@@ -515,8 +515,8 @@ async function combinedPatch(
     output.push(
       `--- ${created ? DEV_NULL : quotePath(`a/${path}`, false, fully)}\n`,
       `+++ ${deleted ? DEV_NULL : quotePath(`b/${path}`, false, fully)}\n`,
-      ...body,
     )
+    for (const line of body) output.push(line)
   }
   return output.join('')
 }
@@ -554,9 +554,8 @@ export function isCombined(commit: CommitFacts, flags: DiffFlags): boolean {
  * The line git prints between a commit's text and its diff, null for none.
  *
  * `---` when both a diffstat and a patch follow, otherwise an empty line,
- * and none under oneline, which is log-tree's rule. A combined diff (`-c`,
- * `--cc`) is printed from its own path, which always writes the empty line,
- * oneline included. Pinned against git 2.50.1.
+ * and none under oneline. A combined diff (`-c`, `--cc`) always gets the
+ * empty line, oneline included. Pinned against git 2.50.1.
  *
  * @param commit the commit whose diff follows
  * @param kind the pretty format's kind

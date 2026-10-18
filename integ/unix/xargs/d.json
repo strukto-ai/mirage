@@ -453,6 +453,40 @@
       "flags": [
         "d"
       ]
+    },
+    {
+      "id": "xargs_d_numeric_escape_digits",
+      "seq": 1304210,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\\\b\\377c' | xargs -d '\\x00ff' echo; printf 'a' | xargs -d '\\x' echo; printf 'a' | xargs -d '\\x411z' echo; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\\b c\na\ncode=1\n",
+        "stderr": "xargs: Invalid escape sequence \\x411z in input delimiter specification; character values must not exceed ff.\n"
+      }
     }
   ]
 }

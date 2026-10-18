@@ -1,0 +1,208 @@
+{
+  "cases": [
+    {
+      "id": "patch_tie_goes_later",
+      "seq": 9941401,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_9941401 && touch /data/patch_9941401/.keep; cd /data/patch_9941401 || exit 1; printf 'a\\nb\\nx1\\nx2\\nold\\ny1\\ny2\\nc\\nx1\\nx2\\nold\\ny1\\ny2\\nd\\n' > pt.txt && printf -- '--- a\\n+++ b\\n@@ -6,5 +6,5 @@\\n x1\\n x2\\n-old\\n+new\\n y1\\n y2\\n' | patch pt.txt; echo rc=$?; cat pt.txt; cd /; rm -r /data/patch_9941401",
+      "expect": {
+        "exit": 0,
+        "stdout": "patching file pt.txt\nHunk #1 succeeded at 9 (offset 3 lines).\nrc=0\na\nb\nx1\nx2\nold\ny1\ny2\nc\nx1\nx2\nnew\ny1\ny2\nd\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "patch_fuzz_spent_on_longer_end",
+      "seq": 9941402,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_9941402 && touch /data/patch_9941402/.keep; cd /data/patch_9941402 || exit 1; printf 'a\\nb\\nc\\nd\\ne\\n' > pf.txt && printf -- '--- a\\n+++ b\\n@@ -1,5 +1,5 @@\\n Z\\n b\\n c\\n-d\\n+D\\n e\\n' | patch pf.txt; echo rc=$?; cat pf.txt; cd /; rm -r /data/patch_9941402",
+      "expect": {
+        "exit": 0,
+        "stdout": "patching file pf.txt\nHunk #1 succeeded at 1 with fuzz 1.\nrc=0\na\nb\nc\nD\ne\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "patch_hunks_share_context",
+      "seq": 9941403,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_9941403 && touch /data/patch_9941403/.keep; cd /data/patch_9941403 || exit 1; printf 'l1\\nc1\\nc2\\nc3\\nx1\\nc4\\nc5\\nc6\\nd1\\nd2\\n' > po.txt && printf -- '--- a\\n+++ b\\n@@ -2,7 +2,7 @@\\n c1\\n c2\\n c3\\n-x1\\n+y1\\n c4\\n c5\\n c6\\n@@ -3,7 +3,7 @@\\n c2\\n c3\\n x1\\n-c4\\n+c4new\\n c5\\n c6\\n d1\\n' | patch po.txt; echo rc=$?; cat po.txt; cd /; rm -r /data/patch_9941403",
+      "expect": {
+        "exit": 0,
+        "stdout": "patching file po.txt\nrc=0\nl1\nc1\nc2\nc3\ny1\nc4new\nc5\nc6\nd1\nd2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "patch_misordered_hunk",
+      "seq": 9941404,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_9941404 && touch /data/patch_9941404/.keep; cd /data/patch_9941404 || exit 1; printf 'a1\\na2\\nold\\na3\\na4\\nm1\\nm2\\nb1\\nb2\\nold\\nb3\\nb4\\n' > pm.txt && printf -- '--- a\\n+++ b\\n@@ -8,5 +8,5 @@\\n b1\\n b2\\n-old\\n+new\\n b3\\n b4\\n@@ -1,5 +1,5 @@\\n a1\\n a2\\n-old\\n+new\\n a3\\n a4\\n' | patch pm.txt; echo rc=$?; cat pm.txt pm.txt.rej; cd /; rm -r /data/patch_9941404",
+      "expect": {
+        "exit": 0,
+        "stdout": "patching file pm.txt\nmisordered hunks! output would be garbled\nHunk #2 FAILED at 1.\n1 out of 2 hunks FAILED -- saving rejects to file pm.txt.rej\nrc=1\na1\na2\nold\na3\na4\nm1\nm2\nb1\nb2\nnew\nb3\nb4\n--- a\n+++ b\n@@ -1,5 +1,5 @@\n a1\n a2\n-old\n+new\n a3\n a4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "patch_rejects_of_two_sections",
+      "seq": 9941405,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_9941405 && touch /data/patch_9941405/.keep; cd /data/patch_9941405 || exit 1; printf 'l1\\nl2\\nl3\\nl4\\nl5\\nl6\\nl7\\nl8\\n' > pr.txt && printf -- '--- a\\n+++ b\\n@@ -2,3 +2,3 @@\\n l2\\n-nope\\n+X\\n l4\\n--- a\\n+++ b\\n@@ -6,3 +6,3 @@\\n l6\\n-nope2\\n+Y\\n l8\\n' | patch pr.txt; echo rc=$?; cat pr.txt.rej; cd /; rm -r /data/patch_9941405",
+      "expect": {
+        "exit": 0,
+        "stdout": "patching file pr.txt\nHunk #1 FAILED at 2.\n1 out of 1 hunk FAILED -- saving rejects to file pr.txt.rej\npatching file pr.txt\nHunk #1 FAILED at 6.\n1 out of 1 hunk FAILED -- saving rejects to file pr.txt.rej\nrc=1\n--- a\n+++ b\n@@ -2,3 +2,3 @@\n l2\n-nope\n+X\n l4\n--- a\n+++ b\n@@ -6,3 +6,3 @@\n l6\n-nope2\n+Y\n l8\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "patch_failed_line_counts_placed_hunks",
+      "seq": 9941406,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_9941406 && touch /data/patch_9941406/.keep; cd /data/patch_9941406 || exit 1; printf 'a\\nb\\nc\\nd\\ne\\nf\\ng\\nh\\ni\\nj\\nk\\nl\\n' > pn.txt && printf -- '--- a\\n+++ b\\n@@ -2,3 +2,5 @@\\n b\\n+N1\\n+N2\\n c\\n d\\n@@ -8,3 +10,3 @@\\n h\\n-zzz\\n+Z\\n j\\n' | patch pn.txt; echo rc=$?; head -3 pn.txt.rej; cd /; rm -r /data/patch_9941406",
+      "expect": {
+        "exit": 0,
+        "stdout": "patching file pn.txt\nHunk #2 FAILED at 10.\n1 out of 2 hunks FAILED -- saving rejects to file pn.txt.rej\nrc=1\n--- a\n+++ b\n@@ -10,3 +12,3 @@\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

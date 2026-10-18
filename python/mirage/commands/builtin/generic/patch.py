@@ -1,8 +1,7 @@
 import logging
 import re
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
-from enum import Enum
 
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.size_suffix import decimal_value
@@ -59,9 +58,9 @@ def _label(line: str, strip_count: int) -> tuple[str, str]:
 
 
 _HUNK_HEADER = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
-# GNU patch's default fuzz factor: how many context lines at each end of
-# a hunk may be ignored to place it.
-_MAX_FUZZ = 2
+# The fuzz factor the manual gives as patch's default: a hunk may leave
+# up to this many of its outer context lines unmatched to be placed.
+_FUZZ_FACTOR = 2
 
 
 def _span(start: int, count: int) -> str:
@@ -95,9 +94,6 @@ class _Hunk:
             ),
         )
 
-    def pattern(self) -> list[str]:
-        return [line[1:] for line in self.body if line[:1] != "+"]
-
     def sizes(self) -> tuple[int, int]:
         """Its old and new sides' line counts."""
         return (
@@ -105,35 +101,20 @@ class _Hunk:
             sum(1 for line in self.body if line[:1] != "-"),
         )
 
-    def first(self) -> int:
-        """The line its old side starts at, GNU's ``pch_first``.
-
-        An empty old side (``-3,0``) goes in after the line it names.
-        """
-        return self.old_start + (0 if self.pattern() else 1)
-
-    def context(self) -> tuple[int, int]:
-        """The context lines before its first change and after its last."""
-        kinds = [line[:1] for line in self.body]
-        prefix = next((i for i, k in enumerate(kinds) if k != " "), len(kinds))
-        suffix = next(
-            (i for i, k in enumerate(reversed(kinds)) if k != " "), len(kinds)
-        )
-        return prefix, suffix
-
-    def rejected(self, out_offset: int) -> list[str]:
+    def rejected(self, grown: int) -> list[str]:
         """Its lines in a reject file, as GNU writes a hunk back.
 
-        The ``@@`` line is moved by the output offset, and each run of
-        changes lists its removed lines before its added ones.
+        The ``@@`` line is moved by what the hunks placed before it
+        added, and each run of changes lists its removed lines before
+        its added ones.
 
         Args:
-            out_offset (int): the lines the hunks applied before it added.
+            grown (int): the lines the hunks placed before it added.
         """
         old, new = self.sizes()
         lines = [
-            f"@@ -{_span(self.old_start + out_offset, old)} "
-            f"+{_span(self.new_start + out_offset, new)} @@{self.note}"
+            f"@@ -{_span(self.old_start + grown, old)} "
+            f"+{_span(self.new_start + grown, new)} @@{self.note}"
         ]
         added: list[str] = []
         for line in self.body:
@@ -245,149 +226,273 @@ def _parse_patch(patch_text: str, strip_count: int) -> list[_Section]:
     return sections
 
 
-def _matches(
+@dataclass(frozen=True, slots=True)
+class _Needle:
+    """What a hunk looks for in the file, and where its header puts it.
+
+    Args:
+        old (tuple[str, ...]): its old side, context and removed lines.
+        lead (int): the context lines before its first change.
+        trail (int): the context lines after its last change.
+        claimed (int): the line its header says the old side starts at;
+            an empty old side (``-3,0``) goes in after the line it names,
+            so it claims the line after that.
+    """
+
+    old: tuple[str, ...]
+    lead: int
+    trail: int
+    claimed: int
+
+
+def _needle_of(hunk: _Hunk) -> _Needle:
+    kinds = [line[:1] for line in hunk.body]
+    lead = 0
+    while lead < len(kinds) and kinds[lead] == " ":
+        lead += 1
+    trail = 0
+    while trail < len(kinds) - lead and kinds[-1 - trail] == " ":
+        trail += 1
+    old = tuple(line[1:] for line in hunk.body if line[:1] != "+")
+    return _Needle(old, lead, trail, hunk.old_start + (0 if old else 1))
+
+
+def _compared_at(needle: _Needle, fuzz: int) -> tuple[int, int]:
+    """The context lines still compared above and below at ``fuzz``.
+
+    Fuzz is spent on the longer end first: a hunk with three lines of
+    context above its change and one below compares (3, 1) at fuzz 0,
+    (2, 1) at fuzz 1 and (1, 1) at fuzz 2 (GNU patch 2.8).
+
+    Args:
+        needle (_Needle): the hunk's old side.
+        fuzz (int): the context lines it may leave unmatched.
+    """
+    most = max(needle.lead, needle.trail) - fuzz
+    return max(0, min(needle.lead, most)), max(0, min(needle.trail, most))
+
+
+def _sits(
     lines: list[str],
-    pattern: list[str],
-    where: int,
-    prefix_fuzz: int,
-    suffix_fuzz: int,
+    needle: _Needle,
+    at: int,
+    compared: tuple[int, int],
+    used: int,
 ) -> bool:
-    for k in range(prefix_fuzz, len(pattern) - suffix_fuzz):
-        line_no = where + k
-        if not 1 <= line_no <= len(lines) or lines[line_no - 1] != pattern[k]:
+    """Whether the hunk's old side, starting at line ``at``, is there.
+
+    Only the context ``compared`` keeps is read. Lines left out above
+    may hang off the top of the file, but nothing may run past its end
+    except what is left out below. A hunk with less context at one end
+    than at the other was cut short by that end of the file, so while
+    that still holds it must meet it: a short bottom ends on the file's
+    last line, and a short top whose header names line 1 starts on the
+    first. Such a hunk is not found at all, rather than found out of
+    order, where it would reach back into what earlier hunks used up:
+    one meeting the end must start at or after ``used``, and one
+    meeting the start must make its first change at or after it (GNU
+    patch 2.8).
+
+    Args:
+        lines (list[str]): the file.
+        needle (_Needle): the hunk's old side.
+        at (int): the 0-based line its first line would be on.
+        compared (tuple[int, int]): context kept above and below.
+        used (int): the lines the hunks placed before it used up.
+    """
+    above, below = compared
+    top = needle.lead - above
+    stop = len(needle.old) - needle.trail + below
+    if at + stop > len(lines) or (top < stop and at + top < 0):
+        return False
+    if above > below and (at + len(needle.old) != len(lines) or at < used):
+        return False
+    if above < below and needle.claimed <= 1:
+        if at != 0 or needle.lead < used:
+            return False
+    for index in range(top, stop):
+        if lines[at + index] != needle.old[index]:
             return False
     return True
 
 
-def _locate(
-    lines: list[str], hunk: _Hunk, in_offset: int, fuzz: int, frozen: int
+def _tries(expected: int, used: int, last: int) -> Iterator[int]:
+    """The lines a hunk is tried at, in the order GNU patch 2.8 tries them.
+
+    From an expected line at or past ``used`` the search fans out: the
+    expected line, one line later, one earlier, two later and so on, so
+    at equal distance the later line wins, and it goes no higher than
+    ``used``. From an expected line above ``used`` it reaches as far
+    above the expected line as ``used`` is below it, and tries that
+    farthest line first, then ``used``, then the lines between them in
+    file order, then the lines after ``used``: with 20 lines used and a
+    hunk expected at line 15 it tries 9, 21, 10, 11, ..., 20, 22, ...
+    (1-based). There, a hunk expected past the last line it fits at is
+    not tried anywhere.
+
+    Args:
+        expected (int): the 0-based line the header and the hunks before
+            it point at.
+        used (int): the lines the hunks placed before it used up.
+        last (int): the last 0-based line the hunk fits at.
+    """
+    if expected < used:
+        if expected > last:
+            return
+        farthest = 2 * expected - used
+        yield farthest
+        yield used
+        yield from range(farthest + 1, min(used, last + 1))
+        yield from range(used + 1, last + 1)
+        return
+    yield expected
+    step = 1
+    while expected + step <= last or expected - step >= used:
+        if expected + step <= last:
+            yield expected + step
+        if expected - step >= used:
+            yield expected - step
+        step += 1
+
+
+def _is_tried(at: int, expected: int, used: int, last: int) -> bool:
+    """Whether ``_tries`` ever reaches line ``at``.
+
+    Args:
+        at (int): the 0-based line.
+        expected (int): the 0-based line the hunk is expected at.
+        used (int): the lines the hunks placed before it used up.
+        last (int): the last 0-based line the hunk fits at.
+    """
+    if expected < used:
+        if expected > last:
+            return False
+        farthest = 2 * expected - used
+        return (
+            at in (farthest, used)
+            or farthest < at < min(used, last + 1)
+            or used < at <= last
+        )
+    return at == expected or expected < at <= last or used <= at < expected
+
+
+def _forced_edge(
+    lines: list[str], needle: _Needle, compared: tuple[int, int]
 ) -> int | None:
-    """Where a hunk's old side is in ``lines``, GNU's ``locate_hunk``.
+    """The one line a hunk held to an end of the file can start at.
 
-    The claimed line first, then alternately after and before it. With
-    fuzz, that many context lines at each end go unchecked; a hunk with
-    less context at one end is anchored there (a hunk that starts at the
-    top of the file with no leading context can only match the top, one
-    with no trailing context only the end).
+    None when the hunk is free to sit anywhere; see ``_sits`` for when
+    it is held.
 
     Args:
-        lines (list[str]): the file's lines.
-        hunk (_Hunk): the hunk, in the orientation being applied.
-        in_offset (int): how far the hunks before it were found moved.
-        fuzz (int): context lines each end may ignore.
-        frozen (int): the lines already copied out, which it cannot use.
+        lines (list[str]): the file.
+        needle (_Needle): the hunk's old side.
+        compared (tuple[int, int]): context kept above and below.
     """
-    first = hunk.first() + in_offset
-    pattern = hunk.pattern()
-    if not pattern:
-        return first
-    prefix, suffix = hunk.context()
-    context = max(prefix, suffix)
-    prefix_fuzz = fuzz + prefix - context
-    suffix_fuzz = fuzz + suffix - context
-    max_pos = len(lines) - (len(pattern) - suffix_fuzz) + 1 - first
-    max_neg = min(first - (frozen + 1 - (prefix - prefix_fuzz)), first - 1)
-    if prefix_fuzz < 0:
-        if hunk.first() > 1:
-            prefix_fuzz = 0
-        elif (
-            frozen <= prefix
-            and 1 - first <= max_pos
-            and _matches(lines, pattern, 1, 0, suffix_fuzz)
+    above, below = compared
+    if above > below:
+        return len(lines) - len(needle.old)
+    if above < below and needle.claimed <= 1:
+        return 0
+    return None
+
+
+def _seek(
+    lines: list[str], needle: _Needle, fuzz: int, expected: int, used: int
+) -> int | None:
+    """The 0-based line the hunk is found at with ``fuzz``, or None.
+
+    A hunk with no old side is not looked for: it goes where it is
+    expected. One held to an end of the file is tried at that one line,
+    if the search would reach it, instead of at every line the search
+    tries. One that lands on the line before the first, line 0, is
+    taken as not found at all, though one landing higher still is found
+    there (GNU patch 2.8: ``-0,0`` expected one line up fails plainly,
+    expected two lines up it fails as misordered).
+
+    Args:
+        lines (list[str]): the file.
+        needle (_Needle): the hunk's old side.
+        fuzz (int): the context lines it may leave unmatched.
+        expected (int): the 0-based line it is expected at.
+        used (int): the lines the hunks placed before it used up.
+    """
+    found: int | None = expected
+    if needle.old:
+        compared = _compared_at(needle, fuzz)
+        last = len(lines) - (len(needle.old) - needle.trail + compared[1])
+        edge = _forced_edge(lines, needle, compared)
+        if edge is None:
+            found = next(
+                (
+                    at
+                    for at in _tries(expected, used, last)
+                    if _sits(lines, needle, at, compared, used)
+                ),
+                None,
+            )
+        elif _is_tried(edge, expected, used, last) and _sits(
+            lines, needle, edge, compared, used
         ):
-            return 1
+            found = edge
         else:
-            return None
-    if suffix_fuzz < 0:
-        # GNU's rule, kept on purpose: diff writes a shorter trailing
-        # context only at the end of a file, so a hunk with less context
-        # after its change than before belongs at the end, even where its
-        # lines also sit at the line its header names. GNU patch 2.8 edits
-        # the last occurrence then, and fuzzes or fails a hunk the end of
-        # the file no longer matches.
-        at_end = len(lines) - len(pattern) + 1
-        if first - at_end <= max_neg and _matches(
-            lines, pattern, at_end, prefix_fuzz, 0
-        ):
-            return at_end
-        return None
-    for offset in range(max(max_pos, max_neg) + 1):
-        if offset <= max_pos and _matches(
-            lines, pattern, first + offset, prefix_fuzz, suffix_fuzz
-        ):
-            return first + offset
-        if 0 < offset <= max_neg and _matches(
-            lines, pattern, first - offset, prefix_fuzz, suffix_fuzz
-        ):
-            return first - offset
-    return None
+            found = None
+    return None if found == -1 else found
 
 
-class _Reversed(Enum):
-    """The first hunk fits only the other way round."""
-
-    DETECTED = "detected"
-
-
-def _place(
-    lines: list[str], hunk: _Hunk, in_offset: int, frozen: int, probe: bool
-) -> tuple[int, int] | _Reversed | None:
-    """The line and fuzz a hunk applies at, None when it does not.
-
-    Each fuzz level is tried in turn, and with ``probe`` a level the
-    hunk misses is tried the other way round too, as GNU does for a
-    file's first hunk: a patch already applied is caught there before
-    more fuzz lets it in somewhere else.
+def _fuzz_steps(needle: _Needle) -> Iterator[int]:
+    """The fuzz levels worth trying, each one comparing less than the last.
 
     Args:
-        lines (list[str]): the file's lines.
-        hunk (_Hunk): the hunk, in the orientation being applied.
-        in_offset (int): how far the hunks before it were found moved.
-        frozen (int): the lines already copied out.
-        probe (bool): try the other orientation at each level.
+        needle (_Needle): the hunk's old side.
     """
-    prefix, suffix = hunk.context()
-    for fuzz in range(min(_MAX_FUZZ, max(prefix, suffix)) + 1):
-        where = _locate(lines, hunk, in_offset, fuzz, frozen)
-        if where is not None:
-            return where, fuzz
-        if (
-            probe
-            and _locate(lines, hunk.swapped(), in_offset, fuzz, frozen)
-            is not None
-        ):
-            return _Reversed.DETECTED
-    return None
+    seen: tuple[int, int] | None = None
+    for fuzz in range(_FUZZ_FACTOR + 1):
+        compared = _compared_at(needle, fuzz)
+        if compared != seen:
+            seen = compared
+            yield fuzz
 
 
-def _splice(
-    out: list[str], lines: list[str], src: int, where: int, hunk: _Hunk
+def _emit(
+    lines: list[str], hunk: _Hunk, needle: _Needle, at: int, out: list[str]
 ) -> int:
-    """Copy the file up to a hunk, then the hunk itself; the next line.
+    """Write the hunk's changes, placed at ``at``, onto ``out``.
 
-    Context lines are the file's own, as GNU's ``apply_hunk`` copies
-    them, so a line fuzz let through keeps what the file says.
+    Only the part from its first change to its last is written: the
+    context around it stays in the file, where a later hunk may still
+    read it, and context between changes is copied from the file rather
+    than from the patch.
 
     Args:
-        out (list[str]): the patched lines so far.
-        lines (list[str]): the file's lines.
-        src (int): the first line not yet copied, zero-based.
-        where (int): the line the hunk's old side starts at.
-        hunk (_Hunk): the hunk, in the orientation being applied.
+        lines (list[str]): the file.
+        hunk (_Hunk): the hunk.
+        needle (_Needle): its old side.
+        at (int): the 0-based line its old side starts at.
+        out (list[str]): the patched lines so far, extended here.
+
+    Returns:
+        int: the 0-based line after the last one it changed.
     """
-    out.extend(lines[src : max(where - 1, src)])
-    at = where - 1
-    for line in hunk.body:
+    source = at + needle.lead
+    for line in hunk.body[needle.lead : len(hunk.body) - needle.trail]:
         kind = line[:1]
-        if kind == " ":
-            if src <= at < len(lines):
-                out.append(lines[at])
-            at += 1
-        elif kind == "-":
-            at += 1
-        else:
+        if kind == "+":
             out.append(line[1:])
-    return max(at, src)
+            continue
+        if kind == " ":
+            out.append(lines[source])
+        source += 1
+    return source
+
+
+def _placed_note(ordinal: int, line: int, fuzz: int, moved: int) -> str:
+    text = f"Hunk #{ordinal} succeeded at {line}"
+    if fuzz:
+        text += f" with fuzz {fuzz}"
+    if moved:
+        text += f" (offset {moved} line{'' if moved == 1 else 's'})"
+    return text + "."
 
 
 @dataclass(frozen=True, slots=True)
@@ -399,7 +504,7 @@ class _Outcome:
         notes (list[str]): the lines GNU prints after ``patching file``.
         rejected (list[tuple[_Hunk, int]]): the hunks for the reject
             file as they were tried (``-R`` swaps them), each with the
-            output offset it was refused at.
+            lines the hunks placed before it added.
         exact (bool): every hunk applied where it said, with no fuzz.
     """
 
@@ -437,65 +542,76 @@ def _as_tried(
 
 
 def _apply_section(
-    lines: list[str], hunks: tuple[_Hunk, ...], reverse: bool, forward: bool
+    lines: list[str],
+    hunks: tuple[_Hunk, ...],
+    reverse: bool,
+    forward: bool,
 ) -> _Outcome:
-    """Apply one section's hunks to a file's lines, GNU patch's way.
+    """Apply one section's hunks to a file's lines, as GNU patch does.
 
-    A hunk is placed by its context, at an offset or with fuzz when it
-    has to be, and one that fits nowhere is rejected, never forced in.
-    When the first hunk fits only the other way round the file is
+    Each hunk is looked for where its header and the hunks before it
+    point, at fuzz 0 and then with more of its outer context left out;
+    one found nowhere is rejected. A hunk found where its change would
+    land on lines an earlier hunk already changed is rejected too, and
+    no further fuzz is tried for it. When the first hunk is not found
+    but reads at that same fuzz the other way round, the file is
     skipped as already applied (or reversed). Lines are reported in the
-    output file's numbering: the input offset GNU found, plus what the
-    hunks applied so far added.
+    patched file's numbering.
 
     Args:
         lines (list[str]): the file's lines.
         hunks (tuple[_Hunk, ...]): the section's hunks.
-        reverse (bool): ``-R``.
+        reverse (bool): ``-R``, which swaps each hunk first.
         forward (bool): ``-N``.
     """
     out: list[str] = []
     notes: list[str] = []
     rejected: list[tuple[_Hunk, int]] = []
-    src = 0
-    in_offset = 0
-    out_offset = 0
     exact = True
-    for number, hunk in enumerate(hunks, 1):
-        active = hunk.swapped() if reverse else hunk
-        placed = _place(lines, active, in_offset, src, number == 1)
-        if placed is _Reversed.DETECTED:
-            return _Outcome(
-                None,
-                _reversed_notes(reverse, forward),
-                _as_tried(hunks, reverse),
-                False,
-            )
-        if placed is None:
-            notes.append(
-                f"Hunk #{number} FAILED at "
-                f"{active.first() + in_offset + out_offset}."
-            )
-            rejected.append((active, out_offset))
+    used = 0
+    shift = 0
+    grown = 0
+    for ordinal, given in enumerate(hunks, 1):
+        hunk = given.swapped() if reverse else given
+        needle = _needle_of(hunk)
+        other = _needle_of(hunk.swapped()) if ordinal == 1 else None
+        expected = needle.claimed - 1 + shift
+        at: int | None = None
+        fuzz = 0
+        for fuzz in _fuzz_steps(needle):
+            at = _seek(lines, needle, fuzz, expected, used)
+            if at is not None:
+                break
+            if (
+                other is not None
+                and _seek(lines, other, fuzz, other.claimed - 1, 0) is not None
+            ):
+                return _Outcome(
+                    None,
+                    _reversed_notes(reverse, forward),
+                    _as_tried(hunks, reverse),
+                    False,
+                )
+        if at is None or at + needle.lead < used:
+            if at is None:
+                line = needle.claimed
+            else:
+                notes.append("misordered hunks! output would be garbled")
+                line = at + 1
+                shift = at + 1 - needle.claimed
+            notes.append(f"Hunk #{ordinal} FAILED at {line + grown}.")
+            rejected.append((hunk, grown))
             exact = False
             continue
-        where, fuzz = placed
-        in_offset = where - active.first()
-        src = _splice(out, lines, src, where, active)
-        if fuzz or in_offset:
+        shift = at + 1 - needle.claimed
+        if fuzz or shift:
+            notes.append(_placed_note(ordinal, at + 1 + grown, fuzz, shift))
             exact = False
-            note = f"Hunk #{number} succeeded at {where + out_offset}"
-            if fuzz:
-                note += f" with fuzz {fuzz}"
-            if in_offset:
-                note += (
-                    f" (offset {in_offset} "
-                    f"line{'' if in_offset == 1 else 's'})"
-                )
-            notes.append(note + ".")
-        old, new = active.sizes()
-        out_offset += new - old
-    out.extend(lines[src:])
+        out.extend(lines[used : at + needle.lead])
+        used = _emit(lines, hunk, needle, at, out)
+        old, new = hunk.sizes()
+        grown += new - old
+    out.extend(lines[used:])
     return _Outcome(out, notes, rejected, exact)
 
 
@@ -507,7 +623,7 @@ def _reject_text(
     Args:
         section (_Section): the section the hunks are from.
         rejected (list[tuple[_Hunk, int]]): the hunks, each with the
-            output offset it was refused at.
+            lines the hunks placed before it added.
         reverse (bool): ``-R``, which swaps the names as it did the hunks.
     """
     names = (
@@ -516,8 +632,8 @@ def _reject_text(
         else (section.old_label, section.new_label)
     )
     lines = [f"--- {names[0]}", f"+++ {names[1]}"]
-    for hunk, out_offset in rejected:
-        lines.extend(hunk.rejected(out_offset))
+    for hunk, grown in rejected:
+        lines.extend(hunk.rejected(grown))
     return "".join(f"{line}\n" for line in lines).encode()
 
 
@@ -591,6 +707,7 @@ async def patch(
     report: list[str] = []
     failed = False
     written: set[str] = set()
+    rejects: dict[str, bytes] = {}
     for section in sections:
         if orig is not None:
             file_spec, shown = orig, orig.raw_path or orig.virtual
@@ -610,6 +727,7 @@ async def patch(
             write_bytes=write_bytes,
             report=report,
             written=written,
+            rejects=rejects,
         )
         failed = failed or refused
     out = "".join(f"{line}\n" for line in report).encode() if report else None
@@ -627,14 +745,16 @@ async def _patch_file(
     write_bytes: Callable[..., Awaitable[None]],
     report: list[str],
     written: set[str],
+    rejects: dict[str, bytes],
 ) -> bool:
     """Apply one section to its file, GNU patch's way; True when a hunk
     of it was refused.
 
     A file that does not match the patch exactly is backed up to
     ``.orig`` the first time this run writes it, and the hunks that did
-    not go in are saved to ``.rej``. A file that is not there is not
-    made unless a hunk applied, and a directory is refused whole.
+    not go in are saved to ``.rej``, after those an earlier section of
+    this run saved for it. A file that is not there is not made unless a
+    hunk applied, and a directory is refused whole.
 
     Args:
         section (_Section): the section.
@@ -646,6 +766,7 @@ async def _patch_file(
         write_bytes (Callable): bound writer.
         report (list[str]): the lines printed so far, extended here.
         written (set[str]): the files this run has written already.
+        rejects (dict[str, bytes]): each file's ``.rej`` text so far.
     """
     original: bytes | None = None
     try:
@@ -663,6 +784,7 @@ async def _patch_file(
             reverse,
             write_bytes,
             report,
+            rejects,
         )
         return True
     except FileNotFoundError as exc:
@@ -697,6 +819,7 @@ async def _patch_file(
         reverse,
         write_bytes,
         report,
+        rejects,
     )
     return True
 
@@ -710,19 +833,24 @@ async def _save_rejects(
     reverse: bool,
     write_bytes: Callable[..., Awaitable[None]],
     report: list[str],
+    rejects: dict[str, bytes],
 ) -> None:
     """Write the hunks that did not go in to ``.rej``, and say so.
+
+    A file patched by several sections of one patch keeps one ``.rej``:
+    each section's rejects follow the last, under their own names.
 
     Args:
         section (_Section): their section, whose names head the file.
         rejected (list[tuple[_Hunk, int]]): the hunks as they were tried,
-            each with the output offset it was refused at.
+            each with the lines the hunks placed before it added.
         verb (str): ``FAILED``, or ``ignored`` for a skipped file.
         spec (PathSpec): the file they were for.
         shown (str): that file as GNU names it.
         reverse (bool): ``-R``.
         write_bytes (Callable): bound writer.
         report (list[str]): the lines printed so far, extended here.
+        rejects (dict[str, bytes]): each file's ``.rej`` text so far.
     """
     total = len(section.hunks)
     report.append(
@@ -731,14 +859,18 @@ async def _save_rejects(
         f"saving rejects to file {shown}.rej"
     )
     reject = _companion(spec, ".rej")
-    data = _reject_text(section, rejected, reverse)
+    data = rejects.get(reject.virtual, b"") + _reject_text(
+        section, rejected, reverse
+    )
+    rejects[reject.virtual] = data
     await write_bytes(reject, data)
 
 
 __all__ = ["patch"]
 
 
-# GNU patch's numeric_string: one sign, then digits to the end of the word.
+# A -p value is one optional sign, then digits to the end of the word:
+# GNU patch 2.8 refuses `3x` and ` 1`, and takes `+0`.
 STRIP_COUNT = re.compile(r"[+-]?[0-9]+")
 
 

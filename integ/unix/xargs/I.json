@@ -988,6 +988,74 @@
       "flags": [
         "rep"
       ]
+    },
+    {
+      "id": "xargs_I_size_errors",
+      "seq": 1304206,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abcdef\\n' | xargs -I{} -s 8 echo x{}; echo code=$?; printf 'abcdef\\n' | xargs -I{} -s 12 echo x{}; echo code=$?; printf 'abc\\nb\\n' | xargs -I{} -s 5 echo; echo code=$?; printf 'a\\nb\\n' | xargs -I{} -s 4 echo {}; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\ncode=1\n\ncode=1\ncode=1\n",
+        "stderr": "xargs: command too long\nxargs: argument list too long\nxargs: argument line too long\nxargs: cannot fit single argument within argument list size limit\n"
+      }
+    },
+    {
+      "id": "xargs_I_open_quote_at_end",
+      "seq": 1304207,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf \"x '\" | xargs echo; echo code=$?; printf \"x '\" | xargs -I{} echo {}; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\ncode=0\ncode=1\n",
+        "stderr": "xargs: unmatched single quote; by default quotes are special to xargs unless you use the -0 option\n"
+      }
     }
   ]
 }
