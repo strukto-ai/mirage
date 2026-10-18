@@ -14,12 +14,38 @@
 
 import asyncio
 
+import pytest
+
 from mirage.io.types import IOResult, OpReport
 
 
 async def _async_source(*chunks):
     for chunk in chunks:
         yield chunk
+
+
+@pytest.mark.parametrize("field", ["stdout", "stderr"])
+def test_materialization_preserves_a_source_replacement(field):
+    async def run():
+        reading = asyncio.Event()
+        release = asyncio.Event()
+
+        async def source():
+            reading.set()
+            await release.wait()
+            yield b"old"
+
+        io = IOResult()
+        setattr(io, field, source())
+        materialize_field = getattr(io, f"materialize_{field}")
+        read = asyncio.create_task(materialize_field())
+        await reading.wait()
+        setattr(io, field, b"new")
+        release.set()
+        assert await read == b"old"
+        assert await materialize_field() == b"new"
+
+    asyncio.run(run())
 
 
 def test_op_report_defaults_say_nothing_ran():

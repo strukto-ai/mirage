@@ -293,15 +293,21 @@ class IOResult:
         self._stream_source = None
 
     async def materialize_stdout(self) -> bytes:
-        self.stdout = await materialize(self.stdout)
-        return self.stdout
+        source = self.stdout
+        value = await materialize(source)
+        if self.stdout is source:
+            self.stdout = value
+        return value
 
     async def stdout_str(self, errors: str = "replace") -> str:
         return (await self.materialize_stdout()).decode(errors=errors)
 
     async def materialize_stderr(self) -> bytes:
-        self.stderr = await materialize(self.stderr)
-        return self.stderr
+        source = self.stderr
+        value = await materialize(source)
+        if self.stderr is source:
+            self.stderr = value
+        return value
 
     async def stderr_str(self, errors: str = "replace") -> str:
         return (await self.materialize_stderr()).decode(errors=errors)

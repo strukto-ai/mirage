@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { Refusal } from '../types.ts'
-import { type ByteSource, IOResult, materialize } from './types.ts'
+import { type ByteSource, IOResult, materialize, type StreamName } from './types.ts'
 
 async function* toAsync(chunks: Uint8Array[]): AsyncIterable<Uint8Array> {
   await Promise.resolve()
@@ -39,6 +39,25 @@ describe('materialize', () => {
 })
 
 describe('IOResult', () => {
+  for (const field of ['stdout', 'stderr'] satisfies StreamName[]) {
+    it(`preserves a ${field} replacement while materializing the previous source`, async () => {
+      let release: () => void = () => undefined
+      const waiting = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      async function* source() {
+        await waiting
+        yield new TextEncoder().encode('old')
+      }
+      const io = new IOResult({ [field]: source() })
+      const read = field === 'stdout' ? io.materializeStdout() : io.materializeStderr()
+      io[field] = new TextEncoder().encode('new')
+      release()
+      expect(new TextDecoder().decode(await read)).toBe('old')
+      expect(new TextDecoder().decode(await materialize(io[field]))).toBe('new')
+    })
+  }
+
   it('defaults all fields', () => {
     const io = new IOResult()
     expect(io.stdout).toBeNull()

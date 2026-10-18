@@ -238,8 +238,9 @@ export class IOResult {
   }
 
   async materializeStdout(): Promise<Uint8Array> {
-    const bytes = await materialize(this.stdout)
-    this.stdout = bytes
+    const source = this.stdout
+    const bytes = await materialize(source)
+    if (this.stdout === source) this.stdout = bytes
     return bytes
   }
 
@@ -248,8 +249,9 @@ export class IOResult {
   }
 
   async materializeStderr(): Promise<Uint8Array> {
-    const bytes = await materialize(this.stderr)
-    this.stderr = bytes
+    const source = this.stderr
+    const bytes = await materialize(source)
+    if (this.stderr === source) this.stderr = bytes
     return bytes
   }
 
