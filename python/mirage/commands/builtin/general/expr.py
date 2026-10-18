@@ -38,6 +38,7 @@ from mirage.types import PathSpec
 INT_OPERAND_RE = re.compile(r"-?[0-9]+")
 
 CMP_OPS = ("=", "==", "!=", "<", "<=", ">", ">=")
+ADD_OPS = ("+", "-")
 MUL_OPS = ("*", "/", "%")
 
 NON_INTEGER = "expr: non-integer argument"
@@ -246,8 +247,8 @@ def int_operand_or_none(text: str) -> int | None:
 def is_null(value: str) -> bool:
     """Whether GNU expr counts a value as false.
 
-    GNU's `null()` is not "empty or the character zero": the empty
-    string is false, and so is any run of zeros with at most one leading
+    False is not "empty or the character zero": the empty string is
+    false, and so is any run of zeros with at most one leading
     minus, which is why `expr 00 '&' 1` is false and `expr - '&' 1` is
     not.
 
@@ -361,43 +362,42 @@ def compare(left: str, op: str, right: str) -> str:
     return "1" if held else "0"
 
 
-def docolon(subject: str, pattern: str, utf8: bool = False) -> str:
+def colon_match(subject: str, pattern: str, utf8: bool = False) -> str:
     """The `:` operator, which `match` is the prefix spelling of.
 
-    The pattern is a POSIX BRE anchored at the start of the subject. A
-    pattern with a group answers with group 1's text -- the empty string
-    when the group did not participate -- and one without answers with
-    the match length, or `0` when nothing matched. Which of the two it is
-    depends on the pattern alone, so the group count has to come from the
-    translator rather than from a match object that may not exist.
+    POSIX: the pattern is a BRE anchored at the start of the subject. A
+    pattern with a group answers with what group 1 matched -- the
+    empty string when the match failed or the group took no part --
+    and one without answers with the length of the match, `0` when
+    there is none. Whether it has a group is the pattern's business
+    alone, so a failed `expr abc : '\\(x\\)'` is empty, not `0`.
+
+    Both strings are byte views, so `.` matches one byte and the length
+    counts bytes: GNU reads `expr <e-acute> : '.'` as 1 and
+    `expr <e-acute> : '\\(.\\)'` as the single byte `c3`. Under a UTF-8
+    locale (`utf8`) both are text and the same two answer the whole
+    character.
 
     Args:
-        subject (str): the string being matched.
-        pattern (str): the BRE, in GNU's dialect.
-        utf8 (bool): both are text under a UTF-8 locale.
-
-    Both the subject and the pattern are byte views, so `.` matches one
-    byte and the length this answers with is a byte count: GNU reads
-    `expr <e-acute> : '.'` as 1 and `expr <e-acute> : '\\(.\\)'` as the
-    single byte `c3`. Under a UTF-8 locale both are text, and the same
-    two answer the whole character.
+        subject (str): the string to match, as a byte view.
+        pattern (str): the BRE, as a byte view.
+        utf8 (bool): both are text, under a UTF-8 locale.
 
     Returns:
-        str: group 1's text, the match length, or a null value.
+        str: group 1's text, or the match length.
 
     Raises:
-        ExprError: the pattern is one glibc's regex compiler refuses.
+        ExprError: glibc's wording for a pattern it refuses, under
+            expr's own prefix.
     """
     try:
-        regex, groups = compile_bre(pattern, utf8)
+        compiled, groups = compile_bre(pattern, utf8)
     except BreError as exc:
         raise ExprError(f"expr: {exc}") from exc
-    matched = regex.match(subject)
-    if matched is None:
-        return "" if groups else "0"
+    found = compiled.match(subject)
     if groups:
-        return matched.group(1) or ""
-    return str(len(matched.group(0)))
+        return "" if found is None else found.group(1) or ""
+    return "0" if found is None else str(found.end())
 
 
 def do_index(text: str, chars: str) -> str:
@@ -453,298 +453,186 @@ def do_substr(text: str, pos_arg: str, len_arg: str) -> str:
     return text[start - 1 : start - 1 + count]
 
 
-class ExprParser:
-    """GNU expr's grammar as a recursive descent over argv words.
+# How many operands each prefix keyword reads: GNU's `match`, `substr`,
+# `index` and `length`.
+KEYWORD_ARITY = {"match": 2, "substr": 3, "index": 2, "length": 1}
 
-    Each level binds tighter than the one above it and every level is
-    left-associative: `|`, then `&`, then the comparisons, then `+ -`,
-    then `* / %`, then `:`, then the keyword operators and `+ TOKEN`,
-    then primaries. There is no unary operator anywhere -- `-5` is an
-    integer literal, `+` is the string-quoting operator, and `^`, `!`
-    and `<>` are not operators at all. The structure is mirrored level
-    for level in `expr.ts`.
 
-    `evaluate` threads GNU's short-circuiting through: `|` and `&` parse
-    their right operand with it false when the left already decided the
-    answer, and every level that can refuse a value checks it first, so
-    `expr 1 '|' 1 '/' 0` is 1 rather than a division by zero.
+class ExprReader:
+    """An expr line read and evaluated in one left-to-right pass.
 
-    Every word in `args`, every value it produces and every word it
-    quotes in a diagnostic is a byte view (`byte_view`), which is
-    what makes `length`, `index`, `substr` and `:` count bytes as GNU
-    does and makes a string comparison the `strcmp` byte order GNU
-    uses. The conversion is the command's, not the parser's. Under a
-    UTF-8 locale (``utf8``) every word is text instead, and the same
-    operators count characters.
+    The grammar is POSIX's, loosest first: `|`, `&`, the six
+    comparisons (and GNU's `==`), `+ -`, `* / %`, then `:`, every level
+    left-associative. Under `:` sit GNU's operands: a prefix keyword
+    (`match`, `substr`, `index`, `length`) with its operands, `+ WORD`
+    quoting one word, `( EXPR )`, or any other single word, operator
+    words included (`expr '*'` prints `*`). There is no unary operator:
+    `-5` is a word and so is `-`.
+
+    ``live`` is false inside an operand `|` or `&` has already decided
+    (`expr 1 '|' a / 0` prints 1): the operand is still read, so a
+    syntax error in it still counts, but nothing in it is computed and
+    so nothing in it can refuse a value -- not a non-integer, not a zero
+    divisor, not a bad pattern.
+
+    Every word and value is a byte view (see `_expr_eval`), or text
+    under a UTF-8 locale (``utf8``).
+
+    Args:
+        words (list[str]): the expression words.
+        utf8 (bool): the words are text, under a UTF-8 locale.
     """
 
-    def __init__(self, args: list[str], utf8: bool = False) -> None:
-        self.args = args
+    def __init__(self, words: list[str], utf8: bool = False) -> None:
+        self.words = words
         self.utf8 = utf8
-        self.pos = 0
+        self.next = 0
         self.depth = 0
 
-    def at_end(self) -> bool:
-        """Whether every word has been consumed.
+    def done(self) -> bool:
+        return self.next >= len(self.words)
 
-        Returns:
-            bool: True when no words are left.
+    def ahead(self) -> str | None:
+        return None if self.done() else self.words[self.next]
+
+    def last_read(self) -> str:
+        return self.words[self.next - 1]
+
+    def read_word(self) -> str:
+        """The next word, which has to be there.
+
+        Raises:
+            ExprError: the line ran out; GNU names the word before.
         """
-        return self.pos >= len(self.args)
+        if self.done():
+            raise ExprError(
+                missing_argument_after(self.last_read(), self.utf8)
+            )
+        self.next += 1
+        return self.words[self.next - 1]
 
-    def peek(self) -> str | None:
-        """The next word without consuming it.
-
-        Returns:
-            str | None: the word, or None at the end of the line.
-        """
-        return None if self.at_end() else self.args[self.pos]
-
-    def nextarg(self, word: str) -> bool:
-        """Consume the next word if it is exactly `word`.
-
-        Args:
-            word (str): the operator or keyword to look for.
-
-        Returns:
-            bool: True when it was there and has been consumed.
-        """
-        if self.peek() == word:
-            self.pos += 1
-            return True
-        return False
-
-    def take(self) -> str:
-        """Consume the next word unconditionally.
-
-        Returns:
-            str: the word.
-        """
-        word = self.args[self.pos]
-        self.pos += 1
+    def take_if(self, wanted: tuple[str, ...]) -> str | None:
+        word = self.ahead()
+        if word is None or word not in wanted:
+            return None
+        self.next += 1
         return word
 
-    def prev(self) -> str:
-        """The last word consumed, which GNU names in two diagnostics.
-
-        Returns:
-            str: the word, or the empty string before anything was read.
-        """
-        return self.args[self.pos - 1] if self.pos > 0 else ""
-
-    def require_more_args(self) -> None:
-        """Refuse a line that ended where an operand was needed.
-
-        Raises:
-            ExprError: the line is exhausted.
-        """
-        if self.at_end():
-            raise ExprError(missing_argument_after(self.prev(), self.utf8))
-
-    def eval_or(self, evaluate: bool) -> str:
-        """Level 1: `|`, which short-circuits on a truthy left operand.
-
-        Args:
-            evaluate (bool): False inside a branch already decided.
-
-        Returns:
-            str: the left operand when it is truthy, else the right one,
-                normalised to `0` when both are falsy.
-        """
-        left = self.eval_and(evaluate)
-        while self.nextarg("|"):
-            right = self.eval_and(evaluate and is_null(left))
-            if is_null(left):
-                left = "0" if is_null(right) else right
+    def either(self, live: bool) -> str:
+        """`A | B`: A unless it is null or 0, else B unless it is, else 0."""
+        left = self.both(live)
+        while self.take_if(("|",)):
+            right = self.both(live and is_null(left))
+            if live and is_null(left):
+                left = right if not is_null(right) else "0"
         return left
 
-    def eval_and(self, evaluate: bool) -> str:
-        """Level 2: `&`, which short-circuits on a falsy left operand.
-
-        Args:
-            evaluate (bool): False inside a branch already decided.
-
-        Returns:
-            str: the left operand when both are truthy, else `0`.
-        """
-        left = self.eval_compare(evaluate)
-        while self.nextarg("&"):
-            right = self.eval_compare(evaluate and not is_null(left))
-            if is_null(left) or is_null(right):
-                left = "0"
+    def both(self, live: bool) -> str:
+        """`A & B`: A when neither is null or 0, else 0."""
+        left = self.relation(live)
+        while self.take_if(("&",)):
+            right = self.relation(live and not is_null(left))
+            if live:
+                left = "0" if is_null(left) or is_null(right) else left
         return left
 
-    def eval_compare(self, evaluate: bool) -> str:
-        """Level 3: the six comparisons, plus `==` as a synonym for `=`.
-
-        Args:
-            evaluate (bool): False inside a branch already decided.
-
-        Returns:
-            str: the value of the chain.
-        """
-        left = self.eval_additive(evaluate)
-        while True:
-            op = self.peek()
-            if op is None or op not in CMP_OPS:
-                return left
-            self.pos += 1
-            right = self.eval_additive(evaluate)
-            if evaluate:
+    def relation(self, live: bool) -> str:
+        left = self.sum(live)
+        while (op := self.take_if(CMP_OPS)) is not None:
+            right = self.sum(live)
+            if live:
                 left = compare(left, op, right)
+        return left
 
-    def eval_additive(self, evaluate: bool) -> str:
-        """Level 4: `+` and `-` as binary arithmetic.
-
-        A `+` in an *operand* position is the quoting operator instead,
-        which is why `expr 1 + + 2` is 3: this level reads the first `+`
-        and `eval_keyword` reads the second.
-
-        Args:
-            evaluate (bool): False inside a branch already decided.
-
-        Returns:
-            str: the value of the chain.
-
-        Raises:
-            ExprError: an operand is not an integer.
-        """
-        left = self.eval_multiplicative(evaluate)
-        while True:
-            if self.nextarg("+"):
-                op = "+"
-            elif self.nextarg("-"):
-                op = "-"
-            else:
-                return left
-            right = self.eval_multiplicative(evaluate)
-            if evaluate:
-                a = parse_int_operand(left)
-                b = parse_int_operand(right)
+    def sum(self, live: bool) -> str:
+        left = self.product(live)
+        while (op := self.take_if(ADD_OPS)) is not None:
+            right = self.product(live)
+            if live:
+                a, b = parse_int_operand(left), parse_int_operand(right)
                 left = digits_of_int(a + b if op == "+" else a - b)
+        return left
 
-    def eval_multiplicative(self, evaluate: bool) -> str:
-        """Level 5: `*`, `/` and `%`, which share one level.
-
-        Args:
-            evaluate (bool): False inside a branch already decided.
-
-        Returns:
-            str: the value of the chain.
-
-        Raises:
-            ExprError: an operand is not an integer, or a divisor is
-                zero.
-        """
-        left = self.eval_colon(evaluate)
-        while True:
-            op = self.peek()
-            if op is None or op not in MUL_OPS:
-                return left
-            self.pos += 1
-            right = self.eval_colon(evaluate)
-            if evaluate:
-                a = parse_int_operand(left)
-                b = parse_int_operand(right)
+    def product(self, live: bool) -> str:
+        left = self.matching(live)
+        while (op := self.take_if(MUL_OPS)) is not None:
+            right = self.matching(live)
+            if live:
+                a, b = parse_int_operand(left), parse_int_operand(right)
                 if op == "*":
                     left = digits_of_int(a * b)
                 elif op == "/":
                     left = digits_of_int(trunc_div(a, b))
                 else:
                     left = digits_of_int(trunc_mod(a, b))
-
-    def eval_colon(self, evaluate: bool) -> str:
-        """Level 6: `:`, the regex match, tighter than any arithmetic.
-
-        Args:
-            evaluate (bool): False inside a branch already decided.
-
-        Returns:
-            str: the value of the chain.
-
-        Raises:
-            ExprError: a pattern is one glibc would refuse.
-        """
-        left = self.eval_keyword(evaluate)
-        while self.nextarg(":"):
-            right = self.eval_keyword(evaluate)
-            if evaluate:
-                left = docolon(left, right, self.utf8)
         return left
 
-    def eval_keyword(self, evaluate: bool) -> str:
-        """The keyword operators and `+ TOKEN`, all above the primaries.
+    def matching(self, live: bool) -> str:
+        left = self.operand(live)
+        while self.take_if((":",)):
+            right = self.operand(live)
+            if live:
+                left = colon_match(left, right, self.utf8)
+        return left
 
-        `+` consumes the next argv word unconditionally and pushes it as
-        a literal string, whatever it spells: `expr + length` is
-        `length` and `expr + '('` is `(`. It does not recurse, so
-        `expr + + hello` and `expr + length abcde` are syntax errors --
-        the quoted token eats the operator and the next word is left
-        with no slot.
+    def operand(self, live: bool) -> str:
+        """One operand under `:`, prefix keywords applied.
 
-        `length` counts bytes, which is what it costs to have every
-        value be a byte view: `len` of one is already a byte count, so
-        there is nothing here to special-case.
+        A keyword reads its own operands at this same level, so
+        `length length abc` is 1 and `substr + abc 1 1` is `a`. Those
+        chains are kept on a list here rather than on the call stack:
+        GNU reads one of any length, and only parentheses count toward
+        the nesting limit.
+        """
+        waiting: list[tuple[str, list[str]]] = []
+        while True:
+            word = self.read_word()
+            if word in KEYWORD_ARITY:
+                waiting.append((word, []))
+                continue
+            value = self.simple(word, live)
+            while waiting:
+                keyword, given = waiting[-1]
+                given.append(value)
+                if len(given) < KEYWORD_ARITY[keyword]:
+                    break
+                waiting.pop()
+                value = self.keyword(keyword, given) if live else ""
+            if not waiting:
+                return value
+
+    def keyword(self, keyword: str, given: list[str]) -> str:
+        if keyword == "length":
+            return str(len(given[0]))
+        if keyword == "index":
+            return do_index(given[0], given[1])
+        if keyword == "substr":
+            return do_substr(given[0], given[1], given[2])
+        return colon_match(given[0], given[1], self.utf8)
+
+    def simple(self, word: str, live: bool) -> str:
+        """`+ WORD`, `( EXPR )` or a word standing for itself.
 
         Args:
-            evaluate (bool): False inside a branch already decided.
-
-        Returns:
-            str: the value of the primary.
-
-        Raises:
-            ExprError: the line ends where an operand was needed.
+            word (str): the word already read.
+            live (bool): whether to compute.
         """
-        if self.nextarg("+"):
-            self.require_more_args()
-            return self.take()
-        if self.nextarg("length"):
-            return str(len(self.eval_keyword(evaluate)))
-        if self.nextarg("match"):
-            left = self.eval_keyword(evaluate)
-            right = self.eval_keyword(evaluate)
-            return docolon(left, right, self.utf8) if evaluate else left
-        if self.nextarg("index"):
-            left = self.eval_keyword(evaluate)
-            right = self.eval_keyword(evaluate)
-            return do_index(left, right)
-        if self.nextarg("substr"):
-            text = self.eval_keyword(evaluate)
-            pos_arg = self.eval_keyword(evaluate)
-            len_arg = self.eval_keyword(evaluate)
-            return do_substr(text, pos_arg, len_arg)
-        return self.eval_primary(evaluate)
-
-    def eval_primary(self, evaluate: bool) -> str:
-        """A parenthesised expression, or a bare word.
-
-        Args:
-            evaluate (bool): False inside a branch already decided.
-
-        Returns:
-            str: the value.
-
-        Raises:
-            ExprError: the line ends where an operand was needed, a
-                parenthesis is never closed, a `)` stands where a
-                primary belongs, or the nesting is deeper than
-                MAX_NESTING.
-        """
-        self.require_more_args()
-        if self.nextarg("("):
-            self.depth += 1
-            if self.depth > MAX_NESTING:
-                raise ExprError(NESTING_TOO_DEEP)
-            value = self.eval_or(evaluate)
-            self.depth -= 1
-            if not self.nextarg(")"):
-                raise ExprError(
-                    expecting_close(self.peek(), self.prev(), self.utf8)
-                )
-            return value
-        if self.peek() == ")":
+        if word == "+":
+            return self.read_word()
+        if word == ")":
             raise ExprError(UNEXPECTED_CLOSE)
-        return self.take()
+        if word != "(":
+            return word
+        if self.depth >= MAX_NESTING:
+            raise ExprError(NESTING_TOO_DEEP)
+        self.depth += 1
+        value = self.either(live)
+        self.depth -= 1
+        if self.take_if((")",)) is None:
+            raise ExprError(
+                expecting_close(self.ahead(), self.last_read(), self.utf8)
+            )
+        return value
 
 
 def _expr_eval(args: list[str], utf8: bool = False) -> tuple[str, int]:
@@ -764,10 +652,10 @@ def _expr_eval(args: list[str], utf8: bool = False) -> tuple[str, int]:
     Raises:
         ExprError: anything GNU refuses.
     """
-    parser = ExprParser(args, utf8)
-    value = parser.eval_or(True)
-    if not parser.at_end():
-        raise ExprError(unexpected_argument(parser.args[parser.pos], utf8))
+    reader = ExprReader(args, utf8)
+    value = reader.either(True)
+    if not reader.done():
+        raise ExprError(unexpected_argument(reader.words[reader.next], utf8))
     return value, 1 if is_null(value) else 0
 
 

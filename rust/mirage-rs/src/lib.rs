@@ -1,5 +1,6 @@
 mod base64;
 mod comm;
+mod compress;
 mod cut;
 mod digest;
 mod generated;
@@ -279,6 +280,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "comm" => comm::open(config),
         "tr" => tr::open(config),
         "uniq" => uniq::open(config),
+        "compress" => compress::open(config),
         "digest" => digest::open(config),
         "grep" => grep::open(config),
         "join" => join::open(config),

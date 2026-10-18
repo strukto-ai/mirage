@@ -101,10 +101,43 @@ def test_duration_seconds_rejects_garbage():
         ("RTMIN+ 2", None),
         ("RTMAX+1", None),
         ("2147483648", None),
+        ("CLD", 17),
+        ("io", 29),
+        ("SIGPOLL", 29),
+        ("09", 9),
+        ("128", 0),
+        ("192", 64),
+        ("384", None),
+        ("576", 64),
+        ("2147483392", 0),
+        ("SIG128", None),
+        ("+9", None),
+        (" 9", None),
+        ("TERM ", None),
+        ("EMT", None),
+        ("SIGSIGTERM", None),
+        ("RTMIN\t2", 36),
+        ("RTMIN2", 36),
+        ("RTMAX2", None),
+        ("RTMIN-1", None),
+        ("RTMAX-030", 34),
+        ("RTMIN+1 ", None),
     ],
 )
 def test_parse_signal(operand, number):
     assert parse_signal(operand) == number
+
+
+def test_parse_signal_reads_numbers_past_the_int_digit_limit():
+    # GNU 9.7 reads 5,000 leading zeros as nothing, and 5,000 digits as
+    # no signal.
+    zeros, nines = "0" * 5000, "9" * 5000
+    assert parse_signal(f"{zeros}9") == 9
+    assert parse_signal(f"SIG{zeros}9") == 9
+    assert parse_signal(f"{zeros}265") == 9
+    assert parse_signal(f"RTMIN+{zeros}2") == 36
+    assert parse_signal(nines) is None
+    assert parse_signal(f"RTMIN+{nines}") is None
 
 
 @pytest.mark.parametrize(
@@ -121,6 +154,9 @@ def test_parse_signal(operand, number):
         (49, "RTMIN+15"),
         (50, "RTMAX-14"),
         (64, "RTMAX"),
+        (16, "STKFLT"),
+        (31, "SYS"),
+        (33, "33"),
     ],
 )
 def test_signal_name(number, name):

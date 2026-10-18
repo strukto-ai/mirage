@@ -54,7 +54,15 @@ import {
   writeRef,
 } from './refs.ts'
 import { filterWords, refFilter, withoutFilterValues, type RefFilter } from './ref_filter.ts'
-import { displayWidth, formatRefs, listingFormat, usedFields } from './ref_format.ts'
+import { parseField } from './ref_fields.ts'
+import {
+  displayWidth,
+  formatRefs,
+  listingFormat,
+  sortRefs,
+  usedFields,
+  ValueTable,
+} from './ref_format.ts'
 import {
   configuredSort,
   headDescription,
@@ -81,7 +89,10 @@ import {
   type GitObject,
   type HeadRef,
   type ReadOnlyRefusal,
+  type RefContext,
+  type RefField,
   type RefItem,
+  type RefSortKey,
   type Upstream,
 } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
@@ -347,72 +358,145 @@ async function remove(
   return `Deleted branch ${name} (was ${short(sha, repo.abbrev)}).\n`
 }
 
+// What a listing row reads when the line gives no --format.
+const ROW_ID = parseField('objectname:short')
+const ROW_SUBJECT = parseField('contents:subject')
+const ROW_TRACK = parseField('upstream:track')
+const ROW_UPSTREAM = parseField('upstream:short')
+const ROW_WORKTREE = parseField('worktreepath')
+const ROW_TARGET = parseField('symref:short')
+
 /**
- * git's `build_format`: the format a branch listing prints with when the line
- * gives none, colors left out as they are off a terminal.
- *
- * A local branch is marked `*` when HEAD is on it and `+` when another worktree
- * is; `-v` pads every name to one column and adds the id, the upstream's
- * distance and the subject, and `-vv` names the upstream (and a worktree the
- * branch is out in) as well.
+ * The fields `branch` rows read with `verbose` `-v`.
  *
  * @param verbose how many `-v`
- * @param width the name column, from `listWidth`
- * @param prefix what a remote-tracking branch is labelled with, `remotes/`
- *   unless only those are listed
  */
-function buildFormat(verbose: number, width: number, prefix: string): string {
-  const label = prefix.replaceAll('%', '%%')
-  let local = '%(if)%(HEAD)%(then)* %(else)%(if)%(worktreepath)%(then)+ %(else)  %(end)%(end)'
-  let remote = '  '
-  if (verbose) {
-    const oid = '%(objectname:short)'
-    local += `%(align:${String(width)},left)%(refname:lstrip=2)%(end) ${oid} `
-    if (verbose > 1) {
-      local +=
-        '%(if:notequals=*)%(HEAD)%(then)%(if)%(worktreepath)%(then)(%(worktreepath)) %(end)%(end)' +
-        '%(if)%(upstream)%(then)[%(upstream:short)%(if)%(upstream:track)%(then): ' +
-        '%(upstream:track,nobracket)%(end)] %(end)%(contents:subject)'
-    } else {
-      local += '%(if)%(upstream:track)%(then)%(upstream:track) %(end)%(contents:subject)'
-    }
-    remote +=
-      `%(align:${String(width)},left)${label}%(refname:lstrip=2)%(end)` +
-      `%(if)%(symref)%(then) -> %(symref:short)%(else) ${oid} %(contents:subject)%(end)`
-  } else {
-    local += '%(refname:lstrip=2)%(if)%(symref)%(then) -> %(symref:short)%(end)'
-    remote += `${label}%(refname:lstrip=2)%(if)%(symref)%(then) -> %(symref:short)%(end)`
-  }
-  return `%(if:notequals=refs/remotes)%(refname:rstrip=-2)%(then)${local}%(else)${remote}%(end)`
+export function rowFields(verbose: number): RefField[] {
+  if (!verbose) return [ROW_WORKTREE, ROW_TARGET]
+  return [
+    ROW_WORKTREE,
+    ROW_TARGET,
+    ROW_ID,
+    ROW_SUBJECT,
+    ROW_TRACK,
+    ...(verbose > 1 ? [ROW_UPSTREAM] : []),
+  ]
 }
 
 /**
- * `calc_maxwidth`: the widest name a verbose listing pads to.
+ * A row's name: `main`, `remotes/origin/main` (`origin/main` under `-r`), or
+ * the detached HEAD's description.
  *
- * @param bonus the width of the label a remote-tracking branch carries
- * @param description the detached HEAD row's name
+ * @param item the listed ref
+ * @param ctx carries the detached HEAD's description
+ * @param prefix what a remote-tracking branch is labelled with
  */
-function listWidth(items: readonly RefItem[], bonus: number, description: string): number {
-  let widest = 0
-  for (const item of items) {
-    let width: number
-    if (item.kind === RefKind.DETACHED) width = displayWidth(description)
-    else {
-      let name = item.name
-      for (const prefix of [BRANCH_PREFIX, REMOTE_PREFIX])
-        if (name.startsWith(prefix)) name = name.slice(prefix.length)
-      width = displayWidth(name) + (item.kind === RefKind.REMOTE ? bonus : 0)
-    }
-    widest = Math.max(widest, width)
+function rowLabel(item: RefItem, ctx: RefContext, prefix: string): string {
+  if (item.kind === RefKind.DETACHED) return ctx.headDescription
+  if (item.kind === RefKind.REMOTE) return prefix + item.name.slice(REMOTE_PREFIX.length)
+  return item.name.startsWith(BRANCH_PREFIX) ? item.name.slice(BRANCH_PREFIX.length) : item.name
+}
+
+/**
+ * The upstream bracket of a verbose row, with its trailing space.
+ *
+ * git 2.50.1 prints `[ahead 1, behind 2]` or `[gone]` under `-v` and nothing
+ * for a branch level with its upstream; `-vv` names the upstream first,
+ * `[origin/main: ahead 1]`, `[origin/main]`.
+ *
+ * @param item the listed ref
+ * @param table the listing's field values
+ * @param verbose how many `-v`
+ */
+function tracking(item: RefItem, table: ValueTable, verbose: number): string {
+  const upstream = item.upstream
+  if (item.kind !== RefKind.BRANCH || upstream === null) return ''
+  const state = upstream.gone
+    ? 'gone'
+    : (
+        [
+          ['ahead', upstream.ahead],
+          ['behind', upstream.behind],
+        ] as const
+      )
+        .filter(([, count]) => count > 0)
+        .map(([word, count]) => `${word} ${String(count)}`)
+        .join(', ')
+  if (verbose === 1) return state ? `[${state}] ` : ''
+  const name = table.value(item, ROW_UPSTREAM).text
+  return state ? `[${name}: ${state}] ` : `[${name}] `
+}
+
+/**
+ * A branch listing as git prints it when the line gives no `--format`.
+ *
+ * Each row is two columns of marker, `*` for the branch HEAD is on (or a
+ * detached HEAD) and `+` for one another worktree has out, then the name; a
+ * symbolic ref adds ` -> ` and its target. `-v` pads every name to the widest,
+ * by display width, and follows it with the abbreviated id, the upstream
+ * bracket and the subject, so an empty subject leaves the id's space behind. A
+ * remote-tracking symbolic ref keeps only its ` -> ` target there, while a
+ * local one reads as the branch it names. `-vv` also names the upstream, and
+ * puts `(<path>)` after the id of a branch another worktree has out.
+ *
+ * @param items the listed refs, in name order
+ * @param ctx the listing's facts
+ * @param keys the sort keys, null for `--no-sort`
+ * @param verbose how many `-v`
+ * @param prefix what a remote-tracking branch is labelled with, `remotes/`
+ *   unless only those are listed
+ * @param icase `--ignore-case`
+ */
+export function branchRows(
+  items: readonly RefItem[],
+  ctx: RefContext,
+  keys: readonly RefSortKey[] | null,
+  verbose: number,
+  prefix: string,
+  icase: boolean,
+): [string, GitError | null] {
+  const table = new ValueTable(
+    [...rowFields(verbose), ...(keys ?? []).map((key) => key.field)],
+    ctx,
+  )
+  const rows: string[] = []
+  try {
+    const ordered = keys ? sortRefs(items, keys, table, ctx, icase, true) : [...items]
+    const labels = ordered.map((item) => rowLabel(item, ctx, prefix))
+    const width = Math.max(0, ...labels.map(displayWidth))
+    ordered.forEach((item, at) => {
+      const label = labels[at] ?? ''
+      const current = item.kind === RefKind.DETACHED || item.name === ctx.head
+      const elsewhere = item.kind === RefKind.BRANCH && item.worktree !== ''
+      const marker = current ? '* ' : elsewhere ? '+ ' : '  '
+      const target = item.symref !== null ? table.value(item, ROW_TARGET).text : ''
+      if (!verbose) {
+        rows.push(`${marker}${label}${target ? ` -> ${target}` : ''}\n`)
+        return
+      }
+      const padded = label + ' '.repeat(width - displayWidth(label))
+      if (target && item.kind === RefKind.REMOTE) {
+        rows.push(`${marker}${padded} -> ${target}\n`)
+        return
+      }
+      const where = verbose > 1 && elsewhere && !current ? `(${item.worktree}) ` : ''
+      rows.push(
+        `${marker}${padded} ${table.value(item, ROW_ID).text} ${where}` +
+          `${tracking(item, table, verbose)}${table.value(item, ROW_SUBJECT).text}\n`,
+      )
+    })
+  } catch (err) {
+    if (err instanceof GitError) return [rows.join(''), err]
+    throw err
   }
-  return widest
+  return [rows.join(''), null]
 }
 
 /**
  * A branch listing, through git's ref-filter as git prints one: the local
  * branches (`-r` the remote-tracking ones instead, `-a` both) and a detached
  * HEAD, which leads whatever the sort keys say, each printed through `--format`
- * or the format `buildFormat` makes.
+ * or as `branchRows` lays rows out.
  */
 async function listBranches(
   ctx: Context,
@@ -435,10 +519,12 @@ async function listBranches(
       (!remotesOnly && name.startsWith(BRANCH_PREFIX)) ||
       (includeRemotes && name.startsWith(REMOTE_PREFIX))) &&
     matchShort(name, patterns, icase)
-  let fmt = listingFormat(template ?? buildFormat(verbose, 0, prefix))
+  const fmt = template !== undefined ? listingFormat(template) : null
   const [items, found, errors] = await refListing(
     repo,
-    usedFields(fmt, keys ?? []),
+    fmt !== null
+      ? usedFields(fmt, keys ?? [])
+      : [...rowFields(verbose), ...(keys ?? []).map((key) => key.field)],
     wanted,
     filter,
     dateClock(ctx.env),
@@ -446,16 +532,15 @@ async function listBranches(
   let refCtx = found
   if (items.some((item) => item.kind === RefKind.DETACHED))
     refCtx = { ...refCtx, headDescription: await headDescription(repo, head) }
-  if (template === undefined && verbose)
-    fmt = listingFormat(
-      buildFormat(verbose, listWidth(items, prefix.length, refCtx.headDescription), prefix),
-    )
-  const [out, stopped] = formatRefs(fmt, items, refCtx, keys, {
-    omitEmpty: fl.asBool('omit_empty'),
-    icase,
-    detachedFirst: true,
-    stream: false,
-  })
+  const [out, stopped] =
+    fmt === null
+      ? branchRows(items, refCtx, keys, verbose, prefix, icase)
+      : formatRefs(fmt, items, refCtx, keys, {
+          omitEmpty: fl.asBool('omit_empty'),
+          icase,
+          detachedFirst: true,
+          stream: false,
+        })
   return listingResult(out, errors, stopped)
 }
 

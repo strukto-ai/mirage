@@ -52,10 +52,47 @@ SPACE_PADDED = "ekl"
 # The directives that stand for several parts (%F is %+4Y-%m-%d, %D is
 # %m/%d/%y, %T is %H:%M:%S), which GNU pads as a whole.
 COMPOSITES = "cDFrRTxX"
+# The directives whose text holds the year: the year, the ISO year and
+# the century, and the dates that print a whole year. The two-digit years
+# and the dates built on them (%y, %g, %D, %x) repeat every 400 years with
+# the calendar, as every weekday and day number does.
+YEAR_TEXT = "YGCFc"
 # The directives that render text (names, AM/PM, the zone abbreviation)
 # or a blank, whose width GNU fills with spaces unless `0` or `+` says
 # zeros and whose `-` drops it; glibc pads them under `-` anyway.
 TEXTUAL = "aAbBhnpPtZ"
+
+
+def year_value(dt: datetime, directive: str, years: int) -> int:
+    """The number a year directive shows for ``dt`` moved ``years`` later.
+
+    Args:
+        dt (datetime): the moment being rendered.
+        directive (str): a key of YEARISH_DIGITS.
+        years (int): years to add to the moment's own, a multiple of 400.
+    """
+    iso = dt.isocalendar()[0] + years
+    year = dt.year + years
+    return {"Y": year, "G": iso, "C": year // 100, "y": year % 100}.get(
+        directive, iso % 100
+    )
+
+
+def year_text(dt: datetime, directive: str, years: int) -> str:
+    """A directive of YEAR_TEXT unpadded, for ``dt`` moved ``years`` later:
+    ``%F`` is the year then ``-%m-%d`` and ``%c`` is ``%a %b %e %H:%M:%S``
+    then the year, as the C locale spells them.
+
+    Args:
+        dt (datetime): the moment being rendered.
+        directive (str): one of YEAR_TEXT.
+        years (int): years to add to the moment's own, a multiple of 400.
+    """
+    if directive == "F":
+        return f"{dt.year + years}{dt.strftime('-%m-%d')}"
+    if directive == "c":
+        return f"{dt.strftime('%a %b %e %H:%M:%S')} {dt.year + years}"
+    return str(year_value(dt, directive, years))
 
 
 def winning_pad(flags: str) -> str | None:
@@ -153,7 +190,11 @@ def epoch_seconds(dt: datetime, flags: str, width: int | None) -> str:
 
 
 def pad_number(
-    dt: datetime, directive: str, flags: str, width: int | None
+    dt: datetime,
+    directive: str,
+    flags: str,
+    width: int | None,
+    years: int = 0,
 ) -> str:
     """Render a numeric directive under GNU's flags and width: the width
     replaces the default digits rather than adding to them (``%1d`` is
@@ -168,8 +209,13 @@ def pad_number(
         flags (str): the flag characters typed between ``%`` and the
             width.
         width (int | None): the minimum field width, if typed.
+        years (int): years to add to the moment's own, a multiple of 400.
     """
-    value = int(dt.strftime("%" + directive))
+    value = (
+        year_value(dt, directive, years)
+        if directive in YEARISH_DIGITS
+        else int(dt.strftime("%" + directive))
+    )
     pad = winning_pad(flags)
     if pad is None:
         pad = "_" if directive in SPACE_PADDED else "0"
@@ -196,7 +242,11 @@ def pad_quarter(quarter: str, flags: str, width: int | None) -> str:
 
 
 def padded_composite(
-    dt: datetime, directive: str, flags: str, width: int | None
+    dt: datetime,
+    directive: str,
+    flags: str,
+    width: int | None,
+    years: int = 0,
 ) -> str:
     """Pad a composite directive (``%F``, ``%D``, ``%T``, ``%c`` and the
     rest of ``COMPOSITES``) the way GNU date does: the flags reach the
@@ -215,8 +265,13 @@ def padded_composite(
         flags (str): the flag characters typed between ``%`` and the
             width.
         width (int | None): the minimum field width, if typed.
+        years (int): years to add to the moment's own, a multiple of 400.
     """
-    text = dt.strftime("%" + directive)
+    text = (
+        year_text(dt, directive, years)
+        if years and directive in YEAR_TEXT
+        else dt.strftime("%" + directive)
+    )
     if "^" in flags:
         text = text.upper()
     pad = winning_pad(flags)
@@ -225,12 +280,14 @@ def padded_composite(
     if directive == "F" and pad != "_":
         rest = dt.strftime("-%m-%d")
         if pad == "+":
-            return plus_year(dt, "Y", width - 6) + rest
-        return pad_signed("", str(dt.year), "0", width - 6) + rest
+            return plus_year(dt, "Y", width - 6, years) + rest
+        return pad_signed("", str(dt.year + years), "0", width - 6) + rest
     return text.rjust(width, "0" if pad in ("0", "+") else " ")
 
 
-def plus_year(dt: datetime, directive: str, width: int | None) -> str:
+def plus_year(
+    dt: datetime, directive: str, width: int | None, years: int = 0
+) -> str:
     """Render ``%+Y``, ``%+G``, ``%+C``, ``%+y`` or ``%+g`` as GNU date
     does: zero-padded to the width, and led by ``+`` when the value
     outgrows the digits the directive normally shows or the width
@@ -242,17 +299,9 @@ def plus_year(dt: datetime, directive: str, width: int | None) -> str:
         dt (datetime): the moment being rendered.
         directive (str): a key of YEARISH_DIGITS.
         width (int | None): the minimum field width, if typed.
+        years (int): years to add to the moment's own, a multiple of 400.
     """
-    if directive == "Y":
-        value = dt.year
-    elif directive == "G":
-        value = dt.isocalendar()[0]
-    elif directive == "C":
-        value = dt.year // 100
-    elif directive == "y":
-        value = dt.year % 100
-    else:
-        value = dt.isocalendar()[0] % 100
+    value = year_value(dt, directive, years)
     digits = YEARISH_DIGITS[directive]
     signed = value > 10**digits - 1 or (width is not None and width > digits)
     sign = "+" if signed else ""
@@ -296,7 +345,7 @@ def pad_text(
     return text.rjust(width, "0" if pad in ("0", "+") else " ")
 
 
-def gnu_strftime(dt: datetime, fmt: str) -> str:
+def gnu_strftime(dt: datetime, fmt: str, years: int = 0) -> str:
     """Render ``fmt`` the way GNU ``date`` and ``ls --time-style=+FMT`` do.
 
     Two directives GNU implements itself are expanded ahead of the C
@@ -330,9 +379,14 @@ def gnu_strftime(dt: datetime, fmt: str) -> str:
     other directive passes to strftime with its prefix intact; ``%%``
     pairs are stepped over, keeping ``%%q`` literal.
 
+    A moment past what a ``datetime`` holds is rendered whole 400-year
+    cycles earlier, the Gregorian calendar's period, and ``years`` puts
+    them back into every directive of YEAR_TEXT.
+
     Args:
         dt (datetime): the moment being rendered.
         fmt (str): the format as typed, without the leading ``+``.
+        years (int): years to add to the moment's own, a multiple of 400.
     """
     out: list[str] = []
     i = 0
@@ -366,7 +420,9 @@ def gnu_strftime(dt: datetime, fmt: str) -> str:
             # The C locale has no alternative forms: a modified directive
             # is the plain one.
             out.append(
-                gnu_strftime(dt, fmt[i:k] + fmt[c + 1]).replace("%", "%%")
+                gnu_strftime(dt, fmt[i:k] + fmt[c + 1], years).replace(
+                    "%", "%%"
+                )
             )
             i = c + 2
             continue
@@ -383,15 +439,19 @@ def gnu_strftime(dt: datetime, fmt: str) -> str:
             nanos = f"{dt.microsecond * 1000:09d}"
             out.append(nanos[:width].ljust(width, "0") if width else nanos)
         elif pad == "+" and directive in YEARISH_DIGITS:
-            out.append(plus_year(dt, directive, width))
+            out.append(plus_year(dt, directive, width, years))
         elif directive in COMPOSITES and (flags or width is not None):
-            out.append(padded_composite(dt, directive, flags, width))
+            out.append(padded_composite(dt, directive, flags, width, years))
         elif directive in NUMERIC_DIGITS and (
             width is not None or pad is not None
         ):
-            out.append(pad_number(dt, directive, flags, width))
+            out.append(pad_number(dt, directive, flags, width, years))
         elif directive in TEXTUAL and (flags or width is not None):
             out.append(pad_text(dt, directive, flags, width))
+        elif years and directive == "F":
+            out.append(plus_year(dt, "Y", 4, years) + dt.strftime("-%m-%d"))
+        elif years and directive in YEAR_TEXT:
+            out.append(year_text(dt, directive, years))
         elif directive not in GNU_DIRECTIVES:
             out.append("%%" + fmt[i + 1 : c + 1])
         elif directive == "P":

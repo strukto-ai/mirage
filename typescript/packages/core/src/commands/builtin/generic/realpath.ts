@@ -30,8 +30,32 @@ import { namespaceOf } from '../../../workspace/files.ts'
 
 const MODES: Record<string, string> = { canonicalize_existing: 'e', canonicalize_missing: 'm' }
 const LINKS: Record<string, string> = { logical: 'L', physical: 'P', strip: 's', no_symlinks: 's' }
-const LOOP_CHECK_AFTER = 20
-const LINK_CEILING = 1024
+// GNU 9.7 resolves a chain of any length (3,000 links measured) and calls a
+// loop of any length a loop; a walk here stops at LINK_LIMIT links, so a
+// longer chain is refused as a loop. On a loop, `-m` keeps unresolved the
+// first link that comes round again counting from the 21st: of
+// l1 -> l2 -> ... -> lk -> l1, measured for k from 1 to 50, `realpath -m l1`
+// prints l((20 mod k) + 1), and behind a chain of more than 20 links it
+// prints the loop's first link.
+const LINK_LIMIT = 1024
+const KEPT_FROM = 21
+
+type Step = readonly [string, readonly string[]]
+
+/**
+ * The link `-m` leaves unresolved once the walk is back at a link: from
+ * `first` on the walk repeats itself every `steps.length - first` links, so
+ * the first link met again from the KEPT_FROM-th on is the loop's own first
+ * link, or the link that step lands on when fewer links lead into the loop.
+ * Mirrors Python's _kept_link.
+ */
+function keptLink(steps: readonly Step[], first: number): Step {
+  const period = steps.length - first
+  const landing = Math.max(KEPT_FROM - 1, first)
+  const step = steps[first + ((landing - first) % period)]
+  if (step === undefined) throw new RangeError(`no step ${String(landing)}`)
+  return step
+}
 
 /**
  * GNU realpath's options, the last of each family winning: `mode` is `e`
@@ -68,8 +92,8 @@ async function directory(stat: StatFn, path: string, word: string): Promise<void
 }
 
 /**
- * gnulib's canonicalize_filename_mode, over the workspace, which `realpath`
- * and `readlink -f` share. A relative word starts at the working directory.
+ * A path with its links resolved, the walk `realpath` and `readlink -f`
+ * share. A relative word starts at the working directory.
  * Each named component is appended and, unless `nolinks`, a link there is
  * read (`readlink`, one link's target or null) and its target put in front
  * of the names left, so a `..` climbs from where a link leads. A link the
@@ -77,12 +101,14 @@ async function directory(stat: StatFn, path: string, word: string): Promise<void
  * followed by `.` or `..` must be a directory. A trailing slash rejects an
  * existing non-directory. GNU 9.7's default mode accepts a missing final
  * component with a slash; `nolinks` also accepts missing parents. `e`
- * requires existence, while `m` checks nothing. A loop is a link met again
- * with the same names left, looked for once 20 links are behind, as gnulib
- * does; a link that grows the names it leaves (`a -> a/x`) never repeats,
- * and GNU walks it until memory runs out, so the walk stops at
- * LINK_CEILING links. `m` leaves the looping link unresolved. Throws the
- * first check the walk fails. Mirrors Python.
+ * requires existence, while `m` checks nothing. A walk that comes back to a
+ * link with the same names left is in a loop, `Too many levels of symbolic
+ * links`, and so is one that meets more than LINK_LIMIT links, which covers
+ * a link that grows the names it leaves (`a -> a/x`) and that GNU walks until
+ * memory runs out. `m` instead leaves one link unresolved and goes on with
+ * the names left after it: on a loop the one keptLink picks, past the limit
+ * the link it stopped at. Throws the first check the walk fails. Mirrors
+ * Python.
  */
 export async function canonicalize(
   word: string,
@@ -98,8 +124,8 @@ export async function canonicalize(
   let slash = word.endsWith('/')
   let path = '/'
   let last: string | undefined
-  let links = 0
-  const seen = new Set<string>()
+  const steps: Step[] = []
+  const stepOf = new Map<string, number>()
   for (let name = names.shift(); name !== undefined; name = names.shift()) {
     last = name
     if (name === '.' || name === '..') {
@@ -110,16 +136,24 @@ export async function canonicalize(
     const target =
       nolinks || readlink === null || !pathVisible(visibility, path) ? null : readlink(path)
     if (target !== null) {
-      links++
-      const key = JSON.stringify([path, names])
-      if (links <= LOOP_CHECK_AFTER || (!seen.has(key) && links <= LINK_CEILING)) {
-        if (links > LOOP_CHECK_AFTER) seen.add(key)
+      const here: Step = [path, [...names]]
+      const key = JSON.stringify(here)
+      const again = stepOf.get(key)
+      if (again === undefined && steps.length < LINK_LIMIT) {
+        stepOf.set(key, steps.length)
+        steps.push(here)
         slash = slash || (names.length === 0 && target.endsWith('/'))
         names.unshift(...target.split('/').filter((n) => n !== ''))
         path = target.startsWith('/') ? '/' : parent(path)
         continue
       }
       if (mode !== 'm') throw eloop(word)
+      if (again !== undefined) {
+        const [keptPath, rest] = keptLink(steps, again)
+        path = keptPath
+        names.splice(0, names.length, ...rest)
+        last = path.slice(path.lastIndexOf('/') + 1)
+      }
     }
     const next = names[0]
     if (mode !== 'm' && (next === '.' || next === '..')) await directory(stat, path, word)

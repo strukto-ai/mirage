@@ -321,6 +321,20 @@ def test_expr_parentheses(args, value, code):
     assert _expr_eval(list(args)) == (value, code)
 
 
+def test_expr_reads_a_chain_of_two_thousand_keywords():
+    # GNU 9.7: each `length` reads the next as its operand, at any length
+    # of chain; the call stack once ran out near 1,000.
+    chain = ["length"] * 2000
+    assert _expr_eval([*chain, "abc"]) == ("1", 0)
+    assert _expr_eval(["substr", *chain, "abcdef", "1", "1"]) == ("1", 0)
+    assert _expr_eval([*chain[1:], "+", "length"]) == ("1", 0)
+    with pytest.raises(ExprError) as caught:
+        _expr_eval([*chain, "length"])
+    assert str(caught.value) == (
+        "expr: syntax error: missing argument after 'length'"
+    )
+
+
 def test_expr_refuses_nesting_past_our_own_limit():
     # GNU declares no limit and segfaults with nothing on stderr, so the
     # limit and its wording are ours, not a GNU string.

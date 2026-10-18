@@ -37,8 +37,23 @@ describe('eventOf', () => {
     ['SIGEXIT', null],
     ['65', null],
     ['FOO', null],
+    // bash 5.2 takes the names `trap -l` lists and no other: IO and STKFLT,
+    // but not the IOT, CLD or POLL timeout also takes.
+    ['IO', TrapEvent.Other],
+    ['sigstkflt', TrapEvent.Other],
+    ['IOT', null],
+    ['SIGCLD', null],
+    ['POLL', null],
   ])('reads %s as bash does', (spec, event) => {
     expect(eventOf(spec)).toBe(event)
+  })
+
+  it('reads numbers past any digit limit as bash does', () => {
+    // bash 5.2 reads 5,000 leading zeros as nothing, and 5,000 digits as no
+    // signal. Mirrors test_trap.py.
+    expect(eventOf('0'.repeat(5000))).toBe(TrapEvent.Exit)
+    expect(eventOf('0'.repeat(5000) + '9')).toBe(TrapEvent.Other)
+    expect(eventOf('9'.repeat(5000))).toBeNull()
   })
 })
 

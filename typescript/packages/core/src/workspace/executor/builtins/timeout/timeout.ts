@@ -15,6 +15,7 @@
 import { versionLine } from '../../../../commands/spec/standard.ts'
 import { quoteText } from '../../../../commands/quote.ts'
 import { STRTOD, strtodDouble } from '../../../../commands/builtin/utils/strtod.ts'
+import { INT_MAX, boundedDecimal } from '../../../../commands/builtin/utils/strtol.ts'
 import { renderHelp } from '../../../../commands/spec/help.ts'
 import { SHELL_SPECS, parseShellOptions } from '../../../../commands/spec/shell.ts'
 import {
@@ -40,18 +41,18 @@ import {
   SELF_KILLING_SIGNALS,
   SIGCHLD,
   SIGKILL,
-  SIGNAL_NAMES,
+  SIGNAL_ALIASES,
+  SIGNALS,
   SIGRTMAX,
   SIGRTMIN,
   SIGSTOP,
   STOP_SIGNALS,
+  TIMEOUT_NAMES,
 } from './constants.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
 const SYNOPSIS = 'timeout [OPTION] DURATION COMMAND [ARG]...'
-
-const LONG = /^[ \t\n\v\f\r]*[+-]?[0-9]+$/
 
 const UNIT_SECONDS: Readonly<Record<string, number>> = Object.freeze({
   '': 1,
@@ -60,8 +61,6 @@ const UNIT_SECONDS: Readonly<Record<string, number>> = Object.freeze({
   h: 3600,
   d: 86400,
 })
-
-const SIGNUM_BOUND = SIGRTMAX
 
 const TIMED_OUT: unique symbol = Symbol('timed-out')
 
@@ -102,61 +101,88 @@ export function durationSeconds(raw: string): number | null {
   return (value === 0 ? 0 : value) * multiplier
 }
 
-function strtol(text: string): number | null {
-  if (text === '') return 0
-  return LONG.test(text) ? Number(text.trim()) : null
+// The offset after RTMIN or RTMAX: C blanks, then an optional sign, then
+// decimal digits and nothing more (`RTMIN 2`, `RTMAX-01`; not `RTMIN+ 2`).
+const RT_OFFSET = /^[ \t\n\v\f\r]*([+-]?)([0-9]+)$/
+
+function decimal(digits: string): number | null {
+  if (!/^[0-9]+$/.test(digits)) return null
+  const value = boundedDecimal(digits, INT_MAX + 1n)
+  return value === null ? null : Number(value)
 }
 
-function str2sig(name: string): number | null {
-  if (/^[0-9]/.test(name)) {
-    if (!/^[0-9]+$/.test(name)) return null
-    return Number(name) <= SIGNUM_BOUND ? Number(name) : null
-  }
-  for (const [known, number] of SIGNAL_NAMES) if (known === name) return number
-  const span = SIGRTMAX - SIGRTMIN
-  if (name.startsWith('RTMIN')) {
-    const delta = strtol(name.slice(5))
-    if (delta !== null && delta >= 0 && delta <= span) return SIGRTMIN + delta
-  } else if (name.startsWith('RTMAX')) {
-    const delta = strtol(name.slice(5))
-    if (delta !== null && delta >= -span && delta <= 0) return SIGRTMAX + delta
+/**
+ * The signal a bare number names, as GNU timeout 9.7 reads one: 0 to 64
+ * name themselves; 128 to 192 are a `$?` of 128 plus the signal, and from
+ * 256 on only the low byte counts, which must then be 0 to 64 (`265` is
+ * KILL, `384` nothing). Mirrors Python's _status_signal.
+ */
+function statusSignal(value: number): number | null {
+  if (value <= SIGRTMAX) return value
+  if (value < 256) return value >= 128 && value <= 128 + SIGRTMAX ? value - 128 : null
+  const low = value % 256
+  return low <= SIGRTMAX ? low : null
+}
+
+function realtime(name: string): number | null {
+  for (const [base, start] of [
+    ['RTMIN', SIGRTMIN],
+    ['RTMAX', SIGRTMAX],
+  ] as const) {
+    if (!name.startsWith(base)) continue
+    const rest = name.slice(base.length)
+    if (rest === '') return start
+    const match = RT_OFFSET.exec(rest)
+    const offset = match === null ? null : decimal(match[2] ?? '')
+    if (match === null || offset === null) return null
+    const value = match[1] === '-' ? start - offset : start + offset
+    return value >= SIGRTMIN && value <= SIGRTMAX ? value : null
   }
   return null
 }
 
 /**
- * GNU's operand2sig: the signal a -s value names, null if none.
- *
- * A number may carry a shell's 128 or 256 offset, as in `$?`; a name is
- * read in any case, with or without its SIG prefix.
+ * The signal a `-s` value names, null if it names none. Measured on GNU
+ * timeout 9.7: a number (decimal digits only, no sign or blank) may carry a
+ * shell's 128 or 256 offset, as `$?` does; a name is read in any case, with
+ * or without `SIG`, and `SIG` before digits takes only 0 to 64. `RTMIN+n`
+ * and `RTMAX-n` stay inside the realtime range. Mirrors Python's
+ * parse_signal.
  */
 export function parseSignal(operand: string): number | null {
-  let number: number | null
-  if (/^[0-9]/.test(operand)) {
-    if (!/^[0-9]+$/.test(operand) || Number(operand) > 2 ** 31 - 1) return null
-    const typed = Number(operand)
-    number = typed & (typed >= 0xff ? 0xff : 0x7f)
-  } else {
-    const upper = operand.replace(/[a-z]/g, (c) => c.toUpperCase())
-    number = str2sig(upper)
-    if (number === null && upper.startsWith('SIG')) number = str2sig(upper.slice(3))
+  for (let i = 0; i < operand.length; i += 1) if (operand.charCodeAt(i) > 0x7f) return null
+  if (/^[0-9]+$/.test(operand)) {
+    const value = decimal(operand)
+    return value === null ? null : statusSignal(value)
   }
-  if (number === null || number < 0 || number > SIGNUM_BOUND) return null
-  return number
+  const upper = operand.toUpperCase()
+  const name = upper.startsWith('SIG') ? upper.slice(3) : upper
+  if (/^[0-9]+$/.test(name)) {
+    const value = decimal(name)
+    return value !== null && value <= SIGRTMAX ? value : null
+  }
+  const alias = SIGNAL_ALIASES.get(name)
+  if (alias !== undefined) return alias
+  for (const [number, known] of SIGNALS) if (known === name) return number
+  return realtime(name)
 }
 
 /**
- * gnulib's sig2str: a signal's name, or its number when it has none.
- * The table follows glibc on x86-64 Linux: the first matching name wins
- * (6 is ABRT, 29 is POLL), independently of the host's signal numbers.
+ * A signal's name as `timeout -v` prints it, or its number. The realtime
+ * range is named from RTMIN up to its middle (RTMIN+15 is 49) and from RTMAX
+ * above it (50 is RTMAX-14), as GNU 9.7 and bash do. Mirrors Python's
+ * signal_name.
  */
 export function signalName(number: number): string {
-  for (const [name, known] of SIGNAL_NAMES) if (known === number) return name
+  const named = TIMEOUT_NAMES.get(number) ?? SIGNALS.get(number)
+  if (named !== undefined) return named
   if (number < SIGRTMIN || number > SIGRTMAX) return String(number)
-  const low = number <= SIGRTMIN + Math.floor((SIGRTMAX - SIGRTMIN) / 2)
-  const delta = number - (low ? SIGRTMIN : SIGRTMAX)
-  const suffix = delta === 0 ? '' : delta > 0 ? `+${String(delta)}` : String(delta)
-  return `${low ? 'RTMIN' : 'RTMAX'}${suffix}`
+  if (number === SIGRTMIN) return 'RTMIN'
+  if (number === SIGRTMAX) return 'RTMAX'
+  if (number - SIGRTMIN <= Math.floor((SIGRTMAX - SIGRTMIN) / 2)) {
+    return `RTMIN+${String(number - SIGRTMIN)}`
+  }
+  return `RTMAX-${String(SIGRTMAX - number)}`
 }
 
 // Run the inner line and drain its stdout under the same deadline. A lazy

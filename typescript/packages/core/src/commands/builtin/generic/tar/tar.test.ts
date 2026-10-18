@@ -19,27 +19,14 @@ import { materialize } from '../../../../io/types.ts'
 import { readTar } from '../../tar_helper.ts'
 // Mirrors python/tests/commands/builtin/generic/tar/test_tar.py.
 
-import { beforeAll, expect, it } from 'vitest'
-import { gzip } from '../../../../utils/compress.ts'
+import { expect, it } from 'vitest'
 import { PathSpec, FileStat, FileType, MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
-import { writeTar } from '../../tar_helper.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
-
-let OK: Uint8Array = new Uint8Array()
-
-beforeAll(async () => {
-  OK = await gzip(
-    await writeTar([
-      { name: 'd/a.txt', data: ENC.encode('hello\n'), isFile: true },
-      { name: 'd/b.txt', data: ENC.encode('bee\n'), isFile: true },
-    ]),
-  )
-})
 
 async function shell(
   line: string,
@@ -64,7 +51,13 @@ it('lists the member a cut short stream reaches', async () => {
   // The stream holds the first header and no data block: GNU lists the
   // member it reached, then stops there without its child's status (tar
   // 1.35, same bytes).
-  const r = await shell('tar -tzf /data/cut.tgz', { '/data/cut.tgz': OK.subarray(0, -40) })
+  const cut = new Uint8Array([
+    31, 139, 8, 0, 0, 0, 0, 0, 0, 19, 75, 209, 79, 212, 43, 169, 40, 97, 160, 37, 48, 0, 2, 51, 19,
+    19, 48, 13, 4, 232, 52, 72, 22, 137, 13, 18, 55, 55, 52, 49, 101, 80, 48, 160, 169, 171, 160,
+    160, 180, 184, 36, 177, 8, 104, 37, 61, 236, 26, 132, 32, 35, 53, 39, 39, 159, 107, 160, 93, 49,
+    10, 6,
+  ])
+  const r = await shell('tar -tzf /data/cut.tgz', { '/data/cut.tgz': cut })
   expect(r).toEqual([
     2,
     'd/a.txt\n',

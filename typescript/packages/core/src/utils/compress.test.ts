@@ -28,6 +28,35 @@ import { GzipDataError } from './compress.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
+
+it('yields while draining expanded output and closes an interrupted source', async () => {
+  const size = 32 * 1024 * 1024
+  const archive = await gzip(new Uint8Array(size).fill(120))
+  let closed = false
+  const controller = new AbortController()
+  let written = 0
+  async function* source(): AsyncIterable<Uint8Array> {
+    try {
+      yield* yieldBytes(archive)
+    } finally {
+      closed = true
+    }
+  }
+  const timer = setTimeout(() => {
+    controller.abort()
+  }, 1)
+  try {
+    for await (const data of gunzipStream(source())) {
+      written += data.byteLength
+      if (controller.signal.aborted) break
+    }
+    expect(written).toBeGreaterThan(0)
+    expect(written).toBeLessThan(size)
+    expect(closed).toBe(true)
+  } finally {
+    clearTimeout(timer)
+  }
+})
 // gzip -n of "hello\n": a fixed ten-byte header, the deflate body, trailer.
 const HELLO = new Uint8Array([
   0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3, 0xcb, 0x48, 0xcd, 0xc9, 0xc9, 0xe7, 2, 0, 0x20, 0x30, 0x3a,
@@ -197,7 +226,7 @@ describe('gunzipStream', () => {
     const decoded = gunzipStream(source())[Symbol.asyncIterator]()
     expect((await decoded.next()).value).toEqual(ENC.encode('x'.repeat(GZIP_CHUNK_SIZE)))
     expect(reads).toEqual([1])
-    await decoded.return?.()
+    await decoded.return()
     expect(reads).toEqual([1])
     expect(closed).toEqual([true])
   })

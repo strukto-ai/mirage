@@ -26,8 +26,8 @@ const LONG_MAX = 2n ** 63n - 1n
 export const ULONG_MAX = 2n ** 64n - 1n
 export const INT_MAX = 2n ** 31n - 1n
 export const UINT_MAX = 2n ** 32n - 1n
-// What gnulib appends after a refused number that scanned, measured under
-// LC_ALL=C on glibc: ERANGE for a value outside the option's range and
+// What GNU 9.7 appends after a refused number that scanned, measured under
+// LC_ALL=C: ERANGE for a value outside the option's range and
 // EOVERFLOW for one the program words as too large for its type.
 export const ERANGE_REASON = 'Numerical result out of range'
 export const EOVERFLOW_REASON = 'Value too large for defined data type'
@@ -54,6 +54,19 @@ export function signedDecimal(text: string): bigint | null {
   if (match === null) return null
   const value = decimalValue(match[2] ?? '0')
   return match[1] === '-' ? -value : value
+}
+
+/**
+ * ASCII decimal `digits` as a number, null when it is `bound` or more. Leading
+ * zeros go first and a run longer than the bound is refused by its length, so
+ * however many digits are typed, the conversion only ever sees as many as the
+ * bound has. Mirrors Python's bounded_decimal.
+ */
+export function boundedDecimal(digits: string, bound: bigint): bigint | null {
+  const significant = digits.replace(/^0+/, '')
+  if (significant.length > bound.toString().length) return null
+  const value = BigInt(significant === '' ? '0' : significant)
+  return value < bound ? value : null
 }
 
 /**

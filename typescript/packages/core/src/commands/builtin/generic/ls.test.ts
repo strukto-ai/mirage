@@ -25,9 +25,9 @@ import {
   LS_MINOR_PROBLEM,
   LS_OK,
   exitStatusFor,
-  filevercmp,
   lsGeneric,
   parseFlags,
+  sortByVersion,
   typeIndicator,
 } from './ls.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
@@ -315,27 +315,51 @@ describe('honest per-entry errors', () => {
 })
 
 describe('lsGeneric sort orders', () => {
-  it('filevercmp pins gnulib corner cases', () => {
-    expect(filevercmp('file2.txt', 'file10.txt')).toBeLessThan(0)
-    expect(filevercmp('a.txt', 'a.tar.gz')).toBeGreaterThan(0)
-    expect(filevercmp('', 'a')).toBeLessThan(0)
-    expect(filevercmp('.', '..')).toBeLessThan(0)
-    expect(filevercmp('.hidden', 'a')).toBeLessThan(0)
-    expect(filevercmp('1.0~rc1', '1.0')).toBeLessThan(0)
-    expect(filevercmp('abc', 'abc')).toBe(0)
+  const byVersion = async (...names: string[]): Promise<(string | undefined)[]> =>
+    (await sortByVersion(names)).map((i) => names[i])
+
+  it.each([
+    ['file2.txt', 'file10.txt'],
+    ['a.tar.gz', 'a.txt'],
+    ['', 'a'],
+    ['.', '..'],
+    ['.hidden', 'a'],
+    ['1.0~rc1', '1.0'],
+  ])('sortByVersion pins GNU corner cases: %s before %s', async (first, second) => {
+    expect(await byVersion(second, first)).toEqual([first, second])
+    expect(await byVersion(first, second)).toEqual([first, second])
   })
 
-  it('filevercmp orders bytes past the letters', () => {
+  it('sortByVersion keeps equal names in input order', async () => {
+    expect(await sortByVersion(['abc', 'abc'])).toEqual([0, 1])
+    expect(await sortByVersion([])).toEqual([])
+  })
+
+  it('sortByVersion breaks ties by bytes', async () => {
+    // GNU 9.7 `ls -v`: names a version reading cannot tell apart list in
+    // byte order, `a001 a01 a1`, as `sort -V` prints them.
+    expect(await byVersion('a1', 'a01', 'a001')).toEqual(['a001', 'a01', 'a1'])
+  })
+
+  it('sortByVersion orders bytes past the letters', async () => {
     // Pinned on coreutils 9.7 under LC_ALL=C: `_ { é ÿ Ā €` and
-    // `a- a{ aé`, since gnulib classifies bytes, not code points.
-    expect(filevercmp('_', '{')).toBeLessThan(0)
-    expect(filevercmp('{', 'é')).toBeLessThan(0)
-    expect(filevercmp('é', 'ÿ')).toBeLessThan(0)
-    expect(filevercmp('ÿ', 'Ā')).toBeLessThan(0)
-    expect(filevercmp('Ā', '€')).toBeLessThan(0)
-    expect(filevercmp('a-', 'a{')).toBeLessThan(0)
-    expect(filevercmp('a{', 'aé')).toBeLessThan(0)
-    expect(filevercmp('\uffff', '\u{1d11e}')).toBeLessThan(0)
+    // `a- a{ aé`, since the order classifies bytes, not code points.
+    expect(await byVersion('€', 'Ā', 'ÿ', 'é', '{', '_')).toEqual(['_', '{', 'é', 'ÿ', 'Ā', '€'])
+    expect(await byVersion('aé', 'a{', 'a-')).toEqual(['a-', 'a{', 'aé'])
+    expect(await byVersion('\u{1d11e}', '\uffff')).toEqual(['\uffff', '\u{1d11e}'])
+  })
+
+  it('sortByVersion keeps a leading U+FEFF', async () => {
+    // GNU 9.7 `ls -v` over a, b, U+FEFF, aU+FEFF and U+FEFFa: the mark's
+    // bytes sort past the letters wherever they sit, and every name lists once.
+    expect(await byVersion('a', '\ufeffa', 'b', '\ufeff', 'a\ufeff')).toEqual([
+      'a',
+      'a\ufeff',
+      'b',
+      '\ufeff',
+      '\ufeffa',
+    ])
+    expect(await sortByVersion(['\ufeffa', 'a'])).toEqual([1, 0])
   })
 })
 
@@ -353,7 +377,7 @@ describe('lsGeneric parseFlags', () => {
     expect(parsed.timeKind).toBe(timeKind)
   })
 
-  // gnulib's argmatch resolves an unambiguous prefix and answers the
+  // A choice word may be any unambiguous prefix, and it answers the
   // canonical word of the value it matched. Every row measured on coreutils
   // 9.7 (`ls --sort=non`, `-l --time=acc`, `--hyperlink=n`,
   // `-l --time-style=full`). Mirrors test_ls.py. A posix- prefix
@@ -461,8 +485,8 @@ describe('dot entries respect mount boundaries', () => {
 })
 
 describe('typeIndicator', () => {
-  // ls.c get_type_indicator: slash marks only directories, and only classify
-  // marks an executable. Mirrors test_ls.py.
+  // GNU 9.7's ls: slash marks only directories, and only classify marks an
+  // executable. Mirrors test_ls.py.
   it.each([
     [FileType.DIRECTORY, null, ['', '/', '/', '/']],
     [FileType.SYMLINK, null, ['', '', '@', '@']],

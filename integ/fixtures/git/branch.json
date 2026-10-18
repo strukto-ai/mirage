@@ -1,0 +1,19 @@
+[
+  "branch",
+  "branch -v",
+  "branch -vv",
+  "branch -a",
+  "branch -a -v",
+  "branch -a -vv",
+  "branch -r",
+  "branch -r -v",
+  "branch -r -vv",
+  "branch -v --list 'a*'",
+  "branch -vv --sort=-committerdate",
+  "branch -v --merged main",
+  "branch -vv --contains main~1",
+  "branch -a -vv --sort=-refname",
+  "branch -v --points-at main",
+  "branch -v --list 'none*'",
+  "branch -a -v -i --list 'A*'"
+]

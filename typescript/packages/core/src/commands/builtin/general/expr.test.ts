@@ -336,6 +336,16 @@ describe('expr + TOKEN', () => {
 })
 
 describe('expr keyword operators', () => {
+  it('reads a chain of two thousand keywords', async () => {
+    // GNU 9.7: each `length` reads the next as its operand, at any length of
+    // chain. Mirrors test_expr.py.
+    const chain: string[] = Array.from({ length: 2000 }, () => 'length')
+    await expectValue([...chain, 'abc'], '1', 0)
+    await expectValue(['substr', ...chain, 'abcdef', '1', '1'], '1', 0)
+    await expectValue([...chain.slice(1), '+', 'length'], '1', 0)
+    await expectRefusal([...chain, 'length'], "expr: syntax error: missing argument after 'length'")
+  })
+
   it('length counts the characters', async () => {
     await expectValue(['length', 'abcde'], '5', 0)
     await expectValue(['length', ''], '0', 1)

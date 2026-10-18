@@ -359,7 +359,16 @@ typescript/packages/core/src/commands/cli/builtin/gh/constants.ts set up
 follows go-gh v2.13.0 (https://github.com/cli/go-gh), the version gh 2.85.0
 builds with: TEMPLATE_TOKEN, TEMPLATE_ACTION and TEMPLATE_DECLARATION read a
 template's actions as its template package does, and GOJQ_RAISED holds the
-errors its jq package reports. go-gh carries this notice:
+errors its jq package reports. In
+python/mirage/commands/cli/builtin/gh/accessor.py and
+typescript/packages/core/src/commands/cli/builtin/gh/accessor.ts, --jq prints
+each result and stops at a halt or an error as its jq package's Evaluate does,
+and a github.com subdomain reads as github.com as its auth package's
+NormalizeHostname has it; and python/mirage/core/github/repo.py and
+typescript/packages/core/src/core/github/repo.ts read a repository argument,
+[HOST/]OWNER/REPO or a git remote URL, as its repository package's Parse and
+its internal/git IsURL, ParseURL and RepoInfoFromURL read one. go-gh carries
+this notice:
 
 MIT License
 
@@ -1006,6 +1015,7 @@ limitations under the License.
 
 Apache License 2.0, used by:
 - cfg-if 1.0.5 (https://github.com/rust-lang/cfg-if)
+- flate2 1.1.10 (https://github.com/rust-lang/flate2-rs)
 - regex-automata 0.4.18 (https://github.com/rust-lang/regex)
 - regex-syntax 0.8.11 (https://github.com/rust-lang/regex)
 
@@ -1614,6 +1624,31 @@ Except as contained in this notice, the name of a copyright holder shall
 not be used in advertising or otherwise to promote the sale, use or other
 dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
+
+------------------------------------------------------------------------
+
+zlib License, used by:
+- zlib-rs 0.6.8 (https://github.com/trifectatechfoundation/zlib-rs)
+
+(C) 2024 Trifecta Tech Foundation
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source distribution.
 
 ------------------------------------------------------------------------
 

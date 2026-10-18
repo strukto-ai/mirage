@@ -22,6 +22,7 @@ import { BreError, compileBre } from '../utils/bre.ts'
 import { quoteWord } from '../../quote.ts'
 
 const CMP_OPS = new Set(['=', '==', '!=', '<', '<=', '>', '>='])
+const ADD_OPS = new Set(['+', '-'])
 const MUL_OPS = new Set(['*', '/', '%'])
 
 // GNU expr's operand grammar, which is narrower than either language's
@@ -119,8 +120,8 @@ function parseIntOperand(s: string): bigint {
   return n
 }
 
-// Whether GNU expr counts a value as false. GNU's `null()` is not "empty
-// or the character zero": the empty string is false, and so is any run of
+// Whether GNU expr counts a value as false. False is not "empty or the
+// character zero": the empty string is false, and so is any run of
 // zeros with at most one leading minus, which is why `expr 00 '&' 1` is
 // false and `expr - '&' 1` is not.
 export function isNull(value: string): boolean {
@@ -179,7 +180,7 @@ function compare(left: string, op: string, right: string): string {
 }
 
 // Compile a BRE, re-wording glibc's refusal under expr's own program
-// prefix the way GNU's `error()` does.
+// prefix, as GNU prints it.
 function compileOrRefuse(pattern: string, utf8: boolean): [RegExp, number] {
   try {
     return compileBre(pattern, utf8)
@@ -189,26 +190,25 @@ function compileOrRefuse(pattern: string, utf8: boolean): [RegExp, number] {
   }
 }
 
-// The `:` operator, which `match` is the prefix spelling of. The pattern
-// is a POSIX BRE anchored at the start of the subject. A pattern with a
-// group answers with group 1's text -- the empty string when the group
-// did not participate -- and one without answers with the match length,
-// or `0` when nothing matched. Which of the two it is depends on the
-// pattern alone, so the group count has to come from the translator
-// rather than from a match object that may not exist.
+// The `:` operator, which `match` is the prefix spelling of. POSIX: the
+// pattern is a BRE anchored at the start of the subject. A pattern with a
+// group answers with what group 1 matched -- the empty string when the match
+// failed or the group took no part -- and one without answers with the length
+// of the match, `0` when there is none. Whether it has a group is the
+// pattern's business alone, so a failed `expr abc : '\(x\)'` is empty, not
+// `0`.
 //
-// Both the subject and the pattern are byte views, so `.` matches one
-// byte and the length this answers with is a byte count: GNU reads
-// `expr <e-acute> : '.'` as 1 and `expr <e-acute> : '\(.\)'` as the
-// single byte `c3`. Under a UTF-8 locale (`utf8`) both are text, and the
-// same two answer the whole character.
-function docolon(subject: string, pattern: string, utf8 = false): string {
+// Both strings are byte views, so `.` matches one byte and the length counts
+// bytes: GNU reads `expr <e-acute> : '.'` as 1 and `expr <e-acute> : '\(.\)'`
+// as the single byte `c3`. Under a UTF-8 locale (`utf8`) both are text and
+// the same two answer the whole character, counted by code point. Mirrors
+// Python's colon_match.
+function colonMatch(subject: string, pattern: string, utf8 = false): string {
   const [regex, groups] = compileOrRefuse(pattern, utf8)
   regex.lastIndex = 0
-  const matched = regex.exec(subject)
-  if (matched === null) return groups > 0 ? '' : '0'
-  if (groups > 0) return matched[1] ?? ''
-  return String(Array.from(matched[0]).length)
+  const found = regex.exec(subject)
+  if (groups > 0) return found?.[1] ?? ''
+  return found === null ? '0' : String(Array.from(found[0]).length)
 }
 
 // The `index` operator, which is `strcspn` over a character set. It is
@@ -249,143 +249,116 @@ function doSubstr(text: string, posArg: string, lenArg: string): string {
   return chars.slice(from, from + Number(count > size ? size : count)).join('')
 }
 
-// GNU expr's grammar as a recursive descent over argv words.
+// How many operands each prefix keyword reads: GNU's `match`, `substr`,
+// `index` and `length`.
+const KEYWORD_ARITY = new Map([
+  ['match', 2],
+  ['substr', 3],
+  ['index', 2],
+  ['length', 1],
+])
+
+// An expr line read and evaluated in one left-to-right pass.
 //
-// Each level binds tighter than the one above it and every level is
-// left-associative: `|`, then `&`, then the comparisons, then `+ -`, then
-// `* / %`, then `:`, then the keyword operators and `+ TOKEN`, then
-// primaries. There is no unary operator anywhere -- `-5` is an integer
-// literal, `+` is the string-quoting operator, and `^`, `!` and `<>` are
-// not operators at all. The structure is mirrored level for level in
-// `expr.py`.
+// The grammar is POSIX's, loosest first: `|`, `&`, the six comparisons (and
+// GNU's `==`), `+ -`, `* / %`, then `:`, every level left-associative. Under
+// `:` sit GNU's operands: a prefix keyword (`match`, `substr`, `index`,
+// `length`) with its operands, `+ WORD` quoting one word, `( EXPR )`, or any
+// other single word, operator words included (`expr '*'` prints `*`). There
+// is no unary operator: `-5` is a word and so is `-`.
 //
-// `evaluate` threads GNU's short-circuiting through: `|` and `&` parse
-// their right operand with it false when the left already decided the
-// answer, and every level that can refuse a value checks it first, so
-// `expr 1 '|' 1 '/' 0` is 1 rather than a division by zero.
+// `live` is false inside an operand `|` or `&` has already decided (`expr 1
+// '|' a / 0` prints 1): the operand is still read, so a syntax error in it
+// still counts, but nothing in it is computed and so nothing in it can refuse
+// a value -- not a non-integer, not a zero divisor, not a bad pattern.
 //
-// Every word in `args`, every value it produces and every word it quotes
-// in a diagnostic is a byte view (`byteView`), which is what makes
-// `length`, `index`, `substr` and `:` count bytes as GNU does and makes a
-// string comparison the `strcmp` byte order GNU uses. The conversion is
-// the command's, not the parser's. Under a UTF-8 locale (`utf8`) every word
-// is text instead, and the same operators count characters.
-class ExprParser {
-  private readonly args: string[]
-  private readonly utf8: boolean
-  private pos = 0
+// Every word and value is a byte view (see exprEval), or text under a UTF-8
+// locale (`utf8`). Mirrors Python's ExprReader.
+class ExprReader {
+  next = 0
   private depth = 0
 
-  constructor(args: string[], utf8 = false) {
-    this.args = args
-    this.utf8 = utf8
+  constructor(
+    readonly words: readonly string[],
+    private readonly utf8 = false,
+  ) {}
+
+  done(): boolean {
+    return this.next >= this.words.length
   }
 
-  // Whether every word has been consumed.
-  atEnd(): boolean {
-    return this.pos >= this.args.length
+  ahead(): string | null {
+    return this.words[this.next] ?? null
   }
 
-  // The offending word at the cursor, for the leftover-word diagnostic.
-  current(): string {
-    return this.args[this.pos] ?? ''
+  lastRead(): string {
+    return this.words[this.next - 1] ?? ''
   }
 
-  // The next word without consuming it, or null at the end of the line.
-  private peek(): string | null {
-    return this.atEnd() ? null : (this.args[this.pos] ?? '')
-  }
-
-  // Consume the next word if it is exactly `word`.
-  private nextarg(word: string): boolean {
-    if (this.peek() === word) {
-      this.pos += 1
-      return true
-    }
-    return false
-  }
-
-  // Consume the next word unconditionally.
-  private take(): string {
-    const word = this.args[this.pos] ?? ''
-    this.pos += 1
+  // The next word, which has to be there: when the line ran out, GNU names
+  // the word before.
+  readWord(): string {
+    const word = this.words[this.next]
+    if (word === undefined) throw new ExprError(missingArgumentAfter(this.lastRead(), this.utf8))
+    this.next++
     return word
   }
 
-  // The last word consumed, which GNU names in two of its diagnostics.
-  private prev(): string {
-    return this.pos > 0 ? (this.args[this.pos - 1] ?? '') : ''
+  takeIf(wanted: string | ReadonlySet<string>): string | null {
+    const word = this.ahead()
+    if (word === null) return null
+    if (typeof wanted === 'string' ? word !== wanted : !wanted.has(word)) return null
+    this.next++
+    return word
   }
 
-  // Refuse a line that ended where an operand was needed.
-  private requireMoreArgs(): void {
-    if (this.atEnd()) throw new ExprError(missingArgumentAfter(this.prev(), this.utf8))
-  }
-
-  // Level 1: `|`, which short-circuits on a truthy left operand. It
-  // answers the left operand when that is truthy, else the right one,
-  // normalised to `0` when both are falsy.
-  evalOr(evaluate: boolean): string {
-    let left = this.evalAnd(evaluate)
-    while (this.nextarg('|')) {
-      const right = this.evalAnd(evaluate && isNull(left))
-      if (isNull(left)) left = isNull(right) ? '0' : right
+  // `A | B`: A unless it is null or 0, else B unless it is, else 0.
+  either(live: boolean): string {
+    let left = this.both(live)
+    while (this.takeIf('|') !== null) {
+      const right = this.both(live && isNull(left))
+      if (live && isNull(left)) left = isNull(right) ? '0' : right
     }
     return left
   }
 
-  // Level 2: `&`, which short-circuits on a falsy left operand. It
-  // answers the left operand when both are truthy, else `0`.
-  private evalAnd(evaluate: boolean): string {
-    let left = this.evalCompare(evaluate)
-    while (this.nextarg('&')) {
-      const right = this.evalCompare(evaluate && !isNull(left))
-      if (isNull(left) || isNull(right)) left = '0'
+  // `A & B`: A when neither is null or 0, else 0.
+  both(live: boolean): string {
+    let left = this.relation(live)
+    while (this.takeIf('&') !== null) {
+      const right = this.relation(live && !isNull(left))
+      if (live) left = isNull(left) || isNull(right) ? '0' : left
     }
     return left
   }
 
-  // Level 3: the six comparisons, plus `==` as a synonym for `=`.
-  private evalCompare(evaluate: boolean): string {
-    let left = this.evalAdditive(evaluate)
-    for (;;) {
-      const op = this.peek()
-      if (op === null || !CMP_OPS.has(op)) return left
-      this.pos += 1
-      const right = this.evalAdditive(evaluate)
-      if (evaluate) left = compare(left, op, right)
+  relation(live: boolean): string {
+    let left = this.sum(live)
+    for (let op = this.takeIf(CMP_OPS); op !== null; op = this.takeIf(CMP_OPS)) {
+      const right = this.sum(live)
+      if (live) left = compare(left, op, right)
     }
+    return left
   }
 
-  // Level 4: `+` and `-` as binary arithmetic. A `+` in an *operand*
-  // position is the quoting operator instead, which is why
-  // `expr 1 + + 2` is 3: this level reads the first `+` and
-  // `evalKeyword` reads the second.
-  private evalAdditive(evaluate: boolean): string {
-    let left = this.evalMultiplicative(evaluate)
-    for (;;) {
-      let op: string
-      if (this.nextarg('+')) op = '+'
-      else if (this.nextarg('-')) op = '-'
-      else return left
-      const right = this.evalMultiplicative(evaluate)
-      if (evaluate) {
+  sum(live: boolean): string {
+    let left = this.product(live)
+    for (let op = this.takeIf(ADD_OPS); op !== null; op = this.takeIf(ADD_OPS)) {
+      const right = this.product(live)
+      if (live) {
         const a = parseIntOperand(left)
         const b = parseIntOperand(right)
         left = String(op === '+' ? a + b : a - b)
       }
     }
+    return left
   }
 
-  // Level 5: `*`, `/` and `%`, which share one level.
-  private evalMultiplicative(evaluate: boolean): string {
-    let left = this.evalColon(evaluate)
-    for (;;) {
-      const op = this.peek()
-      if (op === null || !MUL_OPS.has(op)) return left
-      this.pos += 1
-      const right = this.evalColon(evaluate)
-      if (evaluate) {
+  product(live: boolean): string {
+    let left = this.matching(live)
+    for (let op = this.takeIf(MUL_OPS); op !== null; op = this.takeIf(MUL_OPS)) {
+      const right = this.matching(live)
+      if (live) {
         const a = parseIntOperand(left)
         const b = parseIntOperand(right)
         if (op === '*') left = String(a * b)
@@ -393,70 +366,64 @@ class ExprParser {
         else left = String(truncMod(a, b))
       }
     }
+    return left
   }
 
-  // Level 6: `:`, the regex match, tighter than any arithmetic.
-  private evalColon(evaluate: boolean): string {
-    let left = this.evalKeyword(evaluate)
-    while (this.nextarg(':')) {
-      const right = this.evalKeyword(evaluate)
-      if (evaluate) left = docolon(left, right, this.utf8)
+  matching(live: boolean): string {
+    let left = this.operand(live)
+    while (this.takeIf(':') !== null) {
+      const right = this.operand(live)
+      if (live) left = colonMatch(left, right, this.utf8)
     }
     return left
   }
 
-  // The keyword operators and `+ TOKEN`, all above the primaries.
-  //
-  // `+` consumes the next argv word unconditionally and pushes it as a
-  // literal string, whatever it spells: `expr + length` is `length` and
-  // `expr + '('` is `(`. It does not recurse, so `expr + + hello` and
-  // `expr + length abcde` are syntax errors -- the quoted token eats the
-  // operator and the next word is left with no slot.
-  //
-  // `length` counts bytes, which is what it costs to have every value be
-  // a byte view: the string's length is already a byte count, so there is
-  // nothing here to special-case.
-  private evalKeyword(evaluate: boolean): string {
-    if (this.nextarg('+')) {
-      this.requireMoreArgs()
-      return this.take()
+  // One operand under `:`, prefix keywords applied. A keyword reads its own
+  // operands at this same level, so `length length abc` is 1 and `substr + abc
+  // 1 1` is `a`. Those chains are kept on a list here rather than on the call
+  // stack: GNU reads one of any length, and only parentheses count toward the
+  // nesting limit.
+  operand(live: boolean): string {
+    const waiting: [string, string[]][] = []
+    for (;;) {
+      const word = this.readWord()
+      if (KEYWORD_ARITY.has(word)) {
+        waiting.push([word, []])
+        continue
+      }
+      let value = this.simple(word, live)
+      for (let top = waiting.at(-1); top !== undefined; top = waiting.at(-1)) {
+        const [keyword, given] = top
+        given.push(value)
+        if (given.length < (KEYWORD_ARITY.get(keyword) ?? 0)) break
+        waiting.pop()
+        value = live ? this.keyword(keyword, given) : ''
+      }
+      if (waiting.length === 0) return value
     }
-    if (this.nextarg('length')) {
-      return String(Array.from(this.evalKeyword(evaluate)).length)
-    }
-    if (this.nextarg('match')) {
-      const left = this.evalKeyword(evaluate)
-      const right = this.evalKeyword(evaluate)
-      return evaluate ? docolon(left, right, this.utf8) : left
-    }
-    if (this.nextarg('index')) {
-      const left = this.evalKeyword(evaluate)
-      const right = this.evalKeyword(evaluate)
-      return doIndex(left, right)
-    }
-    if (this.nextarg('substr')) {
-      const text = this.evalKeyword(evaluate)
-      const posArg = this.evalKeyword(evaluate)
-      const lenArg = this.evalKeyword(evaluate)
-      return doSubstr(text, posArg, lenArg)
-    }
-    return this.evalPrimary(evaluate)
   }
 
-  // A parenthesised expression, or a bare word.
-  private evalPrimary(evaluate: boolean): string {
-    this.requireMoreArgs()
-    if (this.nextarg('(')) {
-      this.depth += 1
-      if (this.depth > MAX_NESTING) throw new ExprError(NESTING_TOO_DEEP)
-      const value = this.evalOr(evaluate)
-      this.depth -= 1
-      if (!this.nextarg(')'))
-        throw new ExprError(expectingClose(this.peek(), this.prev(), this.utf8))
-      return value
+  keyword(keyword: string, given: readonly string[]): string {
+    const [first = '', second = '', third = ''] = given
+    if (keyword === 'length') return String(Array.from(first).length)
+    if (keyword === 'index') return doIndex(first, second)
+    if (keyword === 'substr') return doSubstr(first, second, third)
+    return colonMatch(first, second, this.utf8)
+  }
+
+  // `+ WORD`, `( EXPR )` or a word standing for itself, the word already read.
+  simple(word: string, live: boolean): string {
+    if (word === '+') return this.readWord()
+    if (word === ')') throw new ExprError(UNEXPECTED_CLOSE)
+    if (word !== '(') return word
+    if (this.depth >= MAX_NESTING) throw new ExprError(NESTING_TOO_DEEP)
+    this.depth++
+    const value = this.either(live)
+    this.depth--
+    if (this.takeIf(')') === null) {
+      throw new ExprError(expectingClose(this.ahead(), this.lastRead(), this.utf8))
     }
-    if (this.peek() === ')') throw new ExprError(UNEXPECTED_CLOSE)
-    return this.take()
+    return value
   }
 }
 
@@ -466,9 +433,10 @@ class ExprParser {
 // status. The words in and the value out are byte views, or text under a
 // UTF-8 locale (`utf8`).
 export function exprEval(args: string[], utf8 = false): [string, number] {
-  const parser = new ExprParser(args, utf8)
-  const value = parser.evalOr(true)
-  if (!parser.atEnd()) throw new ExprError(unexpectedArgument(parser.current(), utf8))
+  const reader = new ExprReader(args, utf8)
+  const value = reader.either(true)
+  const leftover = reader.ahead()
+  if (leftover !== null) throw new ExprError(unexpectedArgument(leftover, utf8))
   return [value, isNull(value) ? 1 : 0]
 }
 

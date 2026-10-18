@@ -12,43 +12,49 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-SIGNAL_NAMES: tuple[tuple[str, int], ...] = (
-    ("HUP", 1),
-    ("INT", 2),
-    ("QUIT", 3),
-    ("ILL", 4),
-    ("TRAP", 5),
-    ("ABRT", 6),
-    ("FPE", 8),
-    ("KILL", 9),
-    ("SEGV", 11),
-    ("BUS", 7),
-    ("PIPE", 13),
-    ("ALRM", 14),
-    ("TERM", 15),
-    ("USR1", 10),
-    ("USR2", 12),
-    ("CHLD", 17),
-    ("URG", 23),
-    ("STOP", 19),
-    ("TSTP", 20),
-    ("CONT", 18),
-    ("TTIN", 21),
-    ("TTOU", 22),
-    ("SYS", 31),
-    ("POLL", 29),
-    ("VTALRM", 26),
-    ("PROF", 27),
-    ("XCPU", 24),
-    ("XFSZ", 25),
-    ("IOT", 6),
-    ("CLD", 17),
-    ("PWR", 30),
-    ("WINCH", 28),
-    ("IO", 29),
-    ("STKFLT", 16),
-    ("EXIT", 0),
-)
+# Linux's signal numbers by the names bash 5.2 gives them in `kill -l` and
+# `trap -l` (debian:stable-slim). 32 and 33 have no name; 34 to 64 are the
+# realtime range, named from its two ends.
+SIGNALS: dict[int, str] = {
+    1: "HUP",
+    2: "INT",
+    3: "QUIT",
+    4: "ILL",
+    5: "TRAP",
+    6: "ABRT",
+    7: "BUS",
+    8: "FPE",
+    9: "KILL",
+    10: "USR1",
+    11: "SEGV",
+    12: "USR2",
+    13: "PIPE",
+    14: "ALRM",
+    15: "TERM",
+    16: "STKFLT",
+    17: "CHLD",
+    18: "CONT",
+    19: "STOP",
+    20: "TSTP",
+    21: "TTIN",
+    22: "TTOU",
+    23: "URG",
+    24: "XCPU",
+    25: "XFSZ",
+    26: "VTALRM",
+    27: "PROF",
+    28: "WINCH",
+    29: "IO",
+    30: "PWR",
+    31: "SYS",
+}
+
+# The other names GNU timeout 9.7 takes for -s, by the number
+# `timeout -v -s NAME` then reports sending. bash refuses them all.
+SIGNAL_ALIASES: dict[str, int] = {"EXIT": 0, "IOT": 6, "CLD": 17, "POLL": 29}
+
+# Where `timeout -v` names a number otherwise than bash does.
+TIMEOUT_NAMES: dict[int, str] = {0: "EXIT", 29: "POLL"}
 
 SIGRTMIN = 34
 SIGRTMAX = 64

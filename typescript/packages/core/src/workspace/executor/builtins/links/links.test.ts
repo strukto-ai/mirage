@@ -750,3 +750,64 @@ for (const command of ['cp -P', 'mv']) {
     },
   )
 }
+
+const LOOPS =
+  'cd /data && ln -s l2 l1 && ln -s l3 l2 && ln -s l4 l3 && ln -s l1 l4' +
+  ' && ln -s m2 m1 && ln -s m3 m2 && ln -s m1 m3'
+
+describe('realpath and readlink -f over link loops', () => {
+  it('refuse a loop', async () => {
+    const ws = await makeWs()
+    await ws.shell(LOOPS)
+    const r = await ws.shell(
+      'cd /data; realpath /data/l1; echo rc=$?; realpath -e l1; echo rc=$?;' +
+        ' readlink -f l2; echo rc=$?; readlink -e l2; echo rc=$?',
+    )
+    expect(DEC.decode(r.stdout)).toBe('rc=1\nrc=1\nrc=1\nrc=1\n')
+    expect(err(r)).toBe(
+      'realpath: /data/l1: Too many levels of symbolic links\n' +
+        'realpath: l1: Too many levels of symbolic links\n',
+    )
+  })
+
+  it('keep the 21st link of a loop in missing mode', async () => {
+    // GNU 9.7 keeps l((20 mod k) + 1) of a loop of k links: l1 of four
+    // (from l1), l3 of four (from l3), m3 of three.
+    const ws = await makeWs()
+    await ws.shell(LOOPS)
+    const r = await ws.shell('cd /data; realpath -m /data/l1/x /data/m1/x; readlink -m l3')
+    expect(DEC.decode(r.stdout)).toBe('/data/l1/x\n/data/m3/x\n/data/l3\n')
+  })
+
+  it('keep the first link of a loop behind a chain in missing mode', async () => {
+    // GNU 9.7: behind 25 links (rt1 -> ... -> rt25 -> rq1) the loop's own
+    // first link stays; behind 19 (from rt7) the 21st step lands on rq2.
+    const ws = await makeWs()
+    await ws.shell(
+      'cd /data && ln -s rq2 rq1 && ln -s rq3 rq2 && ln -s rq1 rq3' +
+        ' && ln -s rq1 rt25 && for i in $(seq 24 -1 1); do ln -s rt$((i+1)) rt$i; done',
+    )
+    const r = await ws.shell(
+      'cd /data; realpath -m rt1/x; readlink -m rt7; readlink -m rt1/../rt3/y; realpath rt1; echo rc=$?',
+    )
+    expect(DEC.decode(r.stdout)).toBe('/data/rq1/x\n/data/rq2\n/data/rq1/y\nrc=1\n')
+    expect(err(r)).toBe('realpath: rt1: Too many levels of symbolic links\n')
+  })
+
+  it('follow a long chain up to the link limit', async () => {
+    // GNU 9.7 follows a chain of any length; here 1,024 links resolve and
+    // the 1,025th is refused as a loop, as is a link that grows its path.
+    const ws = await makeWs()
+    await ws.shell(
+      'cd /data && echo z > c0 && for i in $(seq 1025); do ln -s c$((i-1)) c$i; done && ln -s g/x g',
+    )
+    const r = await ws.shell(
+      'cd /data; realpath c300 c1024; readlink -f /data/c300; realpath -m c300/x; realpath c1025 g; echo rc=$?',
+    )
+    expect(DEC.decode(r.stdout)).toBe('/data/c0\n/data/c0\n/data/c0\n/data/c0/x\nrc=1\n')
+    expect(err(r)).toBe(
+      'realpath: c1025: Too many levels of symbolic links\n' +
+        'realpath: g: Too many levels of symbolic links\n',
+    )
+  })
+})

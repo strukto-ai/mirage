@@ -2,18 +2,19 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import partial
 
-from mirage.commands.builtin.constants import UINTMAX
 from mirage.commands.builtin.utils.lines import map_stream
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
     reported_stream,
     split_readable,
 )
+from mirage.commands.builtin.utils.size_suffix import decimal_value
 from mirage.commands.builtin.utils.stream import (
     resolve_source,
     stdin_stat,
     stdin_stream,
 )
+from mirage.commands.builtin.utils.strtol import bounded_decimal
 from mirage.commands.config import Context
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
@@ -24,10 +25,18 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.width import TAB_WIDTH
 
-# GNU's scanner is `c_isdigit`, which is ASCII. A unicode-aware test
-# (python `str.isdigit`, a `\d` class) accepts U+0663 and friends, which
-# GNU reports as invalid characters.
+# A tab stop's digits are ASCII only: GNU reports U+0663 and the other
+# non-ASCII digits as invalid characters, which a unicode-aware test
+# (python `str.isdigit`, a `\d` class) would accept.
 _DIGITS = frozenset("0123456789")
+
+# What may lead a number to make it a size rather than a stop.
+_SPECIFIERS = frozenset("+/")
+
+# GNU 9.7 refuses a tab stop at or past 2**63, quoting its digits as
+# typed: `-t 9223372036854775807` is accepted and `-t 9223372036854775808`
+# is "tab stop is too large '9223372036854775808'".
+_TOO_LARGE = 2**63
 
 # `isblank` in the C locale, which is space and TAB and nothing else. A
 # newline, a carriage return, a vertical tab and a form feed are all
@@ -37,7 +46,7 @@ _BLANKS = frozenset(" \t")
 
 @dataclass(frozen=True, slots=True)
 class TabStops:
-    """One resolved ``-t``/``--tabs`` list, as gnulib models it.
+    """One resolved ``-t``/``--tabs`` list.
 
     Three independent pieces, because ``-t 2,/4`` and ``-t 2,+4`` differ
     only in which of the last two is set. ``stops`` are the explicit
@@ -64,174 +73,218 @@ class ExpandFlags:
 
 
 @dataclass(slots=True)
-class _TabAccumulator:
-    """The state gnulib keeps ACROSS ``-t`` occurrences.
+class _TabList:
+    """The tab list as the ``-t`` values read so far have built it.
 
-    ``-t 2,4 -t 6`` is byte-identical to ``-t 2,4,6`` and ``-t 6 -t 2,4``
-    refuses as non-ascending, so the stop list and the two specifier
-    sizes outlive one occurrence. What does NOT outlive it is the
-    per-scan state (a pending value, having seen ``/`` or ``+``), which
-    is why ``-t '+4,2'`` refuses but ``-t +4 -t 2`` does not.
+    The stops and the two sizes carry over from one ``-t`` to the next;
+    what a single value is in the middle of does not (see
+    `_read_tab_list`).
 
     Args:
-        stops (list[int]): explicit stops collected so far.
-        extend (int): ``/N``'s multiple, 0 while unset.
-        increment (int): ``+N``'s step, 0 while unset.
-        problems (list[str]): stderr lines collected so far.
+        stops (list[int]): the explicit stops, in typed order.
+        extend (int): ``/N``'s size, 0 when unset.
+        increment (int): ``+N``'s size, 0 when unset.
+        problems (list[str]): the diagnostic lines so far.
     """
 
-    stops: list[int]
-    extend: int
-    increment: int
-    problems: list[str]
+    stops: list[int] = field(default_factory=list)
+    extend: int = 0
+    increment: int = 0
+    problems: list[str] = field(default_factory=list)
 
 
-def _flush_stop(
-    acc: _TabAccumulator, value: int, saw_extend: bool, saw_increment: bool
-) -> None:
-    """Commit one scanned number, as ``/``, ``+`` or an ordinary stop.
+def _invalid(rest: str) -> str:
+    return (
+        f"expand: tab size contains invalid character(s): '{quote_text(rest)}'"
+    )
 
-    ``/`` wins when both specifiers were seen, matching GNU's
-    ``if (extend) ... else if (increment) ...``. Either setter refuses a
-    SECOND non-zero value, which is how ``-t '+4,2'`` and
-    ``-t +4 -t +5`` are reported: the value 0 leaves the specifier unset,
-    so ``-t '+0,1'`` is accepted and means an increment of 1.
+
+def _give_value(
+    tabs: _TabList, value: int, waiting: list[str], given: str
+) -> str | None:
+    """Settle one number of a ``-t`` value, or refuse it for good.
+
+    A number led by ``/`` or ``+`` (or by one still waiting from an
+    earlier element of the same value, `-t 1,+0,3` making 3 the
+    increment) sets that size; ``/`` wins over ``+`` when both lead it.
+    A zero sets nothing and leaves the specifier waiting, so
+    `-t +0,0,0` is the default 8. Measured on GNU 9.7:
+
+    * a size set twice is refused, even by a zero: `-t +4 -t +0` is
+      "'+' specifier only allowed with the last value";
+    * the other size is refused only by a nonzero value: `-t +4 -t /0`
+      is accepted and `-t +4 -t /3` is "'/' specifier is mutually
+      exclusive with '+'", in either order;
+    * a plain number after a size in the same value is refused, naming
+      the specifier character typed last (`-t /+4,2` names `+`), while
+      `-t +4 -t 2` is two values and accepted.
 
     Args:
-        acc (_TabAccumulator): the cross-occurrence state to update.
-        value (int): the scanned number.
-        saw_extend (bool): a ``/`` preceded it in this occurrence.
-        saw_increment (bool): a ``+`` preceded it in this occurrence.
+        tabs (_TabList): the list being built.
+        value (int): the number.
+        waiting (list[str]): the specifier characters waiting for a
+            value, emptied once one is set.
+        given (str): the character that set a size earlier in this
+            value, or empty.
+
+    Returns:
+        str | None: the character that set a size, or None when the
+            number is refused (the line is in ``tabs.problems``).
     """
-    if saw_extend:
-        if acc.extend:
-            acc.problems.append(
-                "expand: '/' specifier only allowed with the last value"
+    if not waiting:
+        if given:
+            tabs.problems.append(
+                f"expand: '{given}' specifier only allowed with the last value"
             )
-        acc.extend = value
-        return
-    if saw_increment:
-        if acc.increment:
-            acc.problems.append(
-                "expand: '+' specifier only allowed with the last value"
-            )
-        acc.increment = value
-        return
-    acc.stops.append(value)
+            return None
+        tabs.stops.append(value)
+        return given
+    size = "/" if "/" in waiting else "+"
+    if (tabs.extend if size == "/" else tabs.increment) != 0:
+        tabs.problems.append(
+            f"expand: '{size}' specifier only allowed with the last value"
+        )
+        return None
+    if not value:
+        return given
+    if (tabs.increment if size == "/" else tabs.extend) != 0:
+        tabs.problems.append(
+            "expand: '/' specifier is mutually exclusive with '+'"
+        )
+        return None
+    if size == "/":
+        tabs.extend = value
+    else:
+        tabs.increment = value
+    named = waiting[-1]
+    waiting.clear()
+    return named
 
 
-def _check_stops(stops: list[int]) -> None:
-    """GNU's two post-scan refusals, in the order it applies them.
-
-    The list is walked in order and each element is tested for zero
-    BEFORE it is tested for ascending, which is the only thing that
-    tells the two messages apart on a list that breaks both rules:
-    ``-t 3,0`` is ``cannot be 0`` (element 0 is zero) while
-    ``-t 3,1,0`` is ``must be ascending`` (element 1 fails first). Both
-    run only when the scan reported nothing at all, so ``-t 0,x`` names
-    the ``x`` and never the zero.
+def _read_number(
+    raw: str, at: int, tabs: _TabList
+) -> tuple[int, int | None, list[str]] | None:
+    """One number of a ``-t`` value, from its first digit to its end.
 
     Args:
-        stops (list[int]): the accumulated stops, in typed order.
+        raw (str): the value as typed.
+        at (int): where the number's first digit is.
+        tabs (_TabList): the list being built, for the diagnostics.
 
-    Raises:
-        ValueError: the single stderr line to print, exit 1.
+    Returns:
+        tuple[int, int | None, list[str]] | None: where the number
+            ends, its value (None when a digit run was too large) and
+            the specifier characters misplaced inside it; None when an
+            invalid character ended the parse.
+    """
+    digits = ""
+    misplaced: list[str] = []
+    oversized = False
+    while at < len(raw) and raw[at] != "," and raw[at] not in _BLANKS:
+        char = raw[at]
+        if char in _SPECIFIERS:
+            tabs.problems.append(
+                f"expand: '{char}' specifier not at start of number:"
+                f" '{quote_text(raw[at:])}'"
+            )
+            misplaced.append(char)
+            at += 1
+            continue
+        if char not in _DIGITS:
+            tabs.problems.append(_invalid(raw[at:]))
+            return None
+        run = at
+        while at < len(raw) and raw[at] in _DIGITS:
+            at += 1
+        if bounded_decimal(raw[run:at], _TOO_LARGE) is None:
+            tabs.problems.append(
+                f"expand: tab stop is too large '{quote_text(raw[run:at])}'"
+            )
+            oversized = True
+        digits += raw[run:at]
+    return at, None if oversized else decimal_value(digits), misplaced
+
+
+def _read_tab_list(raw: str, tabs: _TabList) -> bool:
+    """Read one ``-t`` value into ``tabs``.
+
+    Numbers are split by commas and blanks (`isblank` in C: space and
+    TAB), and an empty element is skipped. A ``/`` or ``+`` after a
+    number's first digit is reported with the rest of the value and
+    the scan goes on (`-t 4+5+6` reports '+5+6' and then '+6'), the
+    character then leading the next number instead, so `-t 4+5,6,7`
+    goes on to refuse the 7 as GNU does. A digit run at or past 2**63
+    is reported and the scan goes on too (`-t 99999999999999999999,x`
+    reports both). Either leaves the list refused. Any other character
+    ends the whole parse, quoting the rest of the value (`-t 1,x,0`
+    reports 'x,0').
+
+    Args:
+        raw (str): the value as typed.
+        tabs (_TabList): the list being built.
+
+    Returns:
+        bool: False when the parse ended here.
+    """
+    waiting: list[str] = []
+    given = ""
+    at = 0
+    while at < len(raw):
+        char = raw[at]
+        if char == "," or char in _BLANKS:
+            at += 1
+            continue
+        if char in _SPECIFIERS:
+            waiting.append(char)
+            at += 1
+            continue
+        if char not in _DIGITS:
+            tabs.problems.append(_invalid(raw[at:]))
+            return False
+        number = _read_number(raw, at, tabs)
+        if number is None:
+            return False
+        at, value, misplaced = number
+        if value is not None:
+            named = _give_value(tabs, value, waiting, given)
+            if named is None:
+                return False
+            given = named
+        waiting.extend(misplaced)
+    return True
+
+
+def _refused_order(stops: list[int]) -> str | None:
+    """GNU's walk over the explicit stops, once every value has scanned.
+
+    Each stop is tested for zero before it is tested against the one
+    before it, so `-t 3,0` cannot be 0 and `-t 3,1,0` must be
+    ascending.
+
+    Args:
+        stops (list[int]): the stops in typed order.
+
+    Returns:
+        str | None: the one diagnostic line, or None when they pass.
     """
     previous = 0
     for stop in stops:
         if stop == 0:
-            raise ValueError("expand: tab size cannot be 0")
+            return "expand: tab size cannot be 0"
         if stop <= previous:
-            raise ValueError("expand: tab sizes must be ascending")
+            return "expand: tab sizes must be ascending"
         previous = stop
+    return None
 
 
-def _scan_tab_stops(raw: str, acc: _TabAccumulator) -> None:
-    """Scan one ``-t`` occurrence, gnulib's ``parse_tab_stops``.
-
-    Character by character, because every one of GNU's messages quotes a
-    position rather than the argument: an invalid character and a
-    misplaced specifier both quote the remainder FROM that character
-    (``-t 1,x`` reports ``'x'`` where ``-t x,1`` reports ``'x,1'``), and
-    an overflowing number quotes its own digit run. An empty element is
-    skipped in silence, which is why ``-t ''``, ``-t ','`` and
-    ``-t '1,,3'`` are all accepted.
-
-    ONE thing ends the scan and two do not. An invalid character breaks
-    it where it stands, so nothing to its right is read and
-    ``-t '1,x,0'`` reports only the ``x,0``. A misplaced ``/``/``+``
-    does NOT: it is reported and the scan carries on, so ``-t 4+5+6``
-    prints two misplaced lines and ``-t 4+x`` prints the misplaced one
-    and then the invalid-character one. Neither does an overflowing
-    digit run, so ``-t '99999999999999999999,x'`` reports both lines.
-    Any of them makes the caller skip ``_check_stops``, which is why
-    ``-t '1,99999999999999999999,0'`` never mentions the zero.
-
-    Args:
-        raw (str): one occurrence's raw value.
-        acc (_TabAccumulator): the cross-occurrence state to update.
-    """
-    have = False
-    value = 0
-    digits_at = 0
-    saw_extend = False
-    saw_increment = False
-    index = 0
-    while index < len(raw):
-        char = raw[index]
-        if char in "/+":
-            if have:
-                # Reported and then CONTINUED, unlike an invalid
-                # character: `-t 4+5+6` prints TWO misplaced-specifier
-                # lines and `-t 4+x` prints the misplaced one and then
-                # the invalid-character one. The specifier is not
-                # recorded either, so the `4` in `-t '4+,x'` still
-                # flushes as an ordinary stop.
-                acc.problems.append(
-                    f"expand: '{char}' specifier not at start of "
-                    f"number: '{quote_text(raw[index:])}'"
-                )
-            else:
-                saw_extend = saw_extend or char == "/"
-                saw_increment = saw_increment or char == "+"
-        elif char in _DIGITS:
-            if not have:
-                value = 0
-                have = True
-                digits_at = index
-            value = value * 10 + int(char)
-            # The accumulator GNU overflows: a tab stop is read into
-            # `uintmax_t`.
-            if value > UINTMAX:
-                end = index
-                while end < len(raw) and raw[end] in _DIGITS:
-                    end += 1
-                acc.problems.append(
-                    "expand: tab stop is too large "
-                    f"'{quote_text(raw[digits_at:end])}'"
-                )
-                index = end - 1
-        elif char == "," or char in _BLANKS:
-            if have:
-                _flush_stop(acc, value, saw_extend, saw_increment)
-                have = False
-        else:
-            acc.problems.append(
-                "expand: tab size contains invalid "
-                f"character(s): '{quote_text(raw[index:])}'"
-            )
-            return
-        index += 1
-    if have and not acc.problems:
-        _flush_stop(acc, value, saw_extend, saw_increment)
-
-
-def parse_tab_stops(occurrences: list[str]) -> TabStops:
+def read_tab_stops(occurrences: list[str]) -> TabStops:
     """Every ``-t``/``--tabs`` value one line carried, as one tab list.
 
     GNU takes a LIST of tab stops, not a single size, and ``-t``
     accumulates across occurrences, so this is handed every occurrence
-    in typed order rather than the one value the flag bag kept.
+    in typed order rather than the one value the flag bag kept. A value
+    that leaves any problem ends the parse there: `-t 4+ -t x` reports
+    only the '+'.
 
     Args:
         occurrences (list[str]): the raw values, in typed order.
@@ -243,13 +296,14 @@ def parse_tab_stops(occurrences: list[str]) -> TabStops:
         ValueError: the stderr text to print, newline-separated with no
             trailing newline, exit 1.
     """
-    acc = _TabAccumulator(stops=[], extend=0, increment=0, problems=[])
+    tabs = _TabList()
     for raw in occurrences:
-        _scan_tab_stops(raw, acc)
-    if acc.problems:
-        raise ValueError("\n".join(acc.problems))
-    _check_stops(acc.stops)
-    return TabStops(tuple(acc.stops), acc.extend, acc.increment)
+        if not _read_tab_list(raw, tabs) or tabs.problems:
+            raise ValueError("\n".join(tabs.problems))
+    refused = _refused_order(tabs.stops)
+    if refused is not None:
+        raise ValueError(refused)
+    return TabStops(tuple(tabs.stops), tabs.extend, tabs.increment)
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> ExpandFlags:
@@ -266,7 +320,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> ExpandFlags:
     """
     fl = FlagView(flags, spec=SPECS["expand"])
     return ExpandFlags(
-        tabs=parse_tab_stops(fl.as_list("tabs")),
+        tabs=read_tab_stops(fl.as_list("tabs")),
         initial_only=fl.as_bool("initial"),
     )
 
@@ -449,5 +503,5 @@ __all__ = [
     "expand_generic",
     "next_tab_stop",
     "parse_flags",
-    "parse_tab_stops",
+    "read_tab_stops",
 ]

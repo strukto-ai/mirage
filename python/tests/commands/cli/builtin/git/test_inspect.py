@@ -100,7 +100,7 @@ ENV = {
 @pytest.fixture(scope="module")
 def inspection_repos(tmp_path_factory):
     repos = {}
-    for name in ("gaps", "merge-base"):
+    for name in ("gaps", "merge-base", "branch"):
         path = tmp_path_factory.mktemp(name) / "repo"
         subprocess.run(
             ["bash", str(GAPS.with_name(name + ".sh")), str(path)],
@@ -117,7 +117,7 @@ def inspection_repos(tmp_path_factory):
     "fixture,command",
     [
         (name, command)
-        for name in ("gaps", "merge-base")
+        for name in ("gaps", "merge-base", "branch")
         for command in json.loads(GAPS.with_name(name + ".json").read_text())
     ],
 )

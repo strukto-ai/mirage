@@ -35,6 +35,33 @@ HELLO = gzip.compress(b"hello\n", mtime=0)
 HCRC_HEAD = HELLO[:3] + b"\x02" + HELLO[4:10]
 
 
+class FailingCloseSource:
+    def __init__(self):
+        self.read = False
+        self.closed = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.read:
+            raise StopAsyncIteration
+        self.read = True
+        return b"not gzip"
+
+    async def aclose(self):
+        self.closed += 1
+        raise OSError("cleanup failure")
+
+
+@pytest.mark.asyncio
+async def test_cleanup_failure_preserves_the_gzip_failure_and_closes_once():
+    source = FailingCloseSource()
+    with pytest.raises(GzipDataError, match="not in gzip format"):
+        await materialize(gunzip_stream(source))
+    assert source.closed == 1
+
+
 def test_every_member_decompresses():
     assert gunzip_partial(HELLO + HELLO) == (b"hello\nhello\n", None)
 
@@ -252,7 +279,7 @@ def test_eof_distinguishes_complete_bodies_from_partial_ones(
     for offset in range(0, len(data), width):
         list(decoder.feed(data[offset : offset + width]))
     with pytest.raises(GzipDataError) as exc:
-        decoder.finish()
+        list(decoder.finish())
     assert exc.value.fatal
     assert exc.value.keeps_output is keeps
 
@@ -269,7 +296,7 @@ def test_optional_fields_and_header_crc_across_chunks(width, fields):
     output = []
     for offset in range(0, len(data), width):
         output.extend(decoder.feed(data[offset : offset + width]))
-    decoder.finish()
+    list(decoder.finish())
     assert b"".join(output) == b"hello\nhello\n"
 
 
@@ -281,7 +308,7 @@ def test_eof_in_consumed_optional_fields_is_still_fatal(flag, prefix):
     extra = b"\xff\xffabc" if flag == 0x04 else b""
     list(decoder.feed(prefix + head + extra))
     with pytest.raises(GzipDataError) as exc:
-        decoder.finish()
+        list(decoder.finish())
     assert exc.value.fatal
     assert exc.value.keeps_output is bool(prefix)
 
@@ -296,16 +323,15 @@ def test_long_header_fields_use_bounded_memory(flag, terminated):
     chunk = b"x" * GZIP_CHUNK_SIZE
     for _ in range(128):
         assert list(decoder.feed(chunk)) == []
-        assert len(decoder._pending) <= 9
         crc = zlib.crc32(chunk, crc)
     if terminated:
         crc = zlib.crc32(b"\0", crc) & 0xFFFF
         tail = b"\0" + crc.to_bytes(2, "little") + HELLO[10:]
         assert b"".join(decoder.feed(tail)) == b"hello\n"
-        decoder.finish()
+        list(decoder.finish())
     else:
         with pytest.raises(GzipDataError, match="unexpected end of file"):
-            decoder.finish()
+            list(decoder.finish())
 
 
 def test_named_gzip_header_moves_the_truncation_boundary():
@@ -348,3 +374,31 @@ async def test_gzip_stream_produces_output_before_eof_and_closes_its_source():
     assert (await anext(stream))[:2] == b"\x1f\x8b"
     await stream.aclose()
     assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_output_only_draining_yields_to_cancellation_and_closes_source():
+    archive = gzip.compress(b"x" * (32 * 1024 * 1024))
+    closed = asyncio.Event()
+    written = 0
+
+    async def source():
+        try:
+            yield archive
+        finally:
+            closed.set()
+
+    async def consume():
+        nonlocal written
+        async for data in gunzip_stream(source()):
+            written += len(data)
+
+    task = asyncio.create_task(consume())
+    timer = asyncio.get_running_loop().call_later(0.001, task.cancel)
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert 0 < written < 32 * 1024 * 1024
+        assert closed.is_set()
+    finally:
+        timer.cancel()

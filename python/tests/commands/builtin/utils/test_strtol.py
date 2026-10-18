@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.commands.builtin.utils.strtol import (
+    bounded_decimal,
     c_int,
     signed_decimal,
     strtol,
@@ -87,3 +88,23 @@ def test_scanners_read_a_number_past_the_int_digit_limit():
     assert signed_decimal("-" + digits) == -(10**5000 - 1)
     assert strtol(digits) == (2**63 - 1, "")
     assert strtoul(digits) == (2**64 - 1, "")
+
+
+@pytest.mark.parametrize(
+    "digits,bound,value",
+    [
+        ("", 10, 0),
+        ("18446744073709551614", 2**64 - 1, 2**64 - 2),
+        ("0018446744073709551615", 2**64 - 1, None),
+        ("100", 100, None),
+        ("099", 100, 99),
+    ],
+)
+def test_bounded_decimal_refuses_the_bound_and_past(digits, bound, value):
+    assert bounded_decimal(digits, bound) == value
+
+
+def test_bounded_decimal_reads_past_the_int_digit_limit():
+    assert bounded_decimal("0" * 5000 + "1", 2**64 - 1) == 1
+    assert bounded_decimal("0" * 5000, 10) == 0
+    assert bounded_decimal("9" * 5000, 2**64 - 1) is None

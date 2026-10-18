@@ -359,6 +359,18 @@ class PosixZone implements Zone {
     return !(end <= utcMs && utcMs < start)
   }
 
+  /**
+   * When daylight saving time starts and ends in a UTC year, as epoch seconds:
+   * the instants the two rules lay out in the year the UTC clock reads, the
+   * end first when the window wraps the year and the two equal when it is
+   * empty. Mirrors Python's PosixZone.transitions.
+   */
+  transitions(year: number): [number, number] {
+    const start = transitionAt(this.start, year) - this.stdOffsetSec * 1000
+    const end = transitionAt(this.end, year) - this.dstOffsetSec * 1000
+    return [Math.floor(start / 1000), Math.floor(end / 1000)]
+  }
+
   parts(dt: Date): ZoneParts {
     const inDst = this.inDst(dt.getTime())
     const offsetSec = inDst ? this.dstOffsetSec : this.stdOffsetSec
@@ -380,6 +392,15 @@ class PosixZone implements Zone {
     if (dstShows) return new Date(asDst)
     return new Date(asStd)
   }
+}
+
+/**
+ * When a POSIX TZ zone's daylight saving time starts and ends in a UTC year
+ * (see PosixZone.transitions), null for any other zone, whose transitions come
+ * from tzdata. Mirrors Python's posix_transitions.
+ */
+export function posixTransitions(zone: Zone, year: number): [number, number] | null {
+  return zone instanceof PosixZone ? zone.transitions(year) : null
 }
 
 export const UTC_ZONE: Zone = new UtcZone()
@@ -433,13 +454,13 @@ function readClock(spec: string, pos: number): [[number, number, number] | null,
   return [[Number(m[1]), Number(m[2] ?? 0), Number(m[3] ?? 0)], CLOCK_RE.lastIndex]
 }
 
-// A POSIX offset at `pos` as glibc's parse_offset reads it: seconds west of
+// A POSIX offset at `pos` as glibc's tzset reads one: seconds west of
 // Greenwich, and the position after it. A standard offset must start with
 // a sign or a digit and read at least an hour, else there is none (null,
 // and `pos` unmoved). A daylight offset takes a sign even when no hours
 // follow, and reads as null then, past the sign, for the caller to default.
-// Hours are clamped at 24 and minutes and seconds at 59, glibc's
-// compute_offset.
+// Hours are clamped at 24 and minutes and seconds at 59, as glibc clamps
+// them.
 function readOffset(spec: string, pos: number, dst: boolean): [number | null, number] {
   const head = spec[pos] ?? ''
   if (!dst && !(head === '+' || head === '-' || /\d/.test(head))) return [null, pos]
@@ -461,7 +482,7 @@ function bounded(offsetSec: number): number {
 }
 
 /**
- * One transition rule at `pos` as glibc's parse_rule reads it: the rule,
+ * One transition rule at `pos` as glibc's tzset reads one: the rule,
  * the position after it, and whether glibc accepts it. An optional comma
  * leads. `Jn` and `n` take a day, `Mm.w.d` a month, week and weekday, and
  * the end of the string stands for the US rule of that half; `/time` may

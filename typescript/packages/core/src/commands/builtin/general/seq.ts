@@ -31,7 +31,7 @@ import { CommandName } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { LONG_DOUBLE_OVERFLOW, strtodWhole } from '../utils/strtod.ts'
 
-// GNU seq's long_double_format: one floating directive, its flags and an
+// What GNU seq takes for -f: one floating directive, its flags and an
 // optional L, with nothing but %% around it.
 const FORMAT_DIRECTIVE = /([-+#0 ']*)([0-9]*)(?:\.([0-9]*))?(L?)/y
 const FLOAT_CONVERSIONS = 'efgaEFGA'
@@ -129,7 +129,7 @@ function seqNumber(negative: boolean, units = 0n, scale = 0, kind = NumberKind.F
   return { negative, units, scale, kind }
 }
 
-// An operand as GNU seq's scan_arg reads it: what it names, its print width
+// An operand as seq reads it: what it names, its print width
 // in the form it was typed (`-.1` counts as `-0.1` and `1.` as `1`, 0 for a
 // hex number or an infinity), and its digits after the point, null when it is
 // no fixed-point number (a hex float with a point or a `p` exponent). Mirrors
@@ -143,8 +143,8 @@ export interface SeqOperand {
 // FIRST and INCREMENT when the line leaves them out.
 const ONE: SeqOperand = { value: seqNumber(false, 1n), width: 1, precision: 0 }
 
-// The default format for whole numbers, `%.0f`, which GNU's seq_fast prints
-// without printf.
+// The default format for whole numbers, `%.0f`, which needs no printf for a
+// whole FIRST and INCREMENT.
 const PLAIN: SeqFormat = {
   prefix: '',
   flags: '',
@@ -220,74 +220,82 @@ export function readNumber(found: RegExpExecArray): SeqNumber | null {
   return seqNumber(negative, 0n, 0, NumberKind.NAN)
 }
 
-// GNU seq's scan_arg: an operand's value, print width and precision. The
-// width and precision come from the digits as typed, so `1.50` prints two
-// decimals and `1e2` none. A hex operand has no width, and one with a point
-// or a lowercase `p` no precision either. Mirrors Python's scan_operand.
-export function scanOperand(text: string): SeqOperand {
+// The print width and decimals of an operand, from how it was typed. The
+// integer digits count as typed, leading zeros and all (`001` is three wide),
+// with one for a `-` and none for a `+` or a blank, and `.5` counts as `0.5`.
+// An exponent moves the point: a positive one widens the integer part
+// (`0.5e1` is `05`, two wide) and eats the decimals, a negative one adds
+// decimals and leaves the integer part alone (`12e-1` is `01.2`). Measured on
+// GNU 9.7 over 3,600 operand pairs, with and without `-w`. The width is 0 for
+// a hex number or an infinity, and the decimals are null when GNU prints the
+// operand with `%g`: a hex float with a point or a lowercase `p` exponent
+// (`0x1P3` keeps fixed point, `0x1p3` does not). Mirrors Python's
+// _typed_shape.
+function typedShape(found: RegExpExecArray): [number, number | null] {
+  const [, sign, hexa, decimal] = found
+  if (hexa !== undefined) return [0, hexa.includes('.') || hexa.includes('p') ? null : 0]
+  if (decimal === undefined) return [0, 0]
+  const [mantissa = '', power = '0'] = decimal.toLowerCase().split('e')
+  const [whole = '', fraction = ''] = mantissa.split('.')
+  const shift = signedDigits(power)
+  const decimals = Number(BigInt(fraction.length) > shift ? BigInt(fraction.length) - shift : 0n)
+  const lift = Number(shift > 0n ? shift : 0n)
+  const width = (sign === '-' ? 1 : 0) + Math.max(whole.length, 1) + lift
+  return [width + (decimals > 0 ? decimals + 1 : 0), decimals]
+}
+
+// FIRST, INCREMENT or LAST, refused as GNU refuses it. The whole word must be
+// one number in strtold's syntax, leading blanks allowed and trailing ones not
+// (`seq '3 '` is refused), and within the long double range. NaN is refused in
+// words of its own. Mirrors Python's read_operand.
+export function readOperand(text: string): SeqOperand {
+  const shown = `'${quoteText(text)}'`
   const found = strtodWhole(text)
   const value = found === null ? null : readNumber(found)
-  if (value === null) throw refuse(`invalid floating point argument: '${quoteText(text)}'`)
-  if (value.kind === NumberKind.NAN) {
-    throw refuse(`invalid 'not-a-number' argument: '${quoteText(text)}'`)
-  }
-  const shown = text.replace(/^[ \t\n\v\f\r+]+/, '')
-  const point = shown.indexOf('.')
-  let precision: number | null = point >= 0 || shown.includes('p') ? null : 0
-  let width = 0
-  if (value.kind === NumberKind.FINITE && !/[xX]/.test(shown)) {
-    width = shown.length
-    let fraction = 0
-    if (point >= 0) {
-      fraction = (shown.slice(point + 1).split(/[eE]/)[0] ?? '').length
-      precision = fraction
-      if (fraction === 0) width -= 1
-      else if (point === 0 || !'0123456789'.includes(shown[point - 1] ?? '')) width += 1
-    }
-    const marker = Math.max(shown.indexOf('e'), shown.indexOf('E'))
-    if (marker >= 0 && precision !== null) {
-      let exponent = Number(signedDigits(shown.slice(marker + 1)))
-      precision += exponent < 0 ? -exponent : -Math.min(precision, exponent)
-      width -= shown.length - marker
-      if (exponent < 0) {
-        if (point < 0 || marker === point + 1) width += 1
-        exponent = -exponent
-      } else {
-        if (point >= 0 && precision === 0 && fraction !== 0) width -= 1
-        exponent -= Math.min(fraction, exponent)
-      }
-      width += exponent
-    }
-  }
+  if (found === null || value === null) throw refuse(`invalid floating point argument: ${shown}`)
+  if (value.kind === NumberKind.NAN) throw refuse(`invalid 'not-a-number' argument: ${shown}`)
+  const [width, precision] = typedShape(found)
   return { value, width, precision }
 }
 
-// GNU seq's get_default_format: `%.PRECf` with the operands' widest
-// precision, zero-padded to the wider of FIRST and LAST under `-w`, and `%g`
-// once any operand is no fixed-point number. Mirrors Python's
-// default_format.
-export function defaultFormat(
+// An operand's width once printed with `decimals` places. Its integer part
+// keeps its typed width and the decimals are what the format asks for: `-w .5
+// -0.25 -.5` prints `-.5` as `-0.50`, five wide. A hex number or an infinity
+// has no integer part to count but still takes the point and the decimals:
+// `seq -w inf 0.001 inf` prints ` inf`, four wide.
+function widthAt(operand: SeqOperand, decimals: number): number {
+  const typed = operand.precision ?? 0
+  const integer = operand.width - (typed > 0 ? typed + 1 : 0)
+  return integer + (decimals > 0 ? decimals + 1 : 0)
+}
+
+// The format seq prints with when no `-f` is given: `%.Nf`, where N is the
+// most decimals FIRST or INCREMENT was typed with (LAST's never count: `seq 1
+// 1.50` prints `1`). `-w` pads it with zeros to the wider of FIRST and LAST at
+// those decimals, and INCREMENT's width never counts (`seq -w 1 10 5` prints
+// `1`). Any operand `%g` would print turns the whole format into `%g`, which
+// `-w` leaves unpadded (`seq -w 1 0x1.8 5` prints `2.5`). Mirrors Python's
+// implied_format.
+export function impliedFormat(
   first: SeqOperand,
   step: SeqOperand,
   last: SeqOperand,
   equalWidth: boolean,
 ): SeqFormat {
-  const plain = { prefix: '', flags: '', width: '', suffix: '' }
+  const shown = { prefix: '', suffix: '' }
   if (first.precision === null || step.precision === null || last.precision === null) {
-    return { ...plain, precision: null, conversion: 'g' }
+    return { ...shown, flags: '', width: '', precision: null, conversion: 'g' }
   }
-  const precision = Math.max(first.precision, step.precision)
-  if (!equalWidth) return { ...plain, precision: String(precision), conversion: 'f' }
-  let firstWidth = first.width + precision - first.precision
-  let lastWidth = last.width + precision - last.precision
-  if (last.precision !== 0 && precision === 0) lastWidth -= 1
-  if (last.precision === 0 && precision !== 0) lastWidth += 1
-  if (first.precision === 0 && precision !== 0) firstWidth += 1
+  const decimals = Math.max(first.precision, step.precision)
+  if (!equalWidth) {
+    return { ...shown, flags: '', width: '', precision: String(decimals), conversion: 'f' }
+  }
+  const width = Math.max(widthAt(first, decimals), widthAt(last, decimals))
   return {
-    ...plain,
+    ...shown,
     flags: '0',
-    width: String(Math.max(firstWidth, lastWidth)),
-    precision: String(precision),
+    width: String(width),
+    precision: String(decimals),
     conversion: 'f',
   }
 }
@@ -493,16 +501,22 @@ function less(a: SeqNumber, b: SeqNumber): boolean {
   return left < signed(b) * 10n ** BigInt(scale - b.scale)
 }
 
-// Whether a printed number reads back as LAST. GNU cuts the format's own text
-// from both ends and reads the rest with strtold, so a number padded on the
-// right never reads back.
-function readsAs(text: string, spec: SeqFormat, last: SeqNumber): boolean {
-  const head = spec.prefix.replaceAll('%%', '%').length
+// Whether a printed number, read back as a number, is LAST. The format's own
+// text is cut from both ends and strtold reads what is left as a whole word,
+// so leading blanks read (`%5.1f`) and trailing ones do not: `seq -f %-5.1f 0
+// 0.34 1` stops at `0.7` where `seq -f %5.1f 0 0.34 1` goes on to `  1.0`.
+// Mirrors Python's _names_last.
+function namesLast(text: string, spec: SeqFormat, last: SeqNumber): boolean {
+  const lead = spec.prefix.replaceAll('%%', '%').length
   const tail = spec.suffix.replaceAll('%%', '%').length
-  const found = strtodWhole(text.slice(head, text.length - tail))
+  const found = strtodWhole(text.slice(lead, text.length - tail))
   const value = found === null ? null : readNumber(found)
-  if (value === null || value.kind === NumberKind.NAN) return false
-  return !less(value, last) && !less(last, value)
+  if (value?.kind !== last.kind) return false
+  if (value.kind === NumberKind.INFINITE) return value.negative === last.negative
+  if (value.kind === NumberKind.NAN) return false
+  const scale = Math.max(value.scale, last.scale)
+  const read = signed(value) * 10n ** BigInt(scale - value.scale)
+  return read === signed(last) * 10n ** BigInt(scale - last.scale)
 }
 
 // FIRST + i * INCREMENT for i from 1 on, without end. Exact sums for finite
@@ -526,9 +540,9 @@ function* values(first: SeqNumber, step: SeqNumber): Generator<SeqNumber> {
   for (;;) yield tail
 }
 
-// The whole numbers after FIRST, printed plainly: GNU's seq_fast. Their digits
-// are exact, so the number past LAST never reads back as LAST and the print
-// loop's last test has nothing to add. LAST is one FIRST does not pass.
+// The whole numbers after FIRST, printed plainly. Their digits are exact, so
+// the number past LAST never reads back as LAST and the print loop's last test
+// has nothing to add. LAST is one FIRST does not pass.
 function* integers(first: SeqNumber, step: SeqNumber, last: SeqNumber): Generator<string> {
   const delta = signed(step)
   let units = signed(first) + delta
@@ -543,41 +557,55 @@ function* integers(first: SeqNumber, step: SeqNumber, last: SeqNumber): Generato
   for (; delta > 0n ? units <= whole : units >= whole; units += delta) yield units.toString()
 }
 
-// GNU seq's print_numbers: each number as printed, FIRST to LAST. The number
-// past LAST is printed too when it reads back as LAST and prints differently
-// from the one before it. GNU added that against rounding in its long double
-// sums; exact sums reach it only through a format with fewer digits than the
-// operands (`seq -f %.1f 0 0.34 1` ends in 1.0).
-function* lines(
+// The width a `%.0f`-shaped format zero-pads whole numbers to: 0 for the plain
+// `%.0f` itself, null for any other format.
+function zeroPad(spec: SeqFormat): number | null {
+  const plain = spec.prefix === PLAIN.prefix && spec.suffix === PLAIN.suffix
+  if (!plain || spec.conversion !== 'f' || spec.precision !== '0') return null
+  if (spec.flags === '') return spec.width === '' ? 0 : null
+  return spec.flags === '0' ? Number(spec.width || '0') : null
+}
+
+// A finite number with nothing after the point.
+function whole(value: SeqNumber): boolean {
+  return value.kind === NumberKind.FINITE && value.units % 10n ** BigInt(value.scale) === 0n
+}
+
+// Each number of the sequence as printed, FIRST to LAST. Nothing when FIRST is
+// already past LAST. Otherwise the numbers up to LAST, and then the first one
+// past it as well when it prints differently from the one before it and its
+// printed text reads back as LAST: `seq -f %.1f 0 0.34 1` ends in `1.0`, the
+// 1.02 past LAST, while `seq -f %.0f 0 0.6 1` stops at the `1` 0.6 printed as.
+// Sums are exact, so a whole FIRST and INCREMENT under a whole-number format
+// can skip printf. Mirrors Python's _printed_lines.
+function* printedLines(
   first: SeqNumber,
   step: SeqNumber,
   last: SeqNumber,
   spec: SeqFormat,
 ): Generator<string> {
-  const descending = step.negative
-  const past = (value: SeqNumber): boolean => (descending ? less(value, last) : less(last, value))
-  if (past(first)) return
-  let previous = render(spec, first)
-  yield previous
-  const plain = (Object.keys(PLAIN) as (keyof SeqFormat)[]).every((key) => spec[key] === PLAIN[key])
-  if (
-    plain &&
-    first.kind === NumberKind.FINITE &&
-    step.kind === NumberKind.FINITE &&
-    first.scale === 0 &&
-    step.scale === 0
-  ) {
-    yield* integers(first, step, last)
+  const beyond = (value: SeqNumber): boolean =>
+    step.negative ? less(value, last) : less(last, value)
+  if (beyond(first)) return
+  let shown = render(spec, first)
+  yield shown
+  const pad = zeroPad(spec)
+  if (pad !== null && whole(first) && whole(step)) {
+    for (const digits of integers(first, step, last)) {
+      if (pad === 0) yield digits
+      else if (digits.startsWith('-')) yield '-' + digits.slice(1).padStart(pad - 1, '0')
+      else yield digits.padStart(pad, '0')
+    }
     return
   }
   for (const value of values(first, step)) {
     const text = render(spec, value)
-    if (past(value)) {
-      if (text !== previous && readsAs(text, spec, last)) yield text
+    if (beyond(value)) {
+      if (text !== shown && namesLast(text, spec, last)) yield text
       return
     }
     yield text
-    previous = text
+    shown = text
   }
 }
 
@@ -619,23 +647,26 @@ function seq(
   if (spec !== null && equalWidth) {
     throw refuse('format string may not be specified when printing equal width strings')
   }
-  let last = scanOperand(texts[0] ?? '')
+  let last = readOperand(texts[0] ?? '')
   let first = ONE
   let step = ONE
   if (texts.length > 1) {
     first = last
-    last = scanOperand(texts[1] ?? '')
+    last = readOperand(texts[1] ?? '')
   }
   if (texts.length > 2) {
     step = last
     if (step.value.kind === NumberKind.FINITE && step.value.units === 0n) {
       throw refuse(`invalid Zero increment value: '${quoteText(texts[1] ?? '')}'`)
     }
-    last = scanOperand(texts[2] ?? '')
+    last = readOperand(texts[2] ?? '')
   }
-  spec ??= defaultFormat(first, step, last, equalWidth)
+  spec ??= impliedFormat(first, step, last, equalWidth)
   const separator = fl.asStr('separator') ?? '\n'
-  return [stream(lines(first.value, step.value, last.value, spec), separator), new IOResult()]
+  return [
+    stream(printedLines(first.value, step.value, last.value, spec), separator),
+    new IOResult(),
+  ]
 }
 
 export const GENERAL_SEQ = command({

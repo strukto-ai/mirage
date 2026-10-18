@@ -240,6 +240,237 @@
         "stdout": "",
         "stderr": "gzip: stdin has flags 0x40 -- not supported\n"
       }
+    },
+    {
+      "id": "gzip_shared_after_output_6_reserved",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\x72\\x74\\x04\\x01\\x00\\x00\\x00\\x00\\xff\\xff\\x07' | gzip -dc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "\ngzip: stdin: invalid compressed data--format violated\n"
+      }
+    },
+    {
+      "id": "gzip_shared_after_output_65537_reserved",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(set -o pipefail; printf '\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\xec\\xc1\\x81\\x00\\x00\\x00\\x00\\xc3\\x20\\xb6\\xf9\\x4b\\xfd\\x20\\x55\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\xc0\\x0d\\x00\\x00\\xff\\xff\\x07' | gzip -dc | wc -c)",
+      "expect": {
+        "exit": 1,
+        "stdout": "65536\n",
+        "stderr": "\ngzip: stdin: invalid compressed data--format violated\n"
+      }
+    },
+    {
+      "id": "gzip_shared_after_member_6_reserved",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\xcb\\x48\\xcd\\xc9\\xc9\\xe7\\x02\\x00\\x20\\x30\\x3a\\x36\\x06\\x00\\x00\\x00\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\x72\\x74\\x04\\x01\\x00\\x00\\x00\\x00\\xff\\xff\\x07' | gzip -dc",
+      "expect": {
+        "exit": 1,
+        "stdout": "hello\n",
+        "stderr": "\ngzip: stdin: invalid compressed data--format violated\n"
+      }
+    },
+    {
+      "id": "gzip_shared_after_output_0_distance",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\x00\\x00\\x00\\xff\\xff\\x03\\x02\\x00' | gzip -dc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "\ngzip: stdin: invalid compressed data--format violated\n"
+      }
+    },
+    {
+      "id": "gzip_shared_one_byte_000",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\x00' | gzip -dc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "\ngzip: stdin: not in gzip format\n"
+      }
+    },
+    {
+      "id": "gzip_shared_legacy_magic",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\x1f\\x9e\\x08\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\xcb\\x48\\xcd\\xc9\\xc9\\xe7\\x02\\x00\\x20\\x30\\x3a\\x36\\x06\\x00\\x00\\x00' | gzip -dc",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gzip_shared_second_legacy_magic",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\xcb\\x48\\xcd\\xc9\\xc9\\xe7\\x02\\x00\\x20\\x30\\x3a\\x36\\x06\\x00\\x00\\x00\\x1f\\x9e\\x08\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\xcb\\x48\\xcd\\xc9\\xc9\\xe7\\x02\\x00\\x20\\x30\\x3a\\x36\\x06\\x00\\x00\\x00' | gzip -dc",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nhello\n",
+        "stderr": ""
+      }
     }
   ]
 }

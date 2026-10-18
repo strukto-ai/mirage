@@ -9,6 +9,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
 md5.workspace = true
 memchr.workspace = true
 regex-automata.workspace = true

@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { boundedDecimal } from '../../../../commands/builtin/utils/strtol.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { builtinError, result } from '../shared.ts'
-import { SIGNAL_NAMES } from '../timeout/constants.ts'
+import { SIGNALS } from '../timeout/constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
-import { EXIT_EVENT, PSEUDO_SIGNALS, RUN_EVENTS, SIGNAL_MAX, USAGE } from './constants.ts'
+import { PSEUDO_SIGNALS, RUN_EVENTS, SIGNAL_MAX, USAGE } from './constants.ts'
 import { TrapEvent } from './types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 
@@ -27,17 +28,15 @@ import { decodeText, encodeText } from '../../../../shell/bytes.ts'
  */
 export function eventOf(spec: string): TrapEvent | null {
   if (/^[0-9]+$/.test(spec)) {
-    const number = Number(spec)
-    if (number === 0) return TrapEvent.Exit
-    return number <= SIGNAL_MAX ? TrapEvent.Other : null
+    const number = boundedDecimal(spec, BigInt(SIGNAL_MAX) + 1n)
+    if (number === null) return null
+    return number === 0n ? TrapEvent.Exit : TrapEvent.Other
   }
   const name = spec.toUpperCase()
   if (Object.hasOwn(RUN_EVENTS, name)) return name as TrapEvent
   if (PSEUDO_SIGNALS.has(name)) return TrapEvent.Other
   const base = name.startsWith('SIG') ? name.slice(3) : name
-  if (base !== EXIT_EVENT && SIGNAL_NAMES.some(([known]) => known === base)) {
-    return TrapEvent.Other
-  }
+  if ([...SIGNALS.values()].includes(base)) return TrapEvent.Other
   if (base.startsWith('RTMIN') || base.startsWith('RTMAX')) return TrapEvent.Other
   return null
 }

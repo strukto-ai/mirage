@@ -20,7 +20,7 @@ from mirage.commands.builtin.generic.expand import (
     TabStops,
     next_tab_stop,
     parse_flags,
-    parse_tab_stops,
+    read_tab_stops,
 )
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
@@ -137,8 +137,19 @@ def test_expand_quotes_from_the_first_unparseable_character(raw, quoted):
     )
 
 
+def test_expand_reads_a_stop_past_the_int_digit_limit():
+    # GNU 9.7: 5,000 zeros before a number leave the number, and a
+    # 5,000-digit stop is too large.
+    zeros = "0" * 5000
+    assert read_tab_stops([f"{zeros}4"]) == TabStops(stops=(4,))
+    assert read_tab_stops([f"2,/{zeros}4"]) == TabStops(stops=(2,), extend=4)
+    nines = "9" * 5000
+    with pytest.raises(ValueError, match="^expand: tab stop is too large '9"):
+        read_tab_stops([nines])
+
+
 def test_expand_tab_size_accepts_a_leading_plus():
-    """`+4` is not a sign: it is gnulib's INCREMENT specifier.
+    """`+4` is not a sign: it is the specifier that makes 4 an increment.
 
     A bare `+4` and a bare `4` coincide (an increment of 4 from column 0
     is the same sequence as a repeating size of 4), which is why round 2
@@ -354,7 +365,7 @@ _EXPAND_REFUSALS = [
 @pytest.mark.parametrize("raw,message", _EXPAND_REFUSALS)
 def test_expand_refuses_a_tab_list_gnu_refuses(raw, message):
     with pytest.raises(ValueError) as refusal:
-        parse_tab_stops([raw])
+        read_tab_stops([raw])
     assert str(refusal.value) == message
 
 
@@ -390,23 +401,23 @@ def test_expand_tab_list_refusal_is_fatal_before_any_operand(raw, message):
 def test_expand_refuses_across_occurrences(occurrences, message):
     """The accumulated state is what a second `-t` is checked against."""
     with pytest.raises(ValueError) as refusal:
-        parse_tab_stops(occurrences)
+        read_tab_stops(occurrences)
     assert str(refusal.value) == message
 
 
 @pytest.mark.parametrize("raw", ["", ",", ",,", " ", "+", "/"])
 def test_expand_an_empty_list_leaves_the_default(raw):
     """No stop and neither specifier: GNU stays on 8."""
-    assert parse_tab_stops([raw]) == TabStops()
+    assert read_tab_stops([raw]) == TabStops()
 
 
 # A newline is not `isblank` in C (that is space and TAB and nothing
 # else), so it is an invalid character rather than a separator. The
 # character scan gets this for free where the old `^\+?[0-9]+$` with
 # `re.match` accepted it, because python's `$` also matches immediately
-# BEFORE a trailing newline (ground truth NL2-A). The quoted remainder is
-# rendered through gnulib `quote()`, so each of these is the escape's two
-# characters and never the byte (NL3-A).
+# BEFORE a trailing newline (ground truth NL2-A). The remainder is quoted
+# and escaped as every coreutils diagnostic quotes one, so each of these is
+# the escape's two characters and never the byte (NL3-A).
 @pytest.mark.parametrize(
     "raw,quoted",
     [
@@ -421,7 +432,7 @@ def test_expand_an_empty_list_leaves_the_default(raw):
 )
 def test_expand_refuses_a_non_blank_separator(raw, quoted):
     with pytest.raises(ValueError) as refusal:
-        parse_tab_stops([raw])
+        read_tab_stops([raw])
     assert str(refusal.value) == (
         f"expand: tab size contains invalid character(s): '{quoted}'"
     )
@@ -435,7 +446,7 @@ def test_expand_digits_are_ascii_only(raw):
     as two octal escapes rather than as the character (NL3-A).
     """
     with pytest.raises(ValueError) as refusal:
-        parse_tab_stops([raw])
+        read_tab_stops([raw])
     assert str(refusal.value) == (
         "expand: tab size contains invalid character(s): '\\331\\243'"
     )
@@ -587,7 +598,7 @@ def test_expand_backspace_ends_the_leading_run_under_initial_only():
 )
 def test_expand_a_misplaced_specifier_does_not_end_the_scan(raw, message):
     with pytest.raises(ValueError) as refusal:
-        parse_tab_stops([raw])
+        read_tab_stops([raw])
     assert str(refusal.value) == message
 
 
@@ -605,5 +616,5 @@ def test_expand_a_misplaced_specifier_does_not_end_the_scan(raw, message):
 def test_expand_an_invalid_character_does_end_the_scan(raw, message):
     """The other direction: one line, and nothing to its right is read."""
     with pytest.raises(ValueError) as refusal:
-        parse_tab_stops([raw])
+        read_tab_stops([raw])
     assert str(refusal.value) == message

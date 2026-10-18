@@ -145,8 +145,8 @@ export interface Walk {
  * Accepts an ISO-8601 date or a bare epoch second. git accepts far more
  * (`2 weeks ago`, `yesterday`); anything else is refused here rather than
  * silently ignored, which would quietly widen the window. An empty value is
- * now, as git's approxidate reads a date that says nothing (git 2.47:
- * `--since=` lists no past commit).
+ * now, as git reads a date that says nothing (git 2.47: `--since=` lists no
+ * past commit).
  */
 function timestamp(value: string | null, flag: string, now: number): number | null {
   if (value === null) return null
@@ -666,31 +666,54 @@ async function* walkHistory(
 /**
  * Order a walk's commits so no parent comes before any of its children.
  *
- * git's sort_in_topological_order: a commit is emitted once every child in
- * the list has been, children counted only among the commits listed. `topo`
- * keeps a stack, so a merge's second parent's line is followed to its end
- * before the first parent's, and the tips come out in walk order; `date`
- * takes the newest ready commit instead, ties in the order they became ready.
+ * A commit is ready once every child of it in the list is printed; children
+ * outside the list do not hold it back, and every parent counts,
+ * `--first-parent` or not. `topo` prints the commit a printed child made
+ * ready last before the next tip in walk order, so a merge's last parent's
+ * line runs to its end before an earlier parent's: git 2.50.1 prints
+ * `M P2b P2a P1b P1a base` for a merge `M` of `P1b` and `P2b` whatever their
+ * dates. `date` prints the newest ready commit, ties in the order they became
+ * ready, the tips first in walk order.
  *
  * @param list the walk, newest first
- * @param order which of git's two orders
+ * @param order `--topo-order` or `--date-order`
  */
 function sortCommits(list: readonly CommitFacts[], order: 'topo' | 'date'): CommitFacts[] {
-  const indegree = new Map<string, number>()
-  const byOid = new Map<string, CommitFacts>()
-  for (const commit of list) {
-    indegree.set(commit.oid, 1)
-    byOid.set(commit.oid, commit)
-  }
+  const byOid = new Map(list.map((commit) => [commit.oid, commit]))
+  const unprintedChildren = new Map(list.map((commit) => [commit.oid, 0]))
   for (const commit of list) {
     for (const parent of commit.parents) {
-      const count = indegree.get(parent)
-      if (count !== undefined && count > 0) indegree.set(parent, count + 1)
+      const count = unprintedChildren.get(parent)
+      if (count !== undefined) unprintedChildren.set(parent, count + 1)
     }
   }
-  // A stack for topo; for date a heap on (newest, first ready).
-  const ready: { commit: CommitFacts; seq: number }[] = []
-  let seq = 0
+  const tips = list.filter((commit) => unprintedChildren.get(commit.oid) === 0)
+  const printed: CommitFacts[] = []
+  const printCommit = (commit: CommitFacts): CommitFacts[] => {
+    printed.push(commit)
+    const freed: CommitFacts[] = []
+    for (const parent of commit.parents) {
+      const count = unprintedChildren.get(parent)
+      if (count === undefined) continue
+      unprintedChildren.set(parent, count - 1)
+      const parentCommit = byOid.get(parent)
+      if (count === 1 && parentCommit !== undefined) freed.push(parentCommit)
+    }
+    return freed
+  }
+  if (order === 'topo') {
+    const freed: CommitFacts[] = []
+    let upcoming = 0
+    for (;;) {
+      const commit = freed.length > 0 ? freed.pop() : tips[upcoming++]
+      if (commit === undefined) return printed
+      freed.push(...printCommit(commit))
+    }
+  }
+  // The ready commits on a heap keyed newest first and then earliest readied,
+  // so the next one to print is at its top.
+  const ready: { commit: CommitFacts; arrival: number }[] = []
+  let arrivals = 0
   const before = (a: number, b: number): boolean => {
     const x = ready[a]
     const y = ready[b]
@@ -698,7 +721,7 @@ function sortCommits(list: readonly CommitFacts[], order: 'topo' | 'date'): Comm
     if (x.commit.committerTime !== y.commit.committerTime) {
       return x.commit.committerTime > y.commit.committerTime
     }
-    return x.seq < y.seq
+    return x.arrival < y.arrival
   }
   const swap = (a: number, b: number): void => {
     const x = ready[a]
@@ -707,19 +730,15 @@ function sortCommits(list: readonly CommitFacts[], order: 'topo' | 'date'): Comm
     ready[a] = y
     ready[b] = x
   }
-  const put = (commit: CommitFacts): void => {
-    ready.push({ commit, seq })
-    seq += 1
-    if (order === 'topo') return
+  const push = (commit: CommitFacts): void => {
+    ready.push({ commit, arrival: arrivals++ })
     for (let at = ready.length - 1; at > 0 && before(at, (at - 1) >> 1); at = (at - 1) >> 1) {
       swap(at, (at - 1) >> 1)
     }
   }
-  const take = (): CommitFacts | undefined => {
-    if (order === 'topo' || ready.length <= 1) return ready.pop()?.commit
-    const top = ready[0]
-    const last = ready.pop()
-    if (last !== undefined) ready[0] = last
+  const pop = (): CommitFacts | undefined => {
+    swap(0, ready.length - 1)
+    const top = ready.pop()
     for (let at = 0; ;) {
       let next = at
       for (const child of [2 * at + 1, 2 * at + 2]) {
@@ -731,23 +750,11 @@ function sortCommits(list: readonly CommitFacts[], order: 'topo' | 'date'): Comm
     }
     return top?.commit
   }
-  for (const commit of list) if (indegree.get(commit.oid) === 1) put(commit)
-  // The tips come out in the order the walk found them, which a stack
-  // reverses unless it is turned over first.
-  if (order === 'topo') ready.reverse()
-  const sorted: CommitFacts[] = []
-  for (let commit = take(); commit !== undefined; commit = take()) {
-    for (const parent of commit.parents) {
-      const count = indegree.get(parent)
-      if (count === undefined || count === 0) continue
-      indegree.set(parent, count - 1)
-      const next = byOid.get(parent)
-      if (count - 1 === 1 && next !== undefined) put(next)
-    }
-    indegree.set(commit.oid, 0)
-    sorted.push(commit)
+  for (const tip of tips) push(tip)
+  for (let next = pop(); next !== undefined; next = pop()) {
+    for (const parent of printCommit(next)) push(parent)
   }
-  return sorted
+  return printed
 }
 
 /** Whether a commit's date is inside `--since`/`--until`. */

@@ -27,6 +27,22 @@ child=$(commit skew-child 1000000001 -p "$parent")
 commit skew-left 1000000200 -p "$ancestor" -p "$child" >/dev/null
 commit skew-right 1000000300 -p "$ancestor" -p "$child" >/dev/null
 git tag -a tagged -m tag x
+# Two bases the walk meets oldest first: listed newest first anyway.
+early=$(commit order-root 1000000500)
+newer=$(commit order-newer 1000000560 -p "$early")
+older=$(commit order-older 1000000530 -p "$early")
+commit order-left 1000000600 -p "$newer" -p "$older" >/dev/null
+near=$(commit order-near 1000000585 -p "$older")
+far=$(commit order-far 1000000505 -p "$newer")
+commit order-right 1000000590 -p "$near" -p "$far" >/dev/null
+# Two bases of one date: listed in the order the walk meets them.
+early=$(commit tie-root 1000000700)
+first=$(commit tie-first 1000000730 -p "$early")
+second=$(commit tie-second 1000000730 -p "$early")
+commit tie-left 1000000800 -p "$first" -p "$second" >/dev/null
+near=$(commit tie-near 1000000785 -p "$second")
+far=$(commit tie-far 1000000705 -p "$first")
+commit tie-right 1000000790 -p "$near" -p "$far" >/dev/null
 hidden=$(commit shallow-hidden 1000000400)
 boundary=$(commit shallow-boundary 1000000401 -p "$hidden")
 other=$(commit shallow-other 1000000402 -p "$hidden")

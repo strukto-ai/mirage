@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+# The --jq output and the github.com host rule follow go-gh v2.13.0
+# (MIT; see licenses/third_party/go-gh.txt).
+
 import json
 import re
 import sys

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
-import { cInt, strtol, strtoul, signedDecimal, unsignedDecimal } from './strtol.ts'
+import { boundedDecimal, cInt, strtol, strtoul, signedDecimal, unsignedDecimal } from './strtol.ts'
 
 // Mirrors python/tests/commands/builtin/utils/test_strtol.py.
 describe('strtol', () => {
@@ -70,5 +70,23 @@ describe('a number past any digit limit', () => {
     expect(signedDecimal(`-${digits}`)).toBe(-(10n ** 5000n - 1n))
     expect(strtol(digits)).toEqual([2n ** 63n - 1n, ''])
     expect(strtoul(digits)).toEqual([2n ** 64n - 1n, ''])
+  })
+})
+
+describe('boundedDecimal', () => {
+  it.each([
+    ['', 10n, 0n],
+    ['18446744073709551614', 2n ** 64n - 1n, 2n ** 64n - 2n],
+    ['0018446744073709551615', 2n ** 64n - 1n, null],
+    ['100', 100n, null],
+    ['099', 100n, 99n],
+  ])('reads %s under %s, refusing the bound and past', (digits, bound, value) => {
+    expect(boundedDecimal(digits, bound)).toBe(value)
+  })
+
+  it('reads past any digit limit', () => {
+    expect(boundedDecimal('0'.repeat(5000) + '1', 2n ** 64n - 1n)).toBe(1n)
+    expect(boundedDecimal('0'.repeat(5000), 10n)).toBe(0n)
+    expect(boundedDecimal('9'.repeat(5000), 2n ** 64n - 1n)).toBeNull()
   })
 })

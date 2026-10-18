@@ -109,6 +109,9 @@ class WordKind(StrEnum):
 # Numeric values are validated; path values enter virtual path resolution.
 ValueType = Literal["bool", "str", "int", "float", "path"]
 
+ArgumentAction = Literal["store", "store_true", "count", "append", "extend"]
+Nargs: TypeAlias = int | Literal["?", "*", "+", "REMAINDER"] | None
+
 # What the parser itself can put in the bag: it works on argv, so every
 # value is still text, or the bool/int a flag's own shape implies.
 ParsedFlagValue: TypeAlias = str | bool | int | list[str]
@@ -138,10 +141,8 @@ class Argument:
 
     names: tuple[str, ...]
     type: ValueType = "str"
-    action: Literal["store", "store_true", "count", "append", "extend"] = (
-        "store"
-    )
-    nargs: int | Literal["?", "*", "+", "REMAINDER"] | None = None
+    action: ArgumentAction = "store"
+    nargs: Nargs = None
     choices: tuple[str, ...] = ()
     required: bool = False
     default: str | None = None
@@ -159,10 +160,8 @@ class Argument:
         self,
         *names: str,
         type: ValueType = "str",
-        action: Literal[
-            "store", "store_true", "count", "append", "extend"
-        ] = "store",
-        nargs: int | Literal["?", "*", "+", "REMAINDER"] | None = None,
+        action: ArgumentAction = "store",
+        nargs: Nargs = None,
         choices: tuple[str, ...] = (),
         required: bool = False,
         default: str | None = None,
