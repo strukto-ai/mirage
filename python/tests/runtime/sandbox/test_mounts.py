@@ -563,8 +563,8 @@ async def test_a_failed_mount_keeps_pipe_diagnostics_when_the_guest_is_gone():
     try:
         result = await ws.shell("python3 job.py")
         assert result.exit_code == 1
-        assert (
-            "CLI refused: sandbox is not running" in await result.stderr_str()
-        )
+        said = await result.stderr_str()
+        assert "guest unavailable" in said
+        assert "CLI: CLI refused: sandbox is not running" in said
     finally:
         await ws.close()

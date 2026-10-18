@@ -18,11 +18,11 @@ import json
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.cli import open_cli_pipe, run_cli
+from mirage.runtime.sandbox.constants import EXEC_PRELUDE
 from mirage.runtime.sandbox.microsandbox.config import MicrosandboxConfig
 from mirage.runtime.sandbox.microsandbox.constants import (
     INSPECT_TIMEOUT_SECONDS,
     MICROSANDBOX_CLI_HINT,
-    PRELUDE,
     RUNNING_STATE,
     not_running_hint,
 )
@@ -116,7 +116,7 @@ class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
             "--",
             "sh",
             "-c",
-            PRELUDE,
+            EXEC_PRELUDE,
             "sh",
             cwd,
             *argv,

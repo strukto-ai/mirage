@@ -425,7 +425,7 @@ class SandboxMounts:
                     if diagnostic:
                         raise RuntimeError(
                             f"{self._runtime}: sshfs did not mount {prefix}: "
-                            f"{diagnostic}"
+                            f"{error}; CLI: {diagnostic}"
                         ) from error
                     raise
                 if task.done() or asyncio.get_running_loop().time() > deadline:

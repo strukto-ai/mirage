@@ -19,6 +19,7 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
+from mirage.runtime.sandbox.constants import EXEC_PRELUDE
 from mirage.runtime.sandbox.microsandbox import MicrosandboxRuntime
 from mirage.runtime.table import build_runtime
 from mirage.types import PathSpec
@@ -124,7 +125,7 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch):
                 "--",
                 "sh",
                 "-c",
-                'CDPATH= cd -- "$1" && shift && exec "$@"',
+                EXEC_PRELUDE,
                 "sh",
                 "/work",
                 *words,

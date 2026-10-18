@@ -17,6 +17,7 @@ import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '../../../workspace.ts'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
+import { EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { MicrosandboxRuntime } from './runtime.ts'
 import * as cli from '../cli.ts'
 
@@ -137,7 +138,7 @@ describe('MicrosandboxRuntime', () => {
             '--',
             'sh',
             '-c',
-            'CDPATH= cd -- "$1" && shift && exec "$@"',
+            EXEC_PRELUDE,
             'sh',
             '/work',
             ...words,

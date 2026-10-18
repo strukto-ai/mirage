@@ -12,8 +12,10 @@ programs in it.
 
 ## Installation
 
-Install `msb` on the host and put it on `PATH`. Create a sandbox from an
-image with Mirage, `fuse3`, and the programs your captures need. The
+Install `msb` 0.7.8 or later on the host and put it on `PATH`; older
+releases, such as 0.5, have no `exec --no-tty`, so every command fails.
+Create a sandbox from an image with Mirage, `fuse3`, and the programs your
+captures need. The
 [sandbox image](/home/setup/runtime/sandbox#the-sandbox-image) can be pushed
 to an OCI registry and used by Microsandbox:
 
@@ -21,7 +23,7 @@ to an OCI registry and used by Microsandbox:
 msb create my-registry/mirage-fuse:latest --name mirage-box
 ```
 
-The integration was verified with released Microsandbox 0.7.8 on macOS
+The runtime was verified with released Microsandbox 0.7.8 on macOS
 Apple Silicon, using its stock CLI, firmware and Linux aarch64 guest agent.
 No local Microsandbox patches are required. `/dev/fuse` was present and usable
 as root. If programs run as another user, configure that user's device
@@ -153,7 +155,8 @@ do not automatically apply to guest file operations.
 - As a temporary workaround for released agents blocking during startup in an
   SSHFS directory, Mirage starts a shell in `/`, changes to the requested
   directory inside that shell, then replaces it with the requested program.
-  The guest needs a POSIX `sh`; a failed directory change stops execution.
+  The guest needs a POSIX `sh`; a working directory the guest does not have
+  fails the command with exit status 126, as on Docker.
   This delayed-`cd` workaround can be removed once nonblocking guest startup
   is released and required.
 - Passive SSHFS symlink handling is explicit; Mirage does not pretend to be

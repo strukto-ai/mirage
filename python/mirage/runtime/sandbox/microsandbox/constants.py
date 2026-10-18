@@ -19,7 +19,6 @@ MICROSANDBOX_CLI_HINT = (
 
 RUNNING_STATE = "Running"
 INSPECT_TIMEOUT_SECONDS = 10
-PRELUDE = 'CDPATH= cd -- "$1" && shift && exec "$@"'
 
 
 def not_running_hint(sandbox: str, state: str) -> str:

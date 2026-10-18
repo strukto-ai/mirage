@@ -1,0 +1,47 @@
+{
+  "optional": true,
+  "optional_reason": "Microsandbox runs each guest as a microVM the user starts with msb 0.7.8 or later, and the hosted runners provision none. Run locally against a running guest with MIRAGE_INTEG_MICROSANDBOX_SANDBOX naming it (the unserved-cwd case pins dash's wording, as in python:3.12-slim-bookworm).",
+  "requires": [
+    "env:MIRAGE_INTEG_MICROSANDBOX_SANDBOX"
+  ],
+  "cases": [
+    {
+      "id": "unserved_cwd_fails_loud",
+      "world": {
+        "runtimes": [
+          {
+            "name": "microsandbox",
+            "captures": [
+              "uname"
+            ],
+            "config": {
+              "sandbox": "${MIRAGE_INTEG_MICROSANDBOX_SANDBOX}"
+            }
+          },
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /ram",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "uname",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr_contains": "can't cd to /ram"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -421,10 +421,13 @@ export class SandboxMounts {
         } catch (error) {
           signal?.throwIfAborted()
           const diagnostic = (await pipe.diagnostic?.()) ?? ''
-          if (diagnostic)
-            throw new Error(`${this.runtime}: sshfs did not mount ${prefix}: ${diagnostic}`, {
-              cause: error,
-            })
+          if (diagnostic) {
+            const said = error instanceof Error ? error.message : String(error)
+            throw new Error(
+              `${this.runtime}: sshfs did not mount ${prefix}: ${said}; CLI: ${diagnostic}`,
+              { cause: error },
+            )
+          }
           throw error
         }
         if (entry.ended || Date.now() > deadline) {

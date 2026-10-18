@@ -587,7 +587,9 @@ describe('SandboxMounts', () => {
     try {
       const result = await ws.shell('python3 job.py')
       expect(result.exitCode).toBe(1)
-      expect(DEC.decode(result.stderr)).toContain('CLI refused: sandbox is not running')
+      const said = DEC.decode(result.stderr)
+      expect(said).toContain('guest unavailable')
+      expect(said).toContain('CLI: CLI refused: sandbox is not running')
     } finally {
       await ws.close()
     }

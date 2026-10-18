@@ -15,6 +15,7 @@
 import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { checkMountType, requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
+import { EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
@@ -23,7 +24,6 @@ import {
   RUNNING_STATE,
   MICROSANDBOX_CLI_HINT,
   INSPECT_TIMEOUT_SECONDS,
-  PRELUDE,
   notRunningHint,
 } from './constants.ts'
 import { type CliResult, openCliPipe, runCli } from '../cli.ts'
@@ -119,7 +119,7 @@ export class MicrosandboxRuntime
     // line starting with a dash would otherwise parse as one.
     // Released agents block their event loop during chdir into passive SSHFS.
     // Defer it until the shell starts, so the agent can serve the mount pipe.
-    args.push('--', 'sh', '-c', PRELUDE, 'sh', cwd, ...argv)
+    args.push('--', 'sh', '-c', EXEC_PRELUDE, 'sh', cwd, ...argv)
     const result = await this.microsandbox(args, stdin, signal)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
