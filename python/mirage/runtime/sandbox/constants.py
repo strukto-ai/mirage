@@ -84,6 +84,11 @@ MOUNT_POLL_SECONDS = 0.1
 # sandbox side is unmounted.
 UNMOUNT_WAIT_SECONDS = 5.0
 
+# How much of a pipe helper's stderr is kept to say why a mount failed,
+# and how long a helper still running has to finish saying it.
+PIPE_DIAGNOSTIC_BYTES = 16384
+PIPE_DIAGNOSTIC_WAIT_SECONDS = 1.0
+
 # sshfs keeps no copy of its own: every listing, stat and read asks the
 # host, so a file the host changes, or a profile now hides, shows at
 # once, and a file whose size the backend does not know reads whole

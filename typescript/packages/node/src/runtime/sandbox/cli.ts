@@ -19,6 +19,10 @@ import { stat } from 'node:fs/promises'
 import { Readable, type Writable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import {
+  PIPE_DIAGNOSTIC_BYTES,
+  PIPE_DIAGNOSTIC_WAIT_SECONDS,
+} from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { debuglog } from 'node:util'
 import { asyncChain, closeQuietly } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
@@ -231,25 +235,49 @@ export async function closeChildren(children: Set<ChildProcess>): Promise<void> 
   )
 }
 
-/** Hold a byte transport to a sandbox helper until stopped. */
+/**
+ * Hold a byte transport to a sandbox helper until stopped. The tail of what
+ * the helper says on stderr is kept for `diagnostic`, so a mount that fails
+ * can say why. Stopping ends the helper's input; one that has not closed
+ * 100 ms later loses its process group and our ends of its pipes, which
+ * output nobody read would otherwise hold open, exited or not. Mirrors
+ * Python's `open_cli_pipe`.
+ */
 export function openCliPipe(executable: string, args: string[]): Promise<SandboxPipe> {
   const child = spawn(executable, args, {
-    stdio: ['pipe', 'pipe', 'ignore'],
+    stdio: ['pipe', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',
+  })
+  let said = Buffer.alloc(0)
+  child.stderr.on('data', (chunk: Buffer) => {
+    said = Buffer.concat([said, chunk]).subarray(-PIPE_DIAGNOSTIC_BYTES)
+  })
+  child.stderr.on('error', (err) => {
+    debuglog('mirage')('%s helper stderr closed: %s', executable, err)
   })
   child.stdin.on('error', (err) => {
     debuglog('mirage')('%s helper stdin closed: %s', executable, err)
   })
-  const exited = once(child, 'close').catch((err: unknown) => {
-    debuglog('mirage')('%s helper failed: %s', executable, err)
-  })
+  const exited = once(child, 'close').then(
+    () => true,
+    (err: unknown) => {
+      debuglog('mirage')('%s helper failed: %s', executable, err)
+      return true
+    },
+  )
   return Promise.resolve({
     reader: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
     writer: child.stdin,
+    diagnostic: async () => {
+      await Promise.race([
+        exited,
+        delay(PIPE_DIAGNOSTIC_WAIT_SECONDS * 1000, false, { ref: false }),
+      ])
+      return said.toString('utf8').trim()
+    },
     stop: async () => {
       child.stdin.end()
-      await Promise.race([exited, delay(100, undefined, { ref: false })])
-      if (child.exitCode === null && child.signalCode === null) stopTree(child)
+      if (!(await Promise.race([exited, delay(100, false, { ref: false })]))) stopTree(child)
       await exited
     },
   })

@@ -12,9 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { spawn } from 'node:child_process'
-import { once } from 'node:events'
-import { Readable } from 'node:stream'
 import type { Context } from '@struktoai/mirage-core/commands/config'
 import { materialize } from '@struktoai/mirage-core/io/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -32,7 +29,7 @@ import {
   PRELUDE,
   notRunningHint,
 } from './constants.ts'
-import { type CliResult, runCli } from '../cli.ts'
+import { type CliResult, openCliPipe, runCli } from '../cli.ts'
 
 /**
  * Run programs in an existing Microsandbox guest through the msb CLI.
@@ -171,72 +168,19 @@ export class MicrosandboxRuntime
 
   override async openPipe(command: string): Promise<SandboxPipe> {
     await this.connect()
-    const child = spawn(
-      'msb',
-      [
-        'exec',
-        this.config.sandbox,
-        '--quiet',
-        '--no-tty',
-        '--stream',
-        '-w',
-        '/',
-        '--',
-        'sh',
-        '-c',
-        command,
-      ],
-      { stdio: ['pipe', 'pipe', 'pipe'] },
-    )
-    let diagnostics = Buffer.alloc(0)
-    child.stderr.on('data', (chunk: Buffer) => {
-      diagnostics = Buffer.concat([diagnostics, chunk]).subarray(-16384)
-    })
-    child.stderr.on('error', (error: Error) => {
-      console.debug('microsandbox: reading mount pipe stderr failed', error)
-    })
-    child.stdin.on('error', (err) => {
-      console.debug(`microsandbox: the pipe for ${command} closed`, err)
-    })
-    const exited = once(child, 'close').catch((err: unknown) => {
-      console.debug('microsandbox: the mount pipe did not start', err)
-    })
-    try {
-      await once(child, 'spawn')
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') throw new Error(MICROSANDBOX_CLI_HINT)
-      throw err
-    }
-    return {
-      reader: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-      writer: child.stdin,
-      diagnostic: async () => {
-        let timer: ReturnType<typeof setTimeout> | undefined
-        try {
-          await Promise.race([
-            exited,
-            new Promise<void>((resolve) => {
-              timer = setTimeout(resolve, 1000)
-            }),
-          ])
-        } finally {
-          clearTimeout(timer)
-        }
-        return diagnostics.toString('utf8').trim()
-      },
-      stop: async () => {
-        if (child.exitCode === null && child.signalCode === null) child.kill()
-        const timer = setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
-        }, 5000)
-        timer.unref()
-        try {
-          await exited
-        } finally {
-          clearTimeout(timer)
-        }
-      },
-    }
+    return openCliPipe('msb', [
+      'exec',
+      this.config.sandbox,
+      '--quiet',
+      '--no-tty',
+      '--stream',
+      '-w',
+      '/',
+      '--',
+      'sh',
+      '-c',
+      command,
+    ])
   }
 }
 

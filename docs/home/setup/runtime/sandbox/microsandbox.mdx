@@ -163,8 +163,7 @@ do not automatically apply to guest file operations.
   separate sandbox per tenant.
 - Environment variables passed with `-e` are visible in the host's process
   arguments. Do not pass secrets this way on a host shared with untrusted users.
-- Mount startup errors retain a bounded tail of CLI stderr. Closing a mount
-  pipe escalates to a forced kill after five seconds if the CLI does not exit.
+- Mount startup errors keep a bounded tail of CLI stderr.
 - A Mirage timeout cancels the host CLI call. The guest agent cleans up that
   connection's commands; kernel-blocked filesystem cleanup may take longer.
   Use Microsandbox's own limits when required.

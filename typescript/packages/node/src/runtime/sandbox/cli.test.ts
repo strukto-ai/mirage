@@ -17,7 +17,9 @@ import { spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { closeChildren, runCli } from './cli.ts'
+import { setTimeout as delay } from 'node:timers/promises'
+import { closeChildren, openCliPipe, runCli } from './cli.ts'
+import { PIPE_DIAGNOSTIC_BYTES } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { ProcessInput } from '@struktoai/mirage-core/process/stdio'
 import { PipeClosed } from '@struktoai/mirage-core/io/errors'
 
@@ -230,5 +232,41 @@ describe('runCli', () => {
     expect((await run).code).not.toBe(0)
     expect(Date.now() - started).toBeLessThan(5000)
     expect(children.size).toBe(0)
+  })
+})
+
+// Children whose output nobody reads: one exits once its input closes,
+// with a write still blocked in a thread; one stays blocked writing.
+const UNREAD_THEN_EXIT = [
+  'import os, sys, threading',
+  "threading.Thread(target=os.write, args=(1, b'x' * (1 << 20)), daemon=True).start()",
+  'sys.stdin.buffer.read()',
+  'os._exit(0)',
+].join('\n')
+const UNREAD_FOREVER = "import os\nos.write(1, b'x' * (1 << 20))"
+
+describe('openCliPipe', () => {
+  it('keeps the tail of its stderr', async () => {
+    const pipe = await openCliPipe(process.execPath, [
+      '-e',
+      "process.stderr.write('x'.repeat(40000) + 'the-end')",
+    ])
+    try {
+      const said = (await pipe.diagnostic?.()) ?? ''
+      expect(said.endsWith('the-end')).toBe(true)
+      expect(said.length).toBe(PIPE_DIAGNOSTIC_BYTES)
+    } finally {
+      await pipe.stop()
+    }
+  })
+
+  it.each([
+    ['exits once its input closes', UNREAD_THEN_EXIT],
+    ['never exits', UNREAD_FOREVER],
+  ])('stops a command that %s without waiting on output nobody read', async (_name, script) => {
+    const pipe = await openCliPipe('python3', ['-c', script])
+    await delay(500)
+    const stopped = pipe.stop().then(() => 'stopped')
+    expect(await Promise.race([stopped, delay(5000, 'stuck', { ref: false })])).toBe('stopped')
   })
 })

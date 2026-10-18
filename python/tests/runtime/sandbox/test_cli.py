@@ -19,7 +19,13 @@ import sys
 
 import pytest
 
-from mirage.runtime.sandbox.cli import Children, close_children, run_cli
+from mirage.runtime.sandbox.cli import (
+    Children,
+    close_children,
+    open_cli_pipe,
+    run_cli,
+)
+from mirage.runtime.sandbox.constants import PIPE_DIAGNOSTIC_BYTES
 
 # A child that starts a sleep in a session of its own, so killing the
 # child's group leaves it running with the output pipes it inherited.
@@ -29,6 +35,17 @@ ESCAPE = (
     "open(sys.argv[1], 'w').write(str(p.pid))\n"
     "time.sleep(30)\n"
 )
+
+# Children whose output nobody reads: one exits once its input closes,
+# with a write still blocked in a thread; one stays blocked writing.
+UNREAD_THEN_EXIT = (
+    "import os, sys, threading\n"
+    "threading.Thread(target=os.write, args=(1, b'x' * (1 << 20)), "
+    "daemon=True).start()\n"
+    "sys.stdin.buffer.read()\n"
+    "os._exit(0)\n"
+)
+UNREAD_FOREVER = "import os\nos.write(1, b'x' * (1 << 20))\n"
 
 
 async def _ended(pid: int) -> bool:
@@ -210,3 +227,31 @@ async def test_close_children_does_not_wait_on_a_descendant_that_left(
         assert code != 0 and not children
     finally:
         os.kill(escaped, signal.SIGKILL)
+
+
+@pytest.mark.asyncio
+async def test_a_pipe_keeps_the_tail_of_its_stderr():
+    pipe = await open_cli_pipe(
+        sys.executable,
+        ["-c", "import sys; sys.stderr.write('x' * 40000 + 'the-end')"],
+    )
+    try:
+        assert pipe.diagnostic is not None
+        said = await pipe.diagnostic()
+        assert said.endswith("the-end")
+        assert len(said) == PIPE_DIAGNOSTIC_BYTES
+    finally:
+        await pipe.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "script",
+    [UNREAD_THEN_EXIT, UNREAD_FOREVER],
+    ids=["exits_once_its_input_closes", "never_exits"],
+)
+async def test_stopping_a_pipe_does_not_wait_on_output_nobody_read(script):
+    pipe = await open_cli_pipe(sys.executable, ["-c", script])
+    await asyncio.sleep(0.5)
+    async with asyncio.timeout(5):
+        await pipe.stop()

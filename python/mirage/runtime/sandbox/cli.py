@@ -18,9 +18,14 @@ import os
 import signal
 import sys
 from collections.abc import Awaitable, Callable
+from contextvars import Context
 
 from mirage.io.stream import async_chain, close_quietly
 from mirage.io.types import ByteSource
+from mirage.runtime.sandbox.constants import (
+    PIPE_DIAGNOSTIC_BYTES,
+    PIPE_DIAGNOSTIC_WAIT_SECONDS,
+)
 from mirage.runtime.types import RunResult, SandboxPipe
 
 logger = logging.getLogger(__name__)
@@ -283,6 +288,12 @@ async def close_children(children: Children) -> None:
 async def open_cli_pipe(executable: str, args: list[str]) -> SandboxPipe:
     """Hold a byte transport to a sandbox helper until stopped.
 
+    The tail of what the helper says on stderr is kept for
+    ``diagnostic``, so a mount that fails can say why. Stopping ends
+    the helper's input; one that has not closed 0.1 s later loses its
+    process group and our ends of its pipes, which output nobody read
+    would otherwise hold open.
+
     Args:
         executable (str): the provider's CLI.
         args (list[str]): arguments starting a foreground helper.
@@ -291,9 +302,30 @@ async def open_cli_pipe(executable: str, args: list[str]) -> SandboxPipe:
         executable,
         args,
         stdin=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
     )
     assert child.stdin is not None and child.stdout is not None
+    said = bytearray()
+
+    async def keep_tail() -> None:
+        assert child.stderr is not None
+        try:
+            while chunk := await child.stderr.read(_STREAM_LIMIT):
+                said.extend(chunk)
+                del said[:-PIPE_DIAGNOSTIC_BYTES]
+        except Exception:
+            logger.debug("%s helper stderr closed", executable, exc_info=True)
+
+    draining = asyncio.create_task(keep_tail(), context=Context())
+
+    async def diagnostic() -> str:
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(draining), PIPE_DIAGNOSTIC_WAIT_SECONDS
+            )
+        except TimeoutError:
+            logger.debug("%s helper is still running", executable)
+        return said.decode(errors="replace").strip()
 
     async def stop() -> None:
         assert child.stdin is not None
@@ -303,5 +335,7 @@ async def open_cli_pipe(executable: str, args: list[str]) -> SandboxPipe:
         except TimeoutError:
             stop_tree(child, transport)
         await child.wait()
+        draining.cancel()
+        await asyncio.gather(draining, return_exceptions=True)
 
-    return SandboxPipe(child.stdout, child.stdin, stop)
+    return SandboxPipe(child.stdout, child.stdin, stop, diagnostic)

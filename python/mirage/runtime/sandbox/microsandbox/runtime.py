@@ -14,16 +14,14 @@
 
 import asyncio
 import json
-import logging
 from collections.abc import Sequence
-from contextvars import Context
 from typing import Any
 
-from mirage.commands.config import Context as CommandContext
+from mirage.commands.config import Context
 from mirage.io.types import materialize
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.cli import run_cli
+from mirage.runtime.sandbox.cli import open_cli_pipe, run_cli
 from mirage.runtime.sandbox.microsandbox.config import MicrosandboxConfig
 from mirage.runtime.sandbox.microsandbox.constants import (
     INSPECT_TIMEOUT_SECONDS,
@@ -34,8 +32,6 @@ from mirage.runtime.sandbox.microsandbox.constants import (
 )
 from mirage.runtime.types import RunResult, SandboxPipe
 from mirage.types import PathSpec
-
-logger = logging.getLogger(__name__)
 
 
 class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
@@ -111,7 +107,7 @@ class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
         engine: None,
         paths: list[PathSpec],
         texts: list[str],
-        ctx: CommandContext,
+        ctx: Context,
     ) -> RunResult:
         """Admit mounts, then validate the guest immediately before execution.
 
@@ -119,7 +115,7 @@ class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
             engine (None): no provider engine.
             paths (list[PathSpec]): unused.
             texts (list[str]): unused.
-            ctx (CommandContext): line, input, environment and working directory.
+            ctx (Context): line, input, environment and working directory.
         """
         refusal = await self._admit_mounts()
         if refusal is not None:
@@ -137,7 +133,7 @@ class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
         engine: None,
         paths: list[PathSpec],
         texts: list[str],
-        ctx: CommandContext,
+        ctx: Context,
     ) -> RunResult:
         refusal = await self._admit_mounts()
         if refusal is not None:
@@ -187,9 +183,9 @@ class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
     async def open_pipe(self, command: str) -> SandboxPipe:
         """Hold a byte-preserving msb stream open for guest sshfs."""
         await self.connect()
-        try:
-            process = await asyncio.create_subprocess_exec(
-                "msb",
+        return await open_cli_pipe(
+            "msb",
+            [
                 "exec",
                 self.config.sandbox,
                 "--quiet",
@@ -201,59 +197,5 @@ class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
                 "sh",
                 "-c",
                 command,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        except FileNotFoundError:
-            raise RuntimeError(MICROSANDBOX_CLI_HINT) from None
-        assert process.stdin is not None and process.stdout is not None
-        assert process.stderr is not None
-        diagnostics = bytearray()
-
-        async def drain_stderr() -> None:
-            assert process.stderr is not None
-            try:
-                while chunk := await process.stderr.read(4096):
-                    diagnostics.extend(chunk)
-                    del diagnostics[:-16384]
-            except Exception:
-                logger.debug(
-                    "microsandbox: reading mount pipe stderr failed",
-                    exc_info=True,
-                )
-
-        draining = asyncio.create_task(drain_stderr(), context=Context())
-
-        async def diagnostic() -> str:
-            if not draining.done():
-                try:
-                    await asyncio.wait_for(asyncio.shield(draining), timeout=1)
-                except TimeoutError:
-                    logger.debug(
-                        "microsandbox: returning partial mount pipe diagnostics"
-                    )
-            return diagnostics.decode(errors="replace").strip()
-
-        async def stop() -> None:
-            if process.returncode is None:
-                process.terminate()
-            try:
-                await asyncio.wait_for(process.wait(), timeout=5)
-            except TimeoutError:
-                process.kill()
-                await process.wait()
-            if not draining.done():
-                try:
-                    await asyncio.wait_for(draining, timeout=1)
-                except TimeoutError:
-                    logger.debug(
-                        "microsandbox: stderr did not close after the mount pipe exited"
-                    )
-
-        return SandboxPipe(
-            process.stdout,
-            process.stdin,
-            stop,
-            diagnostic,
+            ],
         )
