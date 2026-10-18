@@ -741,3 +741,57 @@ fn large_tail_cache_follows_subject_and_direction() {
         .unwrap();
     assert_eq!(collect(stream.as_mut()), json!(2));
 }
+
+#[test]
+fn adjacent_stars_share_one_state() {
+    for (name, pattern, extglob, expected) in [
+        ("b", "**(a)", true, true),
+        ("ba", "**(a)", true, true),
+        ("xaa", "x**(a)", true, true),
+        ("", "***", false, true),
+        ("*", "[**]", false, true),
+        ("a", "[**]", false, false),
+        ("a*b", "a[*]**b", false, true),
+        ("ab", "a[*]**b", false, false),
+    ] {
+        assert_eq!(
+            matches(name, pattern, extglob),
+            expected,
+            "{name} {pattern}"
+        );
+    }
+    let stars = "*".repeat(1024);
+    let subject = units(&"a".repeat(200_000));
+    for (pattern, operation, expected) in [
+        (stars.clone(), json!({"kind":"matches"}), json!(true)),
+        (
+            format!("*a{stars}b"),
+            json!({"kind":"matches"}),
+            json!(false),
+        ),
+        (
+            format!("a{stars}"),
+            json!({"kind":"end","longest":false}),
+            json!(1),
+        ),
+        (
+            format!("{stars}a"),
+            json!({"kind":"suffix","longest":false}),
+            json!(subject.len() - 1),
+        ),
+    ] {
+        let config = json!({"pattern": units(&pattern), "operation": operation});
+        let mut stream = open(&serde_json::to_vec(&config).unwrap()).unwrap();
+        let bytes: Vec<u8> = subject.iter().flat_map(|cp| cp.to_le_bytes()).collect();
+        let mut output = Vec::new();
+        stream.feed(&bytes, &mut output).unwrap();
+        stream.finish(&mut output).unwrap();
+        let mut chunks = 0;
+        while stream.busy() {
+            stream.drain(&mut output).unwrap();
+            chunks += 1;
+            assert!(chunks <= 4096, "{pattern:.8} exceeded 4096 work chunks");
+        }
+        assert_eq!(serde_json::from_slice::<Value>(&output).unwrap(), expected);
+    }
+}

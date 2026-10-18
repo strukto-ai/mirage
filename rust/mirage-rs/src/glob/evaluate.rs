@@ -241,7 +241,9 @@ impl Frame {
                 if period && self.position == 0 && wildcard {
                     return Progress::Continue;
                 }
-                if is(cp, b'*') {
+                if let Some(&last) = program.stars.get(&state) {
+                    self.schedule(last, self.position);
+                } else if is(cp, b'*') {
                     self.schedule(state + 1, self.position);
                     if self.position < size {
                         self.schedule(state, self.position + 1);

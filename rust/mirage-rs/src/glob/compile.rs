@@ -103,6 +103,7 @@ pub(super) struct Program {
     pub(super) brackets: HashMap<usize, Bracket>,
     pub(super) groups: HashMap<usize, Group>,
     pub(super) transitions: HashMap<usize, Vec<usize>>,
+    pub(super) stars: HashMap<usize, usize>,
 }
 impl Program {
     pub(super) fn literal(&self, cp: u32) -> u32 {
@@ -164,6 +165,10 @@ enum CompilePhase {
         open: usize,
         branch: usize,
     },
+    Stars {
+        cursor: usize,
+        last: Option<usize>,
+    },
     Done,
 }
 impl Compiler {
@@ -176,6 +181,7 @@ impl Compiler {
                 brackets: HashMap::new(),
                 groups: HashMap::new(),
                 transitions: HashMap::new(),
+                stars: HashMap::new(),
             },
             index: 0,
             groups: Vec::new(),
@@ -192,7 +198,10 @@ impl Compiler {
             CompilePhase::Done => self.phase = CompilePhase::Done,
             CompilePhase::Scan => {
                 let Some(&cp) = p.get(self.index) else {
-                    self.phase = CompilePhase::Done;
+                    self.phase = CompilePhase::Stars {
+                        cursor: p.len(),
+                        last: None,
+                    };
                     return;
                 };
                 if is(cp, b'[') {
@@ -426,6 +435,21 @@ impl Compiler {
                         .or_default()
                         .push(group.end);
                 }
+            }
+            CompilePhase::Stars { cursor, last } => {
+                let Some(index) = cursor.checked_sub(1) else {
+                    self.phase = CompilePhase::Done;
+                    return;
+                };
+                let plain = is(p[index], b'*')
+                    && !(self.program.extglob && self.program.groups.contains_key(&index));
+                if let Some(last) = last.filter(|_| plain) {
+                    self.program.stars.insert(index, last);
+                }
+                self.phase = CompilePhase::Stars {
+                    cursor: index,
+                    last: plain.then(|| last.unwrap_or(index)),
+                };
             }
         }
     }
