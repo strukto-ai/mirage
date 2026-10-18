@@ -120,7 +120,6 @@ def rendered(
 LOOK = "look-around, including look-ahead and look-behind, is not supported"
 
 
-# Each refusal is ripgrep 14.1.1's stderr after `rg: `, exit 2.
 @pytest.mark.parametrize(
     "patterns,message,display,carets,hint",
     [

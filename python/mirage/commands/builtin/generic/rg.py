@@ -103,13 +103,7 @@ GZIP_RULE = "-" * 79
 # The status a line answers for a command it cannot find, which ripgrep
 # reports as a --pre command that could not start.
 COMMAND_NOT_FOUND = 127
-# ripgrep's refusal of a pattern that holds the line terminator outside
-# multiline mode, exit 2 (14.1.1).
-NEWLINE_REFUSAL = (
-    'rg: the literal "\\n" is not allowed in a regex\n\nConsider enabling '
-    "multiline mode with the --multiline flag (or -U for short).\nWhen "
-    "multiline mode is enabled, new line characters can be matched."
-)
+NEWLINE_REFUSAL = "rg: a newline in the pattern requires --multiline (-U)"
 # ripgrep's own words for a line with no pattern, exit 2 (14.1.1).
 RG_NO_PATTERN = "rg: ripgrep requires at least one pattern to execute a search"
 # What ripgrep says when a line that named no path searched nothing,

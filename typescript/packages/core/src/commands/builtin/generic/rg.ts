@@ -81,12 +81,7 @@ const GZIP_RULE = '-'.repeat(79)
 // The status a line answers for a command it cannot find, which ripgrep
 // reports as a --pre command that could not start.
 const COMMAND_NOT_FOUND = 127
-// ripgrep's refusal of a pattern that holds the line terminator outside
-// multiline mode, exit 2 (14.1.1).
-const NEWLINE_REFUSAL =
-  'rg: the literal "\\n" is not allowed in a regex\n\nConsider enabling multiline mode ' +
-  'with the --multiline flag (or -U for short).\nWhen multiline mode is enabled, new line ' +
-  'characters can be matched.'
+const NEWLINE_REFUSAL = 'rg: a newline in the pattern requires --multiline (-U)'
 // What ripgrep says when a line that named no path searched nothing, exit 2
 // (14.1.1).
 export const NOTHING_SEARCHED =

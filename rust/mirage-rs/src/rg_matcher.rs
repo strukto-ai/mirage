@@ -111,13 +111,15 @@ impl Program {
         let (nfa, non_matching, required_terms) = builder.build_nfa(patterns).map_err(|err| {
             let mut message = err.to_string();
             if message.contains("the literal") && message.contains("not allowed") {
-                message.push_str("\n\nConsider enabling multiline mode with the --multiline flag (or -U for short).\nWhen multiline mode is enabled, new line characters can be matched.");
+                message.push_str("\n\nUse --multiline (-U) to match newline characters.");
             }
-            if message.contains("look-around") || message.contains("backreferences are not supported") {
-                message.push_str("\n\nConsider enabling PCRE2 with the --pcre2 flag, which can handle backreferences\nand look-around.");
+            if message.contains("look-around")
+                || message.contains("backreferences are not supported")
+            {
+                message.push_str("\n\nUse --pcre2 (-P) for look-around and backreferences.");
             }
             if message.contains("pattern contains \"\\0\"") {
-                message.push_str("\n\nConsider enabling text mode with the --text flag (or -a for short). Otherwise,\nbinary detection is enabled and matching a NUL byte is impossible.");
+                message.push_str("\n\nMatching NUL requires --text (-a).");
             }
             StreamError::new(message)
         })?;
@@ -1066,12 +1068,19 @@ mod tests {
         let error = rg_matcher::Program::with_options(&[r"\x00".to_owned()], options)
             .err()
             .unwrap();
-        assert!(error.message.contains("Consider enabling text mode"));
+        assert!(error.message.contains("--text"));
         let error =
             rg_matcher::Program::with_options(&[r"\n".to_owned()], rg_matcher::Options::default())
                 .err()
                 .unwrap();
-        assert!(error.message.contains("Consider enabling multiline mode"));
+        assert!(error.message.contains("--multiline"));
+        let error = rg_matcher::Program::with_options(
+            &["(?=a)".to_owned()],
+            rg_matcher::Options::default(),
+        )
+        .err()
+        .unwrap();
+        assert!(error.message.contains("--pcre2"));
     }
 
     #[test]

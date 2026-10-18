@@ -15,8 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { RustRegexError, translateRust, wholeLine, wholeWord } from './rust_regex.ts'
 
-const PCRE2_HINT =
-  'Consider enabling PCRE2 with the --pcre2 flag, which can handle backreferences\nand look-around.'
+const PCRE2_HINT = 'Use --pcre2 (-P) for look-around and backreferences.'
 
 function findAll(patterns: string[], text: string, ignoreCase = false): string[] {
   const translated = translateRust(patterns, ignoreCase)

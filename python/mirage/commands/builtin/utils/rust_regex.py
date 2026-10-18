@@ -68,10 +68,7 @@ GROUP_NAME_INVALID = "invalid capture group character"
 GROUP_NAME_EOF = "unclosed capture group name"
 GROUP_NAME_DUPLICATE = "duplicate capture group name"
 PROPERTY_UNSUPPORTED = "Unicode property not supported in mirage"
-PCRE2_HINT = (
-    "Consider enabling PCRE2 with the --pcre2 flag, which can "
-    "handle backreferences\nand look-around."
-)
+PCRE2_HINT = "Use --pcre2 (-P) for look-around and backreferences."
 
 FLAG_LETTERS = "imsUuxR"
 # An inline flag group that could change case folding: `i` itself, or

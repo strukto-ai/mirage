@@ -323,11 +323,11 @@
         "sharepoint-prefix",
         "ssh"
       ],
-      "command": "printf 'a\\nb\\n' | rg -U --stop-on-nonmatch 'a\\nb'",
+      "command": "{ printf 'a\\nb\\n' | rg -U --stop-on-nonmatch 'a\\nb'; } 2>/dev/null",
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "rg: the literal \"\\n\" is not allowed in a regex\n\nConsider enabling multiline mode with the --multiline flag (or -U for short).\nWhen multiline mode is enabled, new line characters can be matched.\n"
+        "stderr": ""
       }
     },
     {

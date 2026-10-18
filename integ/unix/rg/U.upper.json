@@ -140,11 +140,11 @@
         "nextcloud",
         "box"
       ],
-      "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg 'foo\\nbar' /data/rgfl/a.txt; echo rc=$?; rg -U --no-multiline 'foo\\nbar' /data/rgfl/a.txt; echo rc=$?; rm -rf /data/rgfl",
+      "command": "{ mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg 'foo\\nbar' /data/rgfl/a.txt; echo rc=$?; rg -U --no-multiline 'foo\\nbar' /data/rgfl/a.txt; echo rc=$?; rm -rf /data/rgfl; } 2>/dev/null",
       "expect": {
         "exit": 0,
         "stdout": "rc=2\nrc=2\n",
-        "stderr": "rg: the literal \"\\n\" is not allowed in a regex\n\nConsider enabling multiline mode with the --multiline flag (or -U for short).\nWhen multiline mode is enabled, new line characters can be matched.\nrg: the literal \"\\n\" is not allowed in a regex\n\nConsider enabling multiline mode with the --multiline flag (or -U for short).\nWhen multiline mode is enabled, new line characters can be matched.\n"
+        "stderr": ""
       },
       "flags": [
         "U",

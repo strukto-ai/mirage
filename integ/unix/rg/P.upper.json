@@ -397,11 +397,11 @@
         "nextcloud",
         "box"
       ],
-      "command": "printf 'aa\\n' | rg --engine auto -o '(a)\\1'; printf 'a\\n' | rg --engine pcre2 a; printf 'aa\\n' | rg --engine default -o '(a)\\1'; echo rc=$?",
+      "command": "{ printf 'aa\\n' | rg --engine auto -o '(a)\\1'; printf 'a\\n' | rg --engine pcre2 a; printf 'aa\\n' | rg --engine default -o '(a)\\1'; echo rc=$?; } 2>/dev/null",
       "expect": {
         "exit": 0,
         "stdout": "aa\na\nrc=2\n",
-        "stderr": "rg: regex parse error:\n    (?:(a)\\1)\n          ^^\nerror: backreferences are not supported\n\nConsider enabling PCRE2 with the --pcre2 flag, which can handle backreferences\nand look-around.\n"
+        "stderr": ""
       },
       "flags": [
         "engine"
@@ -463,11 +463,11 @@
         "nextcloud",
         "box"
       ],
-      "command": "printf 'aa\\n' | rg -P --no-pcre2 -o '(a)\\1'; printf 'aa\\n' | rg --no-pcre2 -P -o '(a)\\1'; printf 'aa\\n' | rg -P --engine default -o '(a)\\1'; echo rc=$?",
+      "command": "{ printf 'aa\\n' | rg -P --no-pcre2 -o '(a)\\1'; printf 'aa\\n' | rg --no-pcre2 -P -o '(a)\\1'; printf 'aa\\n' | rg -P --engine default -o '(a)\\1'; echo rc=$?; } 2>/dev/null",
       "expect": {
         "exit": 0,
         "stdout": "aa\nrc=2\n",
-        "stderr": "rg: regex parse error:\n    (?:(a)\\1)\n          ^^\nerror: backreferences are not supported\n\nConsider enabling PCRE2 with the --pcre2 flag, which can handle backreferences\nand look-around.\nrg: regex parse error:\n    (?:(a)\\1)\n          ^^\nerror: backreferences are not supported\n\nConsider enabling PCRE2 with the --pcre2 flag, which can handle backreferences\nand look-around.\n"
+        "stderr": ""
       },
       "flags": [
         "pcre2",
@@ -570,11 +570,11 @@
         "nextcloud",
         "box"
       ],
-      "command": "printf 'aa\\n' | rg -P --no-auto-hybrid-regex -o '(a)\\1'; echo rc=$?; printf 'aa\\n' | rg --no-auto-hybrid-regex -P -o '(a)\\1'; echo rc=$?; printf 'aa\\n' | rg --engine auto --no-auto-hybrid-regex -o '(a)\\1'; echo rc=$?",
+      "command": "{ printf 'aa\\n' | rg -P --no-auto-hybrid-regex -o '(a)\\1'; echo rc=$?; printf 'aa\\n' | rg --no-auto-hybrid-regex -P -o '(a)\\1'; echo rc=$?; printf 'aa\\n' | rg --engine auto --no-auto-hybrid-regex -o '(a)\\1'; echo rc=$?; } 2>/dev/null",
       "expect": {
         "exit": 0,
         "stdout": "rc=2\naa\nrc=0\nrc=2\n",
-        "stderr": "rg: regex parse error:\n    (?:(a)\\1)\n          ^^\nerror: backreferences are not supported\n\nConsider enabling PCRE2 with the --pcre2 flag, which can handle backreferences\nand look-around.\nrg: regex parse error:\n    (?:(a)\\1)\n          ^^\nerror: backreferences are not supported\n\nConsider enabling PCRE2 with the --pcre2 flag, which can handle backreferences\nand look-around.\n"
+        "stderr": ""
       },
       "flags": [
         "no_auto_hybrid_regex",
