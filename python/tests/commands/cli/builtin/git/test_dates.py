@@ -469,6 +469,7 @@ def test_a_padded_epoch_reads_a_named_host_zone_as_tzdata(monkeypatch):
     # read as that tzdata zone: the same dates as a session that names it,
     # its summers searched a day at a time and kept.
     monkeypatch.setenv("TZ", "America/New_York")
+    monkeypatch.setitem(dates.STRETCHES, ZoneInfo("America/New_York"), [])
     host = parse_date_mode("format:%12s", date_clock({}))
     named = parse_date_mode(
         "format:%12s", date_clock({"TZ": "America/New_York"})
