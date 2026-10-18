@@ -1,0 +1,88 @@
+---
+title: Limit command output
+description: Cap command output and execution time at the workspace, mount, or profile level.
+icon: gauge
+---
+
+Mirage keeps large results from flooding an agent. `cat`, `grep`, `rg`, `head`,
+and `tail` return at most 2,000 lines by default, and every command stops after
+600 seconds.
+
+## Set Limits
+
+Set a workspace default for every session, a mount override for commands that
+run on that mount, or a profile override for sessions created with that profile.
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    from mirage import MountMode, Workspace
+    from mirage.types import Limit, OnExceed
+    from mirage.vfs.ram import RAMVFS
+
+    ws = Workspace(
+        {
+            "/data": (RAMVFS(), MountMode.WRITE, {
+                "grep": Limit(max_lines=50, on_exceed=OnExceed.ERROR),
+            }),
+        },
+        mode=MountMode.WRITE,
+        command_limits={"head": Limit(max_lines=500, timeout_seconds=30)},
+        profiles={
+            "researcher": {"command_limits": {"head": Limit(max_lines=5000)}},
+        },
+    )
+    ws.create_session("research", profile="researcher")
+    ```
+  </Tab>
+  <Tab title="TypeScript">
+    ```ts
+    import { Limit, MountMode, OnExceed, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace(
+      {
+        '/data': [
+          new RAMVFS(),
+          MountMode.WRITE,
+          { grep: new Limit({ maxLines: 50, onExceed: OnExceed.ERROR }) },
+        ],
+      },
+      {
+        mode: MountMode.WRITE,
+        commandLimits: { head: new Limit({ maxLines: 500, timeoutSeconds: 30 }) },
+        profiles: { researcher: { commandLimits: { head: new Limit({ maxLines: 5000 }) } } },
+      },
+    )
+    ws.createSession('research', { profile: 'researcher' })
+    ```
+  </Tab>
+</Tabs>
+
+The workspace YAML uses the same fields in snake case under `command_limits`.
+
+## Choose Which Limit Applies
+
+A command uses the first configured entry that names it: the session profile,
+the mount, the workspace, the command's own default, then Mirage's built-in
+default. An entry replaces that command's entire limit, so include the timeout
+again when an override should retain it. Commands absent from an override keep
+their inherited limits.
+
+For commands spanning multiple mounts, Mirage applies the tightest resolved
+limit from those mounts.
+
+## Handle a Reached Limit
+
+- `max_lines` and `max_bytes` cap output. Use `None` in Python or `null` in
+  TypeScript for no cap.
+- `timeout_seconds` sets a deadline. A command that passes it exits 124.
+- `on_exceed=TRUNCATE`, the default, returns the capped output, writes a notice
+  to stderr, and preserves the command's exit code.
+- `on_exceed=ERROR` drops the output and exits 1, so `&&` and `||` see a failure.
+
+In TypeScript, use the camel-case forms `maxLines`, `maxBytes`, `timeoutSeconds`,
+and `onExceed`.
+
+Caps apply to each command's printed output. `cat big.txt; echo end` still prints
+`end`. Input to a pipe, redirect, or command substitution is not cut, so
+`cat big.txt | wc -l` counts every line.

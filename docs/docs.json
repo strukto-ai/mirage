@@ -199,6 +199,7 @@
             "group": "Mirage Shell",
             "pages": [
               "home/core/shell",
+              "home/core/output-limits",
               "home/core/tools",
               "home/core/data-network"
             ]

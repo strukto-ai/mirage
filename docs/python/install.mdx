@@ -7,7 +7,7 @@ icon: download
 
 ## Quick Install
 
-Mirage requires Python 3.11 or newer. Install the base package into an existing project or virtual environment:
+Mirage requires Python 3.11 or newer. In a uv project, install the base package with:
 
 ```bash
 uv add mirage-ai
@@ -15,10 +15,12 @@ uv add mirage-ai
 
 This is enough to start with local workflows such as the RAM VFS and to understand the Mirage execution model.
 
-If you are not using uv:
+In an activated standalone virtual environment, use either installer:
 
 ```bash
-pip install mirage-ai
+uv pip install mirage-ai
+# or
+python -m pip install mirage-ai
 ```
 
 ## Use Mirage as a CLI

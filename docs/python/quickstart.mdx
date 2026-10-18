@@ -7,22 +7,16 @@ keywords: ["Mirage Python quickstart", "mirage-ai", "virtual filesystem", "AI ag
 
 ## Installation
 
-Use Python 3.11 or newer. In an existing project or virtual environment, install Mirage:
+Use Python 3.11 or newer. In a uv project, install Mirage with:
 
 ```bash
 uv add mirage-ai
 ```
 
-If you are not using uv:
+In another activated environment, install it with:
 
 ```bash
-pip install mirage-ai
-```
-
-For VFS types with extra dependencies, install the matching extra:
-
-```bash
-uv add "mirage-ai[s3]"
+python -m pip install mirage-ai
 ```
 
 ## Create a Workspace
@@ -52,8 +46,9 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-Run `python quickstart.py`; it lists `user.json`, prints `alice`, then prints
-the matching JSON document.
+For a uv project, run `uv run python quickstart.py`. If you installed Mirage in
+another activated environment, run `python quickstart.py`. It lists `user.json`,
+prints `alice`, then prints the matching JSON document.
 
 Shell failures are returned in the result; check `exit_code` and `stderr_str()`
 when needed. See the [in-app API reference](/python/access/in-app#session-shell).
@@ -61,53 +56,6 @@ when needed. See the [in-app API reference](/python/access/in-app#session-shell)
 ## Next Steps
 
 - See [Python Installation](/python/install) for VFS extras and the `uv` workflow.
+- Configure [command output limits](/home/core/output-limits) for large files and long-running commands.
 - Browse [Python Agents](/python/agents/index) to wire Mirage into the OpenAI Agents SDK, LangChain, Pydantic AI, and OpenHands.
 - Pick a real backend from [VFS Docs](/python/vfs/index), such as [S3](/python/vfs/s3), [Slack](/python/vfs/slack), or [GitHub](/python/vfs/github).
-
-## Further configuration: output limits
-
-To keep huge reads from flooding an agent, `cat`, `grep`, `rg`, `head`, and
-`tail` cap their output at 2000 lines, and every command stops after 600
-seconds. When a cap fires, the agent sees the truncated output plus a stderr
-notice (`cat: output truncated at limit (2000 lines); ...`).
-
-Set your own limits in three places. A mount's third tuple element covers
-commands that run on it, `command_limits` is the default for every session,
-and a profile's `command_limits` applies to sessions created with it:
-
-```python
-from mirage import MountMode, Workspace
-from mirage.types import Limit, OnExceed
-from mirage.vfs.ram import RAMVFS
-
-ws = Workspace(
-    {
-        "/data": (RAMVFS(), MountMode.WRITE, {
-            "grep": Limit(max_lines=50, on_exceed=OnExceed.ERROR),
-        }),
-    },
-    mode=MountMode.WRITE,
-    command_limits={"head": Limit(max_lines=500, timeout_seconds=30)},
-    profiles={
-        "researcher": {"command_limits": {"head": Limit(max_lines=5000)}},
-    },
-)
-ws.create_session("research", profile="researcher")
-```
-
-A command's limit comes from the first place that names it: the session's
-profile, the mount the command runs on, the workspace, then the built-in
-default. An entry replaces that command's whole limit, so restate
-`timeout_seconds` if you still want a deadline; commands it does not name keep
-their defaults.
-
-- `max_lines` / `max_bytes` cap the output; `None` means no cap.
-- `timeout_seconds` is a deadline; a command that runs past it exits 124.
-- `on_exceed=TRUNCATE` (default) keeps the capped output, adds a stderr
-  notice, and leaves the exit code alone. `ERROR` drops the output and exits
-  1, so `&&` and `||` see the failure.
-
-Caps apply to what each command prints, one command at a time:
-`cat big.txt; echo end` still prints `end`. Data going into a pipe, a
-redirect, or `$(...)` is never cut, so `cat big.txt | wc -l` counts every
-line. The workspace YAML takes the same fields under `command_limits`.
