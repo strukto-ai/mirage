@@ -494,6 +494,25 @@ def test_a_mount_may_refuse_a_full_scan(line, mount, refuse, out):
         assert (_run(vfs, line), vfs.reads) == ((b"", *out), [])
 
 
+@pytest.mark.parametrize(
+    "line, terms",
+    [
+        ("rg -w -e ada -e bob /d", ["ada", "bob"]),
+        ("rg -w 'ada|bob' /d", ["ada", "bob"]),
+        ("rg -w xy /d", ["xy"]),
+        ("rg -x xy /d", ["xy"]),
+    ],
+)
+def test_rg_complete_literal_words_avoid_a_refused_full_scan(line, terms):
+    vfs = SearchRAM(lines=None, refuse=RuntimeError)
+    vfs._store.files["/d/short.txt"] = b"xy\n"
+    plain = RAMVFS()
+    plain._store.files["/d/short.txt"] = b"xy\n"
+    assert _run(vfs, line) == _run(plain, line)
+    assert vfs.asked == [(term, True) for term in terms]
+    assert vfs.scans == []
+
+
 def test_rg_truncated_literal_prefix_never_requests_a_whole_word():
     vfs = SearchRAM(lines=None)
     word = "a" * 101

@@ -1094,6 +1094,39 @@ mod tests {
                 },
                 Some((vec!["ada"], false, false)),
             ),
+            (
+                "alpha|bravo",
+                rg_matcher::Options {
+                    whole_word: true,
+                    ..Default::default()
+                },
+                Some((vec!["alpha", "bravo"], true, false)),
+            ),
+            (
+                "xy",
+                rg_matcher::Options {
+                    whole_word: true,
+                    ..Default::default()
+                },
+                Some((vec!["xy"], true, false)),
+            ),
+            (
+                "a|b",
+                rg_matcher::Options {
+                    line_regexp: true,
+                    ..Default::default()
+                },
+                Some((vec!["a", "b"], true, false)),
+            ),
+            (
+                "xy+",
+                rg_matcher::Options {
+                    whole_word: true,
+                    ..Default::default()
+                },
+                None,
+            ),
+            ("xy", rg_matcher::Options::default(), None),
             (r"\p{Greek}+", rg_matcher::Options::default(), None),
         ] {
             let program =

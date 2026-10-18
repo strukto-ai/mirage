@@ -424,6 +424,21 @@ it.each<[string, string, (message: string) => Error, [string, number] | null]>([
   }
 })
 
+it.each<[string, string[]]>([
+  ['rg -w -e ada -e bob /d', ['ada', 'bob']],
+  ["rg -w 'ada|bob' /d", ['ada', 'bob']],
+  ['rg -w xy /d', ['xy']],
+  ['rg -x xy /d', ['xy']],
+])('avoids a refused full scan for complete literal words in %s', async (line, terms) => {
+  const vfs = new SearchRAM({ lines: null, refuse: plainError })
+  vfs.store.files.set('/d/short.txt', ENC.encode('xy\n'))
+  const plain = new RAMVFS()
+  plain.store.files.set('/d/short.txt', ENC.encode('xy\n'))
+  expect(await run(vfs, line)).toEqual(await run(plain, line))
+  expect(vfs.asked).toEqual(terms.map((term) => [term, true]))
+  expect(vfs.scans).toEqual([])
+})
+
 it('does not request a whole word for a truncated literal prefix', async () => {
   const vfs = new SearchRAM({ lines: null })
   const word = 'a'.repeat(101)

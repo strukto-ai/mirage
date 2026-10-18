@@ -97,8 +97,7 @@ impl RegexMatcherBuilder {
         Error,
     > {
         let mut chir = self.config.build_many(patterns)?;
-        let whole_word = (chir.config().word || chir.config().whole_line)
-            && chir.hir().properties().is_literal();
+        let whole_word = chir.config().word || chir.config().whole_line;
         if chir.config().whole_line {
             chir = chir.into_whole_line();
         } else if chir.config().word {
@@ -117,7 +116,7 @@ impl RegexMatcherBuilder {
                 .iter()
                 .map(|literal| {
                     let bytes = literal.as_bytes();
-                    if bytes.len() < 3 {
+                    if bytes.is_empty() || (!whole_word && bytes.len() < 3) {
                         return None;
                     }
                     std::str::from_utf8(bytes).ok().map(str::to_owned)
