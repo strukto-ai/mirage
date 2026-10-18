@@ -13,50 +13,47 @@ and `tail` return at most 2,000 lines by default, and every command stops after
 Set a workspace default for every session, a mount override for commands that
 run on that mount, or a profile override for sessions created with that profile.
 
-<Tabs>
-  <Tab title="Python">
-    ```python
-    from mirage import MountMode, Workspace
-    from mirage.types import Limit, OnExceed
-    from mirage.vfs.ram import RAMVFS
+<CodeGroup>
+```python Python
+from mirage import MountMode, Workspace
+from mirage.types import Limit, OnExceed
+from mirage.vfs.ram import RAMVFS
 
-    ws = Workspace(
-        {
-            "/data": (RAMVFS(), MountMode.WRITE, {
-                "grep": Limit(max_lines=50, on_exceed=OnExceed.ERROR),
-            }),
-        },
-        mode=MountMode.WRITE,
-        command_limits={"head": Limit(max_lines=500, timeout_seconds=30)},
-        profiles={
-            "researcher": {"command_limits": {"head": Limit(max_lines=5000)}},
-        },
-    )
-    ws.create_session("research", profile="researcher")
-    ```
-  </Tab>
-  <Tab title="TypeScript">
-    ```ts
-    import { Limit, MountMode, OnExceed, RAMVFS, Workspace } from '@struktoai/mirage-node'
+ws = Workspace(
+    {
+        "/data": (RAMVFS(), MountMode.WRITE, {
+            "grep": Limit(max_lines=50, on_exceed=OnExceed.ERROR),
+        }),
+    },
+    mode=MountMode.WRITE,
+    command_limits={"head": Limit(max_lines=500, timeout_seconds=30)},
+    profiles={
+        "researcher": {"command_limits": {"head": Limit(max_lines=5000)}},
+    },
+)
+ws.create_session("research", profile="researcher")
+```
 
-    const ws = new Workspace(
-      {
-        '/data': [
-          new RAMVFS(),
-          MountMode.WRITE,
-          { grep: new Limit({ maxLines: 50, onExceed: OnExceed.ERROR }) },
-        ],
-      },
-      {
-        mode: MountMode.WRITE,
-        commandLimits: { head: new Limit({ maxLines: 500, timeoutSeconds: 30 }) },
-        profiles: { researcher: { commandLimits: { head: new Limit({ maxLines: 5000 }) } } },
-      },
-    )
-    ws.createSession('research', { profile: 'researcher' })
-    ```
-  </Tab>
-</Tabs>
+```ts TypeScript
+import { Limit, MountMode, OnExceed, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace(
+  {
+    '/data': [
+      new RAMVFS(),
+      MountMode.WRITE,
+      { grep: new Limit({ maxLines: 50, onExceed: OnExceed.ERROR }) },
+    ],
+  },
+  {
+    mode: MountMode.WRITE,
+    commandLimits: { head: new Limit({ maxLines: 500, timeoutSeconds: 30 }) },
+    profiles: { researcher: { commandLimits: { head: new Limit({ maxLines: 5000 }) } } },
+  },
+)
+ws.createSession('research', { profile: 'researcher' })
+```
+</CodeGroup>
 
 The workspace YAML uses the same fields in snake case under `command_limits`.
 
