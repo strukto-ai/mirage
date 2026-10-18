@@ -40,6 +40,7 @@ import quotingSyntax from '../bash/syntax/quoting.json'
 import pipelineStatus from '../bash/param/pipestatus.json'
 import traps from '../bash/trap/exit.json'
 import processStreams from '../bash/procsub/stream.json'
+import rgShared from '../unix/rg/shared_engine.json'
 import printfBasic from '../bash/printf/basic.json'
 import printfAssignments from '../bash/printf/vflag.json'
 import printfShared from '../bash/printf/shared.json'
@@ -93,6 +94,7 @@ function battery(): [string, Check][] {
   const files = [
     traps,
     processStreams,
+    rgShared,
     printfBasic,
     printfAssignments,
     printfShared,
@@ -122,6 +124,22 @@ function battery(): [string, Check][] {
 }
 
 const CHECKS: [string, Check][] = [
+  [
+    'cancelling rg on a long line releases the search',
+    async (ws) => {
+      await ws.vfs.write(
+        '/data/rg-long',
+        new TextEncoder().encode('a'.repeat(4 * 1024 * 1024) + '!\n'),
+      )
+      for (const command of ["rg '(a+)+$' /data/rg-long", "rg -U 'a+\\n!' /data/rg-long"]) {
+        const abort = new AbortController()
+        const running = ws.shell(command, { signal: abort.signal })
+        setTimeout(() => abort.abort(), 25)
+        equal(await aborted(running), 'AbortError')
+        equal(await shell(ws, 'echo alive'), [0, 'alive\n', ''])
+      }
+    },
+  ],
   [
     'overlapping sessions own their process-substitution descriptors',
     async (ws) => {

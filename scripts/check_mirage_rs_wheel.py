@@ -111,6 +111,30 @@ def main() -> None:
             b"a\nb\nc\n\xff\n",
         ),
     }
+    rg = stream(
+        "rg",
+        {
+            "pattern": "(?P<word>x)",
+            "replace": "<${word}>",
+            "only_matching": True,
+            "byte_offsets": True,
+        },
+    )
+    rg.begin(b'{"name":"f","label":null,"binary_mode":"text"}')
+    rg_output = settle(rg, rg.feed("éx\n".encode()))
+    rg_output = settle(rg, rg_output + rg.finish())
+    checks["rg capture replacement"] = (rg_output, b"2:<x>\n")
+    progress = json.loads(rg.metadata())
+    checks["rg progress"] = ([progress["selected"]], [True])
+    preview = stream(
+        "rg", {"pattern": ".", "max_columns": 2, "max_columns_preview": True}
+    )
+    preview.begin(b'{"name":"f","label":null,"binary_mode":"text"}')
+    preview_output = settle(preview, preview.feed("é👩‍💻x\n".encode()))
+    checks["rg grapheme preview"] = (
+        settle(preview, preview_output + preview.finish()),
+        "é👩‍💻 [... omitted end of long line]\n".encode(),
+    )
     checks["bc exact arithmetic"] = (
         run(
             "bc",

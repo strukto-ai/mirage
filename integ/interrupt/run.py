@@ -162,6 +162,7 @@ async def seed(client):
     rng = random.Random(7)
     files = {
         "/left": b"a\n" * 12000,
+        "/rg-line": b"a" * (4 * 1024 * 1024) + b"!\n",
         "/right": b"a\n" * 11999 + b"b\n",
         "/numbers": "".join(
             f"{rng.randrange(10**18)}\n" for _ in range(300000)

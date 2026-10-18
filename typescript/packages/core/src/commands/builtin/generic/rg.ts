@@ -50,10 +50,19 @@ import {
   recordEnd,
   printsContext,
   type RgFlags,
-  searchHaystack,
   smartCaseFolds,
   type Tally,
 } from '../rg_search.ts'
+import {
+  RgProgram,
+  formatOutput,
+  latin1,
+  openRg,
+  searchInput,
+  totalsConfig,
+  type RgPattern,
+} from '../rg_stream.ts'
+import { OutputStream, ensureStream } from '../../../io/stream.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
 import { type LinkResolver, linkResolver, mountsOf, dispatchOf, mountRoot } from '../utils/links.ts'
 import { formatRecords } from '../utils/output.ts'
@@ -545,7 +554,7 @@ export function parseFlags(fl: FlagView): RgFlags {
     null: fl.asBool('null'),
     nullData: fl.asBool('null_data'),
     crlf: last(fl, 'crlf', 'no_crlf') === 'crlf' && !fl.asBool('null_data'),
-    multiline: last(fl, 'multiline', 'no_multiline') === 'multiline',
+    multiline: last(fl, 'multiline', 'no_multiline', 'stop_on_nonmatch') === 'multiline',
     stats: last(fl, 'stats', 'no_stats') === 'stats',
     searchZip: last(fl, 'search_zip', 'no_search_zip') === 'search_zip',
     // --pre with no command, or after --no-pre, preprocesses nothing.
@@ -571,7 +580,7 @@ export function parseFlags(fl: FlagView): RgFlags {
       !jsonRecords,
     passthru,
     maxCount: numberFlag(fl, 'max_count'),
-    stopOnNonmatch: fl.asBool('stop_on_nonmatch'),
+    stopOnNonmatch: last(fl, 'stop_on_nonmatch', 'multiline') === 'stop_on_nonmatch',
     contextAfter,
     contextBefore,
     contextSeparator:
@@ -843,87 +852,127 @@ export async function rgGeneric(
   if (f.typeList) return [formatRecords(typeListing(types.definitions)), new IOResult()]
   const notes: string[] = []
   const walk = walkFilter(f, types, await ignoreRules(fl, dispatchOf(ctx), notes))
-  let pat: RegExp | null = null
+  let pat: RgPattern | null = null
   if (!f.listFiles) {
     const resolution = await resolvePattern('rg', texts, fl, paths, mountRoot(ctx), stream)
     if (resolution.error !== null) {
       return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(resolution.error) })]
     }
     if (resolution.pattern === null) return usage(RG_NO_PATTERN)
-    pat = rgMatcher(resolution.pattern, resolution.neverMatch, f)
+    pat =
+      f.engine === 'default'
+        ? await openRg(
+            resolution.pattern,
+            resolution.neverMatch,
+            f,
+            sizeFlag(fl, 'regex_size_limit'),
+            sizeFlag(fl, 'dfa_size_limit'),
+          )
+        : rgMatcher(resolution.pattern, resolution.neverMatch, f)
   }
-  // A line that names no path searches a piped stdin as an implicit `-`
-  // operand, so -l, -H, -c and context answer as they do for a typed one
-  // (ripgrep's Paths::from_low_args, 14.1.1).
-  if (paths.length === 0) {
-    if (ctx.stdin === null) return usage(RG_NO_PATTERN)
-    paths = [STDIN_OPERAND]
+  try {
+    // A line that names no path searches a piped stdin as an implicit `-`
+    // operand, so -l, -H, -c and context answer as they do for a typed one
+    // (ripgrep's Paths::from_low_args, 14.1.1).
+    if (paths.length === 0) {
+      if (ctx.stdin === null) {
+        if (pat instanceof RgProgram) pat.stream.close()
+        return usage(RG_NO_PATTERN)
+      }
+      paths = [STDIN_OPERAND]
+    }
+    const [first = STDIN_OPERAND] = paths
+    const mounts = mountsOf(ctx)
+    const home = mountPrefixOf(first.virtual, first.vfsPath)
+    const rd = mountParentReaddir((p: string) => readdir(sameMountSpec(p, first)), mounts, home)
+    const st = mountParentStat((p: string) => stat(sameMountSpec(p, first)), mounts)
+    if (
+      pat !== null &&
+      paths.length === 1 &&
+      f.stats !== true &&
+      f.json !== true &&
+      f.searchZip !== true &&
+      (f.pre ?? null) === null
+    ) {
+      const single = await searchSingle(first, pat, f, st, rd, stream, ctx.signal)
+      if (single !== null) return await noted(owned(pat, single), notes, f)
+    }
+    const warnings: string[] = []
+    // ripgrep's "nothing searched" speaks for the whole walk, so it waits while
+    // a fan-out searches the mounts below the cwd in runs of its own. A typed ''
+    // shares the synthetic operand's spelling; the walk's verdict is what tells
+    // them apart.
+    const implicit = paths.some(
+      (p) =>
+        p.rawPath === IMPLICIT_CWD &&
+        p.walkError === null &&
+        (f.oneFileSystem || mounts === undefined || mounts.descendants(p.virtual).length === 0),
+    )
+    // A mount below the operand shadows whatever the backend holds there; the
+    // fan-out that would search the mount itself is off too.
+    const boundary = f.oneFileSystem ? (mounts ?? null) : null
+    let found = haystacks(
+      paths,
+      rd,
+      st,
+      ctx.cwd.virtual,
+      walk,
+      f,
+      warnings,
+      boundary,
+      linkResolver(ctx),
+    )
+    if (f.sort !== null && f.sort !== 'none' && !(f.sort === 'path' && !f.sortReverse)) {
+      const listed: Haystack[] = []
+      for await (const h of found) listed.push(h)
+      found = replay(sortHaystacks(listed, f))
+    }
+    const io = new IOResult()
+    const out =
+      pat === null
+        ? listFiles(found, f, warnings, io)
+        : searchAll(
+            found,
+            paths,
+            pat,
+            f,
+            stream,
+            first,
+            warnings,
+            implicit,
+            ctx.cwd.virtual,
+            io,
+            ctx.signal,
+            ctx.shell,
+          )
+    return await noted(owned(pat, [out, io]), notes, f)
+  } catch (error) {
+    if (pat instanceof RgProgram) pat.stream.close()
+    throw error
   }
-  const [first = STDIN_OPERAND] = paths
-  const mounts = mountsOf(ctx)
-  const home = mountPrefixOf(first.virtual, first.vfsPath)
-  const rd = mountParentReaddir((p: string) => readdir(sameMountSpec(p, first)), mounts, home)
-  const st = mountParentStat((p: string) => stat(sameMountSpec(p, first)), mounts)
-  if (
-    pat !== null &&
-    paths.length === 1 &&
-    f.stats !== true &&
-    f.json !== true &&
-    f.searchZip !== true &&
-    (f.pre ?? null) === null
-  ) {
-    const single = await searchSingle(first, pat, f, st, rd, stream, ctx.signal)
-    if (single !== null) return noted(single, notes, f)
+}
+
+function owned(
+  pat: RgPattern | null,
+  result: [ByteSource | null, IOResult],
+): [ByteSource | null, IOResult] {
+  if (!(pat instanceof RgProgram)) return result
+  const [output, io] = result
+  if (output === null || output instanceof Uint8Array) {
+    pat.stream.close()
+    return result
   }
-  const warnings: string[] = []
-  // ripgrep's "nothing searched" speaks for the whole walk, so it waits while
-  // a fan-out searches the mounts below the cwd in runs of its own. A typed ''
-  // shares the synthetic operand's spelling; the walk's verdict is what tells
-  // them apart.
-  const implicit = paths.some(
-    (p) =>
-      p.rawPath === IMPLICIT_CWD &&
-      p.walkError === null &&
-      (f.oneFileSystem || mounts === undefined || mounts.descendants(p.virtual).length === 0),
-  )
-  // A mount below the operand shadows whatever the backend holds there; the
-  // fan-out that would search the mount itself is off too.
-  const boundary = f.oneFileSystem ? (mounts ?? null) : null
-  let found = haystacks(
-    paths,
-    rd,
-    st,
-    ctx.cwd.virtual,
-    walk,
-    f,
-    warnings,
-    boundary,
-    linkResolver(ctx),
-  )
-  if (f.sort !== null && f.sort !== 'none' && !(f.sort === 'path' && !f.sortReverse)) {
-    const listed: Haystack[] = []
-    for await (const h of found) listed.push(h)
-    found = replay(sortHaystacks(listed, f))
-  }
-  const io = new IOResult()
-  const out =
-    pat === null
-      ? listFiles(found, f, warnings, io)
-      : searchAll(
-          found,
-          paths,
-          pat,
-          f,
-          stream,
-          first,
-          warnings,
-          implicit,
-          ctx.cwd.virtual,
-          io,
-          ctx.signal,
-          ctx.shell,
-        )
-  return noted([out, io], notes, f)
+  const source = ensureStream(output)[Symbol.asyncIterator]()
+  return [
+    new OutputStream(source, async () => {
+      try {
+        await source.return?.()
+      } finally {
+        pat.stream.close()
+      }
+    }),
+    io,
+  ]
 }
 
 // A search's result with --ignore-file's notes ahead of its stderr, as
@@ -972,7 +1021,7 @@ function refused(line: string, f: RgFlags): CommandFnResult {
 // walk has to answer.
 async function searchSingle(
   p: PathSpec,
-  pat: RegExp,
+  pat: RgPattern,
   f: RgFlags,
   st: (path: string) => Promise<FileStat>,
   rd: (path: string) => Promise<string[]>,
@@ -1004,7 +1053,7 @@ async function searchSingle(
   const tally: Tally = { selected: false }
   return [
     settled(
-      searchHaystack(stream(p), pat, f, name, label, tally, signal, true, isStdin(p)),
+      searchInput(stream(p), pat, f, name, label, tally, signal, true, isStdin(p)),
       f,
       label,
       tally,
@@ -1250,7 +1299,7 @@ async function preprocessed(
 async function* searchAll(
   found: AsyncIterable<Haystack>,
   paths: readonly PathSpec[],
-  pat: RegExp,
+  pat: RgPattern,
   f: RgFlags,
   stream: Stream,
   template: PathSpec,
@@ -1275,7 +1324,7 @@ async function* searchAll(
   const listingOrCount = f.countOnly || f.countMatches || f.filesOnly || f.filesWithoutMatch
   const records = jsonSummary(f)
   const totals = new Totals()
-  const worker = new Worker()
+  const worker = f.engine === 'default' ? undefined : new Worker()
   const started = performance.now()
   try {
     for await (const h of found) {
@@ -1322,7 +1371,7 @@ async function* searchAll(
         ) {
           source = upToDamage(gunzipStream(opened), faults)
         }
-        for await (const c of searchHaystack(
+        for await (const c of searchInput(
           source,
           pat,
           f,
@@ -1369,13 +1418,28 @@ async function* searchAll(
       skipped ||= tally.skipped === true
       if (records) {
         if (chunks.length > 0) {
-          const begin = jsonLine({ type: 'begin', data: { path: jsonText(name) } })
+          const begin =
+            pat instanceof RgProgram
+              ? formatOutput(pat, { kind: 'begin', name: latin1(name) })
+              : jsonLine({ type: 'begin', data: { path: jsonText(name) } })
           const sent = begin.length + chunks.reduce((sum, c) => sum + c.length, 0)
           yield begin
           yield* chunks
           if (!damaged) {
             totals.add(tally, sent, elapsed)
-            yield totals.endRecord(name, tally, sent, elapsed)
+            yield pat instanceof RgProgram
+              ? formatOutput(pat, {
+                  kind: 'end',
+                  name: latin1(name),
+                  nul: tally.nul ?? null,
+                  selected: tally.selected,
+                  matches: tally.matches ?? 0,
+                  matched_lines: tally.matchedLines ?? 0,
+                  searched: tally.searched ?? 0,
+                  printed: sent,
+                  elapsed,
+                })
+              : totals.endRecord(name, tally, sent, elapsed)
           }
         } else if (f.quiet && tally.selected && !damaged) {
           totals.add(tally, 0, elapsed)
@@ -1396,15 +1460,20 @@ async function* searchAll(
       if (f.quiet && tally.selected && f.stats !== true && f.json !== true) break
     }
     const total = (performance.now() - started) / 1000
-    if (records) yield totals.summaryRecord(total)
+    if (records)
+      yield pat instanceof RgProgram
+        ? formatOutput(pat, { kind: 'summary', totals: totalsConfig(totals), total })
+        : totals.summaryRecord(total)
     else if (f.stats === true) {
       // ripgrep's parallel searcher gives the last --heading group its blank
       // line too; one thread, as for a lone file, does not.
       if (printed && headed(f) && runsParallel(f) && !lone) yield ENC.encode('\n')
-      yield totals.statsBlock(total)
+      yield pat instanceof RgProgram
+        ? formatOutput(pat, { kind: 'stats', totals: totalsConfig(totals), total })
+        : totals.statsBlock(total)
     }
   } finally {
-    await worker.close()
+    await worker?.close()
     // ripgrep's status under --files-without-match follows the listing, not
     // the matching: 0 when a file was listed, 1 when every file matched
     // (14.1.1; GNU grep keeps the match status). A walked binary file it

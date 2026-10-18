@@ -25,4 +25,7 @@ cache-keys = [
   { file = "../Cargo.lock" },
   { file = "../mirage-rs/Cargo.toml" },
   { file = "../mirage-rs/src/**/*.rs" },
+  { file = "../mirage-rs/src/generated/*.dfa" },
+  { file = "../vendor/grep-regex/Cargo.toml" },
+  { file = "../vendor/grep-regex/src/**/*.rs" },
 ]

@@ -35,6 +35,7 @@ interface Exports {
   mirage_rs_begin(handle: number, len: number): number
   mirage_rs_done(handle: number): number
   mirage_rs_status(handle: number): number
+  mirage_rs_metadata(handle: number): number
   mirage_rs_take_stderr(handle: number): number
   mirage_rs_output(handle: number): number
   mirage_rs_output_len(handle: number): number
@@ -142,6 +143,11 @@ export class OpenStream {
   /** The command's exit status for the input so far. */
   status(): number {
     return this.guard(() => this.exports.mirage_rs_status(this.handle))
+  }
+
+  /** The stream's current progress as its typed JSON record. */
+  metadata(): Uint8Array {
+    return this.guard(() => this.collect(this.exports.mirage_rs_metadata(this.handle), []))
   }
 
   /** What the stream wrote to stderr since the last call. */

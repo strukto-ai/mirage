@@ -12,6 +12,8 @@ RULE = "-" * 72
 ADAPTED = [
     ROOT / "licenses/third_party/jq.txt",
     ROOT / "licenses/third_party/uutils-coreutils.txt",
+    ROOT / "licenses/third_party/regex-automata.txt",
+    ROOT / "licenses/third_party/ripgrep.txt",
     ROOT / "licenses/third_party/unicode-data.txt",
 ]
 CORE_LEAD = (

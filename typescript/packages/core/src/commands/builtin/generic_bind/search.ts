@@ -33,6 +33,7 @@ import type { FlagValue } from '../../spec/types.ts'
 import { directoriesAction, parseFlags as parseGrepFlags } from '../generic/grep.ts'
 import { encodingFlag, foldsCase, parseFlags as parseRgFlags, rgMatcher } from '../generic/rg.ts'
 import { searchTerms } from '../grep_pushdown.ts'
+import { openRg, requiredTerms } from '../rg_stream.ts'
 import { compilePattern, patternArg } from '../grep_pattern.ts'
 import type { SearchTerms } from '../types.ts'
 import { beforeFullScan } from '../utils/tree.ts'
@@ -100,7 +101,10 @@ export function grepTerms(
  * text every match holds. Throws the refusal rg itself would print for a bad
  * flag or pattern. Mirrors Python's `rg_terms`.
  */
-export function rgTerms(bag: Record<string, FlagValue>, texts: string[]): SearchTerms | null {
+export async function rgTerms(
+  bag: Record<string, FlagValue>,
+  texts: string[],
+): Promise<SearchTerms | null> {
   const fl = new FlagView(bag, specOf('rg'))
   const f = parseRgFlags(fl)
   const pattern = patternArg(texts, fl)
@@ -118,6 +122,32 @@ export function rgTerms(bag: Record<string, FlagValue>, texts: string[]): Search
     return null
   }
   if (pattern === null || fl.raw('file') !== undefined) return null
+  if (f.engine === 'default') {
+    const program = await openRg(pattern, false, f)
+    try {
+      const terms = requiredTerms(program)
+      if (terms === null || terms.texts.some((term) => term.includes('\n'))) return null
+      return {
+        texts: terms.texts,
+        wholeWord: terms.whole_word,
+        ignoreCase: terms.ignore_case,
+        lineOutput: !(
+          f.lineNumbers ||
+          f.byteOffsets ||
+          f.column ||
+          f.vimgrep ||
+          f.contextAfter > 0 ||
+          f.contextBefore > 0 ||
+          f.stopOnNonmatch ||
+          f.nullData ||
+          f.multiline === true
+        ),
+        readsBinary: f.text || f.nullData || f.binary,
+      }
+    } finally {
+      program.stream.close()
+    }
+  }
   const ignoreCase = foldsCase(pattern, f.fixedString, f)
   const found = searchTerms(
     pattern,
@@ -300,7 +330,9 @@ export async function searchReads(
   let terms: SearchTerms | null
   try {
     terms =
-      name === 'rg' ? rgTerms(ctx.flags, texts) : grepTerms(ctx.flags, texts, utf8Locale(ctx.env))
+      name === 'rg'
+        ? await rgTerms(ctx.flags, texts)
+        : grepTerms(ctx.flags, texts, utf8Locale(ctx.env))
   } catch (err) {
     if (!(err instanceof Error)) throw err
     console.debug(`${name} search left to the scan: ${err.message}`)

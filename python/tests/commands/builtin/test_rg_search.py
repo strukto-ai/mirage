@@ -31,6 +31,7 @@ from mirage.commands.builtin.rg_search import (
     smart_case_folds,
     transcoded,
 )
+from mirage.commands.builtin.rg_stream import open_rg, search_input
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -52,8 +53,15 @@ async def _search(
     tally = Tally()
     chunks = [
         c
-        async for c in search_haystack(
-            _source(data), rg_matcher(pattern, False, f), f, "f", label, tally
+        async for c in search_input(
+            _source(data),
+            open_rg(pattern, False, f)
+            if f.engine == "default"
+            else rg_matcher(pattern, False, f),
+            f,
+            "f",
+            label,
+            tally,
         )
     ]
     return b"".join(chunks).decode(), tally.selected

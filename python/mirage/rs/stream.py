@@ -113,6 +113,10 @@ class OpenStream:
         """The command's exit status for the input so far."""
         return self._stream.status()
 
+    def metadata(self) -> bytes:
+        """The stream's current progress as its typed JSON record."""
+        return self._stream.metadata()
+
     def take_stderr(self) -> bytes:
         """What the stream wrote to stderr since the last call."""
         return self._stream.take_stderr()

@@ -422,3 +422,19 @@ it.each<[string, string, (message: string) => Error, [string, number] | null]>([
     expect([await run(vfs, line), vfs.reads]).toEqual([['', ...out], []])
   }
 })
+
+it('does not request a whole word for a truncated literal prefix', async () => {
+  const vfs = new SearchRAM({ lines: null })
+  const word = 'a'.repeat(101)
+  vfs.store.files.set('/d/long.txt', ENC.encode(word + '\n'))
+  const original = vfs.filesContaining.bind(vfs)
+  vfs.filesContaining = async (scope, text, opts) => {
+    const candidates = await original(scope, text, opts)
+    const wholeWord = new RegExp(`\\b${text}\\b`)
+    return candidates.filter(
+      (found) =>
+        !opts.wholeWord || wholeWord.test(DEC.decode(vfs.store.files.get('/' + found.vfsPath))),
+    )
+  }
+  expect(await run(vfs, `rg -w '${word}' /d`)).toEqual([`/d/long.txt:${word}\n`, '', 0])
+})

@@ -28,7 +28,7 @@
     {
       "id": "rg-regex",
       "command": "printf '%s\\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!' | rg '^(a+)+$'",
-      "canceled": true
+      "canceled": false
     },
     {
       "id": "diff-repeated",
@@ -43,6 +43,16 @@
     {
       "id": "glob-parameter-loop",
       "command": "bash -c 'shopt -s extglob; eval '\"'\"'printf -v matcher_value '\"'\"'\"'\"'\"'\"'\"'\"'%200000s'\"'\"'\"'\"'\"'\"'\"'\"' '\"'\"'\"'\"'\"'\"'\"'\"''\"'\"'\"'\"'\"'\"'\"'\"'; while :; do matcher_result=${matcher_value//+(?)/X}; done'\"'\"''",
+      "canceled": true
+    },
+    {
+      "id": "rg-long-line",
+      "command": "rg '^(a|aa|aaa|aaaa|aaaaa|aaaaaa|aaaaaaa|aaaaaaaa|aaaaaaaaa|aaaaaaaaaa|aaaaaaaaaaa|aaaaaaaaaaaa|aaaaaaaaaaaaa|aaaaaaaaaaaaaa|aaaaaaaaaaaaaaa|aaaaaaaaaaaaaaaa)+b$' /rg-line >/dev/null",
+      "canceled": true
+    },
+    {
+      "id": "rg-long-multiline",
+      "command": "rg -U '^(a|aa|aaa|aaaa|aaaaa|aaaaaa|aaaaaaa|aaaaaaaa|aaaaaaaaa|aaaaaaaaaa|aaaaaaaaaaa|aaaaaaaaaaaa|aaaaaaaaaaaaa|aaaaaaaaaaaaaa|aaaaaaaaaaaaaaa|aaaaaaaaaaaaaaaa|\\n)+b$' /rg-line >/dev/null",
       "canceled": true
     }
   ],

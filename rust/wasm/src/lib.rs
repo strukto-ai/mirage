@@ -178,6 +178,15 @@ pub extern "C" fn mirage_rs_status(handle: u32) -> i32 {
     with_slot(handle, 2, |slot| slot.stream.status())
 }
 
+/// Put the stream's current progress at `mirage_rs_output`.
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_metadata(handle: u32) -> i32 {
+    call(handle, 0, |stream, _, out| {
+        stream.metadata(out);
+        Ok(())
+    })
+}
+
 /// Put what the stream wrote to stderr since the last call at
 /// `mirage_rs_output`.
 #[unsafe(no_mangle)]

@@ -10,6 +10,7 @@ publish = false
 
 [dependencies]
 flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
+grep-regex.workspace = true
 md5.workspace = true
 memchr.workspace = true
 num-bigint.workspace = true
@@ -20,3 +21,6 @@ sha1.workspace = true
 sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+grep-matcher.workspace = true

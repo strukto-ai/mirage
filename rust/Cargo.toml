@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["mirage-rs", "python", "wasm"]
+exclude = ["vendor/grep-regex"]
 
 [workspace.package]
 version = "0.0.7-alpha.2"
@@ -11,22 +12,25 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 mirage-rs = { path = "mirage-rs" }
+grep-regex = { path = "vendor/grep-regex", version = "=0.1.13" }
+grep-matcher = "=0.1.7"
 md5 = { package = "md-5", version = "0.11", default-features = false }
 sha1 = { version = "0.11", default-features = false }
 sha2 = { version = "0.11", default-features = false }
 memchr = { version = "2", default-features = false, features = ["std"] }
 num-bigint = { version = "0.4", default-features = false, features = ["std"] }
 num-traits = { version = "0.2", default-features = false, features = ["std"] }
-regex-automata = { version = "0.4", default-features = false, features = [
+regex-automata = { version = "=0.4.7", default-features = false, features = [
   "std",
   "syntax",
   "meta",
   "hybrid",
   "nfa-pikevm",
+  "dfa-search",
   "perf-literal-substring",
   "perf-literal-multisubstring",
 ] }
-regex-syntax = { version = "0.8", default-features = false, features = ["std"] }
+regex-syntax = { version = "=0.8.4", default-features = false, features = ["std"] }
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
 pyo3 = { version = "0.30", features = ["abi3-py311"] }

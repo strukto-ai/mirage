@@ -5,7 +5,6 @@ import re
 
 import pytest
 
-from mirage.commands.builtin import rg_search
 from mirage.commands.builtin.generic.rg import (
     parse_flags,
     rg_generic,
@@ -402,30 +401,19 @@ async def test_rg_stdin_is_never_read_past_the_answer(
 
 
 @pytest.mark.asyncio
-async def test_rg_no_operand_cancellation_closes_stdin(monkeypatch):
-    # The implicit operand is stdin's sole reader, so a search cancelled
-    # mid-line closes the input rather than leaving it half read.
+async def test_rg_no_operand_cancellation_closes_stdin():
     closed = False
-    calls = 0
     task = asyncio.current_task()
-    original = rg_search.ByteCursor.at
-
-    def measured(self, index):
-        nonlocal calls
-        if calls == 0:
-            asyncio.get_running_loop().call_later(0, task.cancel)
-        calls += 1
-        return original(self, index)
 
     async def source():
         nonlocal closed
         try:
+            asyncio.get_running_loop().call_later(0.01, task.cancel)
             yield b"needle " * 100000 + b"\n"
             raise AssertionError("read beyond the matching line")
         finally:
             closed = True
 
-    monkeypatch.setattr(rg_search.ByteCursor, "at", measured)
     with pytest.raises(asyncio.CancelledError):
         await _run(
             [],
@@ -434,7 +422,6 @@ async def test_rg_no_operand_cancellation_closes_stdin(monkeypatch):
             source(),
         )
     assert closed
-    assert calls < 100000
 
 
 O_FILES = {

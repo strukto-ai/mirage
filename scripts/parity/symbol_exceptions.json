@@ -860,6 +860,11 @@
     "mirageManifest": "Adapts the JavaScript SDK default manifest root while preserving user manifests; Python uses its SDK session-state creation path.",
     "settleWithin": "Promise timeout helper with timer cleanup; Python uses asyncio task waiting."
    }
+  },
+  "commands/builtin/generic/rg": {
+   "typescript_only": {
+    "owned": "Wasm streams require explicit handle disposal after final progress; Python releases native state with object ownership."
+   }
   }
  }
 }

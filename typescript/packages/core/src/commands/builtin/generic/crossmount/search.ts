@@ -47,6 +47,7 @@ import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
 import { beforeFullScan } from '../../utils/tree.ts'
 import { walkErrorLine } from '../../rg_scan.ts'
 import { Totals, splitFooter, type RgFlags } from '../../rg_search.ts'
+import { formatTotals, openRg } from '../../rg_stream.ts'
 import { formatRecords } from '../../utils/output.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { LinkResolver, linkView, mountView } from '../../utils/links.ts'
@@ -115,7 +116,12 @@ export async function runSearch(
   }
   if (rg !== null && !rg.listFiles) {
     const pattern = patternArg(texts, view)
-    if (pattern !== null) rgMatcher(pattern, false, rg)
+    if (pattern !== null) {
+      if (rg.engine === 'default') {
+        const program = await openRg(pattern, false, rg)
+        program.stream.close()
+      } else rgMatcher(pattern, false, rg)
+    }
   }
   const quiet = grep?.quiet ?? rg?.quiet ?? false
   // -q stops at the first match, but --stats and --json count every file.
@@ -268,7 +274,7 @@ export async function runSearch(
   )
   const [parts, footer] =
     rg !== null && (rg.stats === true || rg.json === true)
-      ? oneFooter(results, rg, walked, started)
+      ? await oneFooter(results, rg, walked, started)
       : [results.map((r) => r.data), new Uint8Array()]
   const body = concat([joinRuns(parts, runSeparator(name, bag)), footer])
   // Each run says what the line says once, grep's warnings or rg's notes of
@@ -301,12 +307,12 @@ export async function runSearch(
  * with a blank line too; that line goes with its footer. Mirrors Python's
  * `_one_footer`.
  */
-function oneFooter(
+async function oneFooter(
   results: readonly OperandRun[],
   f: RgFlags,
   walked: ReadonlySet<number>,
   started: number,
-): [Uint8Array[], Uint8Array] {
+): Promise<[Uint8Array[], Uint8Array]> {
   const summary = jsonSummary(f)
   const blank = !summary && headed(f) && runsParallel(f)
   const parts = results.map((r) => r.data)
@@ -321,11 +327,22 @@ function oneFooter(
   }
   if (!found) return [parts, new Uint8Array()]
   const total = (performance.now() - started) / 1000
-  if (summary) return [parts, totals.summaryRecord(total)]
+  if (summary)
+    return [
+      parts,
+      f.engine === 'default'
+        ? await formatTotals(totals, 'summary', total)
+        : totals.summaryRecord(total),
+    ]
   const printed = parts.some((d) => d.length > 0)
   return [
     parts,
-    concat([blank && printed ? encodeText('\n') : new Uint8Array(), totals.statsBlock(total)]),
+    concat([
+      blank && printed ? encodeText('\n') : new Uint8Array(),
+      f.engine === 'default'
+        ? await formatTotals(totals, 'stats', total)
+        : totals.statsBlock(total),
+    ]),
   ]
 }
 

@@ -8,6 +8,10 @@ mod grep;
 mod jq;
 mod printf;
 mod regex;
+mod rg;
+mod rg_format;
+mod rg_grapheme;
+mod rg_matcher;
 mod sort;
 mod utf8;
 mod wc;
@@ -81,6 +85,11 @@ pub trait Stream: Send + Sync {
     /// The command's exit status for the input so far.
     fn status(&self) -> i32 {
         0
+    }
+
+    /// Serialize the command's current typed progress, when it exposes one.
+    fn metadata(&self, out: &mut Vec<u8>) {
+        let _ = out;
     }
 
     /// Append what the command has written to stderr since the last call:
@@ -277,6 +286,8 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "jq_format" => jq::open_format(config),
         "jq_decode" => jq::open_decode(config),
         "printf" => printf::open(config),
+        "rg" => rg::open(config),
+        "rg_format" => rg_format::open(config),
         "sort" => sort::open(config),
         "wc" => wc::open(config),
         _ => Err(StreamError::new(format!("unknown stream: {kind}"))),

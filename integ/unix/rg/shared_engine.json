@@ -1,0 +1,1054 @@
+{
+  "cases": [
+    {
+      "id": "rg_shared_unicode_fold",
+      "seq": 13470200,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'i I İ ı\\n' | rg -i -o i",
+      "expect": {
+        "exit": 0,
+        "stdout": "i\nI\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_leftmost_first",
+      "seq": 13470201,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'ab aaaa\\n' | rg -o 'a|ab'",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\na\na\na\na\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_named_replacement_offsets",
+      "seq": 13470202,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'éx xx\\n' | rg -n -b --column -o '(?<letter>x)' -r '<${letter}>'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:3:2:<x>\n1:7:6:<x>\n1:10:9:<x>\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_empty_utf8_byte_offsets",
+      "seq": 13470203,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'ébx\\n' | rg -o -b 'b*' | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "303a0a313a0a323a620a343a0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_invalid_utf8_byte_mode",
+      "seq": 13470204,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf '\\377aéx\\376\\n' | rg -a -o -b 'x|(?-u:\\xFF)' | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "303aff0a343a780a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_crlf_replacement",
+      "seq": 13470205,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'ax\\r\\nbx\\n' | rg --crlf -n -b --column 'x$' -r 'long' | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "313a323a303a616c6f6e670d0a323a323a343a626c6f6e670d0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_vimgrep_replacement_offsets",
+      "seq": 13470206,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'é x x\\n' | rg --vimgrep -b '(?<v>x)' -r '${v}${v}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "<stdin>:1:4:3:é xx xx\n<stdin>:1:7:6:é xx xx\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_optional_capture_expansion",
+      "seq": 13470207,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a ab\\n' | rg -o '(?<a>a)(?<b>b)?' -r '${a}:${b}:$1x:$$'",
+      "expect": {
+        "exit": 0,
+        "stdout": "a:::$\na:b::$\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_empty_eof",
+      "seq": 13470208,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'ab' | rg -o -b '$' | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "303a61620a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_invalid_utf8_unicode_dot",
+      "seq": 13470209,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf '\\377x\\376\\n' | rg -a -o -b '.' | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "313a780a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_stop_disables_multiline",
+      "seq": 13470210,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a\\nb\\n' | rg -U --stop-on-nonmatch 'a\\nb'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "rg: the literal \"\\n\" is not allowed in a regex\n\nConsider enabling multiline mode with the --multiline flag (or -U for short).\nWhen multiline mode is enabled, new line characters can be matched.\n"
+      }
+    },
+    {
+      "id": "rg_shared_multiline_disables_stop",
+      "seq": 13470211,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a\\nb\\nx\\na\\nb\\n' | rg --stop-on-nonmatch -U 'a\\nb'",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\na\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_invalid_pattern",
+      "seq": 13470212,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a\\n' | rg $'\\xff'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "rg: pattern given is not valid UTF-8\n"
+      }
+    },
+    {
+      "id": "rg_shared_adjacent_context",
+      "seq": 13470213,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'x\\na\\na\\n' | rg -n -C1 a",
+      "expect": {
+        "exit": 0,
+        "stdout": "1-x\n2:a\n3:a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_multiline_before_context",
+      "seq": 13470214,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'x\\na\\nb\\na\\nb\\n' | rg -U -n -C1 'a\\nb'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1-x\n2:a\n3:b\n4:a\n5:b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_multiline_limit_context",
+      "seq": 13470215,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a\\nb\\nx\\ny\\n' | rg -U -n -m1 -A1 'a\\nb'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:a\n2:b\n3-x\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_inverted_multiline_limit",
+      "seq": 13470216,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'x\\na\\nb\\ny\\nz\\n' | rg -U -n -v -m1 --passthru 'a\\nb'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:x\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_inverted_multiline_submatches",
+      "seq": 13470217,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'x\\na\\nb\\ny\\n' | rg -U -v -C1 -n -o 'a\\nb'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:x\n2-a\n3-b\n4:y\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_crlf_empty_submatch",
+      "seq": 13470218,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a\\r' | rg --crlf -o -b '$' | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "313a0d0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_multiline_empty_submatches",
+      "seq": 13470219,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'ab\\ncd\\n' | rg -U -n -o 'a\\nb|$'",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_literal_size_limit",
+      "seq": 13470220,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'foo\\n' | rg --regex-size-limit 1 -c foo",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_grapheme_preview",
+      "seq": 13470221,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'é👩‍💻x\\n' | rg -M2 --max-columns-preview .",
+      "expect": {
+        "exit": 0,
+        "stdout": "é👩‍💻 [... omitted end of long line]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_directory_unicode_preflight",
+      "seq": 13470222,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "mkdir -p /data/rg-shared; printf 'αβγ\\nabc\\n' > /data/rg-shared/unicode; rg -n '\\p{Script_Extensions=Greek}+' /data/rg-shared",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/rg-shared/unicode:1:αβγ\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_crlf_column_limit",
+      "seq": 13470223,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'abc\\r' | rg --crlf -M3 a | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "5b4f6d6974746564206c6f6e67206d61746368696e67206c696e655d0d0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_crlf_column_preview",
+      "seq": 13470224,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'abc\\r' | rg --crlf -M3 --max-columns-preview a | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "616263205b2e2e2e206f6d697474656420656e64206f66206c6f6e67206c696e655d0d0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_null_multiline_end_anchor",
+      "seq": 13470225,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a\\0' | rg -a -U --null-data 'a$'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_null_multiline_start_anchor",
+      "seq": 13470226,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf '\\0a\\0' | rg -a -U --null-data '^a'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_null_multiline_literal_count",
+      "seq": 13470227,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a a\\0' | rg -a -U --null-data -c a | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "3100\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_null_multiline_match_count",
+      "seq": 13470228,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a a\\0' | rg -a -U --null-data --count-matches a | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "3200\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_null_multiline_anchored_count",
+      "seq": 13470229,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a\\na\\0' | rg -a -U --null-data -c '^a' | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "3100\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_null_multiline_anchored_match_count",
+      "seq": 13470230,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a\\na\\0' | rg -a -U --null-data --count-matches '^a' | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "3200\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_null_multiline_inverted_count",
+      "seq": 13470231,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'b\\0x\\0' | rg -a -U --null-data -v -c 'a$' | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "3200\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_null_multiline_empty_offsets",
+      "seq": 13470232,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a\\n\\0' | rg -a -U --null-data -n -b --column -o '^|$' | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "313a313a303a00313a323a313a00313a333a323a00\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_null_multiline_empty_vimgrep",
+      "seq": 13470233,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf 'a\\n' | rg -a -U --null-data --vimgrep -I '^|$' | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "313a313a610a00313a323a610a00\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_shared_null_multiline_eof_selection",
+      "seq": 13470234,
+      "targets": [
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "disk",
+        "dropbox",
+        "dropbox-root",
+        "gridfs",
+        "gridfs-prefix",
+        "nextcloud",
+        "onedrive",
+        "opfs",
+        "ram",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "printf a | rg -a -U --null-data -c '$' | od -An -tx1 | tr -d ' \\n'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "3100\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

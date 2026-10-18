@@ -41,8 +41,16 @@ from mirage.commands.builtin.rg_search import (
     json_text,
     prints_context,
     record_end,
-    search_haystack,
     smart_case_folds,
+)
+from mirage.commands.builtin.rg_stream import (
+    RgPattern,
+    RgProgram,
+    format_output,
+    latin1,
+    open_rg,
+    search_input,
+    totals_config,
 )
 from mirage.commands.builtin.utils.constants import STDIN_OPERAND
 from mirage.commands.builtin.utils.links import (
@@ -740,7 +748,8 @@ def parse_flags(fl: FlagView) -> RgFlags:
         null_data=fl.as_bool("null_data"),
         crlf=_last(fl, "crlf", "no_crlf") == "crlf"
         and not fl.as_bool("null_data"),
-        multiline=_last(fl, "multiline", "no_multiline") == "multiline",
+        multiline=_last(fl, "multiline", "no_multiline", "stop_on_nonmatch")
+        == "multiline",
         stats=_last(fl, "stats", "no_stats") == "stats",
         search_zip=_last(fl, "search_zip", "no_search_zip") == "search_zip",
         # --pre with no command, or after --no-pre, preprocesses nothing.
@@ -770,7 +779,8 @@ def parse_flags(fl: FlagView) -> RgFlags:
         and not json_records,
         passthru=passthru,
         max_count=number_flag(fl, "max_count"),
-        stop_on_nonmatch=fl.as_bool("stop_on_nonmatch"),
+        stop_on_nonmatch=_last(fl, "stop_on_nonmatch", "multiline")
+        == "stop_on_nonmatch",
         context_after=context_after,
         context_before=context_before,
         context_separator=(
@@ -1162,7 +1172,7 @@ async def rg_generic(
     walk = walk_filter(
         f, types, await ignore_rules(fl, dispatch_of(ctx), notes)
     )
-    pat: re.Pattern[str] | None = None
+    pat: RgPattern | None = None
     if not f.list_files:
         pattern, never_match = await resolve_pattern(
             texts,
@@ -1170,7 +1180,17 @@ async def rg_generic(
             operand_stream,
             RG_NO_PATTERN,
         )
-        pat = rg_matcher(pattern, never_match, f)
+        pat = (
+            open_rg(
+                pattern,
+                never_match,
+                f,
+                size_flag(fl, "regex_size_limit"),
+                size_flag(fl, "dfa_size_limit"),
+            )
+            if f.engine == "default"
+            else rg_matcher(pattern, never_match, f)
+        )
 
     if not paths:
         # A line that names no path searches a piped stdin as an
@@ -1292,7 +1312,7 @@ async def _replay(found: list[Haystack]) -> AsyncIterator[Haystack]:
 
 async def _search_single(
     p: PathSpec,
-    pat: re.Pattern[str],
+    pat: RgPattern,
     f: RgFlags,
     st: Callable[[str], Awaitable[FileStat]],
     rd: Callable[[str], Awaitable[list[str]]],
@@ -1331,7 +1351,7 @@ async def _search_single(
     io = IOResult(exit_code=1)
     tally = Tally()
     return _settled(
-        search_haystack(
+        search_input(
             operand_stream(p), pat, f, name, label, tally, pipe=is_stdin(p)
         ),
         f,
@@ -1655,7 +1675,7 @@ async def preprocessed(
 async def _search_all(
     found: AsyncIterator[Haystack],
     paths: list[PathSpec],
-    pat: re.Pattern[str],
+    pat: RgPattern,
     f: RgFlags,
     operand_stream: Callable[[PathSpec], AsyncIterator[bytes]],
     prefix: str,
@@ -1698,7 +1718,7 @@ async def _search_all(
     searched = 0
     records = json_summary(f)
     totals = Totals()
-    worker = Worker()
+    worker = None if f.engine == "default" else Worker()
     started = time.perf_counter()
     try:
         async for h in found:
@@ -1748,7 +1768,7 @@ async def _search_all(
                     and not stdin
                 ):
                     source = _up_to_damage(gunzip_stream(source), faults)
-                matches = search_haystack(
+                matches = search_input(
                     source,
                     pat,
                     f,
@@ -1799,8 +1819,17 @@ async def _search_all(
             skipped = skipped or tally.skipped
             if records:
                 if chunks:
-                    begin = json_line(
-                        {"type": "begin", "data": {"path": json_text(name)}}
+                    begin = (
+                        format_output(
+                            pat, {"kind": "begin", "name": latin1(name)}
+                        )
+                        if isinstance(pat, RgProgram)
+                        else json_line(
+                            {
+                                "type": "begin",
+                                "data": {"path": json_text(name)},
+                            }
+                        )
                     )
                     sent = len(begin) + sum(len(c) for c in chunks)
                     yield begin
@@ -1808,7 +1837,24 @@ async def _search_all(
                         yield chunk
                     if not damaged:
                         totals.add(tally, sent, elapsed)
-                        yield totals.end_record(name, tally, sent, elapsed)
+                        yield (
+                            format_output(
+                                pat,
+                                {
+                                    "kind": "end",
+                                    "name": latin1(name),
+                                    "nul": tally.nul,
+                                    "selected": tally.selected,
+                                    "matches": tally.matches,
+                                    "matched_lines": tally.matched_lines,
+                                    "searched": tally.searched,
+                                    "printed": sent,
+                                    "elapsed": elapsed,
+                                },
+                            )
+                            if isinstance(pat, RgProgram)
+                            else totals.end_record(name, tally, sent, elapsed)
+                        )
                 elif f.quiet and tally.selected and not damaged:
                     totals.add(tally, 0, elapsed)
             elif chunks:
@@ -1835,16 +1881,39 @@ async def _search_all(
             if f.quiet and tally.selected and not (f.stats or f.json):
                 break
         if records:
-            yield totals.summary_record(time.perf_counter() - started)
+            yield (
+                format_output(
+                    pat,
+                    {
+                        "kind": "summary",
+                        "totals": totals_config(totals),
+                        "total": time.perf_counter() - started,
+                    },
+                )
+                if isinstance(pat, RgProgram)
+                else totals.summary_record(time.perf_counter() - started)
+            )
         elif f.stats:
             # ripgrep's parallel searcher gives the last --heading group its
             # blank line too; one thread, as for a lone file, does not.
             if printed and headed(f) and runs_parallel(f) and not lone:
                 yield b"\n"
-            yield totals.stats_block(time.perf_counter() - started)
+            yield (
+                format_output(
+                    pat,
+                    {
+                        "kind": "stats",
+                        "totals": totals_config(totals),
+                        "total": time.perf_counter() - started,
+                    },
+                )
+                if isinstance(pat, RgProgram)
+                else totals.stats_block(time.perf_counter() - started)
+            )
     finally:
         await close_quietly(found)
-        await worker.close()
+        if worker is not None:
+            await worker.close()
         if f.files_without_match and not f.quiet:
             # ripgrep's status under --files-without-match follows the
             # listing, not the matching: 0 when a file was listed, 1 when

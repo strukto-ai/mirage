@@ -100,6 +100,13 @@ impl Stream {
         self.inner.status()
     }
 
+    /// The stream's current progress, encoded as its typed JSON record.
+    fn metadata<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        let mut out = Vec::new();
+        self.inner.metadata(&mut out);
+        PyBytes::new(py, &out)
+    }
+
     /// What the stream wrote to stderr since the last call.
     fn take_stderr<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyBytes> {
         let mut err = Vec::new();

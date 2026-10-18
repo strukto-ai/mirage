@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import re
 from collections.abc import AsyncIterator
 
 import pytest
@@ -490,3 +491,37 @@ def test_a_mount_may_refuse_a_full_scan(line, mount, refuse, out):
         assert _run(vfs, line) == _run(RAMVFS(), line)
     else:
         assert (_run(vfs, line), vfs.reads) == ((b"", *out), [])
+
+
+def test_rg_truncated_literal_prefix_never_requests_a_whole_word():
+    vfs = SearchRAM(lines=None)
+    word = "a" * 101
+    vfs._store.files["/d/long.txt"] = (word + "\n").encode()
+    original = vfs.files_containing
+
+    async def indexed(
+        path, text, *, whole_word, ignore_case, index=NULL_INDEX
+    ):
+        candidates = await original(
+            path,
+            text,
+            whole_word=whole_word,
+            ignore_case=ignore_case,
+            index=index,
+        )
+        return [
+            found
+            for found in candidates
+            if not whole_word
+            or re.search(
+                r"\b" + re.escape(text) + r"\b",
+                vfs._store.files["/" + found.vfs_path].decode(),
+            )
+        ]
+
+    vfs.files_containing = indexed
+    assert _run(vfs, f"rg -w '{word}' /d") == (
+        f"/d/long.txt:{word}\n".encode(),
+        b"",
+        0,
+    )

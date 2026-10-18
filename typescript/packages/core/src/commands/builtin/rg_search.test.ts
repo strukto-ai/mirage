@@ -20,6 +20,7 @@ import { FlagView } from '../spec/flag_view.ts'
 import type { FlagValue } from '../spec/types.ts'
 import { UsageError } from '../errors.ts'
 import { parseFlags, rgMatcher } from './generic/rg.ts'
+import { RgProgram, openRg, searchInput } from './rg_stream.ts'
 import {
   ByteCursor,
   NonmatchStop,
@@ -54,17 +55,16 @@ async function search(
   const f = flagsOf(flags)
   const out: Uint8Array[] = []
   const tally = { selected: false }
-  for await (const chunk of searchHaystack(
-    source(data),
-    rgMatcher(pattern, false, f),
-    f,
-    'f',
-    label,
-    tally,
-  )) {
-    out.push(chunk)
+  const pat =
+    f.engine === 'default' ? await openRg(pattern, false, f) : rgMatcher(pattern, false, f)
+  try {
+    for await (const chunk of searchInput(source(data), pat, f, 'f', label, tally)) {
+      out.push(chunk)
+    }
+    return out.map((c) => DEC.decode(c)).join('')
+  } finally {
+    if (pat instanceof RgProgram) pat.stream.close()
   }
-  return out.map((c) => DEC.decode(c)).join('')
 }
 
 describe('rustMatches', () => {
