@@ -7,7 +7,7 @@ keywords: ["Mirage TypeScript quickstart", "@struktoai/mirage-node", "virtual fi
 
 ## Installation
 
-Install the Node runtime:
+Use Node 22.20+ on Node 22, 24.12+ on Node 24, or 25+. Install the Node runtime:
 
 ```bash
 pnpm add @struktoai/mirage-node
@@ -25,12 +25,13 @@ import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 async function main(): Promise<void> {
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
-
-  await ws.shell('echo "hello mirage" | tee /data/hello.txt')
-  const result = await ws.shell('cat /data/hello.txt')
-  process.stdout.write(result.stdoutText)
-
-  await ws.close()
+  try {
+    await ws.shell('echo "hello mirage" > /data/hello.txt')
+    const result = await ws.shell('cat /data/hello.txt')
+    process.stdout.write(result.stdoutText)
+  } finally {
+    await ws.close()
+  }
 }
 
 main()
@@ -40,6 +41,12 @@ Run it:
 
 ```bash
 pnpm tsx quickstart.ts
+```
+
+It prints:
+
+```text
+hello mirage
 ```
 
 ## Run Commands
@@ -69,7 +76,29 @@ async function main(): Promise<void> {
 main()
 ```
 
-## Output Limits
+## Check command failures
+
+A shell command that exits nonzero still returns a result. Inside `main`,
+before `ws.close()`, check `exitCode` and `stderrText` when the outcome
+matters:
+
+```ts
+const result = await ws.shell('cat /data/missing.txt')
+if (result.exitCode !== 0) process.stderr.write(result.stderrText)
+```
+
+Setup errors, cancellation, and internal failures can still throw. The
+[in-app API reference](/typescript/access/in-app#session-shell) describes the
+full result and streaming contracts.
+
+## Next Steps
+
+- See [TypeScript Installation](/typescript/install) for optional native peers (FUSE, Redis, Postgres, MongoDB, SSH, Email).
+- Building for the browser? Start with the [Browser Quickstart](/typescript/browser-quickstart).
+- Browse [TypeScript Agents](/typescript/agents/index) to wire Mirage into OpenAI Agents SDK, Vercel AI SDK, LangChain, Mastra, and more.
+- Pick a real backend from the VFS section, such as [S3](/typescript/setup/s3), [Slack](/typescript/slack), or [Discord](/typescript/discord).
+
+## Further configuration: output limits
 
 To keep huge reads from flooding an agent, `cat`, `grep`, `rg`, `head`, and
 `tail` cap their output at 2000 lines, and every command stops after 600
@@ -117,9 +146,3 @@ Caps apply to what each command prints, one command at a time:
 redirect, or `$(...)` is never cut, so `cat big.txt | wc -l` counts every
 line. The workspace YAML takes the same fields, in snake_case, under
 `command_limits`.
-
-## Next Steps
-
-- See [TypeScript Installation](/typescript/install) for optional native peers (FUSE, Redis, Postgres, MongoDB, SSH, Email).
-- Browse [TypeScript Agents](/typescript/agents/index) to wire Mirage into OpenAI Agents SDK, Vercel AI SDK, LangChain, Mastra, and more.
-- Pick a real backend from the VFS section, such as [S3](/typescript/setup/s3), [Slack](/typescript/slack), or [Discord](/typescript/discord).

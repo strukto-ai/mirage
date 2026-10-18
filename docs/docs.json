@@ -163,7 +163,7 @@
             ]
           },
           {
-            "group": "Integration",
+            "group": "Backend capabilities",
             "pages": [
               "home/integration/overview",
               "home/integration/search",
@@ -491,6 +491,7 @@
             "pages": [
               "typescript/install",
               "typescript/quickstart",
+              "typescript/browser-quickstart",
               "typescript/setup/fuse",
               "typescript/python",
               "typescript/limitations"

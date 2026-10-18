@@ -93,6 +93,7 @@ async def main() -> None:
     await ws.shell("cp /data/hello.txt /data/hello_copy.txt")
     await ws.shell("mv /data/hello_copy.txt /data/renamed.txt")
     await ws.shell("rm /data/renamed.txt")
+    await ws.close()
 
 
 if __name__ == "__main__":

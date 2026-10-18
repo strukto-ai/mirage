@@ -7,7 +7,8 @@ keywords: ["Mirage Python quickstart", "mirage-ai", "virtual filesystem", "AI ag
 
 ## Installation
 
-Install Mirage:
+Use Python 3.11 or newer. In an existing project or virtual environment,
+install Mirage:
 
 ```bash
 uv add mirage-ai
@@ -29,7 +30,7 @@ uv add "mirage-ai[s3]"
 
 Start with the RAM VFS so you can try Mirage without credentials.
 
-```python
+```python quickstart.py
 import asyncio
 
 from mirage import MountMode, Workspace
@@ -38,15 +39,21 @@ from mirage.vfs.ram import RAMVFS
 
 async def main() -> None:
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
-
-    await ws.shell('echo "hello mirage" | tee /data/hello.txt')
-    result = await ws.shell("cat /data/hello.txt")
-    print(await result.stdout_str())
-
-    await ws.close()
+    try:
+        await ws.shell('echo "hello mirage" > /data/hello.txt')
+        result = await ws.shell("cat /data/hello.txt")
+        print(await result.stdout_str(), end="")
+    finally:
+        await ws.close()
 
 
 asyncio.run(main())
+```
+
+Run it with `python quickstart.py`. It prints:
+
+```text
+hello mirage
 ```
 
 ## Run Commands
@@ -64,18 +71,18 @@ from mirage.vfs.ram import RAMVFS
 async def main() -> None:
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
 
-    await ws.shell('echo \'{"name": "alice"}\' | tee /data/user.json')
+    await ws.shell('echo \'{"name": "alice"}\' > /data/user.json')
 
     result = await ws.shell("ls /data/")
     print(await result.stdout_str())
 
-    result = await ws.shell("cat /data/hello.txt")
+    result = await ws.shell("cat /data/user.json")
     print(await result.stdout_str())
 
     result = await ws.shell('jq ".name" /data/user.json')
     print(await result.stdout_str())
 
-    result = await ws.shell("grep hello /data/hello.txt")
+    result = await ws.shell("grep alice /data/user.json")
     print(await result.stdout_str())
 
     await ws.close()
@@ -84,7 +91,29 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-## Output Limits
+## Check command failures
+
+A shell command that exits nonzero still returns a result. Inside `main`,
+before `ws.close()`, check `result.exit_code` and read `result.stderr_str()`
+when the outcome matters:
+
+```python
+result = await ws.shell("cat /data/missing.txt")
+if result.exit_code != 0:
+    print(await result.stderr_str(), end="")
+```
+
+Setup errors, cancellation, and internal failures can still raise exceptions.
+The [in-app API reference](/python/access/in-app#session-shell) describes the
+full result and streaming contracts.
+
+## Next Steps
+
+- See [Python Installation](/python/install) for VFS extras and the `uv` workflow.
+- Browse [Python Agents](/python/agents/index) to wire Mirage into the OpenAI Agents SDK, LangChain, Pydantic AI, and OpenHands.
+- Pick a real backend from [VFS Docs](/python/vfs/index), such as [S3](/python/vfs/s3), [Slack](/python/vfs/slack), or [GitHub](/python/vfs/github).
+
+## Further configuration: output limits
 
 To keep huge reads from flooding an agent, `cat`, `grep`, `rg`, `head`, and
 `tail` cap their output at 2000 lines, and every command stops after 600
@@ -131,9 +160,3 @@ Caps apply to what each command prints, one command at a time:
 `cat big.txt; echo end` still prints `end`. Data going into a pipe, a
 redirect, or `$(...)` is never cut, so `cat big.txt | wc -l` counts every
 line. The workspace YAML takes the same fields under `command_limits`.
-
-## Next Steps
-
-- See [Python Installation](/python/install) for VFS extras and the `uv` workflow.
-- Browse [Python Agents](/python/agents/index) to wire Mirage into the OpenAI Agents SDK, LangChain, Pydantic AI, and OpenHands.
-- Pick a real backend from [VFS Docs](/python/vfs/index), such as [S3](/python/vfs/s3), [Slack](/python/vfs/slack), or [GitHub](/python/vfs/github).

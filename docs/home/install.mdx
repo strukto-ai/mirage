@@ -7,8 +7,11 @@ icon: download
 
 ## Prerequisites
 
-- **Python** ≥ 3.11 for the `mirage-ai` package and the `mirage` CLI
-- **Node.js** ≥ 20 for the TypeScript SDK
+- **Python** 3.11 or newer for `mirage-ai` and its `mirage` CLI
+- **Node.js** 22.20+ on Node 22, 24.12+ on Node 24, or 25+ for
+  `@struktoai/mirage-node` and `@struktoai/mirage-cli`
+- **Browser builds** can use `@struktoai/mirage-browser` with Node 20.18.1+
+  on Node 20, or Node 22+
 - **macOS** or **Linux** (FUSE-based mounts require platform support)
 
 ## Python
@@ -29,6 +32,9 @@ npm install @struktoai/mirage-browser   # browser / edge runtimes
 npm install @struktoai/mirage-agents    # OpenAI / Vercel AI / LangChain / Mastra adapters
 ```
 
+The browser package runs in the browser; Node is only needed for its package
+manager and build tooling.
+
 ## CLI
 
 ```bash
@@ -40,6 +46,13 @@ uvx mirage-ai
 # or
 npx @struktoai/mirage-cli
 ```
+
+## Run your first workspace
+
+- For an application, follow the [Python](/python/quickstart),
+  [Node](/typescript/quickstart), or
+  [browser](/typescript/browser-quickstart) quickstart.
+- To connect an agent or use the terminal, follow the [CLI quickstart](/home/access/cli#quickstart).
 
 ## More Details
 
