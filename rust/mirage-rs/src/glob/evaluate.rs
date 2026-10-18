@@ -162,11 +162,9 @@ impl Frame {
             }
             Phase::Initial { after, incoming } => {
                 let state = match after {
-                    Some(state) => self
-                        .seen
-                        .range((std::ops::Bound::Excluded(state), std::ops::Bound::Unbounded))
-                        .next(),
-                    None => self.seen.first(),
+                    Some(state) if program.floors.contains(&state) => None,
+                    Some(state) => self.seen.range(..state).next_back(),
+                    None => self.seen.last(),
                 };
                 if let Some(&state) = state {
                     self.active.push(state);

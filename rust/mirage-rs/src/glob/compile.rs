@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 
@@ -104,6 +104,7 @@ pub(super) struct Program {
     pub(super) groups: HashMap<usize, Group>,
     pub(super) transitions: HashMap<usize, Vec<usize>>,
     pub(super) stars: HashMap<usize, usize>,
+    pub(super) floors: HashSet<usize>,
 }
 impl Program {
     pub(super) fn literal(&self, cp: u32) -> u32 {
@@ -137,6 +138,7 @@ pub(super) struct Compiler {
     pub(super) program: Program,
     index: usize,
     groups: Vec<OpenGroup>,
+    closes: HashMap<usize, usize>,
     phase: CompilePhase,
 }
 enum CompilePhase {
@@ -168,6 +170,7 @@ enum CompilePhase {
     Stars {
         cursor: usize,
         last: Option<usize>,
+        outer: Option<usize>,
     },
     Done,
 }
@@ -182,9 +185,11 @@ impl Compiler {
                 groups: HashMap::new(),
                 transitions: HashMap::new(),
                 stars: HashMap::new(),
+                floors: HashSet::new(),
             },
             index: 0,
             groups: Vec::new(),
+            closes: HashMap::new(),
             phase: CompilePhase::Scan,
         }
     }
@@ -201,6 +206,7 @@ impl Compiler {
                     self.phase = CompilePhase::Stars {
                         cursor: p.len(),
                         last: None,
+                        outer: None,
                     };
                     return;
                 };
@@ -245,6 +251,7 @@ impl Compiler {
                         let mut frame = self.groups.pop().expect("open group");
                         frame.branches.push((frame.start, self.index));
                         let open = frame.open;
+                        self.closes.insert(self.index, open);
                         self.program.groups.insert(
                             open,
                             Group {
@@ -436,19 +443,30 @@ impl Compiler {
                         .push(group.end);
                 }
             }
-            CompilePhase::Stars { cursor, last } => {
+            CompilePhase::Stars {
+                cursor,
+                last,
+                mut outer,
+            } => {
                 let Some(index) = cursor.checked_sub(1) else {
                     self.phase = CompilePhase::Done;
                     return;
                 };
+                if let Some(&open) = self.closes.get(&index).filter(|_| self.program.extglob) {
+                    outer = Some(outer.map_or(open, |outer| outer.min(open)));
+                }
                 let plain = is(p[index], b'*')
                     && !(self.program.extglob && self.program.groups.contains_key(&index));
                 if let Some(last) = last.filter(|_| plain) {
                     self.program.stars.insert(index, last);
                 }
+                if plain && outer.is_none() {
+                    self.program.floors.insert(index);
+                }
                 self.phase = CompilePhase::Stars {
                     cursor: index,
                     last: plain.then(|| last.unwrap_or(index)),
+                    outer: outer.filter(|&open| open != index),
                 };
             }
         }

@@ -795,3 +795,66 @@ fn adjacent_stars_share_one_state() {
         assert_eq!(serde_json::from_slice::<Value>(&output).unwrap(), expected);
     }
 }
+
+#[test]
+fn separated_stars_keep_only_the_last_live() {
+    for (name, pattern, expected) in [
+        ("axbc", "*@(a*d|b)c", true),
+        ("axdc", "*@(a*d|b)c", true),
+        ("zaxbc", "?*@(a*d|b)c", true),
+        ("xab", "!(*a)b", false),
+        ("aab", "!(*a)b", false),
+        ("abab", "*(a*b)", true),
+        ("abxab", "*(a*b)", true),
+        ("aXbY", "*@(X|Y)*", true),
+        ("ab", "@(a|b)*a*b", false),
+        ("bab", "@(a|b)*a*b", true),
+        ("q.c", "*.*@(c|d)", true),
+    ] {
+        assert_eq!(matches(name, pattern, true), expected, "{name} {pattern}");
+    }
+    let stars = "*a".repeat(1024);
+    let subject = units(&"a".repeat(200_000));
+    for (pattern, extglob, operation, expected) in [
+        (stars.clone(), false, json!({"kind":"matches"}), json!(true)),
+        (
+            format!("{stars}b"),
+            false,
+            json!({"kind":"matches"}),
+            json!(false),
+        ),
+        (
+            format!("@(a|b){stars}"),
+            true,
+            json!({"kind":"matches"}),
+            json!(true),
+        ),
+        (
+            "a*".repeat(1024),
+            false,
+            json!({"kind":"end","longest":false}),
+            json!(1024),
+        ),
+        (
+            stars.clone(),
+            false,
+            json!({"kind":"suffix","longest":false}),
+            json!(subject.len() - 1024),
+        ),
+    ] {
+        let config =
+            json!({"pattern": units(&pattern), "extglob": extglob, "operation": operation});
+        let mut stream = open(&serde_json::to_vec(&config).unwrap()).unwrap();
+        let bytes: Vec<u8> = subject.iter().flat_map(|cp| cp.to_le_bytes()).collect();
+        let mut output = Vec::new();
+        stream.feed(&bytes, &mut output).unwrap();
+        stream.finish(&mut output).unwrap();
+        let mut chunks = 0;
+        while stream.busy() {
+            stream.drain(&mut output).unwrap();
+            chunks += 1;
+            assert!(chunks <= 4096, "{pattern:.8} exceeded 4096 work chunks");
+        }
+        assert_eq!(serde_json::from_slice::<Value>(&output).unwrap(), expected);
+    }
+}
