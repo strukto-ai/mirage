@@ -140,26 +140,14 @@ async def main():
     r = await ws.shell("ls /slack/channels/")
     print(await r.stdout_str())
 
-    channels = (await r.stdout_str()).strip().splitlines()
-    if not channels:
-        raise RuntimeError("No Slack channels are visible to this bot")
-    ch = channels[0]
+    ch = (await r.stdout_str()).strip().splitlines()[0]
     base = f"/slack/channels/{ch}"
 
     # Discover an available day, then read a few messages
     r = await ws.shell(f'ls "{base}/" | tail -n 1')
     day = (await r.stdout_str()).strip()
-    if not day:
-        raise RuntimeError(f"No message days are visible under {base}")
     r = await ws.shell(f'head -n 3 "{base}/{day}/chat.jsonl"')
     print(await r.stdout_str())
-
-    # Discover and read a user profile
-    r = await ws.shell("ls /slack/users/ | head -n 1")
-    users = (await r.stdout_str()).strip().splitlines()
-    if users:
-        r = await ws.shell(f'cat "/slack/users/{users[0]}"')
-        print(await r.stdout_str())
 
     # Extract message text with jq
     r = await ws.shell(

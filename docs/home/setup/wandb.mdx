@@ -6,12 +6,8 @@ description: "Read experiment runs, configuration, summaries, history, and run f
 ## Credentials
 
 Create a key in [W&B User Settings](https://wandb.ai/settings) and store it in
-`WANDB_API_KEY`. The entity is the W&B username or team that owns the projects
-you want to expose; it is the first segment in a project URL such as
-`https://wandb.ai/<entity>/<project>`.
-
-The key must be able to view every entity you configure. Mirage does not
-discover entities from the key.
+`WANDB_API_KEY`. Set `entities` to the username or team segment from a project
+URL; Mirage does not discover entities from the key.
 
 ## First read with Python
 
@@ -33,21 +29,11 @@ ws = Workspace({
 
 
 async def main():
-    entity_path = f"/wandb/{entity}"
-    result = await ws.shell(f"ls {shlex.quote(entity_path)} | head -n 1")
-    projects = (await result.stdout_str()).strip().splitlines()
-    if not projects:
-        raise RuntimeError(f"No W&B projects are visible under {entity}")
-
-    project = projects[0]
-    project_path = f"{entity_path}/{project}"
-    result = await ws.shell(f"ls {shlex.quote(project_path)} | head -n 1")
-    runs = (await result.stdout_str()).strip().splitlines()
-    if not runs:
-        raise RuntimeError(f"No W&B runs are visible under {entity}/{project}")
-
-    run_path = f"{project_path}/{runs[0]}/run.json"
-    result = await ws.shell(f"cat {shlex.quote(run_path)}")
+    result = await ws.shell(
+        f"find /wandb/{entity} -name run.json | head -n 1"
+    )
+    run_path = (await result.stdout_str()).strip()
+    result = await ws.shell(f"head -n 20 {shlex.quote(run_path)}")
     print(await result.stdout_str())
 
 

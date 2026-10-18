@@ -146,26 +146,18 @@ async def main():
     r = await ws.shell("ls /discord/")
     print(await r.stdout_str())
 
-    guilds = (await r.stdout_str()).strip().splitlines()
-    if not guilds:
-        raise RuntimeError("No Discord guilds are visible to this bot")
-    guild = guilds[0]
+    guild = (await r.stdout_str()).strip().splitlines()[0]
 
     # List channels
     r = await ws.shell(f'ls "/discord/{guild}/channels/"')
     print(await r.stdout_str())
 
-    channels = (await r.stdout_str()).strip().splitlines()
-    if not channels:
-        raise RuntimeError(f"No text channels are visible in {guild}")
-    ch = channels[0]
+    ch = (await r.stdout_str()).strip().splitlines()[0]
     base = f"/discord/{guild}/channels/{ch}"
 
     # Discover an available day, then read a few messages
     r = await ws.shell(f'ls "{base}/" | tail -n 1')
     day = (await r.stdout_str()).strip()
-    if not day:
-        raise RuntimeError(f"No message days are visible under {base}")
     r = await ws.shell(f'head -n 3 "{base}/{day}/chat.jsonl"')
     print(await r.stdout_str())
 
@@ -180,14 +172,9 @@ async def main():
         ' | jq -r ".author.username" | sort | uniq -c')
     print(await r.stdout_str())
 
-    # List attachments for a day and download one
+    # List attachments for a day
     r = await ws.shell(f'ls "{base}/{day}/files/"')
     print(await r.stdout_str())
-    attachments = (await r.stdout_str()).strip().splitlines()
-    if attachments:
-        r = await ws.shell(f'cat "{base}/{day}/files/{attachments[0]}"')
-        blob = await r.materialize_stdout()
-        print(f"downloaded {len(blob)} bytes")
 
     # Search every day of the channel
     r = await ws.shell(f'grep -r hello "{base}/"')

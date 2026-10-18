@@ -22,45 +22,9 @@ vfs = PostgresVFS(PostgresConfig(
 ws = Workspace({"/pg": vfs}, mode=MountMode.READ)
 ```
 
-For DSN format and permissions, see [Postgres Setup](/home/setup/postgres).
-
-## First read
-
-Schemas appear at the mount root. Each table and view has `schema.json`,
-`semantic.json`, and a line-delimited `rows.jsonl` file:
-
-```text
-/pg/
-  database.json
-  public/
-    tables/
-      users/
-        schema.json
-        semantic.json
-        rows.jsonl
-    views/
-```
-
-Discover a table from the connected database before reading it; names such as
-`public.users` above are illustrative:
-
-```python
-import asyncio
-import shlex
-
-
-async def main():
-    result = await ws.shell("find /pg/ -name rows.jsonl | head -n 1")
-    rows_path = (await result.stdout_str()).strip()
-    if not rows_path:
-        raise RuntimeError("No readable Postgres tables or views were found")
-
-    result = await ws.shell(f"head -n 3 {shlex.quote(rows_path)}")
-    print(await result.stdout_str())
-
-
-asyncio.run(main())
-```
+For DSN format and permissions, see [Postgres Setup](/home/setup/postgres). To
+inspect data, run `find /pg/ -name rows.jsonl`, then `head -n 3` on a returned
+path.
 
 | Field | Default | Notes |
 | --- | --- | --- |

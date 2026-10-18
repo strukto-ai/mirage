@@ -202,10 +202,6 @@ file cache.
 
 ## Example
 
-The page, data-source, and row IDs below illustrate the path format. Replace
-them with values returned by `ls` or `tree`; the repository example under
-`examples/python/notion/` performs that discovery automatically.
-
 ```python
 import asyncio
 import os
@@ -224,7 +220,6 @@ vfs = NotionVFS(config=config)
 
 async def main():
     ws = Workspace({"/notion": vfs}, mode=MountMode.WRITE)
-    # Account CLIs are installed separately from VFS mounts.
     ws.register_cli("ntn", NTN, config.model_dump())
 
     # List top-level pages

@@ -103,33 +103,4 @@ print(tree["documents"][0])
 print(len(chunks["documents"]))
 ```
 
-## Seed a Small Collection (Optional)
-
-If you do not already have a collection in Mirage's format, this creates one
-file that you can use to verify the mount. It uses Chroma's default embedding
-function; production ingestion can supply its own embeddings.
-
-```python
-import json
-
-import chromadb
-
-client = chromadb.HttpClient(host="localhost", port=8000)
-collection = client.get_or_create_collection("mirage-example")
-collection.upsert(
-    ids=["__path_tree__", "hello-0"],
-    documents=[
-        json.dumps({"hello.txt": {"size": 19}}),
-        "Hello from Chroma.\n",
-    ],
-    metadatas=[
-        {"kind": "path_tree"},
-        {"page_slug": "hello.txt", "chunk_index": 0},
-    ],
-)
-```
-
-Set `CHROMA_COLLECTION=mirage-example`, mount it, and start with
-`cat /knowledge/hello.txt`.
-
 For Python configuration, see the [Python Chroma VFS](/python/vfs/chroma) page.

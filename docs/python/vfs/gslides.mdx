@@ -83,10 +83,6 @@ file cache; a rendered read through FUSE, `ws.vfs`, a
 
 ## Example
 
-The presentation names and IDs below illustrate the path format. Replace them
-with values returned by `ls /gslides/owned/`; the linked repository example
-discovers an available presentation automatically.
-
 ```python
 import asyncio
 import os
@@ -109,7 +105,6 @@ vfs = GSlidesVFS(config=config)
 
 async def main():
     ws = Workspace({"/gslides": vfs}, mode=MountMode.READ)
-    # Account CLIs are installed separately from VFS mounts.
     ws.register_cli("gws", GWS, config.model_dump())
 
     # List structure
