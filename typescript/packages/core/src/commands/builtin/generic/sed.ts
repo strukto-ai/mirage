@@ -45,7 +45,7 @@ import { posixPhrase } from '../../../errors/posix.ts'
 import { dispatchOf, mountRoot } from '../utils/links.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
-type Write = (p: PathSpec, data: ByteSource) => Promise<void>
+type WriteBytes = (p: PathSpec, data: ByteSource) => Promise<void>
 
 /**
  * How sed reaches the files its script names (`r`, `R`, `w`, `W`,
@@ -60,7 +60,7 @@ interface ScriptFiles {
   write(name: string, data: ByteSource, atomic?: boolean, append?: boolean): Promise<void>
 }
 
-function scriptFiles(ctx: Context, stream: Stream, write: Write): ScriptFiles {
+function scriptFiles(ctx: Context, stream: Stream, write: WriteBytes): ScriptFiles {
   const prefix = mountRoot(ctx)
   const spec = (name: string): PathSpec => {
     const resolved = resolvePath(name, ctx.cwd.virtual)
@@ -357,7 +357,7 @@ export async function sedGeneric(
   texts: string[],
   ctx: Context,
   stream: Stream,
-  write: Write,
+  write: WriteBytes,
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(ctx.flags)
   const inPlace = parsed.inPlace

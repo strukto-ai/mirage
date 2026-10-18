@@ -295,7 +295,7 @@ def _attribs(row: ZipRow) -> str:
     return f"{perms}  {row.host_version // 10}.{row.host_version % 10}"
 
 
-def _method(row: ZipRow) -> str:
+def _method_text(row: ZipRow) -> str:
     text = METHODS.get(row.method)
     if text is None:
         return f"u{row.method:03d}"
@@ -360,7 +360,7 @@ def render_row(row: ZipRow, fmt: ZipinfoRows) -> str:
         line += f"{percent:>3}%"
     elif fmt == "long":
         line += f" {row.csize:>8}"
-    return f"{line} {_method(row)} {_stamp(row)} {row.name}"
+    return f"{line} {_method_text(row)} {_stamp(row)} {row.name}"
 
 
 def render_header(archive: str, zip_size: int, entries: int) -> str:
@@ -450,7 +450,7 @@ def _saved(uncompressed: int, compressed: int) -> str:
     return f"{'-' if ratio < 0 else ' '}{percent}%"
 
 
-def _comment(raw: bytes) -> bytes:
+def _render_comment(raw: bytes) -> bytes:
     """An archive or entry comment as Info-ZIP prints it.
 
     The stored bytes up to a NUL, less CR and ^S, with ESC shown as
@@ -482,7 +482,9 @@ def render_verbose(
         comment (bytes): the archive comment as stored.
     """
     parts = (
-        [] if quiet else [f"Archive:  {archive}\n".encode(), _comment(comment)]
+        []
+        if quiet
+        else [f"Archive:  {archive}\n".encode(), _render_comment(comment)]
     )
     parts.append(VERBOSE_HEADER.encode())
     for row in rows:
@@ -495,7 +497,7 @@ def render_verbose(
             f"{row.name}\n".encode()
         )
         if not quiet:
-            parts.append(_comment(row.comment))
+            parts.append(_render_comment(row.comment))
     size = sum(r.size for r in rows)
     csize = sum(_compressed_of(r) for r in rows)
     plural = "" if len(rows) == 1 else "s"

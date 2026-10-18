@@ -177,7 +177,7 @@ NOT_DIR_START = StartPoint(
 )
 
 
-async def _missing_start(
+async def _missing_start_detail(
     search: PathSpec, stat: Callable[[PathSpec], Awaitable[FileStat]] | None
 ) -> StartPoint:
     """The start point ``stat_path`` found nothing at, with GNU's errno.
@@ -278,7 +278,7 @@ async def resolve_start(
             raise
         return StartPoint(walk=False, results=[], missing=True, detail=detail)
     if start is None:
-        return await _missing_start(search, stat)
+        return await _missing_start_detail(search, stat)
     manager = active_cache_manager()
     if (
         start.type is FileType.FILE

@@ -216,7 +216,7 @@ function withRootRow(rows: string[], display: string, root: string[]): string[] 
 // null for both ways a lookup fails, because every other caller of it treats
 // them alike, while GNU names the one its stat met. So the mount's own stat
 // is asked which, on the failure path only: a start point under a plain file
-// is ENOTDIR. Mirrors _missing_start in find.py.
+// is ENOTDIR. Mirrors _missing_start_detail in find.py.
 async function missingStartDetail(
   root: PathSpec,
   stat: ((spec: PathSpec) => Promise<FileStat>) | undefined,

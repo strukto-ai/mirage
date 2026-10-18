@@ -179,7 +179,7 @@ def _spec_index(name: bytes, members: tuple[bytes, ...]) -> int | None:
     return None
 
 
-def _select(
+def _select_entries(
     infos: list[zipfile.ZipInfo],
     members: tuple[str, ...],
     excludes: tuple[str, ...],
@@ -712,7 +712,9 @@ async def _run(
             prompt are read.
     """
     infos = zf.infolist()
-    selected, unmatched, unmatched_excludes = _select(infos, members, excludes)
+    selected, unmatched, unmatched_excludes = _select_entries(
+        infos, members, excludes
+    )
     filtered = bool(members or excludes)
     nothing_left = filtered and not selected
     if Z:

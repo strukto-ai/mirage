@@ -323,7 +323,7 @@ async function exchangePair(
 
 // Move sources to a destination, fanning out into a directory. NativeMove
 // uses an atomic backend rename. PrimitiveMove handles cross-mount moves by
-// copying the tree (parents first, via cpWalk plus mkdir/write) and then
+// copying the tree (parents first, via walk plus mkdir/write) and then
 // removing the source children first. Failures follow GNU mv on a
 // cross-device move: a copy failure keeps the whole source and skips
 // removal, a removal failure (e.g. a source mount with no unlink) reports

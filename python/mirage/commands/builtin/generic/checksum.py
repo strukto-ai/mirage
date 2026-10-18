@@ -269,9 +269,7 @@ def _parse_check_line(line: str, algorithm: str) -> tuple[str, str] | None:
     return digest.lower(), name
 
 
-def _resolve_check_target(
-    filename: str, cwd: str, mount_prefix: str
-) -> PathSpec:
+def _check_target(filename: str, cwd: str, mount_prefix: str) -> PathSpec:
     """PathSpec for a recorded name, resolved like GNU against the cwd.
 
     Args:
@@ -389,7 +387,7 @@ async def _hash_check(
             continue
         parsed_lines += 1
         expected_hash, filename = parsed
-        target = _resolve_check_target(filename, cwd, mount_prefix)
+        target = _check_target(filename, cwd, mount_prefix)
         try:
             digest = await hash_source(read_stream(target), algorithm)
         except WALK_ERRORS as exc:

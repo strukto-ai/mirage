@@ -169,7 +169,7 @@ def excluded(name: str, patterns: list[str]) -> bool:
     return any(fnmatch(name, _relative(pattern)) for pattern in patterns)
 
 
-def _repeated(formed: dict[str, list[str]], junk: bool) -> str:
+def _repeated_warning(formed: dict[str, list[str]], junk: bool) -> str:
     """Info-ZIP's warning for the first name two paths would share.
 
     ``check_dup`` sorts the stored names and reports the first one
@@ -299,7 +299,7 @@ async def plan_zip(
         members=tuple(members),
         warnings=tuple(warnings),
         write=bool(members),
-        repeated=_repeated(formed, junk),
+        repeated=_repeated_warning(formed, junk),
     )
 
 
