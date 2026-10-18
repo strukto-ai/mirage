@@ -56,9 +56,9 @@ _SIMPLE_ESCAPES = {
     "v": "\v",
 }
 
-_HEX = set("0123456789abcdefABCDEF")
+_HEX_DIGIT = set("0123456789abcdefABCDEF")
 
-_OCT = set("01234567")
+_OCT_DIGIT = set("01234567")
 
 _ANSIC_ESCAPES = {
     "\x07": "\\a",
@@ -519,7 +519,7 @@ def _read_escape(
         limit = 2 if ch == "x" else (4 if ch == "u" else 8)
         digits: list[str] = []
         j = i + 2
-        while j < n and len(digits) < limit and fmt[j] in _HEX:
+        while j < n and len(digits) < limit and fmt[j] in _HEX_DIGIT:
             digits.append(fmt[j])
             j += 1
         if digits:
@@ -530,11 +530,11 @@ def _read_escape(
         kind = "hex" if ch == "x" else "unicode"
         warnings.append(f"printf: missing {kind} digit for \\{ch}\n")
         return "\\" + ch, i + 2, False
-    if ch in _OCT:
+    if ch in _OCT_DIGIT:
         start = i + 1
         limit = 4 if b_arg and ch == "0" else 3
         j = start
-        while j < n and j - start < limit and fmt[j] in _OCT:
+        while j < n and j - start < limit and fmt[j] in _OCT_DIGIT:
             j += 1
         return byte_char(int(fmt[start:j], 8)), j, False
     return "\\" + ch, i + 2, False

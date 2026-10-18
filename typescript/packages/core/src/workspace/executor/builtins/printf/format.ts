@@ -22,7 +22,7 @@ import { codePointText } from '../../../../shell/escapes.ts'
 // `echo -e` wants \0NNN and gives \c a different meaning. Only the
 // simple table and \x, \u and \U overlap, and only printf warns when
 // those three have no digits, so each reader keeps its own.
-const PRINTF_SIMPLE_ESCAPES: Record<string, string> = {
+const SIMPLE_ESCAPES: Record<string, string> = {
   '\\': '\\',
   n: '\n',
   t: '\t',
@@ -540,7 +540,7 @@ function readEscape(
   if (i + 1 >= n) return ['\\', i + 1, false]
   const ch = fmt.charAt(i + 1)
   if (ch === 'c') return ['', i + 2, true]
-  const simple = PRINTF_SIMPLE_ESCAPES[ch]
+  const simple = SIMPLE_ESCAPES[ch]
   if (simple !== undefined) return [simple, i + 2, false]
   if (ch === 'x' || ch === 'u' || ch === 'U') {
     const limit = ch === 'x' ? 2 : ch === 'u' ? 4 : 8
