@@ -5,6 +5,7 @@ struct CountAlloc;
 static ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 static PEAK: AtomicUsize = AtomicUsize::new(0);
+static LARGEST_REALLOC: AtomicUsize = AtomicUsize::new(0);
 
 fn allocated(size: usize) {
     ALLOCATED.fetch_add(size, Ordering::Relaxed);
@@ -27,6 +28,7 @@ unsafe impl GlobalAlloc for CountAlloc {
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         let replacement = unsafe { System.realloc(ptr, layout, new_size) };
         if !replacement.is_null() {
+            LARGEST_REALLOC.fetch_max(new_size, Ordering::Relaxed);
             LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
             allocated(new_size);
         }
@@ -98,5 +100,31 @@ fn short_records_bound_allocation_volume_and_live_input() {
         peak < CHUNK * 8,
         "unaligned records retained {peak} live bytes for {} input bytes",
         data.len(),
+    );
+
+    const RECORD: usize = 70_000;
+    let data = [vec![b'a'; RECORD], b"\r\nx\r\n".to_vec()].concat();
+    let mut stream = mirage_rs::open(
+        "rg",
+        br#"{"pattern":"\\r","multiline":true,"crlf":true,"count_only":true}"#,
+    )
+    .unwrap();
+    stream.begin(b"{}").unwrap();
+    let mut out = Vec::new();
+    LARGEST_REALLOC.store(0, Ordering::Relaxed);
+    stream.feed(&data, &mut out).unwrap();
+    while stream.busy() {
+        stream.drain(&mut out).unwrap();
+    }
+    stream.finish(&mut out).unwrap();
+    while stream.busy() {
+        stream.drain(&mut out).unwrap();
+    }
+    let largest = LARGEST_REALLOC.load(Ordering::Relaxed);
+    assert_eq!(out, b"2\r\n");
+    assert_eq!(stream.status(), 0);
+    assert!(
+        largest < RECORD,
+        "CRLF record selection reallocated {largest} bytes for a {RECORD}-byte record",
     );
 }
