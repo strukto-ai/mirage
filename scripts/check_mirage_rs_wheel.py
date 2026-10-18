@@ -111,6 +111,30 @@ def main() -> None:
             b"a\nb\nc\n\xff\n",
         ),
     }
+    checks["bc exact arithmetic"] = (
+        run(
+            "bc",
+            {"math_mode": False, "line_length": "0"},
+            b"9007199254740993+1\nscale=3;",
+            b"1/7\n",
+        ),
+        b"9007199254740994\n.142\n",
+    )
+    checks["bc math"] = (
+        run("bc", {"math_mode": True}, b"sqrt(2)\n"),
+        b"1.41421356237309504880\n",
+    )
+    bc = stream("bc", {"math_mode": False})
+    recovered = settle(bc, bc.feed(b"1/0\n2+2\n"))
+    recovered = settle(bc, recovered + bc.finish())
+    checks["bc recovery"] = (
+        (recovered, bc.status(), bc.take_stderr()),
+        (
+            b"4\n",
+            0,
+            b"Runtime error (func=(main), adr=3): Divide by zero\n",
+        ),
+    )
     merge = stream(
         "sort",
         {

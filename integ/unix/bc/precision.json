@@ -573,6 +573,26 @@
         "stdout": "4\n",
         "stderr": "Runtime error (func=(main), adr=3): Arithmetic limit exceeded\n"
       }
+    },
+    {
+      "id": "bc_syntax_after_resource_refusal_discards_line",
+      "seq": 602355,
+      "command": "printf 'x=5;2^1000000 2\\nx\\n' | bc",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": "(standard_in) 1: syntax error\n"
+      }
+    },
+    {
+      "id": "bc_utf8_bom_is_an_illegal_character",
+      "seq": 602356,
+      "command": "printf '\ufeff2+2\\n3+3\\n' | bc",
+      "expect": {
+        "exit": 0,
+        "stdout": "6\n",
+        "stderr": "(standard_in) 1: illegal character: \ufeff\n"
+      }
     }
   ]
 }

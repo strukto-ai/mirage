@@ -12,104 +12,33 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../../../types.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
-import { IOResult } from '../../../../io/types.ts'
+import { chunks } from '../../../../io/cooperative.ts'
+import { OutputStream, closeQuietly } from '../../../../io/stream.ts'
+import { IOResult, materialize } from '../../../../io/types.ts'
+import { YieldBudget } from '../../../../io/yield_budget.ts'
+import { openStream, type OpenStream } from '../../../../rs/stream.ts'
+import type { PathSpec } from '../../../../types.ts'
+import { concat } from '../../../../utils/bytes.ts'
 import { command, type CommandFnResult, type Context } from '../../../config.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { formatOptionalRecords } from '../../utils/output.ts'
 
-import type { BcNumber, BcState, BcStatement } from './types.ts'
-import { ZERO } from './numbers.ts'
-import * as constants from './constants.ts'
-import { BcParseError, BcRuntimeError, BcHalt, parseErrorLine, runtimeErrorLine } from './errors.ts'
-import { OutputColumn, outputLineLength } from './render.ts'
-import { parseInput } from './lexer.ts'
-import { evalStatement } from './parser.ts'
-
-const ENC = new TextEncoder()
-
-export function snapshotState(state: BcState): BcState {
-  return {
-    scale: state.scale,
-    mathMode: state.mathMode,
-    ibase: state.ibase,
-    obase: state.obase,
-    last: state.last,
-    variables: new Map(state.variables),
-    warnings: [],
-  }
-}
-
-export function restoreState(state: BcState, saved: BcState): void {
-  state.scale = saved.scale
-  state.ibase = saved.ibase
-  state.obase = saved.obase
-  state.last = saved.last
-  state.variables = new Map(saved.variables)
-}
-
-export function errorLine(statement: BcStatement, error: BcParseError): number {
-  if (error.incomplete) return statement.incompleteLine
-  return statement.lines[error.pos] ?? statement.lines[0] ?? statement.incompleteLine
-}
-
-export async function* runLines(
-  lines: AsyncIterable<BcStatement[] | string>,
-  state: BcState,
-  folder: OutputColumn,
-  errors: string[],
+/** Collect diagnostics before yielding output and drain pending work. */
+export async function* drained(
+  stream: OpenStream,
+  output: Uint8Array,
+  io: IOResult,
+  budget: YieldBudget,
 ): AsyncGenerator<Uint8Array> {
-  let halted = false
-  for await (const statements of lines) {
-    if (typeof statements === 'string') {
-      errors.push(statements)
-      continue
-    }
-    const saved = snapshotState(state)
-    const savedCol = folder.col
-    const lineResults: string[] = []
-    const lineErrors: string[] = []
-    const parseErrors: string[] = []
-    let aborted = false
-    for (const statement of statements) {
-      const runs: boolean = statement.execute && !halted && !aborted
-      const target = runs ? state : snapshotState(state)
-      const writes: string[] = []
-      try {
-        evalStatement(statement.text, target, writes)
-      } catch (err) {
-        if (err instanceof BcParseError) {
-          parseErrors.push(parseErrorLine(errorLine(statement, err), err.text))
-        } else if (err instanceof BcRuntimeError) {
-          if (runs) {
-            lineErrors.push(...state.warnings)
-            state.warnings.length = 0
-            lineErrors.push(runtimeErrorLine(err.message))
-            aborted = true
-          }
-        } else if (err instanceof BcHalt) {
-          halted = runs
-        } else {
-          throw err
-        }
-      }
-      if (runs) lineErrors.push(...state.warnings)
-      state.warnings.length = 0
-      if (!runs) continue
-      for (const piece of writes) lineResults.push(folder.write(piece))
-    }
-    if (parseErrors.length > 0) {
-      errors.push(...parseErrors)
-      restoreState(state, saved)
-      folder.col = savedCol
-      halted = false
-      continue
-    }
-    errors.push(...lineErrors)
-    if (lineResults.length > 0) yield ENC.encode(lineResults.join(''))
-    if (halted) break
+  for (;;) {
+    io.exitCode = stream.status()
+    const notice = stream.takeStderr()
+    if (notice.byteLength > 0) io.stderr = concat([await materialize(io.stderr), notice])
+    if (output.byteLength > 0) yield output
+    if (!stream.busy()) return
+    await budget.run()
+    output = stream.drain()
   }
 }
 
@@ -120,29 +49,27 @@ export function bc(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, specOf('bc'))
-  const useMath = fl.asBool('args_l')
-  const state: BcState = {
-    scale: useMath ? constants.MATH_LIBRARY_SCALE : 0,
-    mathMode: useMath,
-    ibase: constants.DEFAULT_BASE,
-    obase: constants.DEFAULT_BASE,
-    last: ZERO,
-    variables: new Map<string, BcNumber>(),
-    warnings: [],
+  const config = {
+    math_mode: fl.asBool('args_l'),
+    line_length: ctx.env?.BC_LINE_LENGTH ?? null,
   }
-  const folder = new OutputColumn(outputLineLength(ctx.env))
-  const errors: string[] = []
-  const lines = parseInput(ctx.stdin ?? new Uint8Array(), ctx.signal)
+  const source = ctx.stdin ?? new Uint8Array()
   const io = new IOResult()
   async function* output(): AsyncGenerator<Uint8Array> {
+    const stream = await openStream('bc', config)
+    const budget = new YieldBudget(ctx.signal)
     try {
-      yield* runLines(lines, state, folder, errors)
+      for await (const chunk of chunks(source, ctx.signal)) {
+        await budget.run()
+        yield* drained(stream, stream.feed(chunk), io, budget)
+        if (stream.done()) break
+      }
+      yield* drained(stream, stream.finish(), io, budget)
     } finally {
-      await lines.return(undefined)
-      io.stderr = formatOptionalRecords(errors)
+      stream.close()
     }
   }
-  return Promise.resolve([output(), io])
+  return Promise.resolve([new OutputStream(output(), () => closeQuietly(source)), io])
 }
 
 export const GENERAL_BC = command({

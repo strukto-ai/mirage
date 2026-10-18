@@ -1,4 +1,5 @@
 mod base64;
+mod bc;
 mod compress;
 mod digest;
 mod generated;
@@ -264,6 +265,7 @@ impl std::error::Error for StreamError {}
 pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     match kind {
         "base64" => base64::open(config),
+        "bc" => bc::open(config),
         "compress" => compress::open(config),
         "digest" => digest::open(config),
         "grep" => grep::open(config),
