@@ -776,6 +776,10 @@ async function gitDiff(before: Map<string, Buffer>, after: Map<string, Buffer>):
   }
 }
 
+function asFile(lines: string[]): Buffer {
+  return Buffer.from(lines.map((l) => `${l}\n`).join(''))
+}
+
 // Seeded random tree pairs, each diffed by the fake and by git: a small
 // vocabulary, so lines repeat and a change can sit in several places, a line
 // in Latin-1 that is no UTF-8, names that git quotes or pads, a binary, an
@@ -845,7 +849,6 @@ async function diffsMatchGit(): Promise<void> {
   let fresh = 0
   const freshLines = (n: number): string[] =>
     Array.from({ length: n }, () => (rand() < 0.4 ? pick(common) : `line ${String(fresh++)}`))
-  const asFile = (lines: string[]): Buffer => Buffer.from(lines.map((l) => `${l}\n`).join(''))
   const blocks: number[] = []
   for (let run = 0; run < 10; run += 1) {
     const before = new Map<string, Buffer>()
