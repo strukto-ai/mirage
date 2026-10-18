@@ -87,6 +87,24 @@ describe('ConcurrencyLimiter', () => {
     expect(typeof second).toBe('function')
   })
 
+  it('an abort during handoff returns the permit to the next waiter', async () => {
+    const limiter = new ConcurrencyLimiter(1)
+    const release = await limiter.acquire()
+    const controller = new AbortController()
+    const abandoned = limiter.acquire(controller.signal)
+    const next = limiter.acquire()
+    const reason = new Error('cancelled during handoff')
+
+    release()
+    controller.abort(reason)
+
+    await expect(abandoned).rejects.toMatchObject({ name: 'AbortError', cause: reason })
+    const handoff = await next
+    handoff()
+    const reusable = await limiter.acquire()
+    reusable()
+  })
+
   // The bug the hand-off in `release` exists to prevent. Returning the
   // permit to the pool before waking the waiter leaves it visible for the
   // rest of that tick, so a caller arriving in the same tick takes it --

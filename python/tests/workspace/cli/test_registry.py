@@ -40,9 +40,11 @@ class ClosingAccessor(Accessor):
     def __init__(self, config: TokenConfig) -> None:
         self.config = config
         self.closed = False
+        self.closes = 0
 
     async def close(self) -> None:
         self.closed = True
+        self.closes += 1
         if self.config.token == "bad":
             raise RuntimeError("logout failed")
 
@@ -239,6 +241,33 @@ async def test_close_does_not_wait_out_a_line_that_never_ends():
     install.activity.acquire()
     await asyncio.wait_for(reg.close(), 5)
     assert install.accessor.closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("token", ["ok", "bad"])
+async def test_close_gives_a_pending_removal_the_shutdown_grace(token):
+    reg = CLIRegistry()
+    install = reg.install(
+        "prog", tree(TokenConfig, ClosingAccessor), {"token": token}
+    )
+    release = install.activity.acquire()
+    removing = asyncio.create_task(reg.uninstall("prog"))
+    await asyncio.sleep(0)
+    closing = asyncio.create_task(reg.close())
+    try:
+        done, _ = await asyncio.wait({closing, removing}, timeout=1)
+        assert done == {closing, removing}
+        results = await asyncio.gather(
+            closing, removing, return_exceptions=True
+        )
+        if token == "bad":
+            assert all(isinstance(result, RuntimeError) for result in results)
+        else:
+            assert results == [None, None]
+        assert install.accessor.closes == 1
+    finally:
+        release()
+        await asyncio.gather(closing, removing, return_exceptions=True)
 
 
 @pytest.mark.asyncio

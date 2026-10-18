@@ -13,9 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Callable
 
+from mirage.concurrency.limiter import settle
 from mirage.io.types import ByteSource
+
+logger = logging.getLogger(__name__)
 
 
 class Activity:
@@ -61,23 +65,49 @@ class ActivityStream:
         self._source = source.__aiter__()
         self._release = release
         self._pull_lock = asyncio.Lock()
+        self._closing: asyncio.Task[None] | None = None
 
     def __aiter__(self) -> "ActivityStream":
         return self
 
     async def __anext__(self) -> bytes:
         async with self._pull_lock:
+            if self._closing is not None:
+                raise StopAsyncIteration
             try:
                 return await self._source.__anext__()
             except BaseException:
-                self._release()
+                if self._closing is None:
+                    self._release()
                 raise
 
     async def aclose(self) -> None:
-        async with self._pull_lock:
-            try:
-                close = getattr(self._source, "aclose", None)
-                if close is not None:
+        if self._closing is None:
+            self._closing = asyncio.create_task(self._finish())
+        await settle(self._closing)
+
+    async def _finish(self) -> None:
+        """Wake close-driven readers; native generators require an idle pull.
+
+        Keep the activity until both the pull and source cleanup have ended.
+        """
+        close = getattr(self._source, "aclose", None)
+        try:
+            if close is not None:
+                try:
                     await close()
-            finally:
+                except RuntimeError as exc:
+                    if (
+                        str(exc)
+                        != "aclose(): asynchronous generator is already running"
+                    ):
+                        raise
+                    logger.debug(
+                        "waiting for generator pull before close",
+                        exc_info=True,
+                    )
+                    async with self._pull_lock:
+                        await close()
+        finally:
+            async with self._pull_lock:
                 self._release()

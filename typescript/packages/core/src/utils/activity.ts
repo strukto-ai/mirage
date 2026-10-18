@@ -51,6 +51,7 @@ export class Activity {
 class ActivityStream implements AsyncIterableIterator<Uint8Array> {
   private readonly source: AsyncIterator<Uint8Array>
   private readonly pullLock = new KeyLock()
+  private closing: Promise<IteratorResult<Uint8Array>> | undefined
   constructor(
     source: AsyncIterable<Uint8Array>,
     private readonly release: () => void,
@@ -60,26 +61,34 @@ class ActivityStream implements AsyncIterableIterator<Uint8Array> {
   [Symbol.asyncIterator](): AsyncIterableIterator<Uint8Array> {
     return this
   }
+  private isClosing(): boolean {
+    return this.closing !== undefined
+  }
   next(): Promise<IteratorResult<Uint8Array>> {
     return this.pullLock.withLock('', async () => {
+      if (this.isClosing()) return { done: true, value: undefined }
       try {
         const step = await this.source.next()
-        if (step.done === true) this.release()
+        if (step.done === true && this.closing === undefined) this.release()
         return step
       } catch (error) {
-        this.release()
+        if (this.closing === undefined) this.release()
         throw error
       }
     })
   }
   return(): Promise<IteratorResult<Uint8Array>> {
+    this.closing ??= this.finish()
+    return this.closing
+  }
+  private async finish(): Promise<IteratorResult<Uint8Array>> {
     // A pull can wait on a source that only yields when something lands (a
     // follow), so the source is told to close before the pull ends, not
     // after: its own close is what ends that wait.
-    const closing = this.source.return?.()
+    const closing = Promise.resolve().then(() => this.source.return?.())
     // Handled here so a failed close is not unhandled while the pull ends;
     // awaiting it below still hands the failure to the caller.
-    void closing?.catch(() => undefined)
+    void closing.catch(() => undefined)
     return this.pullLock.withLock('', async () => {
       try {
         await closing

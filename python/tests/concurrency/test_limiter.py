@@ -135,6 +135,20 @@ async def test_cancellation_releases_capacity() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cancellation_during_handoff_returns_permit_to_next_waiter():
+    limiter = ConcurrencyLimiter(1)
+    async with limiter.acquire():
+        abandoned = asyncio.create_task(_acquire_once(limiter))
+        following = asyncio.create_task(_acquire_once(limiter))
+        await asyncio.sleep(0)
+    abandoned.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await abandoned
+    await asyncio.wait_for(following, 1)
+    await asyncio.wait_for(_acquire_once(limiter), 1)
+
+
+@pytest.mark.asyncio
 async def test_bounded_map_keeps_order_and_owns_its_workers():
     entered = asyncio.Event()
     cleaned = asyncio.Event()

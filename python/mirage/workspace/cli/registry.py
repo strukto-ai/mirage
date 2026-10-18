@@ -64,6 +64,7 @@ class CLIRegistry:
         self._installs: dict[str, CLIInstall] = {}
         self._peers = peers
         self._retiring: dict[int, asyncio.Task[None]] = {}
+        self._shutdown = asyncio.Event()
 
     def install(
         self,
@@ -182,7 +183,7 @@ class CLIRegistry:
         if install is None:
             raise KeyError(f"CLI name {name!r} is not installed")
         identity = id(install)
-        closing = asyncio.create_task(_retire(install))
+        closing = asyncio.create_task(_retire(install, self._shutdown))
         self._retiring[identity] = closing
         try:
             await asyncio.shield(closing)
@@ -203,6 +204,8 @@ class CLIRegistry:
         a removal is, so a caller cancelled mid-close leaves it running
         and a retried close waits for it.
         """
+        shutdown, self._shutdown = self._shutdown, asyncio.Event()
+        shutdown.set()
         installs = list(self._installs.values())
         self._installs.clear()
         for install in installs:
@@ -242,9 +245,21 @@ class CLIRegistry:
         return frozenset(self._installs)
 
 
-async def _retire(install: CLIInstall) -> None:
-    await install.activity.wait()
-    await install.accessor.close()
+async def _retire(install: CLIInstall, shutdown: asyncio.Event) -> None:
+    idle = asyncio.create_task(install.activity.wait())
+    stopping = asyncio.create_task(shutdown.wait())
+    try:
+        done, _ = await asyncio.wait(
+            {idle, stopping}, return_when=asyncio.FIRST_COMPLETED
+        )
+    finally:
+        idle.cancel()
+        stopping.cancel()
+        await asyncio.gather(idle, stopping, return_exceptions=True)
+    if idle in done:
+        await install.accessor.close()
+    else:
+        await _close_after_grace(install)
 
 
 async def _close_after_grace(install: CLIInstall) -> None:
@@ -253,4 +268,5 @@ async def _close_after_grace(install: CLIInstall) -> None:
         await asyncio.wait({idle}, timeout=ABORT_JOIN_SECONDS)
     finally:
         idle.cancel()
+        await asyncio.gather(idle, return_exceptions=True)
     await install.accessor.close()

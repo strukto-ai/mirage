@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { abortable, makeAbortError, mergeSignals } from '../utils/abort.ts'
+import { abortable, hasAborted, makeAbortError, mergeSignals } from '../utils/abort.ts'
 
 /**
  * Limit concurrent async operations within one process.
@@ -63,6 +63,10 @@ export class ConcurrencyLimiter {
         this.waiters.push(admit)
         signal?.addEventListener('abort', onAbort, { once: true })
       })
+    }
+    if (hasAborted(signal)) {
+      this.release()
+      throw makeAbortError(signal)
     }
     let released = false
     return () => {

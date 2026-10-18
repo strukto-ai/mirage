@@ -53,7 +53,7 @@ it.each(['eof', 'error', 'close'])('usage ends with its stream (%s)', async (fin
   await next
 })
 
-it('close waits for a pending pull before releasing usage', async () => {
+it.each([false, true])('close waits for a pending pull (wrapped=%s)', async (wrapped) => {
   const activity = new Activity()
   let entered = (): void => undefined
   let resume = (): void => undefined
@@ -68,7 +68,15 @@ it('close waits for a pending pull before releasing usage', async () => {
     await release
     yield new Uint8Array([1])
   }
-  const source = activity.hold(chunks())
+  const raw = chunks()
+  const delegated: AsyncIterableIterator<Uint8Array> = {
+    next: () => raw.next(),
+    return: () => raw.return(undefined),
+    [Symbol.asyncIterator]() {
+      return this
+    },
+  }
+  const source = activity.hold(wrapped ? delegated : raw)
   if (source instanceof Uint8Array) throw new Error('expected stream')
   const iterator = source[Symbol.asyncIterator]()
   const pulling = iterator.next()
@@ -116,3 +124,80 @@ it('close ends a pull waiting on a source that only its close ends', async () =>
   expect((await pulling).done).toBe(true)
   await activity.wait()
 })
+
+it('close retains usage through cleanup and shares concurrent returns', async () => {
+  const activity = new Activity()
+  let wake = (): void => undefined
+  let clean = (): void => undefined
+  const cleanup = new Promise<void>((resolve) => {
+    clean = resolve
+  })
+  let closes = 0
+  const source: AsyncIterableIterator<Uint8Array> = {
+    next: () =>
+      new Promise((resolve) => {
+        wake = () => {
+          resolve({ done: true, value: undefined })
+        }
+      }),
+    return: async () => {
+      closes++
+      wake()
+      await cleanup
+      return { done: true, value: undefined }
+    },
+    [Symbol.asyncIterator]() {
+      return this
+    },
+  }
+  const held = activity.hold(source)
+  if (held instanceof Uint8Array) throw new Error('expected stream')
+  const iterator = held[Symbol.asyncIterator]()
+  const pulling = iterator.next()
+  let idle = false
+  const waiting = activity.wait().then(() => {
+    idle = true
+  })
+  const closing = iterator.return?.()
+  const again = iterator.return?.()
+  try {
+    expect((await pulling).done).toBe(true)
+    await Promise.resolve()
+    expect(idle).toBe(false)
+    expect(closes).toBe(1)
+    clean()
+    await Promise.all([closing, again, waiting])
+    await iterator.return?.()
+    expect(closes).toBe(1)
+  } finally {
+    clean()
+    await Promise.allSettled([pulling, closing, again, waiting])
+  }
+})
+
+it.each(['throw', 'reject'])(
+  'a failed close releases usage without retrying (%s)',
+  async (kind) => {
+    const activity = new Activity()
+    const failure = new Error('close failed')
+    let closes = 0
+    const source: AsyncIterableIterator<Uint8Array> = {
+      next: () => Promise.resolve({ done: true, value: undefined }),
+      return: () => {
+        closes++
+        if (kind === 'throw') throw failure
+        return Promise.reject(failure)
+      },
+      [Symbol.asyncIterator]() {
+        return this
+      },
+    }
+    const held = activity.hold(source)
+    if (held instanceof Uint8Array) throw new Error('expected stream')
+    const iterator = held[Symbol.asyncIterator]()
+    await expect(iterator.return?.()).rejects.toBe(failure)
+    await expect(iterator.return?.()).rejects.toBe(failure)
+    await activity.wait()
+    expect(closes).toBe(1)
+  },
+)

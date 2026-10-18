@@ -20,7 +20,7 @@ import { snakeToCamel } from '../../utils/normalize.ts'
 import { JOB_BUILTINS, KEYWORDS, NAMESPACE_COMMANDS, SHELL_NAMES } from '../lookup/constants.ts'
 import { z } from 'zod'
 
-import { ABORT_JOIN_MS } from '../../utils/abort.ts'
+import { ABORT_JOIN_MS, abortable } from '../../utils/abort.ts'
 import { Activity } from '../../utils/activity.ts'
 import type { CLIInstall } from './types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -47,6 +47,7 @@ import { compareCodePoints } from '../../utils/sort.ts'
 export class CLIRegistry {
   private readonly installs = new Map<string, CLIInstall>()
   private readonly retiring = new Map<CLIInstall, Promise<void>>()
+  private shutdown = new AbortController()
 
   /** @param peers the mounts' accessors, which an install may share an account with. */
   constructor(private readonly peers: () => readonly Accessor[] = () => []) {}
@@ -181,7 +182,7 @@ export class CLIRegistry {
       throw new Error(`CLI name '${name}' is not installed`)
     }
     this.installs.delete(name)
-    await this.track(install, retire(install))
+    await this.track(install, retire(install, this.shutdown.signal))
   }
 
   /**
@@ -196,6 +197,9 @@ export class CLIRegistry {
    * waits for the clients the first is still closing.
    */
   async close(): Promise<void> {
+    const shutdown = this.shutdown
+    this.shutdown = new AbortController()
+    shutdown.abort()
     const installs = [...this.installs.values()]
     this.installs.clear()
     for (const install of installs) void this.track(install, closeAfterGrace(install))
@@ -230,8 +234,14 @@ export class CLIRegistry {
   }
 }
 
-async function retire(install: CLIInstall): Promise<void> {
-  await install.activity.wait()
+async function retire(install: CLIInstall, shutdown: AbortSignal): Promise<void> {
+  try {
+    await abortable(install.activity.wait(), shutdown)
+  } catch (error) {
+    if (!shutdown.aborted) throw error
+    await closeAfterGrace(install)
+    return
+  }
   await install.accessor.close?.()
 }
 

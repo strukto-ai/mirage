@@ -50,11 +50,13 @@ function noop(): [null, IOResult] {
 /** Records its close, and fails it for the token `bad`. */
 class ClosingAccessor extends Accessor {
   closed = false
+  closes = 0
   constructor(readonly config: TokenConfig) {
     super()
   }
   override close(): Promise<void> {
     this.closed = true
+    this.closes++
     if (this.config.token === 'bad') return Promise.reject(new Error('logout failed'))
     return Promise.resolve()
   }
@@ -203,6 +205,38 @@ describe('CLIRegistry', () => {
     release()
     expect(await second).toBe(true)
     await first
+  })
+
+  it.each(['ok', 'bad'])('close gives a pending removal its shutdown grace (%s)', async (token) => {
+    const reg = new CLIRegistry()
+    const install = reg.install(
+      'prog',
+      tree(tokenConfig, (config) => new ClosingAccessor(config as TokenConfig)),
+      { token },
+    )
+    const release = install.activity.acquire()
+    const removing = reg.uninstall('prog')
+    const closing = reg.close()
+    const settled = Promise.allSettled([closing, removing])
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const results = await Promise.race([
+        settled,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            reject(new Error('shutdown is stuck'))
+          }, 1000)
+        }),
+      ])
+      expect(results.map((result) => result.status)).toEqual(
+        token === 'bad' ? ['rejected', 'rejected'] : ['fulfilled', 'fulfilled'],
+      )
+      expect((install.accessor as ClosingAccessor).closes).toBe(1)
+    } finally {
+      clearTimeout(timer)
+      release()
+      await settled
+    }
   })
 })
 
