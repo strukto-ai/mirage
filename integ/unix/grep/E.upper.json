@@ -1652,6 +1652,194 @@
         "E",
         "basic_regexp"
       ]
+    },
+    {
+      "id": "grep_E_empty_iteration_keeps_its_capture",
+      "seq": 17100005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'b\\nab\\naab\\nax\\n' | grep -cE '^(a?)*\\1b$'; printf 'b\\n' | grep -c '^\\(a*\\)*\\1b$'",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "E",
+        "c"
+      ]
+    },
+    {
+      "id": "grep_E_word_backreference_in_the_c_locale",
+      "seq": 17100006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '__\\nab\\n' | LC_ALL=C grep -nE '^(\\w)\\1$'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:__\n",
+        "stderr": ""
+      },
+      "flags": [
+        "E",
+        "n"
+      ]
+    },
+    {
+      "id": "grep_E_group_of_a_dropped_operator_is_refused",
+      "seq": 17100007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n' | grep -E '(a|?)'; echo rc=$?; printf 'b)\\n' | grep -E '(?)b)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nb)\n",
+        "stderr": "grep: Unmatched ( or \\(\ngrep: warning: ? at start of expression\n"
+      },
+      "flags": [
+        "E"
+      ]
+    },
+    {
+      "id": "grep_E_stray_byte_in_brackets_under_utf8",
+      "seq": 17100008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for p in '[\\351]' '[\\340-\\352]' '[\\377]'; do printf '\\303\\251\\n\\377\\n' | LC_ALL=C.UTF-8 grep -c \"$(printf \"$p\")\"; done",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\n1\n0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "E",
+        "c"
+      ]
+    },
+    {
+      "id": "grep_equivalence_class_cannot_end_a_range",
+      "seq": 17100010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nm\\n' | grep '[[=a=]-z]'; echo rc=$?; printf 'a\\nm\\n' | grep -E '[a-[=b=]]'; echo rc=$?; printf 'a\\nm\\n' | grep -c '[[.a.]-z]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\n2\n",
+        "stderr": "grep: Invalid range end\ngrep: Invalid range end\n"
+      },
+      "flags": [
+        "E"
+      ]
     }
   ]
 }

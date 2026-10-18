@@ -11,6 +11,8 @@ publish = false
 [dependencies]
 md5.workspace = true
 memchr.workspace = true
+regex-automata.workspace = true
+regex-syntax.workspace = true
 sha1.workspace = true
 sha2.workspace = true
 serde.workspace = true

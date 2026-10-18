@@ -39,6 +39,10 @@ import { exitCodeFor } from '../grep_scan.ts'
 import { BINARY_EXTENSIONS, getExtension } from '../../../utils/filetype.ts'
 import { Worker } from '../../../concurrency/worker.ts'
 import { grepInput, nameEnd, type FlagSet } from '../grep_binary.ts'
+import { openGrep, streamConfig, streamInput } from '../grep_stream.ts'
+import { RegexSyntax } from '../types.ts'
+import { OutputStream } from '../../../io/stream.ts'
+import type { OpenStream } from '../../../rs/stream.ts'
 import { fileAdmitted, dirAdmitted, parseFileGlobs } from '../grep_select.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { UsageError } from '../../errors.ts'
@@ -302,52 +306,88 @@ export async function grepGeneric(
     ]
   if (resolution.neverMatch) f.fixedString = false
   const utf8 = utf8Locale(ctx.env)
-  let pat: RegExp
+  // -G, -E and -F run in mirage-rs, which compiles the list once for every
+  // input; -P stays with the host's PCRE translation.
+  let pat: RegExp | null = null
+  let rs: OpenStream | null = null
+  let warning: Uint8Array
   try {
-    pat = resolution.neverMatch
-      ? new RegExp(NEVER_MATCH)
-      : compilePattern(
-          byteView(resolution.pattern, utf8),
-          f.ignoreCase,
-          f.fixedString,
-          f.wholeWord,
-          f.syntax,
-          utf8,
-          f.lineRegexp,
-        )
+    if (f.syntax === RegexSyntax.PERL) {
+      pat = resolution.neverMatch
+        ? new RegExp(NEVER_MATCH)
+        : compilePattern(
+            byteView(resolution.pattern, utf8),
+            f.ignoreCase,
+            f.fixedString,
+            f.wholeWord,
+            f.syntax,
+            utf8,
+            f.lineRegexp,
+          )
+      warning = ENC.encode(lineWarnings(fl, f, resolution.pattern, resolution.neverMatch))
+    } else {
+      const [opened, warnings] = await openGrep(
+        streamConfig(f, resolution.neverMatch ? null : resolution.pattern, utf8),
+      )
+      rs = opened
+      warning = fl.asBool('unix_byte_offsets')
+        ? concat([ENC.encode(UNIX_BYTE_OFFSETS), warnings])
+        : warnings
+    }
   } catch (error) {
     if (!(error instanceof UsageError)) throw error
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(error.message + '\n') })]
   }
-  const warning = lineWarnings(fl, f, resolution.pattern, resolution.neverMatch)
-  const warned = (): IOResult =>
-    warning ? new IOResult({ stderr: ENC.encode(warning) }) : new IOResult()
-  const io = warned()
+  const searcher = rs
+  let worker: Worker | undefined
+  const search = (
+    source: AsyncIterable<Uint8Array>,
+    label: string,
+    show: boolean,
+    fileIO: IOResult,
+    afterOutput = false,
+    size: number | null = null,
+  ): AsyncIterable<Uint8Array> =>
+    searcher !== null
+      ? streamInput(source, searcher, label, show, fileIO, afterOutput, size, ctx.signal)
+      : grepInput(
+          source,
+          pat ?? new RegExp(NEVER_MATCH),
+          f,
+          label,
+          show,
+          fileIO,
+          afterOutput,
+          ctx.signal,
+          utf8,
+          size,
+          worker,
+        )
+  // The stream is released however the output ends, read or not.
+  const owned = (output: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array> =>
+    searcher === null
+      ? output
+      : new OutputStream(output[Symbol.asyncIterator](), () => {
+          searcher.close()
+          return Promise.resolve()
+        })
+  const io = warning.byteLength > 0 ? new IOResult({ stderr: warning }) : new IOResult()
   io.exitCode = 1
   const first = paths[0]
   if (first === undefined) {
     try {
       const source = guardInput(resolveSource(ctx.stdin), ctx)
       return [
-        grepInput(
-          source,
-          pat,
-          f,
-          f.label ?? GREP_STDIN_LABEL,
-          f.withFilename && !f.noFilename,
-          io,
-          false,
-          ctx.signal,
-          utf8,
-        ),
+        owned(search(source, f.label ?? GREP_STDIN_LABEL, f.withFilename && !f.noFilename, io)),
         io,
       ]
     } catch (error) {
+      searcher?.close()
       if (!(error instanceof Error)) throw error
       return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(error.message + '\n') })]
     }
   }
-  const worker = new Worker()
+  if (searcher === null) worker = new Worker()
   const prefix = mountPrefixOf(first.virtual, first.vfsPath)
   const mounts = mountsOf(ctx)
   const rd = mountParentReaddir((p: string) => readdir(sameMountSpec(p, first)), mounts, prefix)
@@ -443,18 +483,13 @@ export async function grepGeneric(
     try {
       try {
         const show = !f.noFilename && (f.withFilename || walked || paths.length > 1)
-        for await (const chunk of grepInput(
+        for await (const chunk of search(
           stream(p),
-          pat,
-          f,
           operandLabel(p, f.label ?? GREP_STDIN_LABEL),
           show,
           fileIO,
           printed,
-          ctx.signal,
-          utf8,
           info.type === FileType.FILE ? (info.size ?? null) : null,
-          worker,
         )) {
           updateStatus(fileIO)
           printed = true
@@ -478,10 +513,10 @@ export async function grepGeneric(
         if (f.quiet && matched) break
       }
     } finally {
-      await worker.close()
+      await worker?.close()
       if (notices.length > 0) io.stderr = concat([await materialize(io.stderr), ...notices])
     }
   }
 
-  return [run(), io]
+  return [owned(run()), io]
 }

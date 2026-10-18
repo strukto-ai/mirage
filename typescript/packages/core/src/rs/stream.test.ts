@@ -45,4 +45,35 @@ describe('openStream', () => {
     expect(refused).toBeInstanceOf(StreamRefusal)
     expect((refused as StreamRefusal).output).toEqual(data)
   })
+
+  it('reads one input after another', async () => {
+    const stream = await openStream('grep', { patterns: ['*a'], syntax: 'extended', count: true })
+    const text = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
+    try {
+      expect(text(stream.takeStderr())).toBe('grep: warning: * at start of expression\n')
+      for (const [data, count, status] of [
+        ['a\nb\n', '1\n', 0],
+        ['b\n', '0\n', 1],
+      ] as const) {
+        stream.begin({ label: 'in' })
+        expect(stream.feed(new TextEncoder().encode(data)).byteLength).toBe(0)
+        expect(stream.done()).toBe(false)
+        expect(text(stream.finish())).toBe(count)
+        expect(stream.status()).toBe(status)
+      }
+    } finally {
+      stream.close()
+    }
+  })
+
+  it('refuses another input for a stream of one', async () => {
+    const stream = await openStream('base64', DECODE)
+    try {
+      expect(() => {
+        stream.begin({})
+      }).toThrow(StreamRefusal)
+    } finally {
+      stream.close()
+    }
+  })
 })

@@ -29,6 +29,12 @@ from mirage.commands.builtin.grep_select import (
     file_admitted,
     parse_file_globs,
 )
+from mirage.commands.builtin.grep_stream import (
+    open_grep,
+    stream_config,
+    stream_input,
+)
+from mirage.commands.builtin.types import RegexSyntax
 from mirage.commands.builtin.utils.constants import GREP_STDIN_LABEL
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.stream import (
@@ -362,34 +368,69 @@ async def grep_generic(
     if never_match:
         f = replace(f, fixed_string=False)
     utf8 = utf8_locale(ctx.env)
-    pat = (
-        re.compile(NEVER_MATCH)
-        if never_match
-        else compile_pattern(
-            byte_view(pattern, utf8),
-            f.ignore_case,
-            f.fixed_string,
-            f.whole_word,
-            f.syntax,
-            utf8,
-            f.line_regexp,
+    worker: Worker | None = None
+    # -G, -E and -F run in mirage-rs, which compiles the list once for
+    # every input; -P stays with the host's PCRE translation.
+    if f.syntax is RegexSyntax.PERL:
+        pat = (
+            re.compile(NEVER_MATCH)
+            if never_match
+            else compile_pattern(
+                byte_view(pattern, utf8),
+                f.ignore_case,
+                f.fixed_string,
+                f.whole_word,
+                f.syntax,
+                utf8,
+                f.line_regexp,
+            )
         )
-    )
-    warning = line_warnings(fl, f, pattern, never_match)
-    io = IOResult(exit_code=1, stderr=warning or None)
-    if not paths:
-        source = resolve_source(stdin)
+        stream = None
+        warning = line_warnings(fl, f, pattern, never_match)
+    else:
+        stream, warning = open_grep(
+            stream_config(f, None if never_match else pattern, utf8)
+        )
+        if fl.as_bool("unix_byte_offsets"):
+            warning = UNIX_BYTE_OFFSETS + warning
+
+    def search(
+        source: AsyncIterator[bytes],
+        label: str,
+        show: bool,
+        file_io: IOResult,
+        after_output: bool = False,
+        size: int | None = None,
+    ) -> AsyncGenerator[bytes, None]:
+        if stream is not None:
+            return stream_input(
+                source, stream, label, show, file_io, after_output, size
+            )
         return grep_input(
             source,
             pat,
             f,
+            label,
+            show,
+            file_io,
+            after_output,
+            utf8,
+            size,
+            worker,
+        )
+
+    io = IOResult(exit_code=1, stderr=warning or None)
+    if not paths:
+        source = resolve_source(stdin)
+        return search(
+            source,
             f.label,
             f.with_filename and not f.no_filename,
             io,
-            utf8=utf8,
         ), io
 
-    worker = Worker()
+    if stream is None:
+        worker = Worker()
     mounts = mounts_of(ctx)
     prefix = mount_prefix_of(paths[0].virtual, paths[0].vfs_path)
     rd = mount_parent_readdir(
@@ -510,17 +551,13 @@ async def grep_generic(
                     f.with_filename or walked or len(paths) > 1
                 )
                 async with aclosing(
-                    grep_input(
+                    search(
                         source,
-                        pat,
-                        f,
                         operand_label(p, f.label),
                         show,
                         file_io,
                         printed,
-                        utf8,
                         info.size if info.type == FileType.FILE else None,
-                        worker,
                     )
                 ) as output:
                     async for chunk in output:
@@ -544,7 +581,8 @@ async def grep_generic(
                 if f.quiet and matched:
                     break
         finally:
-            await worker.close()
+            if worker is not None:
+                await worker.close()
             if diagnostics:
                 io.stderr = (await materialize(io.stderr)) + b"".join(
                     diagnostics

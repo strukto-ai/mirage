@@ -151,6 +151,43 @@
         "n",
         "h"
       ]
+    },
+    {
+      "id": "grep_A_huge_count_takes_every_line_after",
+      "seq": 17100009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\nnext\\nlast\\n' | grep -A 18446744073709551615 x",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\nnext\nlast\n",
+        "stderr": ""
+      },
+      "flags": [
+        "A"
+      ]
     }
   ]
 }

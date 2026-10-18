@@ -149,6 +149,45 @@
         "i",
         "w"
       ]
+    },
+    {
+      "id": "grep_w_needs_no_word_character_beside_the_match",
+      "seq": 17100004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf ' @ \\na@b\\n@\\n' | grep -nw '@'; printf 'a\\n \\n\\n' | grep -cw ''",
+      "expect": {
+        "exit": 0,
+        "stdout": "1: @ \n3:@\n2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "w",
+        "n",
+        "c"
+      ]
     }
   ]
 }

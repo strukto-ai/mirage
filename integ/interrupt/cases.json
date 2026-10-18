@@ -17,7 +17,12 @@
     },
     {
       "id": "grep-regex",
-      "command": "printf '%s\\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!' | grep -E '^(a+)+$'",
+      "command": "printf '%s\\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!' | grep -P '^(a+)+$'",
+      "canceled": true
+    },
+    {
+      "id": "grep-backreference",
+      "command": "printf '%s\\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!' | grep -E '^(a*)*\\1b$'",
       "canceled": true
     },
     {

@@ -6,8 +6,8 @@ use mirage_rs::{Stream, StreamError};
 /// The input window's size: the host copies a chunk of at most this many
 /// bytes into it and calls `mirage_rs_feed`, so a chunk costs no allocation
 /// however large the input. Calls are synchronous, so every stream shares
-/// one window.
-const INPUT_CAPACITY: usize = 64 * 1024;
+/// one window. It holds one block of grep's binary-file probe.
+const INPUT_CAPACITY: usize = 96 * 1024;
 
 struct Slot {
     stream: Box<dyn Stream>,
@@ -157,6 +157,35 @@ pub extern "C" fn mirage_rs_busy(handle: u32) -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn mirage_rs_drain(handle: u32) -> i32 {
     call(handle, 0, |stream, _, out| stream.drain(out))
+}
+
+/// Start the next input of a stream that reads one after another, its
+/// configuration the first `len` bytes of the input window.
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_begin(handle: u32, len: usize) -> i32 {
+    call(handle, len, |stream, input, _| stream.begin(input))
+}
+
+/// 1 once the stream wants no more of the current input, else 0.
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_done(handle: u32) -> i32 {
+    with_slot(handle, 1, |slot| i32::from(slot.stream.done()))
+}
+
+/// The command's exit status for the input so far.
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_status(handle: u32) -> i32 {
+    with_slot(handle, 2, |slot| slot.stream.status())
+}
+
+/// Put what the stream wrote to stderr since the last call at
+/// `mirage_rs_output`.
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_take_stderr(handle: u32) -> i32 {
+    call(handle, 0, |stream, _, out| {
+        stream.take_stderr(out);
+        Ok(())
+    })
 }
 
 #[unsafe(no_mangle)]

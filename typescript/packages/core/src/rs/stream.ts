@@ -32,6 +32,10 @@ interface Exports {
   mirage_rs_drain(handle: number): number
   mirage_rs_feed_input(handle: number, index: number, len: number): number
   mirage_rs_end_input(handle: number, index: number): number
+  mirage_rs_begin(handle: number, len: number): number
+  mirage_rs_done(handle: number): number
+  mirage_rs_status(handle: number): number
+  mirage_rs_take_stderr(handle: number): number
   mirage_rs_output(handle: number): number
   mirage_rs_output_len(handle: number): number
   mirage_rs_error(handle: number): number
@@ -112,6 +116,33 @@ export class OpenStream {
   /** End input `index` of a multi-input stream. */
   endInput(index: number): Uint8Array {
     return this.guard(() => this.collect(this.exports.mirage_rs_end_input(this.handle, index), []))
+  }
+
+  /** Start the next input of a stream that reads one after another. */
+  begin(config: Readonly<Record<string, JsonValue>>): void {
+    const bytes = encoder.encode(JSON.stringify(config))
+    if (bytes.byteLength > this.capacity)
+      throw new StreamRefusal('stream input configuration too large', new Uint8Array())
+    this.guard(() => {
+      const window = this.exports.mirage_rs_input(this.handle)
+      new Uint8Array(this.exports.memory.buffer, window, bytes.byteLength).set(bytes)
+      this.collect(this.exports.mirage_rs_begin(this.handle, bytes.byteLength), [])
+    })
+  }
+
+  /** Whether the stream wants no more of the current input. */
+  done(): boolean {
+    return this.guard(() => this.exports.mirage_rs_done(this.handle) === 1)
+  }
+
+  /** The command's exit status for the input so far. */
+  status(): number {
+    return this.guard(() => this.exports.mirage_rs_status(this.handle))
+  }
+
+  /** What the stream wrote to stderr since the last call. */
+  takeStderr(): Uint8Array {
+    return this.guard(() => this.collect(this.exports.mirage_rs_take_stderr(this.handle), []))
   }
 
   close(): void {

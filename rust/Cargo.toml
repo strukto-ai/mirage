@@ -15,6 +15,16 @@ md5 = { package = "md-5", version = "0.11", default-features = false }
 sha1 = { version = "0.11", default-features = false }
 sha2 = { version = "0.11", default-features = false }
 memchr = { version = "2", default-features = false, features = ["std"] }
+regex-automata = { version = "0.4", default-features = false, features = [
+  "std",
+  "syntax",
+  "meta",
+  "hybrid",
+  "nfa-pikevm",
+  "perf-literal-substring",
+  "perf-literal-multisubstring",
+] }
+regex-syntax = { version = "0.8", default-features = false, features = ["std"] }
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
 pyo3 = { version = "0.30", features = ["abi3-py311"] }

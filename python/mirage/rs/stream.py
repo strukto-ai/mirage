@@ -94,6 +94,29 @@ class OpenStream:
         except StreamError as exc:
             raise StreamRefusal(str(exc.args[0]), bytes(exc.args[1])) from exc
 
+    def begin(self, config: Mapping[str, JsonValue]) -> None:
+        """Start the next input of a stream that reads one after another.
+
+        Args:
+            config (Mapping[str, JsonValue]): That input's configuration.
+        """
+        try:
+            self._stream.begin(json.dumps(config).encode())
+        except StreamError as exc:
+            raise StreamRefusal(str(exc.args[0]), b"") from exc
+
+    def done(self) -> bool:
+        """Whether the stream wants no more of the current input."""
+        return self._stream.done()
+
+    def status(self) -> int:
+        """The command's exit status for the input so far."""
+        return self._stream.status()
+
+    def take_stderr(self) -> bytes:
+        """What the stream wrote to stderr since the last call."""
+        return self._stream.take_stderr()
+
 
 def open_stream(kind: str, config: Mapping[str, JsonValue]) -> OpenStream:
     """Open the mirage-rs stream *kind*.

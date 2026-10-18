@@ -246,7 +246,26 @@ const CHECKS: [string, Check][] = [
     async (ws) => {
       const controller = new AbortController()
       const running = aborted(
-        shell(ws, "printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!\\n' | grep -E '^(a+)+$'", {
+        shell(ws, "printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!\\n' | grep -P '^(a+)+$'", {
+          signal: controller.signal,
+        }),
+      )
+      const timer = setTimeout(() => controller.abort(), 250)
+      try {
+        equal(await running, 'AbortError')
+        equal(await shell(ws, 'echo ready'), [0, 'ready\n', ''])
+      } finally {
+        clearTimeout(timer)
+        controller.abort()
+      }
+    },
+  ],
+  [
+    'a slow back-reference grep can be interrupted',
+    async (ws) => {
+      const controller = new AbortController()
+      const running = aborted(
+        shell(ws, "printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!\\n' | grep -E '^(a*)*\\1b$'", {
           signal: controller.signal,
         }),
       )

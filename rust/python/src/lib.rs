@@ -8,7 +8,7 @@ create_exception!(mirage_rs, StreamError, PyException);
 /// One open stream: `feed` takes a chunk and returns the bytes it produced;
 /// a refusal raises `StreamError(message, output)` with the output written
 /// before it.
-#[pyclass(unsendable, module = "mirage_rs")]
+#[pyclass(module = "mirage_rs")]
 struct Stream {
     inner: Box<dyn streams::Stream>,
     out: Vec<u8>,
@@ -81,6 +81,30 @@ impl Stream {
     fn end_input<'py>(&mut self, py: Python<'py>, index: usize) -> PyResult<Bound<'py, PyBytes>> {
         let result = self.inner.end_input(index, &mut self.out);
         self.deliver(py, result)
+    }
+
+    /// Start the next input of a stream that reads one after another.
+    fn begin(&mut self, py: Python<'_>, config: &[u8]) -> PyResult<()> {
+        self.inner
+            .begin(config)
+            .map_err(|err| StreamError::new_err((err.message, PyBytes::new(py, b"").unbind())))
+    }
+
+    /// Whether the stream wants no more of the current input.
+    fn done(&self) -> bool {
+        self.inner.done()
+    }
+
+    /// The command's exit status for the input so far.
+    fn status(&self) -> i32 {
+        self.inner.status()
+    }
+
+    /// What the stream wrote to stderr since the last call.
+    fn take_stderr<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        let mut err = Vec::new();
+        self.inner.take_stderr(&mut err);
+        PyBytes::new(py, &err)
     }
 }
 
