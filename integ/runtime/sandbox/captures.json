@@ -3,12 +3,12 @@
     {
       "id": "captured_only",
       "runtimes": [
-        "apple_container",
         "docker",
+        "ssh",
         "e2b",
-        "microsandbox",
         "smolvm",
-        "ssh"
+        "microsandbox",
+        "apple_container"
       ],
       "entry": {
         "captures": [

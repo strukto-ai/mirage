@@ -12,9 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Context } from '@struktoai/mirage-core/commands/config'
-import { materialize } from '@struktoai/mirage-core/io/types'
-import type { PathSpec } from '@struktoai/mirage-core/types'
 import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { checkMountType, requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
@@ -50,6 +47,12 @@ export class MicrosandboxRuntime
     this.serveMounts(checkMountType('microsandbox', this.config.mountType))
   }
 
+  /** Skip the connect-once latch: every exec probes the guest. */
+  protected override ensureConnected(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted()
+    return Promise.resolve()
+  }
+
   // One msb CLI invocation.
   protected microsandbox(
     args: string[],
@@ -69,7 +72,10 @@ export class MicrosandboxRuntime
     } catch (error) {
       signal?.throwIfAborted()
       if (deadline.aborted)
-        throw new Error('msb runtime inspection timed out after 10 seconds', { cause: error })
+        throw new Error(
+          `msb runtime inspection timed out after ${String(INSPECT_TIMEOUT_SECONDS)} seconds`,
+          { cause: error },
+        )
       throw error
     }
   }
@@ -94,54 +100,6 @@ export class MicrosandboxRuntime
     if (state !== RUNNING_STATE) {
       throw new Error(notRunningHint(this.config.sandbox, String(state)))
     }
-  }
-
-  override async execLine(
-    line: string,
-    stdin: Uint8Array | null,
-    env: Record<string, string>,
-    cwd: string,
-    signal?: AbortSignal,
-  ): Promise<RunResult> {
-    return this.execArgv(['sh', '-c', line], stdin, env, cwd, signal)
-  }
-
-  override async runProcess(
-    _engine: undefined,
-    _paths: PathSpec[],
-    texts: string[],
-    ctx: Context,
-  ): Promise<RunResult> {
-    ctx.signal?.throwIfAborted()
-    const refusal = await this.admitMounts(ctx.signal)
-    if (refusal !== null) return refusal
-    return this.execArgv(
-      texts,
-      ctx.stdin === null ? null : await materialize(ctx.stdin),
-      { ...this.config.env, ...ctx.env },
-      ctx.cwd.virtual,
-      ctx.signal,
-    )
-  }
-
-  /** Admit mounts, then validate the guest immediately before execution. */
-  override async runLine(
-    _engine: undefined,
-    _paths: PathSpec[],
-    _texts: string[],
-    ctx: Context,
-  ): Promise<RunResult> {
-    ctx.signal?.throwIfAborted()
-    const refusal = await this.admitMounts(ctx.signal)
-    if (refusal !== null) return refusal
-    const line = ctx.flags.c
-    return this.execLine(
-      typeof line === 'string' ? line : '',
-      ctx.stdin === null ? null : await materialize(ctx.stdin),
-      { ...this.config.env, ...ctx.env },
-      ctx.cwd.virtual,
-      ctx.signal,
-    )
   }
 
   protected override async execArgv(

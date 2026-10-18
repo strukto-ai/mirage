@@ -14,11 +14,11 @@ checks hides, a read-only mount and a host change through it, and that
 | `env.json`      | config `env` reaches the line                                 | every box                                        |
 | `timeout.json`  | a mount limit's timeout ends the line with 124                | every box                                        |
 | `captures.json` | only captured commands go to the box; the rest stay in mirage | every box                                        |
-| `kernel.json`   | the box runs its own Linux kernel                             | apple_container, microsandbox, smolvm            |
+| `kernel.json`   | the box runs its own Linux kernel                             | smolvm, microsandbox, apple_container            |
 | `mounts.json`   | `mount_type` serves the session's view into the box           | docker, e2b, microsandbox                        |
 
-The boxes are apple_container, docker, e2b, microsandbox, smolvm and ssh. CI runs docker
+The boxes are docker, ssh, e2b, smolvm, microsandbox and apple_container. CI runs docker
 and ssh in `integ-runtime` against containers it starts, and e2b in
 `integ-e2b` against E2B Embed, on the python host only (see the runtime
-README); apple_container, microsandbox and smolvm run where their
+README); smolvm, microsandbox and apple_container run where their
 host exists.

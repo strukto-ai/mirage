@@ -3,9 +3,9 @@
     {
       "id": "own_guest_kernel",
       "runtimes": [
-        "apple_container",
+        "smolvm",
         "microsandbox",
-        "smolvm"
+        "apple_container"
       ],
       "steps": [
         {

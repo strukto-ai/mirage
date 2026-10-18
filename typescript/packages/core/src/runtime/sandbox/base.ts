@@ -168,10 +168,6 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
 
   private async prepare(signal?: AbortSignal): Promise<RunResult | null> {
     await this.ensureConnected(signal)
-    return this.admitMounts(signal)
-  }
-
-  protected async admitMounts(signal?: AbortSignal): Promise<RunResult | null> {
     const refusal = await this.mounts?.admit(this.binding, signal)
     return refusal == null
       ? null

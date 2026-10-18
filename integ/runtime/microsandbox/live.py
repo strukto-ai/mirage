@@ -397,77 +397,160 @@ async def host_pids(marker):
     ]
 
 
+class FullInspect(MicrosandboxRuntime):
+    async def _microsandbox(self, args, stdin=None):
+        return await super()._microsandbox(
+            ["inspect", *args[1:]] if args[0] == "status" else args,
+            stdin,
+        )
+
+
+async def inspect_pids():
+    rows = (await local("ps", "-axo", "pid=,command=")).decode()
+    return [
+        int(parts[0])
+        for line in rows.splitlines()
+        if len(parts := line.split(None, 2)) == 3
+        and (parts[1] == "msb" or parts[1].endswith("/msb"))
+        and parts[2].startswith("inspect " + SANDBOX + " ")
+    ]
+
+
+async def probe_with_storage_locked():
+    run_dir = (
+        Path(os.environ.get("MSB_HOME", str(Path.home() / ".microsandbox")))
+        / "run"
+    )
+    digest = hashlib.sha256(SANDBOX.encode()).hexdigest()[:32]
+
+    with (run_dir / "creation-locks" / (digest + ".lock")).open("rb") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = await asyncio.wait_for(raw("printf runtime-probe-ok"), 5)
+        assert (
+            result.exit_code == 0 and result.stdout == b"runtime-probe-ok"
+        ), result
+        pending = asyncio.create_task(
+            FullInspect(config={"sandbox": SANDBOX}).execute(
+                [],
+                list(("true",)),
+                Context(cwd=PathSpec.from_str_path("/")),
+                kind="process",
+            )
+        )
+        try:
+            for _ in range(80):
+                if await inspect_pids():
+                    break
+                await asyncio.sleep(0.025)
+            else:
+                raise AssertionError("real msb inspect did not start")
+            assert not pending.done()
+            pending.cancel()
+            try:
+                await pending
+            except asyncio.CancelledError:
+                pass
+            else:
+                raise AssertionError("probe ignored cancellation")
+            for _ in range(80):
+                if not await inspect_pids():
+                    break
+                await asyncio.sleep(0.025)
+            else:
+                raise AssertionError("cancelled inspect process survived")
+        finally:
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+            for pid in await inspect_pids():
+                os.kill(pid, signal.SIGKILL)
+
+
+async def missing_fuse_device():
+    ws = Workspace(
+        {"/missing-fuse": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[
+            MicrosandboxRuntime(
+                captures=["python3"],
+                config={
+                    "sandbox": SANDBOX,
+                    "mount_type": "ssh",
+                },
+            ),
+            "workspace",
+        ],
+    )
+    moved = await raw(
+        "test -c /dev/fuse && test ! -e /dev/fuse-mirage-e2e && "
+        "mv /dev/fuse /dev/fuse-mirage-e2e"
+    )
+    assert moved.exit_code == 0, moved.stderr
+    try:
+        result = await ws.shell("python3 -c 'print(1)'")
+        assert result.exit_code == 1
+        assert b"fuse: device not found" in result.stderr, result.stderr
+    finally:
+        restored = await raw("mv /dev/fuse-mirage-e2e /dev/fuse")
+        assert restored.exit_code == 0, restored.stderr
+        await ws.close()
+
+
+async def stopped_after_connect(mode):
+    runtime = MicrosandboxRuntime(
+        config={"sandbox": SANDBOX, "mount_type": mode}
+    )
+    assert (await runtime.exec_line("true", None, {}, "/")).exit_code == 0
+    await local("msb", "stop", SANDBOX, "--timeout", "10")
+    try:
+        for operation in (
+            runtime.exec_line("printf must-not-run", None, {}, "/"),
+            runtime.open_pipe("printf must-not-run"),
+        ):
+            try:
+                await operation
+            except RuntimeError as error:
+                assert "not running" in str(error), error
+            else:
+                raise AssertionError("accepted a stopped guest")
+        state = json.loads(
+            await local("msb", "inspect", SANDBOX, "--format", "json")
+        )
+        assert state["status"] == "Stopped", state["status"]
+    finally:
+        await local("msb", "start", SANDBOX)
+        await runtime.close()
+
+
+class StopAfterProbe(MicrosandboxRuntime):
+    async def connect(self):
+        await super().connect()
+        await local("msb", "stop", SANDBOX, "--timeout", "10")
+
+
+async def stopped_between_probe_and_pipe(mode):
+    candidate = StopAfterProbe(config={"sandbox": SANDBOX, "mount_type": mode})
+    try:
+        pipe = await candidate.open_pipe("printf race-command-ran")
+        try:
+            assert (
+                await asyncio.wait_for(pipe.reader.read(), 15)
+                == b"race-command-ran"
+            )
+            await pipe.stop()
+            assert pipe.diagnostic is not None
+            assert "not running" not in await pipe.diagnostic()
+        finally:
+            await pipe.stop()
+        state = json.loads(
+            await local("msb", "inspect", SANDBOX, "--format", "json")
+        )
+        assert state["status"] == "Stopped", state
+    finally:
+        await local("msb", "start", SANDBOX)
+
+
 async def lifecycle_checks():
     runtime = MicrosandboxRuntime(config={"sandbox": SANDBOX})
-
-    async def probe_with_storage_locked():
-        run_dir = (
-            Path(
-                os.environ.get("MSB_HOME", str(Path.home() / ".microsandbox"))
-            )
-            / "run"
-        )
-        digest = hashlib.sha256(SANDBOX.encode()).hexdigest()[:32]
-
-        class FullInspect(MicrosandboxRuntime):
-            async def _microsandbox(self, args, stdin=None):
-                return await super()._microsandbox(
-                    ["inspect", *args[1:]] if args[0] == "status" else args,
-                    stdin,
-                )
-
-        async def inspect_pids():
-            rows = (await local("ps", "-axo", "pid=,command=")).decode()
-            return [
-                int(parts[0])
-                for line in rows.splitlines()
-                if len(parts := line.split(None, 2)) == 3
-                and (parts[1] == "msb" or parts[1].endswith("/msb"))
-                and parts[2].startswith("inspect " + SANDBOX + " ")
-            ]
-
-        with (run_dir / "creation-locks" / (digest + ".lock")).open(
-            "rb"
-        ) as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            result = await asyncio.wait_for(raw("printf runtime-probe-ok"), 5)
-            assert (
-                result.exit_code == 0 and result.stdout == b"runtime-probe-ok"
-            ), result
-            pending = asyncio.create_task(
-                FullInspect(config={"sandbox": SANDBOX}).execute(
-                    [],
-                    list(("true",)),
-                    Context(cwd=PathSpec.from_str_path("/")),
-                    kind="process",
-                )
-            )
-            try:
-                for _ in range(80):
-                    if await inspect_pids():
-                        break
-                    await asyncio.sleep(0.025)
-                else:
-                    raise AssertionError("real msb inspect did not start")
-                assert not pending.done()
-                pending.cancel()
-                try:
-                    await pending
-                except asyncio.CancelledError:
-                    pass
-                else:
-                    raise AssertionError("probe ignored cancellation")
-                for _ in range(80):
-                    if not await inspect_pids():
-                        break
-                    await asyncio.sleep(0.025)
-                else:
-                    raise AssertionError("cancelled inspect process survived")
-            finally:
-                pending.cancel()
-                await asyncio.gather(pending, return_exceptions=True)
-                for pid in await inspect_pids():
-                    os.kill(pid, signal.SIGKILL)
 
     await check(
         "storage_lock_does_not_block_exec_and_cancel_reaps_probe",
@@ -537,91 +620,9 @@ async def lifecycle_checks():
 
     await check("cancelled_execution_reaps_guest", cancelled_call)
 
-    async def missing_fuse_device():
-        ws = Workspace(
-            {"/missing-fuse": RAMVFS()},
-            mode=MountMode.EXEC,
-            runtimes=[
-                MicrosandboxRuntime(
-                    captures=["python3"],
-                    config={
-                        "sandbox": SANDBOX,
-                        "mount_type": "ssh",
-                    },
-                ),
-                "workspace",
-            ],
-        )
-        moved = await raw(
-            "test -c /dev/fuse && test ! -e /dev/fuse-mirage-e2e && "
-            "mv /dev/fuse /dev/fuse-mirage-e2e"
-        )
-        assert moved.exit_code == 0, moved.stderr
-        try:
-            result = await ws.shell("python3 -c 'print(1)'")
-            assert result.exit_code == 1
-            assert b"fuse: device not found" in result.stderr, result.stderr
-        finally:
-            restored = await raw("mv /dev/fuse-mirage-e2e /dev/fuse")
-            assert restored.exit_code == 0, restored.stderr
-            await ws.close()
-
     await check(
         "missing_fuse_device_preserves_sshfs_error", missing_fuse_device
     )
-
-    async def stopped_after_connect(mode):
-        runtime = MicrosandboxRuntime(
-            config={"sandbox": SANDBOX, "mount_type": mode}
-        )
-        assert (await runtime.exec_line("true", None, {}, "/")).exit_code == 0
-        await local("msb", "stop", SANDBOX, "--timeout", "10")
-        try:
-            for operation in (
-                runtime.exec_line("printf must-not-run", None, {}, "/"),
-                runtime.open_pipe("printf must-not-run"),
-            ):
-                try:
-                    await operation
-                except RuntimeError as error:
-                    assert "not running" in str(error), error
-                else:
-                    raise AssertionError("accepted a stopped guest")
-            state = json.loads(
-                await local("msb", "inspect", SANDBOX, "--format", "json")
-            )
-            assert state["status"] == "Stopped", state["status"]
-        finally:
-            await local("msb", "start", SANDBOX)
-            await runtime.close()
-
-    async def stopped_between_probe_and_pipe(mode):
-        class StopAfterProbe(MicrosandboxRuntime):
-            async def connect(self):
-                await super().connect()
-                await local("msb", "stop", SANDBOX, "--timeout", "10")
-
-        candidate = StopAfterProbe(
-            config={"sandbox": SANDBOX, "mount_type": mode}
-        )
-        try:
-            pipe = await candidate.open_pipe("printf race-command-ran")
-            try:
-                assert (
-                    await asyncio.wait_for(pipe.reader.read(), 15)
-                    == b"race-command-ran"
-                )
-                await pipe.stop()
-                assert pipe.diagnostic is not None
-                assert "not running" not in await pipe.diagnostic()
-            finally:
-                await pipe.stop()
-            state = json.loads(
-                await local("msb", "inspect", SANDBOX, "--format", "json")
-            )
-            assert state["status"] == "Stopped", state
-        finally:
-            await local("msb", "start", SANDBOX)
 
     for mode in (None, "ssh", "both"):
         await check(

@@ -56,7 +56,7 @@ differs.
 | local                                              | the host's `python3`                          | the host's `python3`                           |
 | host                                               | the runner itself, inside `with ws:`          | the runner itself, under `patchNodeFs`         |
 | sandlock                                           | host `python3` and `node` under Landlock      | the same                                       |
-| apple_container, docker, microsandbox, smolvm, ssh | whole lines in a box the user runs            | the same                                       |
+| docker, ssh, smolvm, microsandbox, apple_container | whole lines in a box the user runs            | the same                                       |
 | e2b                                                | whole lines in an E2B sandbox                 | not run here (below)                           |
 
 The e2b variants run on the python host only. E2B's sandbox proxy now and
@@ -98,8 +98,8 @@ because the runners run one case at a time. No CLI reaches a process's own
 - `backends` repeats a case over `ram`, `disk`, `ssh`, `s3` and `redis`;
   each mount gets its own key space or directory. `ssh` mounts a fresh
   directory on the ssh runtime's box over SFTP.
-- A runtime the hosted runners cannot give every job (e2b, microsandbox, smolvm,
-  apple_container, sandlock) is skipped when its requirement is unmet, even
+- A runtime the hosted runners cannot give every job (e2b, smolvm,
+  microsandbox, apple_container, sandlock) is skipped when its requirement is unmet, even
   under `INTEG_RUNTIME_STRICT=1`.
 
 ## Running
@@ -124,19 +124,19 @@ bash integ/runtime/cli.sh python/.venv/bin/mirage "node typescript/packages/cli/
 
 | Needs                                        | For                                                 |
 | -------------------------------------------- | --------------------------------------------------- |
-| `MIRAGE_INTEG_APPLE_CONTAINER`               | apple_container                                     |
-| `MIRAGE_INTEG_BOX_MOUNTS`                    | `sandbox/mounts.json`: sshfs, FUSE, `/boxdata`      |
-| `MIRAGE_INTEG_DOCKER_CONTAINER`              | docker                                              |
-| `MIRAGE_INTEG_E2B_SANDBOX`                   | e2b                                                 |
-| `MIRAGE_INTEG_MICROSANDBOX_SANDBOX`          | microsandbox                                        |
-| `MIRAGE_INTEG_SANDLOCK`                      | sandlock                                            |
-| `MIRAGE_INTEG_SMOLVM_MACHINE`                | smolvm                                              |
-| `MIRAGE_INTEG_SSH_HOST`, `_USERNAME`, `_KEY` | ssh, and the `ssh` variants                         |
-| `MIRAGE_QUICKJS_HOME`                        | quickjs on the python host                          |
 | `MIRAGE_WASI_HOME`                           | wasi                                                |
-| `MONGODB_URI`                                | `backend/mongodb.json`                              |
-| `REDIS_URL`                                  | `redis` variants and `backend/redis.json`           |
+| `MIRAGE_QUICKJS_HOME`                        | quickjs on the python host                          |
 | `S3_ENDPOINT`                                | `s3` variants and `backend/` on the typescript host |
+| `REDIS_URL`                                  | `redis` variants and `backend/redis.json`           |
+| `MONGODB_URI`                                | `backend/mongodb.json`                              |
+| `MIRAGE_INTEG_DOCKER_CONTAINER`              | docker                                              |
+| `MIRAGE_INTEG_SSH_HOST`, `_USERNAME`, `_KEY` | ssh, and the `ssh` variants                         |
+| `MIRAGE_INTEG_E2B_SANDBOX`                   | e2b                                                 |
+| `MIRAGE_INTEG_BOX_MOUNTS`                    | `sandbox/mounts.json`: sshfs, FUSE, `/boxdata`      |
+| `MIRAGE_INTEG_SMOLVM_MACHINE`                | smolvm                                              |
+| `MIRAGE_INTEG_MICROSANDBOX_SANDBOX`          | microsandbox                                        |
+| `MIRAGE_INTEG_APPLE_CONTAINER`               | apple_container                                     |
+| `MIRAGE_INTEG_SANDLOCK`                      | sandlock                                            |
 
 With `INTEG_RUNTIME_STRICT=1` an unmet requirement fails instead of
 skipping. `MIRAGE_INTEG_BOX_MOUNTS` says the docker, e2b or microsandbox
@@ -145,25 +145,37 @@ guest has sshfs, FUSE, and a mount of its own at `/boxdata` holding `own.txt`
 
 ## Microsandbox live matrix
 
-`microsandbox/setup.sh` provisions a dedicated running guest using a locally
+`microsandbox/setup.sh` provisions a dedicated running guest with a locally
 built Mirage wheel. If its `mirage-rs` dependency has not been published,
-pass a matching guest-compatible native wheel as the third argument; build it
-from this checkout's `rust/python` on Linux. `microsandbox/live.py` and
-`microsandbox/live.ts` exercise
-`fuse`, `ssh`, and `both`, including mounted cwd, symlinks, binary I/O, session
-rules, cancellation, stopped guests, storage-lock contention, and cleanup.
-They stop/restart the guest and temporarily hide `/dev/fuse`; do not use a
-guest containing work you want to keep.
-
-From the repository root, after provisioning each guest:
+pass a matching guest-compatible native wheel, built from this checkout's
+`rust/python` on Linux, as the third argument. `microsandbox/live.py` and
+`microsandbox/live.ts` exercise `fuse`, `ssh` and `both`, including mounted
+cwd, symlinks, binary I/O, session rules, cancellation, stopped guests,
+storage-lock contention and cleanup. They stop and restart the guest and hide
+`/dev/fuse` for a while; do not use a guest holding work you want to keep.
+Build the Node packages first, then from the repository root:
 
 ```bash
-MIRAGE_E2E_SANDBOX=python-box python/.venv/bin/python integ/runtime/microsandbox/live.py
-MIRAGE_E2E_SANDBOX=typescript-box integ/node_modules/.bin/tsx integ/runtime/microsandbox/live.ts
+uv build --wheel python --out-dir /tmp/mirage-wheels
+msb create python:3.12-slim-bookworm --name mirage-e2e-python --memory 1G
+bash integ/runtime/microsandbox/setup.sh mirage-e2e-python /tmp/mirage-wheels/mirage_ai-*.whl
+MIRAGE_E2E_SANDBOX=mirage-e2e-python python/.venv/bin/python integ/runtime/microsandbox/live.py
+msb remove --force mirage-e2e-python
 ```
 
-See `docs/home/setup/runtime/sandbox/microsandbox.mdx` for setup and guest
-removal. These runners work with released Microsandbox 0.7.8, using its
-stock CLI, firmware and guest agent. They exercise the delayed-`cd` workaround
-and demonstrate the documented automatic-start race if a guest stops between
-the running-state check and execution. Hosted CI does not provision these guests.
+`live.ts` runs the same way against a second guest, with
+`integ/node_modules/.bin/tsx integ/runtime/microsandbox/live.ts`.
+
+The adapter tests in `python/tests/runtime/sandbox/microsandbox/` and
+`typescript/packages/node/src/runtime/sandbox/microsandbox/` take real guests
+too, each skipped when unset: `MIRAGE_INTEG_MICROSANDBOX_SANDBOX` (Python and
+the guest's own FUSE workspace at `/data`, with `/data/hello.txt` holding
+`hello from Mirage FUSE`), `MIRAGE_INTEG_MICROSANDBOX_MOUNT_SANDBOX` (Python,
+`sshfs` and a usable `/dev/fuse`) and
+`MIRAGE_INTEG_MICROSANDBOX_STOPPED_SANDBOX` (a stopped guest, which they check
+is never started).
+
+These runners work with released Microsandbox 0.7.8 and its stock CLI,
+firmware and guest agent. They exercise the delayed-`cd` workaround and show
+the automatic-start race when a guest stops between the running-state check
+and the exec. Hosted CI does not provision these guests.

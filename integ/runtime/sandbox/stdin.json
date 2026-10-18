@@ -3,12 +3,12 @@
     {
       "id": "stdin",
       "runtimes": [
-        "apple_container",
         "docker",
+        "ssh",
         "e2b",
-        "microsandbox",
         "smolvm",
-        "ssh"
+        "microsandbox",
+        "apple_container"
       ],
       "steps": [
         {
@@ -24,8 +24,8 @@
     {
       "id": "stdin_absent_eof",
       "runtimes": [
-        "e2b",
-        "ssh"
+        "ssh",
+        "e2b"
       ],
       "steps": [
         {
@@ -40,8 +40,8 @@
     {
       "id": "stdin_empty_eof",
       "runtimes": [
-        "e2b",
-        "ssh"
+        "ssh",
+        "e2b"
       ],
       "steps": [
         {

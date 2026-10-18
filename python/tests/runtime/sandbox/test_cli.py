@@ -233,15 +233,20 @@ async def test_close_children_does_not_wait_on_a_descendant_that_left(
 async def test_a_pipe_keeps_the_tail_of_its_stderr():
     pipe = await open_cli_pipe(
         sys.executable,
-        ["-c", "import sys; sys.stderr.write('x' * 40000 + 'the-end')"],
+        [
+            "-c",
+            "import sys, time; sys.stderr.write('x' * 40000 + 'the-end'); "
+            "sys.stderr.flush(); time.sleep(30)",
+        ],
     )
+    assert pipe.diagnostic is not None
     try:
-        assert pipe.diagnostic is not None
         said = await pipe.diagnostic()
         assert said.endswith("the-end")
         assert len(said) == PIPE_DIAGNOSTIC_BYTES
     finally:
         await pipe.stop()
+    assert await pipe.diagnostic() == said
 
 
 @pytest.mark.asyncio

@@ -14,11 +14,7 @@
 
 import asyncio
 import json
-from collections.abc import Sequence
-from typing import Any
 
-from mirage.commands.config import Context
-from mirage.io.types import materialize
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.cli import open_cli_pipe, run_cli
@@ -31,7 +27,6 @@ from mirage.runtime.sandbox.microsandbox.constants import (
     not_running_hint,
 )
 from mirage.runtime.types import RunResult, SandboxPipe
-from mirage.types import PathSpec
 
 
 class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
@@ -50,12 +45,8 @@ class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
     config_cls = MicrosandboxConfig
     config: MicrosandboxConfig
 
-    def __init__(
-        self,
-        captures: Sequence[str] | None = None,
-        config: MicrosandboxConfig | dict[str, Any] | None = None,
-    ) -> None:
-        super().__init__(captures, config)
+    async def _ensure_connected(self) -> None:
+        """Skip the connect-once latch: every exec probes the guest."""
 
     async def _microsandbox(
         self, args: list[str], stdin: bytes | None = None
@@ -70,7 +61,8 @@ class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
                 await self._connect()
         except TimeoutError as error:
             raise RuntimeError(
-                "msb runtime inspection timed out after 10 seconds"
+                "msb runtime inspection timed out after "
+                f"{INSPECT_TIMEOUT_SECONDS} seconds"
             ) from error
 
     async def _connect(self) -> None:
@@ -96,54 +88,6 @@ class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
             raise RuntimeError(
                 not_running_hint(self.config.sandbox, str(state))
             )
-
-    async def exec_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-    ) -> RunResult:
-        return await self._exec_argv(("sh", "-c", line), stdin, env, cwd)
-
-    async def run_line(
-        self,
-        engine: None,
-        paths: list[PathSpec],
-        texts: list[str],
-        ctx: Context,
-    ) -> RunResult:
-        """Admit mounts, then validate the guest immediately before execution.
-
-        Args:
-            engine (None): no provider engine.
-            paths (list[PathSpec]): unused.
-            texts (list[str]): unused.
-            ctx (Context): line, input, environment and working directory.
-        """
-        refusal = await self._admit_mounts()
-        if refusal is not None:
-            return refusal
-        line = ctx.flags.get("c")
-        return await self.exec_line(
-            line if isinstance(line, str) else "",
-            await materialize(ctx.stdin) if ctx.stdin is not None else None,
-            {**self.config.env, **(ctx.env or {})},
-            ctx.cwd.virtual,
-        )
-
-    async def run_process(
-        self,
-        engine: None,
-        paths: list[PathSpec],
-        texts: list[str],
-        ctx: Context,
-    ) -> RunResult:
-        refusal = await self._admit_mounts()
-        if refusal is not None:
-            return refusal
-        return await self._exec_argv(
-            tuple(texts),
-            await materialize(ctx.stdin) if ctx.stdin is not None else None,
-            {**self.config.env, **(ctx.env or {})},
-            ctx.cwd.virtual,
-        )
 
     async def _exec_argv(
         self,

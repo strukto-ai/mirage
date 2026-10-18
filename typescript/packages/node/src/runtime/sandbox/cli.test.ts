@@ -249,15 +249,17 @@ describe('openCliPipe', () => {
   it('keeps the tail of its stderr', async () => {
     const pipe = await openCliPipe(process.execPath, [
       '-e',
-      "process.stderr.write('x'.repeat(40000) + 'the-end')",
+      "process.stderr.write('x'.repeat(40000) + 'the-end'); setTimeout(() => undefined, 30000)",
     ])
+    let said = ''
     try {
-      const said = (await pipe.diagnostic?.()) ?? ''
+      said = (await pipe.diagnostic?.()) ?? ''
       expect(said.endsWith('the-end')).toBe(true)
       expect(said.length).toBe(PIPE_DIAGNOSTIC_BYTES)
     } finally {
       await pipe.stop()
     }
+    expect(await pipe.diagnostic?.()).toBe(said)
   })
 
   it.each([

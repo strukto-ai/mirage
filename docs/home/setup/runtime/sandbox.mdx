@@ -11,21 +11,20 @@ to [`@external`](/home/setup/runtime/overview#captures), every program
 Mirage does not have itself.
 
 A program there opens workspace files at the same paths, so the sandbox
-must see the mounts. `apple_container`, `docker`, `e2b`, `microsandbox`,
-`smolvm`, and `ssh` pick how with `mount_type`: `ssh`
+must see the mounts. `docker`, `e2b`, `ssh`, `smolvm`, `microsandbox`, and `apple_container` pick how with `mount_type`: `ssh`
 serves them from the workspace, `fuse` from a Mirage inside the sandbox, and
 `both` mixes the two. Daytona uses a Mirage inside.
 
 | Runtime | Runs programs in | Workspace files through |
 | --- | --- | --- |
-| [Apple Container](/home/setup/runtime/sandbox/apple_container) | A container on macOS, one per agent if you map them | `mount_type`: `ssh`, `fuse` or `both` |
-| [Daytona](/home/setup/runtime/sandbox/daytona) | A Daytona cloud sandbox | FUSE, from a Mirage inside |
 | [Docker](/home/setup/runtime/sandbox/docker) | A Docker container | `mount_type`: `ssh`, `fuse` or `both` |
 | [E2B](/home/setup/runtime/sandbox/e2b) | An E2B cloud sandbox | `mount_type`: `ssh`, `fuse` or `both` |
-| [microsandbox](/home/setup/runtime/sandbox/microsandbox) | A microVM with its own kernel | `mount_type`: `ssh`, `fuse` or `both` |
-| [Sandlock](/home/setup/runtime/sandbox/sandlock) | This Linux host, confined | A [FUSE folder](/home/setup/fuse) you grant |
+| [Daytona](/home/setup/runtime/sandbox/daytona) | A Daytona cloud sandbox | FUSE, from a Mirage inside |
 | [smolvm](/home/setup/runtime/sandbox/smolvm) | A microVM with its own kernel | `mount_type`: `ssh`, `fuse` or `both` |
+| [Microsandbox](/home/setup/runtime/sandbox/microsandbox) | A microVM with its own kernel | `mount_type`: `ssh`, `fuse` or `both` |
+| [Apple Container](/home/setup/runtime/sandbox/apple_container) | A container on macOS, one per agent if you map them | `mount_type`: `ssh`, `fuse` or `both` |
 | [SSH](/home/setup/runtime/sandbox/ssh) | Any machine running `sshd` | `mount_type`: `ssh`, `fuse` or `both` |
+| [Sandlock](/home/setup/runtime/sandbox/sandlock) | This Linux host, confined | A [FUSE folder](/home/setup/fuse) you grant |
 
 ## The sandbox image
 

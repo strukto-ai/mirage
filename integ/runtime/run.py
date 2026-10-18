@@ -83,19 +83,19 @@ BACKEND_REQUIRES: dict[str, list[str]] = {
 # the line head a step's program runs under in it. A sandbox has none: it
 # runs whole lines, so a case's plain commands are its program.
 RUNTIME_LANGUAGE: dict[str, str | None] = {
-    "apple_container": None,
-    "docker": None,
-    "e2b": None,
-    "host": "python",
-    "local": "python",
-    "microsandbox": None,
     "monty": "python",
+    "wasi": "python",
     "pyodide": "python",
     "quickjs": "js",
+    "local": "python",
     "sandlock": "python",
-    "smolvm": None,
+    "host": "python",
+    "docker": None,
     "ssh": None,
-    "wasi": "python",
+    "e2b": None,
+    "smolvm": None,
+    "microsandbox": None,
+    "apple_container": None,
 }
 PROGRAM_HEAD: dict[str, str] = {"python": "python3 -c", "js": "node -e"}
 # Every language a program or an `expect` may be keyed by. `node` is the
@@ -112,43 +112,27 @@ LEDGER_CHECKS = frozenset({"ops_contain", "ops_absent", "ops_count"})
 # missing here does not exist on this host (pyodide is typescript's), so
 # its variant is not listed at all.
 RUNTIME_REQUIRES: dict[str, list[str]] = {
-    "apple_container": ["env:MIRAGE_INTEG_APPLE_CONTAINER"],
-    "docker": ["env:MIRAGE_INTEG_DOCKER_CONTAINER"],
-    "e2b": ["env:MIRAGE_INTEG_E2B_SANDBOX"],
-    "host": [],
-    "local": [],
-    "microsandbox": ["env:MIRAGE_INTEG_MICROSANDBOX_SANDBOX"],
     "monty": [],
-    "quickjs": ["env:MIRAGE_QUICKJS_HOME"],
-    "sandlock": ["env:MIRAGE_INTEG_SANDLOCK"],
-    "smolvm": ["env:MIRAGE_INTEG_SMOLVM_MACHINE"],
-    "ssh": ["env:MIRAGE_INTEG_SSH_HOST"],
     "wasi": ["env:MIRAGE_WASI_HOME"],
+    "quickjs": ["env:MIRAGE_QUICKJS_HOME"],
+    "local": [],
+    "sandlock": ["env:MIRAGE_INTEG_SANDLOCK"],
+    "host": [],
+    "docker": ["env:MIRAGE_INTEG_DOCKER_CONTAINER"],
+    "ssh": ["env:MIRAGE_INTEG_SSH_HOST"],
+    "e2b": ["env:MIRAGE_INTEG_E2B_SANDBOX"],
+    "smolvm": ["env:MIRAGE_INTEG_SMOLVM_MACHINE"],
+    "microsandbox": ["env:MIRAGE_INTEG_MICROSANDBOX_SANDBOX"],
+    "apple_container": ["env:MIRAGE_INTEG_APPLE_CONTAINER"],
 }
 # The world entry a runtime is built from, before a case's own `entry`
 # narrows its captures or adds config. A sandbox is reached through
 # config the job provides; a name missing here is built by name alone.
 RUNTIME_ENTRY: dict[str, dict[str, Any]] = {
-    "apple_container": {
-        "captures": ["*"],
-        "config": {"container": "${MIRAGE_INTEG_APPLE_CONTAINER}"},
-    },
+    "sandlock": {"captures": ["python3", "node", "@external"]},
     "docker": {
         "captures": ["*"],
         "config": {"container": "${MIRAGE_INTEG_DOCKER_CONTAINER}"},
-    },
-    "e2b": {
-        "captures": ["*"],
-        "config": {"sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX}"},
-    },
-    "microsandbox": {
-        "captures": ["*"],
-        "config": {"sandbox": "${MIRAGE_INTEG_MICROSANDBOX_SANDBOX}"},
-    },
-    "sandlock": {"captures": ["python3", "node", "@external"]},
-    "smolvm": {
-        "captures": ["*"],
-        "config": {"machine": "${MIRAGE_INTEG_SMOLVM_MACHINE}"},
     },
     "ssh": {
         "captures": ["*"],
@@ -159,16 +143,32 @@ RUNTIME_ENTRY: dict[str, dict[str, Any]] = {
             "identity_file": "${MIRAGE_INTEG_SSH_KEY}",
         },
     },
+    "e2b": {
+        "captures": ["*"],
+        "config": {"sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX}"},
+    },
+    "smolvm": {
+        "captures": ["*"],
+        "config": {"machine": "${MIRAGE_INTEG_SMOLVM_MACHINE}"},
+    },
+    "microsandbox": {
+        "captures": ["*"],
+        "config": {"sandbox": "${MIRAGE_INTEG_MICROSANDBOX_SANDBOX}"},
+    },
+    "apple_container": {
+        "captures": ["*"],
+        "config": {"container": "${MIRAGE_INTEG_APPLE_CONTAINER}"},
+    },
 }
 # Runtimes that need a host the hosted runners do not give every job
 # (a live sandbox, a hypervisor, Landlock): an unmet requirement skips
 # their variants even under INTEG_RUNTIME_STRICT.
 OPTIONAL_RUNTIMES = {
-    "apple_container",
-    "e2b",
-    "microsandbox",
     "sandlock",
+    "e2b",
     "smolvm",
+    "microsandbox",
+    "apple_container",
 }
 
 _moto_server: Any = None

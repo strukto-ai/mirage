@@ -538,6 +538,10 @@ async def test_a_server_that_fails_says_why(monkeypatch):
     await ws.close()
 
 
+async def _refused_by_the_cli() -> str:
+    return "CLI refused: sandbox is not running"
+
+
 @pytest.mark.asyncio
 async def test_a_failed_mount_keeps_pipe_diagnostics_when_the_guest_is_gone():
     class UnavailableSandbox(FakeSandbox):
@@ -548,15 +552,11 @@ async def test_a_failed_mount_keeps_pipe_diagnostics_when_the_guest_is_gone():
 
         async def open_pipe(self, command):
             pipe = await super().open_pipe(command)
-
-            async def diagnostic():
-                return "CLI refused: sandbox is not running"
-
             return SandboxPipe(
                 pipe.reader,
                 pipe.writer,
                 pipe.stop,
-                diagnostic,
+                _refused_by_the_cli,
             )
 
     ws = workspace(UnavailableSandbox("ssh", sshfs_mounts=False))

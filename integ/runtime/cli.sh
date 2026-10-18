@@ -55,58 +55,35 @@ requirement_met() {
 # the world entry it is built from, and the runtimes an unmet requirement
 # skips even under INTEG_RUNTIME_STRICT.
 RUNTIMES='{
-  "language": {
-    "apple_container": null,
-    "docker": null,
-    "e2b": null,
-    "local": "python",
-    "microsandbox": null,
-    "monty": "python",
-    "pyodide": "python",
-    "quickjs": "js",
-    "sandlock": "python",
-    "smolvm": null,
-    "ssh": null,
-    "wasi": "python"
-  },
-  "head": {"js":"node -e","python":"python3 -c"},
+  "language": {"monty": "python", "wasi": "python", "pyodide": "python", "quickjs": "js",
+    "local": "python", "sandlock": "python", "docker": null, "ssh": null, "e2b": null,
+    "smolvm": null, "microsandbox": null, "apple_container": null},
+  "head": {"python": "python3 -c", "js": "node -e"},
   "requires": {
-    "python": {
-      "apple_container": ["env:MIRAGE_INTEG_APPLE_CONTAINER"],
-      "docker": ["env:MIRAGE_INTEG_DOCKER_CONTAINER"],
-      "e2b": ["env:MIRAGE_INTEG_E2B_SANDBOX"],
-      "local": [],
+    "python": {"monty": [], "wasi": ["env:MIRAGE_WASI_HOME"], "quickjs": ["env:MIRAGE_QUICKJS_HOME"],
+      "local": [], "sandlock": ["env:MIRAGE_INTEG_SANDLOCK"],
+      "docker": ["env:MIRAGE_INTEG_DOCKER_CONTAINER"], "ssh": ["env:MIRAGE_INTEG_SSH_HOST"],
+      "e2b": ["env:MIRAGE_INTEG_E2B_SANDBOX"], "smolvm": ["env:MIRAGE_INTEG_SMOLVM_MACHINE"],
       "microsandbox": ["env:MIRAGE_INTEG_MICROSANDBOX_SANDBOX"],
-      "monty": [],
-      "quickjs": ["env:MIRAGE_QUICKJS_HOME"],
-      "sandlock": ["env:MIRAGE_INTEG_SANDLOCK"],
+      "apple_container": ["env:MIRAGE_INTEG_APPLE_CONTAINER"]},
+    "typescript": {"monty": [], "pyodide": [], "quickjs": [],
+      "local": [], "sandlock": ["env:MIRAGE_INTEG_SANDLOCK"],
+      "docker": ["env:MIRAGE_INTEG_DOCKER_CONTAINER"], "ssh": ["env:MIRAGE_INTEG_SSH_HOST"],
       "smolvm": ["env:MIRAGE_INTEG_SMOLVM_MACHINE"],
-      "ssh": ["env:MIRAGE_INTEG_SSH_HOST"],
-      "wasi": ["env:MIRAGE_WASI_HOME"]
-    },
-    "typescript": {
-      "apple_container": ["env:MIRAGE_INTEG_APPLE_CONTAINER"],
-      "docker": ["env:MIRAGE_INTEG_DOCKER_CONTAINER"],
-      "local": [],
       "microsandbox": ["env:MIRAGE_INTEG_MICROSANDBOX_SANDBOX"],
-      "monty": [],
-      "pyodide": [],
-      "quickjs": [],
-      "sandlock": ["env:MIRAGE_INTEG_SANDLOCK"],
-      "smolvm": ["env:MIRAGE_INTEG_SMOLVM_MACHINE"],
-      "ssh": ["env:MIRAGE_INTEG_SSH_HOST"]
-    }
+      "apple_container": ["env:MIRAGE_INTEG_APPLE_CONTAINER"]}
   },
   "entry": {
-    "apple_container": {"captures":["*"],"config":{"container":"${MIRAGE_INTEG_APPLE_CONTAINER}"}},
-    "docker": {"captures":["*"],"config":{"container":"${MIRAGE_INTEG_DOCKER_CONTAINER}"}},
-    "e2b": {"captures":["*"],"config":{"sandbox_id":"${MIRAGE_INTEG_E2B_SANDBOX}"}},
-    "microsandbox": {"captures":["*"],"config":{"sandbox":"${MIRAGE_INTEG_MICROSANDBOX_SANDBOX}"}},
-    "sandlock": {"captures":["python3","node","@external"]},
-    "smolvm": {"captures":["*"],"config":{"machine":"${MIRAGE_INTEG_SMOLVM_MACHINE}"}},
-    "ssh": {"captures":["*"],"config":{"host":"${MIRAGE_INTEG_SSH_HOST}","identity_file":"${MIRAGE_INTEG_SSH_KEY}","port":2222,"username":"${MIRAGE_INTEG_SSH_USERNAME}"}}
+    "sandlock": {"captures": ["python3", "node", "@external"]},
+    "docker": {"captures": ["*"], "config": {"container": "${MIRAGE_INTEG_DOCKER_CONTAINER}"}},
+    "ssh": {"captures": ["*"], "config": {"host": "${MIRAGE_INTEG_SSH_HOST}", "port": 2222,
+      "username": "${MIRAGE_INTEG_SSH_USERNAME}", "identity_file": "${MIRAGE_INTEG_SSH_KEY}"}},
+    "e2b": {"captures": ["*"], "config": {"sandbox_id": "${MIRAGE_INTEG_E2B_SANDBOX}"}},
+    "smolvm": {"captures": ["*"], "config": {"machine": "${MIRAGE_INTEG_SMOLVM_MACHINE}"}},
+    "microsandbox": {"captures": ["*"], "config": {"sandbox": "${MIRAGE_INTEG_MICROSANDBOX_SANDBOX}"}},
+    "apple_container": {"captures": ["*"], "config": {"container": "${MIRAGE_INTEG_APPLE_CONTAINER}"}}
   },
-  "optional": ["apple_container","e2b","microsandbox","sandlock","smolvm"]
+  "optional": ["sandlock", "e2b", "smolvm", "microsandbox", "apple_container"]
 }'
 
 # The case once per runtime it names on this host, one JSON per line (a case

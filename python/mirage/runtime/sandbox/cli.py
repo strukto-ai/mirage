@@ -319,12 +319,13 @@ async def open_cli_pipe(executable: str, args: list[str]) -> SandboxPipe:
     draining = asyncio.create_task(keep_tail(), context=Context())
 
     async def diagnostic() -> str:
-        try:
-            await asyncio.wait_for(
-                asyncio.shield(draining), PIPE_DIAGNOSTIC_WAIT_SECONDS
-            )
-        except TimeoutError:
-            logger.debug("%s helper is still running", executable)
+        if not draining.done():
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(draining), PIPE_DIAGNOSTIC_WAIT_SECONDS
+                )
+            except TimeoutError:
+                logger.debug("%s helper is still running", executable)
         return said.decode(errors="replace").strip()
 
     async def stop() -> None:

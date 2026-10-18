@@ -347,6 +347,38 @@ async function within<T>(operation: Promise<T>, ms: number): Promise<T> {
   }
 }
 
+class FullInspect extends MicrosandboxRuntime {
+  protected override microsandbox(
+    args: string[],
+    stdin: Uint8Array | null = null,
+    signal?: AbortSignal,
+  ) {
+    return super.microsandbox(
+      args[0] === 'status' ? ['inspect', ...args.slice(1)] : args,
+      stdin,
+      signal,
+    )
+  }
+}
+
+async function inspectPids() {
+  return (await local('ps', '-axo', 'pid=,command=')).split('\n').flatMap((line) => {
+    const match = /^\s*(\d+)\s+(\S+)\s+(.+)$/.exec(line)
+    return match &&
+      (match[2] === 'msb' || match[2]?.endsWith('/msb')) &&
+      match[3]?.startsWith('inspect ' + sandbox + ' ')
+      ? [Number(match[1])]
+      : []
+  })
+}
+
+class StopAfterProbe extends MicrosandboxRuntime {
+  override async connect() {
+    await super.connect()
+    await local('msb', 'stop', sandbox, '--timeout', '10')
+  }
+}
+
 async function lifecycleChecks() {
   const runtime = new MicrosandboxRuntime({ config: { sandbox } })
   await check('storage_lock_does_not_block_exec_and_cancel_reaps_probe', async () => {
@@ -368,29 +400,6 @@ async function lifecycleChecks() {
     )
     const locked = once(locker.stdout, 'data')
     const ended = once(locker, 'close')
-    class FullInspect extends MicrosandboxRuntime {
-      protected override microsandbox(
-        args: string[],
-        stdin: Uint8Array | null = null,
-        signal?: AbortSignal,
-      ) {
-        return super.microsandbox(
-          args[0] === 'status' ? ['inspect', ...args.slice(1)] : args,
-          stdin,
-          signal,
-        )
-      }
-    }
-    async function inspectPids() {
-      return (await local('ps', '-axo', 'pid=,command=')).split('\n').flatMap((line) => {
-        const match = /^\s*(\d+)\s+(\S+)\s+(.+)$/.exec(line)
-        return match &&
-          (match[2] === 'msb' || match[2]?.endsWith('/msb')) &&
-          match[3]?.startsWith('inspect ' + sandbox + ' ')
-          ? [Number(match[1])]
-          : []
-      })
-    }
     const controller = new AbortController()
     let pending: Promise<unknown> = Promise.resolve()
     try {
@@ -529,12 +538,6 @@ async function lifecycleChecks() {
       }
     })
     await check(`${mountType}_released_cli_can_restart_after_probe`, async () => {
-      class StopAfterProbe extends MicrosandboxRuntime {
-        override async connect() {
-          await super.connect()
-          await local('msb', 'stop', sandbox, '--timeout', '10')
-        }
-      }
       const candidate = new StopAfterProbe({ config: { sandbox, mountType } })
       try {
         const pipe = await candidate.openPipe('printf race-command-ran')

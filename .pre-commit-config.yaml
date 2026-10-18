@@ -139,9 +139,10 @@ repos:
         name: Type check (integ)
         entry: bash -c 'cd integ && node_modules/.bin/tsc -p tsconfig.check.json'
         language: system
-        # Keep this filter aligned with tsconfig.check.json: the list had already
-        # fallen five fakes behind tsconfig.check.json, so editing one of those
-        # skipped the hook that type checks it.
+        # Every directory tsconfig.check.json includes, not a hand-kept
+        # list: the list had already fallen five fakes behind
+        # tsconfig.check.json, so editing one of those skipped the hook that
+        # type checks it.
         files: ^integ/(runtime/microsandbox/.*\.ts|server/.*\.ts|hosting/.*\.ts|access/.*\.ts|events/.*\.ts|wandb/.*\.ts|slack_atlas\.ts|airtable_atlas\.ts|scripts/capture_airtable_atlas\.ts|tsconfig(\.check)?\.json)$
         pass_filenames: false
       - id: py-mypy
