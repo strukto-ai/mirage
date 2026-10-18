@@ -1,3 +1,5 @@
+import hashlib
+import os
 from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -6,8 +8,10 @@ from unittest.mock import patch
 
 import pytest
 
-from mirage.cache.index.config import IndexConfig
-from mirage.types import MountMode, PathSpec, ReadSpec
+from mirage.cache.index import redis as redis_index
+from mirage.cache.index.config import IndexConfig, RedisIndexConfig
+from mirage.cache.index.redis import RedisIndexCacheStore
+from mirage.types import MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
@@ -127,6 +131,83 @@ async def test_writing_an_object_preserves_its_existing_prefix_in_walks():
                 assert await result.stdout_str() == "/s3/a/child\n"
         finally:
             await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not os.environ.get("REDIS_URL"), reason="REDIS_URL not set"
+)
+async def test_write_settlement_preserves_a_peer_fresh_listing(redis_prefix):
+    objects = {"a.txt": b"initial"}
+    session = MultiBucketSession({"bucket": objects})
+    index_config = RedisIndexConfig(
+        url=os.environ["REDIS_URL"], key_prefix=redis_prefix
+    )
+    writer = Workspace(
+        {"/s3": (_s3_vfs(), MountMode.WRITE)}, index=index_config
+    )
+    peer = Workspace(
+        {
+            "/s3": Mount(
+                vfs=_s3_vfs(),
+                mode=MountMode.WRITE,
+                read=ReadSpec(policy=ReadPolicy.FRESH),
+            )
+        },
+        index=index_config,
+    )
+    index = writer.mount("/s3").index_store
+    assert isinstance(index, RedisIndexCacheStore)
+    original_pipeline = index._client.pipeline
+    refilled = False
+    newer = b"newer-value"
+    fingerprint = hashlib.md5(newer).hexdigest()
+
+    def pipeline(*args, **kwargs):
+        transaction = original_pipeline(*args, **kwargs)
+        execute = transaction.execute
+
+        async def delayed_execute(*args, **kwargs):
+            nonlocal refilled
+            publishes_write = any(
+                command[0][0].lower() == "eval"
+                and command[0][1] == redis_index._ADD_ENTRY
+                for command in transaction.command_stack
+            )
+            if publishes_write and not refilled:
+                refilled = True
+                assert objects["a.txt"] == b"old"
+                await session._client.put_object(
+                    Bucket="bucket", Key="a.txt", Body=newer
+                )
+                before = session._client.bucket_calls[
+                    "list_objects_v2", "bucket"
+                ]
+                assert await peer.vfs.readdir("/s3") == ["/s3/a.txt"]
+                assert (
+                    session._client.bucket_calls["list_objects_v2", "bucket"]
+                    > before
+                )
+                peer_stat = await peer.vfs.stat("/s3/a.txt")
+                assert peer_stat.size == len(newer)
+            return await execute(*args, **kwargs)
+
+        transaction.execute = delayed_execute
+        return transaction
+
+    with patch_s3_session(session):
+        try:
+            await writer.vfs.readdir("/s3")
+            with patch.object(index._client, "pipeline", pipeline):
+                await writer.vfs.write("/s3/a.txt", b"old")
+            assert refilled
+            current = await writer.vfs.stat("/s3/a.txt")
+            assert current.size == len(newer)
+            assert current.fingerprint in (None, fingerprint)
+        finally:
+            await index.clear()
+            await writer.close()
+            await peer.close()
 
 
 @pytest.mark.asyncio

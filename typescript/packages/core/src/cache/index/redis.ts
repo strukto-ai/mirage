@@ -106,6 +106,18 @@ local function encode_listing(listing, predecessor)
   return (string.gsub(encoded, '"expires_at":[%d%.eE%+%-]+',
     '"expires_at":' .. deadline))
 end
+local function publish_listing(
+  key, listing, raw, global_key, directory_key, replacement)
+  if replacement ~= '' then
+    local current = redis.call('GET', global_key)
+    local directory = redis.call('GET', directory_key)
+    if current and directory and listing.generation == current .. ':' .. directory then
+      listing.generation = current .. ':' .. replacement
+    end
+    redis.call('SET', directory_key, replacement)
+  end
+  redis.call('SET', key, encode_listing(listing, raw))
+end
 local function remember_directory(children_prefix, tombstone_prefix, path)
   path = string.gsub(path, '/+$', '')
   if path == '' then return end
@@ -148,7 +160,7 @@ for offset = 1, #listing.entries, 128 do
       or (row ~= false and is_dir(cjson.decode(row)))) and 1 or 0
   end
 end
-redis.call('SET', KEYS[1], encode_listing(listing, ARGV[1]))
+publish_listing(KEYS[1], listing, ARGV[1], KEYS[2], KEYS[3], ARGV[6])
 remember_directory(ARGV[2], ARGV[3], ARGV[4])
 return 1
 `
@@ -374,7 +386,7 @@ if next.partial then
 else
   redis.call('DEL', KEYS[2])
 end
-for i = 7, #ARGV, 2 do
+for i = 8, #ARGV, 2 do
   if next.partial then
     local old = redis.call('GET', ARGV[2] .. ARGV[i])
     if (old and is_dir(cjson.decode(old)))
@@ -385,7 +397,7 @@ for i = 7, #ARGV, 2 do
   redis.call('SET', ARGV[2] .. ARGV[i], ARGV[i + 1])
   redis.call('ZADD', KEYS[3], 0, ARGV[i])
 end
-redis.call('SET', KEYS[1], ARGV[1])
+publish_listing(KEYS[1], next, ARGV[1], KEYS[4], KEYS[5], ARGV[7])
 remember_directory(ARGV[3], ARGV[4], path)
 return 1
 `
@@ -411,7 +423,7 @@ local function protected(path)
   return false
 end
 local named = {}
-for i = 7, #ARGV, 2 do
+for i = 8, #ARGV, 2 do
   named[ARGV[i]] = is_dir(cjson.decode(ARGV[i + 1]))
 end
 local seen, gone, folders = {}, {}, {}
@@ -447,7 +459,7 @@ end
 if saved then
   for _, path in ipairs(saved.entries) do drop(path, buried[path]) end
 end
-for i = 7, #ARGV, 2 do drop(ARGV[i], false) end
+for i = 8, #ARGV, 2 do drop(ARGV[i], false) end
 local roots = {}
 for i, path in ipairs(gone) do
   if folders[i] == 1 then roots[#roots + 1] = path end
@@ -462,11 +474,11 @@ end
 for _, root in ipairs(roots) do
   for _, path in ipairs(subtree(KEYS[3], root)) do remove(path) end
 end
-for i = 7, #ARGV, 2 do
+for i = 8, #ARGV, 2 do
   redis.call('SET', ARGV[2] .. ARGV[i], ARGV[i + 1])
   redis.call('ZADD', KEYS[3], 0, ARGV[i])
 end
-redis.call('SET', KEYS[1], ARGV[1])
+publish_listing(KEYS[1], cjson.decode(ARGV[1]), ARGV[1], KEYS[4], KEYS[5], ARGV[7])
 remember_directory(ARGV[3], ARGV[4], string.sub(KEYS[1], #ARGV[3] + 1))
 return {gone, folders}
 `
@@ -741,7 +753,11 @@ export class RedisIndexCacheStore extends IndexCacheStore {
         const c = await this.client()
         const generation = await this.generation(c, this.generationKey)
         const directories = new Map<string, string>()
-        const paths = [...new Set(pending.flatMap((seed) => [...seed.children.keys()]))]
+        const lastSeed = new Map<string, number>()
+        for (const [number, seed] of pending.entries()) {
+          for (const path of seed.children.keys()) lastSeed.set(path, number)
+        }
+        const paths = [...lastSeed.keys()]
         if (paths.length > 0) {
           const current = await c.mGet(paths.map((path) => `${this.generationKey}:${path}`))
           const missing = new Map<string, string>()
@@ -763,13 +779,12 @@ export class RedisIndexCacheStore extends IndexCacheStore {
           }
         }
         const rows = new Map(pending.flatMap((seed) => [...seed.entries]))
-        const listed = new Set(paths)
         const pipe = c.multi()
         this.trackPaths(
           pipe,
           pending.flatMap((seed) => [...seed.entries.keys(), ...seed.children.keys()]),
         )
-        for (const seed of pending) {
+        for (const [number, seed] of pending.entries()) {
           for (const [path, entry] of seed.entries) {
             pipe.set(this.entryKey(path), JSON.stringify(entry))
           }
@@ -777,7 +792,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
             const listing: IndexDirectory = {
               entries: keys,
               folders: keys.map((key) =>
-                listed.has(key) || rows.get(key)?.type === FileType.DIRECTORY ? 1 : 0,
+                lastSeed.has(key) || rows.get(key)?.type === FileType.DIRECTORY ? 1 : 0,
               ),
               expires_at: seed.expiresAt,
               generation: `${generation}:${directories.get(path) ?? ''}`,
@@ -786,13 +801,14 @@ export class RedisIndexCacheStore extends IndexCacheStore {
               window: false,
             }
             pipe.eval(SEED_LISTING, {
-              keys: [this.childrenKey(path)],
+              keys: [this.childrenKey(path), this.generationKey, `${this.generationKey}:${path}`],
               arguments: [
                 JSON.stringify(listing),
                 this.childrenPrefix,
                 this.tombstonePrefix,
                 path,
                 this.entryPrefix,
+                lastSeed.get(path) === number ? uuid7() : '',
               ],
             })
           }
@@ -982,7 +998,13 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     }
     if (!evict) {
       await c.eval(WRITE_LISTING, {
-        keys: [this.childrenKey(vfsPath), this.tombstonePrefix + vfsPath, this.pathsKey],
+        keys: [
+          this.childrenKey(vfsPath),
+          this.tombstonePrefix + vfsPath,
+          this.pathsKey,
+          this.generationKey,
+          `${this.generationKey}:${vfsPath}`,
+        ],
         arguments: [
           JSON.stringify(listing),
           this.entryPrefix,
@@ -990,6 +1012,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
           this.tombstonePrefix,
           `${this.generationKey}:`,
           '[]',
+          uuid7(),
           ...rows.flat(),
         ],
       })
@@ -998,7 +1021,13 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     // One script, so no other writer lands between reading the previous
     // listing and replacing it; the diff is against the true predecessor.
     const [gone, folders] = (await this.evalComplete(c, SWAP_LISTING, {
-      keys: [this.childrenKey(vfsPath), this.tombstonePrefix + vfsPath, this.pathsKey],
+      keys: [
+        this.childrenKey(vfsPath),
+        this.tombstonePrefix + vfsPath,
+        this.pathsKey,
+        this.generationKey,
+        `${this.generationKey}:${vfsPath}`,
+      ],
       arguments: [
         JSON.stringify(listing),
         this.entryPrefix,
@@ -1006,6 +1035,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
         this.tombstonePrefix,
         `${this.generationKey}:`,
         JSON.stringify(excluded.map(rstripSlash)),
+        uuid7(),
         ...rows.flat(),
       ],
     })) as [string[], number[]]

@@ -158,7 +158,11 @@ async def test_failed_seed_flush_remains_retryable(client):
     await store.close()
     assert pipe.execute.await_count == 2
     assert pipe.set.call_args_list[:1] == pipe.set.call_args_list[1:]
-    assert pipe.eval.call_args_list[:2] == pipe.eval.call_args_list[2:]
+    registry, seed, retry_registry, retry_seed = pipe.eval.call_args_list
+    assert registry == retry_registry
+    assert seed.args[:-1] == retry_seed.args[:-1]
+    assert seed.args[-1]
+    assert retry_seed.args[-1]
 
 
 @pytest.mark.asyncio
@@ -382,6 +386,104 @@ async def test_batched_initialization_preserves_observed_tokens(
             await store.list_dir("/present")
         ).status == LookupStatus.EXPIRED
         assert (await store.list_dir("/missing")).entries == []
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "race",
+    [
+        "none",
+        "global-change",
+        "directory-change",
+        "missing-global",
+        "missing-directory",
+    ],
+)
+async def test_repeated_seeds_preserve_final_snapshot_without_reviving_races(
+    rolling_client, monkeypatch, race
+):
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    await store.set_dir("/dir", [])
+    await store.set_dir("/other", [])
+    deadline = datetime(2090, 1, 1, microsecond=123456, tzinfo=timezone.utc)
+    seeds = [
+        ("/dir", "a", "dir-1", deadline),
+        ("/other", "x", "other-1", deadline + timedelta(hours=1)),
+        ("/dir", "b", "dir-2", deadline + timedelta(hours=2)),
+        ("/other", "y", "other-2", deadline + timedelta(hours=3)),
+        ("/dir", "c", "dir-3", deadline + timedelta(hours=4)),
+    ]
+    rows = {}
+    for directory, name, version, expires_at in seeds:
+        path = f"{directory}/{name}"
+        row = FileStat(name=name, type=FileType.FILE, fingerprint=version)
+        rows[path] = row
+        store.seed(
+            {path: row},
+            {directory: [path]},
+            expires_at,
+            version=version,
+        )
+    pipeline = client.pipeline
+    intercepted = False
+
+    def delayed_pipeline(*args, **kwargs):
+        pipe = pipeline(*args, **kwargs)
+        execute = pipe.execute
+
+        async def execute_after_token_change(*args, **kwargs):
+            nonlocal intercepted
+            if not intercepted and any(
+                str(command[0][0]).lower() == "eval"
+                and command[0][1] == redis_index._SEED_LISTING
+                for command in pipe.command_stack
+            ):
+                intercepted = True
+                if race != "none":
+                    key = f"{prefix}mirage:idx:generation"
+                    if race in ("directory-change", "missing-directory"):
+                        key += ":/dir"
+                    if race.startswith("missing-"):
+                        await client.delete(key)
+                    else:
+                        await client.set(key, str(uuid4()))
+            return await execute(*args, **kwargs)
+
+        pipe.execute = execute_after_token_change
+        return pipe
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(client, "pipeline", delayed_pipeline)
+            listing = await store.list_dir("/dir")
+        assert intercepted
+        assert await store.get_many(list(rows)) == rows
+        raw = json.loads(await client.get(prefix + CHILDREN_PREFIX + "/dir"))
+        assert raw["entries"] == ["/dir/c"]
+        assert raw["version"] == "dir-3"
+        assert raw["expires_at"] == (deadline + timedelta(hours=4)).timestamp()
+        if race == "none":
+            assert listing.entries == ["/dir/c"]
+            assert listing.version == "dir-3"
+            assert await stored_stat(store, "/dir/c") == rows["/dir/c"]
+        else:
+            assert listing.status == LookupStatus.EXPIRED
+            assert await stored_stat(store, "/dir/c") is None
+        other = await store.list_dir("/other")
+        if race in ("global-change", "missing-global"):
+            assert other.status == LookupStatus.EXPIRED
+        else:
+            assert other.entries == ["/other/y"]
+            assert other.version == "other-2"
+        await store.set_dir("/reviver", [])
+        final = await store.list_dir("/dir")
+        if race == "none":
+            assert final.entries == ["/dir/c"]
+        else:
+            assert final.status == LookupStatus.EXPIRED
     finally:
         await store.close()
 
@@ -1203,6 +1305,43 @@ async def test_split_seed_membership_retains_directory_flags(
 
 
 @pytest.mark.asyncio
+async def test_entry_only_seed_preserves_directory_history_for_subtree_eviction(
+    rolling_client,
+):
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    deadline = datetime.now(timezone.utc) + timedelta(hours=1)
+    file = FileStat(name="sub", type=FileType.FILE, fingerprint="file")
+    store.seed(
+        {"/dir/sub": FileStat(name="sub", type=FileType.DIRECTORY)},
+        {"/dir": ["/dir/sub"]},
+        deadline,
+    )
+    store.seed(
+        {
+            "/dir/sub": file,
+            "/dir/sub/stray": FileStat(name="stray", type=FileType.FILE),
+        },
+        {},
+        deadline,
+    )
+    try:
+        assert (await store.list_dir("/dir")).entries == ["/dir/sub"]
+        assert (await store.get("/dir/sub")).entry == file
+        assert (await store.get("/dir/sub/stray")).entry is not None
+        gone = await store.set_dir("/dir", [("sub", file)])
+        assert [(child.path, child.folder) for child in gone] == [
+            ("/dir/sub", True)
+        ]
+        assert (
+            await store.get("/dir/sub/stray")
+        ).status == LookupStatus.NOT_FOUND
+        assert (await store.get("/dir/sub")).entry == file
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
 async def test_authoritative_add_fences_captured_directory_generation(
     rolling_client, monkeypatch
 ):
@@ -1252,8 +1391,11 @@ async def test_batch_entry_lookup_uses_one_mget(rolling_client, monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("peer_name", ["a", "b"])
 @pytest.mark.parametrize("own_listing", [False, True])
+@pytest.mark.parametrize(
+    "publication", ["add", "complete", "window", "partial", "seed"]
+)
 async def test_delayed_authoritative_add_preserves_a_newer_publication(
-    rolling_client, monkeypatch, peer_name, own_listing
+    rolling_client, monkeypatch, peer_name, own_listing, publication
 ):
     client, prefix = rolling_client
     writer = RedisIndexCacheStore(client=client, key_prefix=prefix)
@@ -1284,12 +1426,29 @@ async def test_delayed_authoritative_add_preserves_a_newer_publication(
                 for command in pipe.command_stack
             ):
                 inserted = True
-                captured = await client.get(generation_key)
-                await CacheManager(None, peer, "/dir/", True).keep_created(
-                    PathSpec.from_str_path(f"/{peer_name}"), new
+                rows = (
+                    [("a", new)]
+                    if peer_name == "a"
+                    else [("a", old), ("b", new)]
                 )
+                if publication == "add":
+                    await CacheManager(None, peer, "/dir/", True).keep_created(
+                        PathSpec.from_str_path(f"/{peer_name}"), new
+                    )
+                elif publication == "partial":
+                    await peer.set_partial_dir("/dir", rows)
+                elif publication == "seed":
+                    peer.seed(
+                        {f"/dir/{name}": row for name, row in rows},
+                        {"/dir": [f"/dir/{name}" for name, _ in rows]},
+                        datetime.now(timezone.utc) + timedelta(hours=1),
+                    )
+                    await peer.list_dir("/dir")
+                else:
+                    await peer.set_dir(
+                        "/dir", rows, window=publication == "window"
+                    )
                 expected_generation = await client.get(generation_key)
-                assert expected_generation != captured
                 assert (await peer.get(f"/dir/{peer_name}")).entry == new
                 expected_listing = await client.get(listing_key)
             return await execute(*args, **kwargs)
@@ -1311,7 +1470,10 @@ async def test_delayed_authoritative_add_preserves_a_newer_publication(
     assert not listing.window
     assert await stored_stat(writer, "/dir/a") is None
     if own_listing:
-        assert (await writer.list_dir("/dir/a")).status == LookupStatus.EXPIRED
+        assert (await writer.list_dir("/dir/a")).status in {
+            LookupStatus.EXPIRED,
+            LookupStatus.NOT_FOUND,
+        }
     assert (
         json.loads(await client.get(listing_key))["expires_at"]
         == json.loads(expected_listing)["expires_at"]

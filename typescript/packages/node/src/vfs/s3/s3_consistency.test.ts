@@ -18,6 +18,10 @@ import {
   type RedisIndexConfig,
 } from '@struktoai/mirage-core/cache/index/config'
 import {
+  RedisIndexCacheStore,
+  type RedisClientLike,
+} from '@struktoai/mirage-core/cache/index/redis'
+import {
   type ReadSpec,
   DEFAULT_READ_TTL,
   MountMode,
@@ -27,7 +31,14 @@ import {
 const FRESH: ReadSpec = { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL }
 const BOUNDED: ReadSpec = { policy: ReadPolicy.BOUNDED, ttl: DEFAULT_READ_TTL }
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { GetObjectCommand, HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
+import {
+  GetObjectCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3'
+import { createHash } from 'node:crypto'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { Reconciler } from '@struktoai/mirage-core/workspace/reconcile'
 import { Workspace } from '../../workspace.ts'
@@ -141,6 +152,77 @@ describe('S3 cache consistency (mocked)', () => {
       await ws.close()
     }
   })
+
+  it.skipIf(process.env.REDIS_URL === undefined)(
+    'write settlement preserves a peer fresh listing',
+    async () => {
+      const keyPrefix = `s3-refill:${crypto.randomUUID()}:`
+      const indexConfig: RedisIndexConfig = {
+        type: IndexType.REDIS,
+        ...(process.env.REDIS_URL === undefined ? {} : { url: process.env.REDIS_URL }),
+        keyPrefix,
+      }
+      const writer = new Workspace(
+        { '/s3': new S3VFS(makeConfig()) },
+        { mode: MountMode.WRITE, index: indexConfig },
+      )
+      const peer = new Workspace(
+        { '/s3': new S3VFS(makeConfig()) },
+        { mode: MountMode.WRITE, read: FRESH, index: indexConfig },
+      )
+      const backend = new S3Client({ region: 'us-east-1' })
+      const index = writer.mount('/s3').indexStore
+      if (!(index instanceof RedisIndexCacheStore)) throw new Error('expected Redis index')
+      const client = await (index as unknown as { client: () => Promise<RedisClientLike> }).client()
+      const multi = client.multi.bind(client)
+      const newer = ENC.encode('newer-value')
+      const fingerprint = createHash('md5').update(newer).digest('hex')
+      let refilled = false
+      const spy = vi.spyOn(client, 'multi').mockImplementation(() => {
+        const transaction = multi()
+        const evaluate = transaction.eval.bind(transaction)
+        let publishesWrite = false
+        transaction.eval = (script, options) => {
+          if (
+            options.keys[0] === `${keyPrefix}mirage:idx:directory:/s3` &&
+            options.arguments[0] === `${keyPrefix}mirage:idx:entry:/s3/c.txt`
+          )
+            publishesWrite = true
+          return evaluate(script, options)
+        }
+        const exec = transaction.exec.bind(transaction)
+        transaction.exec = async () => {
+          if (publishesWrite && !refilled) {
+            refilled = true
+            expect(DEC.decode(mock.store.get(BUCKET, 'c.txt'))).toBe('old')
+            await backend.send(new PutObjectCommand({ Bucket: BUCKET, Key: 'c.txt', Body: newer }))
+            const before = mock.commandCalls(ListObjectsV2Command)
+            expect(await peer.vfs.readdir('/s3')).toEqual(['/s3/c.txt'])
+            expect(mock.commandCalls(ListObjectsV2Command)).toBeGreaterThan(before)
+            expect(await peer.vfs.stat('/s3/c.txt')).toMatchObject({
+              size: newer.byteLength,
+            })
+          }
+          return exec()
+        }
+        return transaction
+      })
+      try {
+        await writer.vfs.readdir('/s3')
+        await writer.vfs.write('/s3/c.txt', ENC.encode('old'))
+        expect(refilled).toBe(true)
+        const current = await writer.vfs.stat('/s3/c.txt')
+        expect(current.size).toBe(newer.byteLength)
+        expect([null, fingerprint]).toContain(current.fingerprint)
+      } finally {
+        spy.mockRestore()
+        backend.destroy()
+        await index.clear()
+        await writer.close()
+        await peer.close()
+      }
+    },
+  )
 
   it('fresh re-list keeps the deletion baseline after stat', async () => {
     mock.store.set(BUCKET, 'sub/a', ENC.encode('a'))

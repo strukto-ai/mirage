@@ -499,6 +499,97 @@ ${script}`,
     }
   })
 
+  it.each(['none', 'global-change', 'directory-change', 'missing-global', 'missing-directory'])(
+    'repeated seeds retain the final snapshot without reviving %s',
+    async (race) => {
+      const client = await redis()
+      await store.setDir('/dir', [])
+      await store.setDir('/other', [])
+      const deadline = new Date('2090-01-01T00:00:00.123Z')
+      const seeds = [
+        { directory: '/dir', name: 'a', version: 'dir-1', hours: 0 },
+        { directory: '/other', name: 'x', version: 'other-1', hours: 1 },
+        { directory: '/dir', name: 'b', version: 'dir-2', hours: 2 },
+        { directory: '/other', name: 'y', version: 'other-2', hours: 3 },
+        { directory: '/dir', name: 'c', version: 'dir-3', hours: 4 },
+      ]
+      const rows = new Map<string, FileStat>()
+      for (const { directory, name, version, hours } of seeds) {
+        const path = `${directory}/${name}`
+        const row = entry(version, name)
+        rows.set(path, row)
+        store.seed(
+          new Map([[path, row]]),
+          new Map([[directory, [path]]]),
+          new Date(deadline.getTime() + hours * 3600000),
+          version,
+        )
+      }
+      const multi = client.multi.bind(client)
+      let intercepted = false
+      const spy = vi.spyOn(client, 'multi').mockImplementation(() => {
+        const pipeline = multi()
+        const evaluate = pipeline.eval.bind(pipeline)
+        let publishesSeed = false
+        pipeline.eval = (script, options) => {
+          if (
+            options.keys[0] === `${prefix}mirage:idx:directory:/dir` &&
+            options.arguments[3] === '/dir'
+          )
+            publishesSeed = true
+          return evaluate(script, options)
+        }
+        const exec = pipeline.exec.bind(pipeline)
+        pipeline.exec = async () => {
+          if (publishesSeed && !intercepted) {
+            intercepted = true
+            if (race !== 'none') {
+              const key = `${prefix}mirage:idx:generation${
+                race === 'directory-change' || race === 'missing-directory' ? ':/dir' : ''
+              }`
+              if (race.startsWith('missing-')) await client.del(key)
+              else await client.set(key, 'concurrent-replacement')
+            }
+          }
+          return exec()
+        }
+        return pipeline
+      })
+      try {
+        const listing = await store.listDir('/dir')
+        expect(intercepted).toBe(true)
+        expect(await store.getMany([...rows.keys()])).toEqual(rows)
+        const raw = await client.get(`${prefix}mirage:idx:directory:/dir`)
+        if (raw === null) throw new Error('missing final seeded listing')
+        const snapshot = IndexDirectorySchema.parse(JSON.parse(raw))
+        expect(snapshot.entries).toEqual(['/dir/c'])
+        expect(snapshot.version).toBe('dir-3')
+        expect(snapshot.expires_at).toBe((deadline.getTime() + 4 * 3600000) / 1000)
+        if (race === 'none') {
+          expect(listing.entries).toEqual(['/dir/c'])
+          expect(listing.version).toBe('dir-3')
+          expect(await storedStat(store, '/dir/c')).toEqual(rows.get('/dir/c'))
+        } else {
+          expect(listing.status).toBe(LookupStatus.EXPIRED)
+          expect(await storedStat(store, '/dir/c')).toBeNull()
+        }
+        const other = await store.listDir('/other')
+        if (race === 'global-change' || race === 'missing-global') {
+          expect(other.status).toBe(LookupStatus.EXPIRED)
+        } else {
+          expect(other.entries).toEqual(['/other/y'])
+          expect(other.version).toBe('other-2')
+        }
+        await store.setDir('/reviver', [])
+        const final = await store.listDir('/dir')
+        if (race === 'none') expect(final.entries).toEqual(['/dir/c'])
+        else expect(final.status).toBe(LookupStatus.EXPIRED)
+      } finally {
+        spy.mockRestore()
+      }
+    },
+  )
+
   it.each(['replaced after initialization', 'lost NX'] as const)(
     'keeps pending seed rows expired when their token was %s',
     async (race) => {
@@ -734,6 +825,32 @@ ${script}`,
     },
   )
 
+  it('entry-only seeds retain directory history for later subtree eviction', async () => {
+    const deadline = new Date(Date.now() + 3600000)
+    const file = entry('file', 'sub')
+    store.seed(
+      new Map([['/dir/sub', entry('directory', 'sub', 'folder')]]),
+      new Map([['/dir', ['/dir/sub']]]),
+      deadline,
+    )
+    store.seed(
+      new Map([
+        ['/dir/sub', file],
+        ['/dir/sub/stray', entry('stray', 'stray')],
+      ]),
+      new Map(),
+      deadline,
+    )
+    expect((await store.listDir('/dir')).entries).toEqual(['/dir/sub'])
+    expect((await store.get('/dir/sub')).entry).toEqual(file)
+    expect((await store.get('/dir/sub/stray')).entry).toBeDefined()
+    expect(await store.setDir('/dir', [['sub', file]])).toEqual([
+      { path: '/dir/sub', folder: true },
+    ])
+    expect((await store.get('/dir/sub/stray')).status).toBe(LookupStatus.NOT_FOUND)
+    expect((await store.get('/dir/sub')).entry).toEqual(file)
+  })
+
   it('authoritative add fences a captured directory generation', async () => {
     const old = new FileStat({ name: 'a', type: FileType.FILE, size: 3, fingerprint: 'old' })
     const next = new FileStat({ name: 'a', type: FileType.FILE, size: 11, fingerprint: 'new' })
@@ -776,14 +893,20 @@ ${script}`,
     }
   })
 
-  it.each([
-    ['a', false],
-    ['b', false],
-    ['a', true],
-    ['b', true],
-  ] as const)(
-    'delayed authoritative add preserves a newer publication (%s, own listing=%s)',
-    async (peerName, ownListing) => {
+  it.each(
+    ['add', 'complete', 'window', 'partial', 'seed'].flatMap((publication) =>
+      (
+        [
+          ['a', false],
+          ['b', false],
+          ['a', true],
+          ['b', true],
+        ] as const
+      ).map(([peerName, ownListing]) => ({ publication, peerName, ownListing })),
+    ),
+  )(
+    'delayed authoritative add preserves a newer $publication publication ($peerName, own listing=$ownListing)',
+    async ({ publication, peerName, ownListing }) => {
       const old = new FileStat({ name: 'a', type: FileType.FILE, size: 3, fingerprint: 'old' })
       const next = new FileStat({
         name: peerName,
@@ -813,10 +936,28 @@ ${script}`,
         pipe.exec = async () => {
           if (publishesAdd && !inserted) {
             inserted = true
-            const captured = await client.get(generationKey)
-            await new CacheManager(null, peer, '/dir/', true).keepCreated(`/${peerName}`, next)
+            const rows: [string, FileStat][] =
+              peerName === 'a'
+                ? [['a', next]]
+                : [
+                    ['a', old],
+                    ['b', next],
+                  ]
+            if (publication === 'add') {
+              await new CacheManager(null, peer, '/dir/', true).keepCreated(`/${peerName}`, next)
+            } else if (publication === 'partial') {
+              await peer.setPartialDir('/dir', rows)
+            } else if (publication === 'seed') {
+              peer.seed(
+                new Map(rows.map(([name, row]) => [`/dir/${name}`, row])),
+                new Map([['/dir', rows.map(([name]) => `/dir/${name}`)]]),
+                new Date(Date.now() + 3600000),
+              )
+              await peer.listDir('/dir')
+            } else {
+              await peer.setDir('/dir', rows, undefined, { window: publication === 'window' })
+            }
             expectedGeneration = await client.get(generationKey)
-            expect(expectedGeneration).not.toBe(captured)
             expect((await peer.get(`/dir/${peerName}`)).entry).toEqual(next)
             expectedListing = (await client.get(listingKey)) ?? ''
           }
@@ -838,7 +979,10 @@ ${script}`,
       expect(listing.version ?? null).toBeNull()
       expect(listing.window ?? false).toBe(false)
       expect(await storedStat(store, '/dir/a')).toBeNull()
-      if (ownListing) expect((await store.listDir('/dir/a')).status).toBe(LookupStatus.EXPIRED)
+      if (ownListing)
+        expect([LookupStatus.EXPIRED, LookupStatus.NOT_FOUND]).toContain(
+          (await store.listDir('/dir/a')).status,
+        )
       expect(
         IndexDirectorySchema.parse(JSON.parse((await client.get(listingKey)) ?? '')).expires_at,
       ).toBe(IndexDirectorySchema.parse(JSON.parse(expectedListing)).expires_at)
@@ -1209,7 +1353,13 @@ describe('Redis client protocol', () => {
     const writes = vi.mocked(pipeline.set).mock.calls
     expect(writes.slice(0, 1)).toEqual(writes.slice(1))
     const scripts = vi.mocked(pipeline.eval).mock.calls
-    expect(scripts.slice(0, 2)).toEqual(scripts.slice(2))
+    expect(scripts).toHaveLength(4)
+    expect(scripts[0]).toEqual(scripts[2])
+    expect(scripts[1]?.[0]).toEqual(scripts[3]?.[0])
+    expect(scripts[1]?.[1].keys).toEqual(scripts[3]?.[1].keys)
+    expect(scripts[1]?.[1].arguments.slice(0, -1)).toEqual(scripts[3]?.[1].arguments.slice(0, -1))
+    expect(scripts[1]?.[1].arguments.at(-1)).toBeTruthy()
+    expect(scripts[3]?.[1].arguments.at(-1)).toBeTruthy()
     expect(value.quit).not.toHaveBeenCalled()
   })
 
