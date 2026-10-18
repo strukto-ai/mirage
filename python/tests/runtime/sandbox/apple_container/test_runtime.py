@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import os
 import subprocess
 
 import pytest
@@ -86,6 +87,24 @@ def prelude(cwd: str, *argv: str) -> subprocess.CompletedProcess:
         capture_output=True,
         check=False,
     )
+
+
+def test_the_prelude_resolves_a_relative_cwd_without_cdpath(tmp_path):
+    for root in ("start", "elsewhere"):
+        (tmp_path / root / "sub").mkdir(parents=True)
+    done = subprocess.run(
+        ["/bin/sh", "-c", EXEC_PRELUDE, "sh", "sub"]
+        + ["sh", "-c", 'pwd -P; printf "%s\\n" "$CDPATH"'],
+        capture_output=True,
+        check=False,
+        cwd=tmp_path / "start",
+        env={**os.environ, "CDPATH": str(tmp_path / "elsewhere")},
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.decode().splitlines() == [
+        os.path.realpath(tmp_path / "start" / "sub"),
+        str(tmp_path / "elsewhere"),
+    ]
 
 
 @pytest.mark.asyncio

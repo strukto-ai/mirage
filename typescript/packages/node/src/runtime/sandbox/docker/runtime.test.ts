@@ -100,7 +100,7 @@ describe('DockerRuntime', () => {
       'cid-42',
       'sh',
       '-c',
-      'cd -- "$1" || exit 126; shift; exec "$@"',
+      'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"',
       'sh',
       '/root/ws',
       'sh',

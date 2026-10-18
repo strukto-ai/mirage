@@ -275,6 +275,10 @@ async def mode_checks(mode):
             )
             assert [r["index"] for r in results] == [str(i) for i in range(6)]
             assert all(r["end"] > r["start"] for r in results)
+            span = max(r["end"] for r in results) - min(
+                r["start"] for r in results
+            )
+            assert span < 3, f"six one-second jobs took {span:.1f}s"
 
         await check(mode + "_parallel_processes", parallel)
 

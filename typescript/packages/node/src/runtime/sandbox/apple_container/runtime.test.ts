@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { existsSync, realpathSync } from 'node:fs'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
@@ -274,6 +274,27 @@ describe.skipIf(process.platform === 'win32')('EXEC_PRELUDE', () => {
 
   it('keeps the exit code', () => {
     expect(prelude('/', 'sh', '-c', 'exit 7').status).toBe(7)
+  })
+
+  it('resolves a relative cwd without CDPATH', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'prelude-'))
+    try {
+      for (const root of ['start', 'elsewhere']) {
+        await mkdir(join(dir, root, 'sub'), { recursive: true })
+      }
+      const done = spawnSync(
+        '/bin/sh',
+        ['-c', EXEC_PRELUDE, 'sh', 'sub', 'sh', '-c', 'pwd -P; printf "%s\\n" "$CDPATH"'],
+        { cwd: join(dir, 'start'), env: { ...process.env, CDPATH: join(dir, 'elsewhere') } },
+      )
+      expect(done.status).toBe(0)
+      expect(String(done.stdout).split('\n').slice(0, -1)).toEqual([
+        realpathSync(join(dir, 'start', 'sub')),
+        join(dir, 'elsewhere'),
+      ])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })
 

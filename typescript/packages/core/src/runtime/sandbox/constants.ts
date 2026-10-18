@@ -94,6 +94,8 @@ export const PIPE_SERVER_HINT =
  * image's environment rather than replace a name it already sets, and
  * `-w` can create a missing directory instead of failing. sh imports the
  * environment last-wins, `cd` fails loud (126) on a cwd the sandbox does
- * not serve, and `exec` hands over the argv unchanged.
+ * not serve, and `exec` hands over the argv unchanged. `cd` runs without
+ * CDPATH, so a relative cwd resolves from `/` and prints nothing, while
+ * the program still sees the guest's own CDPATH.
  */
-export const EXEC_PRELUDE = 'cd -- "$1" || exit 126; shift; exec "$@"'
+export const EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'

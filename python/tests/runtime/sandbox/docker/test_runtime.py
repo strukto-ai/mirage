@@ -73,7 +73,7 @@ async def test_exec_line_threads_cwd_env_stdin_and_real_stderr():
         "cid-42",
         "sh",
         "-c",
-        'cd -- "$1" || exit 126; shift; exec "$@"',
+        'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"',
         "sh",
         "/root/workspace",
         "sh",
