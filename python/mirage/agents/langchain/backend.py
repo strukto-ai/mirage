@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import base64
+import logging
 import shlex
 from collections.abc import Awaitable
 from pathlib import PurePosixPath
@@ -43,6 +44,8 @@ from mirage.io.types import IOResult
 from mirage.workspace.files import Files
 from mirage.workspace.tools.io_text import replace_text, with_refusal
 from mirage.workspace.workspace import Session, Workspace
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -230,15 +233,15 @@ class LangchainWorkspace(SandboxBackendProtocol):
             return WriteResult(
                 error=f"Error: file '{file_path}' already exists"
             )
-        except (FileNotFoundError, NotADirectoryError, ValueError):
+        except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
             # missing file is the good path: the write may proceed
-            pass
+            logger.debug("nothing to overwrite at %s: %s", file_path, exc)
         parent = "/".join(file_path.rstrip("/").split("/")[:-1]) or "/"
         try:
             await ops.mkdir(parent)
-        except (FileExistsError, ValueError):
+        except (FileExistsError, ValueError) as exc:
             # mkdir -p semantics: an existing parent is success
-            pass
+            logger.debug("parent not created at %s: %s", parent, exc)
         await ops.write(file_path, content.encode("utf-8"))
         return WriteResult(path=file_path)
 
@@ -366,9 +369,9 @@ class LangchainWorkspace(SandboxBackendProtocol):
             parent = "/".join(path.rstrip("/").split("/")[:-1]) or "/"
             try:
                 await ops.mkdir(parent)
-            except (FileExistsError, ValueError):
+            except (FileExistsError, ValueError) as exc:
                 # mkdir -p semantics: an existing parent is success
-                pass
+                logger.debug("parent not created at %s: %s", parent, exc)
             await ops.write(path, data)
             results.append(FileUploadResponse(path=path))
         return results

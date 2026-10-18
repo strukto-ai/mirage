@@ -53,6 +53,12 @@ def test_io_to_grep_matches():
     assert matches[0]["text"] == "hello world"
 
 
+def test_io_to_grep_matches_skips_a_row_without_a_line_number():
+    io = IOResult(stdout=b"/a:b.txt:hello\n/c.txt:2:kept\n", exit_code=0)
+    matches = io_to_grep_matches(io)
+    assert matches == [{"path": "/c.txt", "line": 2, "text": "kept"}]
+
+
 def test_io_to_grep_matches_empty():
     io = IOResult(stdout=b"", exit_code=1)
     matches = io_to_grep_matches(io)

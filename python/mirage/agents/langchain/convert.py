@@ -12,10 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
+
 from deepagents.backends.protocol import ExecuteResponse, FileInfo, GrepMatch
 
 from mirage.io.types import IOResult
 from mirage.workspace.tools.io_text import decode, with_refusal
+
+logger = logging.getLogger(__name__)
 
 
 def io_to_execute_response(io: IOResult) -> ExecuteResponse:
@@ -41,7 +45,8 @@ def io_to_grep_matches(io: IOResult) -> list[GrepMatch]:
         if len(parts) >= 3:
             try:
                 line_num = int(parts[1])
-            except ValueError:
+            except ValueError as exc:
+                logger.debug("no line number in grep row %r: %s", line, exc)
                 continue
             matches.append(
                 GrepMatch(path=parts[0], line=line_num, text=parts[2])
