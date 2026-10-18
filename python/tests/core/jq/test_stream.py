@@ -38,7 +38,7 @@ def _sources(*inputs: bytes, size: int = 1 << 20) -> list[InputSource]:
     ]
 
 
-def _parsed(text: object) -> object:
+def _parsed(text):
     # The value jq's parser reads the text as, which is what libjq runs on.
     assert isinstance(text, str)
     if "\\ud" not in text.lower():
@@ -56,16 +56,19 @@ async def _read(
 ) -> list[tuple]:
     reader = InputReader(sources, opts)
     out: list[tuple] = []
-    while True:
-        text = await reader.next_input()
-        if text is NO_VALUE:
-            return out
-        if isinstance(text, JqParseError):
-            out.append(("error", text.message, reader.position()))
-            if not opts.seq:
+    try:
+        while True:
+            text = await reader.next_input()
+            if text is NO_VALUE:
                 return out
-            continue
-        out.append((text if texts else _parsed(text), reader.position()))
+            if isinstance(text, JqParseError):
+                out.append(("error", text.message, reader.position()))
+                if not opts.seq:
+                    return out
+                continue
+            out.append((text if texts else _parsed(text), reader.position()))
+    finally:
+        await reader.close()
 
 
 async def _values(*inputs: bytes, opts: JqOptions = JqOptions()) -> list:
@@ -176,7 +179,10 @@ async def test_a_document_is_handed_over_before_the_input_ends(data, value):
     reader = InputReader(
         [InputSource("f0.json", _unending(data))], JqOptions()
     )
-    assert _parsed(await asyncio.wait_for(reader.next_input(), 5)) == value
+    try:
+        assert _parsed(await asyncio.wait_for(reader.next_input(), 5)) == value
+    finally:
+        await reader.close()
 
 
 @pytest.mark.asyncio
@@ -382,8 +388,11 @@ async def test_stream_and_slurp_collect_the_events():
 @pytest.mark.asyncio
 async def test_no_input_at_all_reads_as_nothing():
     reader = InputReader([], JqOptions())
-    assert await reader.next_input() is NO_VALUE
-    assert reader.position() == "<unknown>"
+    try:
+        assert await reader.next_input() is NO_VALUE
+        assert reader.position() == "<unknown>"
+    finally:
+        await reader.close()
 
 
 @pytest.mark.asyncio
@@ -404,9 +413,12 @@ async def _reported(
     reports: list[str] = []
     reader = InputReader(sources, opts, reports.append)
     values = []
-    while (text := await reader.next_input()) is not NO_VALUE:
-        values.append(_parsed(text))
-    return values, reports, reader.position(), reader.failures()
+    try:
+        while (text := await reader.next_input()) is not NO_VALUE:
+            values.append(_parsed(text))
+        return values, reports, reader.position(), reader.failures()
+    finally:
+        await reader.close()
 
 
 MISSING = (

@@ -58,15 +58,19 @@ async function read(
 ): Promise<Row[]> {
   const reader = new InputReader(inputs, opts)
   const rows: Row[] = []
-  for (;;) {
-    const text = await reader.nextInput()
-    if (text === NO_VALUE) return rows
-    if (text instanceof JqParseError) {
-      rows.push(['error', text.message, reader.position()])
-      if (!opts.seq) return rows
-      continue
+  try {
+    for (;;) {
+      const text = await reader.nextInput()
+      if (text === NO_VALUE) return rows
+      if (text instanceof JqParseError) {
+        rows.push(['error', text.message, reader.position()])
+        if (!opts.seq) return rows
+        continue
+      }
+      rows.push([asTexts ? text : await parsed(text), reader.position()])
     }
-    rows.push([asTexts ? text : await parsed(text), reader.position()])
+  } finally {
+    await reader.close()
   }
 }
 
@@ -170,8 +174,12 @@ describe('InputReader', () => {
         resolve('still waiting')
       }, 5000)
     })
-    expect(await parsed(await Promise.race([reader.nextInput(), late]))).toEqual(value)
-    clearTimeout(timer)
+    try {
+      expect(await parsed(await Promise.race([reader.nextInput(), late]))).toEqual(value)
+    } finally {
+      clearTimeout(timer)
+      await reader.close()
+    }
   })
 
   it.each([1, 7, 1 << 20])(
@@ -303,8 +311,12 @@ describe('InputReader', () => {
 
   it('reads no input at all as nothing', async () => {
     const reader = new InputReader([], jqOptions())
-    expect(await reader.nextInput()).toBe(NO_VALUE)
-    expect(reader.position()).toBe('<unknown>')
+    try {
+      expect(await reader.nextInput()).toBe(NO_VALUE)
+      expect(reader.position()).toBe('<unknown>')
+    } finally {
+      await reader.close()
+    }
   })
 
   it('finds no documents in an empty input', async () => {
@@ -387,10 +399,14 @@ async function reported(
   const reports: string[] = []
   const reader = new InputReader(inputs, opts, (line) => reports.push(line))
   const found: unknown[] = []
-  for (;;) {
-    const text = await reader.nextInput()
-    if (text === NO_VALUE) return [found, reports, reader.position(), reader.failures()]
-    found.push(await parsed(text))
+  try {
+    for (;;) {
+      const text = await reader.nextInput()
+      if (text === NO_VALUE) return [found, reports, reader.position(), reader.failures()]
+      found.push(await parsed(text))
+    }
+  } finally {
+    await reader.close()
   }
 }
 
