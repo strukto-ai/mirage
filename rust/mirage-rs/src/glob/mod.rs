@@ -17,7 +17,6 @@ const WORK: usize = 2048;
 type Span = (usize, usize);
 type Positions = Arc<Vec<Span>>;
 type Key = (usize, usize, usize);
-type RunKey = (usize, usize, usize, Vec<usize>);
 
 fn yes() -> bool {
     true

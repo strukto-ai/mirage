@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use super::compile::{Atom, Program, has, is};
-use super::{Key, Positions, RunKey, Span};
+use super::{Key, Positions, Span};
 
 fn append_span(spans: &mut Vec<Span>, (lo, hi): Span) {
     if lo >= hi {
@@ -13,6 +13,35 @@ fn append_span(spans: &mut Vec<Span>, (lo, hi): Span) {
         return;
     }
     spans.push((lo, hi));
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+struct StateSetId(usize);
+
+#[derive(Eq, Ord, PartialEq, PartialOrd)]
+struct RunKey {
+    start: usize,
+    end: usize,
+    offset: usize,
+    incoming: StateSetId,
+}
+
+#[derive(Default)]
+struct TailCache {
+    prefixes: BTreeMap<(StateSetId, usize), StateSetId>,
+    runs: BTreeMap<RunKey, Key>,
+}
+
+impl TailCache {
+    fn extend(&mut self, prefix: StateSetId, state: usize) -> StateSetId {
+        let next = StateSetId(
+            self.prefixes
+                .len()
+                .checked_add(1)
+                .expect("glob state-set IDs exhausted"),
+        );
+        *self.prefixes.entry((prefix, state)).or_insert(next)
+    }
 }
 
 struct Negative {
@@ -31,6 +60,7 @@ enum Phase {
     Position,
     Initial {
         after: Option<usize>,
+        incoming: Option<StateSetId>,
     },
     Active,
     Epsilon {
@@ -102,7 +132,7 @@ impl Frame {
         reverse: bool,
         period: bool,
         memo: &HashMap<Key, Positions>,
-        runs: &mut HashMap<RunKey, Key>,
+        tails: &mut TailCache,
     ) -> Progress {
         let size = subject.len();
         let character = |position: usize| {
@@ -124,26 +154,13 @@ impl Frame {
                 self.position = position;
                 self.seen = seen;
                 self.active.clear();
-                if self.retain_runs && self.pending.is_empty() && self.seen.len() <= 64 {
-                    let run = *runs
-                        .entry((
-                            self.key.0,
-                            self.key.1,
-                            position,
-                            self.seen.iter().copied().collect(),
-                        ))
-                        .or_insert(self.key);
-                    if let Some(done) = memo.get(&run) {
-                        self.phase = Phase::Tail {
-                            spans: Arc::clone(done),
-                            index: done.partition_point(|&(_, hi)| hi <= position),
-                        };
-                        return Progress::Continue;
-                    }
-                }
-                self.phase = Phase::Initial { after: None };
+                self.phase = Phase::Initial {
+                    after: None,
+                    incoming: (self.retain_runs && self.pending.is_empty())
+                        .then_some(StateSetId::default()),
+                };
             }
-            Phase::Initial { after } => {
+            Phase::Initial { after, incoming } => {
                 let state = match after {
                     Some(state) => self
                         .seen
@@ -153,7 +170,26 @@ impl Frame {
                 };
                 if let Some(&state) = state {
                     self.active.push(state);
-                    self.phase = Phase::Initial { after: Some(state) };
+                    self.phase = Phase::Initial {
+                        after: Some(state),
+                        incoming: incoming.map(|prefix| tails.extend(prefix, state)),
+                    };
+                } else if let Some(incoming) = incoming {
+                    let run = *tails
+                        .runs
+                        .entry(RunKey {
+                            start: self.key.0,
+                            end: self.key.1,
+                            offset: self.position,
+                            incoming,
+                        })
+                        .or_insert(self.key);
+                    if let Some(done) = memo.get(&run) {
+                        self.phase = Phase::Tail {
+                            spans: Arc::clone(done),
+                            index: done.partition_point(|&(_, hi)| hi <= self.position),
+                        };
+                    }
                 }
             }
             Phase::Active => {
@@ -369,7 +405,7 @@ impl Frame {
 pub(super) struct Evaluator {
     frames: Vec<Frame>,
     memo: HashMap<Key, Positions>,
-    runs: HashMap<RunKey, Key>,
+    tails: TailCache,
     pub(super) answer: Option<Positions>,
 }
 
@@ -390,7 +426,7 @@ impl Evaluator {
             reverse,
             period,
             &self.memo,
-            &mut self.runs,
+            &mut self.tails,
         ) {
             Progress::Continue => self.frames.push(frame),
             Progress::Need(key) => {
@@ -436,9 +472,9 @@ mod tests {
             Some(&(0, subject.len() + 1))
         );
         assert!(
-            evaluator.runs.len() <= 1,
+            evaluator.tails.runs.len() <= 1,
             "a single boolean match retained {} run histories",
-            evaluator.runs.len()
+            evaluator.tails.runs.len()
         );
     }
 }

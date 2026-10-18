@@ -664,3 +664,80 @@ fn star_before_extglob_includes_every_tail() {
         assert_eq!(matches(name, pattern, true), expected);
     }
 }
+
+#[test]
+fn replacement_reuses_large_active_state_sets() {
+    let alternatives: Vec<String> = (0..65).map(|index| format!("*b{index}")).collect();
+    let pattern = format!("@({})", alternatives.join("|"));
+    let config = json!({"pattern": units(&pattern), "extglob": true, "operation": {"kind": "replace", "all": true}});
+    for tail in ["", "b64"] {
+        let mut stream = open(&serde_json::to_vec(&config).unwrap()).unwrap();
+        let subject = units(&format!("{}{tail}", "a".repeat(256)));
+        let bytes: Vec<u8> = subject.iter().flat_map(|cp| cp.to_le_bytes()).collect();
+        let mut output = Vec::new();
+        stream.feed(&bytes, &mut output).unwrap();
+        stream.finish(&mut output).unwrap();
+        let mut chunks = 0;
+        while stream.busy() {
+            stream.drain(&mut output).unwrap();
+            chunks += 1;
+            assert!(
+                chunks <= 1024,
+                "failed replacement starts exceeded 1024 work chunks"
+            );
+        }
+        let expected = if tail.is_empty() {
+            json!([])
+        } else {
+            json!([[0, subject.len()]])
+        };
+        assert_eq!(serde_json::from_slice::<Value>(&output).unwrap(), expected);
+    }
+}
+
+#[test]
+fn large_state_identity_survives_drain_boundaries() {
+    let alternatives: Vec<String> = (0..=WORK).map(|index| format!("*b{index}")).collect();
+    let pattern = format!("@({})", alternatives.join("|"));
+    let subject = format!("ab{WORK}");
+    assert_eq!(
+        request(
+            &units(&pattern),
+            &units(&subject),
+            json!({"kind":"replace","all":true}),
+            false,
+            true,
+            false
+        ),
+        json!([[0, subject.len()]])
+    );
+}
+
+#[test]
+fn large_tail_cache_follows_subject_and_direction() {
+    let alternatives: Vec<String> = (0..65).map(|index| format!("*b{index}")).collect();
+    let pattern = format!("@({})", alternatives.join("|"));
+    let config = json!({"pattern": units(&pattern), "extglob": true, "operation": {"kind": "replace", "all": true}});
+    let mut stream = open(&serde_json::to_vec(&config).unwrap()).unwrap();
+    let bytes: Vec<u8> = units(&"a".repeat(256))
+        .iter()
+        .flat_map(|cp| cp.to_le_bytes())
+        .collect();
+    stream.feed(&bytes, &mut Vec::new()).unwrap();
+    assert_eq!(collect(stream.as_mut()), json!([]));
+    stream.begin(br#"{"kind":"replace","all":true}"#).unwrap();
+    let bytes: Vec<u8> = units("aab64")
+        .iter()
+        .flat_map(|cp| cp.to_le_bytes())
+        .collect();
+    stream.feed(&bytes, &mut Vec::new()).unwrap();
+    assert_eq!(collect(stream.as_mut()), json!([[0, 5]]));
+    stream
+        .begin(br#"{"kind":"suffix","longest":true,"reuse_subject":true}"#)
+        .unwrap();
+    assert_eq!(collect(stream.as_mut()), json!(0));
+    stream
+        .begin(br#"{"kind":"suffix","longest":false,"reuse_subject":true}"#)
+        .unwrap();
+    assert_eq!(collect(stream.as_mut()), json!(2));
+}
