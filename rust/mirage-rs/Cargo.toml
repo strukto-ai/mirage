@@ -12,7 +12,7 @@ publish = false
 md5.workspace = true
 memchr.workspace = true
 regex-automata.workspace = true
-regex-syntax.workspace = true
+regex-syntax = { workspace = true, features = ["unicode-bool"] }
 sha1.workspace = true
 sha2.workspace = true
 serde.workspace = true

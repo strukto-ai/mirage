@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "join_gnu_o_list_runs_into_operands",
+      "seq": 601560,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/join_601560 && touch /data/join_601560/a && (cd /data/join_601560 || exit 1; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && join -o 1.1 2.2 1.2 a b; echo rc=$?; join -o 1.1 2.2 -o 1.2 a b; echo rc=$?; join -o 1.1 2.2 a -o 0 b; echo rc=$?; join -o 1.1 a 2.2 b; echo rc=$?; join -o auto 1.1 a b; echo rc=$?; join -o 1.1 -a1 2.2 a b; echo rc=$?; printf '1 q\\n' > 2.2 && join -o 1.1 2.2 a; echo rc=$?; join -o 1.1 '' a b; echo rc=$?); rm -r /data/join_601560",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 x a\n3 z c\nrc=0\n1 a x\n3 c z\nrc=0\n1 1 x\n3 3 z\nrc=0\nrc=1\nrc=1\nrc=1\n1\nrc=0\nrc=1\n",
+        "stderr": "join: invalid file number in field spec: 'a'\njoin: extra operand 'b'\nTry 'join --help' for more information.\njoin: extra operand 'b'\nTry 'join --help' for more information.\njoin: invalid file number in field spec: ''\n"
+      },
+      "flags": [
+        "o"
+      ]
+    }
+  ]
+}

@@ -12,6 +12,15 @@ from mirage.commands.errors import UsageError
 from mirage.io.types import ByteSource
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "option", ["skip_fields", "skip_chars", "check_chars"]
+)
+async def test_counts_beyond_json_numeric_range_remain_unbounded(option):
+    expected = b"a\nb\n" if option == "check_chars" else b"a\n"
+    assert await _collect(b"a\nb\n", flags={option: "9" * 400}) == expected
+
+
 def _unused_read_stream(_accessor, _path):
     raise AssertionError("read_stream should not be called for stdin input")
 
@@ -197,3 +206,73 @@ async def _one_byte_chunks(data: bytes) -> AsyncIterator[bytes]:
 async def test_uniq_groups_survive_one_byte_chunks(flags, expected):
     source = _one_byte_chunks(b"A\na\nA\nb\nC\nc")
     assert await _collect(source, flags=flags) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flags,data,expected",
+    [
+        ({}, b"\xff\n\xfe\n\xff\n", b"\xff\n\xfe\n\xff\n"),
+        ({"skip_chars": "1"}, b"\xffA\n\xfeA\nB\n", b"\xffA\nB\n"),
+        (
+            {"skip_chars": "1", "check_chars": "1"},
+            "😀aX\néaY\nzb\n".encode(),
+            "😀aX\nzb\n".encode(),
+        ),
+        (
+            {"ignore_case": True},
+            "ΟΣ\nΟς\nΟΣΑ\nοσα\n".encode(),
+            "ΟΣ\nΟΣΑ\n".encode(),
+        ),
+        (
+            {"ignore_case": True},
+            "AΣ\u0301\nAς\u0301\nAΣ\u0301B\nAσ\u0301b\n".encode(),
+            "AΣ\u0301\nAΣ\u0301B\n".encode(),
+        ),
+        (
+            {"ignore_case": True, "check_chars": "2"},
+            "AΣX\naςY\n".encode(),
+            "AΣX\n".encode(),
+        ),
+        (
+            {"zero_terminated": True, "group": "both"},
+            b"a\0a\0b",
+            b"\0a\0a\0\0b\0\0",
+        ),
+    ],
+)
+async def test_uniq_keys_and_separators_survive_byte_splits(
+    flags, data, expected
+):
+    assert await _collect(_one_byte_chunks(data), flags=flags) == expected
+
+
+@pytest.mark.asyncio
+async def test_uniq_large_records_drain_before_a_blocked_tail_and_close():
+    closed = False
+    record = b"A" * (256 * 1024)
+
+    async def source():
+        nonlocal closed
+        try:
+            yield record + b"\n" + record.lower() + b"\nb\n"
+            raise AssertionError("uniq fetched the tail")
+        finally:
+            closed = True
+
+    output, _ = await uniq_generic(
+        [],
+        read_stream=_unused_read_stream,
+        stdin=source(),
+        flags={"ignore_case": True, "count": True},
+    )
+    received = bytearray()
+    try:
+        while not received.endswith(b"\n"):
+            piece = await anext(output)
+            assert len(piece) <= 16 * 1024
+            received.extend(piece)
+        assert received == b"      2 " + record + b"\n"
+    finally:
+        await output.aclose()
+    assert closed

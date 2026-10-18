@@ -1,0 +1,48 @@
+{
+  "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+  ],
+  "cases": [
+    {
+      "id": "comm_shared_stdin_before_total",
+      "seq": 17020310,
+      "command": "printf 'a\\nb\\nc\\nd\\n' | comm --total - -",
+      "expect": {
+        "exit": 1,
+        "stdout": "a\n\tb\nc\n\td\n",
+        "stderr": "comm: -: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "comm_strict_refusal_keeps_partial_output",
+      "seq": 17020311,
+      "command": "printf 'b\\na\\n' > /data/record-left; printf 'z\\n' > /data/record-right; comm --check-order --total /data/record-left /data/record-right",
+      "expect": {
+        "exit": 1,
+        "stdout": "b\n",
+        "stderr": "comm: file 1 is not in sorted order\n"
+      }
+    }
+  ]
+}

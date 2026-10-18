@@ -63,16 +63,6 @@ export function translateBracket(pattern: string, start: number, out: string[]):
   throw new SyntaxError('Unmatched [, [^, [:, [., or [=')
 }
 
-/** Expand a class to its ordered C-locale characters for tr, or null for no such class. */
-export function classCharacters(name: string): string | null {
-  const expansion = Object.hasOwn(POSIX_CLASSES, name) ? POSIX_CLASSES[name] : undefined
-  if (expansion === undefined) return null
-  const pattern = new RegExp('[' + expansion + ']')
-  return Array.from({ length: 128 }, (_, n) => String.fromCharCode(n))
-    .filter((ch) => pattern.test(ch))
-    .join('')
-}
-
 // What each `.` and negated bracket checks first under a UTF-8 locale: a byte
 // that is no part of a character rides the text as its surrogate escape, and
 // glibc matches it with neither.

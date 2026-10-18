@@ -24,9 +24,8 @@ import { HEX, HEX_ESCAPE_DIGITS, OCT, SIMPLE_ESCAPES } from './constants.ts'
  * `\uHHHH` and `\UHHHHHHHH` (a code point), `\0NNN` (octal) and `\c`
  * (stop output); an unknown escape like `\z` passes through as `\z`.
  * Returns the text and whether `\c` stopped the output, which also drops
- * echo's newline. `tr` has its own reader
- * (`commands/builtin/utils/escapes.ts`) because only the shell writes
- * bytes: `\xHH` here names a byte, not a code point.
+ * echo's newline. `tr` has its own operand grammar in the Rust stream.
+ * `\xHH` here names a byte, not a code point.
  */
 export function interpretEscapes(text: string): [string, boolean] {
   const out: string[] = []

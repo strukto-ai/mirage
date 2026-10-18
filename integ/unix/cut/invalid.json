@@ -743,7 +743,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'a\\tb\\n' | cut -f '2-3é'",
+      "command": "printf 'a\\tb\\n' | cut -f '2-3\u00e9'",
       "expect": {
         "exit": 1,
         "stdout": "",
@@ -780,7 +780,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'ab\\n' | cut -b '1,é'",
+      "command": "printf 'ab\\n' | cut -b '1,\u00e9'",
       "expect": {
         "exit": 1,
         "stdout": "",
@@ -817,7 +817,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'ab\\n' | cut -c 'xé'",
+      "command": "printf 'ab\\n' | cut -c 'x\u00e9'",
       "expect": {
         "exit": 1,
         "stdout": "",
@@ -854,7 +854,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'a\\tb\\n' | cut -f '😀'",
+      "command": "printf 'a\\tb\\n' | cut -f '\ud83d\ude00'",
       "expect": {
         "exit": 1,
         "stdout": "",
@@ -1044,6 +1044,455 @@
         "exit": 1,
         "stdout": "",
         "stderr": "cut: invalid field value '\\n'\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "f"
+      ]
+    },
+    {
+      "id": "cut_f_a_lone_dash_has_no_endpoint",
+      "seq": 17200001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b\\n' | cut -d, -f -",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: invalid range with no endpoint: -\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "d",
+        "f"
+      ]
+    },
+    {
+      "id": "cut_c_a_dash_after_a_list_has_no_endpoint",
+      "seq": 17200002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc\\n' | cut -c '1,-'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: invalid range with no endpoint: -\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "cut_f_a_field_past_uintmax_is_too_large",
+      "seq": 17200003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b\\n' | cut -d, -f 1-0018446744073709551615",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: field number '0018446744073709551615' is too large\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "d",
+        "f"
+      ]
+    },
+    {
+      "id": "cut_b_an_offset_past_uintmax_is_too_large",
+      "seq": 17200004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc\\n' | cut -b 99999999999999999999x",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: byte/character offset '99999999999999999999' is too large\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "cut_f_the_largest_field_number_is_accepted",
+      "seq": 17200005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b\\n' | cut -d, -f 1,18446744073709551614",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d",
+        "f"
+      ]
+    },
+    {
+      "id": "cut_c_an_open_range_may_start_past_the_line",
+      "seq": 17200006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc\\n' | cut -c 1,4294967296-; printf 'abc\\n' | cut -c '2-,1'",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nabc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "cut_c_a_zero_low_bound_is_refused_at_its_dash",
+      "seq": 17200007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc\\n' | cut -c 0-x",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: byte/character positions are numbered from 1\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "cut_f_a_zero_high_bound_is_a_decreasing_range",
+      "seq": 17200008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b\\n' | cut -d, -f -0",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: invalid decreasing range\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "d",
+        "f"
+      ]
+    },
+    {
+      "id": "cut_c_a_second_dash_wins_over_a_decreasing_range",
+      "seq": 17200009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc\\n' | cut -c 3-1-2",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: invalid byte or character range\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "cut_f_a_carriage_return_is_an_invalid_field_value",
+      "seq": 17200010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\n' | cut -f $'1\\r'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: invalid field value '\\r'\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "f"
+      ]
+    },
+    {
+      "id": "cut_list_numbers_past_five_thousand_digits",
+      "seq": 17300003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "z=$(printf '%05000d' 0); n=$(printf '%05000d' 0 | tr 0 9); printf 'a\\tb\\tc\\n' | cut -f \"${z}2-${z}3\"; echo rc=$?; echo abc | cut -c \"$n\" 2>/dev/null; echo rc=$?; echo abc | cut -c \"$n\" 2>&1 | head -c 40; echo; echo abc | cut -f \"1-$n\" 2>&1 | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\tc\nrc=0\nrc=1\ncut: byte/character offset '999999999999\n5073\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f",
+        "c"
+      ]
+    },
+    {
+      "id": "cut_invalid_list_precedes_missing_operand",
+      "seq": 17300004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cut -f - cut-missing-record-engine",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: invalid range with no endpoint: -\nTry 'cut --help' for more information.\n"
       },
       "flags": [
         "f"

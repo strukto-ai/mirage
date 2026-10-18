@@ -21,6 +21,14 @@ import { uniqGeneric } from './uniq.ts'
 
 const DEC = new TextDecoder()
 
+it.each(['skip_fields', 'skip_chars', 'check_chars'])(
+  'keeps unbounded %s across the JSON bridge',
+  async (option) => {
+    const [out] = await run(new TextEncoder().encode('a\nb\n'), { [option]: '9'.repeat(400) })
+    expect(DEC.decode(await materialize(out))).toBe(option === 'check_chars' ? 'a\nb\n' : 'a\n')
+  },
+)
+
 async function stderrOf(flags: Context['flags']): Promise<[string, number]> {
   const ctx = {
     stdin: new TextEncoder().encode('a\na\nb\n'),
@@ -154,4 +162,74 @@ it.each<[Context['flags'], string]>([
 ])('uniq groups survive one-byte chunks %j', async (flags, expected) => {
   const [out] = await run(oneByteChunks('A\na\nA\nb\nC\nc'), flags)
   expect(DEC.decode(await materialize(out))).toBe(expected)
+})
+
+it.each<[Context['flags'], Uint8Array, Uint8Array]>([
+  [{}, Uint8Array.of(255, 10, 254, 10, 255, 10), Uint8Array.of(255, 10, 254, 10, 255, 10)],
+  [
+    { skip_chars: '1' },
+    Uint8Array.of(255, 65, 10, 254, 65, 10, 66, 10),
+    Uint8Array.of(255, 65, 10, 66, 10),
+  ],
+  [
+    { skip_chars: '1', check_chars: '1' },
+    new TextEncoder().encode('😀aX\néaY\nzb\n'),
+    new TextEncoder().encode('😀aX\nzb\n'),
+  ],
+  [
+    { ignore_case: true },
+    new TextEncoder().encode('ΟΣ\nΟς\nΟΣΑ\nοσα\n'),
+    new TextEncoder().encode('ΟΣ\nΟΣΑ\n'),
+  ],
+  [
+    { ignore_case: true },
+    new TextEncoder().encode('AΣ\u0301\nAς\u0301\nAΣ\u0301B\nAσ\u0301b\n'),
+    new TextEncoder().encode('AΣ\u0301\nAΣ\u0301B\n'),
+  ],
+  [
+    { ignore_case: true, check_chars: '2' },
+    new TextEncoder().encode('AΣX\naςY\n'),
+    new TextEncoder().encode('AΣX\n'),
+  ],
+  [
+    { zero_terminated: true, group: 'both' },
+    new TextEncoder().encode('a\0a\0b'),
+    new TextEncoder().encode('\0a\0a\0\0b\0\0'),
+  ],
+])('uniq keys and separators survive byte splits %j', async (flags, data, expected) => {
+  async function* source() {
+    await Promise.resolve()
+    for (const byte of data) yield Uint8Array.of(byte)
+  }
+  const [out] = await run(source(), flags)
+  expect(await materialize(out)).toEqual(expected)
+})
+
+it('uniq large records drain before a blocked tail and close', async () => {
+  let closed = false
+  const record = 'A'.repeat(256 * 1024)
+  async function* source() {
+    await Promise.resolve()
+    try {
+      yield new TextEncoder().encode(`${record}\n${record.toLowerCase()}\nb\n`)
+      throw new Error('uniq fetched the tail')
+    } finally {
+      closed = true
+    }
+  }
+  const [out] = await run(source(), { ignore_case: true, count: true })
+  const output = ensureStream(out ?? new Uint8Array())[Symbol.asyncIterator]()
+  let received = ''
+  try {
+    while (!received.endsWith('\n')) {
+      const piece = await output.next()
+      if (piece.done === true) throw new Error('stream ended before the group')
+      expect(piece.value.byteLength).toBeLessThanOrEqual(16 * 1024)
+      received += DEC.decode(piece.value)
+    }
+    expect(received).toBe(`      2 ${record}\n`)
+  } finally {
+    await output.return?.()
+  }
+  expect(closed).toBe(true)
 })

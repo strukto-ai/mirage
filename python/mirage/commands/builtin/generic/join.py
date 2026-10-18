@@ -6,13 +6,12 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
-from contextlib import aclosing
 from dataclasses import dataclass, field
 from enum import Enum
 
-from mirage.commands.builtin.constants import INTMAX_MIN
 from mirage.commands.builtin.utils.lines import record_separator
 from mirage.commands.builtin.utils.stream import never_opened, stdin_stream
+from mirage.commands.builtin.utils.strtol import unsigned_decimal
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
@@ -28,18 +27,23 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, IOResult
+from mirage.io.yield_budget import YieldBudget
+from mirage.rs.stream import close_stream, open_stream
+from mirage.shell.bytes import byte_view, encode_text
 from mirage.types import PathSpec, PolymorphicReadFn
 
-IDX_MAX = 2**63 - 1
-WHOLE_LINE = b"\n"
-FIELD_RUN = re.compile(rb"[^ \t\n]+")
-INTEGER = re.compile(r"[ \t\n\v\f\r]*([+-]?[0-9]+)", re.ASCII)
-OUTLIST_SEPARATOR = re.compile(r"[, \t]")
-ASCII_UPPER = bytes.maketrans(
-    b"abcdefghijklmnopqrstuvwxyz", b"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-)
-OPTIONS = (
+# The largest field number join keeps; GNU 9.7 reads any larger one as
+# this one, so `-1 99999999999999999999 -1 1` is refused as
+# "incompatible join fields 9223372036854775806, 0".
+LARGEST_FIELD = 2**63 - 1
+# The -t value that keeps each record whole: both `-t ''` and `-t $'\n'`
+# select it, under -z as well, and they never conflict with each other.
+WHOLE_RECORD = b"\n"
+COLUMN_BREAK = re.compile(r"[, \t]")
+JOIN_COLUMN = (0, 0)
+OPTION_DESTS = (
     "a",
     "v",
     "e",
@@ -54,657 +58,338 @@ OPTIONS = (
     "nocheck_order",
     "header",
 )
+LONE_J_WORDS = {"-j1": 1, "-j2": 2}
 
 
-class CheckOrder(Enum):
-    """join.c's ``check_input_order``: whether disorder is diagnosed."""
+class OrderCheck(Enum):
+    """What join does with a line whose key sorts before the one above it.
 
-    DEFAULT = "default"
-    ENABLED = "enabled"
-    DISABLED = "disabled"
-
-
-@dataclass(frozen=True, slots=True)
-class JoinFlags:
-    """join's options once GNU's option loop has run, in join.c's terms.
-
-    Args:
-        field1 (int): zero-based join field of file 1.
-        field2 (int): zero-based join field of file 2.
-        tab (bytes | None): the field separator byte, None for runs of
-            blanks, or ``WHOLE_LINE`` when the whole line is the field.
-        output_separator (bytes): what goes between output fields.
-        unpairables1 (bool): print file 1's unpairable lines (-a1, -v1).
-        unpairables2 (bool): print file 2's unpairable lines (-a2, -v2).
-        pairables (bool): print joined lines (no -v).
-        empty_filler (bytes | None): -e, for a missing or empty field.
-        outlist (tuple[tuple[int, int], ...]): -o as (file, field) pairs,
-            file 0 naming the join field.
-        autoformat (bool): -o auto.
-        ignore_case (bool): -i.
-        eol (bytes): the record terminator, NUL under -z.
-        check_order (CheckOrder): --check-order and --nocheck-order.
-        header (bool): --header.
-        files (tuple[int, int]): which operands are FILE1 and FILE2, since
-            the obsolete ``-j1 FIELD``, ``-j2 FIELD`` and ``-o LIST...``
-            forms take operands as option values.
+    WARN, the default, names the first such line of each file, but only
+    once some line has gone unpaired, then finishes and exits 1 under
+    ``input is not in sorted order``. FAIL (``--check-order``) names the
+    first one and stops there. OFF (``--nocheck-order``) never looks.
     """
 
-    field1: int = 0
-    field2: int = 0
-    tab: bytes | None = None
-    output_separator: bytes = b" "
-    unpairables1: bool = False
-    unpairables2: bool = False
-    pairables: bool = True
-    empty_filler: bytes | None = None
-    outlist: tuple[tuple[int, int], ...] = ()
-    autoformat: bool = False
-    ignore_case: bool = False
-    eol: bytes = b"\n"
-    check_order: CheckOrder = CheckOrder.DEFAULT
+    WARN = "warn"
+    FAIL = "fail"
+    OFF = "off"
+
+
+@dataclass(frozen=True)
+class JoinFlags:
+    """join's options as one line set them.
+
+    Attributes:
+        keys (tuple[int, int]): each file's join field, counted from 0.
+        unpaired (tuple[bool, bool]): whether each file's unpairable lines
+            print (``-a``, ``-v``).
+        paired (bool): whether joined lines print; any ``-v`` clears it.
+        filler (bytes | None): the ``-e`` text for an empty field.
+        columns (tuple[tuple[int, int], ...]): the ``-o`` list, each item
+            a file number and a field counted from 0; file 0 is the join
+            field.
+        auto_columns (bool): ``-o auto``.
+        delimiter (bytes | None): the ``-t`` byte; None parts fields at
+            runs of blanks and WHOLE_RECORD keeps each record whole.
+        separator (bytes): what output fields are joined with.
+        fold_case (bool): ``-i``.
+        terminator (bytes): what ends a record, NUL under ``-z``.
+        order (OrderCheck): what an unsorted line does.
+        header (bool): ``--header``.
+        files (tuple[int, int]): the operand positions of FILE1 and FILE2.
+    """
+
+    keys: tuple[int, int] = (0, 0)
+    unpaired: tuple[bool, bool] = (False, False)
+    paired: bool = True
+    filler: bytes | None = None
+    columns: tuple[tuple[int, int], ...] = ()
+    auto_columns: bool = False
+    delimiter: bytes | None = None
+    separator: bytes = b" "
+    fold_case: bool = False
+    terminator: bytes = b"\n"
+    order: OrderCheck = OrderCheck.WARN
     header: bool = False
     files: tuple[int, int] = (0, 1)
 
 
-class _Status(Enum):
-    """join.c's operand_status: what a filed operand may turn out to be."""
-
-    MUST_BE_OPERAND = "operand"
-    MIGHT_BE_J1_ARG = "j1"
-    MIGHT_BE_J2_ARG = "j2"
-    MIGHT_BE_O_ARG = "o"
+def _refusal(message: str) -> UsageError:
+    return UsageError(f"join: {message}", 1)
 
 
-@dataclass(frozen=True, slots=True)
-class _Filed:
-    index: int
-    word: str
-    status: _Status
+def _field_index(text: str) -> int:
+    """A field number as join reads one, counted from 0.
 
-
-def _raw(text: str) -> bytes:
-    return text.encode("utf-8", "surrogateescape")
-
-
-def _strtoimax(text: str) -> int | None:
-    """``xstrtoimax`` with no valid suffix: the value, or None if invalid.
+    C blanks, one plus sign and decimal digits, nothing after them, and
+    never zero: `-1 ' 2'` and `-1 +2` are field 2, `-1 '2 '` and `-1 0`
+    are refused.
 
     Args:
-        text (str): the option argument.
+        text (str): the number as typed.
     """
-    match = INTEGER.fullmatch(text)
-    if match is None:
-        return None
-    return int(match[1])
-
-
-def _join_field(text: str) -> int:
-    """join.c's ``string_to_join_field``: a 1-based field, made 0-based.
-
-    Args:
-        text (str): the option argument.
-    """
-    value = _strtoimax(text)
-    if value is not None and not INTMAX_MIN <= value <= IDX_MAX:
-        value = IDX_MAX
-    if value is None or value <= 0:
-        raise UsageError(
-            f"join: invalid field number: '{quote_text(text)}'", 1
-        )
-    return value - 1
+    value = unsigned_decimal(text)
+    if not value:
+        raise _refusal(f"invalid field number: '{quote_text(text)}'")
+    return min(value, LARGEST_FIELD) - 1
 
 
 def _file_number(text: str) -> int:
-    """The FILENUM of ``-a`` or ``-v``: 1 or 2.
-
-    Args:
-        text (str): the option argument.
-    """
-    value = _strtoimax(text)
-    if value is None or value not in (1, 2):
-        raise UsageError(f"join: invalid file number: '{quote_text(text)}'", 1)
+    value = unsigned_decimal(text)
+    if value not in (1, 2):
+        raise _refusal(f"invalid file number: '{quote_text(text)}'")
     return value
 
 
-def _field_spec(spec: str) -> tuple[int, int]:
-    """join.c's ``decode_field_spec``: one ``-o`` item as (file, field).
+def _column(item: str) -> tuple[int, int]:
+    """One -o item: ``0`` for the join field, else ``FILE.FIELD``.
+
+    GNU 9.7 sorts a bad item by its first byte: one led by 0, 1 or 2 is
+    an "invalid field specifier" (`01.1`, `1`, `2x`), any other an
+    "invalid file number in field spec" (`3.1`, `.1`, `auto,1.1`), and
+    the text after `1.` or `2.` must be a field number.
 
     Args:
-        spec (str): ``0``, ``1.N`` or ``2.N``.
+        item (str): the item as typed.
     """
-    head = spec[:1]
-    if head == "0":
-        if len(spec) > 1:
-            raise UsageError(
-                f"join: invalid field specifier: '{quote_text(spec)}'", 1
-            )
-        return 0, 0
-    if head in ("1", "2"):
-        if spec[1:2] != ".":
-            raise UsageError(
-                f"join: invalid field specifier: '{quote_text(spec)}'", 1
-            )
-        return int(head), _join_field(spec[2:])
-    raise UsageError(
-        f"join: invalid file number in field spec: '{quote_text(spec)}'", 1
-    )
+    if item == "0":
+        return JOIN_COLUMN
+    lead = item[:1]
+    if lead in ("1", "2") and item[1:2] == ".":
+        return int(lead), _field_index(item[2:])
+    if lead in ("0", "1", "2"):
+        raise _refusal(f"invalid field specifier: '{quote_text(item)}'")
+    raise _refusal(f"invalid file number in field spec: '{quote_text(item)}'")
 
 
-def _field_list(text: str) -> list[tuple[int, int]]:
-    """join.c's ``add_field_list``: items split at a comma or blank.
-
-    A separator that ends the list closes it, which is why ``-o 1.1,``
-    is accepted while ``-o 1.1,,2.1`` names an empty item.
-
-    Args:
-        text (str): the ``-o`` argument.
-    """
-    specs: list[tuple[int, int]] = []
-    rest = text
-    while True:
-        match = OUTLIST_SEPARATOR.search(rest)
-        item = rest if match is None else rest[: match.start()]
-        specs.append(_field_spec(item))
-        if match is None or match.end() == len(rest):
-            return specs
-        rest = rest[match.end() :]
+@dataclass
+class _LoneJ:
+    file: int
+    claimed: bool = False
 
 
-def _set_join_field(current: int | None, value: int) -> int:
-    if current is not None and current != value:
-        raise UsageError(
-            f"join: incompatible join fields {current}, {value}", 1
-        )
-    return value
+@dataclass
+class _Operand:
+    position: int
+    word: str
+    lone: _LoneJ | None = None
+    listed: bool = False
 
 
-@dataclass(slots=True)
-class _Options:
-    """The state join.c's option loop builds, before it is frozen."""
-
-    field1: int | None = None
-    field2: int | None = None
-    tab: bytes | None = None
-    literal_tab: bool = False
-    unpairables: list[bool] = field(default_factory=lambda: [False, False])
-    pairables: bool = True
-    empty_filler: bytes | None = None
-    outlist: list[tuple[int, int]] = field(default_factory=list)
-    autoformat: bool = False
-    ignore_case: bool = False
-    zero: bool = False
-    check_order: CheckOrder = CheckOrder.DEFAULT
+@dataclass
+class _Reading:
+    words: Sequence[str]
+    seen: int = 0
+    names: list[_Operand] = field(default_factory=list)
+    lone: list[_LoneJ] = field(default_factory=list)
+    keys: list[int | None] = field(default_factory=lambda: [None, None])
+    unpaired: list[bool] = field(default_factory=lambda: [False, False])
+    paired: bool = True
+    filler: bytes | None = None
+    columns: list[tuple[int, int]] = field(default_factory=list)
+    auto_columns: bool = False
+    delimiter: bytes | None = None
+    separator: bytes = b" "
+    fold_case: bool = False
+    terminator: bytes = record_separator(False)
+    order: OrderCheck = OrderCheck.WARN
     header: bool = False
-    files: list[_Filed] = field(default_factory=list)
-    joption_count: list[int] = field(default_factory=lambda: [0, 0])
 
-    def set_tab(self, text: str) -> None:
-        raw = _raw(text)
-        tab = raw or WHOLE_LINE
-        if len(raw) > 1:
-            if raw != b"\\0":
-                raise UsageError(
-                    f"join: multi-character tab '{quote_text(text)}'", 1
-                )
-            tab = b"\0"
-        if self.tab is not None and self.tab != tab:
-            raise UsageError("join: incompatible tabs", 1)
-        self.tab = tab
-        self.literal_tab = self.literal_tab or bool(raw)
+    def set_key(self, side: int, index: int) -> None:
+        held = self.keys[side]
+        if held is not None and held != index:
+            raise _refusal(f"incompatible join fields {held}, {index}")
+        self.keys[side] = index
 
-    def apply(self, name: str, value: FlagValue, spelled: bool) -> _Status:
-        """Take one option, and say what the next operand may be.
+    def operand(self, word: str, lone: _LoneJ | None, listed: bool) -> None:
+        """File one operand, making room when two are already filed.
+
+        A third operand gives the earliest filed one that could be an
+        option's value to that option: the field number of the lone
+        ``-jN`` before it (`join -j1 2 a b` is `-1 2 a b`), or more of the
+        ``-o`` list (`join -o 1.1 2.2 a b` is `-o 1.1,2.2 a b`), appended
+        where the list then ends. With no such operand it is an extra one.
 
         Args:
-            name (str): the option's dest.
-            value (FlagValue): its value.
-            spelled (bool): whether it was typed as a lone ``-j1`` or
-                ``-j2`` (SPELLED_WORDS).
+            word (str): the operand as typed.
+            lone (_LoneJ | None): the lone ``-jN`` typed right before it.
+            listed (bool): it continues an ``-o`` list's run of operands.
         """
-        text = value if isinstance(value, str) else ""
-        if name == "j" and spelled:
-            is_j2 = text == "2"
-            self.joption_count[is_j2] += 1
-            return (
-                _Status.MIGHT_BE_J2_ARG if is_j2 else _Status.MIGHT_BE_J1_ARG
-            )
-        if name == "o" and text != "auto":
-            self.outlist.extend(_field_list(text))
-            return _Status.MIGHT_BE_O_ARG
+        position = self.seen
+        self.seen += 1
+        if position < len(self.words):
+            word = self.words[position]
+        if len(self.names) == 2:
+            taken = next((n for n in self.names if n.lone or n.listed), None)
+            if taken is None:
+                raise extra_operand_error(CommandName.JOIN, word)
+            self.names.remove(taken)
+            if taken.lone is not None:
+                taken.lone.claimed = True
+                self.set_key(taken.lone.file - 1, _field_index(taken.word))
+            else:
+                self.add_items(taken.word)
+        self.names.append(_Operand(position, word, lone, listed))
+
+    def option(self, name: str, value: FlagValue) -> None:
+        if value is False:
+            return
+        text = "" if value is True else str(value)
         if name in ("a", "v"):
-            if name == "v":
-                self.pairables = False
-            self.unpairables[_file_number(text) - 1] = True
+            self.unpaired[_file_number(text) - 1] = True
+            self.paired = self.paired and name == "a"
         elif name == "e":
-            raw = _raw(text)
-            if self.empty_filler is not None and self.empty_filler != raw:
-                raise UsageError(
-                    "join: conflicting empty-field replacement strings", 1
-                )
-            self.empty_filler = raw
-        elif name == "args_1":
-            self.field1 = _set_join_field(self.field1, _join_field(text))
-        elif name == "2":
-            self.field2 = _set_join_field(self.field2, _join_field(text))
+            filler = encode_text(text)
+            if self.filler is not None and self.filler != filler:
+                raise _refusal("conflicting empty-field replacement strings")
+            self.filler = filler
+        elif name in ("args_1", "2"):
+            self.set_key(0 if name == "args_1" else 1, _field_index(text))
         elif name == "j":
-            self.field1 = _set_join_field(self.field1, _join_field(text))
-            self.field2 = _set_join_field(self.field2, self.field1)
+            index = _field_index(text)
+            self.set_key(0, index)
+            self.set_key(1, index)
         elif name == "o":
-            self.autoformat = True
+            self.add_columns(text)
         elif name == "t":
-            self.set_tab(text)
+            self.set_delimiter(text)
         elif name == "ignore_case":
-            self.ignore_case = True
+            self.fold_case = True
         elif name == "zero_terminated":
-            self.zero = True
-        elif name == "check_order":
-            self.check_order = CheckOrder.ENABLED
-        elif name == "nocheck_order":
-            self.check_order = CheckOrder.DISABLED
+            self.terminator = record_separator(True)
+        elif name in ("check_order", "nocheck_order"):
+            self.order = (
+                OrderCheck.FAIL if name == "check_order" else OrderCheck.OFF
+            )
         elif name == "header":
             self.header = True
-        return _Status.MUST_BE_OPERAND
 
-    def add_file(self, index: int, word: str, status: _Status) -> _Status:
-        """join.c's add_file_name: file an operand, taking an earlier one
-        as an option's value when a third arrives, and say what the next
-        operand may be.
+    def add_columns(self, text: str) -> None:
+        if text == "auto":
+            self.auto_columns = True
+        else:
+            self.add_items(text)
+
+    def add_items(self, text: str) -> None:
+        # One separator may close the list (`-o '1.1,'`); any other empty
+        # item is refused.
+        items = COLUMN_BREAK.split(text)
+        if len(items) > 1 and items[-1] == "":
+            items.pop()
+        self.columns.extend(_column(item) for item in items)
+
+    def set_delimiter(self, text: str) -> None:
+        # `-t ''` keeps records whole but leaves the output separator as
+        # it was; `\0` is NUL; any other value must be one byte.
+        raw = encode_text(text)
+        if raw == b"":
+            byte = WHOLE_RECORD
+        elif raw == b"\\0":
+            byte = b"\0"
+        elif len(raw) == 1:
+            byte = raw
+        else:
+            raise _refusal(f"multi-character tab '{quote_text(text)}'")
+        if self.delimiter is not None and self.delimiter != byte:
+            raise _refusal("incompatible tabs")
+        self.delimiter = byte
+        if raw:
+            self.separator = byte
+
+    def finish(self, argv: Sequence[str]) -> JoinFlags:
+        """Check the operands, then apply the lone ``-jN`` words left.
+
+        A lone ``-jN`` whose operand stayed a file name is ``-j N``, and
+        GNU 9.7 applies those after every other option, every ``-j1``
+        before every ``-j2``: `join -j2 a -j1 b` is refused as
+        "incompatible join fields 0, 1".
 
         Args:
-            index (int): the operand's position among the operands.
-            word (str): the operand as typed.
-            status (_Status): what the option before it says it may be.
+            argv (Sequence[str]): the line's words after ``join``.
         """
-        if len(self.files) == 2:
-            op0 = self.files[0].status is _Status.MUST_BE_OPERAND
-            taken = self.files[op0]
-            if taken.status is _Status.MUST_BE_OPERAND:
-                raise extra_operand_error(CommandName.JOIN, word)
-            if taken.status is _Status.MIGHT_BE_J1_ARG:
-                self.joption_count[0] -= 1
-                self.field1 = _set_join_field(
-                    self.field1, _join_field(taken.word)
-                )
-            elif taken.status is _Status.MIGHT_BE_J2_ARG:
-                self.joption_count[1] -= 1
-                self.field2 = _set_join_field(
-                    self.field2, _join_field(taken.word)
-                )
-            else:
-                self.outlist.extend(_field_list(taken.word))
-            del self.files[op0]
-        self.files.append(_Filed(index, word, status))
-        if status is _Status.MIGHT_BE_O_ARG:
-            return _Status.MIGHT_BE_O_ARG
-        return _Status.MUST_BE_OPERAND
-
-    def settle_j(self) -> None:
-        """A ``-j1`` or ``-j2`` no operand was taken for is ``-j 1`` or
-        ``-j 2``."""
-        for which in (0, 1):
-            if self.joption_count[which]:
-                self.field1 = _set_join_field(self.field1, which)
-                self.field2 = _set_join_field(self.field2, which)
-
-    def freeze(self) -> JoinFlags:
-        separator = (
-            self.tab
-            if self.tab is not None
-            and (self.tab != WHOLE_LINE or self.literal_tab)
-            else b" "
+        if len(self.names) < 2 and (self.seen or argv):
+            last = self.names[-1].word if self.names else None
+            raise missing_operand_error(CommandName.JOIN, last, argv)
+        for number in (1, 2):
+            if any(j.file == number and not j.claimed for j in self.lone):
+                self.set_key(0, number - 1)
+                self.set_key(1, number - 1)
+        files = (
+            (self.names[0].position, self.names[1].position)
+            if len(self.names) == 2
+            else (0, 1)
         )
+        first, second = (0 if key is None else key for key in self.keys)
         return JoinFlags(
-            field1=self.field1 or 0,
-            field2=self.field2 or 0,
-            tab=self.tab,
-            output_separator=separator,
-            unpairables1=self.unpairables[0],
-            unpairables2=self.unpairables[1],
-            pairables=self.pairables,
-            empty_filler=self.empty_filler,
-            outlist=tuple(self.outlist),
-            autoformat=self.autoformat,
-            ignore_case=self.ignore_case,
-            eol=record_separator(self.zero),
-            check_order=self.check_order,
+            keys=(first, second),
+            unpaired=(self.unpaired[0], self.unpaired[1]),
+            paired=self.paired,
+            filler=self.filler,
+            columns=tuple(self.columns),
+            auto_columns=self.auto_columns,
+            delimiter=self.delimiter,
+            separator=self.separator,
+            fold_case=self.fold_case,
+            terminator=self.terminator,
+            order=self.order,
             header=self.header,
-            files=(
-                (self.files[0].index, self.files[1].index)
-                if len(self.files) == 2
-                else (0, 1)
-            ),
+            files=files,
         )
 
 
 def parse_flags(
     flags: Mapping[str, FlagValue],
-    operands: Sequence[str] | None = None,
+    operands: Sequence[str] = (),
     argv: Sequence[str] = (),
 ) -> JoinFlags:
-    """Run join.c's option loop over the occurrences in typed order.
+    """Read join's options and operands in the order the line typed them.
 
-    Each option takes effect where it was typed, so ``-a1 -a2`` asks for
-    both files, the later of ``--check-order`` and ``--nocheck-order``
-    wins, and a second ``-1``, ``-t`` or ``-e`` that disagrees with the
-    first is GNU's refusal. The operands are read there too, as join's
-    RETURN_IN_ORDER getopt hands them over: a third one is refused where
-    it stands, or turns an earlier one into the value of an obsolete
-    ``-j1 FIELD``, ``-j2 FIELD`` or ``-o LIST...``. A glob's matches
-    stand where it was typed once ``spread_operands`` has put them on the
-    tape. Operands the tape does not place, from a call that never went
-    through the shell, follow the options, as after ``--``.
+    GNU join meets its options and operands in one pass, so the first
+    problem left to right is the one reported: `join a b c -a 3` names
+    the extra operand, `join -a 3 a b c` the file number. A ``-j1`` or
+    ``-j2`` typed as one word and followed at once by an operand may be
+    the obsolete ``-j1 FIELD``, and the operands right after an ``-o``
+    list may be more of it: such an operand is taken as the value only
+    when a third operand needs the room (`join -j1 2 a b`), and stays a
+    file name otherwise (`join -j1 a b` is `join -j 1 a b`).
 
     Args:
-        flags (Mapping[str, FlagValue]): flags parsed against join's spec.
-        operands (Sequence[str] | None): the operands, or None to read the
-            options alone.
-        argv (Sequence[str]): the line's words, for the usage error.
+        flags (Mapping[str, FlagValue]): the parsed flags and their tape.
+        operands (Sequence[str]): the operands as typed, in order; when
+            the tape places none, they are read after every option.
+        argv (Sequence[str]): the line's words after ``join``, which the
+            missing-operand line names the last of.
     """
-    options = _Options()
-    words = list(operands or ())
-    tape = FlagView(flags, spec=SPECS["join"]).occurrences(
-        *OPTIONS, OPERAND, SPELLED
+    reading = _Reading(operands)
+    spelled: str | None = None
+    fresh: _LoneJ | None = None
+    listing = False
+    tape = FlagView(flags, SPECS[CommandName.JOIN]).occurrences(
+        OPERAND, SPELLED, *OPTION_DESTS
     )
-    placed = [value for name, value in tape if name == OPERAND]
-    if len(placed) != len(words):
-        tape = [(name, value) for name, value in tape if name != OPERAND]
-    status = _Status.MUST_BE_OPERAND
-    spelled = after_dashes = False
-    index = 0
     for name, value in tape:
+        after_word, spelled = spelled, None
+        after_lone, fresh = fresh, None
+        after_list, listing = listing, False
         if name == SPELLED:
-            after_dashes = after_dashes or value == "--"
-            spelled = value != "--"
+            spelled = str(value)
         elif name == OPERAND:
-            if after_dashes:
-                options.add_file(index, words[index], _Status.MUST_BE_OPERAND)
-            else:
-                status = options.add_file(index, words[index], status)
-            index += 1
+            reading.operand(str(value), after_lone, after_list)
+            listing = after_list
+        elif name == "j" and after_word in LONE_J_WORDS:
+            fresh = _LoneJ(LONE_J_WORDS[after_word])
+            reading.lone.append(fresh)
         else:
-            status = options.apply(name, value, spelled)
-            spelled = False
-    for rest in range(index, len(words)):
-        options.add_file(rest, words[rest], _Status.MUST_BE_OPERAND)
-    if operands is not None and len(options.files) < 2:
-        raise missing_operand_error(
-            CommandName.JOIN,
-            options.files[-1].word if options.files else None,
-            argv,
-        )
-    options.settle_j()
-    return options.freeze()
-
-
-@dataclass(frozen=True, slots=True)
-class _Line:
-    record: bytes
-    fields: tuple[bytes, ...]
-    key: bytes
-
-
-BLANK = _Line(b"", (), b"")
-
-
-def _fields(record: bytes, tab: bytes | None) -> tuple[bytes, ...]:
-    if not record:
-        return ()
-    if tab is None:
-        return tuple(FIELD_RUN.findall(record))
-    if tab == WHOLE_LINE:
-        return (record,)
-    return tuple(record.split(tab))
-
-
-def _keycmp(left: bytes, right: bytes) -> int:
-    if not left:
-        return 0 if not right else -1
-    if not right:
-        return 1
-    return (left > right) - (left < right)
-
-
-class _Merge:
-    """join.c's ``join``: a merge of two inputs read one line at a time.
-
-    Disorder is diagnosed as each line is read, against the previous line
-    of the same file: always under --check-order, which stops the run
-    where it stands, and by default only once an unpairable line has been
-    seen, once per file. Both are why the order check is read-driven
-    rather than a property of the whole input.
-
-    Args:
-        flags (JoinFlags): the parsed options.
-        names (tuple[bytes, bytes]): each operand as typed.
-        inputs (tuple[AsyncLineIterator, AsyncLineIterator]): each file's records.
-        paths (tuple[PathSpec, PathSpec]): each operand, for a failed read.
-    """
-
-    def __init__(
-        self,
-        flags: JoinFlags,
-        names: tuple[bytes, bytes],
-        inputs: tuple[AsyncLineIterator, AsyncLineIterator],
-        paths: tuple[PathSpec, PathSpec],
-    ) -> None:
-        self.flags = flags
-        self.names = names
-        self.inputs = inputs
-        self.paths = paths
-        self.fields = (flags.field1, flags.field2)
-        self.read = [0, 0]
-        self.previous: list[_Line | None] = [None, None]
-        self.warned = [False, False]
-        self.seen_unpairable = False
-        self.fatal = False
-        self.autocount = [0, 0]
-        self.err: list[bytes] = []
-
-    async def get_line(self, which: int) -> _Line | None:
-        if self.fatal:
-            return None
-        reader = self.inputs[which]
-        try:
-            record = await reader.readline(self.flags.eol)
-        except FS_ERRORS as exc:
-            path = self.paths[which]
-            self.err.append(
-                fs_error_line("join", path, exc).encode()
-                if never_opened(reader, path, exc)
-                else f"join: read error: {fs_strerror(exc) or exc}\n".encode()
-            )
-            self.fatal = True
-            return None
-        if record is None:
-            return None
-        self.read[which] += 1
-        fields = _fields(record, self.flags.tab)
-        index = self.fields[which]
-        key = fields[index] if index < len(fields) else b""
-        line = _Line(
-            record,
-            fields,
-            key.translate(ASCII_UPPER) if self.flags.ignore_case else key,
-        )
-        previous = self.previous[which]
-        self.previous[which] = line
-        if previous is not None and self.check_order(previous, line, which):
-            return None
-        return line
-
-    def check_order(self, previous: _Line, line: _Line, which: int) -> bool:
-        """Diagnose LINE against PREVIOUS; whether the run stops here.
-
-        Args:
-            previous (_Line): the line read before it from the same file.
-            line (_Line): the line just read.
-            which (int): 0 for file 1, 1 for file 2.
-        """
-        mode = self.flags.check_order
-        if mode is CheckOrder.DISABLED or self.warned[which]:
-            return False
-        if mode is CheckOrder.DEFAULT and not self.seen_unpairable:
-            return False
-        if _keycmp(previous.key, line.key) <= 0:
-            return False
-        text = line.record.split(b"\0", 1)[0]
-        self.err.append(
-            b"join: "
-            + self.names[which]
-            + b":"
-            + str(self.read[which]).encode()
-            + b": is not sorted: "
-            + text
-            + b"\n"
-        )
-        if mode is CheckOrder.ENABLED:
-            self.fatal = True
-        else:
-            self.warned[which] = True
-        return self.fatal
-
-    def prfield(self, index: int, line: _Line) -> bytes:
-        value = line.fields[index] if index < len(line.fields) else b""
-        if value or self.flags.empty_filler is None:
-            return value
-        return self.flags.empty_filler
-
-    def prfields(self, line: _Line, which: int) -> list[bytes]:
-        count = (
-            self.autocount[which]
-            if self.flags.autoformat
-            else len(line.fields)
-        )
-        return [
-            self.prfield(i, line)
-            for i in range(count)
-            if i != self.fields[which]
-        ]
-
-    def emit(self, line1: _Line, line2: _Line) -> bytes:
-        if self.fatal:
-            return b""
-        lines = (line1, line2)
-        if line1 is BLANK:
-            key = self.prfield(self.fields[1], line2)
-        else:
-            key = self.prfield(self.fields[0], line1)
-        if self.flags.outlist:
-            parts = [
-                self.prfield(index, lines[file - 1]) if file else key
-                for file, index in self.flags.outlist
-            ]
-        else:
-            parts = [key, *self.prfields(line1, 0), *self.prfields(line2, 1)]
-        return self.flags.output_separator.join(parts) + self.flags.eol
-
-    async def first(self, which: int) -> list[_Line]:
-        line = await self.get_line(which)
-        return [] if line is None else [line]
-
-    async def run_of(self, which: int, run: list[_Line], other: _Line) -> bool:
-        """Read file WHICH while it matches OTHER; whether it hit EOF.
-
-        Args:
-            which (int): 0 for file 1, 1 for file 2.
-            run (list[_Line]): the lines read so far, extended in place.
-            other (_Line): the other file's current line.
-        """
-        while True:
-            line = await self.get_line(which)
-            if line is None:
-                return True
-            run.append(line)
-            if _keycmp(line.key, other.key) != 0:
-                return False
-
-    async def tail(
-        self, which: int, run: list[_Line]
-    ) -> AsyncGenerator[bytes, None]:
-        """Finish the file left over once the other one ended.
-
-        Its lines are unpairable, printed under -a or -v, and still read
-        for the order check unless --nocheck-order, though they never
-        count as unpairable for the default check themselves.
-
-        Args:
-            which (int): 0 for file 1, 1 for file 2.
-            run (list[_Line]): the file's current line, or nothing.
-        """
-        unpairables = (self.flags.unpairables1, self.flags.unpairables2)[which]
-        checktail = (
-            self.flags.check_order is not CheckOrder.DISABLED
-            and not all(self.warned)
-        )
-        if not run or not (unpairables or checktail):
-            return
-        line: _Line | None = run[0]
-        while line is not None:
-            if unpairables:
-                yield self.emit(
-                    *((line, BLANK) if which == 0 else (BLANK, line))
-                )
-            line = (
-                None
-                if self.warned[which] and not unpairables
-                else await self.get_line(which)
-            )
-
-    async def run(self) -> AsyncGenerator[bytes, None]:
-        seq1 = await self.first(0)
-        seq2 = await self.first(1)
-        if self.flags.autoformat:
-            self.autocount = [
-                len(seq[0].fields) if seq else 0 for seq in (seq1, seq2)
-            ]
-        if self.flags.header and (seq1 or seq2):
-            yield self.emit(
-                seq1[0] if seq1 else BLANK, seq2[0] if seq2 else BLANK
-            )
-            self.previous = [None, None]
-            seq1 = await self.first(0) if seq1 else seq1
-            seq2 = await self.first(1) if seq2 else seq2
-        while seq1 and seq2:
-            diff = _keycmp(seq1[0].key, seq2[0].key)
-            if diff < 0:
-                if self.flags.unpairables1:
-                    yield self.emit(seq1[0], BLANK)
-                seq1 = await self.first(0)
-                self.seen_unpairable = True
-                continue
-            if diff > 0:
-                if self.flags.unpairables2:
-                    yield self.emit(BLANK, seq2[0])
-                seq2 = await self.first(1)
-                self.seen_unpairable = True
-                continue
-            eof1 = await self.run_of(0, seq1, seq2[0])
-            eof2 = await self.run_of(1, seq2, seq1[0])
-            if self.fatal:
-                return
-            if self.flags.pairables:
-                for line1 in seq1 if eof1 else seq1[:-1]:
-                    for line2 in seq2 if eof2 else seq2[:-1]:
-                        yield self.emit(line1, line2)
-            seq1 = [] if eof1 else seq1[-1:]
-            seq2 = [] if eof2 else seq2[-1:]
-        if self.fatal:
-            return
-        for which, run in ((0, seq1), (1, seq2)):
-            async with aclosing(self.tail(which, run)) as tail:
-                async for chunk in tail:
-                    yield chunk
-
-    def result(self) -> IOResult:
-        stderr = b"".join(self.err)
-        if not self.fatal and any(self.warned):
-            stderr += b"join: input is not in sorted order\n"
-        return IOResult(stderr=stderr or None, exit_code=1 if stderr else 0)
+            reading.option(name, value)
+            listing = name == "o" and value != "auto"
+    if reading.seen == 0:
+        for word in operands:
+            reading.operand(word, None, False)
+    return reading.finish(argv)
 
 
 def _operand_word(path: PathSpec) -> str:
-    return path.raw_path or path.virtual
+    return path.raw_path
 
 
 async def join(
@@ -734,27 +419,111 @@ async def join(
         )
     read = stdin_stream(read_stream, stdin)
     readers = (AsyncLineIterator(read(file1)), AsyncLineIterator(read(file2)))
-    merge = _Merge(
-        flags,
-        (_raw(_operand_word(file1)), _raw(_operand_word(file2))),
-        readers,
-        (file1, file2),
-    )
     io = IOResult()
-    return _join_stream(merge, io), io
+    return _join_stream(flags, readers, (file1, file2), io), io
+
+
+async def _reader_chunks(
+    reader: AsyncLineIterator,
+) -> AsyncGenerator[bytes, None]:
+    while (chunk := await reader.read_chunk()) is not None:
+        yield chunk
+
+
+async def _join_stderr(
+    pieces: list[bytes], count: int
+) -> AsyncGenerator[bytes, None]:
+    for index in range(count):
+        yield pieces[index]
 
 
 async def _join_stream(
-    merge: _Merge, io: IOResult
+    flags: JoinFlags,
+    readers: tuple[AsyncLineIterator, AsyncLineIterator],
+    paths: tuple[PathSpec, PathSpec],
+    io: IOResult,
 ) -> AsyncGenerator[bytes, None]:
+    stream = open_stream(
+        "join",
+        {
+            "keys": list(flags.keys),
+            "unpaired": list(flags.unpaired),
+            "paired": flags.paired,
+            "filler": byte_view(flags.filler)
+            if flags.filler is not None
+            else None,
+            "columns": [list(column) for column in flags.columns],
+            "auto_columns": flags.auto_columns,
+            "delimiter": byte_view(flags.delimiter)
+            if flags.delimiter is not None
+            else None,
+            "separator": byte_view(flags.separator),
+            "fold_case": flags.fold_case,
+            "terminator": flags.terminator[0],
+            "order": flags.order.value,
+            "header": flags.header,
+            "names": [byte_view(path.raw_path) for path in paths],
+        },
+    )
+    sources = [chunks(_reader_chunks(reader)) for reader in readers]
+    budget = YieldBudget()
+    errors: list[bytes] = []
+    io.stderr = b""
+
+    def record_result() -> None:
+        if error := stream.take_stderr():
+            errors.append(error)
+            io.stderr = _join_stderr(errors, len(errors))
+        io.exit_code = max(io.exit_code, stream.status())
+
+    def fail(which: int, exc: BaseException) -> None:
+        errors.append(
+            encode_text(
+                fs_error_line(CommandName.JOIN, paths[which], exc)
+                if never_opened(readers[which], paths[which], exc)
+                else f"join: read error: {fs_strerror(exc) or exc}\n"
+            )
+        )
+        io.stderr, io.exit_code = _join_stderr(errors, len(errors)), 1
+
     try:
-        async with aclosing(merge.run()) as source:
-            async for chunk in source:
-                yield chunk
+        unreadable: tuple[int, BaseException] | None = None
+        for which, reader in enumerate(readers):
+            try:
+                await reader.peek()
+            except FS_ERRORS as exc:
+                if never_opened(reader, paths[which], exc):
+                    fail(which, exc)
+                    return
+                unreadable = unreadable or (which, exc)
+        if unreadable is not None:
+            fail(*unreadable)
+            return
+        while True:
+            await budget.run()
+            if stream.busy():
+                output = stream.drain()
+            elif (requested := stream.wants()) is not None:
+                try:
+                    chunk = await anext(sources[requested])
+                except StopAsyncIteration:
+                    output = stream.end_input(requested)
+                except FS_ERRORS as exc:
+                    fail(requested, exc)
+                    return
+                else:
+                    output = stream.feed_input(requested, chunk)
+            else:
+                break
+            record_result()
+            if output:
+                yield output
     finally:
-        result = merge.result()
-        io.exit_code, io.stderr = result.exit_code, result.stderr
-        for reader in merge.inputs:
+        record_result()
+        await close_stream(stream)
+        for source in sources:
+            await source.aclose()
+        for reader in readers:
             await reader.discard()
 
 
@@ -793,4 +562,4 @@ async def join_generic(
     )
 
 
-__all__ = ["JoinFlags", "join", "join_generic", "parse_flags"]
+__all__ = ["JoinFlags", "OrderCheck", "join", "join_generic", "parse_flags"]

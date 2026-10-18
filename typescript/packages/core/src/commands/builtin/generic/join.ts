@@ -12,8 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chunks } from '../../../io/cooperative.ts'
+import { YieldBudget } from '../../../io/yield_budget.ts'
+import { abortable } from '../../../utils/abort.ts'
+import { closeStream, openStream } from '../../../rs/stream.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
-import { INTMAX_MIN } from '../constants.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { OPERAND, SPELLED } from '../../spec/constants.ts'
 import { FlagView, spreadOperands } from '../../spec/flag_view.ts'
@@ -24,18 +27,22 @@ import { UsageError } from '../../errors.ts'
 import { quoteText } from '../../quote.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 import { CommandName, type ParsedFlagValue } from '../../spec/types.ts'
-import { byteView, encodeText, fromByteView } from '../../../shell/bytes.ts'
+import { byteView } from '../../../shell/bytes.ts'
+import { unsignedDecimal } from '../utils/strtol.ts'
 import { neverOpened, stdinStream } from '../utils/stream.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 
-const IDX_MAX = (1n << 63n) - 1n
-const WHOLE_LINE = '\n'
-const FIELD_RUN = /[^ \t\n]+/g
-const INTEGER = /^[ \t\n\v\f\r]*([+-]?[0-9]+)$/
-const OUTLIST_SEPARATOR = /[, \t]/
-const ASCII_LOWER = /[a-z]+/g
-const OPTIONS = [
+// The largest field number join keeps; GNU 9.7 reads any larger one as this
+// one, so `-1 99999999999999999999 -1 1` is refused as "incompatible join
+// fields 9223372036854775806, 0".
+const LARGEST_FIELD = (1n << 63n) - 1n
+// The -t value that keeps each record whole: both `-t ''` and `-t $'\n'`
+// select it, under -z as well, and they never conflict with each other.
+const WHOLE_RECORD = '\n'
+const COLUMN_BREAK = /[, \t]/
+const JOIN_COLUMN: Column = [0, 0]
+const OPTION_DESTS = [
   'a',
   'v',
   'e',
@@ -50,529 +57,331 @@ const OPTIONS = [
   'nocheck_order',
   'header',
 ]
-
-/** join.c's `check_input_order`: whether disorder is diagnosed. */
-export enum CheckOrder {
-  DEFAULT = 'default',
-  ENABLED = 'enabled',
-  DISABLED = 'disabled',
-}
+const LONE_J_WORDS: Readonly<Record<string, number>> = { '-j1': 1, '-j2': 2 }
 
 /**
- * join's options once GNU's option loop has run, in join.c's terms. Every
- * byte-valued field is a byte view: one character per byte, so a string
- * comparison is join.c's memcmp. `files` says which operands are FILE1 and
- * FILE2, since the obsolete `-j1 FIELD`, `-j2 FIELD` and `-o LIST...` forms
- * take operands as option values. Mirrors JoinFlags in join.py.
+ * What join does with a line whose key sorts before the one above it. WARN,
+ * the default, names the first such line of each file, but only once some
+ * line has gone unpaired, then finishes and exits 1 under `input is not in
+ * sorted order`. FAIL (`--check-order`) names the first one and stops there.
+ * OFF (`--nocheck-order`) never looks. Mirrors OrderCheck in join.py.
+ */
+export enum OrderCheck {
+  WARN = 'warn',
+  FAIL = 'fail',
+  OFF = 'off',
+}
+
+/** A -o item: a file number and a field counted from 0; file 0 is the join field. */
+export type Column = readonly [number, number]
+
+/**
+ * join's options as one line set them; every byte string is a byte view, one
+ * character per byte. Mirrors JoinFlags in join.py.
  */
 export interface JoinFlags {
-  readonly field1: number
-  readonly field2: number
-  readonly tab: string | null
-  readonly outputSeparator: string
-  readonly unpairables1: boolean
-  readonly unpairables2: boolean
-  readonly pairables: boolean
-  readonly emptyFiller: string | null
-  readonly outlist: readonly (readonly [number, number])[]
-  readonly autoformat: boolean
-  readonly ignoreCase: boolean
-  readonly eol: string
-  readonly checkOrder: CheckOrder
-  readonly header: boolean
-  readonly files: readonly [number, number]
+  /** Each file's join field, counted from 0. */
+  keys: readonly [number, number]
+  /** Whether each file's unpairable lines print (-a, -v). */
+  unpaired: readonly [boolean, boolean]
+  /** Whether joined lines print; any -v clears it. */
+  paired: boolean
+  /** The -e text for an empty field. */
+  filler: string | null
+  /** The -o list. */
+  columns: readonly Column[]
+  /** -o auto. */
+  autoColumns: boolean
+  /** The -t byte; null parts fields at runs of blanks, WHOLE_RECORD keeps each record whole. */
+  delimiter: string | null
+  /** What output fields are joined with. */
+  separator: string
+  /** -i. */
+  foldCase: boolean
+  /** What ends a record, NUL under -z. */
+  terminator: string
+  /** What an unsorted line does. */
+  order: OrderCheck
+  /** --header. */
+  header: boolean
+  /** The operand positions of FILE1 and FILE2. */
+  files: readonly [number, number]
 }
 
-/** join.c's operand_status: what a filed operand may turn out to be. */
-enum Status {
-  MUST_BE_OPERAND = 'operand',
-  MIGHT_BE_J1_ARG = 'j1',
-  MIGHT_BE_J2_ARG = 'j2',
-  MIGHT_BE_O_ARG = 'o',
+function refusal(message: string): UsageError {
+  return new UsageError(`join: ${message}`, 1)
 }
 
-interface Filed {
-  readonly index: number
-  readonly word: string
-  readonly status: Status
-}
-
-// `xstrtoimax` with no valid suffix: the value, or null if invalid.
-function strtoimax(text: string): bigint | null {
-  const match = INTEGER.exec(text)
-  return match === null ? null : BigInt(match[1] ?? '')
-}
-
-// join.c's `string_to_join_field`: a 1-based field, made 0-based.
-function joinField(text: string): bigint {
-  let value = strtoimax(text)
-  if (value !== null && (value < INTMAX_MIN || value > IDX_MAX)) value = IDX_MAX
-  if (value === null || value <= 0n) {
-    throw new UsageError(`join: invalid field number: '${quoteText(text)}'`, 1)
+/**
+ * A field number as join reads one, counted from 0: C blanks, one plus sign
+ * and decimal digits, nothing after them, and never zero. `-1 ' 2'` and
+ * `-1 +2` are field 2, `-1 '2 '` and `-1 0` are refused.
+ */
+function fieldIndex(text: string): bigint {
+  const value = unsignedDecimal(text)
+  if (value === null || value === 0n) {
+    throw refusal(`invalid field number: '${quoteText(text)}'`)
   }
-  return value - 1n
+  return (value < LARGEST_FIELD ? value : LARGEST_FIELD) - 1n
 }
 
-// The FILENUM of `-a` or `-v`: 1 or 2.
-function fileNumber(text: string): 1 | 2 {
-  const value = strtoimax(text)
-  if (value === 1n) return 1
-  if (value === 2n) return 2
-  throw new UsageError(`join: invalid file number: '${quoteText(text)}'`, 1)
+function fileNumber(text: string): number {
+  const value = unsignedDecimal(text)
+  if (value !== 1n && value !== 2n) throw refusal(`invalid file number: '${quoteText(text)}'`)
+  return Number(value)
 }
 
-// join.c's `decode_field_spec`: one `-o` item as [file, field].
-function fieldSpec(spec: string): [number, bigint] {
-  const head = spec.slice(0, 1)
-  if (head === '0') {
-    if (spec.length > 1) {
-      throw new UsageError(`join: invalid field specifier: '${quoteText(spec)}'`, 1)
-    }
-    return [0, 0n]
+/**
+ * One -o item: `0` for the join field, else `FILE.FIELD`. GNU 9.7 sorts a bad
+ * item by its first byte: one led by 0, 1 or 2 is an "invalid field
+ * specifier" (`01.1`, `1`, `2x`), any other an "invalid file number in field
+ * spec" (`3.1`, `.1`, `auto,1.1`), and the text after `1.` or `2.` must be a
+ * field number.
+ */
+function column(item: string): Column {
+  if (item === '0') return JOIN_COLUMN
+  const lead = item.slice(0, 1)
+  if ((lead === '1' || lead === '2') && item.slice(1, 2) === '.') {
+    return [Number(lead), Number(fieldIndex(item.slice(2)))]
   }
-  if (head === '1' || head === '2') {
-    if (spec.slice(1, 2) !== '.') {
-      throw new UsageError(`join: invalid field specifier: '${quoteText(spec)}'`, 1)
-    }
-    return [Number(head), joinField(spec.slice(2))]
+  if (lead === '0' || lead === '1' || lead === '2') {
+    throw refusal(`invalid field specifier: '${quoteText(item)}'`)
   }
-  throw new UsageError(`join: invalid file number in field spec: '${quoteText(spec)}'`, 1)
+  throw refusal(`invalid file number in field spec: '${quoteText(item)}'`)
 }
 
-// join.c's `add_field_list`: items split at a comma or blank. A separator
-// that ends the list closes it, which is why `-o 1.1,` is accepted while
-// `-o 1.1,,2.1` names an empty item.
-function fieldList(text: string): [number, bigint][] {
-  const specs: [number, bigint][] = []
-  let rest = text
-  for (;;) {
-    const match = OUTLIST_SEPARATOR.exec(rest)
-    specs.push(fieldSpec(match === null ? rest : rest.slice(0, match.index)))
-    if (match === null || match.index + 1 === rest.length) return specs
-    rest = rest.slice(match.index + 1)
-  }
+interface LoneJ {
+  file: number
+  claimed: boolean
 }
 
-function setJoinField(current: bigint | null, value: bigint): bigint {
-  if (current !== null && current !== value) {
-    throw new UsageError(`join: incompatible join fields ${String(current)}, ${String(value)}`, 1)
-  }
-  return value
+interface Operand {
+  position: number
+  word: string
+  lone: LoneJ | null
+  listed: boolean
 }
 
-// The state join.c's option loop builds, before it is frozen.
-class Options {
-  field1: bigint | null = null
-  field2: bigint | null = null
-  tab: string | null = null
-  literalTab = false
-  unpairables: [boolean, boolean] = [false, false]
-  pairables = true
-  emptyFiller: string | null = null
-  outlist: [number, bigint][] = []
-  autoformat = false
-  ignoreCase = false
-  zero = false
-  checkOrder = CheckOrder.DEFAULT
+class Reading {
+  seen = 0
+  readonly names: Operand[] = []
+  readonly lone: LoneJ[] = []
+  readonly keys: (bigint | null)[] = [null, null]
+  readonly unpaired: [boolean, boolean] = [false, false]
+  paired = true
+  filler: string | null = null
+  readonly columns: Column[] = []
+  autoColumns = false
+  delimiter: string | null = null
+  separator = ' '
+  foldCase = false
+  terminator = '\n'
+  order = OrderCheck.WARN
   header = false
-  files: Filed[] = []
-  joptionCount: [number, number] = [0, 0]
 
-  setTab(text: string): void {
-    const raw = byteView(text)
-    let tab = raw === '' ? WHOLE_LINE : raw
-    if (raw.length > 1) {
-      if (raw !== '\\0') {
-        throw new UsageError(`join: multi-character tab '${quoteText(text)}'`, 1)
-      }
-      tab = '\0'
+  constructor(private readonly words: readonly string[]) {}
+
+  setKey(side: number, index: bigint): void {
+    const held = this.keys[side] ?? null
+    if (held !== null && held !== index) {
+      throw refusal(`incompatible join fields ${String(held)}, ${String(index)}`)
     }
-    if (this.tab !== null && this.tab !== tab) throw new UsageError('join: incompatible tabs', 1)
-    this.tab = tab
-    this.literalTab ||= raw !== ''
+    this.keys[side] = index
   }
 
-  // Take one option, and say what the next operand may be. `spelled` is
-  // whether it was typed as a lone `-j1` or `-j2` (SPELLED_WORDS).
-  apply(name: string, value: ParsedFlagValue, spelled: boolean): Status {
-    const text = typeof value === 'string' ? value : ''
-    if (name === 'j' && spelled) {
-      const isJ2 = text === '2'
-      this.joptionCount[isJ2 ? 1 : 0] += 1
-      return isJ2 ? Status.MIGHT_BE_J2_ARG : Status.MIGHT_BE_J1_ARG
-    }
-    if (name === 'o' && text !== 'auto') {
-      this.outlist.push(...fieldList(text))
-      return Status.MIGHT_BE_O_ARG
-    }
-    if (name === 'a' || name === 'v') {
-      if (name === 'v') this.pairables = false
-      this.unpairables[fileNumber(text) - 1] = true
-    } else if (name === 'e') {
-      const raw = byteView(text)
-      if (this.emptyFiller !== null && this.emptyFiller !== raw) {
-        throw new UsageError('join: conflicting empty-field replacement strings', 1)
-      }
-      this.emptyFiller = raw
-    } else if (name === 'args_1') {
-      this.field1 = setJoinField(this.field1, joinField(text))
-    } else if (name === '2') {
-      this.field2 = setJoinField(this.field2, joinField(text))
-    } else if (name === 'j') {
-      const field = setJoinField(this.field1, joinField(text))
-      this.field1 = field
-      this.field2 = setJoinField(this.field2, field)
-    } else if (name === 'o') {
-      this.autoformat = true
-    } else if (name === 't') {
-      this.setTab(text)
-    } else if (name === 'ignore_case') {
-      this.ignoreCase = true
-    } else if (name === 'zero_terminated') {
-      this.zero = true
-    } else if (name === 'check_order') {
-      this.checkOrder = CheckOrder.ENABLED
-    } else if (name === 'nocheck_order') {
-      this.checkOrder = CheckOrder.DISABLED
-    } else if (name === 'header') {
-      this.header = true
-    }
-    return Status.MUST_BE_OPERAND
-  }
-
-  // join.c's add_file_name: file an operand, taking an earlier one as an
-  // option's value when a third arrives, and say what the next operand may be.
-  addFile(index: number, word: string, status: Status): Status {
-    const [first, second] = this.files
-    if (first !== undefined && second !== undefined) {
-      const op0 = first.status === Status.MUST_BE_OPERAND
-      const taken = op0 ? second : first
-      if (taken.status === Status.MUST_BE_OPERAND) {
-        throw extraOperandError(CommandName.JOIN, word)
-      }
-      if (taken.status === Status.MIGHT_BE_J1_ARG) {
-        this.joptionCount[0] -= 1
-        this.field1 = setJoinField(this.field1, joinField(taken.word))
-      } else if (taken.status === Status.MIGHT_BE_J2_ARG) {
-        this.joptionCount[1] -= 1
-        this.field2 = setJoinField(this.field2, joinField(taken.word))
+  /**
+   * File one operand, making room when two are already filed. A third
+   * operand gives the earliest filed one that could be an option's value to
+   * that option: the field number of the lone -jN before it (`join -j1 2 a b`
+   * is `-1 2 a b`), or more of the -o list (`join -o 1.1 2.2 a b` is
+   * `-o 1.1,2.2 a b`), appended where the list then ends. With no such
+   * operand it is an extra one.
+   */
+  operand(typed: string, lone: LoneJ | null, listed: boolean): void {
+    const position = this.seen++
+    const word = this.words[position] ?? typed
+    if (this.names.length === 2) {
+      const at = this.names.findIndex((name) => name.lone !== null || name.listed)
+      const taken = this.names[at]
+      if (taken === undefined) throw extraOperandError(CommandName.JOIN, word)
+      this.names.splice(at, 1)
+      if (taken.lone !== null) {
+        taken.lone.claimed = true
+        this.setKey(taken.lone.file - 1, fieldIndex(taken.word))
       } else {
-        this.outlist.push(...fieldList(taken.word))
-      }
-      this.files.splice(op0 ? 1 : 0, 1)
-    }
-    this.files.push({ index, word, status })
-    return status === Status.MIGHT_BE_O_ARG ? Status.MIGHT_BE_O_ARG : Status.MUST_BE_OPERAND
-  }
-
-  // A `-j1` or `-j2` no operand was taken for is `-j 1` or `-j 2`.
-  settleJ(): void {
-    for (const which of [0, 1] as const) {
-      if (this.joptionCount[which] !== 0) {
-        this.field1 = setJoinField(this.field1, BigInt(which))
-        this.field2 = setJoinField(this.field2, BigInt(which))
+        this.addItems(taken.word)
       }
     }
+    this.names.push({ position, word, lone, listed })
   }
 
-  freeze(): JoinFlags {
-    const separator =
-      this.tab !== null && (this.tab !== WHOLE_LINE || this.literalTab) ? this.tab : ' '
+  option(name: string, value: ParsedFlagValue): void {
+    if (value === false) return
+    const text = value === true ? '' : String(value)
+    switch (name) {
+      case 'a':
+      case 'v':
+        this.unpaired[fileNumber(text) - 1] = true
+        this.paired = this.paired && name === 'a'
+        break
+      case 'e': {
+        const filler = byteView(text)
+        if (this.filler !== null && this.filler !== filler) {
+          throw refusal('conflicting empty-field replacement strings')
+        }
+        this.filler = filler
+        break
+      }
+      case 'args_1':
+      case '2':
+        this.setKey(name === 'args_1' ? 0 : 1, fieldIndex(text))
+        break
+      case 'j': {
+        const index = fieldIndex(text)
+        this.setKey(0, index)
+        this.setKey(1, index)
+        break
+      }
+      case 'o':
+        this.addColumns(text)
+        break
+      case 't':
+        this.setDelimiter(text)
+        break
+      case 'ignore_case':
+        this.foldCase = true
+        break
+      case 'zero_terminated':
+        this.terminator = '\0'
+        break
+      case 'check_order':
+      case 'nocheck_order':
+        this.order = name === 'check_order' ? OrderCheck.FAIL : OrderCheck.OFF
+        break
+      case 'header':
+        this.header = true
+        break
+    }
+  }
+
+  addColumns(text: string): void {
+    if (text === 'auto') this.autoColumns = true
+    else this.addItems(text)
+  }
+
+  addItems(text: string): void {
+    // One separator may close the list (`-o '1.1,'`); any other empty item
+    // is refused.
+    const items = text.split(COLUMN_BREAK)
+    if (items.length > 1 && items.at(-1) === '') items.pop()
+    for (const item of items) this.columns.push(column(item))
+  }
+
+  setDelimiter(text: string): void {
+    // `-t ''` keeps records whole but leaves the output separator as it
+    // was; `\0` is NUL; any other value must be one byte.
+    const raw = byteView(text)
+    let byte: string
+    if (raw === '') byte = WHOLE_RECORD
+    else if (raw === '\\0') byte = '\0'
+    else if (raw.length === 1) byte = raw
+    else throw refusal(`multi-character tab '${quoteText(text)}'`)
+    if (this.delimiter !== null && this.delimiter !== byte) throw refusal('incompatible tabs')
+    this.delimiter = byte
+    if (raw !== '') this.separator = byte
+  }
+
+  /**
+   * Check the operands, then apply the lone -jN words left. A lone -jN whose
+   * operand stayed a file name is `-j N`, and GNU 9.7 applies those after
+   * every other option, every -j1 before every -j2: `join -j2 a -j1 b` is
+   * refused as "incompatible join fields 0, 1".
+   */
+  finish(argv: readonly string[]): JoinFlags {
+    if (this.names.length < 2 && (this.seen > 0 || argv.length > 0)) {
+      throw missingOperandError(CommandName.JOIN, this.names.at(-1)?.word ?? null, argv)
+    }
+    for (const number of [1, 2]) {
+      if (this.lone.some((j) => j.file === number && !j.claimed)) {
+        this.setKey(0, BigInt(number - 1))
+        this.setKey(1, BigInt(number - 1))
+      }
+    }
+    const [one, two] = this.names
     return {
-      field1: Number(this.field1 ?? 0n),
-      field2: Number(this.field2 ?? 0n),
-      tab: this.tab,
-      outputSeparator: separator,
-      unpairables1: this.unpairables[0],
-      unpairables2: this.unpairables[1],
-      pairables: this.pairables,
-      emptyFiller: this.emptyFiller,
-      outlist: this.outlist.map(([file, field]) => [file, Number(field)] as const),
-      autoformat: this.autoformat,
-      ignoreCase: this.ignoreCase,
-      eol: this.zero ? '\0' : '\n',
-      checkOrder: this.checkOrder,
+      keys: [Number(this.keys[0] ?? 0n), Number(this.keys[1] ?? 0n)],
+      unpaired: [this.unpaired[0], this.unpaired[1]],
+      paired: this.paired,
+      filler: this.filler,
+      columns: [...this.columns],
+      autoColumns: this.autoColumns,
+      delimiter: this.delimiter,
+      separator: this.separator,
+      foldCase: this.foldCase,
+      terminator: this.terminator,
+      order: this.order,
       header: this.header,
-      files:
-        this.files[0] !== undefined && this.files[1] !== undefined
-          ? [this.files[0].index, this.files[1].index]
-          : [0, 1],
+      files: one !== undefined && two !== undefined ? [one.position, two.position] : [0, 1],
     }
   }
 }
 
 /**
- * Run join.c's option loop over the occurrences in typed order.
- *
- * Each option takes effect where it was typed, so `-a1 -a2` asks for both
- * files, the later of `--check-order` and `--nocheck-order` wins, and a
- * second `-1`, `-t` or `-e` that disagrees with the first is GNU's
- * refusal. The operands are read there too, as join's RETURN_IN_ORDER getopt
- * hands them over: a third one is refused where it stands, or turns an
- * earlier one into the value of an obsolete `-j1 FIELD`, `-j2 FIELD` or
- * `-o LIST...`. A glob's matches stand where it was typed once
- * `spreadOperands` has put them on the tape. Operands the tape does not
- * place, from a call that never went through the shell, follow the options,
- * as after `--`. `operands` null reads the options alone.
- * Mirrors parse_flags in join.py.
+ * Read join's options and operands in the order the line typed them. GNU join
+ * meets its options and operands in one pass, so the first problem left to
+ * right is the one reported: `join a b c -a 3` names the extra operand,
+ * `join -a 3 a b c` the file number. A `-j1` or `-j2` typed as one word and
+ * followed at once by an operand may be the obsolete `-j1 FIELD`, and the
+ * operands right after an -o list may be more of it: such an operand is taken
+ * as the value only when a third operand needs the room (`join -j1 2 a b`),
+ * and stays a file name otherwise (`join -j1 a b` is `join -j 1 a b`).
+ * `operands` are the operands as typed, read after every option when the
+ * tape places none, and `argv` the line's words after `join`, which the
+ * missing-operand line names the last of. Mirrors parse_flags in join.py.
  */
 export function parseFlags(
   flags: Context['flags'],
-  operands: readonly string[] | null = null,
+  operands: readonly string[] = [],
   argv: readonly string[] = [],
 ): JoinFlags {
-  const options = new Options()
-  const words = operands ?? []
-  let tape = new FlagView(flags, specOf('join')).occurrences(...OPTIONS, OPERAND, SPELLED)
-  if (tape.filter(([name]) => name === OPERAND).length !== words.length) {
-    tape = tape.filter(([name]) => name !== OPERAND)
-  }
-  let status = Status.MUST_BE_OPERAND
-  let spelled = false
-  let afterDashes = false
-  let index = 0
+  const reading = new Reading(operands)
+  let spelled: string | null = null
+  let fresh: LoneJ | null = null
+  let listing = false
+  const tape = new FlagView(flags, specOf(CommandName.JOIN)).occurrences(
+    OPERAND,
+    SPELLED,
+    ...OPTION_DESTS,
+  )
   for (const [name, value] of tape) {
+    const afterWord: string | null = spelled
+    const afterLone: LoneJ | null = fresh
+    const afterList: boolean = listing
+    spelled = null
+    fresh = null
+    listing = false
     if (name === SPELLED) {
-      afterDashes ||= value === '--'
-      spelled = value !== '--'
+      spelled = String(value)
     } else if (name === OPERAND) {
-      const word = words[index] ?? ''
-      if (afterDashes) options.addFile(index, word, Status.MUST_BE_OPERAND)
-      else status = options.addFile(index, word, status)
-      index += 1
+      reading.operand(String(value), afterLone, afterList)
+      listing = afterList
+    } else if (name === 'j' && afterWord !== null && afterWord in LONE_J_WORDS) {
+      fresh = { file: LONE_J_WORDS[afterWord] ?? 1, claimed: false }
+      reading.lone.push(fresh)
     } else {
-      status = options.apply(name, value, spelled)
-      spelled = false
+      reading.option(name, value)
+      listing = name === 'o' && value !== 'auto'
     }
   }
-  for (let rest = index; rest < words.length; rest += 1) {
-    options.addFile(rest, words[rest] ?? '', Status.MUST_BE_OPERAND)
-  }
-  if (operands !== null && options.files.length < 2) {
-    throw missingOperandError(CommandName.JOIN, options.files.at(-1)?.word ?? null, argv)
-  }
-  options.settleJ()
-  return options.freeze()
-}
-
-interface Line {
-  readonly record: string
-  readonly fields: readonly string[]
-  readonly key: string
-}
-
-const BLANK: Line = { record: '', fields: [], key: '' }
-
-function splitFields(record: string, tab: string | null): string[] {
-  if (record === '') return []
-  if (tab === null) return record.match(FIELD_RUN) ?? []
-  if (tab === WHOLE_LINE) return [record]
-  return record.split(tab)
-}
-
-function keycmp(left: string, right: string): number {
-  if (left === '') return right === '' ? 0 : -1
-  if (right === '') return 1
-  return left < right ? -1 : left > right ? 1 : 0
-}
-
-/**
- * join.c's `join`: a merge of two inputs read one line at a time.
- *
- * Disorder is diagnosed as each line is read, against the previous line of
- * the same file: always under --check-order, which stops the run where it
- * stands, and by default only once an unpairable line has been seen, once
- * per file. Both are why the order check is read-driven rather than a
- * property of the whole input. Mirrors _Merge in join.py.
- */
-class Merge {
-  private readonly fields: readonly [number, number]
-  private readonly read: [number, number] = [0, 0]
-  private previous: [Line | null, Line | null] = [null, null]
-  private readonly warned: [boolean, boolean] = [false, false]
-  private seenUnpairable = false
-  private fatal = false
-  private autocount: [number, number] = [0, 0]
-  private readonly err: string[] = []
-
-  constructor(
-    private readonly flags: JoinFlags,
-    private readonly names: readonly [string, string],
-    readonly inputs: readonly [AsyncLineIterator, AsyncLineIterator],
-    private readonly paths: readonly [PathSpec, PathSpec],
-  ) {
-    this.fields = [flags.field1, flags.field2]
-  }
-
-  private async getLine(which: 0 | 1): Promise<Line | null> {
-    if (this.fatal) return null
-    const reader = this.inputs[which]
-    let raw: Uint8Array | null
-    try {
-      raw = await reader.readline(undefined, this.flags.eol.charCodeAt(0))
-    } catch (error) {
-      if (!isFsError(error)) throw error
-      const path = this.paths[which]
-      const line = neverOpened(reader, path, error)
-        ? fsErrorLine('join', path, error)
-        : `join: read error: ${fsStrerror(error) ?? String(error)}\n`
-      this.err.push(byteView(encodeText(line)))
-      this.fatal = true
-      return null
-    }
-    if (raw === null) return null
-    const record = byteView(raw)
-    this.read[which] += 1
-    const fields = splitFields(record, this.flags.tab)
-    const key = fields[this.fields[which]] ?? ''
-    const line: Line = {
-      record,
-      fields,
-      key: this.flags.ignoreCase ? key.replace(ASCII_LOWER, (run) => run.toUpperCase()) : key,
-    }
-    const previous = this.previous[which]
-    this.previous[which] = line
-    return previous !== null && this.checkOrder(previous, line, which) ? null : line
-  }
-
-  // Diagnose LINE against PREVIOUS; whether the run stops here.
-  private checkOrder(previous: Line, line: Line, which: 0 | 1): boolean {
-    const mode = this.flags.checkOrder
-    if (mode === CheckOrder.DISABLED || this.warned[which]) return false
-    if (mode === CheckOrder.DEFAULT && !this.seenUnpairable) return false
-    if (keycmp(previous.key, line.key) <= 0) return false
-    const text = line.record.split('\0', 1)[0] ?? ''
-    this.err.push(
-      `join: ${this.names[which]}:${String(this.read[which])}: is not sorted: ${text}\n`,
-    )
-    if (mode === CheckOrder.ENABLED) this.fatal = true
-    else this.warned[which] = true
-    return this.fatal
-  }
-
-  private prfield(index: number, line: Line): string {
-    const value = line.fields[index] ?? ''
-    if (value !== '' || this.flags.emptyFiller === null) return value
-    return this.flags.emptyFiller
-  }
-
-  private prfields(line: Line, which: 0 | 1): string[] {
-    const count = this.flags.autoformat ? this.autocount[which] : line.fields.length
-    const parts: string[] = []
-    for (let i = 0; i < count; i += 1) {
-      if (i !== this.fields[which]) parts.push(this.prfield(i, line))
-    }
-    return parts
-  }
-
-  private emit(line1: Line, line2: Line): Uint8Array {
-    if (this.fatal) return new Uint8Array()
-    const key =
-      line1 === BLANK ? this.prfield(this.fields[1], line2) : this.prfield(this.fields[0], line1)
-    const parts =
-      this.flags.outlist.length > 0
-        ? this.flags.outlist.map(([file, index]) =>
-            file === 0 ? key : this.prfield(index, file === 1 ? line1 : line2),
-          )
-        : [key, ...this.prfields(line1, 0), ...this.prfields(line2, 1)]
-    return fromByteView(parts.join(this.flags.outputSeparator) + this.flags.eol)
-  }
-
-  private async first(which: 0 | 1): Promise<Line[]> {
-    const line = await this.getLine(which)
-    return line === null ? [] : [line]
-  }
-
-  // Read file WHICH while it matches OTHER; whether it hit EOF.
-  private async runOf(which: 0 | 1, run: Line[], other: Line): Promise<boolean> {
-    for (;;) {
-      const line = await this.getLine(which)
-      if (line === null) return true
-      run.push(line)
-      if (keycmp(line.key, other.key) !== 0) return false
-    }
-  }
-
-  // Finish the file left over once the other one ended. Its lines are
-  // unpairable, printed under -a or -v, and still read for the order check
-  // unless --nocheck-order, though they never count as unpairable for the
-  // default check themselves.
-  private async *tail(which: 0 | 1, run: readonly Line[]): AsyncIterable<Uint8Array> {
-    const unpairables = which === 0 ? this.flags.unpairables1 : this.flags.unpairables2
-    const checktail =
-      this.flags.checkOrder !== CheckOrder.DISABLED && !(this.warned[0] && this.warned[1])
-    let line = run[0] ?? null
-    if (line === null || !(unpairables || checktail)) return
-    while (line !== null) {
-      if (unpairables) {
-        if (which === 0) yield this.emit(line, BLANK)
-        else yield this.emit(BLANK, line)
-      }
-      line = this.warned[which] && !unpairables ? null : await this.getLine(which)
-    }
-  }
-
-  async *run(): AsyncIterable<Uint8Array> {
-    let seq1 = await this.first(0)
-    let seq2 = await this.first(1)
-    if (this.flags.autoformat) {
-      this.autocount = [seq1[0]?.fields.length ?? 0, seq2[0]?.fields.length ?? 0]
-    }
-    if (this.flags.header && (seq1.length > 0 || seq2.length > 0)) {
-      yield this.emit(seq1[0] ?? BLANK, seq2[0] ?? BLANK)
-      this.previous = [null, null]
-      if (seq1.length > 0) seq1 = await this.first(0)
-      if (seq2.length > 0) seq2 = await this.first(1)
-    }
-    for (;;) {
-      const head1 = seq1[0]
-      const head2 = seq2[0]
-      if (head1 === undefined || head2 === undefined) break
-      const diff = keycmp(head1.key, head2.key)
-      if (diff < 0) {
-        if (this.flags.unpairables1) yield this.emit(head1, BLANK)
-        seq1 = await this.first(0)
-        this.seenUnpairable = true
-        continue
-      }
-      if (diff > 0) {
-        if (this.flags.unpairables2) yield this.emit(BLANK, head2)
-        seq2 = await this.first(1)
-        this.seenUnpairable = true
-        continue
-      }
-      const eof1 = await this.runOf(0, seq1, head2)
-      const eof2 = await this.runOf(1, seq2, head1)
-      if (this.fatal) return
-      if (this.flags.pairables) {
-        for (const line1 of eof1 ? seq1 : seq1.slice(0, -1)) {
-          for (const line2 of eof2 ? seq2 : seq2.slice(0, -1)) yield this.emit(line1, line2)
-        }
-      }
-      seq1 = eof1 ? [] : seq1.slice(-1)
-      seq2 = eof2 ? [] : seq2.slice(-1)
-    }
-    if (this.fatal) return
-    yield* this.tail(0, seq1)
-    yield* this.tail(1, seq2)
-  }
-
-  result(): IOResult {
-    let stderr = this.err.join('')
-    if (!this.fatal && (this.warned[0] || this.warned[1])) {
-      stderr += 'join: input is not in sorted order\n'
-    }
-    return new IOResult({
-      stderr: stderr === '' ? null : fromByteView(stderr),
-      exitCode: stderr === '' ? 0 : 1,
-    })
-  }
+  if (reading.seen === 0) for (const word of operands) reading.operand(word, null, false)
+  return reading.finish(argv)
 }
 
 export interface JoinIO {
   read: (p: PathSpec) => AsyncIterable<Uint8Array>
   stdin: ByteSource | null
   flags: JoinFlags
+  signal?: AbortSignal | undefined
 }
 
 /**
@@ -597,19 +406,115 @@ export function join(paths: PathSpec[], io: JoinIO): [ByteSource | null, IOResul
   }
   const stream = stdinStream(io.read, io.stdin)
   const readers = [new AsyncLineIterator(stream(p1)), new AsyncLineIterator(stream(p2))] as const
-  const merge = new Merge(io.flags, [byteView(p1.rawPath), byteView(p2.rawPath)], readers, [p1, p2])
-  const result = new IOResult()
-  return [joinStream(merge, result), result]
+  const result = new IOResult({ stderr: new Uint8Array() })
+  return [joinStream(io.flags, readers, [p1, p2], result, io.signal), result]
 }
 
-async function* joinStream(merge: Merge, io: IOResult): AsyncIterable<Uint8Array> {
+async function* readerChunks(reader: AsyncLineIterator): AsyncIterable<Uint8Array> {
+  for (;;) {
+    const chunk = await reader.readChunk()
+    if (chunk === null) return
+    yield chunk
+  }
+}
+
+async function* joinStderr(
+  pieces: readonly Uint8Array[],
+  count: number,
+): AsyncGenerator<Uint8Array> {
+  for (let index = 0; index < count; index++) {
+    const piece = pieces[index]
+    if (piece !== undefined) yield await Promise.resolve(piece)
+  }
+}
+
+async function* joinStream(
+  flags: JoinFlags,
+  readers: readonly [AsyncLineIterator, AsyncLineIterator],
+  paths: readonly [PathSpec, PathSpec],
+  io: IOResult,
+  signal?: AbortSignal,
+): AsyncIterable<Uint8Array> {
+  const stream = await openStream('join', {
+    keys: [...flags.keys],
+    unpaired: [...flags.unpaired],
+    paired: flags.paired,
+    filler: flags.filler,
+    columns: flags.columns.map(([side, index]) => [side, index]),
+    auto_columns: flags.autoColumns,
+    delimiter: flags.delimiter,
+    separator: flags.separator,
+    fold_case: flags.foldCase,
+    terminator: flags.terminator.charCodeAt(0),
+    order: flags.order,
+    header: flags.header,
+    names: paths.map((path) => byteView(path.rawPath)),
+  })
+  const sources = [
+    chunks(readerChunks(readers[0]), signal),
+    chunks(readerChunks(readers[1]), signal),
+  ] as const
+  const errors: Uint8Array[] = []
+  const budget = new YieldBudget(signal)
+  function recordResult(): void {
+    const error = stream.takeStderr()
+    if (error.byteLength > 0) {
+      errors.push(error)
+      io.stderr = joinStderr(errors, errors.length)
+    }
+    io.exitCode = Math.max(io.exitCode, stream.status())
+  }
+  function fail(side: 0 | 1, error: unknown): void {
+    const message = neverOpened(readers[side], paths[side], error)
+      ? fsErrorLine('join', paths[side], error)
+      : `join: read error: ${fsStrerror(error) ?? String(error)}\n`
+    errors.push(new TextEncoder().encode(message))
+    io.stderr = joinStderr(errors, errors.length)
+    io.exitCode = 1
+  }
   try {
-    yield* merge.run()
+    let unreadable: { side: 0 | 1; error: unknown } | undefined
+    for (const side of [0, 1] as const) {
+      try {
+        await abortable(readers[side].peek(), signal)
+      } catch (error) {
+        if (!isFsError(error)) throw error
+        if (neverOpened(readers[side], paths[side], error)) {
+          fail(side, error)
+          return
+        }
+        unreadable ??= { side, error }
+      }
+    }
+    if (unreadable !== undefined) {
+      fail(unreadable.side, unreadable.error)
+      return
+    }
+    for (;;) {
+      await budget.run()
+      let output: Uint8Array
+      if (stream.busy()) output = stream.drain()
+      else {
+        const wanted = stream.wants()
+        if (wanted === null) break
+        const side = wanted === 0 ? 0 : 1
+        try {
+          const next = await sources[side].next()
+          output = next.done === true ? stream.endInput(side) : stream.feedInput(side, next.value)
+        } catch (error) {
+          if (!isFsError(error)) throw error
+          fail(side, error)
+          return
+        }
+      }
+      recordResult()
+      if (output.byteLength > 0) yield output
+    }
   } finally {
-    const result = merge.result()
-    io.exitCode = result.exitCode
-    io.stderr = result.stderr
-    for (const reader of merge.inputs) await reader.discard()
+    recordResult()
+    await closeStream(stream)
+    for (const source of sources) await source.return?.()
+    for (const reader of readers) await reader.discard()
   }
 }
 
@@ -634,6 +539,7 @@ export async function joinGeneric(
   return join(resolved, {
     read,
     stdin: ctx.stdin,
+    signal: ctx.signal,
     flags: parseFlags(
       flags,
       resolved.map((path) => path.rawPath),

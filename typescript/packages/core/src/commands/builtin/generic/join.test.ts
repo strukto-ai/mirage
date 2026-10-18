@@ -13,11 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { CHUNK_SIZE } from '../../../io/cooperative.ts'
+import { materialize } from '../../../io/types.ts'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { CheckOrder, parseFlags, type JoinFlags } from './join.ts'
+import { PathSpec } from '../../../types.ts'
+import { OrderCheck, join, parseFlags, type JoinFlags } from './join.ts'
 
 type Row = [string, string, string, string, string, number, string, string]
 
@@ -76,19 +79,17 @@ describe('join matches GNU', () => {
 })
 
 const DEFAULTS: JoinFlags = {
-  field1: 0,
-  field2: 0,
-  tab: null,
-  outputSeparator: ' ',
-  unpairables1: false,
-  unpairables2: false,
-  pairables: true,
-  emptyFiller: null,
-  outlist: [],
-  autoformat: false,
-  ignoreCase: false,
-  eol: '\n',
-  checkOrder: CheckOrder.DEFAULT,
+  keys: [0, 0],
+  unpaired: [false, false],
+  paired: true,
+  filler: null,
+  columns: [],
+  autoColumns: false,
+  delimiter: null,
+  separator: ' ',
+  foldCase: false,
+  terminator: '\n',
+  order: OrderCheck.WARN,
   header: false,
   files: [0, 1],
 }
@@ -98,15 +99,15 @@ describe('parseFlags', () => {
     [{}, {}],
     [
       { a: '2', v: '1' },
-      { unpairables1: true, unpairables2: true, pairables: false },
+      { unpaired: [true, true], paired: false },
     ],
-    [{ j: '3' }, { field1: 2, field2: 2 }],
-    [{ t: '' }, { tab: '\n', outputSeparator: ' ' }],
-    [{ t: '\\0' }, { tab: '\0', outputSeparator: '\0' }],
+    [{ j: '3' }, { keys: [2, 2] }],
+    [{ t: '' }, { delimiter: '\n', separator: ' ' }],
+    [{ t: '\\0' }, { delimiter: '\0', separator: '\0' }],
     [
       { o: '0,2.3 1.1' },
       {
-        outlist: [
+        columns: [
           [0, 0],
           [2, 2],
           [1, 0],
@@ -115,9 +116,9 @@ describe('parseFlags', () => {
     ],
     [
       { o: 'auto', zero_terminated: true },
-      { autoformat: true, eol: '\0' },
+      { autoColumns: true, terminator: '\0' },
     ],
-    [{ nocheck_order: true }, { checkOrder: CheckOrder.DISABLED }],
+    [{ nocheck_order: true }, { order: OrderCheck.OFF }],
   ])('%j', (flags, expected) => {
     expect(parseFlags(flags)).toEqual({ ...DEFAULTS, ...expected })
   })
@@ -131,5 +132,107 @@ describe('join across mounts', () => {
       '',
     )
     expect(r).toEqual([0, 'B 2 y\nC - z\nx 1 -\n', ''])
+  })
+})
+
+describe('parseFlags without a tape', () => {
+  it.each<[Record<string, string>, string[], string[], Partial<JoinFlags>]>([
+    [{}, ['a', 'b'], ['a', 'b'], {}],
+    [{ j: '2' }, ['a', 'b'], [], { keys: [1, 1] }],
+  ])('%j files %j', (flags, operands, argv, expected) => {
+    expect(parseFlags(flags, operands, argv)).toEqual({ ...DEFAULTS, ...expected })
+  })
+
+  it.each<[Record<string, string>, string[], string[], string]>([
+    [{}, ['a', 'b', 'c'], [], "join: extra operand 'c'\n"],
+    [{ v: '2' }, ['x', 'a', 'b'], [], "join: extra operand 'b'\n"],
+    [{}, ['a'], [], "join: missing operand after 'a'\n"],
+    [{}, ['a'], ['-a1', 'a'], "join: missing operand after 'a'\n"],
+  ])('%j refuses %j', (flags, operands, argv, message) => {
+    expect(() => parseFlags(flags, operands, argv)).toThrow(message)
+  })
+})
+
+describe('join over two large groups of one key', () => {
+  it('hands on output before the last pair is printed', async () => {
+    const body = (tag: string): Uint8Array =>
+      bytes(Array.from({ length: 1000 }, (_, i) => `k ${tag}${String(i)}\n`).join(''))
+    const files: Record<string, Uint8Array> = { '/a': body('a'), '/b': body('b') }
+    const [source] = join([PathSpec.fromStrPath('/a'), PathSpec.fromStrPath('/b')], {
+      read: async function* (p: PathSpec): AsyncIterable<Uint8Array> {
+        await Promise.resolve()
+        yield files[p.virtual] ?? new Uint8Array()
+      },
+      stdin: null,
+      flags: parseFlags({}),
+    })
+    const chunks = (source as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
+    const first = await chunks.next()
+    await chunks.return?.()
+    expect(view(first.value as Uint8Array).startsWith('k a0 b0\nk a0 b1\n')).toBe(true)
+    expect((first.value as Uint8Array).length).toBeLessThan(2 * CHUNK_SIZE)
+  })
+})
+
+describe('join over input that stays open', () => {
+  it.each<[string, Record<string, string | boolean>, string[], string, string, string]>([
+    ['the rest of FILE1 (-a1)', { a: '1', nocheck_order: true }, ['-', '/b'], 'a 1\n', '', 'a 1\n'],
+    ['the rest of FILE1 (-v1)', { v: '1' }, ['-', '/b'], 'a 1\n', '', 'a 1\n'],
+    ['the rest of FILE2', { a: '2' }, ['/b', '-'], 'a 1\n', '', 'a 1\n'],
+    ['an unpairable line', { a: '1' }, ['-', '/b'], '0 1\n', 'a x\n', '0 1\n'],
+    ['a joined line', {}, ['-', '/b'], 'a 1\nb 2\n', 'a x\nb y\n', 'a 1 x\n'],
+  ])('hands on %s before waiting', async (_name, flags, operands, typed, other, expected) => {
+    async function* live(): AsyncIterable<Uint8Array> {
+      yield bytes(typed)
+      await new Promise(() => undefined)
+    }
+    const [source] = join(
+      operands.map((word) => PathSpec.fromStrPath(word)),
+      {
+        read: async function* (): AsyncIterable<Uint8Array> {
+          await Promise.resolve()
+          yield bytes(other)
+        },
+        stdin: live(),
+        flags: parseFlags(flags),
+      },
+    )
+    const chunks = (source as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
+    const late = new Promise<'late'>((resolve) => {
+      setTimeout(() => {
+        resolve('late')
+      }, 5000)
+    })
+    const first = await Promise.race([chunks.next(), late])
+    expect(first === 'late' ? first : view(first.value as Uint8Array)).toBe(expected)
+  })
+})
+
+describe('join over input in any chunking', () => {
+  it.each<[Record<string, string | boolean>, string, string]>([
+    [{ a: '1' }, 'a 1\nb 2\n\nc 3', 'a x\nc z\n'],
+    [{ zero_terminated: true }, 'a 1\0b\n2\0', 'a x\0b y'],
+    [{ t: ':', header: true }, 'k:h\na:1\n', 'k:g\na:x\nb:y\n'],
+    [{ check_order: true }, 'b 1\na 2\n', 'a x\nb y\n'],
+    [{}, 'b 1\na 2\n', 'a x\nb y\n'],
+  ])('%j', async (flags, a, b) => {
+    const run = async (size: number): Promise<[string, number, string]> => {
+      const bodies: Record<string, Uint8Array> = { '/a': bytes(a), '/b': bytes(b) }
+      const [source, result] = join([PathSpec.fromStrPath('/a'), PathSpec.fromStrPath('/b')], {
+        read: async function* (p: PathSpec): AsyncIterable<Uint8Array> {
+          await Promise.resolve()
+          const body = bodies[p.virtual] ?? new Uint8Array()
+          for (let at = 0; at < body.length; at += size) yield body.subarray(at, at + size)
+        },
+        stdin: null,
+        flags: parseFlags(flags),
+      })
+      const parts: string[] = []
+      for await (const chunk of source as AsyncIterable<Uint8Array>) parts.push(view(chunk))
+      return [parts.join(''), result.exitCode, view(await materialize(result.stderr))]
+    }
+    const whole = await run(1 << 20)
+    expect(whole[0] + whole[2]).not.toBe('')
+    expect(await run(1)).toEqual(whole)
   })
 })

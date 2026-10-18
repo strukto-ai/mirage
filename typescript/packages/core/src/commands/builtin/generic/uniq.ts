@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { stdinStat, stdinStream } from '../utils/stream.ts'
-import { recordSeparator } from '../utils/lines.ts'
 import { splitReadable } from '../utils/operands.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
@@ -24,8 +23,8 @@ import { CommandName, type FlagValue, type ParsedFlagValue } from '../../spec/ty
 import { FlagView } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { resolveSource } from '../utils/stream.ts'
-import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
-import { decodeText, encodeText } from '../../../shell/bytes.ts'
+import { runStream } from '../../../rs/stream.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 
 interface UniqFlags {
   count: boolean
@@ -118,109 +117,6 @@ function parseFlags(bag: Record<string, FlagValue>): UniqFlags {
   }
 }
 
-function isBlank(char: string | undefined): boolean {
-  return char === ' ' || char === '\t'
-}
-
-function skipFields(text: string, count: number): string {
-  let index = 0
-  for (let field = 0; field < count && index < text.length; field += 1) {
-    while (index < text.length && isBlank(text[index])) index += 1
-    while (index < text.length && !isBlank(text[index])) index += 1
-  }
-  return text.slice(index)
-}
-
-function comparisonKey(line: Uint8Array, flags: UniqFlags): string {
-  let characters = Array.from(skipFields(decodeText(line), flags.skipFields))
-  if (flags.skipChars > 0) characters = characters.slice(flags.skipChars)
-  if (flags.checkChars !== null) characters = characters.slice(0, flags.checkChars)
-  const text = characters.join('')
-  return flags.ignoreCase ? text.toLowerCase() : text
-}
-
-function padLeft(value: string, width: number): string {
-  return value.length >= width ? value : ' '.repeat(width - value.length) + value
-}
-
-function formatRecord(
-  line: Uint8Array,
-  count: number,
-  flags: UniqFlags,
-  separator: number,
-): Uint8Array {
-  const prefix = flags.count ? encodeText(`${padLeft(String(count), 7)} `) : new Uint8Array()
-  const output = new Uint8Array(prefix.byteLength + line.byteLength + 1)
-  output.set(prefix)
-  output.set(line, prefix.byteLength)
-  output[output.byteLength - 1] = separator
-  return output
-}
-
-function groupSeparatorBefore(index: number, method: NonNullable<UniqFlags['group']>): boolean {
-  if (method === 'prepend' || method === 'both') return true
-  return index > 0
-}
-
-async function* uniqStream(
-  source: AsyncIterable<Uint8Array>,
-  flags: UniqFlags,
-): AsyncIterable<Uint8Array> {
-  const separator = recordSeparator(flags.zeroTerminated)
-  const reader = new AsyncLineIterator(source)
-  let first: Uint8Array | null = null
-  let currentKey: string | null = null
-  let count = 0
-  let groupIndex = -1
-  let repeatedGroups = 0
-  try {
-    for (;;) {
-      const line = await reader.readline(undefined, separator)
-      const key = line === null ? null : comparisonKey(line, flags)
-      if (line === null || first === null || key !== currentKey) {
-        if (first !== null && flags.allRepeated === null && (flags.count || flags.uniqueOnly)) {
-          if (!(flags.duplicatesOnly && count === 1) && !(flags.uniqueOnly && count > 1)) {
-            yield formatRecord(first, count, flags, separator)
-          }
-        }
-        if (line === null) break
-        first = line
-        currentKey = key
-        count = 0
-        groupIndex += 1
-      }
-      count += 1
-      if (flags.group !== null) {
-        if (count === 1 && groupSeparatorBefore(groupIndex, flags.group)) {
-          yield Uint8Array.of(separator)
-        }
-        yield formatRecord(line, 1, flags, separator)
-      } else if (flags.allRepeated !== null) {
-        if (count === 2) {
-          if (
-            flags.allRepeated === 'prepend' ||
-            (flags.allRepeated === 'separate' && repeatedGroups > 0)
-          ) {
-            yield Uint8Array.of(separator)
-          }
-          yield formatRecord(first, 1, flags, separator)
-          repeatedGroups += 1
-        }
-        if (count >= 2) yield formatRecord(line, 1, flags, separator)
-      } else if (!(flags.count || flags.uniqueOnly)) {
-        if (count === (flags.duplicatesOnly ? 2 : 1)) {
-          yield formatRecord(first, count, flags, separator)
-        }
-      }
-    }
-    if (first !== null && (flags.group === 'append' || flags.group === 'both')) {
-      yield Uint8Array.of(separator)
-    }
-  } finally {
-    await reader.discard()
-  }
-}
-
 export async function uniqGeneric(
   paths: PathSpec[],
   ctx: Context,
@@ -257,7 +153,23 @@ export async function uniqGeneric(
       return [null, new IOResult({ exitCode: 1, stderr: encodeText(`${message}\n`) })]
     }
   }
-  const output = uniqStream(source, parsed)
+  const output = runStream(
+    'uniq',
+    {
+      count: parsed.count,
+      duplicates_only: parsed.duplicatesOnly,
+      unique_only: parsed.uniqueOnly,
+      skip_fields: Math.min(parsed.skipFields, 2 ** 64 - 1),
+      skip_chars: Math.min(parsed.skipChars, 2 ** 64 - 1),
+      check_chars: parsed.checkChars === null ? null : Math.min(parsed.checkChars, 2 ** 64 - 1),
+      ignore_case: parsed.ignoreCase,
+      all_repeated: parsed.allRepeated,
+      group: parsed.group,
+      zero_terminated: parsed.zeroTerminated,
+    },
+    source,
+    ctx.signal,
+  )
   const outputPath = paths[1]
   if (outputPath !== undefined && outputPath.rawPath !== '-') {
     if (write === undefined) {

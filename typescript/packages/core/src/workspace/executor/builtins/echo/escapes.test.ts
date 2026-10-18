@@ -16,12 +16,6 @@ import { describe, expect, it } from 'vitest'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { interpretEscapes } from './escapes.ts'
 
-// Direct port of tests/workspace/executor/test_escapes.py, which covers
-// Python's _interpret_escapes in mirage/workspace/executor/builtins/echo/escapes.py.
-// This file used to import tr's reader instead, which is how tr ended up
-// with echo's grammar: every echo-only rule below (\xHH, \c, \z passing
-// through) was asserted against the wrong command. tr's own rules are
-// pinned in commands/builtin/utils/escapes.test.ts.
 describe('interpretEscapes (port of tests/workspace/executor/test_escapes.py)', () => {
   it('newline', () => {
     expect(interpretEscapes('a\\nb')).toEqual(['a\nb', false])

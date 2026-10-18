@@ -20,12 +20,6 @@ def test_single_char_delimiter_is_accepted():
     assert parsed.delimiter == ","
 
 
-# `--whitespace-delimited` has one candidate, so a word choice accepts any
-# prefix of it. The refusal keeps cut's own one-line wording; GNU cut has
-# no such option, so the rows below are the general rule's answer rather
-# than a measured one, and the empty word (which the general rule
-# ACCEPTS against a sole candidate) is deliberately not pinned either
-# way.
 @pytest.mark.parametrize("value", ["trimmed", "trim", "t"])
 def test_whitespace_delimited_accepts_an_unambiguous_prefix(value):
     assert (
@@ -172,3 +166,104 @@ async def test_cut_does_not_continue_after_fatal_error_or_cancellation(error):
     with pytest.raises(type(error)):
         await materialize(out)
     assert opened == ["/failed"]
+
+
+@pytest.mark.asyncio
+async def test_cut_refuses_the_list_before_input_stat_or_read():
+    async def no_stat(_path):
+        raise AssertionError("cut stat before list refusal")
+
+    output, io = await cut_generic(
+        [PathSpec.from_str_path("/missing")],
+        [],
+        Context(flags={"fields": "-"}),
+        no_stat,
+        _no_stream,
+    )
+    assert output is None
+    assert io.exit_code == 1
+    assert await materialize(io.stderr) == (
+        b"cut: invalid range with no endpoint: -\n"
+        b"Try 'cut --help' for more information.\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_cut_preserves_a_bom_in_selected_fields():
+    output, io = await cut(
+        [],
+        read_stream=_no_stream,
+        stdin=b"\xef\xbb\xbfa,b\n",
+        flags={"fields": "1", "delimiter": ","},
+    )
+    assert await materialize(output) == b"\xef\xbb\xbfa\n"
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["bytes", "characters", "fields"])
+async def test_cut_keeps_raw_delimiter_sentinels_distinct_from_replacement(
+    mode,
+):
+    for source in (b"a\xffb\n", b"a\xef\xbf\xbdb\n"):
+        output, io = await cut(
+            [],
+            read_stream=_no_stream,
+            stdin=source,
+            flags={mode: "1", "delimiter": "\udcff"},
+        )
+        assert io.exit_code == 0
+        assert await materialize(output) == (
+            source if mode == "fields" else b"a\n"
+        )
+    output, io = await cut(
+        [],
+        read_stream=_no_stream,
+        stdin=b"a\xffb\n",
+        flags={"fields": "1", "delimiter": "\udcff", "only_delimited": True},
+    )
+    assert io.exit_code == 0
+    assert await materialize(output) == b""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminated", [False, True])
+async def test_cut_defers_raw_output_delimiter_encoding_error_until_a_record(
+    terminated,
+):
+    pulled = []
+
+    async def source():
+        pulled.append("record")
+        yield b"plain\n" if terminated else b"plain"
+        pulled.append("tail")
+
+    output, io = await cut(
+        [],
+        read_stream=_no_stream,
+        stdin=source(),
+        flags={
+            "fields": "1",
+            "output_delimiter": "\udcff",
+            "only_delimited": True,
+        },
+    )
+    assert io.exit_code == 0
+    assert pulled == []
+    with pytest.raises(UnicodeEncodeError) as caught:
+        await materialize(output)
+    assert caught.value.object == "\udcff"
+    assert caught.value.encoding == "utf-8"
+    assert pulled == (["record"] if terminated else ["record", "tail"])
+
+
+@pytest.mark.asyncio
+async def test_cut_raw_output_delimiter_does_not_refuse_empty_input():
+    output, io = await cut(
+        [],
+        read_stream=_no_stream,
+        stdin=b"",
+        flags={"bytes": "1", "output_delimiter": "\udcff"},
+    )
+    assert io.exit_code == 0
+    assert await materialize(output) == b""

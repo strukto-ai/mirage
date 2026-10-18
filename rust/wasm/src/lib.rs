@@ -153,6 +153,11 @@ pub extern "C" fn mirage_rs_busy(handle: u32) -> i32 {
     with_slot(handle, 0, |slot| i32::from(slot.stream.busy()))
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_cancel(handle: u32) -> i32 {
+    with_slot(handle, 0, |slot| i32::from(slot.stream.cancel()))
+}
+
 /// One bounded step of the work `mirage_rs_busy` reports, and its output.
 #[unsafe(no_mangle)]
 pub extern "C" fn mirage_rs_drain(handle: u32) -> i32 {

@@ -137,6 +137,77 @@
         "stdout": "1 a\r x\n2 b\r y\nrc=0\n1 a x\n2 b y\nrc=0\n_ 2 y\nrc=0\nÉ 1\né x\nrc=0\nid name val\n1 a\n2 b y\n3 z\nrc=0\nk h g\nrc=1\n",
         "stderr": "join: a:3: is not sorted: a 2\njoin: input is not in sorted order\n"
       }
+    },
+    {
+      "id": "join_gnu_header_beside_an_empty_file",
+      "seq": 601563,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/join_601563 && touch /data/join_601563/a && (cd /data/join_601563 || exit 1; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && printf 'h1 h2\\n1 a\\n' > a && : > b && join --header a b; echo rc=$?; join --header -v2 a b; echo rc=$?; join --header -o 0,1.2,2.2 -e E a b; echo rc=$?; join --header -o auto b a; echo rc=$?; printf 'h\\nb 1\\na 2\\n' > a && join --header a b; echo rc=$?; join --header --check-order a b; echo rc=$?; printf 'z h\\na 1\\n' > a && printf 'z g\\na x\\n' > b && join --header --check-order a b; echo rc=$?); rm -r /data/join_601563",
+      "expect": {
+        "exit": 0,
+        "stdout": "h1 h2\nrc=0\nh1 h2\nrc=0\nh1 h2 E\nrc=0\nh1 h2\nrc=0\nh\nrc=0\nh\nrc=1\nz h g\na 1 x\nrc=0\n",
+        "stderr": "join: a:3: is not sorted: a 2\n"
+      },
+      "flags": [
+        "header",
+        "o",
+        "e",
+        "v"
+      ]
+    },
+    {
+      "id": "join_gnu_opens_both_files_before_reading",
+      "seq": 601565,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/join_601565/d && touch /data/join_601565/a /data/join_601565/d/x && (cd /data/join_601565 || exit 1; printf '1 a\\n' > a && join d missing; echo rc=$?; join missing d; echo rc=$?; join a d; echo rc=$?; join d a; echo rc=$?); rm -r /data/join_601565",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "join: missing: No such file or directory\njoin: missing: No such file or directory\njoin: read error: Is a directory\njoin: read error: Is a directory\n"
+      }
     }
   ]
 }

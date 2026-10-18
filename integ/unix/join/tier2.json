@@ -136,6 +136,40 @@
         "stdout": "b one y\nrc=1\nb one y\nrc=0\na 1 x\nb 2 y\nrc=1\na 1\nb x\nd 4\nc 3\nb 9\ne y\nd z\nc w\nrc=1\nb 1 x\nc 3 y\nrc=0\na 1 x\nrc=0\na 1 x\nrc=0\na 1 x\nc 2\nrc=1\n！ 1 x\n😀 2 y\nrc=0\nrc=1\n 7a 20 31 0a ff 20 32 20 78 0a 61 20 71 0a\na 1 x\nrc=1\n",
         "stderr": "join: a:2: is not sorted: a two\njoin: input is not in sorted order\njoin: a:4: is not sorted: c 3\njoin: a:3: is not sorted: c 3\njoin: b:3: is not sorted: d z\njoin: input is not in sorted order\njoin: a:3: is not sorted: b 3\n 6a 6f 69 6e 3a 20 62 3a 32 3a 20 69 73 20 6e 6f\n 74 20 73 6f 72 74 65 64 3a 20 61 20 71 0a 6a 6f\n 69 6e 3a 20 69 6e 70 75 74 20 69 73 20 6e 6f 74\n 20 69 6e 20 73 6f 72 74 65 64 20 6f 72 64 65 72\n 0a\njoin: a:4: is not sorted: b\njoin: input is not in sorted order\n"
       }
+    },
+    {
+      "id": "join_gnu_order_check_counts_unpaired_lines",
+      "seq": 601562,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/join_601562 && touch /data/join_601562/a && (cd /data/join_601562 || exit 1; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && printf 'a 1\\n' > a && printf 'a x\\nc y\\nb z\\na w\\n' > b && join a b; echo rc=$?; join -a2 a b; echo rc=$?; printf '0 1\\na 2\\n' > a && printf 'a x\\nc y\\nb z\\n' > b && join a b; echo rc=$?; printf 'c 1\\nb 2\\nd 3\\na 4\\n' > a && printf 'c x\\nd y\\n' > b && join a b; echo rc=$?; printf 'a 1\\nc 2\\nb 3\\n' > a && printf 'a x\\nz q\\n' > b && join a b; echo rc=$?; printf 'b 1\\nb 2\\na 3\\n' > a && printf 'b x\\nb y\\na z\\n' > b && join --check-order a b; echo rc=$?; printf 'b\\na\\n' > a && : > b && join --check-order a b; echo rc=$?); rm -r /data/join_601562",
+      "expect": {
+        "exit": 0,
+        "stdout": "a 1 x\nrc=0\na 1 x\nc y\nb z\na w\nrc=0\na 2 x\nrc=1\nc 1 x\nd 3 y\nrc=1\na 1 x\nrc=0\nrc=1\nrc=1\n",
+        "stderr": "join: b:3: is not sorted: b z\njoin: input is not in sorted order\njoin: a:4: is not sorted: a 4\njoin: input is not in sorted order\njoin: a:3: is not sorted: a 3\njoin: a:2: is not sorted: a\n"
+      },
+      "flags": [
+        "check-order"
+      ]
     }
   ]
 }

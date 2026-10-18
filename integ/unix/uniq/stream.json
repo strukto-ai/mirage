@@ -1,0 +1,25 @@
+{
+  "targets": ["ram", "disk", "opfs"],
+  "cases": [
+    {
+      "id": "uniq_stream_raw_keys",
+      "seq": 16610200,
+      "command": "printf '\\377\\n\\376\\n\\377\\n' | uniq | od -An -tx1; printf '\\377A\\n\\376A\\nB\\n' | uniq -s 1 | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": " ff 0a fe 0a ff 0a\n ff 41 0a 42 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "uniq_stream_nul_groups",
+      "seq": 16610201,
+      "command": "printf 'a\\0a\\0b' | uniq -z --group=both | od -An -tx1; printf 'a\\0a\\0b\\0c\\0c' | uniq -z --all-repeated=separate | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": " 00 61 00 61 00 00 62 00 00\n 61 00 61 00 00 63 00 63 00\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

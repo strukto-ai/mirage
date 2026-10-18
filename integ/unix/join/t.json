@@ -67,6 +67,43 @@
         "stdout": "1:a:X:c:x:X\n2:X:b:y\nrc=0\nx y x y\nz \nz w z w\nrc=0\nx y\nx y\nx y\nrc=0\nrc=1\nrc=1\n1 a x\u00002 b y\u0000rc=0\n",
         "stderr": "join: multi-character tab '\\303\\251'\njoin: incompatible tabs\n"
       }
+    },
+    {
+      "id": "join_gnu_whole_records_and_empty_lines",
+      "seq": 601564,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/join_601564 && touch /data/join_601564/a && (cd /data/join_601564 || exit 1; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && printf 'x y\\n' > a && printf 'x y\\n' > b && join -t $'\\n' -t '' -o 0,1.1,2.1 a b; echo rc=$?; join -t '' -t '' -o 0,1.1,2.1 a b; echo rc=$?; printf 'x\\ny\\0z\\nw\\0' > a && printf 'x\\nq\\0z\\0' > b && join -z -t '' -a1 -a2 a b | tr '\\0\\n' '@%'; echo rc=$?; printf '\\n' > a && printf '1:x\\n' > b && join -t : -j 2 -a1 -a2 -e E a b; echo rc=$?; printf '1\\va x\\n' > a && printf '1 x\\n' > b && join -j 2 -a1 -a2 a b; echo rc=$?; printf ':1\\n' > a && join -t : -a1 -a2 -e E -o 0,1.1,1.2,1.3,2.1 a b; echo rc=$?); rm -r /data/join_601564",
+      "expect": {
+        "exit": 0,
+        "stdout": "x y\nx y\nx y\nrc=0\nx y x y x y\nrc=0\nx%q@x%y@z@z%w@rc=0\nE\nx:1\nrc=0\nx 1\u000ba 1\nrc=0\nE:E:1:E:E\n1 x:E:E:E:1 x\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "z",
+        "e",
+        "j"
+      ]
     }
   ]
 }

@@ -1,9 +1,8 @@
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 
-from mirage.commands.builtin.utils.escapes import interpret_escapes
 from mirage.commands.builtin.utils.stream import resolve_source
-from mirage.commands.quote import quote_text, quote_word
+from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
@@ -13,21 +12,12 @@ from mirage.commands.spec.usage import (
     usage_hint,
 )
 from mirage.io.types import ByteSource, IOResult
-from mirage.shell.bytes import byte_view, from_byte_view
-from mirage.types import PathSpec
-from mirage.utils.posix import class_characters
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.stream import open_stream, stream_output
+from mirage.shell.bytes import byte_view
+from mirage.types import JsonValue, PathSpec
 
 _TRY_HELP = "\n" + usage_hint("tr")
-_PRINTABLE_ESCAPES = {
-    "\\": "\\",
-    "\a": "\\a",
-    "\b": "\\b",
-    "\f": "\\f",
-    "\n": "\\n",
-    "\r": "\\r",
-    "\t": "\\t",
-    "\v": "\\v",
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,80 +36,6 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TrFlags:
         complement=fl.as_bool("C") or fl.as_bool("complement"),
         truncate_set1=fl.as_bool("truncate_set1"),
     )
-
-
-def _printable(view: str) -> str:
-    """A piece of an operand as GNU tr spells it in a diagnostic.
-
-    Its diagnostics quote this spelling, so a byte outside ASCII shows as
-    an octal escape whose backslash the quoting doubles.
-
-    Args:
-        view (str): the piece as a byte view.
-    """
-    return "".join(
-        _PRINTABLE_ESCAPES.get(ch)
-        or (ch if " " <= ch <= "~" else f"\\{ord(ch):03o}")
-        for ch in view
-    )
-
-
-def _expand_ranges(s: str) -> str:
-    result: list[str] = []
-    i = 0
-    while i < len(s):
-        if s.startswith("[:", i) and ":]" in s[i + 2 :]:
-            end = s.index(":]", i + 2)
-            name = s[i + 2 : end]
-            members = class_characters(name)
-            if members is None:
-                raise ValueError(
-                    "tr: invalid character class "
-                    f"'{quote_word(_printable(name))}'"
-                )
-            result.append(members)
-            i = end + 2
-        elif i + 2 < len(s) and s[i + 1] == "-":
-            start, end = ord(s[i]), ord(s[i + 2])
-            result.extend(chr(c) for c in range(start, end + 1))
-            i += 3
-        else:
-            result.append(s[i])
-            i += 1
-    return "".join(result)
-
-
-async def _tr_stream(
-    source: AsyncIterator[bytes],
-    set1: str,
-    set2: str,
-    delete: bool,
-    squeeze: bool,
-    table: dict[int, int] | None,
-) -> AsyncIterator[bytes]:
-    prev_char = ""
-    squeeze_set = (
-        set(set2) if squeeze and set2 else set(set1) if squeeze else set()
-    )
-    async for chunk in source:
-        text = byte_view(chunk)
-        if delete:
-            result = "".join(c for c in text if c not in set1)
-        elif table is not None:
-            result = text.translate(table)
-        else:
-            result = text
-        if squeeze_set:
-            squeezed: list[str] = []
-            for c in result:
-                if c in squeeze_set and c == prev_char:
-                    continue
-                squeezed.append(c)
-                prev_char = c
-            result = "".join(squeezed)
-        elif result:
-            prev_char = result[-1]
-        yield from_byte_view(result)
 
 
 async def tr_generic(
@@ -144,43 +60,31 @@ async def tr_generic(
                 "squeezing repeats." + _TRY_HELP
             )
         raise extra_operand_error(CommandName.TR, texts[operand_limit])
-    set1 = _expand_ranges(interpret_escapes(byte_view(texts[0])))
-    if parsed.complement:
-        all_chars = "".join(chr(i) for i in range(256))
-        set1 = "".join(ch for ch in all_chars if ch not in set1)
-    set2 = (
-        _expand_ranges(interpret_escapes(byte_view(texts[1])))
-        if len(texts) >= 2
-        else ""
-    )
-
-    if set2 and parsed.truncate_set1:
-        set1 = set1[: len(set2)]
-    elif set2 and len(set2) < len(set1):
-        set2 = set2 + set2[-1] * (len(set1) - len(set2))
-
-    table: dict[int, int] | None = None
-    if not parsed.delete and set2:
-        table = str.maketrans(set1, set2[: len(set1)])
-    elif not parsed.delete and not set2 and not parsed.squeeze:
-        raise ValueError(
-            f"tr: missing operand after '{quote_text(texts[0])}'\n"
-            "Two strings must be given when translating." + _TRY_HELP
-        )
+    config: dict[str, JsonValue] = {
+        "set1": byte_view(texts[0]),
+        "set2": byte_view(texts[1]) if len(texts) >= 2 else None,
+        "delete": parsed.delete,
+        "squeeze": parsed.squeeze,
+        "complement": parsed.complement,
+        "truncate_set1": parsed.truncate_set1,
+    }
+    try:
+        engine = open_stream("tr", config)
+    except StreamRefusal as refusal:
+        message = refusal.message
+        if message == "tr: missing translation operand":
+            message = (
+                f"tr: missing operand after '{quote_text(texts[0])}'\n"
+                "Two strings must be given when translating." + _TRY_HELP
+            )
+        raise ValueError(message) from refusal
 
     if paths:
         source: AsyncIterator[bytes] = read_stream(paths[0])
     else:
         source = resolve_source(stdin)
 
-    return _tr_stream(
-        source,
-        set1,
-        set2,
-        delete=parsed.delete,
-        squeeze=parsed.squeeze,
-        table=table,
-    ), IOResult()
+    return stream_output(engine, source), IOResult()
 
 
 __all__ = ["tr_generic"]

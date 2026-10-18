@@ -72,6 +72,10 @@ impl Stream {
         self.inner.busy()
     }
 
+    fn cancel(&mut self) -> bool {
+        self.inner.cancel()
+    }
+
     /// One bounded step of the work `busy` reports, and its output.
     fn drain<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         let result = self.inner.drain(&mut self.out);

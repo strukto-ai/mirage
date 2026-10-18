@@ -14,11 +14,13 @@
 
 import { stdinStat, stdinStream } from '../utils/stream.ts'
 import { quoteText } from '../../quote.ts'
-import { asyncChain } from '../../../io/stream.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import type { FileStat, PathSpec } from '../../../types.ts'
+import { OutputStream } from '../../../io/stream.ts'
+import type { FileStat, JsonValue, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { cutStream, parseRanges, type CutOptions } from '../cut_ranges.ts'
+import { closeStream, openStream, streamOutput } from '../../../rs/stream.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { byteView } from '../../../shell/bytes.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { operandsIo, reportedStream, splitReadable } from '../utils/operands.ts'
 import { matchWord } from '../../spec/word_choice.ts'
@@ -28,9 +30,21 @@ import { specOf } from '../../spec/builtins.ts'
 
 const ENC = new TextEncoder()
 
+interface CutFlags {
+  ranges: string
+  mode: 'bytes' | 'characters' | 'fields'
+  delimiter: string
+  complement: boolean
+  onlyDelimited: boolean
+  whitespace: 'default' | 'trimmed' | null
+  noPartial: boolean
+  outputDelimiter: string | null
+  zeroTerminated: boolean
+}
+
 const WHITESPACE_ARGS: readonly string[] = ['trimmed']
 
-function parseFlags(bag: Record<string, FlagValue>): CutOptions | string {
+function parseFlags(bag: Record<string, FlagValue>): CutFlags | string {
   const fl = new FlagView(bag, specOf('cut'))
   const bytesRange = fl.asStr('bytes')
   const charsRange = fl.asStr('characters')
@@ -40,20 +54,14 @@ function parseFlags(bag: Record<string, FlagValue>): CutOptions | string {
     return 'cut: you must specify a list of bytes, characters, or fields\n'
   }
   if (selected.length > 1) return 'cut: only one type of list may be specified\n'
-  const mode: CutOptions['mode'] =
+  const mode: CutFlags['mode'] =
     bytesRange !== undefined ? 'bytes' : charsRange !== undefined ? 'characters' : 'fields'
   const range = bytesRange ?? charsRange ?? fieldsRange ?? ''
   const rawWhitespace = fl.raw('whitespace_delimited')
-  let whitespace: CutOptions['whitespace'] = null
+  let whitespace: CutFlags['whitespace'] = null
   if (fl.asBool('w') || fl.asStr('F') !== undefined || rawWhitespace === true) {
     whitespace = 'default'
   } else if (typeof rawWhitespace === 'string') {
-    // One candidate, so the word can only match or not match here: a
-    // prefix of `trimmed` resolves to it, and the refusal keeps cut's own
-    // one-line wording (no candidate block). GNU cut has no such option, so
-    // there is nothing to measure this against: the empty word reaching the
-    // sole candidate as ACCEPTED is what the general rule says, not a probed
-    // answer. It stays the general rule rather than a special case.
     if (!matchWord(rawWhitespace, WHITESPACE_ARGS).matched) {
       return (
         `cut: invalid argument '${quoteText(rawWhitespace)}' for ` + "'--whitespace-delimited'\n"
@@ -74,12 +82,8 @@ function parseFlags(bag: Record<string, FlagValue>): CutOptions | string {
   if (explicitDelimiter !== undefined && Array.from(explicitDelimiter).length !== 1) {
     return 'cut: the delimiter must be a single character\n'
   }
-  // A refusal arrives as the stderr text to print, the same shape every
-  // other check in this function returns.
-  const ranges = parseRanges(range, mode)
-  if (typeof ranges === 'string') return ranges
   return {
-    ranges,
+    ranges: range,
     mode,
     delimiter: explicitDelimiter ?? '\t',
     complement: fl.asBool('complement'),
@@ -102,22 +106,72 @@ export async function cutGeneric(
   if (typeof parsed === 'string') {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
   }
+  const config = {
+    list: byteView(parsed.ranges),
+    mode: parsed.mode,
+    delimiter: Array.from(parsed.delimiter, (character) => character.codePointAt(0) ?? 0),
+    complement: parsed.complement,
+    only_delimited: parsed.onlyDelimited,
+    whitespace: parsed.whitespace,
+    no_partial: parsed.noPartial,
+    output_delimiter:
+      parsed.outputDelimiter === null
+        ? null
+        : { kind: 'bytes', value: byteView(ENC.encode(parsed.outputDelimiter)) },
+    zero_terminated: parsed.zeroTerminated,
+  } satisfies Record<string, JsonValue>
+  let engine: Awaited<ReturnType<typeof openStream>>
+  try {
+    engine = await openStream('cut', config)
+  } catch (error) {
+    if (!(error instanceof StreamRefusal)) throw error
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${error.message}\n`) })]
+  }
   if (paths.length > 0) {
-    const [ok, err] = await splitReadable(paths, stdinStat(stat), 'cut')
+    let inspected: Awaited<ReturnType<typeof splitReadable>>
+    try {
+      inspected = await splitReadable(paths, stdinStat(stat), 'cut')
+    } catch (error) {
+      engine.close()
+      throw error
+    }
+    const [ok, err] = inspected
     const io = operandsIo(err)
-    if (ok.length === 0 && err !== '') return [null, io]
-    const outputs = ok.map((operand) =>
-      reportedStream(cutStream(stream(operand), parsed), io, operand, 'cut'),
+    if (ok.length === 0 && err !== '') {
+      engine.close()
+      return [null, io]
+    }
+    async function* outputs(): AsyncIterable<Uint8Array> {
+      try {
+        for (const [index, operand] of ok.entries()) {
+          const current = index === 0 ? engine : await openStream('cut', config)
+          try {
+            yield* reportedStream(
+              streamOutput(current, stream(operand), ctx.signal),
+              io,
+              operand,
+              'cut',
+            )
+          } finally {
+            await closeStream(current)
+          }
+        }
+      } finally {
+        await closeStream(engine)
+      }
+    }
+    const out: ByteSource = new OutputStream(outputs()[Symbol.asyncIterator](), () =>
+      closeStream(engine),
     )
-    const out: ByteSource = asyncChain(outputs)
     return [out, io]
   }
   let source: AsyncIterable<Uint8Array>
   try {
     source = resolveSource(ctx.stdin)
   } catch (error) {
+    engine.close()
     const message = error instanceof Error ? error.message : String(error)
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${message}\n`) })]
   }
-  return [cutStream(source, parsed), new IOResult()]
+  return [streamOutput(engine, source, ctx.signal), new IOResult()]
 }

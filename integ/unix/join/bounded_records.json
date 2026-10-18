@@ -1,0 +1,48 @@
+{
+  "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+  ],
+  "cases": [
+    {
+      "id": "join_repeated_keys_cartesian_byte_records",
+      "seq": 17020300,
+      "command": "printf 'a 1\\na 2\\n' > /data/record-left; printf 'a x\\na y\\na z\\n' > /data/record-right; join /data/record-left /data/record-right",
+      "expect": {
+        "exit": 0,
+        "stdout": "a 1 x\na 1 y\na 1 z\na 2 x\na 2 y\na 2 z\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "join_malformed_field_bytes_survive",
+      "seq": 17020301,
+      "command": "printf 'a \\377\\n' > /data/record-left; printf 'a \\376\\n' > /data/record-right; join /data/record-left /data/record-right | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": " 61 20 ff 20 fe 0a\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

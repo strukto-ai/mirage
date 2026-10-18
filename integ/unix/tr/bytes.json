@@ -25,6 +25,46 @@
   ],
   "cases": [
     {
+      "id": "tr_delete_squeeze_after_deleted_bytes",
+      "seq": 17020001,
+      "command": "printf 'aa___aaa___bbb' | tr -ds _ ab",
+      "expect": {
+        "exit": 0,
+        "stdout": "ab",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_duplicate_set1_last_mapping",
+      "seq": 17020002,
+      "command": "printf abba | tr aba 123",
+      "expect": {
+        "exit": 0,
+        "stdout": "3223",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_complement_translation_byte_order",
+      "seq": 17020003,
+      "command": "( export LC_ALL=C; printf '\\000\\001a\\376\\377' | tr -c a 0123 | od -An -tx1 )",
+      "expect": {
+        "exit": 0,
+        "stdout": " 30 31 61 33 33\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tr_squeeze_unused_set2_members",
+      "seq": 17020004,
+      "command": "printf aaxxZZZ | tr -s a xZ",
+      "expect": {
+        "exit": 0,
+        "stdout": "xZ",
+        "stderr": ""
+      }
+    },
+    {
       "id": "tr_bytes_spellings",
       "seq": 14470300,
       "command": "( export LC_ALL=C; printf 'A\\302\\240B\\302\\240C\\n' > /data/bytes.txt; tr -d $'\\xc2\\xa0' < /data/bytes.txt; tr -d '\\302\\240' < /data/bytes.txt; tr -d ' ' < /data/bytes.txt )",

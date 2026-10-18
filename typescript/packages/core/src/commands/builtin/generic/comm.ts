@@ -12,7 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { compareCodePoints } from '../../../utils/sort.ts'
+import { chunks } from '../../../io/cooperative.ts'
+import { YieldBudget } from '../../../io/yield_budget.ts'
+import { concat } from '../../../utils/bytes.ts'
+import { closeStream, openStream } from '../../../rs/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -27,7 +30,6 @@ import { isFsError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
 
 // comm's options; `checkOrder` is the later of --check-order and
 // --nocheck-order, null when neither was given.
@@ -75,105 +77,90 @@ export function commGeneric(
   const reader = (p: PathSpec): AsyncLineIterator =>
     isStdin(p) ? shared : new AsyncLineIterator(read(p))
   const io = new IOResult()
-  return [commStream([reader(p1), reader(p2)], io, parsed, [p1, p2]), io]
+  return [commStream([reader(p1), reader(p2)], io, parsed, [p1, p2], ctx.signal), io]
 }
 
-/**
- * Merge the two inputs, checking each one's order as GNU comm does.
- *
- * Each newly read line is checked against its file's previous one: always
- * under --check-order, where the first disorder ends the run, never under
- * --nocheck-order, and by default only once a line unique to one file has
- * printed, warning once per file and closing with `input is not in sorted
- * order`. Both exit 1. A failed read ends the run too, named for its
- * operand; two `-` operands share one stdin reader, and GNU, closing stdin
- * twice, ends with `comm: -: Bad file descriptor`, exit 1, before --total.
- */
+async function* commChunks(
+  reader: AsyncLineIterator,
+  separator: number,
+): AsyncIterable<Uint8Array> {
+  for (;;) {
+    const record = await reader.readline(undefined, separator)
+    if (record === null) return
+    yield record
+    yield Uint8Array.of(separator)
+  }
+}
+
 async function* commStream(
   readers: readonly [AsyncLineIterator, AsyncLineIterator],
   io: IOResult,
   flags: CommFlags,
   paths: readonly [PathSpec, PathSpec],
+  signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
   const separator = recordSeparator(flags.zeroTerminated)
-  const lines: [string | null, string | null] = [null, null]
-  const warned = [false, false]
-  const counts = [0, 0, 0]
-  const errors: string[] = []
-  const suppressed = [flags.suppress1, flags.suppress2, flags.suppress3]
-  let unpairable = false
-  // Read file WHICH's next line; whether its order ends the run.
-  async function pull(which: 0 | 1): Promise<boolean> {
-    let raw: Uint8Array | null
-    try {
-      raw = await readers[which].readline(undefined, separator)
-    } catch (error) {
-      if (!isFsError(error)) throw error
-      errors.push(fsErrorLine('comm', paths[which], error))
-      io.stderr = ENC.encode(errors.join(''))
-      io.exitCode = 1
-      return true
-    }
-    const before = lines[which]
-    const line = raw === null ? null : DEC.decode(raw)
-    lines[which] = line
-    if (
-      flags.checkOrder === false ||
-      !(flags.checkOrder === true || unpairable) ||
-      warned[which] === true ||
-      line === null ||
-      before === null ||
-      compareCodePoints(line, before) >= 0
-    )
-      return false
-    warned[which] = true
-    errors.push(`comm: file ${String(which + 1)} is not in sorted order\n`)
-    io.stderr = ENC.encode(errors.join(''))
-    io.exitCode = 1
-    return flags.checkOrder === true
+  const stream = await openStream('comm', {
+    suppressed: [flags.suppress1, flags.suppress2, flags.suppress3],
+    check_order: flags.checkOrder,
+    delimiter: flags.outputDelimiter,
+    total: flags.total,
+    terminator: separator,
+  })
+  const sources = [
+    chunks(commChunks(readers[0], separator), signal),
+    chunks(commChunks(readers[1], separator), signal),
+  ] as const
+  const errors: Uint8Array[] = []
+  const budget = new YieldBudget(signal)
+  function recordResult(): void {
+    const error = stream.takeStderr()
+    if (error.byteLength > 0) errors.push(error)
+    io.stderr = concat(errors)
+    io.exitCode = Math.max(io.exitCode, stream.status())
   }
   try {
-    if ((await pull(0)) || (await pull(1))) return
     for (;;) {
-      const [left, right] = lines
-      if (left === null && right === null) break
-      const column =
-        right === null || (left !== null && compareCodePoints(left, right) < 0)
-          ? 1
-          : left === null || compareCodePoints(right, left) < 0
-            ? 2
-            : 3
-      unpairable ||= column !== 3
-      const text = column === 2 ? right : left
-      counts[column - 1] = (counts[column - 1] ?? 0) + 1
-      if (!suppressed[column - 1])
-        yield ENC.encode(
-          flags.outputDelimiter.repeat(
-            suppressed.slice(0, column - 1).filter((hidden) => !hidden).length,
-          ) +
-            (text ?? '') +
-            String.fromCharCode(separator),
-        )
-      if (column !== 2 && (await pull(0))) return
-      if (column !== 1 && (await pull(1))) return
+      await budget.run()
+      let output: Uint8Array
+      if (stream.busy()) output = stream.drain()
+      else {
+        const wanted = stream.wants()
+        if (wanted === null) break
+        const side = wanted === 0 ? 0 : 1
+        try {
+          const next = await sources[side].next()
+          output = next.done === true ? stream.endInput(side) : stream.feedInput(side, next.value)
+        } catch (error) {
+          if (!isFsError(error)) throw error
+          errors.push(ENC.encode(fsErrorLine('comm', paths[side], error)))
+          io.stderr = concat(errors)
+          io.exitCode = 1
+          return
+        }
+      }
+      recordResult()
+      if (output.byteLength > 0) yield output
     }
-    if (paths.every((p) => p.rawPath === '-')) {
-      errors.push('comm: -: Bad file descriptor\n')
-      io.stderr = ENC.encode(errors.join(''))
+    if (!stream.done() && paths.every((path) => path.rawPath === '-')) {
+      errors.push(ENC.encode('comm: -: Bad file descriptor\n'))
+      io.stderr = concat(errors)
       io.exitCode = 1
       return
     }
-    if (flags.total)
-      yield ENC.encode(
-        [...counts.filter((_, i) => !suppressed[i]).map(String), 'total'].join(
-          flags.outputDelimiter,
-        ) + String.fromCharCode(separator),
-      )
-    if (warned.includes(true)) {
-      errors.push('comm: input is not in sorted order\n')
-      io.stderr = ENC.encode(errors.join(''))
+    const output = stream.finish()
+    recordResult()
+    if (output.byteLength > 0) yield output
+    while (stream.busy()) {
+      await budget.run()
+      const output = stream.drain()
+      recordResult()
+      if (output.byteLength > 0) yield output
     }
   } finally {
+    recordResult()
+    await closeStream(stream)
+    for (const source of sources) await source.return?.()
     for (const reader of new Set(readers)) await reader.discard()
   }
 }

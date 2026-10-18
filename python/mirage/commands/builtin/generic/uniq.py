@@ -2,7 +2,6 @@ import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
-from mirage.commands.builtin.utils.lines import record_separator
 from mirage.commands.builtin.utils.operands import split_readable
 from mirage.commands.builtin.utils.stream import (
     resolve_source,
@@ -15,9 +14,9 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error, word_refusal_error
 from mirage.commands.spec.word_choice import WordMatch, match_word
-from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.shell.bytes import decode_text, encode_text
+from mirage.rs.stream import run_stream
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, StatFn
 
 # The --all-repeated and --group words, in the order GNU lists each
@@ -30,6 +29,7 @@ SKIP_FIELDS = "fields to skip"
 SKIP_CHARS = "bytes to skip"
 CHECK_CHARS = "bytes to compare"
 GROUP_ARGS = ("prepend", "append", "separate", "both")
+COUNT_LIMIT = 2**64 - 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,98 +122,6 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UniqFlags:
     )
 
 
-def _skip_fields(text: str, count: int) -> str:
-    index = 0
-    for _ in range(count):
-        if index >= len(text):
-            break
-        while index < len(text) and text[index] in " \t":
-            index += 1
-        while index < len(text) and text[index] not in " \t":
-            index += 1
-    return text[index:]
-
-
-def _comparison_key(line: bytes, flags: UniqFlags) -> str:
-    text = _skip_fields(decode_text(line), flags.skip_fields)
-    if flags.skip_chars > 0:
-        text = text[flags.skip_chars :]
-    if flags.check_chars is not None:
-        text = text[: flags.check_chars]
-    if flags.ignore_case:
-        text = text.lower()
-    return text
-
-
-def _format_record(
-    line: bytes, count: int, flags: UniqFlags, separator: bytes
-) -> bytes:
-    if flags.count:
-        return encode_text(f"{count:>7} ") + line + separator
-    return line + separator
-
-
-def _group_separator_before(index: int, method: str) -> bool:
-    if method in ("prepend", "both"):
-        return True
-    return method in ("separate", "append") and index > 0
-
-
-async def _uniq_stream(
-    source: AsyncIterator[bytes], flags: UniqFlags
-) -> AsyncIterator[bytes]:
-    separator = record_separator(flags.zero_terminated)
-    reader = AsyncLineIterator(source)
-    first: bytes | None = None
-    current_key: str | None = None
-    count = 0
-    group_index = -1
-    repeated_groups = 0
-    try:
-        while True:
-            line = await reader.readline(separator)
-            key = None if line is None else _comparison_key(line, flags)
-            if line is None or first is None or key != current_key:
-                if (
-                    first is not None
-                    and flags.all_repeated is None
-                    and (flags.count or flags.unique_only)
-                ):
-                    if not (flags.duplicates_only and count == 1) and not (
-                        flags.unique_only and count > 1
-                    ):
-                        yield _format_record(first, count, flags, separator)
-                if line is None:
-                    break
-                first, current_key, count = line, key, 0
-                group_index += 1
-            count += 1
-            if flags.group is not None:
-                if count == 1 and _group_separator_before(
-                    group_index, flags.group
-                ):
-                    yield separator
-                yield line + separator
-            elif flags.all_repeated is not None:
-                if count == 2:
-                    if flags.all_repeated == "prepend" or (
-                        flags.all_repeated == "separate"
-                        and repeated_groups > 0
-                    ):
-                        yield separator
-                    yield first + separator
-                    repeated_groups += 1
-                if count >= 2:
-                    yield line + separator
-            elif not (flags.count or flags.unique_only):
-                if count == (2 if flags.duplicates_only else 1):
-                    yield first + separator
-        if first is not None and flags.group in ("append", "both"):
-            yield separator
-    finally:
-        await reader.discard()
-
-
 async def uniq_generic(
     paths: list[PathSpec],
     *,
@@ -266,7 +174,24 @@ async def uniq_generic(
         source = read_stream(paths[0])
     else:
         source = resolve_source(stdin)
-    output: ByteSource = _uniq_stream(source, parsed)
+    output: ByteSource = run_stream(
+        "uniq",
+        {
+            "count": parsed.count,
+            "duplicates_only": parsed.duplicates_only,
+            "unique_only": parsed.unique_only,
+            "skip_fields": min(parsed.skip_fields, COUNT_LIMIT),
+            "skip_chars": min(parsed.skip_chars, COUNT_LIMIT),
+            "check_chars": min(parsed.check_chars, COUNT_LIMIT)
+            if parsed.check_chars is not None
+            else None,
+            "ignore_case": parsed.ignore_case,
+            "all_repeated": parsed.all_repeated,
+            "group": parsed.group,
+            "zero_terminated": parsed.zero_terminated,
+        },
+        source,
+    )
     if len(paths) == 2 and paths[1].raw_path != "-":
         if write_bytes is None:
             return None, IOResult(
