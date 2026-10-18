@@ -57,7 +57,7 @@ export function grepTerms(
 ): SearchTerms | null {
   const fl = new FlagView(bag, specOf('grep'))
   const f = parseGrepFlags(fl)
-  const pattern = patternArg(texts, bag)
+  const pattern = patternArg(texts, fl)
   if (f.invert) return null
   if (pattern === null || fl.raw('file') !== undefined) return null
   const matcher = compilePattern(
@@ -104,7 +104,7 @@ export function grepTerms(
 export function rgTerms(bag: Record<string, FlagValue>, texts: string[]): SearchTerms | null {
   const fl = new FlagView(bag, specOf('rg'))
   const f = parseRgFlags(fl)
-  const pattern = patternArg(texts, bag)
+  const pattern = patternArg(texts, fl)
   if (f.invert || f.passthru) return null
   if (!f.quiet && (f.filesWithoutMatch || (f.includeZero && (f.countOnly || f.countMatches)))) {
     return null

@@ -845,7 +845,7 @@ export async function rgGeneric(
   const walk = walkFilter(f, types, await ignoreRules(fl, dispatchOf(ctx), notes))
   let pat: RegExp | null = null
   if (!f.listFiles) {
-    const resolution = await resolvePattern('rg', texts, ctx.flags, paths, ctx.mountPrefix, stream)
+    const resolution = await resolvePattern('rg', texts, fl, paths, ctx.mountPrefix, stream)
     if (resolution.error !== null) {
       return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(resolution.error) })]
     }

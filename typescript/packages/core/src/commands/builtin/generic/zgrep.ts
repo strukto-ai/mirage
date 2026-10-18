@@ -100,7 +100,7 @@ export async function zgrepGeneric(
   stat?: StatFn,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, specOf('zgrep'))
-  const resolution = await resolvePattern('zgrep', texts, ctx.flags, paths, ctx.mountPrefix, stream)
+  const resolution = await resolvePattern('zgrep', texts, fl, paths, ctx.mountPrefix, stream)
   if (resolution.error !== null) {
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(resolution.error) })]
   }

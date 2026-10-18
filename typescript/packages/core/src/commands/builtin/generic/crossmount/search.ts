@@ -101,7 +101,7 @@ export async function runSearch(
           ignores?.empty === false)))
   if (rg?.typeList) return runSingle(name, paths.slice(0, 1), [...texts], bag)
   if (grep !== null) {
-    const pattern = patternArg(texts, bag)
+    const pattern = patternArg(texts, view)
     if (pattern !== null)
       compilePattern(
         pattern,
@@ -114,7 +114,7 @@ export async function runSearch(
       )
   }
   if (rg !== null && !rg.listFiles) {
-    const pattern = patternArg(texts, bag)
+    const pattern = patternArg(texts, view)
     if (pattern !== null) rgMatcher(pattern, false, rg)
   }
   const quiet = grep?.quiet ?? rg?.quiet ?? false
@@ -275,7 +275,7 @@ export async function runSearch(
   // the ignore files it could not read; the line keeps one.
   const noted =
     grep !== null
-      ? encodeText(lineWarnings(view, grep, patternArg(texts, bag) ?? '', false))
+      ? encodeText(lineWarnings(view, grep, patternArg(texts, view) ?? '', false))
       : rg !== null && notes.length > 0 && !rg.noMessages
         ? formatRecords(notes)
         : new Uint8Array()

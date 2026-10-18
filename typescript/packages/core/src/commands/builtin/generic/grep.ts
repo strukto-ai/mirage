@@ -296,7 +296,7 @@ export async function grepGeneric(
     const exitCode = error instanceof UsageError ? error.exitCode : 2
     return [null, new IOResult({ exitCode, stderr: ENC.encode(error.message + '\n') })]
   }
-  const resolution = await resolvePattern(name, texts, ctx.flags, paths, ctx.mountPrefix, stream)
+  const resolution = await resolvePattern(name, texts, fl, paths, ctx.mountPrefix, stream)
   if (resolution.error !== null || resolution.pattern === null)
     return [
       null,

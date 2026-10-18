@@ -23,8 +23,7 @@ import { UsageError } from '../errors.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { materialize } from '../../io/types.ts'
 import { PathSpec } from '../../types.ts'
-import { FlagView } from '../spec/flag_view.ts'
-import { type FlagValue } from '../spec/types.ts'
+import type { FlagView } from '../spec/flag_view.ts'
 
 export const NEVER_MATCH = '(?!)'
 // The matcher options, as GNU grep names them: each one picks the dialect,
@@ -46,14 +45,8 @@ function escapeRegex(s: string): string {
 // Resolve the pattern-list argument from -e values (list[str] when
 // multiple) or the positional. Returns the POSIX newline-joined pattern
 // list, or null when neither was supplied.
-export function patternArg(
-  texts: readonly string[],
-  bag: Record<string, FlagValue>,
-): string | null {
-  // Spec-less, as the shared push-down helpers are: `-e` and `-f` are
-  // declared by the grep, rg and zgrep specs alike, and this helper is
-  // reached from all three.
-  const e = new FlagView(bag).asList('regexp')
+export function patternArg(texts: readonly string[], flags: FlagView): string | null {
+  const e = flags.asList('regexp')
   if (e.length > 0) return e.join('\n')
   if (texts.length > 0 && texts[0] !== undefined) return texts[0]
   return null
@@ -72,17 +65,17 @@ export interface PatternResolution {
 export async function resolvePattern(
   name: string,
   texts: readonly string[],
-  bag: Record<string, FlagValue>,
+  flags: FlagView,
   paths: readonly PathSpec[],
   mountPrefix: string | null | undefined,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<PatternResolution> {
-  let pattern = patternArg(texts, bag)
+  let pattern = patternArg(texts, flags)
   let neverMatch = false
   // `raw` rather than `asList`, mirroring Python's `flags.raw(file_key)`: an
   // empty -f list still means "-f was supplied", which is what turns on the
   // NEVER_MATCH sentinel below.
-  const patternFiles = new FlagView(bag).raw('file')
+  const patternFiles = flags.raw('file')
   if (Array.isArray(patternFiles)) {
     const first = paths[0]
     const prefix =
