@@ -14,8 +14,10 @@
 
 import asyncio
 import json
+import random
 from pathlib import Path
 
+import jq as libjq
 import pytest
 
 from mirage.core.jq.parse import (
@@ -119,3 +121,132 @@ async def test_large_unfinished_input_can_be_cancelled_and_discarded():
             await pending
     finally:
         await parser.close()
+
+
+ALPHABET = [
+    "{",
+    "}",
+    "[",
+    "]",
+    ":",
+    ",",
+    '"',
+    "\\",
+    " ",
+    "\n",
+    "\t",
+    "1",
+    "0",
+    "-",
+    "+",
+    ".",
+    "e",
+    "E",
+    "t",
+    "r",
+    "u",
+    "n",
+    "a",
+    "f",
+    "l",
+    "s",
+    "x",
+    "\x01",
+    "\x00",
+    "é",
+    '"a"',
+    "true",
+    "null",
+    "false",
+    "12",
+    '"\\u00e9"',
+    '"\\ud83d\\ude00"',
+    '"\\ud800"',
+    '"\\udc00"',
+    "\\u",
+    "nan",
+    "NaN",
+    "inf",
+    "1e5",
+    ".5",
+    '"\\n"',
+    '{"k":1}',
+    "[1,2]",
+    "'",
+    "\N{ZERO WIDTH NO-BREAK SPACE}",
+]
+SEEDS = [
+    '{"a":1,"b":[1,2,{"c":null}]}',
+    "[1,2,3]",
+    '"str"',
+    "123",
+    "true",
+    '{"a":{"b":{"c":[true,false]}}}',
+    '[{"x":"y"},{"z":[]}]',
+    "1 2 3",
+    '{"a":1}\n{"b":2}\n',
+    "[]",
+    "{}",
+    "[[[]]]",
+    "-0.5e10",
+    '"a\\"b"',
+]
+
+
+def _mutant(rng: random.Random) -> str:
+    if rng.random() < 0.5:
+        return "".join(rng.choice(ALPHABET) for _ in range(rng.randint(0, 12)))
+    text = list(rng.choice(SEEDS))
+    for _ in range(rng.randint(0, 3)):
+        at = rng.randint(0, len(text))
+        roll = rng.random()
+        if roll < 0.33 and text:
+            del text[min(at, len(text) - 1)]
+        elif roll < 0.66:
+            text.insert(at, rng.choice(ALPHABET))
+        elif text:
+            text[min(at, len(text) - 1)] = rng.choice(ALPHABET)
+    return "".join(text)
+
+
+def _reference(text):
+    dumps = []
+    try:
+        for dump in libjq.compile("tojson").input_text(text):
+            dumps.append(dump)
+    except ValueError as exc:
+        return dumps, str(exc).removeprefix("parse error: ")
+    return dumps, None
+
+
+async def _scanned(data, size):
+    parser = JqParser()
+    texts = []
+    try:
+        for at in range(0, max(1, len(data)), size):
+            parser.feed(data[at : at + size], at + size < len(data))
+            while True:
+                value = await parser.next()
+                if value is NO_VALUE:
+                    break
+                if isinstance(value, JqParseError):
+                    return texts, value.message
+                texts.append(value)
+        return texts, None
+    finally:
+        await parser.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size", [None, 1], ids=["whole", "bytewise"])
+async def test_parser_agrees_with_libjq_on_generated_input(size):
+    rng = random.Random(1325)
+    for case in range(3000):
+        text = _mutant(rng)
+        dumps, message = _reference(text)
+        data = text.encode()
+        texts, got_message = await _scanned(data, size or max(1, len(data)))
+        assert got_message == message, (case, text, size)
+        assert [_reference(value) for value in texts] == [
+            ([dump], None) for dump in dumps
+        ], (case, text, size)
