@@ -23,8 +23,8 @@ ws = Workspace({
 }, mode=MountMode.READ)
 ```
 
-After mounting, `find /wandb/my-team -name run.json` discovers available run
-paths.
+After mounting, `find /wandb/my-team -maxdepth 3 -name run.json` discovers
+available run paths.
 
 The mount exposes `/<entity>/<project>/<run-id>/` with `run.json`,
 `config.json`, `summary.json`, `history.jsonl`, and `files/`.

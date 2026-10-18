@@ -105,7 +105,7 @@ vfs = GSlidesVFS(config=config)
 
 async def main():
     ws = Workspace({"/gslides": vfs}, mode=MountMode.READ)
-    ws.register_cli("gws", GWS, config.model_dump())
+    ws.register_cli("gws", GWS, config)
 
     # List structure
     r = await ws.shell("ls /gslides/")

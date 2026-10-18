@@ -177,14 +177,15 @@ async def main():
     print(await r.stdout_str())
 
     # Triage unread messages
-    r = await ws.shell("himalaya envelope list --folder INBOX --unseen --max 5")
+    r = await ws.shell(
+        "himalaya envelope search -m INBOX --page-size 5 not flag seen")
     print(await r.stdout_str())
 
     # Send an email
     r = await ws.shell(
-        'himalaya message send --to "user@example.com"'
+        'himalaya message compose --to "user@example.com"'
         ' --subject "Hello from MIRAGE"'
-        ' --body "This email was sent via the MIRAGE email VFS."')
+        ' --body "This email was sent via the MIRAGE email VFS." --send')
     print(await r.stdout_str())
 
 
