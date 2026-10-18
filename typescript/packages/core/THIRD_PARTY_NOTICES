@@ -1016,6 +1016,9 @@ limitations under the License.
 Apache License 2.0, used by:
 - cfg-if 1.0.5 (https://github.com/rust-lang/cfg-if)
 - flate2 1.1.10 (https://github.com/rust-lang/flate2-rs)
+- num-bigint 0.4.8 (https://github.com/rust-num/num-bigint)
+- num-integer 0.1.47 (https://github.com/rust-num/num-integer)
+- num-traits 0.2.19 (https://github.com/rust-num/num-traits)
 - regex-automata 0.4.18 (https://github.com/rust-lang/regex)
 - regex-syntax 0.8.11 (https://github.com/rust-lang/regex)
 

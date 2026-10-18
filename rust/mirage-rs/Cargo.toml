@@ -12,6 +12,8 @@ publish = false
 flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
 md5.workspace = true
 memchr.workspace = true
+num-bigint.workspace = true
+num-traits.workspace = true
 regex-automata.workspace = true
 regex-syntax.workspace = true
 sha1.workspace = true
