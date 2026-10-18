@@ -1013,12 +1013,17 @@ describe('foreground output fidelity', () => {
   })
 
   it('retains a large configured budget instead of a fixed constant', async () => {
-    const { shell } = await makeShell({}, { stdoutMaxBytes: 2_000_000 })
-    const proc = await shell.execute(shell.resolve({ command: 'printf "%0.sx" $(seq 1 300000)' }))
+    const { shell } = await makeShell(
+      { 'big.txt': 'x'.repeat(300_000) },
+      { stdoutMaxBytes: 2_000_000 },
+    )
+    const proc = await shell.execute(shell.resolve({ command: 'cat /data/big.txt' }))
     await proc.done
+    expect(proc.status).toBe('completed')
+    expect(proc.exitCode).toBe(0)
     const read = proc.readOutput()
     expect(read.lossy).toBe(false)
-    expect(read.delta.length).toBe(300_000)
+    expect(read.delta).toBe('x'.repeat(300_000))
   })
 })
 
