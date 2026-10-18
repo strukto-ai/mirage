@@ -20,20 +20,22 @@ pnpm add -D tsx typescript
 
 Start with the RAM VFS so you can try Mirage without credentials.
 
-```ts
+```ts quickstart.ts
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 async function main(): Promise<void> {
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   await ws.shell(`echo '{"name": "alice"}' > /data/user.json`)
-  for (const command of [
-    'ls /data',
-    'jq -r ".name" /data/user.json',
-    'grep alice /data/user.json',
-  ]) {
-    const result = await ws.shell(command)
-    process.stdout.write(result.stdoutText)
-  }
+
+  const files = await ws.shell('ls /data')
+  process.stdout.write(files.stdoutText)
+
+  const name = await ws.shell('jq -r ".name" /data/user.json')
+  process.stdout.write(name.stdoutText)
+
+  const match = await ws.shell('grep alice /data/user.json')
+  process.stdout.write(match.stdoutText)
+
   await ws.close()
 }
 

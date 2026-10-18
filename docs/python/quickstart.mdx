@@ -33,13 +33,16 @@ from mirage.vfs.ram import RAMVFS
 async def main() -> None:
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     await ws.shell('echo \'{"name": "alice"}\' > /data/user.json')
-    for command in (
-        "ls /data",
-        'jq -r ".name" /data/user.json',
-        "grep alice /data/user.json",
-    ):
-        result = await ws.shell(command)
-        print(await result.stdout_str(), end="")
+
+    files = await ws.shell("ls /data")
+    print(await files.stdout_str(), end="")
+
+    name = await ws.shell('jq -r ".name" /data/user.json')
+    print(await name.stdout_str(), end="")
+
+    match = await ws.shell("grep alice /data/user.json")
+    print(await match.stdout_str(), end="")
+
     await ws.close()
 
 
