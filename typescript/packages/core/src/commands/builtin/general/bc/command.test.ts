@@ -148,6 +148,26 @@ describe('bc stream lifecycle', () => {
     }
   })
 
+  it('gives each concurrent reader of one snapshot all of it', async () => {
+    async function* source() {
+      await Promise.resolve()
+      yield encoder.encode('1/0\n1\n')
+      yield encoder.encode('2\n')
+    }
+    const { output, io } = await invoke(source())
+    const iterator = cursor(output)
+    const notice = 'Runtime error (func=(main), adr=3): Divide by zero\n'
+    try {
+      expect(await iterator.next()).toEqual({ done: false, value: encoder.encode('1\n') })
+      const snapshot = io.stderr
+      expect(await Promise.all([io.stderrStr(), io.stderrStr()])).toEqual([notice, notice])
+      expect(decoder.decode(await materialize(snapshot))).toBe(notice)
+      expect(await io.stderrStr()).toBe(notice)
+    } finally {
+      await iterator.return?.()
+    }
+  })
+
   it('executes the final line without a newline at EOF', async () => {
     async function* source() {
       await Promise.resolve()

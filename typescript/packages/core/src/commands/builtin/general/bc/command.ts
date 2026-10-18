@@ -24,15 +24,19 @@ import { command, type CommandFnResult, type Context } from '../../../config.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 
-async function* diagnostics(
-  parts: readonly Uint8Array[],
-  count: number,
-): AsyncGenerator<Uint8Array> {
-  await Promise.resolve()
-  for (const part of parts) {
-    if (count === 0) return
-    count -= 1
-    yield part
+/**
+ * The diagnostics so far. Each read starts its own pass over them, so
+ * concurrent readers each read all of them.
+ */
+class Diagnostics implements AsyncIterable<Uint8Array> {
+  constructor(
+    private readonly parts: readonly Uint8Array[],
+    private readonly count: number,
+  ) {}
+
+  async *[Symbol.asyncIterator](): AsyncGenerator<Uint8Array> {
+    await Promise.resolve()
+    yield* this.parts.slice(0, this.count)
   }
 }
 
@@ -49,7 +53,7 @@ export async function* drained(
     const notice = stream.takeStderr()
     if (notice.byteLength > 0) {
       errors.push(notice)
-      io.stderr = diagnostics(errors, errors.length)
+      io.stderr = new Diagnostics(errors, errors.length)
     }
     if (output.byteLength > 0) yield output
     if (!stream.busy()) return

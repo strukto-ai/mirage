@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
 from functools import partial
 
@@ -28,14 +28,30 @@ from mirage.rs.stream import OpenStream, open_stream
 from mirage.types import JsonValue, PathSpec
 
 
-async def diagnostics(
-    parts: list[bytes], count: int
-) -> AsyncGenerator[bytes, None]:
-    for part in parts:
-        if count == 0:
-            return
-        count -= 1
-        yield part
+class Diagnostics(AsyncIterator[bytes]):
+    """The diagnostics so far.
+
+    Each pass starts its own cursor, so concurrent readers each read all
+    of them.
+
+    Args:
+        parts (list[bytes]): the invocation's diagnostic chunks, shared.
+        count (int): how many of them this snapshot holds.
+    """
+
+    def __init__(self, parts: list[bytes], count: int) -> None:
+        self._parts = parts
+        self._count = count
+        self._read = 0
+
+    def __aiter__(self) -> "Diagnostics":
+        return Diagnostics(self._parts, self._count)
+
+    async def __anext__(self) -> bytes:
+        if self._read == self._count:
+            raise StopAsyncIteration
+        self._read += 1
+        return self._parts[self._read - 1]
 
 
 async def drained(
@@ -58,7 +74,7 @@ async def drained(
         io.exit_code = stream.status()
         if notice := stream.take_stderr():
             errors.append(notice)
-            io.stderr = diagnostics(errors, len(errors))
+            io.stderr = Diagnostics(errors, len(errors))
         if output:
             yield output
         if not stream.busy():

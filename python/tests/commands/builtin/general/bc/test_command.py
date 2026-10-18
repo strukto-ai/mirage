@@ -118,6 +118,25 @@ async def test_diagnostic_snapshots_remain_cumulative_across_reads():
 
 
 @pytest.mark.asyncio
+async def test_concurrent_readers_of_one_snapshot_each_read_all_of_it():
+    async def source() -> AsyncGenerator[bytes, None]:
+        yield b"1/0\n1\n"
+        yield b"2\n"
+
+    output, io = await invoke(source())
+    notice = b"Runtime error (func=(main), adr=3): Divide by zero\n"
+    try:
+        assert await anext(output) == b"1\n"
+        snapshot = io.stderr
+        assert await asyncio.gather(
+            materialize(snapshot), io.materialize_stderr()
+        ) == [notice, notice]
+        assert await io.materialize_stderr() == notice
+    finally:
+        await output.aclose()
+
+
+@pytest.mark.asyncio
 async def test_finish_executes_the_last_line_without_a_newline():
     async def source() -> AsyncGenerator[bytes, None]:
         yield b"scale=3;"
