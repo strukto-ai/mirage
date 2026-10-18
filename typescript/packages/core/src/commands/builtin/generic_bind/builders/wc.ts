@@ -13,27 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { wcGeneric } from '../../generic/wc.ts'
-import {
-  type GenericCommand,
-  boundUncached,
-  dirAwareStream,
-  fileSize,
-  resolveGlobOf,
-  type GenericCommandFn,
-} from '../adapter.ts'
-import type { PathSpec } from '../../../../types.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, dirAwareStream, fileSize, resolveOrEmpty } from '../files.ts'
 
-const wc: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  const lineCount = ops.lineCount
+const wc: CommandFn = async (_accessor, paths, texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
   return wcGeneric(
     resolved,
     texts,
     ctx,
-    dirAwareStream(ops, accessor, ctx),
-    boundUncached(lineCount && ((p: PathSpec) => lineCount(accessor, p, idx))),
-    fileSize(ops, accessor, ctx),
+    dirAwareStream(files, ctx),
+    files.answers('line_count') ? files.lineCount : undefined,
+    fileSize(files, ctx),
   )
 }
 

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
+import { onMount } from '../../test-utils.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { type Context, type Command } from '../../commands/config.ts'
 import { describe, expect, it } from 'vitest'
@@ -21,7 +21,15 @@ import { RAMVFS } from './ram.ts'
 import type { NamespaceLinks } from '../../view/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { Files } from '../../workspace/files.ts'
-import { FileStat, FileType, LINK_TARGET_KEY, PathSpec, MountMode } from '../../types.ts'
+import {
+  DirListing,
+  FileStat,
+  FileType,
+  LINK_TARGET_KEY,
+  PathSpec,
+  MountMode,
+} from '../../types.ts'
+import { runWithMountGate } from '../../context/session_context.ts'
 import { CycleError } from '../../utils/path.ts'
 import { readTar } from '../../commands/builtin/tar_helper.ts'
 import { UsageError } from '../../commands/errors.ts'
@@ -75,13 +83,20 @@ function linkTable(entries: Record<string, string>, cycles = false): NamespaceLi
 // The session's files over one RAM mount and a link table: the dispatcher
 // answers from the mount itself, which a walk's scan guard never refuses.
 function filesOver(vfs: RAMVFS, links: NamespaceLinks): Files {
-  const io = commandIo(vfs)
-  const dispatch: DispatchFn = async (op, path, args = []) => {
-    if (op === 'stat') return [await io.stat(vfs.accessor, path), new IOResult()]
-    if (op === 'readdir') return [await io.readdir(vfs.accessor, path), new IOResult()]
-    if (op === 'before_full_scan') return [null, new IOResult()]
-    if (op === 'write' && io.write !== undefined) {
-      await io.write(vfs.accessor, path, args[0] as ByteSource)
+  const dispatch: DispatchFn = async (op, path, args = [], kwargs = {}) => {
+    if (op === 'stat') return [await vfs.stat(path), new IOResult()]
+    if (op === 'readdir') {
+      const listed = await vfs.readdir(path)
+      const rows = listed instanceof DirListing ? listed.entries : listed
+      return [rows.map((row) => `${rstrip(path.virtual)}/${row.name}`), new IOResult()]
+    }
+    if (op === 'read') {
+      const data = await vfs.read(path, {})
+      return [kwargs.stream === true ? [data] : data, new IOResult()]
+    }
+    if (op === 'before_full_scan' || op === 'read_many') return [null, new IOResult()]
+    if (op === 'write') {
+      await vfs.write(path, await materialize(args[0] as ByteSource))
       return [null, new IOResult()]
     }
     throw new Error(`unexpected ${op}`)
@@ -112,14 +127,17 @@ async function runCmd(
   const cmd = reg[0]
   if (cmd === undefined) throw new Error('not registered')
   const before = new Map(vfs.store.files)
-  const result = await cmd.fn(vfs.accessor, paths, texts, {
-    stdin: null,
-    flags,
-    io: commandIo(vfs),
-    cwd: PathSpec.fromStrPath('/'),
-    mountPrefix,
-    ...(links !== null ? { vfs: filesOver(vfs, links) } : {}),
-  })
+  const run = (files: Files): ReturnType<Command['fn']> =>
+    cmd.fn(vfs.accessor, paths, texts, {
+      stdin: null,
+      flags,
+      vfs: files,
+      cwd: PathSpec.fromStrPath('/'),
+    })
+  const result =
+    links === null
+      ? await onMount(vfs, run, mountPrefix || '/')
+      : await runWithMountGate('/', MountMode.WRITE, async () => run(filesOver(vfs, links)))
   if (result === null) {
     return { out: new Uint8Array(), writes: {}, exitCode: 0, stderr: new Uint8Array() }
   }

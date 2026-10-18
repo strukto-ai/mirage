@@ -16,7 +16,8 @@ import { chunks } from '../../../io/cooperative.ts'
 import type { Context } from '../../config.ts'
 import type { FollowOperands, LinkView, MountView } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import type { FileStat } from '../../../types.ts'
+import type { FileStat, Visibility } from '../../../types.ts'
+import { type Caller, currentCaller } from '../../../context/session_context.ts'
 import { PathSpec } from '../../../types.ts'
 import { eloop, isEnoent, isEnotdir } from '../../../errors/fs.ts'
 import type { ByteSource } from '../../../io/types.ts'
@@ -257,6 +258,11 @@ export function mountView(files: Files | undefined, crossing = false): MountView
     isRoot: (path: string) => !crossing && namespace.prefixes().includes(normDir(path)),
     rootOf: (path: string) => ownerPrefix(namespace.prefixes(), path) ?? '/',
     maxDuEntries: (path: string) => namespace.ownerOf(path)?.maxDuEntries ?? null,
+    answers: (path: string, name: string) =>
+      !crossing && (namespace.ownerOf(path)?.calls?.has(name) ?? false),
+    maxGlobMatches: (path: string) =>
+      crossing ? null : (namespace.ownerOf(path)?.maxGlobMatches ?? null),
+    searchable: (path: string) => (crossing ? null : (namespace.ownerOf(path)?.searchable ?? null)),
   }
 }
 
@@ -283,14 +289,50 @@ export function linksOf(ctx: Context): LinkView | undefined {
 }
 
 /**
+ * The mount whose command scope the command runs in, null for none: the one
+ * its files were said to run in (`Files.servedBy`), so a read after an await
+ * answers for this run even where the async context does not isolate tasks;
+ * else the context's.
+ */
+function servingMount(files: Files): Caller['mount'] {
+  return files.served !== undefined ? files.served : currentCaller().mount
+}
+
+/**
+ * Whether the command walks across mounts: it runs on the session's files
+ * with no mount's command scope bound, as a cross-mount run does, so every
+ * call it makes reaches whichever mount serves the path. Mirrors Python's
+ * crosses_mounts.
+ */
+export function crossesMounts(ctx: Context): boolean {
+  return ctx.vfs !== undefined && servingMount(ctx.vfs) === null
+}
+
+/**
+ * The prefix of the mount the command runs on, without its trailing slash:
+ * what a path the command makes up (an output name, a file a list names) is
+ * keyed below. '' for a run across mounts, which keys every path by its
+ * whole virtual path, and outside a workspace. Mirrors Python's mount_root.
+ */
+export function mountRoot(ctx: Context): string {
+  const mount = ctx.vfs === undefined ? null : servingMount(ctx.vfs)
+  return mount === null ? '' : rstripSlash(mount[0])
+}
+
+/**
  * Where the mount boundaries are for the command's walk, read off its files;
- * undefined outside a workspace. A run whose table is the dispatcher itself
- * (a dispatcher and no mount `io`) walks across mounts: the dispatcher
- * descends into every mount, so it has no boundary to stop at. Mirrors
- * Python's mounts_of.
+ * undefined outside a workspace. A run across mounts (`crossesMounts`) has
+ * the dispatcher descend into every mount, so it has no boundary to stop at.
+ * Mirrors Python's mounts_of.
  */
 export function mountsOf(ctx: Context): MountView | undefined {
-  return mountView(ctx.vfs, ctx.io === undefined && ctx.vfs !== undefined)
+  return mountView(ctx.vfs, crossesMounts(ctx))
+}
+
+/** The visibility of the session the files run as, null for none. Mirrors
+ * Python's visibility_of. */
+export function visibilityOf(files: Files | undefined): Visibility | null {
+  return files === undefined ? null : namespaceOf(files).vis()
 }
 
 /** The link resolver an invocation carries: null outside a workspace.

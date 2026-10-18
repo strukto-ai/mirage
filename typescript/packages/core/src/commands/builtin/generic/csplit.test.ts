@@ -16,6 +16,8 @@ import { describe, expect, it } from 'vitest'
 
 import type { IOResult } from '../../../io/types.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
+import { runWithMountGate } from '../../../context/session_context.ts'
+import { Files } from '../../../workspace/files.ts'
 import type { Context } from '../../config.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
@@ -30,20 +32,23 @@ async function runCsplit(flags: Context['flags'], cwd = '/data'): Promise<[PathS
     stdin: ENC.encode('a\nb\n'),
     flags,
     cwd: PathSpec.fromStrPath(cwd),
-    mountPrefix: '/data',
+    vfs: new Files(() => Promise.reject(new Error('no dispatch'))),
   } as Context
-  const result = await csplitGeneric(
-    [],
-    ['2'],
-    ctx,
-    () => {
-      throw new Error('paths are empty; the source is stdin')
-    },
-    (p) => {
-      specs.push(p)
-      return Promise.resolve()
-    },
-    (p) => Promise.reject(new Error(`unlink ${p.virtual}: the run succeeds`)),
+  // The command runs on the mount at /data.
+  const result = await runWithMountGate('/data/', MountMode.WRITE, () =>
+    csplitGeneric(
+      [],
+      ['2'],
+      ctx,
+      () => {
+        throw new Error('paths are empty; the source is stdin')
+      },
+      (p) => {
+        specs.push(p)
+        return Promise.resolve()
+      },
+      (p) => Promise.reject(new Error(`unlink ${p.virtual}: the run succeeds`)),
+    ),
   )
   const [, io] = result as [unknown, IOResult]
   return [specs, io]

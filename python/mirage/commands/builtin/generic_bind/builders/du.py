@@ -13,28 +13,28 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass, field, replace
-from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.du import (
-    ComputeEntries,
-    ComputeSize,
-    du_generic,
+from mirage.commands.builtin.generic.du import DuEntries, du_generic
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import (
+    CommandFiles,
+    command_files,
 )
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    bound_op,
+from mirage.commands.builtin.utils.links import (
+    crosses_mounts,
+    links_of,
+    mount_view,
+    mounts_of,
 )
-from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.tree import WalkCall, tree_walk
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileStat, FileType, PathSpec, ReaddirFn
 from mirage.utils.key_prefix import (
     mount_key,
     mount_prefix_of,
@@ -42,7 +42,6 @@ from mirage.utils.key_prefix import (
     under_path,
 )
 from mirage.utils.path import CycleError
-from mirage.vfs.types import DuEntries
 from mirage.view.types import LinkView, MountView
 
 
@@ -251,17 +250,32 @@ async def _counted(
     return target
 
 
+@dataclass(frozen=True)
+class Walk:
+    """The walk's readdir and stat, answered from the mount's
+    ``read_tree`` where it can, and the directories listed that way,
+    which cost no request and so no budget.
+
+    Args:
+        readdir (WalkCall): the walk's listing.
+        stat (WalkCall): the walk's stat.
+        answered (set[str]): the directories ``read_tree`` listed.
+    """
+
+    readdir: WalkCall
+    stat: WalkCall
+    answered: set[str]
+
+
 async def _du_walk(
-    walk: tuple[WalkCall, WalkCall, set[str]],
-    index: IndexCacheStore,
+    walk: Walk,
     path: PathSpec,
     budget: WalkBudget,
     entries: list[tuple[str, int]] | None,
     follow: Dereference | None = None,
 ) -> int:
-    readdir, stat, answered = walk
     try:
-        info = await stat(path, index)
+        info = await walk.stat(path)
     except Exception as exc:
         _account_for_walk_error(exc, path, budget)
         return 0
@@ -278,12 +292,12 @@ async def _du_walk(
         return size
     budget.directories.append(path.virtual)
     try:
-        children = await readdir(path, index)
+        children = await walk.readdir(path)
     except Exception as exc:
         _account_for_walk_error(exc, path, budget)
         return 0
     total = 0
-    free = (path.virtual.rstrip("/") or "/") in answered
+    free = (path.virtual.rstrip("/") or "/") in walk.answered
     for child in children:
         if not free and not budget.spend(path.virtual):
             break
@@ -293,38 +307,30 @@ async def _du_walk(
             resolved=False,
             vfs_path=rekey(path.virtual, path.vfs_path, child),
         )
-        total += await _du_walk(
-            walk, index, child_spec, budget, entries, follow
-        )
+        total += await _du_walk(walk, child_spec, budget, entries, follow)
     return total
 
 
-def _walk(
-    ops: CommandIO, accessor: Accessor, index: IndexCacheStore
-) -> tuple[WalkCall, WalkCall, set[str]]:
+def _tree_of(files: CommandFiles, listing: ReaddirFn) -> Walk:
     """The walk's readdir and stat, answered from the mount's
-    ``read_tree`` where it can, and the directories listed that way,
-    which cost no request and so no budget.
+    ``read_tree`` where it can, and the directories listed that way.
 
     Args:
-        ops (CommandIO): the mount's table.
-        accessor (Accessor): the mounted backend.
-        index (IndexCacheStore): cache index threaded through reads.
+        files (CommandFiles): the command's files.
+        listing (ReaddirFn): the walk's own listing.
     """
     answered: set[str] = set()
     readdir, stat = tree_walk(
-        bound_op(ops.read_tree, accessor, index),
-        partial(ops.readdir, accessor),
-        partial(ops.stat, accessor),
+        files.read_tree if files.answers("read_tree") else None,
+        listing,
+        files.stat,
         answered=answered,
     )
-    return readdir, stat, answered
+    return Walk(readdir=readdir, stat=stat, answered=answered)
 
 
 async def _walk_operand(
-    ops: CommandIO,
-    accessor: Accessor,
-    index: IndexCacheStore,
+    walk: Walk,
     budget: WalkBudget,
     follow: Dereference | None,
     path: PathSpec,
@@ -334,9 +340,7 @@ async def _walk_operand(
     the walk never reached under the file's own name.
 
     Args:
-        ops (CommandIO): the mount's table.
-        accessor (Accessor): the mounted backend.
-        index (IndexCacheStore): cache index threaded through reads.
+        walk (Walk): the walk's calls.
         budget (WalkBudget): the invocation's allowance and records.
         follow (Dereference | None): the invocation's ``-L`` state.
         path (PathSpec): the operand.
@@ -344,15 +348,13 @@ async def _walk_operand(
             size under its name; None for a total alone.
     """
     budget.directories.clear()
-    walk = _walk(ops, accessor, index)
     state = follow.operand(path) if follow is not None else None
-    total = await _du_walk(walk, index, path, budget, entries, state)
+    total = await _du_walk(walk, path, budget, entries, state)
     if state is not None:
         for link, real in state.waiting:
             if real not in state.counted:
                 total += await _du_walk(
                     walk,
-                    index,
                     link,
                     budget,
                     entries,
@@ -362,62 +364,83 @@ async def _walk_operand(
 
 
 async def walk_size(
-    ops: CommandIO,
-    accessor: Accessor,
-    index: IndexCacheStore,
+    walk: Walk,
     budget: WalkBudget,
     follow: Dereference | None,
     path: PathSpec,
 ) -> int:
-    return await _walk_operand(ops, accessor, index, budget, follow, path)
+    return await _walk_operand(walk, budget, follow, path)
 
 
 async def walk_entries(
-    ops: CommandIO,
-    accessor: Accessor,
-    index: IndexCacheStore,
+    walk: Walk,
     budget: WalkBudget,
     follow: Dereference | None,
     path: PathSpec,
 ) -> DuEntries:
     entries: list[tuple[str, int]] = []
-    total = await _walk_operand(
-        ops, accessor, index, budget, follow, path, entries
-    )
+    total = await _walk_operand(walk, budget, follow, path, entries)
     entries.sort()
     return entries, total
 
 
 async def du(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not ops.is_mounted(accessor):
-        raise ValueError("du: no VFS")
-    mounts = mounts_of(ctx)
-    budget = WalkBudget(ops.max_du_entries, mounts=mounts)
+    files = command_files(ctx, paths)
     fl = FlagView(ctx.flags, spec=SPECS["du"])
+    crossing = crosses_mounts(ctx)
+    mounts = mounts_of(ctx)
+    # A walk across mounts has no cap of its own: each entry is charged to
+    # the mount serving it, at that mount's cap (see WalkBudget).
+    anchor = (paths[0] if paths else ctx.cwd).virtual
+    budget = WalkBudget(
+        mounts.max_du_entries(anchor)
+        if not crossing
+        and mounts is not None
+        and mounts.max_du_entries is not None
+        else None,
+        mounts=mounts,
+    )
+    # Kept on one filesystem across mounts, a listing leaves out the roots
+    # of the mounts below it, which the walk must neither list nor stat.
+    bound = (
+        mount_view(ctx.vfs)
+        if crossing and fl.as_bool("one_file_system")
+        else None
+    )
+
+    async def listing(path: PathSpec) -> list[str]:
+        entries = await files.readdir(path)
+        if bound is None:
+            return entries
+        owner = bound.root_of(path.virtual)
+        return [e for e in entries if bound.root_of(e.rstrip("/")) == owner]
+
     links = links_of(ctx)
     follow = (
         Dereference(links, mounts if fl.as_bool("one_file_system") else None)
         if links is not None and fl.typed_order("L", "P")[-1:] == ["L"]
         else None
     )
-    compute_size: ComputeSize = partial(
-        walk_size, ops, accessor, ctx.index, budget, follow
-    )
-    compute_entries: ComputeEntries = partial(
-        walk_entries, ops, accessor, ctx.index, budget, follow
-    )
+
+    async def compute_size(path: PathSpec) -> int:
+        return await walk_size(_tree_of(files, listing), budget, follow, path)
+
+    async def compute_entries(path: PathSpec) -> DuEntries:
+        return await walk_entries(
+            _tree_of(files, listing), budget, follow, path
+        )
+
     return await du_generic(
         paths,
         list(texts),
         ctx,
-        lambda targets: ops.resolve_glob(accessor, targets, ctx.index),
-        lambda p: ops.stat(accessor, p, ctx.index),
+        files.resolve_glob,
+        files.stat,
         compute_size,
         compute_entries,
         truncated=lambda: budget.hit,

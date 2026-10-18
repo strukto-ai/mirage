@@ -19,7 +19,6 @@ from email.policy import default as default_policy
 import aiosmtplib
 
 from mirage.core.email.config import EmailConfig
-from mirage.vfs.secrets import reveal_secret
 
 IMPLICIT_TLS_PORT = 465
 
@@ -51,7 +50,7 @@ async def send_raw(config: EmailConfig, raw: bytes) -> Message:
         hostname=config.smtp_host,
         port=config.smtp_port,
         username=config.username,
-        password=reveal_secret(config.password),
+        password=config.password.get_secret_value(),
         use_tls=config.smtp_port == IMPLICIT_TLS_PORT,
         start_tls=None,
     )

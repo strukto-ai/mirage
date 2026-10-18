@@ -17,20 +17,21 @@ import { IOResult } from '../../../../io/types.ts'
 import { FileType } from '../../../../types.ts'
 import { fsStrerror, isFsError } from '../../../../errors/fs.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
-import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles } from '../files.ts'
 import { linksOf } from '../../utils/links.ts'
 
-const unlink: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+const unlink: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
   if (paths.length === 0) throw missingOperandError('unlink', null)
-  const idx = ctx.index ?? undefined
-  const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
+  const resolved = await files.resolveGlob(paths)
   if (resolved.length > 1) {
     const extra = resolved[1]
     throw extraOperandError('unlink', extra === undefined ? '' : extra.rawPath)
   }
   const p = resolved[0]
   if (p === undefined) return [null, new IOResult()]
-  const unlinkOp = requireOp(ops.unlink, 'unlink')
   const enc = new TextEncoder()
   const links = linksOf(ctx) ?? null
   // unlink(2) never follows, so a trailing slash on a link operand is
@@ -49,7 +50,7 @@ const unlink: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
   }
   let isDir = false
   try {
-    const st = await ops.stat(accessor, p, idx)
+    const st = await files.stat(p)
     isDir = st.type === FileType.DIRECTORY
   } catch (err) {
     if (!isFsError(err)) throw err
@@ -73,7 +74,7 @@ const unlink: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
     ]
   }
   try {
-    await unlinkOp(accessor, p)
+    await files.unlink(p)
   } catch (err) {
     if (!isFsError(err)) throw err
     return [

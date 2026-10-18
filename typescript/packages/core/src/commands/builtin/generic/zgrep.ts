@@ -17,7 +17,7 @@ import { compilePosixRegex } from '../../../utils/posix.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import type { PathSpec, StatFn } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import {
   NEVER_MATCH,
@@ -30,9 +30,8 @@ import { UsageError } from '../../errors.ts'
 import type { RegexSyntax } from '../types.ts'
 import { matchStart, matchText } from '../utils/pcre.ts'
 import { GREP_STDIN_LABEL, STDIN_OPERAND } from '../utils/constants.ts'
-import { linkResolver } from '../utils/links.ts'
+import { linkResolver, mountRoot } from '../utils/links.ts'
 import { operandLabel } from '../utils/stream.ts'
-import type { StatFn } from './archive/walk.ts'
 import { decompressInputs } from './decompress.ts'
 import { listingMode, maxCount } from './grep.ts'
 import { validUtf8 } from '../grep_binary.ts'
@@ -100,7 +99,7 @@ export async function zgrepGeneric(
   stat?: StatFn,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, specOf('zgrep'))
-  const resolution = await resolvePattern('zgrep', texts, fl, paths, ctx.mountPrefix, stream)
+  const resolution = await resolvePattern('zgrep', texts, fl, paths, mountRoot(ctx), stream)
   if (resolution.error !== null) {
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(resolution.error) })]
   }

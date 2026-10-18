@@ -27,7 +27,8 @@ async function listedPaths(accessor: DiscordAccessor, path: PathSpec): Promise<s
   return rowsOf(await discordReaddir(accessor, path)).map((row) => `${base}/${row.name}`)
 }
 
-const resolveDiscordGlob = makeResolveGlob(listedPaths)
+const resolveDiscordGlob = (accessor: DiscordAccessor, paths: PathSpec[]): Promise<PathSpec[]> =>
+  makeResolveGlob((path) => listedPaths(accessor, path))(paths)
 
 class FakeDiscordTransport implements DiscordTransport {
   public readonly calls: { method: DiscordMethod; endpoint: string }[] = []

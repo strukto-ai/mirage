@@ -14,45 +14,32 @@
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.generic_bind.builders.rmdir import rmdir
-from mirage.commands.config import CommandIO, Context
 from mirage.types import FileStat, FileType, PathSpec
+from tests.fixtures.answers import Answers, run_generic
 
-INDEX = RAMIndexCacheStore()
 TREE = {"/m": ["/m/empty", "/m/locked"], "/m/empty": [], "/m/locked": []}
 
 
-def _ops(removed: list[str] | None = None) -> CommandIO:
-    async def readdir(_accessor, path, index=None):
-        return TREE.get(path.virtual, [])
+async def _readdir(path: PathSpec) -> list[str]:
+    return TREE.get(path.virtual, [])
 
-    async def stat(_accessor, path, index=None):
-        # Served from the index, as github's is: a stat handed none finds
-        # nothing, however real the directory.
-        if index is not INDEX:
-            raise FileNotFoundError(path.virtual)
-        if path.virtual.startswith("/m/locked/"):
-            raise PermissionError(path.virtual)
-        if path.virtual in TREE:
-            return FileStat(name=path.virtual, type=FileType.DIRECTORY)
-        raise FileNotFoundError(path.virtual)
 
-    async def read_bytes(_accessor, _path, index=None):
-        return b""
+async def _stat(path: PathSpec) -> FileStat:
+    if path.virtual.startswith("/m/locked/"):
+        raise PermissionError(path.virtual)
+    if path.virtual in TREE:
+        return FileStat(name=path.virtual, type=FileType.DIRECTORY)
+    raise FileNotFoundError(path.virtual)
 
-    async def remove(_accessor, path, index=None):
+
+def _mount(removed: list[str] | None = None) -> Answers:
+    async def remove(path: PathSpec) -> None:
+        assert removed is not None
         removed.append(path.virtual)
 
-    writes = {} if removed is None else {"rmdir": remove}
-    return CommandIO(
-        readdir=readdir,
-        read_bytes=read_bytes,
-        read_stream=read_bytes,
-        stat=stat,
-        is_mounted=lambda _a: True,
-        **writes,
-    )
+    if removed is None:
+        return Answers("/m/", readdir=_readdir, stat=_stat)
+    return Answers("/m/", readdir=_readdir, stat=_stat, rmdir=remove)
 
 
 def _spec(virtual: str) -> PathSpec:
@@ -64,23 +51,21 @@ def _spec(virtual: str) -> PathSpec:
     )
 
 
-async def _rmdir(ops: CommandIO, *paths: str) -> tuple[int, str]:
-    _, io = await rmdir(
-        ops, object(), [_spec(p) for p in paths], [], Context(index=INDEX)
-    )
+async def _rmdir(mount: Answers, *paths: str) -> tuple[int, str]:
+    _, io = await run_generic("rmdir", mount, [_spec(p) for p in paths])
     return io.exit_code, io.stderr.decode() if io.stderr else ""
 
 
 @pytest.mark.asyncio
-async def test_rmdir_stats_its_operand_through_the_index():
+async def test_rmdir_stats_its_operand_through_the_dispatcher():
     removed: list[str] = []
-    assert await _rmdir(_ops(removed), "/m/empty") == (0, "")
+    assert await _rmdir(_mount(removed), "/m/empty") == (0, "")
     assert removed == ["/m/empty"]
 
 
 @pytest.mark.asyncio
 async def test_rmdir_reports_an_existing_directory_it_cannot_remove():
-    assert await _rmdir(_ops(), "/m/empty") == (
+    assert await _rmdir(_mount(), "/m/empty") == (
         1,
         "rmdir: failed to remove '/m/empty': Operation not supported\n",
     )
@@ -89,7 +74,7 @@ async def test_rmdir_reports_an_existing_directory_it_cannot_remove():
 @pytest.mark.asyncio
 async def test_rmdir_reports_a_refused_stat_and_removes_the_rest():
     removed: list[str] = []
-    assert await _rmdir(_ops(removed), "/m/locked/sub", "/m/empty") == (
+    assert await _rmdir(_mount(removed), "/m/locked/sub", "/m/empty") == (
         1,
         "rmdir: failed to remove '/m/locked/sub': Permission denied\n",
     )

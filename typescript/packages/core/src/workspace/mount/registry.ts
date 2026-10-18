@@ -14,7 +14,7 @@
 
 import type { SessionAccess } from '../../view/types.ts'
 import { IOConfig } from '../../io/config.ts'
-import { commandsFor } from '../../commands/builtin/backends.ts'
+import { backendCommands } from './backends.ts'
 import type { Observer } from '../../observe/observer.ts'
 import type { ProcessView } from '../../process/view.ts'
 import type { SessionState } from '../session/session.ts'
@@ -28,6 +28,7 @@ import { CacheManager } from '../../cache/manager.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
+import type { MountRow } from '../types.ts'
 import { BinViewVFS } from '../../vfs/bin/bin.ts'
 import { DocumentVFS } from '../../vfs/document/document.ts'
 import { HistoryViewVFS } from '../../vfs/history/history.ts'
@@ -108,6 +109,9 @@ export interface RegistryPlacements {
 export class MountRegistry {
   private readonly indexConfig: IndexConfig | undefined
   processView?: (session: SessionState) => ProcessView
+  // Fetches the managed names a tree a mount serves reads, once the executor
+  // has picked that mount; the workspace sets it.
+  fillEnv?: (session: SessionState, names: ReadonlySet<string>) => Promise<void>
   observer: Observer | null = null
   private readonly mountList: MountEntry[]
   readonly retiringMounts = new Map<BaseVFS, Promise<void>>()
@@ -227,6 +231,10 @@ export class MountRegistry {
       },
       (folder, version) => this.mayServeListing(m, folder, version),
       () => this.descendantMounts(m.prefix).map((entry) => entry.prefix.replace(/\/$/, '')),
+      () =>
+        this.allMounts()
+          .filter((entry) => entry !== m && entry.vfs === m.vfs)
+          .map((entry) => entry.prefix.replace(/\/$/, '')),
     )
   }
 
@@ -319,12 +327,14 @@ export class MountRegistry {
     for (const cmd of [...GENERIC_COMMANDS, ...GENERAL_COMMANDS]) {
       m.registerGeneral(cmd)
     }
-    // Through `registerCommands`, as python's `registry.mount` does, so a
-    // family table that fans out over sibling VFS names registers only
-    // this mount's entries instead of letting the last sibling win on a
-    // shared key. After the shared set, so a command the VFS replaces
-    // keeps its own spec, not the generic one of that name.
-    m.registerCommands(commandsFor(init.vfs))
+    // Filtered as `registerCommands` filters, as python's `registry.mount`
+    // does, so a family table that fans out over sibling VFS names registers
+    // only this mount's entries instead of letting the last sibling win on a
+    // shared key. After the shared set, so a command the VFS replaces keeps
+    // its own spec, not the generic one of that name. The backend's table is
+    // mirage's own; the commands the VFS was handed are the user's.
+    m.registerBuiltinCommands(backendCommands(init.vfs))
+    m.registerCommands(init.vfs.commands())
     return m
   }
 
@@ -526,12 +536,23 @@ export class MountRegistry {
     return this.visibleMounts().find((m) => m.prefix === owner) ?? null
   }
 
-  /** What the `Files` facade knows of the mount serving a path, or null when
-   * none does. Mirrors Python's mount_rows. */
-  mountOwner(path: string): { prefix: string; kind: string; maxDuEntries: number | null } | null {
+  /**
+   * What the `Files` facade knows of the mount serving a path, or null when
+   * none does: the functions its VFS answers are the ones its mount read
+   * when it was mounted (`MountEntry.calls`). Mirrors Python's mount_rows.
+   */
+  mountOwner(path: string): MountRow | null {
     const mount = this.tryMountFor(path)
     if (mount === null) return null
-    return { prefix: mount.prefix, kind: mount.vfs.name, maxDuEntries: mount.vfs.maxDuEntries }
+    const vfs = mount.vfs
+    return {
+      prefix: mount.prefix,
+      kind: vfs.name,
+      maxDuEntries: vfs.maxDuEntries,
+      calls: mount.calls,
+      maxGlobMatches: vfs.maxGlobMatches,
+      searchable: vfs.searchable,
+    }
   }
 
   /** The mounts the session a call through a facade of `sessionId` runs as
@@ -605,18 +626,31 @@ export class MountRegistry {
     return best
   }
 
+  /**
+   * The mount a command runs on, as `resolveMount` picks it, without readying
+   * it: the mount of the first path operand, else of the working directory,
+   * when it registers the command; else the first mount that does. Null
+   * where none does, or where the first operand's mount lacks it, a line
+   * `resolveMount` refuses. Mirrors Python's `MountRegistry.command_mount`.
+   */
+  commandMount(cmdName: string, pathScopes: readonly PathSpec[], cwd: string): MountEntry | null {
+    const first = pathScopes[0]
+    const mount = this.tryMountFor(first?.virtual ?? cwd)
+    if (mount !== null && mount.resolveCommand(cmdName) !== null) return mount
+    if (mount !== null && first !== undefined) return null
+    return this.mountForCommand(cmdName)
+  }
+
   async resolveMount(
     cmdName: string,
     pathScopes: readonly PathSpec[],
     cwd: string,
   ): Promise<MountEntry | null> {
-    const mountPath = pathScopes.length > 0 ? (pathScopes[0]?.virtual ?? cwd) : cwd
-    let mount = this.tryMountFor(mountPath)
-    if (mount !== null && mount.resolveCommand(cmdName) == null && pathScopes.length > 0) {
-      throw new MountCommandUnsupported(cmdName, mount.vfs.name, pathScopes[0]?.rawPath ?? cwd)
-    }
-    if (mount?.resolveCommand(cmdName) == null) {
-      mount = this.mountForCommand(cmdName)
+    const mount = this.commandMount(cmdName, pathScopes, cwd)
+    const first = pathScopes[0]
+    if (mount === null && first !== undefined) {
+      const owner = this.tryMountFor(first.virtual)
+      if (owner !== null) throw new MountCommandUnsupported(cmdName, owner.vfs.name, first.rawPath)
     }
     if (mount === null) return null
     await mount.ensureReady()

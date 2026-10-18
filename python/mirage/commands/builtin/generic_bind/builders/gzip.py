@@ -12,39 +12,32 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.gzip import gzip_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    Operation,
-    bound_op,
-    require_op,
-)
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def gzip(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    resolved = (
-        await ops.resolve_glob(accessor, paths, ctx.index) if paths else []
-    )
+    files = command_files(ctx, paths)
+    resolved = await files.resolve_glob(paths) if paths else []
     return await gzip_generic(
         resolved,
         list(texts),
         ctx,
-        bound_op(ops.read_stream, accessor, ctx.index),
-        partial(require_op(ops, Operation.WRITE), accessor),
-        partial(require_op(ops, Operation.UNLINK), accessor),
-        partial(ops.stat, accessor),
+        files.read_stream,
+        files.write,
+        files.unlink,
+        files.stat,
     )
 
 

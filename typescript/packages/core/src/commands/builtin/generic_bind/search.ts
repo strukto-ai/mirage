@@ -12,9 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Accessor } from '../../../accessor/base.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
 
 import { closeQuietly, ensureStream } from '../../../io/stream.ts'
 import type { ByteSource } from '../../../io/types.ts'
@@ -26,7 +24,7 @@ import { CycleError, globPrefixMatch } from '../../../utils/path.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import { revisionFor } from '../../../observe/context.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
-import type { Context, CommandIO } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import type { LinkView } from '../../../view/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -38,7 +36,8 @@ import { searchTerms } from '../grep_pushdown.ts'
 import { compilePattern, patternArg } from '../grep_pattern.ts'
 import type { SearchTerms } from '../types.ts'
 import { beforeFullScan } from '../utils/tree.ts'
-import { linksOf, dispatchOf } from '../utils/links.ts'
+import { linksOf, dispatchOf, mountsOf } from '../utils/links.ts'
+import type { CommandFiles } from './files.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 
 type Reads = (p: PathSpec) => AsyncIterable<Uint8Array>
@@ -217,17 +216,12 @@ async function holdsLine(found: ByteSource): Promise<boolean> {
 }
 
 // The operands that stat as directories, the scopes a walk covers.
-async function directories<A extends Accessor>(
-  io: CommandIO<A>,
-  accessor: A,
-  paths: readonly PathSpec[],
-  index: IndexCacheStore | undefined,
-): Promise<PathSpec[]> {
+async function directories(files: CommandFiles, paths: readonly PathSpec[]): Promise<PathSpec[]> {
   const found: PathSpec[] = []
   for (const path of paths) {
     let info: FileStat
     try {
-      info = await io.stat(accessor, path, index)
+      info = await files.stat(path)
     } catch (err) {
       if (!isFsError(err)) throw err
       console.debug(`search scope ${path.virtual}: ${String(err)}`)
@@ -282,26 +276,24 @@ async function fullScan(
  * refuse it.
  * Mirrors Python's `search_reads`.
  */
-export async function searchReads<A extends Accessor>(
-  io: CommandIO<A>,
+export async function searchReads(
+  files: CommandFiles,
   name: 'grep' | 'rg',
-  accessor: A,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<Reads> {
-  const index = ctx.index ?? undefined
-  const stream: Reads = (p) => io.readStream(accessor, p, index)
-  const files = io.filesContaining
-  const searchable = io.searchable ?? null
-  const lines = io.linesContaining
+  const stream: Reads = files.readStream
+  const narrows = files.answers('files_containing')
+  const searchable = mountsOf(ctx)?.searchable((paths[0] ?? ctx.cwd).virtual) ?? null
+  const lines = files.answers('lines_containing') ? files.linesContaining : undefined
   const links = linksOf(ctx)
   const fl = new FlagView(ctx.flags, specOf(name))
   if (paths.length === 0 || (name === 'rg' && (fl.asBool('files') || fl.asBool('type_list')))) {
     return stream
   }
   const walked = name === 'rg' || directoriesAction(fl) === 'recurse'
-  if (files === undefined && lines === undefined) {
+  if (!narrows && lines === undefined) {
     if (walked) await fullScan(dispatchOf(ctx), paths, name)
     return stream
   }
@@ -314,7 +306,7 @@ export async function searchReads<A extends Accessor>(
     console.debug(`${name} search left to the scan: ${err.message}`)
     return stream
   }
-  const dirs = walked ? await directories(io, accessor, paths, index) : []
+  const dirs = walked ? await directories(files, paths) : []
   if (terms === null) {
     await fullScan(dispatchOf(ctx), dirs, name)
     return stream
@@ -322,17 +314,14 @@ export async function searchReads<A extends Accessor>(
   const asked = terms
   const dropsMark = name === 'rg' && encodingFlag(fl) !== 'none'
   let hits: Set<string> | null = null
-  if (files !== undefined && dirs.length > 0) {
+  if (narrows && dirs.length > 0) {
     const answers = await Promise.all(
       dirs.flatMap((scope) =>
         asked.texts.map((text) =>
-          files(
-            accessor,
-            scope,
-            text,
-            { wholeWord: asked.wholeWord, ignoreCase: asked.ignoreCase },
-            index,
-          ),
+          files.filesContaining(scope, text, {
+            wholeWord: asked.wholeWord,
+            ignoreCase: asked.ignoreCase,
+          }),
         ),
       ),
     )
@@ -375,13 +364,13 @@ export async function searchReads<A extends Accessor>(
     const ignoreCase = { ignoreCase: asked.ignoreCase }
     const [only] = asked.texts
     if (asked.lineOutput && asked.texts.length === 1 && only !== undefined) {
-      const found = await lines(accessor, path, only, ignoreCase, index)
+      const found = await lines(path, only, ignoreCase)
       const answer = found !== null && dropsMark ? await unmarked(found) : found
       if (answer === null) await readUnanswered()
       return answer
     }
     for (const text of asked.texts) {
-      const answer = await lines(accessor, path, text, ignoreCase, index)
+      const answer = await lines(path, text, ignoreCase)
       if (answer === null) {
         await readUnanswered()
         return null

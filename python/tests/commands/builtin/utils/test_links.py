@@ -18,14 +18,18 @@ import pytest
 
 from mirage.commands.builtin.utils.links import (
     LinkResolver,
+    crosses_mounts,
     link_resolver,
     link_view,
+    mount_root,
     mount_view,
+    mounts_of,
     name_location,
     owed_names,
     typed_link,
 )
 from mirage.commands.config import Context
+from mirage.context import reset_mount_gate, set_mount_gate
 from mirage.errors.types import DotWalkLoop
 from mirage.io.types import IOResult
 from mirage.types import (
@@ -283,3 +287,29 @@ def test_a_hidden_mount_is_a_boundary_but_never_named():
     assert crossing.descendants("/data") == []
     assert not crossing.is_root("/data/open")
     assert crossing.root_of("/data/open/x") == "/data/open/"
+
+
+def test_a_command_in_a_mount_scope_walks_and_answers_as_that_mount():
+    facts = MountRow(
+        prefix="/data/",
+        resource_type="ram",
+        mode=MountMode.READ,
+        calls=frozenset({"read_tree"}),
+    )
+    ctx = Context(vfs=Files([facts, *_rows("/data/inner/")], _Dispatch()))
+    across = mounts_of(ctx)
+    assert across is not None and across.answers is not None
+    assert (crosses_mounts(ctx), mount_root(ctx)) == (True, "")
+    assert across.descendants("/data") == []
+    assert not across.answers("/data/x", "read_tree")
+    token = set_mount_gate("/data/", MountMode.WRITE)
+    try:
+        bound = mounts_of(ctx)
+        assert (crosses_mounts(ctx), mount_root(ctx)) == (False, "/data")
+    finally:
+        reset_mount_gate(token)
+    assert bound is not None and bound.answers is not None
+    assert bound.descendants("/data") == ["/data/inner"]
+    assert bound.answers("/data/x", "read_tree")
+    assert not bound.answers("/data/x", "first_lines")
+    assert (crosses_mounts(Context()), mount_root(Context())) == (False, "")

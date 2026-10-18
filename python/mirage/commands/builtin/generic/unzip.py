@@ -12,7 +12,6 @@ from mirage.commands.builtin.generic.archive.extract import (
     ensure_dir,
     extract_dest,
 )
-from mirage.commands.builtin.generic.archive.walk import StatFn
 from mirage.commands.builtin.generic.archive.zipinfo import (
     ZipRow,
     render_header,
@@ -42,7 +41,7 @@ from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.spool import ByteSpool
 from mirage.io.stream import OutputStream, async_chain
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec, PolymorphicReadFn
+from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
 logger = logging.getLogger(__name__)
 

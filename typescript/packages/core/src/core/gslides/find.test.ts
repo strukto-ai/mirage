@@ -29,9 +29,8 @@ vi.mock('./stat.ts', async () => {
 import { GSlidesAccessor } from '../../accessor/gslides.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/client.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
-import type { FindOptions } from '../../vfs/types.ts'
+import type { FindOptions } from '../generic/find.ts'
 import { walkFind } from '../generic/find.ts'
 import * as readdirMod from './readdir.ts'
 import * as statMod from './stat.ts'
@@ -40,7 +39,6 @@ async function find(
   accessor: GSlidesAccessor,
   path: PathSpec,
   options: FindOptions = {},
-  index?: IndexCacheStore,
 ): Promise<string[]> {
   return walkFind(
     path,
@@ -52,7 +50,6 @@ async function find(
       stat: (spec) => statMod.stat(accessor, spec),
     },
     options,
-    index,
   )
 }
 

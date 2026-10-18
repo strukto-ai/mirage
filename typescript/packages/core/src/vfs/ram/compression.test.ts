@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
+import { onMount } from '../../test-utils.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
 import type { Command } from '../../commands/config.ts'
@@ -39,12 +39,14 @@ async function runCmd(
   const cmd = reg[0]
   if (cmd === undefined) throw new Error('not registered')
   const before = new Map(vfs.store.files)
-  const result = await cmd.fn(vfs.accessor, paths, [], {
-    stdin,
-    flags,
-    io: commandIo(vfs),
-    cwd: PathSpec.fromStrPath('/'),
-  })
+  const result = await onMount(vfs, (files) =>
+    cmd.fn(vfs.accessor, paths, [], {
+      stdin,
+      flags,
+      vfs: files,
+      cwd: PathSpec.fromStrPath('/'),
+    }),
+  )
   if (result === null) return { out: new Uint8Array(), writes: {}, exitCode: 0 }
   const [output, io] = result as [unknown, { exitCode: number }]
   let outBytes: Uint8Array = new Uint8Array()

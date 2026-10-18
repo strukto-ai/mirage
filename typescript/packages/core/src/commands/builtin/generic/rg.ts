@@ -55,7 +55,7 @@ import {
   type Tally,
 } from '../rg_search.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
-import { type LinkResolver, linkResolver, mountsOf, dispatchOf } from '../utils/links.ts'
+import { type LinkResolver, linkResolver, mountsOf, dispatchOf, mountRoot } from '../utils/links.ts'
 import { formatRecords } from '../utils/output.ts'
 import { isStdin, stdinStream, wrapBytes } from '../utils/stream.ts'
 import { PcreError, hostFlags, translatePcre } from '../utils/pcre.ts'
@@ -845,7 +845,7 @@ export async function rgGeneric(
   const walk = walkFilter(f, types, await ignoreRules(fl, dispatchOf(ctx), notes))
   let pat: RegExp | null = null
   if (!f.listFiles) {
-    const resolution = await resolvePattern('rg', texts, fl, paths, ctx.mountPrefix, stream)
+    const resolution = await resolvePattern('rg', texts, fl, paths, mountRoot(ctx), stream)
     if (resolution.error !== null) {
       return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(resolution.error) })]
     }

@@ -13,18 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { cmpGeneric } from '../../generic/cmp.ts'
-import { type GenericCommand, fileSize, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, fileSize, resolveOrEmpty } from '../files.ts'
 
-const cmpCmd: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return cmpGeneric(
-    resolved,
-    texts,
-    ctx,
-    (p) => ops.readStream(accessor, p, idx),
-    fileSize(ops, accessor, ctx),
-  )
+const cmpCmd: CommandFn = async (_accessor, paths, texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
+  return cmpGeneric(resolved, texts, ctx, files.readStream, fileSize(files, ctx))
 }
 
 export const BUILDER: GenericCommand = {

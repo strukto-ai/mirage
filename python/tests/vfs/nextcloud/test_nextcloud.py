@@ -9,6 +9,7 @@ def test_nextcloud_write_commands_tagged():
         )
     )
     write_names = {
+        "awk",
         "cp",
         "csplit",
         "gunzip",
@@ -21,13 +22,18 @@ def test_nextcloud_write_commands_tagged():
         "patch",
         "rm",
         "rmdir",
+        "sed",
+        "shuf",
+        "sort",
         "split",
         "tar",
         "tee",
         "touch",
+        "uniq",
         "unlink",
         "truncate",
         "unzip",
+        "xxd",
         "zip",
     }
     for rc in mount_commands(vfs):

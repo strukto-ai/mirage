@@ -16,9 +16,6 @@ from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Callable
 
-from mirage.types import FileStat
-
-AsyncStatFn = Callable[[str], Awaitable[FileStat]]
 AsyncReaddirFn = Callable[[str], Awaitable[list[str]]]
 
 

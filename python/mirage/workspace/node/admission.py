@@ -18,6 +18,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from mirage.commands.cli.walk import walk
 from mirage.commands.spec.types import ValueType
 from mirage.io.types import ByteSource
 from mirage.policy import (
@@ -61,6 +62,7 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import PathSpec, Refusal
 from mirage.utils.abort import MirageAbortError
+from mirage.utils.filetype import get_extension
 from mirage.utils.hidden import is_glob, path_visible
 from mirage.utils.path import resolve_path
 from mirage.workspace.executor.builtins.links.links import follow_paths
@@ -68,10 +70,15 @@ from mirage.workspace.executor.builtins.scope import _to_scope
 from mirage.workspace.executor.command.cli import drops_mount_caches
 from mirage.workspace.executor.command.routing import (
     CWD_DEFAULT_RAW,
+    command_tree,
     command_words,
     default_cwd_operand,
+    merge_scopes,
     path_flag_scopes,
     program_tokens,
+    routable_scopes,
+    routed_operands,
+    tree_path_scopes,
 )
 from mirage.workspace.expand.classify import classify_parts
 from mirage.workspace.expand.classify.path import classify_bare_path
@@ -92,7 +99,10 @@ from mirage.workspace.lookup import (
     walks_mounts,
     word_policy,
 )
-from mirage.workspace.lookup.constants import INTERPRETER_NAMES
+from mirage.workspace.lookup.constants import (
+    INTERPRETER_NAMES,
+    WRITING_PROGRAMS,
+)
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.inner_lines import Word, inner_lines, read_word
@@ -104,7 +114,7 @@ from mirage.workspace.node.occurrence import (
     root_frame,
     whole_occurrence,
 )
-from mirage.workspace.session import SessionState
+from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.session.shell_dirs import home_dir
 
 # The nodes a redirected statement may wrap whose last command is the
@@ -224,10 +234,12 @@ def policy_scopes(
     cwd: str,
     implied: PathSpec | None = None,
     redirects: Sequence[PathSpec] = (),
+    tree_flags: Sequence[PathSpec] = (),
 ) -> list[PathSpec]:
     """The paths a path-pattern guard reads for a line.
 
-    The operands as typed and the values of path-valued flags, then, for
+    The operands as typed and the values of path-valued flags, a command
+    tree's group and leaf options among them, then, for
     a command that follows links, the targets they resolve to: ``cat
     /data/link`` reads ``/data/secret``, so a rule protecting the target
     has to see it, and a command-scoped rule never runs at the dispatcher
@@ -259,9 +271,14 @@ def policy_scopes(
             command reads when typed bare, None when it names a path.
         redirects (Sequence[PathSpec]): the statement's expanded
             redirect targets, empty when it has none.
+        tree_flags (Sequence[PathSpec]): the path-valued options a
+            command tree's walk resolves (``tree_path_scopes``), empty
+            for a command with no tree.
     """
     scopes = [p for p in operands if isinstance(p, PathSpec)]
     scopes.extend(path_flag_scopes(name, args, cwd))
+    typed = {p.virtual for p in scopes}
+    scopes.extend(p for p in tree_flags if p.virtual not in typed)
     if "/" in name:
         # A slash-carrying head word is a file the line executes, and it
         # lives in argv[0], not the operands, so a path-pattern guard
@@ -383,6 +400,114 @@ def unlisted_service(
     )
 
 
+def _writes(
+    name: str,
+    args: list[str],
+    operands: Sequence[str | PathSpec],
+    session: SessionState,
+    registry: MountRegistry,
+    namespace: Namespace | None,
+    implied: PathSpec | None,
+) -> bool:
+    """Whether the handler a command resolves to declares that it may
+    change state.
+
+    A command tree's leaf (an installed CLI's, or a tree a mount serves)
+    as its walk names it, under the session environment its run walks
+    with, which fills a group option declaring ``Argument.env``; any
+    other mount command as every handler a run of it may reach: on the
+    mount that would run it (the mount of the first path the line names,
+    else of the working directory), on each path's own mount, which a run
+    across mounts hands that path, and on every mount below a path, which
+    a walk reaches. Its handler is picked by an operand's extension, so
+    each path's counts, and a run follows links before it picks either,
+    so a link's target counts beside its name. A namespace or routed
+    program that changes what it names (``WRITING_PROGRAMS``: ``ln``,
+    ``chmod`` ...) writes by name.
+    A walk the tree refuses runs nothing, and a shell builtin, a function,
+    an external program or an unknown name declares nothing.
+
+    Args:
+        name (str): command name, expanded.
+        args (list[str]): the words after it.
+        operands (Sequence[str | PathSpec]): the same words, classified.
+        session (SessionState): the session running the line.
+        registry (MountRegistry): registry holding the mounts and the
+            CLI installs.
+        namespace (Namespace | None): the link table; None outside a
+            workspace.
+        implied (PathSpec | None): the working-directory operand a bare
+            command reads.
+    """
+    consumer = lookup(name, session, registry)
+    if name in WRITING_PROGRAMS and consumer in (
+        Consumer.NAMESPACE,
+        Consumer.MOUNT,
+    ):
+        return True
+    if consumer is not Consumer.CLI and consumer is not Consumer.MOUNT:
+        return False
+    tree = command_tree(registry, name, session.cwd)
+    if tree is not None:
+        result = walk(
+            name, tree.spec, args, session.cwd, env_snapshot(session)
+        )
+        return (
+            result.leaf is not None
+            and tree.handlers[" ".join(result.path)].write
+        )
+    runs = runs_as(name, registry)
+    # The words that route the run, picked as execution picks them: a
+    # stdin `-` and an assignment route nowhere, and a path-valued option,
+    # attached or not, routes like an operand.
+    named = [
+        s
+        for s in merge_scopes(
+            routable_scopes(
+                runs,
+                routed_operands(
+                    runs,
+                    args,
+                    session.cwd,
+                    list(operands),
+                    [p for p in operands if isinstance(p, PathSpec)],
+                ),
+            ),
+            path_flag_scopes(runs, args, session.cwd),
+        )
+        if s.walk_error != "ENOENT"
+    ]
+    if namespace is not None and namespace.nodes and named:
+        typed = {p.virtual for p in named}
+        named += [
+            p
+            for p in follow_paths(
+                namespace,
+                list(named),
+                follows_last_component(name, [name, *args]),
+                slash_follows=name not in SLASH_KEEPS_LAST,
+            )
+            if isinstance(p, PathSpec) and p.virtual not in typed
+        ]
+    scopes = named or ([implied] if implied is not None else [])
+    first = registry.command_mount(runs, scopes[:1], session.cwd)
+    reached = [first] if first is not None else []
+    for scope in scopes:
+        owner = registry.try_mount_for(scope.virtual)
+        below = scope.virtual.rstrip("/") + "/"
+        reached += [
+            m
+            for m in registry.mounts()
+            if m is owner or m.prefix.startswith(below)
+        ]
+    extensions = {get_extension(p.virtual) for p in named} or {None}
+    return any(
+        m.may_write(runs, extension)
+        for m in reached
+        for extension in extensions
+    )
+
+
 async def gate(
     name: str,
     args: list[str],
@@ -440,7 +565,8 @@ async def gate(
         Ask) and every answer it came from.
     """
     tool = intrinsic or is_tool(name, session)
-    tokens, program = program_tokens(registry, name, args, session.cwd)
+    env = env_snapshot(session)
+    tokens, program = program_tokens(registry, name, args, session.cwd, env)
     implied = (
         default_cwd_operand(
             [name, *operands], name, registry, session.cwd, stdin
@@ -469,13 +595,14 @@ async def gate(
                 session.cwd,
                 implied,
                 redirects,
+                tree_path_scopes(registry, name, args, session.cwd, env),
             ),
             unread,
         ),
         words=_seen_words(
             session,
             command_words(
-                registry, name, args, operands, redirects, session.cwd
+                registry, name, args, operands, redirects, session.cwd, env
             ),
             unread,
         ),
@@ -487,6 +614,9 @@ async def gate(
         program=program,
         tool=tool,
         walks=walks_mounts(name, [name, *args]),
+        write=_writes(
+            name, args, operands, session, registry, namespace, implied
+        ),
         session=view,
         vfs=vfs,
     )
@@ -694,8 +824,12 @@ def _word_hints(
     if not spec:
         return None, None
     extra: list[ValueType | None] = ["str"] * (consumed - 1)
-    word_kinds = extra + spec_word_kinds(spec, line[consumed:], runs)
-    bases = spec_word_bases(spec, line[consumed:], session.cwd)
+    word_kinds = extra + spec_word_kinds(
+        spec, line[consumed:], runs, env_snapshot(session)
+    )
+    bases = spec_word_bases(
+        spec, line[consumed:], session.cwd, runs, env_snapshot(session)
+    )
     head: list[str | None] = [None] * (consumed - 1)
     word_bases = None if bases is None else head + bases
     return word_kinds, word_bases

@@ -1,26 +1,22 @@
 import logging
 from functools import partial
 
-from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.archive.types import Walked
 from mirage.commands.builtin.generic.archive.walk import DirProbe, WalkFn
 from mirage.commands.builtin.generic.find import parse_find_args
+from mirage.commands.builtin.generic_bind.files import CommandFiles
 from mirage.commands.builtin.utils.tree import before_full_scan
-from mirage.commands.config import CommandIO
 from mirage.core.generic.find import walk_find
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, FileType, PathSpec
-from mirage.vfs.types import OperationFn
+from mirage.types import FileStat, FileType, PathSpec, ReaddirFn, StatFn
 from mirage.view.types import ChildMounts
 
 logger = logging.getLogger(__name__)
 
 
-async def _walk(
-    readdir: OperationFn,
-    stat: OperationFn,
-    index: IndexCacheStore | None,
+async def _walk_with(
+    readdir: ReaddirFn,
+    stat: StatFn,
     dispatch: DispatchFn | None,
     command: str,
     path: PathSpec,
@@ -38,9 +34,8 @@ async def _walk(
     owns ``path`` may refuse the scan before they are listed.
 
     Args:
-        readdir (OperationFn): backend readdir.
-        stat (OperationFn): backend stat.
-        index (IndexCacheStore | None): the per-call cache index.
+        readdir (ReaddirFn): the walk's readdir.
+        stat (StatFn): the walk's stat.
         dispatch (DispatchFn | None): the command's dispatcher, which
             asks the mount's ``before_full_scan``.
         command (str): tar or zip.
@@ -54,18 +49,14 @@ async def _walk(
         path,
         readdir=readdir,
         stat=stat,
-        index=index,
         args=parse_find_args((), type=find_type),
         unreadable=unreadable,
     )
     return Walked(paths=tuple(paths), unreadable=tuple(unreadable))
 
 
-async def _is_dir(
-    stat: OperationFn,
-    readdir: OperationFn,
-    path: PathSpec,
-    index: IndexCacheStore | None,
+async def _is_dir_with(
+    stat: StatFn, readdir: ReaddirFn, path: PathSpec
 ) -> bool:
     """Whether a path is a directory an archiver could chdir into.
 
@@ -75,17 +66,16 @@ async def _is_dir(
     deciding opinion.
 
     Args:
-        stat (OperationFn): backend stat.
-        readdir (OperationFn): backend readdir.
+        stat (StatFn): the probe's stat.
+        readdir (ReaddirFn): the probe's readdir.
         path (PathSpec): the candidate directory.
-        index (IndexCacheStore | None): the per-call cache index.
     """
     try:
-        return (await stat(path, index)).type == FileType.DIRECTORY
+        return (await stat(path)).type == FileType.DIRECTORY
     except (FileNotFoundError, NotADirectoryError, ValueError):
         logger.debug("archive: %s does not stat; asking readdir", path.virtual)
     try:
-        return bool(await readdir(path, index))
+        return bool(await readdir(path))
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         logger.debug(
             "archive: %s is not a directory on either channel: %r",
@@ -96,69 +86,41 @@ async def _is_dir(
 
 
 def walk_of(
-    ops: CommandIO,
-    accessor: Accessor,
-    index: IndexCacheStore,
-    dispatch: DispatchFn | None,
-    command: str,
+    files: CommandFiles, dispatch: DispatchFn | None, command: str
 ) -> WalkFn:
     """The subtree listing tar and zip both walk with.
 
     Args:
-        ops (CommandIO): the bound backend operations.
-        accessor (Accessor): the mount's accessor.
-        index (IndexCacheStore): the per-call cache index.
-        dispatch (DispatchFn | None): the command's dispatcher.
+        files (CommandFiles): the command's files.
+        dispatch (DispatchFn | None): the command's dispatcher, which
+            asks the mount's ``before_full_scan``.
         command (str): tar or zip.
     """
-    return partial(
-        _walk,
-        partial(ops.readdir, accessor),
-        partial(ops.stat, accessor),
-        index,
-        dispatch,
-        command,
-    )
+    return partial(_walk_with, files.readdir, files.stat, dispatch, command)
 
 
-def is_dir_of(
-    ops: CommandIO, accessor: Accessor, index: IndexCacheStore
-) -> DirProbe:
+def is_dir_of(files: CommandFiles) -> DirProbe:
     """The directory probe tar's ``-C`` check uses.
 
     Args:
-        ops (CommandIO): the bound backend operations.
-        accessor (Accessor): the mount's accessor.
-        index (IndexCacheStore): the per-call cache index.
+        files (CommandFiles): the command's files.
     """
-    return partial(
-        _is_dir,
-        partial(ops.stat, accessor),
-        partial(ops.readdir, accessor),
-        index=index,
-    )
+    return partial(_is_dir_with, files.stat, files.readdir)
 
 
-async def _relayed_stat(
-    dispatch: DispatchFn, path: PathSpec, index: IndexCacheStore | None = None
-) -> FileStat:
+async def _relayed_stat(dispatch: DispatchFn, path: PathSpec) -> FileStat:
     """Stat one path on the mount that owns it.
 
     Args:
         dispatch (DispatchFn): the workspace op dispatcher.
         path (PathSpec): the path to stat.
-        index (IndexCacheStore | None): unused; the owning mount keeps
-            its own.
     """
     found, _ = await dispatch("stat", path)
     return found
 
 
 async def _own_listing(
-    dispatch: DispatchFn,
-    owed: ChildMounts | None,
-    path: PathSpec,
-    index: IndexCacheStore | None = None,
+    dispatch: DispatchFn, owed: ChildMounts | None, path: PathSpec
 ) -> list[str]:
     """One directory as its own backend lists it, through the dispatcher.
 
@@ -173,8 +135,6 @@ async def _own_listing(
         owed (ChildMounts | None): the names the namespace owes a
             directory; None lists everything the dispatcher does.
         path (PathSpec): the directory to list.
-        index (IndexCacheStore | None): unused; the owning mount keeps
-            its own.
     """
     entries, _ = await dispatch("readdir", path)
     if owed is None:
@@ -203,10 +163,9 @@ def relay_walk_of(
         command (str): tar or zip.
     """
     return partial(
-        _walk,
+        _walk_with,
         partial(_own_listing, dispatch, owed),
         partial(_relayed_stat, dispatch),
-        None,
         dispatch,
         command,
     )
@@ -219,8 +178,7 @@ def relay_is_dir_of(dispatch: DispatchFn) -> DirProbe:
         dispatch (DispatchFn): the workspace op dispatcher.
     """
     return partial(
-        _is_dir,
+        _is_dir_with,
         partial(_relayed_stat, dispatch),
         partial(_own_listing, dispatch, None),
-        index=None,
     )

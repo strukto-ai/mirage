@@ -24,8 +24,8 @@ import type { LinkView, MountView } from '../../../../../view/types.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { specOf } from '../../../../spec/builtins.ts'
 import { rstripSlash } from '../../../../../utils/slash.ts'
-import { type Files, namespaceOf } from '../../../../../workspace/files.ts'
-import { linkView, mountView } from '../../../utils/links.ts'
+import type { Files } from '../../../../../workspace/files.ts'
+import { linkView, mountView, visibilityOf } from '../../../utils/links.ts'
 
 // List a directory for cp -x: a mount root below the operands is empty, so
 // the copy makes the mount point and reads nothing on the other filesystem,
@@ -84,7 +84,7 @@ export async function runCp(
   const readdir: typeof relayed =
     mounts === undefined ? relayed : (p) => ownFilesystem(relayed, mounts, starts, p)
   const nsLinks = linkView(vfs)
-  const vis = vfs === undefined ? null : namespaceOf(vfs).vis()
+  const vis = visibilityOf(vfs)
   const links: LinkView | undefined =
     mounts === undefined || nsLinks === undefined
       ? nsLinks
@@ -102,7 +102,6 @@ export async function runCp(
     stat,
     strategy,
     parseFlags(fl),
-    undefined,
     storageKey,
     undefined,
     undefined,

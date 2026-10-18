@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
 import importlib
 import inspect
 import pkgutil
 
 import mirage.commands.builtin as builtin
-from mirage.commands.builtin.generic_bind.adapter import _DISPATCHED_SLOTS
+from mirage.commands.builtin.generic_bind.files import CommandFiles
 from mirage.commands.config import Command
 
 # A native fast path answers from the raw backend tree, so every place
@@ -68,7 +69,9 @@ def test_the_chokepoints_read_the_gate():
         f"du no longer consults {GATE}; its one-total fast path would "
         "answer for entries the session hides"
     )
-    assert {"files_containing", "lines_containing"} <= set(_DISPATCHED_SLOTS)
+    assert {"files_containing", "lines_containing"} <= {
+        field.name for field in dataclasses.fields(CommandFiles)
+    }
 
 
 def test_no_backend_registers_its_own_grep_or_rg():

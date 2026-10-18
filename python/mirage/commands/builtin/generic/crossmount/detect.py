@@ -20,7 +20,11 @@ from mirage.commands.builtin.generic.crossmount.constants import (
     RELAY_COMMANDS,
     STREAM_COMMANDS,
 )
-from mirage.commands.builtin.generic.crossmount.types import Cmd, Strategy
+from mirage.commands.builtin.generic.crossmount.types import (
+    Cmd,
+    OperandMount,
+    Strategy,
+)
 from mirage.commands.config import AggregateFn
 from mirage.types import PathSpec
 
@@ -42,38 +46,38 @@ def strategy_for(cmd_name: str) -> Strategy:
 
 def is_cross_mount(
     cmd_name: str,
-    scopes: list[PathSpec],
-    registry,
+    operands: Sequence[OperandMount],
     flag_scopes: Sequence[PathSpec] = (),
 ) -> bool:
-    if len(scopes) < 2 or (
+    """Whether one invocation spans mounts and runs as a cross-mount one.
+
+    Args:
+        cmd_name (str): Command name.
+        operands (Sequence[OperandMount]): Path operands in command-line
+            order, each with the mount the workspace resolved for it.
+        flag_scopes (Sequence[PathSpec]): Path-valued flags (``-t``'s
+            directory), which name where a copy lands.
+    """
+    if len(operands) < 2 or (
         cmd_name not in CROSS_MOUNT_COMMANDS
-        and aggregate_for(cmd_name, scopes, registry) is None
+        and aggregate_for(cmd_name, operands) is None
     ):
         return False
-    mounts = set()
-    for s in scopes:
-        m = registry.try_mount_for(s.virtual)
-        # a scope outside any mount cannot make the command cross-mount
-        if m is not None:
-            mounts.add(m.prefix)
+    # a scope outside any mount cannot make the command cross-mount
+    mounts = {o.mount for o in operands if o.mount is not None}
     # A copy of a tree that holds a mount reads both filesystems, the way
     # GNU cp -r copies across one, even from a single mount's operands.
     # Only a source counts: the destination (-t's directory, else the last
     # operand) lands beside a mount and crosses nothing.
-    landing = {s.virtual for s in flag_scopes or scopes[-1:]}
+    landing = {s.virtual for s in flag_scopes} or {operands[-1].path.virtual}
     return len(mounts) > 1 or (
         cmd_name == Cmd.CP
-        and any(
-            registry.descendant_mounts(s.virtual)
-            for s in scopes
-            if s.virtual not in landing
-        )
+        and any(o.nests for o in operands if o.path.virtual not in landing)
     )
 
 
 def aggregate_for(
-    cmd_name: str, scopes: list[PathSpec], registry
+    cmd_name: str, operands: Sequence[OperandMount]
 ) -> AggregateFn | None:
     """Use an existing, shared registration reducer for a custom command.
 
@@ -82,18 +86,16 @@ def aggregate_for(
 
     Args:
         cmd_name (str): Command name.
-        scopes (list[PathSpec]): Path operands in command-line order.
-        registry (MountRegistry): Registry resolving each operand's mount.
+        operands (Sequence[OperandMount]): Path operands in command-line
+            order, each with the reducer its mount resolves.
     """
     if cmd_name in CROSS_MOUNT_COMMANDS:
         return None
     aggregate = None
-    for scope in scopes:
-        mount = registry.try_mount_for(scope.virtual)
-        handler = mount.resolve_command(cmd_name) if mount else None
-        if handler is None or handler.aggregate is None:
+    for operand in operands:
+        if operand.aggregate is None:
             return None
-        if aggregate is not None and handler.aggregate is not aggregate:
+        if aggregate is not None and operand.aggregate is not aggregate:
             return None
-        aggregate = handler.aggregate
+        aggregate = operand.aggregate
     return aggregate

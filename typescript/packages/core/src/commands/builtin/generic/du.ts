@@ -31,14 +31,14 @@ import { scaledSize } from '../utils/formatting.ts'
 import { quoteText } from '../../quote.ts'
 import { INTMAX } from '../constants.ts'
 import type { MountView, StatPath } from '../../../view/types.ts'
-import { type Files, namespaceOf } from '../../../workspace/files.ts'
+import type { Files } from '../../../workspace/files.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
-import type { DuEntries } from '../../../vfs/types.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
-import { mountsOf } from '../utils/links.ts'
+import { mountsOf, mountRoot, visibilityOf } from '../utils/links.ts'
 import { vfsStatPath } from '../utils/paths.ts'
 export type ComputeSize = (p: PathSpec) => Promise<number>
+export type DuEntries = [entries: [string, number][], total: number]
 export type ComputeEntries = (p: PathSpec) => Promise<DuEntries>
 
 const DEPTH_HEX = /^[+-]?0[xX][0-9a-fA-F]+$/
@@ -464,7 +464,7 @@ async function duOne(
   vfs?: Files,
 ): Promise<[string[], number, SizedRun | null]> {
   const label = path.rawPath
-  const vis = vfs === undefined ? undefined : (namespaceOf(vfs).vis() ?? undefined)
+  const vis = visibilityOf(vfs) ?? undefined
   const roots = mounts?.descendants(path.virtual) ?? []
 
   if (flags.s && !flags.S && roots.length === 0 && !pathsScoped([path])) {
@@ -664,13 +664,8 @@ export async function duGeneric(
     ctx.cwd.virtual,
     resolveGlob,
     stat,
-    (p) =>
-      duHasContent(
-        ctx.vfs === undefined ? undefined : (namespaceOf(ctx.vfs).vis() ?? undefined),
-        computeEntries,
-        p,
-      ),
-    ctx.mountPrefix,
+    (p) => duHasContent(visibilityOf(ctx.vfs) ?? undefined, computeEntries, p),
+    mountRoot(ctx),
     vfsStatPath(ctx.vfs) ?? null,
   )
   const out = await du(

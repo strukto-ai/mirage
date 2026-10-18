@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
+from functools import partial
 
 import pytest
 import pytest_asyncio
@@ -32,7 +33,9 @@ async def _listed(accessor, path, index=None):
     return [f"{base}/{row.name}" for row in rows]
 
 
-resolve_glob = make_resolve_glob(_listed, SCOPE_ERROR)
+def resolve_glob(accessor, paths, index=None):
+    return make_resolve_glob(partial(_listed, accessor), SCOPE_ERROR)(paths)
+
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")

@@ -5,16 +5,13 @@ import pytest
 from mirage.cache.context import push_cache_manager
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.core.generic.find import walk_find
 from mirage.core.generic.find_eval import FindArgs
 from mirage.types import FileStat, FileType, PathSpec
 
 
-async def _children(
-    path: PathSpec, index: IndexCacheStore | None
-) -> list[str]:
+async def _children(path: PathSpec) -> list[str]:
     return ["/entry"] if path.virtual == "/" else []
 
 
@@ -32,7 +29,7 @@ async def test_walk_does_not_read_cached_bytes_for_non_files(
         "/entry": FileStat(name="entry", type=kind),
     }
 
-    async def stat(path: PathSpec, index: IndexCacheStore | None) -> FileStat:
+    async def stat(path: PathSpec) -> FileStat:
         return stats[path.virtual]
 
     previous = push_cache_manager(manager)
@@ -41,7 +38,6 @@ async def test_walk_does_not_read_cached_bytes_for_non_files(
             PathSpec.from_str_path("/"),
             readdir=_children,
             stat=stat,
-            index=None,
             args=FindArgs(),
         )
     finally:
@@ -65,7 +61,7 @@ async def test_walk_backfills_an_unknown_file_size_from_cached_bytes(
         "/entry": FileStat(name="entry", type=FileType.FILE),
     }
 
-    async def stat(path: PathSpec, index: IndexCacheStore | None) -> FileStat:
+    async def stat(path: PathSpec) -> FileStat:
         return stats[path.virtual]
 
     previous = push_cache_manager(manager)
@@ -74,7 +70,6 @@ async def test_walk_backfills_an_unknown_file_size_from_cached_bytes(
             PathSpec.from_str_path("/"),
             readdir=_children,
             stat=stat,
-            index=None,
             args=FindArgs(min_size=6, max_size=6),
         )
     finally:

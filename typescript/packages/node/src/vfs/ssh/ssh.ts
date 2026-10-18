@@ -25,7 +25,6 @@ import type {
   SetAttrFields,
 } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
-import type { MkdirOp } from '@struktoai/mirage-core/vfs/types'
 import { readdir as sshReaddir } from '../../core/ssh/readdir.ts'
 import { lineCount as sshLineCount, read as sshRead } from '../../core/ssh/read.ts'
 import { stat as sshStat, tree as sshTree } from '../../core/ssh/stat.ts'
@@ -49,7 +48,7 @@ import { setAttrs as sshSetAttrs } from '../../core/ssh/set_attrs.ts'
 import { SCOPE_ERROR } from '../../core/ssh/constants.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 
-const mkdirOp: MkdirOp<SSHAccessor> = (accessor, path, parents) =>
+const mkdirOp = (accessor: SSHAccessor, path: PathSpec, parents?: boolean): Promise<void> =>
   sshMkdir(accessor, path, parents === true)
 
 export interface SSHVFSState {

@@ -27,7 +27,8 @@ async function listed(accessor: SSHAccessor, path: PathSpec): Promise<string[]> 
   return rows.map((row) => `${base}/${row.name}`)
 }
 
-const resolveGlob = makeResolveGlob(listed, SCOPE_ERROR)
+const resolveGlob = (accessor: SSHAccessor, paths: PathSpec[]): Promise<PathSpec[]> =>
+  makeResolveGlob((path) => listed(accessor, path), SCOPE_ERROR)(paths)
 
 describe('vfs/ssh resolveGlob binding', () => {
   it('expands a glob pattern into matching paths', async () => {

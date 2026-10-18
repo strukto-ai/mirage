@@ -12,26 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.mktemp import mktemp_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    Operation,
-    require_op,
-)
-from mirage.commands.builtin.utils.copy import path_exists
-from mirage.commands.builtin.utils.links import dispatch_of
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.utils.paths import vfs_stat_path
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_key
 
 
 async def mktemp(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
@@ -39,33 +30,21 @@ async def mktemp(
 ) -> tuple[ByteSource | None, IOResult]:
     # The name a pathless mktemp creates is under $TMPDIR or /tmp, which
     # the working directory's mount rarely owns, so the create goes
-    # through the dispatcher to whichever mount does. Only a generic run
-    # outside a workspace, with no dispatcher and no other mount, writes
-    # through this mount's own ops.
-    dispatch = dispatch_of(ctx)
-    stat_path = vfs_stat_path(ctx.vfs)
-
-    def local(path: PathSpec) -> PathSpec:
-        return PathSpec.from_str_path(
-            path.virtual, mount_key(path.virtual, ctx.mount_prefix or "")
-        )
+    # through the dispatcher to whichever mount does.
+    vfs = ctx.vfs
+    if vfs is None:
+        raise TypeError("mktemp: no workspace files")
+    dispatch = vfs.dispatch
+    stat_path = vfs_stat_path(vfs)
 
     async def mkdir(path: PathSpec) -> None:
-        if dispatch is not None:
-            await dispatch("mkdir", path)
-        else:
-            await require_op(ops, Operation.MKDIR)(accessor, local(path))
+        await dispatch("mkdir", path)
 
     async def write(path: PathSpec, data: bytes) -> None:
-        if dispatch is not None:
-            await dispatch("write", path, data=data)
-        else:
-            await require_op(ops, Operation.WRITE)(accessor, local(path), data)
+        await dispatch("write", path, data=data)
 
     async def exists(path: PathSpec) -> bool:
-        if stat_path is not None:
-            return await stat_path(path) is not None
-        return await path_exists(partial(ops.stat, accessor), local(path))
+        return stat_path is not None and await stat_path(path) is not None
 
     return await mktemp_generic(paths, list(texts), ctx, mkdir, write, exists)
 

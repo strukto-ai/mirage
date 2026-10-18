@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -28,6 +29,7 @@ from mirage.commands.builtin.generic.crossmount.constants import (
     RELAY_COMMANDS,
 )
 from mirage.commands.builtin.generic.crossmount.detect import aggregate_for
+from mirage.commands.builtin.generic.crossmount.types import OperandMount
 from mirage.commands.builtin.generic.program import (
     PROGRAM_FILE_COMMANDS,
     prepare_program,
@@ -36,6 +38,8 @@ from mirage.commands.builtin.generic.program import (
 )
 from mirage.commands.builtin.utils.identity import identity_from
 from mirage.commands.builtin.utils.limit import maybe_with_timeout
+from mirage.commands.cli.types import CLI
+from mirage.commands.cli.walk import invoked_env_names, supplied_env_names
 from mirage.commands.errors import FindParseError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.builtins import is_builtin_grammar, registered_spec
@@ -63,6 +67,7 @@ from mirage.workspace.executor.command.cli import (
     CLIContext,
     drops_mount_caches,
     handle_cli,
+    handle_mount_cli,
 )
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.functions import run_shell_function
@@ -116,6 +121,7 @@ from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.probe import path_stat
 from mirage.workspace.mount.storage import make_check_unlink, make_storage_key
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecuteLine, ExecutionNode
 
@@ -138,6 +144,33 @@ def spelled_words(parts: list[str | PathSpec]) -> tuple[str, ...]:
             command name.
     """
     return tuple(p.raw_path if isinstance(p, PathSpec) else p for p in parts)
+
+
+def _operand_mounts(
+    registry: MountRegistry, cmd_name: str, scopes: list[PathSpec]
+) -> list[OperandMount]:
+    """Each path operand with what the cross-mount decision reads of it:
+    the mount that owns it, the reducer of what ``cmd_name`` resolves to
+    there, and whether a mount sits below it.
+
+    Args:
+        registry (MountRegistry): the workspace's mounts.
+        cmd_name (str): the line's command.
+        scopes (list[PathSpec]): its path operands, in line order.
+    """
+    found: list[OperandMount] = []
+    for scope in scopes:
+        mount = registry.try_mount_for(scope.virtual)
+        handler = mount.resolve_command(cmd_name) if mount else None
+        found.append(
+            OperandMount(
+                path=scope,
+                mount=mount.prefix if mount else None,
+                aggregate=handler.aggregate if handler else None,
+                nests=bool(registry.descendant_mounts(scope.virtual)),
+            )
+        )
+    return found
 
 
 async def _finish_find(
@@ -206,6 +239,54 @@ async def _finish_find(
     if io.exit_code == 0:
         io.exit_code = action_exit
     return stdout
+
+
+async def fill_tree_env(
+    name: str,
+    args: Sequence[str],
+    session: SessionState,
+    registry: MountRegistry,
+    skip: frozenset[str] = frozenset(),
+) -> bool:
+    """Fetch the managed names the tree a mount serves under ``name`` reads.
+
+    The line's fill covers installed CLIs only: which mount's tree a head
+    word reaches is known only when the command runs, after any ``cd``
+    before it on the line. The names are fetched ahead of the command's
+    admission, as an installed CLI's are, so the gate walks the tree under
+    the values the run reads; an env-filled required option would
+    otherwise stop that walk short of the leaf, and a writing leaf would
+    read as a reader. A name the invocation assigns (``TOKEN=x tok``) is
+    the invocation's, so it is never fetched. A failed fetch raises
+    SecretsError.
+
+    Args:
+        name (str): the head word.
+        args (Sequence[str]): the words after it, expanded.
+        session (SessionState): the session the command runs in.
+        registry (MountRegistry): registry holding the mounts.
+        skip (frozenset[str]): the names the invocation assigns.
+
+    Returns:
+        Whether a value was fetched, which changes how the words read.
+    """
+    if registry.fill_env is None or registry.clis.get(name) is not None:
+        return False
+    mount = registry.command_mount(name, [], session.cwd)
+    tree = mount.cli_for(name) if mount is not None else None
+    if not isinstance(tree, CLI):
+        return False
+    if lookup(name, session, registry) is not Consumer.MOUNT:
+        return False
+    verbs = frozenset(w for w in args if not w.startswith("-"))
+    names = (
+        invoked_env_names(tree.spec, verbs)
+        - supplied_env_names(tree.spec, list(args))
+        - skip
+    )
+    before = {n: session.vars.get(n) for n in names}
+    await registry.fill_env(session, names)
+    return any(session.vars.get(n) is not before[n] for n in names)
 
 
 async def handle_command(
@@ -348,6 +429,55 @@ async def handle_command(
         cmd_name, option = EXEC_WRAPPERS[cmd_name]
         parts = [cmd_name, option, *parts[1:]]
 
+    # Unknown name: nobody registers it; fail like bash before any
+    # backend work. The admission policies (fired upstream at the
+    # dispatch chokepoint) stay ahead of this so protective refusals
+    # keep their specific messages.
+    if lookup(typed, session, registry) is Consumer.UNKNOWN:
+        err = encode_text(f"{typed}: command not found\n")
+        return (
+            None,
+            IOResult(exit_code=127, stderr=err),
+            ExecutionNode(command=cmd_str, exit_code=127, stderr=err),
+        )
+
+    # A command tree a mount serves runs by name on that mount, like an
+    # installed CLI: its walk, not a spec parse, reads the words, so it
+    # sits ahead of the help, cross-mount and flag-parsing branches below,
+    # and of the operand a bare ls, du, tree, find or grep implies.
+    tree_mount = registry.command_mount(cmd_name, [], session.cwd)
+    tree = tree_mount.cli_for(cmd_name) if tree_mount is not None else None
+    if tree_mount is not None and isinstance(tree, CLI):
+        await tree_mount.ensure_ready()
+        return await handle_mount_cli(
+            tree_mount,
+            tree,
+            parts,
+            session,
+            stdin,
+            CLIContext(
+                shell=(
+                    functools.partial(
+                        run_nested_line, execute_fn, session.session_id
+                    )
+                    if execute_fn is not None
+                    else None
+                ),
+                command_limits=registry.command_limits,
+                vfs=files,
+                session=session_view(
+                    session,
+                    registry.policies,
+                    diagnostics=context.frame.diagnostics,
+                ),
+                processes=registry.process_view(session)
+                if registry.process_view is not None
+                else None,
+            ),
+            registry.try_mount_for,
+            follow,
+        )
+
     if cmd_name in CWD_DEFAULT_RAW:
         operand = default_cwd_operand(
             parts, cmd_name, registry, session.cwd, stdin
@@ -366,18 +496,6 @@ async def handle_command(
     # Use dispatch to read/write across mounts directly.
     path_scopes = [p for p in parts[1:] if isinstance(p, PathSpec)]
     raw_argv = [p.virtual if isinstance(p, PathSpec) else p for p in parts[1:]]
-    # Unknown name: nobody registers it; fail like bash before any
-    # backend work. The admission policies (fired upstream at the
-    # dispatch chokepoint) stay ahead of this so protective refusals
-    # keep their specific messages.
-    if lookup(typed, session, registry) is Consumer.UNKNOWN:
-        err = encode_text(f"{typed}: command not found\n")
-        return (
-            None,
-            IOResult(exit_code=127, stderr=err),
-            ExecutionNode(command=cmd_str, exit_code=127, stderr=err),
-        )
-
     # --help and --version answer from the package, never from a backend,
     # so they are served before mount permission checks and cross-mount
     # routing: otherwise `rm --version /ro/x` hits the read-only refusal,
@@ -520,7 +638,11 @@ async def handle_command(
 
     # Path-valued flags count: `cp -t /other/mount/dir src` spans mounts
     # exactly like a positional destination would.
-    if is_cross_mount(cmd_name, routing_scopes, registry, flag_scopes):
+    if is_cross_mount(
+        cmd_name,
+        _operand_mounts(registry, cmd_name, routing_scopes),
+        flag_scopes,
+    ):
         # Cross-mount execution bypasses a VFS command handler. Parse
         # against the shared spec so flags and text operands do not depend on
         # the source mount. The bound single-mount runner lets the strategy
@@ -637,7 +759,9 @@ async def handle_command(
             ),
             cwd=session.cwd,
             argv=spelled_words(parts[1:]),
-            aggregate=aggregate_for(cmd_name, cross_scopes, registry),
+            aggregate=aggregate_for(
+                cmd_name, _operand_mounts(registry, cmd_name, cross_scopes)
+            ),
             check_unlink=make_check_unlink(registry),
             follow=follow,
         )

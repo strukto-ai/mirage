@@ -17,9 +17,10 @@ import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 import type { GitHubTransport } from './client.ts'
 import { tree } from './stat.ts'
 import type { TreeEntry } from './tree_entry.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { materialize } from '../../io/types.ts'
-import type { CommandIO } from '../../commands/config.ts'
+import { runWithMountGate } from '../../context/session_context.ts'
+import { answeringFiles } from '../../test-utils.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
 import { BUILDER } from '../../commands/builtin/generic_bind/builders/du.ts'
 
@@ -35,11 +36,6 @@ const TREE: Record<string, TreeEntry> = {
   vendor: { path: 'vendor', type: 'tree', sha: 's6', size: null },
 }
 
-// eslint-disable-next-line @typescript-eslint/require-await
-async function* emptyStream(): AsyncIterable<Uint8Array> {
-  yield* []
-}
-
 // Mirrors test_du.py: the generic du over GitHub's tree prints what GitHub's
 // own du printed, and lists no directory.
 async function runDu(
@@ -47,28 +43,30 @@ async function runDu(
   operand: string,
   flags: Record<string, FlagValue>,
 ): Promise<[string, number, string]> {
-  const table: CommandIO = {
-    readdir: (_a, p) => Promise.reject(new Error(`listed ${p.virtual}`)),
-    readBytes: () => Promise.resolve(new Uint8Array()),
-    readStream: () => emptyStream(),
-    stat: (_a, p) => {
-      const entry = TREE[p.vfsPath.replace(/^\/+|\/+$/g, '')]
-      return Promise.resolve(
-        new FileStat({
+  const vfs = answeringFiles(
+    {
+      readdir: (p) => Promise.reject(new Error(`listed ${p.virtual}`)),
+      stat: (p) => {
+        const entry = TREE[p.vfsPath.replace(/^\/+|\/+$/g, '')]
+        return new FileStat({
           name: p.virtual,
           type: entry?.type === 'blob' ? FileType.FILE : FileType.DIRECTORY,
           size: entry?.type === 'blob' ? (entry.size ?? null) : null,
-        }),
-      )
+        })
+      },
+      read_tree: (p) => tree(accessor, p),
     },
-    readTree: (a, p) => tree(a as GitHubAccessor, p),
-    isMounted: () => true,
-  }
-  const result = await BUILDER.fn(table, accessor, [PathSpec.fromStrPath(operand)], [], {
-    stdin: null,
-    flags,
-    cwd: PathSpec.fromStrPath('/'),
-  })
+    {},
+    { prefix: '/', kind: 'github', maxDuEntries: null, calls: new Set(['read_tree']) },
+  )
+  const result = await runWithMountGate('/', MountMode.WRITE, async () =>
+    BUILDER.fn(accessor, [PathSpec.fromStrPath(operand)], [], {
+      stdin: null,
+      flags,
+      cwd: PathSpec.fromStrPath('/'),
+      vfs,
+    }),
+  )
   if (result === null) throw new Error('du returned nothing')
   const [out, io] = result
   const bytes =

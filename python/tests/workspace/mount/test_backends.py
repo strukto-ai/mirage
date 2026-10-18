@@ -12,14 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.backends import commands_for
 from mirage.commands.builtin.dev import COMMANDS as DEV_COMMANDS
-from mirage.commands.config import command, registered_commands
+from mirage.commands.config import Command, command, registered_commands
 from mirage.commands.spec import SPECS
 from mirage.io.types import IOResult
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.dev import DevVFS
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace.mount.backends import commands_for
 
 
 async def _custom_cat(accessor, paths, texts, opts):
@@ -43,7 +43,7 @@ def test_a_subclass_serves_its_bases_commands():
     assert _served(Versioned()) == _served(DevVFS())
 
 
-def test_a_vfs_without_a_command_module_serves_only_what_it_was_handed():
+def test_a_vfs_without_a_command_module_serves_none_of_mirages_own():
     assert commands_for(RAMVFS()) == []
     assert commands_for(BaseVFS(name="custom")) == []
 
@@ -62,5 +62,9 @@ def test_handed_commands_come_after_the_module_they_replace():
         def commands(self):
             return [cat]
 
-    cats = [rc.fn for rc in commands_for(Handed()) if rc.name == "cat"]
+    cats = [
+        rc.fn
+        for rc in commands_for(Handed())
+        if isinstance(rc, Command) and rc.name == "cat"
+    ]
     assert cats[-1] is registered_commands([cat])[0].fn

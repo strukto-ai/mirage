@@ -172,14 +172,7 @@ function scalarFindFlags(flagKwargs: Flags): Flags {
  * serving the pre-edit content without ever reaching Google.
  */
 export async function dropMountCaches(registry: MountRegistry): Promise<void> {
-  for (const mount of registry.allMounts()) {
-    // Invalidate rather than clear: a cleared index reads exactly like one
-    // that was never filled, so a backend whose index *is* its listing
-    // (github seeds the whole tree once) cannot tell the drop from an empty
-    // repository. Expiring keeps that distinction and the next read refetches.
-    await mount.index.invalidate()
-    await mount.cacheManager?.dropPrefix()
-  }
+  for (const mount of registry.allMounts()) await mount.dropCaches()
 }
 
 // Run one already-parsed command on the mount that owns its paths. The shared

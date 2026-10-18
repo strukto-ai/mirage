@@ -38,16 +38,12 @@ import { buildIndex } from '../../cache/index/factory.ts'
 import { withIndexLock } from '../../cache/index/lock.ts'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { CommandFnResult, Context, Command, CommandIO } from '../../commands/config.ts'
+import { Command, type CommandFnResult, type Context } from '../../commands/config.ts'
 import { STDIN_DASH_COMMANDS, STDIN_DASH_LEADING } from '../../commands/spec/constants.ts'
-import { hasInjectedVersion } from '../../commands/spec/standard.ts'
+import { hasInjectedHelp, hasInjectedVersion } from '../../commands/spec/standard.ts'
 import { ROOT_CWD } from '../../commands/constants.ts'
 import type { OpKwargs, SessionAccess } from '../../view/types.ts'
-import {
-  commandIo,
-  resolveGlobOf,
-  dispatchedIo,
-} from '../../commands/builtin/generic_bind/adapter.ts'
+import { makeResolveGlob } from '../../utils/glob_walk.ts'
 import {
   appendByRewrite,
   expectOffset,
@@ -55,7 +51,7 @@ import {
   truncateByRewrite,
   refuseTaken,
 } from '../../core/generic/rewrite.ts'
-import { declared, methodName } from '../../vfs/call.ts'
+import { declared, declaredCalls, methodName } from '../../vfs/call.ts'
 import { WRITE_EFFECTS } from '../../vfs/constants.ts'
 import { Effect, type Handed, type SearchQuery } from '../../vfs/types.ts'
 import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
@@ -63,29 +59,36 @@ import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 import { getExtension } from '../../utils/filetype.ts'
 import { resolveLimit } from '../../policy/index.ts'
 import { runWithTimeout, withPullTimeout } from '../../commands/builtin/utils/limit.ts'
-import { UsageError } from '../../commands/errors.ts'
-import { CommandTimeoutError } from '../../errors/types.ts'
-import { readFailExitCode } from '../../commands/spec/usage.ts'
 import { materialize, type ByteSource, IOResult } from '../../io/types.ts'
-import { OutputStream, closeQuietly } from '../../io/stream.ts'
+import { closeQuietly } from '../../io/stream.ts'
 import { flagOccurrences } from '../../commands/spec/flag_view.ts'
 import { CommandSpec, type CommandSpecInit, type FlagValue } from '../../commands/spec/types.ts'
 import { runWithWriteContext } from '../../cache/context.ts'
 import { type WriteContext } from '../../cache/types.ts'
 import type { CacheManager } from '../../cache/manager.ts'
-import { joinOrAbort, mergeSignals } from '../../utils/abort.ts'
+import { mergeSignals } from '../../utils/abort.ts'
+import {
+  answered,
+  cliVoice,
+  mountVoice,
+  runHandler,
+  type HandlerVoice,
+} from '../executor/command/handler.ts'
+import { CLI, type CLIHandler, noopAccessor } from '../../commands/cli/types.ts'
 import { callerSignal } from '../abort.ts'
 import { runWithMountContext, runWithRevisions, withMountContext } from '../../observe/context.ts'
 import { uuid7 } from '../../utils/ids.ts'
 import { Activity } from '../../utils/activity.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
+import type { Accessor } from '../../accessor/base.ts'
 import {
   type Limit,
+  type Producer,
   type ReadSpec,
   type SetAttrFields,
   type WalkProbe,
   DEFAULT_READ_SPEC,
-  type DirListing,
+  DirListing,
   FileStat,
   WritePolicy,
   FileType,
@@ -108,8 +111,6 @@ import {
   storedTree,
   unprovenMiss,
 } from './listing.ts'
-import { formatFsError } from '../../errors/render.ts'
-import { PipeClosed } from '../../io/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { dispatchStat, linkFollow, vfsStatPath } from '../../commands/builtin/utils/paths.ts'
 import { linkView } from '../../commands/builtin/utils/links.ts'
@@ -263,14 +264,67 @@ export interface MountInit {
   vfsRef?: string | null
 }
 
-// What the command tier's walk guard proves an operand's `.` and `..` with:
-// the handler reaches its backend past the dispatcher, so the dispatcher's stat and link
-// follow are bound around it, and handed to the handler's table as well. No
-// dispatcher (a mount driven directly) binds nothing. Mirrors the Python
+// A VFS's listing as the paths a glob walks, listed bare with no mount to
+// keep its rows: each row names a child of `path`. Mirrors Python's
+// `_listed_paths`.
+async function listedPaths(vfs: BaseVFS, path: PathSpec): Promise<string[]> {
+  const listed = await vfs.readdir(path, {})
+  const rows = listed instanceof DirListing ? listed.entries : listed
+  const base = rstripSlash((path.pattern !== null ? path.dir : path).virtual)
+  return rows.map((row) => `${base}/${row.name}`)
+}
+
+// What the walk guard proves an operand's `.` and `..` with: the
+// dispatcher's stat and link follow, bound around the handler. No session
+// files (a mount driven directly) binds nothing. Mirrors the Python
 // set_walk_probe binding in Mount.run_command.
 function walkProbeOf(ctx: Partial<Context>): WalkProbe | null {
   if (ctx.vfs === undefined) return null
   return { stat: dispatchStat(ctx.vfs.dispatch), follow: linkFollow(linkView(ctx.vfs)) }
+}
+
+/**
+ * A command tree's root, which never runs: the executor walks the tree and
+ * runs the leaf the line names (`MountEntry.runLeaf`). Mirrors Python's
+ * `_tree_root`.
+ */
+function treeRoot(
+  _accessor: Accessor,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): CommandFnResult {
+  throw new Error(`${ctx.spec?.name ?? '?'}: a command tree runs the leaf its walk names`)
+}
+
+/**
+ * The command a mount registers for a command tree: its root, under the
+ * tree's name. The tree runs on the mount's accessor, so it declares none of
+ * an installation's own: no config, no accessor, no script, no runtime.
+ * Mirrors Python's `_tree_command`.
+ */
+function treeCommand(cli: CLI): Command {
+  const name = cli.spec.name
+  for (const [setting, own] of [
+    ['configModel', cli.configModel !== null],
+    ['accessor', cli.accessor !== noopAccessor],
+    ['script', cli.script !== null],
+    ['runtime', cli.runtime !== null],
+  ] as const) {
+    if (own) {
+      throw new Error(
+        `cli '${name}': a command tree on a mount runs on the mount's accessor; it cannot declare ${setting}`,
+      )
+    }
+  }
+  return new Command({
+    name,
+    spec: cli.spec,
+    vfs: null,
+    filetype: null,
+    fn: treeRoot,
+    write: Object.values(cli.handlers).some((handler) => handler.write),
+  })
 }
 
 // The grammar a handler sees at `ctx.spec`, named for the command it runs as
@@ -286,8 +340,10 @@ export class MountEntry {
   readonly mountId = uuid7()
   readonly prefix: string
   readonly vfs: BaseVFS
-  // The command tier's table, built once from the VFS's functions.
-  readonly io: CommandIO
+  // The functions the VFS answers itself, read once when it is mounted: each
+  // dispatcher call it defines, and `read_range` when a read fetches only the
+  // range asked for. A command asks its mount's row (`MountView.answers`).
+  readonly calls: ReadonlySet<string>
   mode: MountMode
   readonly read: ReadSpec
   readonly write: WritePolicy
@@ -314,7 +370,11 @@ export class MountEntry {
   private writeContextFor: { manager: CacheManager; context: WriteContext } | null = null
 
   private readonly cmds = new Map<CmdKey, Command>()
+  // The keys of `cmds` a user registered (`registerCommands`), not mirage.
+  private readonly userKeys = new Set<CmdKey>()
   private readonly generalCmds = new Map<string, Command>()
+  // name -> the root command registered and the tree it walks
+  private readonly trees = new Map<string, [Command, CLI]>()
   private readonly cmdSpecs = new Map<string, CommandSpec>()
   readonly commandLimits = new Map<string, Limit>()
   // first token -> descending token counts of multi-word command names
@@ -342,7 +402,14 @@ export class MountEntry {
     }
     this.prefix = prefix
     this.vfs = init.vfs
-    this.io = commandIo(init.vfs)
+    const vfs = init.vfs
+    const calls = new Set(
+      [...declaredCalls(vfs.constructor as { prototype: unknown }).keys()].filter((name) =>
+        vfs.supports(name),
+      ),
+    )
+    if (vfs.readsRanges) calls.add('read_range')
+    this.calls = calls
     this.mode = init.mode ?? MountMode.READ
     // A frozen copy carrying the coerced policy, not the caller's object.
     //
@@ -430,12 +497,6 @@ export class MountEntry {
     return this.vfs
   }
 
-  /** The command I/O over `viewFor(access)`. */
-  private ioFor(access?: SessionAccess): CommandIO {
-    const vfs = this.viewFor(access)
-    return vfs === this.vfs ? this.io : commandIo(vfs)
-  }
-
   /** The live pipe a read of `path` takes bytes from, which another task is still writing. Mirrors Python's `live_pipe`. */
   livePipe(path: string, access?: SessionAccess): DevicePipe | null {
     const accessor = this.viewFor(access).accessor
@@ -452,20 +513,15 @@ export class MountEntry {
 
   /** Expand one pattern, keyed below the mount, through the VFS's `readdir` and `stat`. */
   glob(path: PathSpec, index?: IndexCacheStore, access?: SessionAccess): Promise<PathSpec[]> {
-    const io = this.ioFor(access)
-    const listing = this.lists
-      ? {
-          readdir: (_accessor: unknown, p: PathSpec, store?: IndexCacheStore) =>
-            this.listed(p, store ?? this.index),
-          stat: (_accessor: unknown, p: PathSpec, store?: IndexCacheStore) =>
-            this.statAt(store ?? this.index, p),
-        }
-      : {}
-    return resolveGlobOf({ ...io, ...listing, ...(access === undefined ? {} : { access }) })(
-      this.viewFor(access).accessor,
-      [path],
-      index,
-    )
+    const vfs = this.viewFor(access)
+    const store = index ?? this.index
+    return makeResolveGlob(
+      this.lists ? (p) => this.listed(p, store) : (p) => listedPaths(vfs, p),
+      vfs.maxGlobMatches,
+      this.lists ? (p) => this.statAt(store, p) : (p) => vfs.stat(p, {}),
+      undefined,
+      access,
+    )([path])
   }
 
   /** Metadata access bound to this mount's ownership. */
@@ -513,7 +569,9 @@ export class MountEntry {
   // ── command registration ──────────────────────────
 
   register(cmd: Command): void {
-    this.cmds.set(cmdKey(cmd.name, cmd.filetype), cmd)
+    const key = cmdKey(cmd.name, cmd.filetype)
+    this.cmds.set(key, cmd)
+    this.userKeys.add(key)
     this.cmdSpecs.set(cmd.name, cmd.spec)
     this.prefixIndex = null
   }
@@ -539,6 +597,20 @@ export class MountEntry {
       if (rc.name === cmdName) return rc
     }
     return null
+  }
+
+  /**
+   * Whether a run of `cmdName` on an operand with `extension` can reach a
+   * handler that declares it may write. Every handler the run's cascade tries
+   * counts, the filetype one first, since one that declines hands the run to
+   * the next. The directory probe a run makes (`pickHandlers`) is not made,
+   * so a directory named like a file counts its filetype handler too. Mirrors
+   * Python's MountEntry.may_write.
+   */
+  mayWrite(cmdName: string, extension: string | null = null): boolean {
+    return this.resolveCascade(cmdName, extension, this.cmds, this.generalCmds).some(
+      (cmd) => cmd.write,
+    )
   }
 
   /**
@@ -664,20 +736,58 @@ export class MountEntry {
   }
 
   /**
-   * Batch-register commands. Mirrors Python's `Mount.register_commands(...)`.
+   * Batch-register user commands. Mirrors Python's `Mount.register_commands(...)`.
    * Each one is this mount's own, keyed by name and filetype, so it wins
-   * over the shared commands of that name. Multi-VFS entries (sharing the
-   * same name across mounts) are filtered to this mount's VFS kind; if a
+   * over the shared commands of that name, and is a user command
+   * (`isUserCommand`): refused while the session restricts this mount, and
+   * before it writes to a read-only one. Multi-VFS entries are filtered as
+   * `ownCommands` says. A `CLI` serves its verbs as a command tree on this
+   * mount, under its root's name: a line naming it walks the tree as an
+   * installed CLI's does and runs the leaf on this mount's accessor
+   * (`runLeaf`); a tree that declares an installation's own setting throws.
+   */
+  registerCommands(items: readonly (Command | CLI)[]): void {
+    const [commands, trees] = this.ownCommands(items)
+    for (const cmd of commands) this.register(cmd)
+    for (const [root, cli] of trees) this.trees.set(root.name, [root, cli])
+  }
+
+  /**
+   * Register mirage's own commands for this mount's VFS (a builtin backend's
+   * table), filtered as `registerCommands` filters; they are not user
+   * commands. Mirrors Python's `Mount._register_builtins`.
+   */
+  registerBuiltinCommands(items: readonly Command[]): void {
+    for (const cmd of this.ownCommands(items)[0]) {
+      const key = cmdKey(cmd.name, cmd.filetype)
+      this.cmds.set(key, cmd)
+      this.userKeys.delete(key)
+      this.cmdSpecs.set(cmd.name, cmd.spec)
+      this.prefixIndex = null
+    }
+  }
+
+  /**
+   * The entries of `items` this mount registers: multi-VFS entries (sharing
+   * the same name across mounts) are filtered to this mount's VFS kind; if a
    * name has entries but none match this mount, throw.
    */
-  registerCommands(items: readonly Command[]): void {
+  private ownCommands(items: readonly (Command | CLI)[]): [Command[], [Command, CLI][]] {
     const kind = this.vfs.name
     interface Group {
       toRegister: Command[]
       attempted: Set<string>
     }
     const groups = new Map<string, Group>()
-    for (const item of items) {
+    const trees: [Command, CLI][] = []
+    for (const entry of items) {
+      let item: Command
+      if (entry instanceof CLI) {
+        item = treeCommand(entry)
+        trees.push([item, entry])
+      } else {
+        item = entry
+      }
       let g = groups.get(item.name)
       if (!g) {
         g = { toRegister: [], attempted: new Set() }
@@ -694,9 +804,18 @@ export class MountEntry {
         )
       }
     }
-    for (const g of groups.values()) {
-      for (const cmd of g.toRegister) this.register(cmd)
-    }
+    return [[...groups.values()].flatMap((g) => g.toRegister), trees]
+  }
+
+  /**
+   * The command tree this mount serves under `cmdName`, null when the name
+   * resolves to any other command here. Mirrors Python's
+   * `MountEntry.cli_for`.
+   */
+  cliFor(cmdName: string): CLI | null {
+    const tree = this.trees.get(cmdName)
+    if (this.resolveCommand(cmdName) !== tree?.[0]) return null
+    return tree[1]
   }
 
   /**
@@ -1300,7 +1419,13 @@ export class MountEntry {
       named === null && !this.vfs.supports('read') ? getExtension(scope.virtual) : named
     const vfs = this.viewFor(access)
     const levels = this.callers(name, filetype, vfs)
-    if (levels.length === 0) throw enotsup(this.vfs.name, name, scope)
+    if (levels.length === 0) {
+      // A copy only reads its source, so the path it is refused at is the
+      // destination it would have made.
+      const dst = args[0]
+      const copies = declared(this.vfs.constructor, name)?.effect === Effect.COPY
+      throw enotsup(this.vfs.name, name, copies && dst instanceof PathSpec ? dst : scope)
+    }
     taken(name, kwargs)
     this.requireWritable(name, scope, [...args, ...Object.values(kwargs)], access)
     const index = kwargs.index ?? this.index
@@ -1495,14 +1620,14 @@ export class MountEntry {
       const keyedPaths = this.keyedPaths(cmdName, paths)
       const probe = walkProbeOf(ctx)
       const access = ctx.session?.access()
-      const runCtx = this.commandCtx(this.keyedFlags(flags), ctx, access, probe, keyedPaths)
+      const runCtx = this.commandCtx(this.keyedFlags(flags), ctx)
       return this.inCommandScope(probe, async (): Promise<[ByteSource | null, IOResult]> => {
         for (const cmd of handlers) {
           const refusal =
             this.readOnlyRefusal(cmdName, cmd, flags, access) ??
             this.unenforcedRefusal(cmdName, cmd)
           if (refusal !== null) return [null, refusal]
-          const result = await this.runHandler(
+          const result = await this.runOne(
             cmdName,
             cmd,
             keyedPaths,
@@ -1510,8 +1635,9 @@ export class MountEntry {
             { ...runCtx, spec: namedSpec(cmd, cmdName) },
             limitOverride,
             access,
+            paths,
           )
-          if (result !== null) return this.wrapOutput(cmdName, cmd, keyedPaths, result)
+          if (result !== null) return result
         }
         return [null, new IOResult()]
       })
@@ -1616,40 +1742,29 @@ export class MountEntry {
    * The one typed bag a handler reads, built here and nowhere else.
    *
    * A pattern operand travels to the handler whole. The handler resolves it
-   * once, through the shared adapter, which is where the namespace facts
-   * (links, nested mount roots, a trailing slash) are in view; the VFS's
-   * glob hook serves the shell tier and cannot see them, so expanding here
-   * would lose what the handler needs. Python's dispatcher never expands
-   * either. Mirrors Python's MountEntry._command_ctx.
+   * once, through its files, which is where the namespace facts (links,
+   * nested mount roots, a trailing slash) are in view; the VFS's glob hook
+   * serves the shell tier and cannot see them, so expanding here would lose
+   * what the handler needs. Python's dispatcher never expands either. The
+   * working directory carries this mount's key. Mirrors Python's
+   * MountEntry._command_ctx.
    */
-  private commandCtx(
-    flags: Record<string, FlagValue>,
-    ctx: Partial<Context>,
-    access: SessionAccess | undefined,
-    probe: WalkProbe | null,
-    paths: readonly PathSpec[],
-  ): Context {
-    const io = this.ioFor(access)
+  private commandCtx(flags: Record<string, FlagValue>, ctx: Partial<Context>): Context {
     const prefix = rstripSlash(this.prefix)
     const cwd = (ctx.cwd ?? ROOT_CWD).virtual
     return {
       ...ctx,
+      // Said on the files, not only bound in the async context, so a read of
+      // this run's mount after an await answers for this run.
+      ...(ctx.vfs !== undefined ? { vfs: ctx.vfs.servedBy([this.prefix, this.mode]) } : {}),
       stdin: ctx.stdin ?? null,
       flags,
-      mountPrefix: prefix,
       cwd: new PathSpec({
         virtual: cwd,
         directory: cwd,
         vfsPath: mountKey(cwd, prefix),
         resolved: false,
       }),
-      index: this.index,
-      io: {
-        ...dispatchedIo(io, ctx.vfs?.dispatch, paths),
-        ...(ctx.admission === undefined ? {} : { admission: ctx.admission }),
-        ...(access === undefined ? {} : { access }),
-        ...(probe === null ? {} : { walkProbe: probe }),
-      },
     }
   }
 
@@ -1680,29 +1795,37 @@ export class MountEntry {
   }
 
   /**
-   * Refuse a write command no gate would see, on a read-only mount.
+   * Refuse a user command that writes, on a read-only mount.
    *
-   * A command whose I/O runs under the path guards is refused where it
-   * writes, because only the write knows whether a line writes: `gzip -c`,
-   * `tar -t` and `split -n 1/2` read a read-only mount like any reader, and
-   * `gzip f` is refused at the write of `f.gz`, in gzip's own GNU voice. A
-   * write command that reaches its service some other way (a custom
-   * backend's own verb) is refused here, before it runs, because no gate
-   * would see its write. strongestModeUnder, not effectiveMode: a mount
-   * whose only writable region is a show entry still runs it. Only wrapper-owned responses (help, an injected version)
-   * bypass it. The trailing newline is load-bearing: stderr accumulates
-   * across a line. Mirrors Python's MountEntry._read_only_refusal.
+   * Mirage's own commands write through the dispatcher, which refuses each
+   * write in the command's own GNU voice, because only the write knows
+   * whether a line writes: `gzip -c`, `tar -t` and `split -n 1/2` read a
+   * read-only mount like any reader, and `gzip f` is refused at the write of
+   * `f.gz`. A user command (`isUserCommand`) may reach its service some other
+   * way, which no gate would see, so one that writes is refused here, before
+   * it runs. strongestModeUnder, not effectiveMode: a mount whose only
+   * writable region is a show entry still runs it. Only wrapper-owned
+   * responses (an injected help or version) bypass it: a handler that
+   * declares `--help` itself is handed the flag and runs. The trailing
+   * newline is load-bearing: stderr accumulates across a line. `served` is
+   * the command this mount serves `cmd` under, which says whether it is a
+   * user command: a tree's root for one of its leaves, which is built for its
+   * one run and never registered. Mirrors Python's
+   * MountEntry._read_only_refusal.
    */
   private readOnlyRefusal(
     cmdName: string,
     cmd: Command,
     flags: Record<string, FlagValue>,
     access?: SessionAccess,
+    served?: Command,
   ): IOResult | null {
-    const infoOnly = flags.help === true || (flags.version === true && hasInjectedVersion(cmd.spec))
+    const infoOnly =
+      (flags.help === true && hasInjectedHelp(cmd.spec)) ||
+      (flags.version === true && hasInjectedVersion(cmd.spec))
     if (
       cmd.write &&
-      !cmd.pathGuarded &&
+      this.isUserCommand(served ?? cmd) &&
       !infoOnly &&
       strongestModeUnder(this.prefix, this.mode, access) === MountMode.READ
     ) {
@@ -1715,24 +1838,16 @@ export class MountEntry {
   }
 
   /**
-   * Refuse a command the VFS was handed while the session restricts this
-   * mount. Such a command reaches its backend through its own handle, past
-   * the dispatcher, so no hide, path rule or mode cap sees what it reads or
+   * Refuse a user command while the session restricts this mount. Such a
+   * command may reach its backend through its own handle, past the
+   * dispatcher, so no hide, path rule or mode cap sees what it reads or
    * writes; like a runtime that cannot enforce them, it does not run. The
    * handle reaches the whole store, a part another mount shadows included, so
-   * a restriction anywhere below the prefix counts. The commands a builtin
-   * backend serves are mirage's own and run. Mirrors Python's
+   * a restriction anywhere below the prefix counts. Mirrors Python's
    * MountEntry._unenforced_refusal.
    */
   private unenforcedRefusal(cmdName: string, cmd: Command): IOResult | null {
-    const key = cmdKey(cmd.name, cmd.filetype)
-    const handed = this.vfs
-      .commands()
-      .some(
-        (rc) =>
-          (rc.vfs === null || rc.vfs === this.vfs.name) && cmdKey(rc.name, rc.filetype) === key,
-      )
-    if (!handed || this.cmds.get(key) !== cmd) return null
+    if (!this.isUserCommand(cmd)) return null
     const session = currentCaller().session
     if (
       session === null ||
@@ -1747,22 +1862,33 @@ export class MountEntry {
   }
 
   /**
-   * Run one handler under the mount-resolved timeout.
+   * Whether `cmd` is a user command: one this mount serves that is not
+   * mirage's own, registered through `registerCommands` (a VFS's handed
+   * commands among them) rather than as a builtin. Mirrors Python's
+   * MountEntry._is_user_command.
+   */
+  private isUserCommand(cmd: Command): boolean {
+    const key = cmdKey(cmd.name, cmd.filetype)
+    return this.userKeys.has(key) && this.cmds.get(key) === cmd
+  }
+
+  /**
+   * Run one handler under the mount-resolved timeout, through the runner a
+   * CLI leaf shares, in this mount's voice.
    *
    * The dispatch-level guard only sees default limits (the mount is unknown
    * before routing), so the mount-resolved timeout must also bound the
    * command body: eager commands do their work inside cmd.fn, where the
    * stream-consumption guard never runs. limitOverride is the caller's
    * profile, mount and workspace entry; a null one is "no opinion" and must
-   * not shadow this mount's own table. runWithTimeout abandons the promise,
-   * it cannot cancel it; the aborted signal lets a runtime kill what it
-   * spawned (python cancels the task instead). The ambient context.signal
-   * is a background job's kill channel, folded into the same wire.
-   * timeoutSeconds rides along so an engine that executes on the event loop
-   * (quickjs) can interrupt itself when the timer cannot fire. Mirrors
-   * Python's MountEntry._run_handler.
+   * not shadow this mount's own table. `typed` are the operands as the line
+   * typed them, which a file error names. A user
+   * command that declares a write reaches its backend through its own
+   * handle, past the dispatcher's per-path invalidation, so this mount drops
+   * its caches once it has run; mirage's own commands write through the
+   * dispatcher and drop nothing. Mirrors Python's MountEntry._run_one.
    */
-  private async runHandler(
+  private async runOne(
     cmdName: string,
     cmd: Command,
     paths: PathSpec[],
@@ -1770,69 +1896,136 @@ export class MountEntry {
     ctx: Context,
     limitOverride: Limit | null,
     access: SessionAccess | undefined,
+    typed: readonly PathSpec[],
   ): Promise<CommandFnResult> {
-    const resolvedLimit = resolveLimit(
+    const limit = resolveLimit(
       cmdName,
       [],
       cmd.limit,
       limitOverride ?? this.commandLimits.get(cmdName) ?? null,
     )
-    const cmdTimeout = resolvedLimit !== null ? resolvedLimit.timeoutSeconds : null
-    const guard = cmdTimeout !== null && cmdTimeout > 0 ? new AbortController() : null
+    const accessor = this.viewFor(access).accessor
+    return this.runIn(
+      cmdName,
+      limit,
+      ctx,
+      mountVoice(cmdName, typed),
+      { command: cmdName, prefixes: [this.prefix], declared: cmd.limit ?? null },
+      cmd.write && this.isUserCommand(cmd),
+      // Deferred, so a handler that throws before it returns a promise is
+      // still the runner's to word and to drop the caches after.
+      (runCtx) => Promise.resolve().then(() => cmd.fn(accessor, paths, texts, runCtx)),
+    )
+  }
+
+  /**
+   * Run one leaf of a command tree this mount serves.
+   *
+   * The executor walked the line and parsed the leaf's words, as it does an
+   * installed CLI's; the leaf runs here as a command does: on this mount's
+   * accessor, in its scope, under the read-only refusal for its own `write`
+   * and, being a user command that holds the raw handle, the refusal a
+   * restricting session gets. Its failures speak in a CLI's voice. Mirrors
+   * Python's `MountEntry.run_leaf`.
+   */
+  async runLeaf(
+    prog: string,
+    cli: CLI,
+    handler: CLIHandler,
+    paths: PathSpec[],
+    texts: string[],
+    ctx: Context,
+    limit: Limit | null,
+  ): Promise<CommandFnResult> {
+    const root = this.resolveCommand(cli.spec.name)
+    const fn = handler.fn
+    if (fn === null || root === null) throw new Error(`${prog}: no command tree serves it here`)
+    const leaf = new Command({
+      name: prog,
+      spec: ctx.spec ?? cli.spec,
+      vfs: null,
+      filetype: null,
+      fn,
+      write: handler.write,
+      limit: handler.limit,
+    })
+    return this.use(async (): Promise<CommandFnResult> => {
+      const keyedPaths = this.keyedPaths(prog, paths)
+      const probe = walkProbeOf(ctx)
+      const access = ctx.session?.access()
+      const flags = this.keyedFlags(ctx.flags)
+      const runCtx = this.commandCtx(flags, ctx)
+      return this.inCommandScope(probe, async (): Promise<CommandFnResult> => {
+        // No flag here is answered for the leaf: walkLeaf answered the
+        // tree's own help, and the leaf is handed the rest.
+        const refusal =
+          this.readOnlyRefusal(prog, leaf, {}, access, root) ?? this.unenforcedRefusal(prog, root)
+        if (refusal !== null) return [null, refusal]
+        const accessor = this.viewFor(access).accessor
+        return this.runIn(
+          prog,
+          limit,
+          runCtx,
+          cliVoice(prog),
+          { command: prog, prefixes: [this.prefix], declared: handler.limit },
+          handler.write && this.isUserCommand(root),
+          (leafCtx) =>
+            answered(Promise.resolve().then(() => fn(accessor, keyedPaths, texts, leafCtx))),
+        )
+      })
+    })
+  }
+
+  /**
+   * Run a handler body through the shared runner with what this mount binds
+   * around it. The runner abandons the promise, it cannot cancel it; the
+   * aborted signal lets a runtime kill what it spawned (python cancels the
+   * task instead). The ambient context.signal is a background job's kill
+   * channel, folded into the same wire. timeoutSeconds rides along so an
+   * engine that executes on the event loop (quickjs) can interrupt itself
+   * when the timer cannot fire.
+   */
+  private runIn(
+    name: string,
+    limit: Limit | null,
+    ctx: Context,
+    voice: HandlerVoice,
+    producer: Producer,
+    writes: boolean,
+    call: (ctx: Context) => Promise<CommandFnResult>,
+  ): Promise<CommandFnResult> {
+    const timeout = limit !== null ? limit.timeoutSeconds : null
+    const guard = timeout !== null && timeout > 0 ? new AbortController() : null
     const runSignal = mergeSignals(guard?.signal, ctx.signal)
     const runCtx =
       runSignal !== undefined
         ? {
             ...ctx,
             signal: runSignal,
-            ...(cmdTimeout !== null && cmdTimeout > 0 ? { timeoutSeconds: cmdTimeout } : {}),
+            ...(timeout !== null && timeout > 0 ? { timeoutSeconds: timeout } : {}),
           }
         : ctx
-    const running = Promise.resolve(cmd.fn(this.viewFor(access).accessor, paths, texts, runCtx))
-    try {
-      return await runWithTimeout(joinOrAbort(running, runSignal), cmdTimeout, cmdName)
-    } catch (err) {
-      if (guard !== null && err instanceof CommandTimeoutError) guard.abort()
-      // The caller has gone, so output the handler hands back later has no
-      // reader: close it, and log a failure no caller is left to see.
-      void running.then(
-        async (late) => {
-          if (late === null) return
-          await closeQuietly(late[0])
-          await closeQuietly(late[1].stderr)
-        },
-        (late: unknown) => {
-          if (late !== err && !(late instanceof Error && late.name === 'AbortError'))
-            console.error(`${cmdName}: failed after its caller left: ${String(late)}`)
-        },
-      )
-      throw err
-    }
+    return runHandler(call(runCtx), name, limit, producer, voice, {
+      scope: (result) => wrapMountStreams(result, this.mountId, this.activity),
+      ...(writes ? { drop: () => this.dropCaches() } : {}),
+      ...(runSignal !== undefined ? { signal: runSignal } : {}),
+      ...(guard !== null ? { abort: guard } : {}),
+    })
   }
 
-  /** Frame a handler's answer as this mount's command output. Mirrors
-   * Python's MountEntry._wrap_output. */
-  private wrapOutput(
-    cmdName: string,
-    cmd: Command,
-    paths: PathSpec[],
-    result: NonNullable<CommandFnResult>,
-  ): [ByteSource | null, IOResult] {
-    result[1].producer = {
-      command: cmdName,
-      prefixes: [this.prefix],
-      declared: cmd.limit ?? null,
-    }
-    const [stdout, io] = wrapMountStreams(result, this.mountId, this.activity)
-    return [
-      stdout !== null && !(stdout instanceof Uint8Array)
-        ? new OutputStream(commandOutput(stdout, io, cmdName, paths), async () => {
-            await closeQuietly(result[0])
-            await closeQuietly(stdout)
-          })
-        : stdout,
-      io,
-    ]
+  /**
+   * Drop this mount's cached listings and bodies after a write that went
+   * past the dispatcher. Both caches go, because the two hide different
+   * writes: a stale listing hides a create or a delete, a stale body an
+   * edit. The index is invalidated rather than cleared: a cleared index
+   * reads exactly like one that was never filled, so a backend whose index
+   * *is* its listing (github seeds the whole tree once) cannot tell the drop
+   * from an empty repository. Expiring keeps that distinction and the next
+   * read refetches. Mirrors Python's `MountEntry.drop_caches`.
+   */
+  async dropCaches(): Promise<void> {
+    await this.index.invalidate()
+    await this.cacheManager?.dropPrefix()
   }
 
   /**
@@ -2022,31 +2215,6 @@ export class MountEntry {
         this.mountId,
       ),
     )
-  }
-}
-
-async function* commandOutput(
-  source: AsyncIterable<Uint8Array>,
-  io: IOResult,
-  command: string,
-  paths: PathSpec[],
-): AsyncGenerator<Uint8Array> {
-  try {
-    yield* source
-  } catch (err) {
-    if (
-      err instanceof CommandTimeoutError ||
-      err instanceof PipeClosed ||
-      (err instanceof Error && err.name === 'AbortError')
-    )
-      throw err
-    const existing = await materialize(io.stderr)
-    const message = formatFsError(command, err, paths)
-    const stderr = new Uint8Array(existing.length + message.length)
-    stderr.set(existing)
-    stderr.set(message, existing.length)
-    io.stderr = stderr
-    io.exitCode = err instanceof UsageError ? err.exitCode : readFailExitCode(command, err)
   }
 }
 

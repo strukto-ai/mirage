@@ -10,7 +10,7 @@ from mirage.commands.builtin.generic.archive.types import (
 from mirage.errors.classify import classify
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
-from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
+from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec, StatFn
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError
 from mirage.view.types import LinkView, MountView
@@ -21,7 +21,6 @@ from mirage.view.types import LinkView, MountView
 # purpose.
 OTHER_FILESYSTEM = "file is on a different filesystem; not dumped"
 
-StatFn = Callable[[PathSpec], Awaitable[FileStat]]
 WalkFn = Callable[[PathSpec, str], Awaitable[Walked]]
 DirProbe = Callable[[PathSpec], Awaitable[bool]]
 

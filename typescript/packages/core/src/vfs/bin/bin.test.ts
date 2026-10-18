@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MountEntry } from '../../workspace/mount/mount.ts'
-import { commandsFor } from '../../commands/builtin/backends.ts'
+import { commandsFor } from '../../workspace/mount/backends.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
+import { Command } from '../../commands/config.ts'
 import { describe, expect, it } from 'vitest'
 import { MountMode } from '../../types.ts'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
@@ -32,7 +33,11 @@ describe('BinViewVFS', () => {
       () => ['ls'],
       (name) => (name === 'ls' ? 'ls' : null),
     )
-    const names = new Set([...GENERIC_COMMANDS, ...commandsFor(vfs)].map((cmd) => cmd.name))
+    const names = new Set(
+      [...GENERIC_COMMANDS, ...commandsFor(vfs)].flatMap((cmd) =>
+        cmd instanceof Command ? [cmd.name] : [],
+      ),
+    )
     // Every generic command registers, the writers included: `gzip -c`
     // reads the view like any reader, and a line that writes is refused
     // at the op the view does not have.

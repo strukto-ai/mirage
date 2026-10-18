@@ -213,7 +213,10 @@ def cli_env_names(
     (``invoked_env_names``), so ``ntn api get`` contributes the api and
     get chain rather than every sibling verb's options, minus the
     options the invocation itself supplies (``supplied_env_names``):
-    typed outranks environment, so the parser never reads those.
+    typed outranks environment, so the parser never reads those. A tree
+    a mount serves is filled when its mount runs it
+    (``MountRegistry.fill_env``): which mount's tree a head word reaches
+    is known only then, after any ``cd`` before it on the line.
 
     Args:
         nodes (Sequence[TSNodeLike]): the line's walked set

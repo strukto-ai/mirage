@@ -14,41 +14,36 @@
 
 import { describe, expect, it } from 'vitest'
 import { eacces, enoent } from '../../../errors/fs.ts'
-import { PathSpec } from '../../../types.ts'
-import type { CommandIO } from '../../config.ts'
+import type { FileStat, PathSpec } from '../../../types.ts'
+import { PathSpec as Path } from '../../../types.ts'
 import { isDirOf } from './archive_io.ts'
+import type { CommandFiles } from './files.ts'
 
-const accessor = {} as never
-const DIR = PathSpec.fromStrPath('/d')
+const DIR = Path.fromStrPath('/d')
 
-function ops(stat: CommandIO['stat'], readdir: CommandIO['readdir']): CommandIO {
-  return {
-    readdir,
-    readBytes: () => Promise.reject(new Error('not used')),
-    readStream: () => {
-      throw new Error('not used')
-    },
-    stat,
-    isMounted: () => true,
-  }
+type Stat = (p: PathSpec) => Promise<FileStat>
+type Readdir = (p: PathSpec) => Promise<string[]>
+
+function files(stat: Stat, readdir: Readdir): CommandFiles {
+  return { stat, readdir } as unknown as CommandFiles
 }
 
-const missingStat: CommandIO['stat'] = (_a, p) => Promise.reject(enoent(p))
-const listing: CommandIO['readdir'] = (_a, p) => Promise.resolve([`${p.virtual}/a`])
+const missingStat: Stat = (p) => Promise.reject(enoent(p))
+const listing: Readdir = (p) => Promise.resolve([`${p.virtual}/a`])
 
 describe('isDirOf', () => {
   it('asks the listing after a stat miss', async () => {
-    await expect(isDirOf(ops(missingStat, listing), accessor, undefined)(DIR)).resolves.toBe(true)
+    await expect(isDirOf(files(missingStat, listing))(DIR)).resolves.toBe(true)
   })
 
   it('answers no when both channels miss', async () => {
-    const missing: CommandIO['readdir'] = (_a, p) => Promise.reject(enoent(p))
-    await expect(isDirOf(ops(missingStat, missing), accessor, undefined)(DIR)).resolves.toBe(false)
+    const missing: Readdir = (p) => Promise.reject(enoent(p))
+    await expect(isDirOf(files(missingStat, missing))(DIR)).resolves.toBe(false)
   })
 
   it('lets a refused stat through', async () => {
-    const refused: CommandIO['stat'] = (_a, p) => Promise.reject(eacces(p.virtual))
-    await expect(isDirOf(ops(refused, listing), accessor, undefined)(DIR)).rejects.toMatchObject({
+    const refused: Stat = (p) => Promise.reject(eacces(p.virtual))
+    await expect(isDirOf(files(refused, listing))(DIR)).rejects.toMatchObject({
       code: 'EACCES',
     })
   })

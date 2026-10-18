@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.lines import split_lines
+from mirage.commands.builtin.utils.links import mount_root
 from mirage.commands.builtin.utils.size_suffix import decimal_value
 from mirage.commands.builtin.utils.stream import read_stdin_async
 from mirage.commands.config import Context
@@ -679,7 +680,6 @@ async def patch(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
-    has_vfs: bool,
     stdin: ByteSource | None = None,
     p: int = 0,
     R: bool = False,
@@ -696,9 +696,7 @@ async def patch(
     # file, ahead of -i, and the first is the one file every hunk goes to
     # in place of the names the patch's headers carry.
     source = paths[1] if len(paths) > 1 else i
-    patch_data = await _load_patch_data(
-        source if has_vfs else None, stdin, read_bytes
-    )
+    patch_data = await _load_patch_data(source, stdin, read_bytes)
     if isinstance(patch_data, str):
         return None, IOResult(exit_code=2, stderr=patch_data.encode())
     patch_text = patch_data.decode(errors="replace")
@@ -923,18 +921,18 @@ async def patch_generic(
     ctx: Context,
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
-    has_vfs: bool,
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(ctx.flags)
+    # With no file operand the patch's own names resolve against the root
+    # of the mount the command runs on.
     return await patch(
         paths,
         read_bytes=read_bytes,
         write_bytes=write_bytes,
-        has_vfs=has_vfs,
         stdin=ctx.stdin,
         p=parsed.strip,
         R=parsed.reverse,
         i=parsed.input_path,
         N=parsed.forward,
-        mount_prefix=ctx.mount_prefix or "",
+        mount_prefix=mount_root(ctx),
     )

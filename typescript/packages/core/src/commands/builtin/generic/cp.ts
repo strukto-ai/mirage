@@ -16,7 +16,6 @@ import { closeQuietly, primeStream } from '../../../io/stream.ts'
 
 import { pathVisible } from '../../../utils/hidden.ts'
 import { mountedPath, rekey, respelled } from '../../../utils/key_prefix.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import {
@@ -378,7 +377,6 @@ export async function makeLink(
     copies.relay.readdir,
     target,
     errors,
-    undefined,
     copies,
   )
   if (!made.ok) return false
@@ -467,7 +465,6 @@ export async function copyTreeLinks(
         placed,
         [{ path: entry.virtual, kind: leads.type }],
         errors,
-        undefined,
         { policy, lines, copies },
       )
       continue
@@ -482,28 +479,17 @@ export async function copyTreeLinks(
       copies.relay.readdir,
       copies.relayStat,
       followed,
-      undefined,
       'cp',
       errors,
       copies.links,
     )
     const roots: string[] = []
-    await copyEntries(
-      'cp',
-      copies.relay,
-      copies.relayStat,
-      followed,
-      placed,
-      entries,
-      errors,
-      undefined,
-      {
-        policy,
-        ...(lines !== undefined ? { lines } : {}),
-        copies,
-        blocked: roots,
-      },
-    )
+    await copyEntries('cp', copies.relay, copies.relayStat, followed, placed, entries, errors, {
+      policy,
+      ...(lines !== undefined ? { lines } : {}),
+      copies,
+      blocked: roots,
+    })
     await copyTreeLinks(
       copies,
       deref,
@@ -695,13 +681,9 @@ export function justCreatedError(cmdName: string, src: PathSpec, target: PathSpe
 // backend refuses answers false, so the create that follows reports the
 // refusal in its own words, as it did before the probe. Mirrors Python's
 // _holds_directory.
-async function holdsDirectory(
-  stat: StatFn,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<boolean> {
+async function holdsDirectory(stat: StatFn, path: PathSpec): Promise<boolean> {
   try {
-    return await isDirectory(stat, path, index)
+    return await isDirectory(stat, path)
   } catch (err) {
     if (!isFsError(err)) throw err
     console.debug(`cp: destination probe of ${path.virtual} failed: ${String(err)}`)
@@ -743,7 +725,6 @@ async function clearForDirectory(
   dest: PathSpec,
   errors: string[],
   lines: string[] | undefined,
-  index?: IndexCacheStore,
 ): Promise<PathSpec | null> {
   if (copies === undefined || !backupDisplaces(policy.backup)) {
     errors.push(typeMismatchError(policy.cmdName, src, dest, true))
@@ -771,7 +752,6 @@ async function clearForDirectory(
     undefined,
     target,
     errors,
-    index,
     copies,
   )
   return made.ok ? target : null
@@ -854,13 +834,12 @@ async function duplicateForBackup(
   backup: PathSpec,
   errors: string[],
   cmdName: string,
-  index?: IndexCacheStore,
 ): Promise<boolean> {
   if ('rename' in strategy) {
     await strategy.rename(target, backup)
     return true
   }
-  const targetIsDir = await isDirectory(stat, target, index)
+  const targetIsDir = await isDirectory(stat, target)
   if ('readBytes' in strategy) {
     if (!targetIsDir) {
       const data =
@@ -874,17 +853,8 @@ async function duplicateForBackup(
       }
       return true
     }
-    const entries = await cpWalk(strategy.readdir, stat, target, index)
-    const copiedAll = await copyEntries(
-      cmdName,
-      strategy,
-      stat,
-      target,
-      backup,
-      entries,
-      errors,
-      index,
-    )
+    const entries = await cpWalk(strategy.readdir, stat, target)
+    const copiedAll = await copyEntries(cmdName, strategy, stat, target, backup, entries, errors)
     return copiedAll
   }
   if (!targetIsDir) {
@@ -928,7 +898,6 @@ export async function makeBackup(
   readdir: ReaddirFn | undefined,
   target: PathSpec,
   errors: string[],
-  index?: IndexCacheStore,
   copies?: TransferLinks,
 ): Promise<{ backup: PathSpec | null; ok: boolean }> {
   if (policy.backup === null) return { backup: null, ok: true }
@@ -958,7 +927,7 @@ export async function makeBackup(
       await copies.dispatch('unlink', backup)
       removedLink = true
     }
-    made = await duplicateForBackup(strategy, stat, target, backup, errors, policy.cmdName, index)
+    made = await duplicateForBackup(strategy, stat, target, backup, errors, policy.cmdName)
   } catch (err) {
     if (!isFsError(err)) throw err
     errors.push(`${policy.cmdName}: cannot backup '${target.rawPath}': ${String(fsStrerror(err))}`)
@@ -1033,7 +1002,6 @@ async function treeLines(
   target: PathSpec,
   srcBase: string,
   dstBase: string,
-  index?: IndexCacheStore,
 ): Promise<string[]> {
   const dirs = new Set([srcBase, ...(await strategy.find(src, { type: 'd' }))])
   const files = await strategy.find(src, { type: 'f' })
@@ -1045,7 +1013,7 @@ async function treeLines(
       mountedPath(target, dstBase + entryMount.slice(srcBase.length)),
       target,
     )
-    if (dirs.has(entryMount) && (await isDirectory(stat, entryDst, index))) continue
+    if (dirs.has(entryMount) && (await isDirectory(stat, entryDst))) continue
     lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
   }
   return lines
@@ -1104,7 +1072,6 @@ async function mirrorDirs(
   policy: TransferPolicy,
   copies: TransferLinks | undefined,
   intoItself: boolean,
-  index?: IndexCacheStore,
   lines?: string[],
   // Collects the source directories the walk may not open, which are still
   // made at the destination; absent lets the refusal propagate.
@@ -1133,12 +1100,11 @@ async function mirrorDirs(
     try {
       // A directory meets a link at its name as the link itself, where a file
       // writes through it (GNU's lstat for a directory source, coreutils 9.7).
-      const { exists, isDir } = await entryKind(stat, entryDst, index)
+      const { exists, isDir } = await entryKind(stat, entryDst)
       if (isDir) continue
       if (
         !exists ||
-        (await clearForDirectory(policy, copies, stat, entry, entryDst, errors, lines, index)) !==
-          null
+        (await clearForDirectory(policy, copies, stat, entry, entryDst, errors, lines)) !== null
       ) {
         await strategy.mkdir(entryDst)
         made.add(dstMount)
@@ -1166,14 +1132,13 @@ async function mirrorDirs(
 // with no channel the refusal propagates rather than leave a silent gap.
 export async function cpWalk(
   readdir: ReaddirFn,
-  stat: StatFn<[path: PathSpec, index?: IndexCacheStore]>,
+  stat: StatFn,
   root: PathSpec,
-  index?: IndexCacheStore,
   cmdName = 'cp',
   errors?: string[],
   links?: LinkView,
 ): Promise<{ path: string; kind: FileType }[]> {
-  const info = await stat(root, index)
+  const info = await stat(root)
   if (info.type !== FileType.DIRECTORY) return [{ path: root.virtual, kind: info.type }]
   const entries: { path: string; kind: FileType }[] = [
     { path: root.virtual, kind: FileType.DIRECTORY },
@@ -1196,7 +1161,7 @@ export async function cpWalk(
       if (links?.statAt(childSpec.virtual) != null) continue
       let childInfo
       try {
-        childInfo = await stat(childSpec, index)
+        childInfo = await stat(childSpec)
       } catch (err) {
         if (errors === undefined || !isEacces(err)) throw err
         errors.push(`${cmdName}: cannot stat '${childSpec.rawPath}': ${String(fsStrerror(err))}`)
@@ -1230,7 +1195,6 @@ export async function copyEntries(
   target: PathSpec,
   entries: { path: string; kind: FileType }[],
   errors: string[],
-  index?: IndexCacheStore,
   opts: {
     policy?: TransferPolicy
     lines?: string[] | undefined
@@ -1257,7 +1221,7 @@ export async function copyEntries(
     const entryDstSpec = descendantPath(target, dstBase + entry.slice(srcBase.length))
     if (kind === FileType.DIRECTORY) {
       try {
-        const { exists, isDir } = await entryKind(stat, entryDstSpec, index)
+        const { exists, isDir } = await entryKind(stat, entryDstSpec)
         if (isDir) continue
         const free =
           !exists ||
@@ -1269,7 +1233,6 @@ export async function copyEntries(
             entryDstSpec,
             errors,
             opts.lines,
-            index,
           )) !== null
         if (free) {
           await strategy.mkdir(entryDstSpec)
@@ -1322,7 +1285,7 @@ export async function copyEntries(
     if (
       entry !== src.virtual &&
       !made.has(parent(entryDstSpec.virtual)) &&
-      (await holdsDirectory(stat, entryDstSpec, index))
+      (await holdsDirectory(stat, entryDstSpec))
     ) {
       errors.push(ontoDirectory(cmdName, entrySpec, entryDstSpec, opts.policy?.backup ?? null))
       copiedAll = false
@@ -1344,7 +1307,6 @@ export async function copyEntries(
         strategy.readdir,
         entryDstSpec,
         errors,
-        index,
         opts.copies,
       )
       if (!made.ok) {
@@ -1434,7 +1396,6 @@ export async function cpGeneric(
   stat: StatFn,
   strategy: CopyStrategy,
   flags: CpFlags,
-  index?: IndexCacheStore,
   backendKey?: BackendKeyFn,
   readdir?: ReaddirFn,
   // The link standing at the name a destination was typed as, its own row,
@@ -1652,7 +1613,6 @@ export async function cpGeneric(
           target,
           errors,
           flags.verbose ? lines : undefined,
-          index,
         )
         if (freed === null) continue
         target = freed
@@ -1660,12 +1620,12 @@ export async function cpGeneric(
       const srcBase = rstripSlash(src.mountPath)
       const dstBase = rstripSlash(target.mountPath)
       if (isPrimitiveCopy(strategy)) {
-        const walked = await cpWalk(strategy.readdir, stat, src, index, 'cp', errors, copies?.links)
+        const walked = await cpWalk(strategy.readdir, stat, src, 'cp', errors, copies?.links)
         const entries = intoItself
           ? walked.filter((entry) => !within(entry.path, target.virtual))
           : walked
         const leftOut: string[] = []
-        await copyEntries('cp', strategy, stat, src, target, entries, errors, index, {
+        await copyEntries('cp', strategy, stat, src, target, entries, errors, {
           policy,
           lines: flags.verbose ? lines : undefined,
           copies,
@@ -1691,7 +1651,7 @@ export async function cpGeneric(
       // only a fresh destination takes it.
       if (wholeTree && strategy.dirCopy !== undefined) {
         const tree = flags.verbose
-          ? await treeLines(strategy, stat, src, target, srcBase, dstBase, index)
+          ? await treeLines(strategy, stat, src, target, srcBase, dstBase)
           : []
         let copied = true
         try {
@@ -1744,7 +1704,6 @@ export async function cpGeneric(
         policy,
         copies,
         intoItself,
-        index,
         flags.verbose ? lines : undefined,
         unreadable,
       )
@@ -1764,7 +1723,7 @@ export async function cpGeneric(
         if (
           mirrored.made !== null &&
           !mirrored.made.has(parent(dstMount)) &&
-          (await holdsDirectory(stat, entryDst, index))
+          (await holdsDirectory(stat, entryDst))
         ) {
           errors.push(ontoDirectory('cp', entry, entryDst, flags.backup))
           continue
@@ -1776,7 +1735,6 @@ export async function cpGeneric(
           versionReaddir,
           entryDst,
           errors,
-          index,
           copies,
         )
         if (!made.ok) continue
@@ -1834,16 +1792,7 @@ export async function cpGeneric(
         if (copies.owns !== undefined && !copies.owns(target.virtual)) copier = copies.relay
       }
     }
-    const made = await makeBackup(
-      policy,
-      mover,
-      stat,
-      versionReaddir,
-      target,
-      errors,
-      index,
-      copies,
-    )
+    const made = await makeBackup(policy, mover, stat, versionReaddir, target, errors, copies)
     if (!made.ok) continue
     if (flags.verbose) lines.push(transferLine(src, target, made.backup))
     if (isPrimitiveCopy(copier)) {

@@ -16,15 +16,12 @@ import pytest
 
 from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.commands.cli.builtin.hf import HF
-from mirage.commands.cli.builtin.hf.accessor import hub_for, repo_type_of
+from mirage.commands.cli.builtin.hf.accessor import repo_type_of
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import UsageStyle
 from mirage.core.hf_hub.config import HfConfig
-from tests.commands.cli.builtin.hf.conftest import CONFIG
-
-ACCOUNT = HfAccountAccessor(CONFIG)
 
 
 def test_registers_itself_under_the_head_word_hf():
@@ -72,19 +69,6 @@ def test_repo_type_reads_the_flag():
 def test_repo_type_refuses_an_unknown_kind():
     with pytest.raises(UsageError):
         repo_type_of(FlagView({"repo_type": "bucket"}))
-
-
-def test_hub_for_rides_the_installs_account():
-    accessor = hub_for(ACCOUNT, "acme/widget", "dataset", "v2")
-    assert accessor.repo_type == "dataset"
-    assert accessor.repo_id == "acme/widget"
-    assert accessor.revision == "v2"
-    assert accessor.account is ACCOUNT
-    assert accessor.endpoint == CONFIG.endpoint
-
-
-def test_hub_for_defaults_the_revision_to_main():
-    assert hub_for(ACCOUNT, "a/b", "model").revision == "main"
 
 
 def test_the_install_accessor_is_the_account():

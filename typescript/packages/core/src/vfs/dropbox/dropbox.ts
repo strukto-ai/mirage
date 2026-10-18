@@ -23,7 +23,6 @@ import { type DeltaHook } from '../../events/index.ts'
 import type { CapacityResult, PathSpec, FileStat } from '../../types.ts'
 import { capacity as dropboxCapacity } from '../../core/dropbox/capacity.ts'
 import type { Handed } from '../types.ts'
-import type { MkdirOp } from '../types.ts'
 import { readdir as dropboxReaddir } from '../../core/dropbox/readdir.ts'
 import {
   read as dropboxRead,
@@ -46,7 +45,7 @@ import { rename as dropboxRename } from '../../core/dropbox/rename.ts'
 import { copy as dropboxCopy, dirCopy as dropboxDirCopy } from '../../core/dropbox/copy.ts'
 import { filesContaining as dropboxFilesContaining } from '../../core/dropbox/search.ts'
 
-const mkdirOp: MkdirOp<DropboxAccessor> = (accessor, path, parents) =>
+const mkdirOp = (accessor: DropboxAccessor, path: PathSpec, parents?: boolean): Promise<void> =>
   dropboxMkdir(accessor, path, parents)
 
 export interface DropboxVFSState {

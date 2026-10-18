@@ -15,16 +15,20 @@
 import { dotglobActive, extglobActive, sessionVisibility } from '../context/session_context.ts'
 import { pathVisible } from './hidden.ts'
 import type { FollowOperands, SessionAccess } from '../view/types.ts'
-import { type FileStat, FileType, PathSpec } from '../types.ts'
+import { type FileStat, FileType, PathSpec, type ReaddirFn, type StatFn } from '../types.ts'
 import { isFsError } from '../errors/fs.ts'
 import { EXTGLOB_RE, fnmatch, patternParts, QUOTED_CHARS } from './fnmatch.ts'
 import { rekey } from './key_prefix.ts'
 import { rstripSlash } from './slash.ts'
 import { compareCodePoints } from './sort.ts'
-import type { Accessor } from '../accessor/base.ts'
-import type { ReaddirOp, ResolveGlobOp, StatOp } from '../vfs/types.ts'
 
 export const GLOB_CHARS = ['*', '?', '[']
+
+/**
+ * A glob resolver, bound to the readdir and stat it walks with: the
+ * expansion of each operand, in order. Mirrors Python's `ResolveGlobFn`.
+ */
+export type ResolveGlobFn = (paths: readonly PathSpec[]) => Promise<PathSpec[]>
 
 function isoDay(year: number, month: number, date: number): string {
   const mm = String(month).padStart(2, '0')
@@ -570,23 +574,31 @@ export async function expandPattern<A, I>(
   )
 }
 
-export function makeResolveGlob<A extends Accessor = Accessor>(
-  readdir: ReaddirOp<A>,
+/**
+ * A resolver of glob operands over `readdir`, path-first: `stat` is what lets
+ * a trailing slash keep directories only, `targetStat` what a link it matched
+ * points at, `follow` the line's operand resolution a typed word's matches
+ * take, and `resolved` is told what each resolution answers, in order: the
+ * operands a command's reads are warmed ahead of. Mirrors Python's
+ * `make_resolve_glob`.
+ */
+export function makeResolveGlob(
+  readdir: ReaddirFn,
   maxGlobMatches: number = DEFAULT_MAX_GLOB_MATCHES,
-  stat?: StatOp<A>,
+  stat?: StatFn,
   targetStat?: TargetStat,
   access?: SessionAccess,
   follow?: FollowOperands,
   resolved?: (found: PathSpec[]) => void,
-): ResolveGlobOp<A> {
-  return async (accessor, paths, index) => {
+): ResolveGlobFn {
+  return async (paths) => {
     const found = await resolveGlobWith(
-      readdir,
-      accessor,
+      (_accessor: null, path: PathSpec) => readdir(path),
+      null,
       paths,
-      index,
+      undefined,
       maxGlobMatches,
-      stat,
+      stat === undefined ? undefined : (_accessor: null, path: PathSpec) => stat(path),
       targetStat,
       access,
       follow,

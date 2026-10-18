@@ -25,7 +25,7 @@ import type { MountView } from '../../../view/types.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { formatRecords } from '../utils/output.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
-import { linksOf, mountsOf } from '../utils/links.ts'
+import { linksOf, mountsOf, mountRoot } from '../utils/links.ts'
 import { vfsReaddirPath, vfsStatPath } from '../utils/paths.ts'
 import { cInt, strtoul } from '../utils/strtol.ts'
 
@@ -291,7 +291,7 @@ export async function treeGeneric(
             virtual: ctx.cwd.virtual,
             directory: ctx.cwd.virtual,
             resolved: false,
-            vfsPath: mountKey(ctx.cwd.virtual, ctx.mountPrefix ?? ''),
+            vfsPath: mountKey(ctx.cwd.virtual, mountRoot(ctx)),
           }),
         ]
   const readdirPath = vfsReaddirPath(ctx.vfs)

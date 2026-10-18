@@ -12,19 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-import inspect
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
-from mirage.accessor.base import Accessor
 from mirage.commands.builtin.general.interpreter import run_output
-from mirage.commands.builtin.utils.limit import (
-    maybe_with_timeout,
-    run_with_timeout,
-)
+from mirage.commands.builtin.utils.limit import maybe_with_timeout
 from mirage.commands.cli.constants import CLI_CONFIG_ENV, GIT_LONG_OPTIONS
 from mirage.commands.cli.refusal import (
     ARGPARSE_EXIT,
@@ -33,10 +27,9 @@ from mirage.commands.cli.refusal import (
     directory_refusal,
     leaf_refusal,
 )
-from mirage.commands.cli.types import CLI
+from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.cli.walk import listed_node, node_help, owns_argv, walk
-from mirage.commands.config import Context
-from mirage.commands.errors import PartialOutputError, UsageError
+from mirage.commands.config import CommandFnResult, Context
 from mirage.commands.spec import flag_kwarg_name
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import (
@@ -45,12 +38,9 @@ from mirage.commands.spec.types import (
     FlagValue,
     UsageStyle,
 )
-from mirage.concurrency.limiter import run_blocking
-from mirage.errors.fs import error_path, fs_strerror
-from mirage.errors.types import CommandTimeoutError, FsCondition
+from mirage.errors.types import FsCondition
 from mirage.io import IOResult
-from mirage.io.cooperative import chunks
-from mirage.io.stream import OutputStream, close_quietly, materialize
+from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput
 from mirage.policy import resolve_limit
 from mirage.process.view import ProcessView
@@ -61,14 +51,21 @@ from mirage.runtime.types import ScriptSource, ShellFn
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, Limit, PathSpec, Producer, word_text
-from mirage.view.types import SessionView
+from mirage.view.types import FollowOperands, SessionView
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
+from mirage.workspace.executor.command.handler import (
+    answered,
+    call_leaf,
+    cli_voice,
+    run_handler,
+)
 from mirage.workspace.executor.command.run import (
     admission_denial,
     exec_node,
 )
 from mirage.workspace.files import Files
+from mirage.workspace.mount import MountEntry
 from mirage.workspace.mount.namespace.probe import miss_condition, path_stat
 from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.types import ExecutionNode
@@ -81,37 +78,6 @@ from mirage.workspace.types import ExecutionNode
 # of operands, which is why basename has one and still refuses an option
 # it does not know.
 PASSTHROUGH_REST = Argument("args", nargs="*", metavar="")
-
-
-async def call_leaf(
-    fn: Callable[..., Any],
-    accessor: Accessor,
-    paths: list[PathSpec],
-    texts: list[str],
-    ctx: Context,
-) -> Any:
-    """Run a leaf handler, whether it was written ``async def`` or not.
-
-    Async handlers run on the workspace loop. Synchronous Python handlers
-    run in an owned thread so blocking SDK calls cannot stall the loop.
-    Cancellation waits for that thread before releasing the session.
-
-    Args:
-        fn (Callable[..., Any]): the leaf's handler.
-        accessor (Accessor): the install's accessor.
-        paths (list[PathSpec]): the cwd-resolved path operands.
-        texts (list[str]): the text operands.
-        ctx (Context): the leaf's context, the one a command gets.
-    """
-    result = (
-        fn(accessor, paths, texts, ctx)
-        if inspect.iscoroutinefunction(fn)
-        or inspect.iscoroutinefunction(getattr(fn, "__call__", None))
-        else await run_blocking(fn, accessor, paths, texts, ctx)
-    )
-    if inspect.isawaitable(result):
-        return await result
-    return result
 
 
 def parse_spec_for(
@@ -218,20 +184,6 @@ def _missing(message: str) -> IOResult:
         message (str): the refusal, naming the world.
     """
     return IOResult(exit_code=127, stderr=encode_text(f"{message}\n"))
-
-
-def _leaf_message(exc: BaseException) -> str:
-    """What a failed leaf says after its name: a file error stamped with
-    its path as the path and phrase, the way the shell's own commands say
-    it, anything else in its own words.
-
-    Args:
-        exc (BaseException): the leaf's failure.
-    """
-    strerror = fs_strerror(exc)
-    if strerror is None or not isinstance(getattr(exc, "filename", None), str):
-        return str(exc)
-    return f"{error_path(exc)}: {strerror}"
 
 
 async def _script_output(
@@ -390,31 +342,76 @@ async def handle_cli(
         release()
 
 
-async def _run_cli(
-    install: CLIInstall,
+@dataclass(frozen=True, slots=True)
+class LeafCall:
+    """A line a command tree's walk resolved to one leaf, parsed and
+    ready to run.
+
+    Args:
+        cmd_str (str): the line's words as typed, for the record.
+        argv (tuple[str, ...]): the words after the head as typed.
+        prog (str): the head and the verb path, the name a message, a
+            limit and the output guards read.
+        path (tuple[str, ...]): the canonical verb path below the head.
+        leaf (CommandSpec): the leaf's grammar.
+        handler (CLIHandler): the leaf's execution and policy.
+        flags (FlagBag[FlagValue]): the group and leaf flags, one bag.
+        paths (list[PathSpec]): the path operands, cwd-resolved.
+        texts (list[str]): the text operands.
+        warnings (list[str]): what the parse warned about, said ahead of
+            the leaf's own stderr.
+    """
+
+    cmd_str: str
+    argv: tuple[str, ...]
+    prog: str
+    path: tuple[str, ...]
+    leaf: CommandSpec
+    handler: CLIHandler
+    flags: FlagBag[FlagValue]
+    paths: list[PathSpec]
+    texts: list[str]
+    warnings: list[str]
+
+
+async def walk_leaf(
+    name: str,
+    cli: CLI,
     parts: list[str | PathSpec],
     session: SessionState,
-    stdin: ByteSource | None,
-    context: CLIContext,
-    drop_caches: Callable[[], Awaitable[None]] | None,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """``handle_cli``'s body, run while the install is held."""
-    entries = context.entries
-    vfs = context.vfs
+    vfs: Files | None,
+) -> LeafCall | tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Walk a line down a command tree to the leaf it names and parse the
+    leaf's words, or answer the line without running anything.
+
+    The walk consumes subcommand words and group options; the leaf's own
+    argv uses the shared CommandSpec parser. Help, usage refusals and an
+    operand base that is no directory are answered here, for an installed
+    CLI and a tree a mount serves alike.
+
+    Args:
+        name (str): the head word.
+        cli (CLI): the tree.
+        parts (list[str | PathSpec]): expanded command words including
+            the head; CLI words are shell-expanded strings.
+        session (SessionState): shell session (cwd for path resolution,
+            env for the parse).
+        vfs (Files | None): the session's files, which check an operand
+            base; None outside a workspace.
+    """
     # Words re-enter string space as typed (word_text): the walk owns
     # interpretation, so a quoted "Lunch?" must not arrive as the
     # glob-classified absolute /Lunch?. Leaf path operands are resolved
     # later by parse_flags against the session cwd.
     cmd_str = " ".join(word_text(p) for p in parts)
     argv = [word_text(p) for p in parts[1:]]
-    stdout: ByteSource | None
 
     # The walk takes the same environment the leaf parse below does, so
     # a group-level option declaring ``Argument.env`` fills at its own
     # level; without it the fetched credential never enters group_flags.
     result = walk(
-        install.name,
-        install.cli.spec,
+        name,
+        cli.spec,
         argv,
         session.cwd,
         env_snapshot(session),
@@ -442,10 +439,10 @@ async def _run_cli(
                 else FsCondition.ENOTDIR
             )
             stderr, code = directory_refusal(
-                install.name,
+                name,
                 base.raw_path,
                 reason,
-                install.cli.spec.usage_style,
+                cli.spec.usage_style,
             )
             return (
                 None,
@@ -453,19 +450,18 @@ async def _run_cli(
                 ExecutionNode(command=cmd_str, exit_code=code, stderr=stderr),
             )
 
-    prog = " ".join((install.name,) + result.path)
+    prog = " ".join((name,) + result.path)
     leaf = result.leaf
-    binding = install.cli.handlers[" ".join(result.path)]
     # argparse add_help, minus the two nodes that answer for themselves
     # (parse_spec_for). No injected --version: that is a GNU coreutils
     # convention, not an argparse one.
     parse_spec, mirage_help = parse_spec_for(
-        leaf, install.cli.spec.usage_style, owns_argv(install.cli)
+        leaf, cli.spec.usage_style, owns_argv(cli)
     )
 
     # The dialect is the root's, not the leaf's: a program answers in
     # one voice at every level.
-    style = install.cli.spec.usage_style
+    style = cli.spec.usage_style
     # The environment goes into the parse, not on top of it: an option
     # declaring one is coerced, choice-checked, path-resolved and
     # credited against required exactly as a typed value is.
@@ -474,7 +470,7 @@ async def _run_cli(
     # only.
     abbreviations = (
         GIT_LONG_OPTIONS.get(" ".join(result.path), ())
-        if install.cli.spec.name == "git"
+        if cli.spec.name == "git"
         else None
     )
     parsed = parse_flags(
@@ -542,7 +538,220 @@ async def _run_cli(
         # Only the injected flag is dropped; a leaf that declared
         # --help itself is handed the value it asked for.
         kw.pop("help", None)
+    return LeafCall(
+        cmd_str=cmd_str,
+        argv=tuple(argv),
+        prog=prog,
+        path=result.path,
+        leaf=leaf,
+        handler=cli.handlers[" ".join(result.path)],
+        flags=kw,
+        paths=list(parsed.paths),
+        texts=list(parsed.texts),
+        warnings=list(parsed.warnings),
+    )
 
+
+async def handle_mount_cli(
+    mount: MountEntry,
+    cli: CLI,
+    parts: list[str | PathSpec],
+    session: SessionState,
+    stdin: ByteSource | None = None,
+    context: CLIContext = CLIContext(),
+    owner: Callable[[str], MountEntry | None] | None = None,
+    follow: FollowOperands | None = None,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Execute a line whose head word names a command tree a mount serves.
+
+    The tree a VFS was handed (or one registered on its mount) is walked
+    exactly as an installed CLI's is (``walk_leaf``: verbs, help, usage
+    refusals, the leaf's parse); the leaf then runs on the mount, on its
+    accessor and under its refusals (``MountEntry.run_leaf``), with its
+    own limit: the profile's, then the mount's and the workspace's
+    entry for the verb path, then the leaf's declared one. A tree runs on
+    the mount serving its name, never by operand path, and its leaf keys
+    that mount's accessor by each operand: the operands the leaf parse
+    resolved are followed through the link table as the router follows a
+    mount command's (``follow``), and one another mount holds is refused
+    before the leaf runs.
+
+    Args:
+        mount (MountEntry): the mount serving the tree, readied.
+        cli (CLI): the tree.
+        parts (list[str | PathSpec]): expanded command words including
+            the head.
+        session (SessionState): the session running the line.
+        stdin (ByteSource | None): stdin data, carried on the context.
+        context (CLIContext): the workspace facts on offer.
+        owner (Callable[[str], MountEntry | None] | None): the mount a
+            virtual path is on; None checks nothing.
+        follow (FollowOperands | None): the router's link resolution for
+            this command; None follows nothing.
+    """
+    walked = await walk_leaf(cli.spec.name, cli, parts, session, context.vfs)
+    if not isinstance(walked, LeafCall):
+        return walked
+    limit = resolve_limit(
+        walked.prog,
+        command_default=walked.handler.limit,
+        mount_override=mount.command_limits.get(walked.prog),
+        workspace_limits=context.command_limits,
+        profile_limits=session.command_limits,
+    )
+    paths = walked.paths
+    if follow is not None:
+        followed = await follow(list(paths))
+        paths = [p for p in followed if isinstance(p, PathSpec)]
+    foreign = next(
+        (
+            p
+            for p in paths
+            if owner is not None
+            and p.raw_path != "-"
+            and owner(p.virtual) is not mount
+        ),
+        None,
+    )
+    if foreign is not None:
+        msg = (
+            f"{walked.prog}: {foreign.raw_path}: not on {mount.prefix}, "
+            f"the mount serving {cli.spec.name}\n"
+        ).encode()
+        return (
+            None,
+            IOResult(exit_code=1, stderr=msg),
+            ExecutionNode(command=walked.cmd_str, exit_code=1, stderr=msg),
+        )
+
+    async def run(ctx: Context) -> CommandFnResult:
+        return await mount.run_leaf(
+            walked.prog,
+            cli,
+            walked.handler,
+            paths,
+            walked.texts,
+            ctx,
+            limit,
+        )
+
+    return await run_walked(walked, session, stdin, context, limit, run)
+
+
+async def _run_cli(
+    install: CLIInstall,
+    parts: list[str | PathSpec],
+    session: SessionState,
+    stdin: ByteSource | None,
+    context: CLIContext,
+    drop_caches: Callable[[], Awaitable[None]] | None,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """``handle_cli``'s body, run while the install is held."""
+    walked = await walk_leaf(
+        install.name, install.cli, parts, session, context.vfs
+    )
+    if not isinstance(walked, LeafCall):
+        return walked
+    prog = walked.prog
+    binding = walked.handler
+    runtime: LanguageRuntime[Any] | None = None
+    if install.cli.script is not None:
+        runtime, refused = _select_runtime(
+            prog, install.cli, context.entries or [], context.routing
+        )
+        if runtime is None:
+            # The interpreter is missing, not the command: 127 like an
+            # interpreter command no runtime entry captures (run_code),
+            # or 126 when this line's capturers all refused it.
+            assert refused is not None
+            return (
+                None,
+                refused,
+                ExecutionNode(
+                    command=walked.cmd_str,
+                    exit_code=refused.exit_code,
+                    stderr=await refused.materialize_stderr(),
+                ),
+            )
+    elif binding.fn is None:
+        # _validate_cli guarantees fn XOR subcommands XOR script and
+        # walk only returns handler-bearing nodes as leaf; reaching
+        # this is a bug.
+        raise RuntimeError(
+            f"walk returned a leaf without a handler for {prog!r}"
+        )
+
+    # asyncio's timeout cancels the runtime task as well as the caller;
+    # TypeScript forwards an explicit deadline and abort signal instead.
+    limit = resolve_limit(
+        prog,
+        command_default=binding.limit,
+        workspace_limits=context.command_limits,
+        profile_limits=session.command_limits,
+    )
+
+    async def run(ctx: Context) -> CommandFnResult:
+        body: Awaitable[CommandOutput]
+        if install.cli.script is not None:
+            assert runtime is not None
+            body = _script_output(
+                install.config, ctx, install.cli.script, runtime, prog
+            )
+        else:
+            assert binding.fn is not None
+            body = answered(
+                call_leaf(
+                    binding.fn,
+                    install.accessor,
+                    walked.paths,
+                    walked.texts,
+                    ctx,
+                )
+            )
+        # The leaf's `write` is the one answer: the gate hands it to
+        # policy as `CommandContext.write`, and the cache reads it too,
+        # so a verb that can mutate (`gh api` under any method) costs
+        # the mounts a reload rather than a stale read, and so does one
+        # that failed, timed out or was cancelled after its request may
+        # have landed.
+        return await run_handler(
+            body,
+            prog,
+            limit,
+            Producer(command=prog, declared=binding.limit),
+            cli_voice(prog),
+            drop=drop_caches if binding.write else None,
+            frame=install.cli.script is None,
+        )
+
+    return await run_walked(walked, session, stdin, context, limit, run)
+
+
+async def run_walked(
+    walked: LeafCall,
+    session: SessionState,
+    stdin: ByteSource | None,
+    context: CLIContext,
+    limit: Limit | None,
+    run: Callable[[Context], Awaitable[CommandFnResult]],
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Run a walked leaf with the one Context a leaf gets, and record it.
+
+    The leaf's declared limit bounds the handler body and its streams,
+    exactly like mount dispatch: without the wrap a blocking leaf hangs
+    forever and an unbounded-output leaf ignores its own limits. A
+    failure the runner framed is recorded as it is; an answer gets the
+    parse's warnings ahead of its stderr and the limit's stream guards.
+
+    Args:
+        walked (LeafCall): the leaf the walk resolved.
+        session (SessionState): the session running the line.
+        stdin (ByteSource | None): stdin data, carried on the context.
+        context (CLIContext): the workspace facts on offer.
+        limit (Limit | None): the resolved limit.
+        run (Callable[[Context], Awaitable[CommandFnResult]]): runs the
+            leaf's handler with its context.
+    """
     active = True
 
     async def shell(line: str, data: ByteSource | None = None) -> IOResult:
@@ -557,172 +766,37 @@ async def _run_cli(
     # that needs them refuses there on its own.
     ctx = Context(
         stdin=stdin,
-        flags=kw,
+        flags=walked.flags,
         cwd=PathSpec.from_str_path(session.cwd),
         env=env_snapshot(session),
-        argv=tuple(argv),
-        spec=leaf,
-        vfs=vfs,
+        argv=walked.argv,
+        spec=walked.leaf,
+        vfs=context.vfs,
         session=context.session,
         processes=context.processes,
         shell=shell if context.shell is not None else None,
     )
-    paths = list(parsed.paths)
-    texts = list(parsed.texts)
-
-    # asyncio's timeout cancels the runtime task as well as the caller;
-    # TypeScript forwards an explicit deadline and abort signal instead.
-    limit = resolve_limit(
-        prog,
-        command_default=binding.limit,
-        workspace_limits=context.command_limits,
-        profile_limits=session.command_limits,
-    )
-    timeout = limit.timeout_seconds if limit is not None else None
-    body: Awaitable[CommandOutput | None]
-    native = install.cli.script is None
-    if install.cli.script is not None:
-        runtime, refused = _select_runtime(
-            prog, install.cli, entries or [], context.routing
-        )
-        if runtime is None:
-            # The interpreter is missing, not the command: 127 like an
-            # interpreter command no runtime entry captures (run_code),
-            # or 126 when this line's capturers all refused it.
-            assert refused is not None
-            return (
-                None,
-                refused,
-                ExecutionNode(
-                    command=cmd_str,
-                    exit_code=refused.exit_code,
-                    stderr=await refused.materialize_stderr(),
-                ),
-            )
-        body = _script_output(
-            install.config,
-            ctx,
-            install.cli.script,
-            runtime,
-            prog,
-        )
-    else:
-        fn = binding.fn
-        if fn is None:
-            # _validate_cli guarantees fn XOR subcommands XOR script and
-            # walk only returns handler-bearing nodes as leaf; reaching
-            # this is a bug.
-            raise RuntimeError(
-                f"walk returned a leaf without a handler for {prog!r}"
-            )
-        body = call_leaf(fn, install.accessor, paths, texts, ctx)
-    # The leaf's declared limit bounds the handler body and its
-    # streams, exactly like mount dispatch: without the wrap a blocking
-    # leaf hangs forever and an unbounded-output leaf ignores its own
-    # limits.
     try:
-        out = await run_with_timeout(body, timeout, prog)
-    except UsageError as exc:
-        # Leaf-raised usage errors (a malformed --json) keep the bare
-        # message and exit 2, matching the refusal branch above.
-        usage_stderr = encode_text(f"{exc}\n")
-        usage_io = IOResult(exit_code=exc.exit_code, stderr=usage_stderr)
-        return (
-            None,
-            usage_io,
-            ExecutionNode(
-                command=cmd_str, exit_code=exc.exit_code, stderr=usage_stderr
-            ),
-        )
-    except CommandTimeoutError:
-        # A limit timeout is answered by the workspace-level handler
-        # (exit 124), not here. The cancelled leaf may already have sent
-        # its request, and a service that accepted it will not roll it
-        # back, so the mounts stop trusting their caches now.
-        if binding.write and drop_caches is not None:
-            await drop_caches()
-        raise
-    except asyncio.CancelledError:
-        # A canceled leaf may already have sent its write too.
-        if binding.write and drop_caches is not None:
-            await drop_caches()
-        raise
-    except Exception as exc:
-        # Any other thrown leaf error (an API RuntimeError, a ValueError)
-        # becomes this command's IOResult, prefixed like GNU
-        # (prog: message), so the rest of the line keeps running, and
-        # what a leaf printed before it failed stays printed.
-        # The write may already have landed when a leaf throws after its
-        # request (a PUT whose --jq program fails filters a response the
-        # service already applied); without the drop a github mount keeps
-        # serving its pre-write bytes.
-        if binding.write and drop_caches is not None:
-            await drop_caches()
-        err_stderr = encode_text(f"{prog}: {_leaf_message(exc)}\n")
-        err_io = IOResult(exit_code=1, stderr=err_stderr)
-        printed = exc.stdout if isinstance(exc, PartialOutputError) else None
-        return (
-            printed,
-            err_io,
-            ExecutionNode(command=cmd_str, exit_code=1, stderr=err_stderr),
-        )
+        out = await run(ctx)
     finally:
         active = False
-    if out is None:
-        stdout, io = None, IOResult()
-    else:
-        stdout, io = out
-    # The spec's `write` is the one answer: what policy calls a write,
-    # the cache does too, so a verb that can mutate (`gh api` under any
-    # method) costs the mounts a reload rather than a stale read.
-    if binding.write and drop_caches is not None:
-        await drop_caches()
-    io.producer = Producer(command=prog, declared=binding.limit)
+    stdout, io = out if out is not None else (None, IOResult())
+    if io.producer is None:
+        return (
+            stdout,
+            io,
+            ExecutionNode(
+                command=walked.cmd_str,
+                exit_code=io.exit_code,
+                stderr=await io.materialize_stderr(),
+            ),
+        )
 
-    if parsed.warnings:
-        warn = encode_text("".join(f"{prog}: {w}\n" for w in parsed.warnings))
+    prog = walked.prog
+    if walked.warnings:
+        warn = encode_text("".join(f"{prog}: {w}\n" for w in walked.warnings))
         existing = await materialize(io.stderr) if io.stderr else b""
         io.stderr = warn + existing
-
-    owned = stdout if native else None
-    if owned is not None:
-        stdout = _cli_output(owned, io, prog)
     stdout = maybe_with_timeout(stdout, limit, prog)
-    if (
-        owned is not None
-        and stdout is not None
-        and not isinstance(stdout, bytes)
-    ):
-        wrapped = stdout
-
-        async def close() -> None:
-            await close_quietly(owned)
-            await close_quietly(wrapped)
-
-        stdout = OutputStream(wrapped, close)
     io.stderr = maybe_with_timeout(io.stderr, limit, prog)
-
-    return stdout, io, await exec_node(cmd_str, io, parsed.paths)
-
-
-async def _cli_output(
-    source: ByteSource, io: IOResult, prog: str
-) -> AsyncIterator[bytes]:
-    try:
-        async for data in chunks(source):
-            yield data
-    except CommandTimeoutError:
-        raise
-    except Exception as exc:
-        if isinstance(exc, PartialOutputError) and exc.stdout is not None:
-            async for data in chunks(exc.stdout):
-                yield data
-        message = (
-            f"{exc}\n"
-            if isinstance(exc, UsageError)
-            else f"{prog}: {_leaf_message(exc)}\n"
-        )
-        io.stderr = await io.materialize_stderr() + encode_text(message)
-        io.exit_code = exc.exit_code if isinstance(exc, UsageError) else 1
-    finally:
-        await close_quietly(source)
+    return stdout, io, await exec_node(walked.cmd_str, io, walked.paths)

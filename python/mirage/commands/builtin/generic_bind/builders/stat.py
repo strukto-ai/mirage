@@ -15,26 +15,22 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.stat import stat_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    bound_op,
-)
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def stat(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not ops.is_mounted(accessor):
-        raise ValueError("stat: no VFS")
-    resolved = await ops.resolve_glob(accessor, paths, ctx.index)
-    stat_fn = bound_op(ops.stat, accessor, ctx.index)
+    files = command_files(ctx, paths)
+    resolved = await files.resolve_glob(paths)
+    stat_fn = files.stat
     return await stat_generic(resolved, list(texts), ctx, stat_fn)
 
 

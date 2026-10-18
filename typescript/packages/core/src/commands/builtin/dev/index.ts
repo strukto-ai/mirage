@@ -12,47 +12,34 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Accessor } from '../../../accessor/base.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { ZERO_CHUNK_SIZE } from '../../../core/dev/constants.ts'
 import { VFSName, type PathSpec } from '../../../types.ts'
-import type { Command, CommandIO } from '../../config.ts'
-import { generic } from '../generic_bind/index.ts'
-
-type ReadRange = NonNullable<CommandIO['readRange']>
+import type { Files } from '../../../workspace/files.ts'
+import type { Command, Context } from '../../config.ts'
+import { genericReading } from '../generic_bind/factory.ts'
 
 /**
- * Stream `path` as successive ranged reads at the dispatcher. `/dev/zero` answers
- * every range in full, so the stream ends only when the reader stops;
- * `/dev/null` and a regular file end at the first short range. Each range
- * is a dispatcher read, so hides, path rules and policies judge it. Mirrors
- * Python's `_ranged`.
+ * Stream `path` as successive ranged reads of the stored bytes. `/dev/zero`
+ * answers every range in full, so the stream ends only when the reader
+ * stops; `/dev/null` and a regular file end at the first short range. Each
+ * range is a dispatcher read, so hides, path rules and policies judge it.
+ * Mirrors Python's `_ranged`.
  */
-async function* ranged(
-  readRange: ReadRange,
-  accessor: Accessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
+async function* ranged(files: Files, path: PathSpec): AsyncIterable<Uint8Array> {
   let offset = 0
   for (;;) {
-    const chunk = await readRange(accessor, path, index, offset, ZERO_CHUNK_SIZE)
+    const chunk = await files.read(path, { raw: true, offset, size: ZERO_CHUNK_SIZE })
     if (chunk.byteLength > 0) yield chunk
     if (chunk.byteLength < ZERO_CHUNK_SIZE) return
     offset += chunk.byteLength
   }
 }
 
-function endless(io: CommandIO): CommandIO {
-  const readRange = io.readRange
-  if (readRange === undefined) return io
-  return {
-    ...io,
-    readStream: (accessor, path, index) =>
-      path.mountPath.startsWith('/fd/')
-        ? io.readStream(accessor, path, index)
-        : ranged(readRange, accessor, path, index),
-  }
+// An operand read in ranges, except a descriptor under `/fd/`, which keeps
+// the dispatched stream. Mirrors Python's `_endless`.
+function endless(ctx: Context, path: PathSpec): AsyncIterable<Uint8Array> | null {
+  if (ctx.vfs === undefined || path.mountPath.startsWith('/fd/')) return null
+  return ranged(ctx.vfs, path)
 }
 
 // /dev is a RAM mount whose read and stat know the two synthetic character
@@ -60,6 +47,6 @@ function endless(io: CommandIO): CommandIO {
 // the two bounded streaming commands read in ranges, which /dev/zero answers
 // without end.
 export const DEV_COMMANDS: readonly Command[] = [
-  generic('cat', { vfs: VFSName.RAM, table: endless }),
-  generic('head', { vfs: VFSName.RAM, table: endless }),
+  genericReading('cat', { vfs: VFSName.RAM, stream: endless }),
+  genericReading('head', { vfs: VFSName.RAM, stream: endless }),
 ]

@@ -12,84 +12,43 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-
 import pytest
 
-from mirage.commands.builtin.generic_bind.builders.du import du as du_builder
-from mirage.commands.builtin.generic_bind.builders.find import (
-    find as find_builder,
-)
-from mirage.commands.builtin.generic_bind.builders.shuf import (
-    shuf as shuf_builder,
-)
-from mirage.commands.builtin.utils.wrap import stream_from_bytes
-from mirage.commands.config import CommandIO, Context
-from mirage.io.types import materialize
-from mirage.types import ContentType, FileStat, FileType, PathSpec
-
-_FILES = {
-    "/g/a.txt": b"alpha\n",
-    "/g/sub/b.txt": b"bravo\n",
-}
-_DIRS = {"/g", "/g/sub"}
+from mirage.types import MountMode, PathSpec
+from mirage.vfs.base import BaseVFS
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
+from tests.fixtures.mount_commands import run_on_mount
 
 
-async def _readdir(accessor, path, index=None):
-    base = (path.virtual if isinstance(path, PathSpec) else path).rstrip("/")
-    out = []
-    for p in list(_FILES) + sorted(_DIRS):
-        parent = p.rsplit("/", 1)[0] or "/"
-        if parent == base and p != base:
-            out.append(p)
-    return out
+class _ReadOnlyRAM(RAMVFS):
+    """A RAM store with no write-side function and no one-call walk, as
+    a read-only service is."""
+
+    write = BaseVFS.write
+    append = BaseVFS.append
+    pwrite = BaseVFS.pwrite
+    truncate = BaseVFS.truncate
+    read_tree = BaseVFS.read_tree
 
 
-async def _stat(accessor, path, index=None):
-    p = path.virtual if isinstance(path, PathSpec) else path
-    p = p.rstrip("/") or "/"
-    if p in _DIRS:
-        return FileStat(name=p.rsplit("/", 1)[-1], type=FileType.DIRECTORY)
-    if p in _FILES:
-        return FileStat(
-            name=p.rsplit("/", 1)[-1],
-            size=len(_FILES[p]),
-            type=FileType.FILE,
-            content=ContentType.TEXT,
-        )
-    raise FileNotFoundError(p)
+def _ws() -> Workspace:
+    vfs = _ReadOnlyRAM()
+    vfs._store.dirs.update({"/", "/sub"})
+    vfs._store.files.update({"/a.txt": b"alpha\n", "/sub/b.txt": b"bravo\n"})
+    return Workspace({"/g/": (vfs, MountMode.WRITE)})
 
 
-async def _read(accessor, path, index=None):
-    p = path.virtual if isinstance(path, PathSpec) else path
-    return _FILES[p.rstrip("/")]
-
-
-def _ops() -> CommandIO:
-    return CommandIO(
-        readdir=_readdir,
-        read_bytes=_read,
-        read_stream=partial(stream_from_bytes, _read),
-        stat=_stat,
-        is_mounted=lambda a: True,
-    )
-
-
-def _spec(original: str) -> PathSpec:
-    return PathSpec(
-        vfs_path=(original).strip("/"),
-        virtual=original,
-        directory=original,
-        resolved=True,
-    )
+def _spec(virtual: str) -> PathSpec:
+    return PathSpec.from_str_path(virtual)
 
 
 @pytest.mark.asyncio
 async def test_find_walks_tree_without_native_find_op():
-    out, io = await find_builder(
-        _ops(), object(), [_spec("/g")], [], Context(flags={"type": "f"})
+    out, io = await run_on_mount(
+        _ws(), "find", [_spec("/g")], flags={"type": "f"}
     )
-    text = (await materialize(out)).decode()
+    text = out.decode()
     assert "/g/a.txt" in text
     assert "/g/sub/b.txt" in text
     assert io.exit_code == 0
@@ -97,10 +56,8 @@ async def test_find_walks_tree_without_native_find_op():
 
 @pytest.mark.asyncio
 async def test_du_walks_tree_without_native_du_op():
-    out, _ = await du_builder(
-        _ops(), object(), [_spec("/g")], [], Context(flags={"s": True})
-    )
-    text = (await materialize(out)).decode()
+    out, _ = await run_on_mount(_ws(), "du", [_spec("/g")], flags={"s": True})
+    text = out.decode()
     # alpha\n (6) + bravo\n (6) = 12 bytes summed by the readdir walk.
     assert "12" in text
     assert "/g" in text
@@ -108,20 +65,22 @@ async def test_du_walks_tree_without_native_du_op():
 
 @pytest.mark.asyncio
 async def test_shuf_reads_without_a_write_op():
-    out, io = await shuf_builder(
-        _ops(), object(), [_spec("/g/a.txt")], [], Context()
-    )
-    assert (await materialize(out)).decode() == "alpha\n"
+    out, io = await run_on_mount(_ws(), "shuf", [_spec("/g/a.txt")])
+    assert out.decode() == "alpha\n"
     assert io.exit_code == 0
 
 
 @pytest.mark.asyncio
 async def test_shuf_output_flag_names_the_missing_write_op():
-    with pytest.raises(ValueError, match="backend provides no write op"):
-        await shuf_builder(
-            _ops(),
-            object(),
-            [_spec("/g/a.txt")],
-            [],
-            Context(flags={"output": _spec("/g/out.txt")}),
-        )
+    # The mount words its command's failure, as it words any other.
+    out, io = await run_on_mount(
+        _ws(),
+        "shuf",
+        [_spec("/g/a.txt")],
+        flags={"output": _spec("/g/out.txt")},
+    )
+    assert out == b""
+    assert (io.exit_code, io.stderr) == (
+        1,
+        b"shuf: backend provides no write op\n",
+    )

@@ -12,34 +12,29 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.join import join_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    bound_op,
-)
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def join(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not ops.is_mounted(accessor):
-        raise ValueError("join: no VFS")
+    files = command_files(ctx, paths)
     return await join_generic(
         paths,
         list(texts),
         ctx,
-        partial(ops.resolve_glob, accessor, index=ctx.index),
-        bound_op(ops.read_stream, accessor, ctx.index),
+        files.resolve_glob,
+        files.read_stream,
     )
 
 

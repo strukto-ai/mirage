@@ -43,7 +43,7 @@ USAGE = (
 )
 
 
-@command("wget", vfs=None, spec=SPECS["wget"])
+@command("wget", vfs=None, spec=SPECS["wget"], write=True)
 async def wget(
     accessor: Accessor,
     paths: list[PathSpec],

@@ -12,60 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
-import { runWithCacheManager } from '../../../cache/context.ts'
-import { BatchedRAM } from '../../../test-utils.ts'
-import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
-import { requireOp } from './adapter.ts'
-import type { CommandIO } from '../../config.ts'
+import { describe, expect, it } from 'vitest'
+import type { Accessor } from '../../../accessor/base.ts'
+import { runWithMountGate } from '../../../context/session_context.ts'
+import { materialize } from '../../../io/types.ts'
+import { MountMode, PathSpec } from '../../../types.ts'
+import { answeringFiles } from '../../../test-utils.ts'
 import { BUILDERS } from './builders/index.ts'
-import { GENERIC_COMMANDS, generic, withSlashGuard, withStatCache } from './factory.ts'
-import { FakeAccessor, spec } from '../../../core/object_store/fakes.ts'
+import { GENERIC_COMMANDS, generic, genericReading } from './factory.ts'
 
-function makeOps(overrides: Partial<CommandIO> = {}): CommandIO {
-  return {
-    // eslint-disable-next-line @typescript-eslint/no-empty-function
-    readStream: async function* () {},
-    readBytes: () => Promise.resolve(new Uint8Array()),
-    readdir: () => Promise.resolve([]),
-    stat: () =>
-      Promise.resolve(new FileStat({ name: 'x', type: FileType.FILE, content: ContentType.TEXT })),
-    isMounted: () => true,
-    ...overrides,
-  }
-}
-
-describe('withStatCache', () => {
-  it.each([FileType.FILE, FileType.DIRECTORY, FileType.SYMLINK])(
-    'backfills only file sizes for %s',
-    async (type) => {
-      const ws = new Workspace({ '/mnt': new BatchedRAM() })
-      try {
-        await ws.cache.set('/mnt/a.txt', new TextEncoder().encode('rendered'))
-        const get = vi.spyOn(ws.cache, 'get')
-        const row = new FileStat({ name: 'a.txt', type })
-        const guarded = withStatCache(makeOps({ stat: () => Promise.resolve(row) }))
-        const result = await runWithCacheManager(ws.mount('/mnt').cacheManager, () =>
-          guarded.stat(new FakeAccessor(), spec('/a.txt')),
-        )
-        expect(result.size).toBe(type === FileType.FILE ? 8 : null)
-        expect(get.mock.calls.map(([path]) => path)).toEqual(
-          type === FileType.FILE ? ['/mnt/a.txt'] : [],
-        )
-      } finally {
-        await ws.close()
-      }
-    },
-  )
-})
+const DEC = new TextDecoder()
 
 describe('GENERIC_COMMANDS', () => {
   it('has every builder whatever the backend lacks', () => {
-    // A backend without the write-side ops still gets the whole family:
-    // `gzip -c`, `tar -t` and `split -n 1/2` only read, and a line that
-    // writes is refused at the missing op instead of the command being
-    // absent.
+    // A backend without the write-side functions still gets the whole
+    // family: `gzip -c`, `tar -t` and `split -n 1/2` only read, and a line
+    // that writes is refused at the missing function instead of the command
+    // being absent.
     expect(new Set(GENERIC_COMMANDS.map((c) => c.name))).toEqual(
       new Set(BUILDERS.map((b) => b.name)),
     )
@@ -76,86 +39,70 @@ describe('GENERIC_COMMANDS', () => {
     expect(generic('grep')).toBe(GENERIC_COMMANDS.require('grep'))
   })
 
-  it('registers a copy over a changed table for one backend', () => {
-    const ls = generic('ls', { vfs: 'dify', table: withStatCache })
+  it('registers a copy for one backend', () => {
+    const ls = generic('ls', { vfs: 'dify' })
     expect([ls.name, ls.vfs]).toEqual(['ls', 'dify'])
     expect(ls).not.toBe(generic('ls'))
     expect(ls.spec).toEqual(generic('ls').spec)
+    const cat = genericReading('cat', { vfs: 'ram', stream: () => null })
+    expect([cat.name, cat.vfs]).toEqual(['cat', 'ram'])
   })
 
   it('refuses a name no builder has', () => {
     expect(() => generic('lss')).toThrow(/no generic command named 'lss'/)
-    expect(() => generic('lss', { vfs: 'fake', table: withStatCache })).toThrow(
-      /no generic command named 'lss'/,
+    expect(() => generic('lss', { vfs: 'fake' })).toThrow(/no generic command named 'lss'/)
+    expect(() => genericReading('lss', { vfs: 'fake' })).toThrow(/no generic command named 'lss'/)
+  })
+
+  it('refuses outside a workspace', async () => {
+    // A builder reads and writes only through the session's files.
+    const result = await generic('cat').fn({} as Accessor, [PathSpec.fromStrPath('/a')], [], {
+      stdin: null,
+      flags: {},
+      cwd: PathSpec.fromStrPath('/'),
+    })
+    expect(result?.[1].exitCode).toBe(1)
+    expect(DEC.decode(await materialize(result?.[1].stderr ?? null))).toBe(
+      'cat: no workspace files\n',
     )
   })
 
-  it('refuses a missing op where it is called, naming the written path', async () => {
-    // A builder binds the op up front and a line that never writes never
-    // calls it; a copy names its destination.
-    const src = PathSpec.fromStrPath('/a.txt')
-    const dst = PathSpec.fromStrPath('/b.txt')
-    const write = requireOp<NonNullable<CommandIO['write']>>(undefined, 'write')
-    await expect(write(new FakeAccessor(), src, new Uint8Array())).rejects.toMatchObject({
-      code: 'ENOTSUP',
-      virtualPath: '/a.txt',
-    })
-    const copy = requireOp<NonNullable<CommandIO['copy']>>(undefined, 'copy')
-    await expect(copy(new FakeAccessor(), src, dst)).rejects.toMatchObject({
-      code: 'ENOTSUP',
-      virtualPath: '/b.txt',
-    })
-  })
-
-  it('registers shuf as a reader', () => {
-    // Only `shuf -o` writes, so a backend with no write op still serves it.
-    expect(generic('shuf').write).toBe(false)
+  it('registers shuf as a writer', () => {
+    // `shuf -o` may write, which policy reads; a backend with no write
+    // function still serves it.
+    expect(generic('shuf').write).toBe(true)
   })
 })
 
-describe('withSlashGuard on the write tier', () => {
-  const slashed = new PathSpec({
-    virtual: '/mnt/missing',
-    directory: '/mnt',
-    vfsPath: 'missing',
-    rawPath: '/mnt/missing/',
-  })
-
-  it('refuses a slashed write before the backend', async () => {
+describe('the slash guard on the write tier', () => {
+  it('refuses a slashed write before the dispatcher', async () => {
     // open(2) with O_CREAT answers `x/` with EISDIR before looking anything
-    // up, so `tee missing/` and `truncate -s0 missing/` must not leave a
-    // regular file called `missing` behind; a bare operand passes through.
+    // up, so `tee missing/` must not leave a regular file called `missing`
+    // behind; a bare operand passes through.
     const written: string[] = []
-    const write = (_accessor: unknown, path: PathSpec): Promise<void> => {
-      written.push(path.virtual)
-      return Promise.resolve()
-    }
-    const truncate = (_accessor: unknown, path: PathSpec): Promise<void> => {
-      written.push(path.virtual)
-      return Promise.resolve()
-    }
-    const guarded = withSlashGuard(makeOps({ write, append: write, truncate }))
-    await expect(
-      guarded.write?.(new FakeAccessor(), slashed, new Uint8Array()),
-    ).rejects.toMatchObject({
-      code: 'EISDIR',
+    const vfs = answeringFiles({
+      write: (path) => {
+        written.push(path.virtual)
+        return null
+      },
+      stat: () => {
+        throw Object.assign(new Error('missing'), { code: 'ENOENT' })
+      },
     })
-    await expect(
-      guarded.append?.(new FakeAccessor(), slashed, new Uint8Array()),
-    ).rejects.toMatchObject({
-      code: 'EISDIR',
-    })
-    await expect(guarded.truncate?.(new FakeAccessor(), slashed, 0)).rejects.toMatchObject({
-      code: 'EISDIR',
-    })
-    await guarded.write?.(new FakeAccessor(), spec('/a.txt'), new Uint8Array())
-    await guarded.truncate?.(new FakeAccessor(), spec('/a.txt'), 0)
-    expect(written).toEqual(['/mnt/a.txt', '/mnt/a.txt'])
-  })
-
-  it('leaves write absent when the backend has none', () => {
-    const guarded = withSlashGuard(makeOps())
-    expect(guarded.write).toBeUndefined()
-    expect(guarded.append).toBeUndefined()
+    const run = (name: string, raw: string) =>
+      runWithMountGate('/', MountMode.WRITE, async () => {
+        const path = PathSpec.fromStrPath(raw)
+        const result = await generic(name).fn({} as Accessor, [path], [], {
+          stdin: name === 'tee' ? new Uint8Array() : null,
+          flags: {},
+          cwd: PathSpec.fromStrPath('/'),
+          vfs,
+        })
+        await materialize(result?.[0] ?? null)
+        return DEC.decode(await materialize(result?.[1].stderr ?? null))
+      })
+    expect(await run('tee', '/mnt/missing/')).toBe('tee: /mnt/missing/: Is a directory\n')
+    expect(await run('tee', '/mnt/a.txt')).toBe('')
+    expect(new Set(written)).toEqual(new Set(['/mnt/a.txt']))
   })
 })

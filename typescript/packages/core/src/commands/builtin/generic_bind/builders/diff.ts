@@ -13,18 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { diffGeneric } from '../../generic/diff.ts'
-import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, resolveOrEmpty } from '../files.ts'
 
-const diff: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return diffGeneric(
-    resolved,
-    ctx,
-    (p) => ops.readStream(accessor, p, idx),
-    (p) => ops.readdir(accessor, p, idx),
-    (p) => ops.stat(accessor, p, idx),
-  )
+const diff: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
+  return diffGeneric(resolved, ctx, files.readStream, files.readdir, files.stat)
 }
 
 export const BUILDER: GenericCommand = {

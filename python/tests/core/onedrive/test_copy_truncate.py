@@ -3,15 +3,14 @@ from aioresponses import CallbackResult, aioresponses
 from yarl import URL
 
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
-from mirage.cache.index import NULL_INDEX
-from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.config import Context
 from mirage.core.msgraph.client import GraphError
 from mirage.core.onedrive.copy import copy
 from mirage.core.onedrive.truncate import truncate
-from mirage.types import PathSpec
+from mirage.types import MountMode, PathSpec
 from mirage.vfs.onedrive.onedrive import OneDriveVFS
-from tests.fixtures.vfs_io import io_for
+from mirage.workspace import Workspace
+from tests.fixtures.mount_commands import run_on_mount
+from tests.fixtures.vfs_io import vfs_over
 
 
 def _accessor(**kw) -> OneDriveAccessor:
@@ -19,8 +18,6 @@ def _accessor(**kw) -> OneDriveAccessor:
 
 
 _BASE = "https://graph.microsoft.com/v1.0/me/drive"
-
-_cp = generic("cp").fn
 
 
 @pytest.mark.asyncio
@@ -274,16 +271,11 @@ async def test_cp_recursive_uses_server_side_folder_copy():
             headers={"Location": monitor},
         )
         m.get(monitor, payload={"status": "completed"})
-        _out, io = await _cp.__wrapped__(
-            _accessor(),
-            [src, dst],
-            [],
-            Context(
-                io=io_for(OneDriveVFS, _accessor()),
-                index=NULL_INDEX,
-                flags={"r": True},
-            ),
+        ws = Workspace(
+            {"/": (vfs_over(OneDriveVFS, _accessor()), MountMode.WRITE)}
         )
+        _out, io = await run_on_mount(ws, "cp", [src, dst], flags={"r": True})
+    assert (io.exit_code, io.stderr) == (0, None)
 
 
 @pytest.mark.asyncio

@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.crossmount.utils import (
@@ -29,14 +28,13 @@ from mirage.commands.builtin.generic.split import (
 from mirage.commands.builtin.generic.split import (
     split_generic as generic_split,
 )
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    Operation,
-    bound_op,
-    require_op,
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import (
+    command_files,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.builtin.utils.links import dispatch_of, mount_root
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -44,14 +42,14 @@ from mirage.types import PathSpec
 
 
 async def split(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    files = command_files(ctx, paths)
     fl = FlagView(ctx.flags, spec=SPECS["split"])
-    paths = await resolve_or_empty(ops, accessor, paths, ctx.index)
+    paths = await resolve_or_empty(files, paths)
     # as_str, not `x or y`: the latter would swallow an explicitly empty
     # value, which GNU rejects loudly (`split -b ''` is an invalid number,
     # not an absent flag).
@@ -83,14 +81,15 @@ async def split(
     # The pieces go to the prefix, or `x` in the working directory, which
     # need not be this mount, so a dispatcher routes each write to the
     # mount that owns it.
+    dispatch = dispatch_of(ctx)
     write_bytes = (
-        transfer_primitives(ctx.vfs.dispatch)["write"]
-        if ctx.vfs is not None
-        else partial(require_op(ops, Operation.WRITE), accessor)
+        transfer_primitives(dispatch)["write"]
+        if dispatch is not None
+        else files.write
     )
     return await generic_split(
         paths,
-        read_stream=bound_op(ops.read_stream, accessor, ctx.index),
+        read_stream=files.read_stream,
         write_bytes=write_bytes,
         stdin=ctx.stdin,
         lines_per_file=(
@@ -111,7 +110,7 @@ async def split(
         suffix_start=suffix_start,
         additional_suffix=fl.as_str("additional_suffix") or "",
         separator=parse_separator(fl.as_str("separator")),
-        mount_prefix=ctx.mount_prefix,
+        mount_prefix=mount_root(ctx),
         cwd=ctx.cwd.virtual,
     )
 

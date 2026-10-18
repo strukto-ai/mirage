@@ -12,7 +12,6 @@ from mirage.commands.builtin.generic.archive.types import (
 )
 from mirage.commands.builtin.generic.archive.walk import (
     OTHER_FILESYSTEM,
-    StatFn,
     WalkFn,
     scan_operand,
 )
@@ -33,7 +32,7 @@ from mirage.errors.fs import fs_strerror
 from mirage.io.cooperative import chunks
 from mirage.io.spool import ByteSlice, ByteSpool
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec, PolymorphicReadFn
+from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.compress import deflate_raw_stream
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.path import respell_one

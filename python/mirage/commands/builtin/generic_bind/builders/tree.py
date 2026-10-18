@@ -12,32 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.tree import tree_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    bound_op,
-)
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.tree import tree_walk
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def tree(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not ops.is_mounted(accessor):
-        raise ValueError("tree: no VFS")
-    resolved = await ops.resolve_glob(accessor, paths, ctx.index)
-    readdir = partial(ops.readdir, accessor)
-    stat = partial(ops.stat, accessor)
+    files = command_files(ctx, paths)
+    resolved = await files.resolve_glob(paths)
+    readdir = files.readdir
+    stat = files.stat
     return await tree_generic(
         resolved,
         list(texts),
@@ -45,7 +40,9 @@ async def tree(
         readdir,
         stat,
         unbounded=tree_walk(
-            bound_op(ops.read_tree, accessor, ctx.index), readdir, stat
+            (files.read_tree if files.answers("read_tree") else None),
+            readdir,
+            stat,
         ),
     )
 

@@ -14,10 +14,10 @@
 
 import pytest
 
-from mirage.commands.builtin.backends import commands_for
 from mirage.core.trello.config import TrelloConfig
 from mirage.types import VFSName
 from mirage.vfs.trello.trello import TrelloVFS
+from mirage.workspace.mount.backends import commands_for
 
 
 @pytest.fixture

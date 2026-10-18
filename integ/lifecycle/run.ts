@@ -63,7 +63,7 @@ import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { answered as answeredCall, checked } from '@struktoai/mirage-server/io_serde'
 import { VFS_CALL_BY_NAME } from '@struktoai/mirage-server/vfs_calls'
 import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
-import type { Context } from '@struktoai/mirage-core/commands/config'
+import { command, type Context } from '@struktoai/mirage-core/commands/config'
 import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { chunks } from '@struktoai/mirage-core/io/cooperative'
 import { IOResult } from '@struktoai/mirage-core/io/types'
@@ -120,6 +120,7 @@ type Step = (
       runtime?: string
       config?: Record<string, unknown>
     }
+  | { op: 'register_command'; path: string; name: string; write?: boolean; stdout?: string }
   | { op: 'unregister_cli' | 'add_runtime' | 'remove_runtime' | 'stream_cli_stats'; name: string }
   | {
       op: 'register_stream_cli'
@@ -495,6 +496,19 @@ async function action(
         step.config ?? null,
       )
       break
+    case 'register_command': {
+      const out = new TextEncoder().encode(step.stdout ?? '')
+      ws.mount(step.path).registerCommands(
+        command({
+          name: step.name,
+          vfs: null,
+          spec: new CommandSpec(),
+          write: step.write ?? false,
+          fn: () => [out, new IOResult()],
+        }),
+      )
+      break
+    }
     case 'unregister_cli':
       await ws.unregisterCli(step.name)
       break

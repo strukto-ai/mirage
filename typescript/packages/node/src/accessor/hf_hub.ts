@@ -129,6 +129,34 @@ export class HfHubAccessor extends Accessor {
   }
 }
 
+/**
+ * A Hub handle for one repository, over an account it borrows.
+ *
+ * The `hf` CLI builds one per invocation over the install's account rather
+ * than owning a second Hub client: the handle only names which repository is
+ * being addressed and rides the account's credential, origin and request
+ * bound, so `hf` gets the mount's tree walk and commit builder for free. It
+ * reaches no mount, which is what keeps `hf` an account CLI. A verb reads paths and
+ * sizes, never the per-file commit a mount's mtimes come from, so the walk
+ * lists bare.
+ */
+export function hubFor(
+  account: HfAccountAccessor,
+  repoId: string,
+  repoType: string,
+  revision?: string,
+): HfHubAccessor {
+  return new HfHubAccessor(
+    account,
+    {
+      repoId,
+      revision: revision === undefined || revision === '' ? DEFAULT_REVISION : revision,
+      expandCommits: false,
+    },
+    repoType,
+  )
+}
+
 export class HfModelsAccessor extends HfHubAccessor {
   constructor(account: HfAccountAccessor, config: HfRepoConfig) {
     super(account, config, 'model', VFSName.HF_MODELS)

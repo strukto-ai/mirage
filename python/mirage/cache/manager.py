@@ -77,6 +77,7 @@ class CacheManager:
         may_serve_listing: Callable[[str, str | None], Awaitable[bool]]
         | None = None,
         excluded_prefixes: Callable[[], tuple[str, ...]] = tuple,
+        aliases: Callable[[], tuple[str, ...]] = tuple,
     ) -> None:
         """Args:
         file_cache (FileCacheMixin | None): Workspace file cache
@@ -101,6 +102,9 @@ class CacheManager:
             cached listing; None serves them all.
         excluded_prefixes (Callable[[], tuple[str, ...]]): live nested
             mount roots protected from recursive deletion.
+        aliases (Callable[[], tuple[str, ...]]): the prefixes of the
+            other live mounts of this mount's VFS, whose cached bodies
+            are the same files under other names.
         """
         self._file_cache = file_cache
         self._index = index
@@ -110,6 +114,7 @@ class CacheManager:
         self._read_ttl = read_ttl
         self._on_gone = on_gone
         self._excluded_prefixes = excluded_prefixes
+        self._aliases = aliases
         self._may_serve_listing = may_serve_listing
         self._written: dict[str, tuple[int, float, int | None]] = {}
         self._checked: dict[str, tuple[str, int, float]] = {}
@@ -910,6 +915,8 @@ class CacheManager:
         that this mount's bytes may no longer match the service. Clearing
         the listing alone is not enough, because an already-read body is
         served warm and would keep answering with the pre-write content.
+        A VFS mounted at several prefixes holds each file under each of
+        them, so the bodies under every alias go too.
 
         Over-evicts when this mount is the root and another mount sits
         beneath it, since keys are compared by prefix. That costs a
@@ -918,7 +925,8 @@ class CacheManager:
         self._retire()
         if not self._caches_reads or self._file_cache is None:
             return
-        await self._file_cache.evict_prefix(self._prefix + "/")
+        for prefix in (self._prefix, *self._aliases()):
+            await self._file_cache.evict_prefix(prefix + "/")
 
     async def _invalidate_path(self, path: PathSpec) -> str:
         self._retire()

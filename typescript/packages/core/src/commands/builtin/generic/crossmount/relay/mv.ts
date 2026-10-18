@@ -17,15 +17,15 @@ import { fileStreamOp } from '../utils.ts'
 import { transferLinksOf } from '../utils.ts'
 import type { ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { refuseReveal } from '../../../generic_bind/adapter.ts'
+import { refuseReveal } from '../../../generic_bind/files.ts'
 import { mvGeneric, parseFlags } from '../../mv.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import { flatten, readBytesOp, readdirOp, relayCopy, statOp } from '../utils.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { specOf } from '../../../../spec/builtins.ts'
-import { type Files, namespaceOf } from '../../../../../workspace/files.ts'
-import { linkView, mountView } from '../../../utils/links.ts'
+import type { Files } from '../../../../../workspace/files.ts'
+import { linkView, mountView, visibilityOf } from '../../../utils/links.ts'
 
 // Move operands that span mounts via the shared generic mv. Pure wiring:
 // copy through the transfer primitives, then unlink the source on its own
@@ -77,18 +77,12 @@ export async function runMv(
       ...(checkUnlink !== undefined ? { checkUnlink } : {}),
     },
     parseFlags(new FlagView(flagKwargs, specOf('mv'))),
-    undefined,
     storageKey,
     undefined,
     refuseReveal,
     links === undefined
       ? undefined
-      : transferLinksOf(
-          links,
-          dispatch,
-          '/',
-          vfs === undefined ? undefined : (namespaceOf(vfs).vis() ?? undefined),
-        ),
+      : transferLinksOf(links, dispatch, '/', visibilityOf(vfs) ?? undefined),
     stdin,
     mounts === undefined ? undefined : (p: string) => mounts.isRoot(p),
     dispatch,

@@ -481,12 +481,9 @@ def set_mount_gate(prefix: str, mode: MountMode) -> CallerToken:
     """Bind the executing mount's prefix and configured mode to the
     current async context, for the run of one command.
 
-    Set by ``Mount.run_command`` around the handler, so the mode guard
-    on the command tier's I/O can resolve ``effective_path_mode`` for
-    every path a handler mutates: a path-guarded command is refused only
-    at its writes, the write-command gate admits any other when a shown
-    subtree grants writes, and this binding is how each individual write
-    is then held to its own region's mode.
+    ``Mount.run_command`` binds the same around the handler: its files'
+    calls read it (``get_mount_gate``) to tell a run on one mount from a
+    line that spans mounts, and to ask that mount's facts.
 
     Args:
         prefix (str): the mount's prefix.
@@ -502,8 +499,8 @@ def reset_mount_gate(token: CallerToken) -> None:
 
 def get_mount_gate() -> tuple[str, MountMode] | None:
     """The executing mount's (prefix, configured mode), None outside a
-    mount's command (a generic invoked directly in a test, or the
-    scratch tier)."""
+    mount's command: a line that spans mounts, run through the dispatcher
+    alone, or the scratch tier."""
     return _caller.get().mount
 
 

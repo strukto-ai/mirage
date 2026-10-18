@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { classify } from '../../../errors/classify.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import type { FsCondition, WalkDeclinedError } from '../../../errors/types.ts'
@@ -26,11 +25,7 @@ const NO_DIRECTORY: ReadonlySet<FsCondition> = new Set(['ENOENT', 'ENOTDIR', 'EL
 
 export type ReadTree = (path: PathSpec) => Promise<Map<string, FileStat> | null>
 
-export type WalkCall<R> = (
-  path: PathSpec,
-  index?: IndexCacheStore,
-  nofollow?: boolean,
-) => Promise<R>
+export type WalkCall<R> = (path: PathSpec, nofollow?: boolean) => Promise<R>
 
 /**
  * Let the mount that owns `path` refuse a command about to read every file
@@ -100,8 +95,8 @@ function listings(found: Map<string, FileStat>): Map<string, string[]> {
  * `readTree`, or a dispatcher that declines it (a path rule below the
  * directory) leaves the walk to `readdir` and `stat`, each judged on its own,
  * as does a path the answer does not hold; under a hide the dispatcher
- * answers without the hidden entries. Both take the path and the
- * index the walk passes. `answered` collects each directory listed
+ * answers without the hidden entries. Both take the path first and pass
+ * the rest through. `answered` collects each directory listed
  * from an answer, for a walk that charges a budget per request. Mirrors
  * Python's `tree_walk`.
  */
@@ -131,7 +126,7 @@ export function treeWalk<D, S>(
     }
     return null
   }
-  const treeReaddir: WalkCall<D> = async (path, index, nofollow) => {
+  const treeReaddir: WalkCall<D> = async (path, nofollow) => {
     const virtual = path.virtual.replace(/\/+$/, '') || '/'
     let hit = answerable(path) ? covering(virtual) : null
     if (hit === null && !asked.has(virtual) && path.pattern === null) {
@@ -158,16 +153,16 @@ export function treeWalk<D, S>(
         return listing.map((name) => base + name) as D
       }
     }
-    return readdir(path, index, nofollow)
+    return readdir(path, nofollow)
   }
-  const treeStat: WalkCall<S> = async (path, index) => {
+  const treeStat: WalkCall<S> = async (path, nofollow) => {
     const virtual = path.virtual.replace(/\/+$/, '') || '/'
     const hit = answerable(path) ? covering(virtual) : null
     if (hit !== null && hit[1] !== '') {
       const found = roots.get(hit[0])?.[0].get(hit[1])
       if (found !== undefined) return found as S
     }
-    return stat(path, index)
+    return stat(path, nofollow)
   }
   return [treeReaddir, treeStat]
 }

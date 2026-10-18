@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec } from '../../types.ts'
-import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
+import { onMount } from '../../test-utils.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../io/types.ts'
@@ -30,12 +30,14 @@ async function runCut(
   const vfs = new RAMVFS()
   const cmd = RAM_CUT[0]
   if (cmd === undefined) throw new Error('cut not registered')
-  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
-    stdin,
-    flags,
-    io: commandIo(vfs),
-    cwd: PathSpec.fromStrPath('/'),
-  })
+  const result = await onMount(vfs, (files) =>
+    cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
+      stdin,
+      flags,
+      vfs: files,
+      cwd: PathSpec.fromStrPath('/'),
+    }),
+  )
   if (result === null) return ''
   const [out] = result
   if (out === null) return ''
@@ -72,12 +74,14 @@ describe('cut', () => {
     const vfs = new RAMVFS()
     const cmd = RAM_CUT[0]
     if (cmd === undefined) throw new Error('cut not registered')
-    const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
-      stdin: null,
-      flags: { fields: '1' },
-      io: commandIo(vfs),
-      cwd: PathSpec.fromStrPath('/'),
-    })
+    const result = await onMount(vfs, (files) =>
+      cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
+        stdin: null,
+        flags: { fields: '1' },
+        vfs: files,
+        cwd: PathSpec.fromStrPath('/'),
+      }),
+    )
     if (result === null) throw new Error('result null')
     const [out, ioResult] = result
     expect(ioResult.exitCode).toBe(0)

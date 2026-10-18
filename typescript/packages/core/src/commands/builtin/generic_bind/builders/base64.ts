@@ -13,22 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { base64Generic } from '../../generic/base64_cmd.ts'
-import {
-  type GenericCommand,
-  dirAwareStat,
-  resolveGlobOf,
-  type GenericCommandFn,
-} from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, dirAwareStat, resolveOrEmpty } from '../files.ts'
 
-const base64: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return base64Generic(
-    resolved,
-    ctx,
-    (p) => ops.readStream(accessor, p, idx),
-    dirAwareStat(ops, accessor, ctx),
-  )
+const base64: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
+  return base64Generic(resolved, ctx, files.readStream, dirAwareStat(files, ctx))
 }
 
 export const BUILDER: GenericCommand = {

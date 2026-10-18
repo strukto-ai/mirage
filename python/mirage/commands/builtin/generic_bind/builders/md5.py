@@ -14,33 +14,33 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.md5 import md5_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    bound_uncached,
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import (
+    command_files,
     dir_aware_stat,
     dir_aware_stream,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def md5(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    resolved = await resolve_or_empty(ops, accessor, paths, ctx.index)
+    files = command_files(ctx, paths)
+    resolved = await resolve_or_empty(files, paths)
     return await md5_generic(
         resolved,
         list(texts),
         ctx,
-        dir_aware_stat(ops, accessor, ctx),
-        dir_aware_stream(ops, accessor, ctx),
-        bound_uncached(ops.checksum, accessor, ctx.index),
+        dir_aware_stat(files, ctx),
+        dir_aware_stream(files, ctx),
+        (files.checksum if files.answers("checksum") else None),
     )
 
 

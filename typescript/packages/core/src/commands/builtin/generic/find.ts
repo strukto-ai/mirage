@@ -16,12 +16,11 @@ import { activeCacheManager } from '../../../cache/context.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { modifiedTs } from '../../../core/generic/find.ts'
+import { type FindOptions, modifiedTs } from '../../../core/generic/find.ts'
 import { fsStrerror, isEnoent, isEnotdir, isMissError, walkRefusal } from '../../../errors/fs.ts'
 import { dotRefusal, linkFollow, statOrEnoent, vfsStatPath } from '../utils/paths.ts'
 import { failureText } from '../../../errors/classify.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { FindOptions } from '../../../vfs/types.ts'
 import { FindParseError } from '../../errors.ts'
 import { parseDepth, parseFindExpression, parseMtime, parseSize } from '../find_parse.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
@@ -44,8 +43,7 @@ import { printfKind } from '../../../core/generic/find_eval.ts'
 import { pathVisible } from '../../../utils/hidden.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
-import { linksOf } from '../utils/links.ts'
-import { namespaceOf } from '../../../workspace/files.ts'
+import { linksOf, visibilityOf } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
 
@@ -278,7 +276,6 @@ export function findGeneric(
   loops?: () => [string, string][],
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(ctx.flags)
-  const namespace = ctx.vfs === undefined ? undefined : namespaceOf(ctx.vfs)
   const nameFlag = parsed.name
   const inameFlag = parsed.iname
   const typeFlag = parsed.type
@@ -479,7 +476,7 @@ export function findGeneric(
             ? await applyMtimeFilter(rootRows, effMtimeMin, effMtimeMax, stat, prefix)
             : rootRows
         first = respellRaw(
-          checked.filter((row) => pathVisible(namespace?.vis(), row)),
+          checked.filter((row) => pathVisible(visibilityOf(ctx.vfs), row)),
           root.virtual,
           root.rawPath,
         )
@@ -560,7 +557,7 @@ export function findGeneric(
       // Hidden rows drop here, above the native-op/walk fork, so a mount's
       // visibility behavior cannot depend on whether its backend ships a
       // native find op.
-      const visibleRows = unpruned.filter((row) => pathVisible(namespace?.vis(), row))
+      const visibleRows = unpruned.filter((row) => pathVisible(visibilityOf(ctx.vfs), row))
       const added = respellRaw(visibleRows, root.virtual, root.rawPath)
       for (const row of added) if (!first.includes(row)) yield ENC.encode(row + '\n')
       for (const r of added) run.push(matchedPath(r, root))

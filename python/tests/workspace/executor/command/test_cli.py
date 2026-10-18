@@ -50,6 +50,7 @@ from mirage.workspace.executor.command.cli import (
     handle_cli,
 )
 from mirage.workspace.executor.command.flags import option_error, parse_flags
+from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import seed_var, set_attr
 
@@ -1475,3 +1476,158 @@ async def test_removal_closes_the_accessor_after_the_leaf_and_its_output():
     assert await materialize(stdout) == b"done\n"
     await asyncio.wait_for(removing, 1)
     assert install.accessor.closed
+
+
+# ── a command tree a mount serves ──────────────────────────────
+
+
+async def _note_show(accessor, paths, texts, ctx):
+    out = b""
+    for path in paths:
+        out += f"{path.raw_path}: ".encode() + await ctx.vfs.read(path)
+    return out, IOResult()
+
+
+async def _note_add(accessor, paths, texts, ctx):
+    accessor.store.files["/" + paths[0].vfs_path] = (
+        f"tags: {' '.join(texts)}\n".encode()
+    )
+    return b"tagged\n", IOResult()
+
+
+NOTE = Argument("note", type="path")
+# `add` writes past the dispatcher and declares its own --help.
+NOTES = CLI(
+    spec=CommandSpec(
+        name="notes",
+        subcommands=(
+            CommandSpec(
+                name="show",
+                aliases=("ls",),
+                arguments=(
+                    Argument("-C", type="path", action="append"),
+                    Argument("notes", type="path", nargs="+"),
+                ),
+                operand_base="-C",
+            ),
+            CommandSpec(
+                name="add",
+                arguments=(
+                    Argument("--help", action="store_true"),
+                    NOTE,
+                    Argument("tags", nargs="+"),
+                ),
+            ),
+        ),
+    ),
+    handlers={
+        "show": CLIHandler(fn=_note_show),
+        "add": CLIHandler(fn=_note_add, write=True),
+    },
+)
+
+
+@pytest.mark.parametrize(
+    "cli,setting",
+    [
+        (make_install().cli, "config_model"),
+        (
+            CLI(
+                spec=STASH.spec,
+                handlers=STASH.handlers,
+                accessor=ClosingAccessor,
+            ),
+            "accessor",
+        ),
+        (script_install().cli, "script"),
+    ],
+)
+def test_a_mount_refuses_a_tree_that_brings_its_own_service(cli, setting):
+    mount = MountEntry("/data/", RAMVFS())
+    with pytest.raises(ValueError, match=f"cli '{cli.spec.name}'.*{setting}"):
+        mount.register_commands([cli])
+
+
+def test_a_mount_serves_a_tree_until_a_command_takes_its_name():
+    mount = MountEntry("/data/", RAMVFS())
+    mount.register_commands([NOTES])
+    assert mount.cli_for("notes") is NOTES
+    mount.register_commands(
+        [command("notes", vfs=None, spec=CommandSpec())(send)]
+    )
+    assert mount.cli_for("notes") is None
+
+
+@pytest.mark.asyncio
+async def test_a_mounts_tree_named_like_ls_keeps_its_words():
+    # No implied `.`: the tree's walk reads the words as typed.
+    tree = CLI(
+        spec=CommandSpec(
+            name="ls",
+            subcommands=(CommandSpec(name="show", arguments=(NOTE,)),),
+        ),
+        handlers={"show": CLIHandler(fn=_note_show)},
+    )
+    ws = Workspace({"/n/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        ws.mount("/n/").register_commands([tree])
+        helped = await ws.shell("cd /n && ls --help")
+        assert helped.exit_code == 0
+        assert b"show" in helped.stdout
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_mounts_tree_runs_like_an_installed_cli_on_its_mount():
+    vfs = RAMVFS()
+    vfs.caches_reads = True
+    vfs.accessor.store.files["/a.md"] = b"first\n"
+    ws = Workspace({"/n/": vfs, "/o/": RAMVFS()}, mode=MountMode.WRITE)
+    stderr = {
+        0: b"",
+        1: b"notes add: read-only mount at /n/\n",
+        126: b"notes: Permission denied\n",
+        127: b"notes show: command cannot enforce this session's file "
+        b"restrictions\n",
+    }
+    try:
+        ws.mount("/n/").register_commands([NOTES])
+        assert (await ws.shell("cat /n/a.md")).stdout == b"first\n"
+        shown = await ws.shell("cd /n && notes ls a.md")
+        assert (shown.exit_code, shown.stdout) == (0, b"a.md: first\n")
+        # Through a link: the leaf is handed the target, as a command is.
+        added = await ws.shell("ln -s a.md link.md && notes add link.md work")
+        assert (added.exit_code, added.stdout) == (0, b"tagged\n")
+        assert (await ws.shell("cat /n/a.md")).stdout == b"tags: work\n"
+        # One spelling, two files: each operand keeps its own -C.
+        await ws.shell("mkdir a b && echo A > a/f && echo B > b/f")
+        two = await ws.shell("notes show -C /n/a f -C /n/b f")
+        assert two.stdout == b"f: A\nf: B\n"
+        # An option's value spelled like the operand stays the option's.
+        await ws.shell("echo AA > a/a")
+        assert (await ws.shell("notes show -C a a")).stdout == b"a: AA\n"
+        # The leaf keys /n/'s accessor, so another mount's file is refused.
+        foreign = await ws.shell("notes add /o/a.md work")
+        assert (foreign.exit_code, foreign.stderr) == (
+            1,
+            b"notes add: /o/a.md: not on /n/, the mount serving notes\n",
+        )
+        ws.set_mount_mode("/n/", MountMode.READ)
+        ws.create_session("hidden", profile={"paths": {"hide": ["/n/x"]}})
+        rule = {"reason": "no tagging", "commands": ["notes add"]}
+        ws.create_session("ruled", profile={"commands": {"deny": [rule]}})
+        for line, session, code in (
+            ("notes show /n/a.md", None, 0),
+            ("notes add /n/a.md w", None, 1),
+            ("notes add /n/a.md w --help", None, 1),
+            ("notes show /n/a.md", "hidden", 127),
+            ("notes ls /n/a.md", "ruled", 0),
+            ("notes add /n/a.md w", "ruled", 126),
+        ):
+            io = await ws.shell(line, session_id=session)
+            got = (io.exit_code, io.stderr or b"")
+            assert got == (code, stderr[code]), line
+        assert vfs.accessor.store.files["/a.md"] == b"tags: work\n"
+    finally:
+        await ws.close()

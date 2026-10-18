@@ -12,9 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.hf_hub import HfAccountAccessor
+from mirage.accessor.hf_hub import HfAccountAccessor, hub_for
 from mirage.commands.cli.builtin.hf.accessor import (
-    hub_for,
     repo_type_of,
     require_operands,
     require_token,

@@ -12,10 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FileStat } from '../../../types.ts'
-
 export type AsyncReaddirFn = (path: string) => Promise<string[]>
-export type AsyncStatFn = (path: string) => Promise<FileStat>
 
 /**
  * A pattern translated from its dialect into this host's. `ignoreCase` says

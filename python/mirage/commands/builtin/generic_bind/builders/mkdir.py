@@ -12,14 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
+from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    Operation,
-    require_op,
-)
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.links import links_of
 from mirage.commands.builtin.utils.paths import (
     descendant_path,
@@ -27,7 +26,7 @@ from mirage.commands.builtin.utils.paths import (
     nearest_ancestor,
 )
 from mirage.commands.builtin.utils.slash_links import mkdir_link_refusal
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import missing_operand_error
@@ -38,26 +37,25 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.render import operand_spelling
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType, PathSpec
+from mirage.types import FileType, PathSpec, WalkProbe
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.mode import DEFAULT_DIR_MODE, parse_chmod
 from mirage.utils.path import CycleError, norm, parent, walk_nodes
-from mirage.vfs.types import OperationFn
 from mirage.view.types import LinkView
 
 
 async def mkdir(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    files = command_files(ctx, paths)
     fl = FlagView(ctx.flags, spec=SPECS["mkdir"])
     parents = fl.as_bool("parents")
     verbose = fl.as_bool("verbose")
     mode_text = fl.as_str("mode")
-    if not ops.is_mounted(accessor) or not paths:
+    if not paths:
         raise missing_operand_error("mkdir", None)
     mode: int | None = None
     if mode_text is not None:
@@ -67,11 +65,11 @@ async def mkdir(
         mode = parse_chmod(mode_text, DEFAULT_DIR_MODE)
         if mode is None:
             raise ValueError(f"mkdir: invalid mode '{mode_text}'")
-        if ops.set_attrs is None:
+        if not files.answers("setattr"):
             raise NotImplementedError(
                 "mkdir: --mode is not supported on this backend"
             )
-    elif ops.set_attrs is not None:
+    elif files.answers("setattr"):
         # A new directory is 0777 masked by the session's umask. Only a
         # mask away from bash's default costs a setattr, because 755 is
         # what every backend already renders for a fresh directory;
@@ -83,26 +81,28 @@ async def mkdir(
         )
         if umask != DEFAULT_UMASK:
             mode = 0o777 & ~umask
-    mkdir_fn = require_op(ops, Operation.MKDIR)
-    paths = await ops.resolve_glob(accessor, paths, ctx.index)
+    paths = await files.resolve_glob(paths)
     lines: list[str] = []
     errors: list[str] = []
     links = links_of(ctx)
+    probe = get_walk_probe()
     for path in paths:
         taken, refusal = await mkdir_link_refusal(path, links, parents=parents)
         if taken:
             if refusal is not None:
                 errors.append(refusal)
             continue
-        names = await created_names(path, parents, links) if verbose else []
-        failed = await make_directory(mkdir_fn, accessor, path, parents, links)
+        names = (
+            await created_names(path, parents, links, probe) if verbose else []
+        )
+        failed = await make_directory(files.mkdir, path, parents, links, probe)
         if failed is not None:
             errors.append(failed)
             continue
-        if mode is not None and ops.set_attrs is not None:
+        if mode is not None and files.answers("setattr"):
             # -m applies to the named directory only; any parents made by
             # -p keep the default mode (GNU).
-            await ops.set_attrs(accessor, path, mode=mode)
+            await files.set_attrs(path, {"mode": mode})
         lines.extend(created_lines(names))
     output = ("\n".join(lines) + "\n").encode() if lines else None
     stderr = ("\n".join(errors) + "\n").encode() if errors else None
@@ -110,7 +110,10 @@ async def mkdir(
 
 
 async def created_names(
-    path: PathSpec, parents: bool, links: LinkView | None = None
+    path: PathSpec,
+    parents: bool,
+    links: LinkView | None = None,
+    probe: WalkProbe | None = None,
 ) -> list[str]:
     """The names a verbose mkdir reports for ``path``, top-down, as GNU
     spells them.
@@ -127,8 +130,9 @@ async def created_names(
         path (PathSpec): the operand.
         parents (bool): whether ``-p`` makes the missing ancestors.
         links (LinkView | None): the namespace's symlink facts.
+        probe (WalkProbe | None): what the chain is probed with, None
+            outside a workspace command.
     """
-    probe = get_walk_probe()
     if not parents or probe is None:
         return [operand_spelling(path.virtual, path)]
     named = PathSpec.from_str_path(path.virtual)
@@ -174,11 +178,11 @@ def created_lines(names: list[str]) -> list[str]:
 
 
 async def make_directory(
-    mkdir_fn: OperationFn,
-    accessor: Accessor,
+    mkdir: Callable[..., Awaitable[Any]],
     path: PathSpec,
     parents: bool,
     links: LinkView | None = None,
+    probe: WalkProbe | None = None,
 ) -> str | None:
     """Make one mkdir operand, or the line GNU reports when it cannot.
 
@@ -189,18 +193,19 @@ async def make_directory(
     store's override included, so they report alike.
 
     Args:
-        mkdir_fn (OperationFn): the guarded backend mkdir.
-        accessor (Accessor): backend handle.
+        mkdir (Callable[..., Awaitable[Any]]): the dispatched mkdir.
         path (PathSpec): the operand.
         parents (bool): whether ``-p`` makes the missing ancestors.
         links (LinkView | None): the namespace's symlink facts.
+        probe (WalkProbe | None): what a walked name is judged with,
+            None outside a workspace command.
     """
     # -p enters the names in front of the operand one at a time, so a
     # dot among them, or a link loop the walk refused the operand for,
     # is met at that name and GNU quotes it rather than the operand.
     if parents and (path.dotted is not None or path.walk_error == "ELOOP"):
         failed = await _make_walked(
-            mkdir_fn, accessor, path, path.dotted or path.virtual, links
+            mkdir, path, path.dotted or path.virtual, links, probe
         )
         if failed is not None:
             return failed
@@ -210,7 +215,7 @@ async def make_directory(
         # walk just made.
         path = replace(path, dotted=None)
     try:
-        await mkdir_fn(accessor, path, parents=parents)
+        await mkdir(path, parents=parents)
     except FS_ERRORS as exc:
         named = operand_spelling(error_path(exc), path)
         return f"mkdir: cannot create directory '{named}': {fs_strerror(exc)}"
@@ -218,11 +223,11 @@ async def make_directory(
 
 
 async def _make_walked(
-    mkdir_fn: OperationFn,
-    accessor: Accessor,
+    mkdir: Callable[..., Awaitable[Any]],
     path: PathSpec,
     dotted: str,
     links: LinkView | None,
+    probe: WalkProbe | None,
 ) -> str | None:
     """Make every name an operand's walk enters, GNU ``mkdir -p`` style.
 
@@ -233,19 +238,17 @@ async def _make_walked(
     spells it. None when every name is made.
 
     Args:
-        mkdir_fn (OperationFn): the guarded backend mkdir.
-        accessor (Accessor): backend handle.
+        mkdir (Callable[..., Awaitable[Any]]): the dispatched mkdir.
         path (PathSpec): the operand.
         dotted (str): its dotted spelling.
         links (LinkView | None): the namespace's symlink facts.
+        probe (WalkProbe | None): what a walked name is judged with.
     """
     root = mount_prefix_of(path.virtual, path.vfs_path).rstrip("/")
     follow = links.resolve if links is not None else None
     for node, spelled in walk_nodes(dotted, path.raw_path, follow):
         try:
-            why = await _enter_node(
-                mkdir_fn, accessor, path, node, root, links
-            )
+            why = await _enter_node(mkdir, path, node, root, links, probe)
         except FileExistsError:
             why = posix_phrase(FsCondition.ENOTDIR)
         except FS_ERRORS as exc:
@@ -256,12 +259,12 @@ async def _make_walked(
 
 
 async def _enter_node(
-    mkdir_fn: OperationFn,
-    accessor: Accessor,
+    mkdir: Callable[..., Awaitable[Any]],
     path: PathSpec,
     node: str,
     root: str,
     links: LinkView | None,
+    probe: WalkProbe | None,
 ) -> str | None:
     """Make one name of a walk a directory, or say why it is not one.
 
@@ -275,12 +278,12 @@ async def _enter_node(
     own mkdir answers.
 
     Args:
-        mkdir_fn (OperationFn): the guarded backend mkdir.
-        accessor (Accessor): backend handle.
+        mkdir (Callable[..., Awaitable[Any]]): the dispatched mkdir.
         path (PathSpec): the operand the walk belongs to.
         node (str): the name entered, absolute and link-spelled.
         root (str): the operand's mount root, without a trailing slash.
         links (LinkView | None): the namespace's symlink facts.
+        probe (WalkProbe | None): what the name is judged with.
     """
     if links is not None and links.stat_at(node) is not None:
         try:
@@ -293,7 +296,6 @@ async def _enter_node(
         if target.type != FileType.DIRECTORY:
             return posix_phrase(FsCondition.ENOTDIR)
         return None
-    probe = get_walk_probe()
     if probe is not None:
         exists, is_dir = await entry_kind(
             probe.stat, PathSpec.from_str_path(node)
@@ -302,7 +304,7 @@ async def _enter_node(
             return None if is_dir else posix_phrase(FsCondition.ENOTDIR)
     real = links.resolve(node) if links is not None else node
     if real.startswith(root + "/"):
-        await mkdir_fn(accessor, descendant_path(path, real), parents=True)
+        await mkdir(descendant_path(path, real), parents=True)
     return None
 
 

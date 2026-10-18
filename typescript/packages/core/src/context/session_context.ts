@@ -447,12 +447,10 @@ export function getAdmission(): EntryGate | null {
  * Bind the executing mount's prefix and configured mode for the
  * duration of `fn`: the run of one command.
  *
- * Bound by `Mount.runCommand` around the handler, so the mode guard on
- * the command tier's I/O can resolve `effectivePathMode` for every path
- * a handler mutates: a path-guarded command is refused only at its
- * writes, the write-command gate admits any other when a shown subtree
- * grants writes, and this binding is how each individual write is then
- * held to its own region's mode.
+ * Bound by `Mount.runCommand` around the handler: it is how a command
+ * tells its run on one mount from a run across mounts, which binds none
+ * (`crossesMounts`), and the prefix a path it makes up is keyed below
+ * (`mountRoot`).
  */
 export function runWithMountGate<T>(
   prefix: string,
@@ -460,43 +458,6 @@ export function runWithMountGate<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   return runChanged({ mount: [prefix, mode] }, fn)
-}
-
-/**
- * The gate of the mount serving `virtual`: its [prefix, configured
- * mode], null outside a mount's command (a generic invoked directly in
- * a test, or the scratch tier).
- *
- * The reader selects among every live gate by the path itself: the
- * longest prefix covering it wins, the way the mount table routes, and
- * two live gates at one prefix (two workspaces sharing a fallback
- * runtime) answer with the weaker mode, failing toward refusal. On an
- * isolating runtime one binding is live and every caller asks about a
- * path that mount serves; on the fallback storage (a browser with no
- * AsyncLocalStorage) overlapping commands on different mounts hold
- * gates concurrently, and the path is what keeps one from being judged
- * against the other's. A path no live gate covers answers null, the
- * same inert reading an unbound context gives.
- */
-export function mountGateFor(virtual: string): readonly [string, MountMode] | null {
-  const v = norm(virtual)
-  let bestLen = -1
-  let bestPrefix: string | null = null
-  let bestMode: MountMode | null = null
-  for (const [rawPrefix, mode] of liveCallers().flatMap((caller) =>
-    caller.mount === null ? [] : [caller.mount],
-  )) {
-    const prefix = norm(rawPrefix)
-    if (prefix !== '/' && v !== prefix && !v.startsWith(prefix + '/')) continue
-    if (prefix.length > bestLen) {
-      bestLen = prefix.length
-      bestPrefix = prefix
-      bestMode = mode
-    } else if (prefix.length === bestLen && bestMode !== null) {
-      bestMode = weakerMode(bestMode, mode)
-    }
-  }
-  return bestPrefix === null || bestMode === null ? null : [bestPrefix, bestMode]
 }
 
 /**
@@ -558,9 +519,10 @@ export function noteRefusal(refusal: Refusal): void {
  * The walk probe bound to the command serving `virtual`, null outside a
  * mount's command (a generic invoked directly in a test).
  *
- * Selected by the path the way `mountGateFor` selects a gate, so on the
- * fallback storage a concurrent command on another mount cannot lend its
- * probe to this one. Mirrors Python's get_walk_probe.
+ * Selected among every live binding by the path itself, the longest prefix
+ * covering it winning as the mount table routes, so on the fallback storage
+ * a concurrent command on another mount cannot lend its probe to this one.
+ * Mirrors Python's get_walk_probe.
  */
 export function walkProbeFor(virtual: string): WalkProbe | null {
   const v = norm(virtual)

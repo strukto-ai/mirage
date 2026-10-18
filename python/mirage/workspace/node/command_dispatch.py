@@ -99,6 +99,7 @@ from mirage.workspace.executor.builtins.alias import (
 from mirage.workspace.executor.builtins.table import BUILTINS
 from mirage.workspace.executor.builtins.types import BuiltinCall
 from mirage.workspace.executor.command import handle_command
+from mirage.workspace.executor.command.command import fill_tree_env
 from mirage.workspace.executor.command.external import run_external
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
@@ -111,7 +112,12 @@ from mirage.workspace.lookup import (
     runtime_refused,
 )
 from mirage.workspace.lookup.constants import INTERPRETER_NAMES
-from mirage.workspace.node.admission import Admitted, Refused, admit
+from mirage.workspace.node.admission import (
+    Admitted,
+    Refused,
+    admit,
+    classified_words,
+)
 from mirage.workspace.node.occurrence import claimant_for, evaluated_from
 from mirage.workspace.node.types import ExpandedWords
 from mirage.workspace.session.state import (
@@ -413,6 +419,7 @@ async def execute_command(
             handed,
             sink,
             expanded,
+            assigned=frozenset(k for k, _ in prefix_assignments),
         )
         if refused:
             io.stderr = refused + (await materialize(io.stderr) or b"")
@@ -460,6 +467,7 @@ async def _dispatch_command_body(
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
     expanded: ExpandedWords | None = None,
+    assigned: frozenset[str] = frozenset(),
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     # The command's place on the line, as the pass computed it, and
     # the entry point its nested evaluations re-enter through: a word that
@@ -527,6 +535,7 @@ async def _dispatch_command_body(
         seed_prefix=seed_prefix,
         claimant=claimant,
         sink=sink,
+        assigned=assigned,
     )
     # Capture xtrace before the body runs so `set -x` itself is not
     # traced (bash enables tracing only for the following commands).
@@ -585,6 +594,7 @@ async def _run_argv(
     seed_prefix: Callable[[str], Awaitable[None]] | None = None,
     claimant: Claimant | None = None,
     sink: JobConsole | None = None,
+    assigned: frozenset[str] = frozenset(),
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Route one expanded command to its builtin or mount handler.
 
@@ -629,6 +639,15 @@ async def _run_argv(
         argv = dataclasses.replace(
             argv, operands=tuple(boundary), args=tuple(expanded)
         )
+    # Ahead of every admission of the command: the gate walks a mount's tree
+    # under the managed values its run reads. A first fetch changes how the
+    # words read (an env-filled required option lets the walk reach the
+    # leaf, whose files are paths), so they are classified again.
+    if name and await fill_tree_env(
+        name, list(argv.args), session, registry, assigned
+    ):
+        words = classified_words(name, list(argv.args), session, registry)
+        argv = dataclasses.replace(argv, operands=tuple(words[1:]))
 
     admitted: Admitted | None = None
     # What the last admission was asked about: the redirect layer admits

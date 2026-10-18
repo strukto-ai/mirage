@@ -12,36 +12,33 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.iconv import iconv_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    Operation,
-    bound_op,
-    require_op,
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import (
+    command_files,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def iconv(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    resolved = await resolve_or_empty(ops, accessor, paths, ctx.index)
+    files = command_files(ctx, paths)
+    resolved = await resolve_or_empty(files, paths)
     return await iconv_generic(
         resolved,
         list(texts),
         ctx,
-        bound_op(ops.read_stream, accessor, ctx.index),
-        partial(require_op(ops, Operation.WRITE), accessor),
+        files.read_stream,
+        files.write,
     )
 
 

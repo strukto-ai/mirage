@@ -81,7 +81,7 @@ from mirage.workspace.node.occurrence import (
     segment_frames,
     whole_occurrence,
 )
-from mirage.workspace.session import SessionState
+from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.session.shell_dirs import home_dir
 
 # How the explanation tree names a parse node that shapes a line; a node
@@ -397,7 +397,13 @@ async def _judge_words(
     unread = _unread_paths(read_words, kinds, session.cwd, lost)
     redirects = redirect_paths(redirect_words, registry, session.cwd)
     words_read = command_words(
-        registry, name, args, classified[1:], redirects, session.cwd
+        registry,
+        name,
+        args,
+        classified[1:],
+        redirects,
+        session.cwd,
+        env_snapshot(session),
     )
     gated = await gate(
         name,

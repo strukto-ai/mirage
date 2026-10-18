@@ -65,6 +65,9 @@ function mountsOf(descendants: string[], hidden: string[] = []): MountView {
     visibleDescendants: (p) => under(p).filter((d) => !hidden.includes(d)),
     isRoot: (p) => descendants.includes(rstripSlash(p)),
     rootOf: () => '/',
+    answers: () => false,
+    maxGlobMatches: () => null,
+    searchable: () => null,
   }
 }
 

@@ -105,6 +105,8 @@ config model, a typed CLI accepts no config and receives `null`.
 
 Mark mutating `CLIHandler` bindings `write: true`. This classifies the command for policy and
 cache invalidation; it does not grant permission or perform the mutation.
+Policy reads it as `CommandContext.write`, so one `preCommand` method can
+refuse every writing verb.
 Descriptions, options and operands supply `--help` and `man` at every level.
 
 ## Register the program
@@ -151,6 +153,44 @@ shell `install` or `uninstall` command, so an agent can use a CLI it was given
 but cannot remove it. A deployment that must pin the head word should enforce
 that with policy; shell functions can otherwise shadow it like they do in bash.
 
+## Serve a CLI on a mount
+
+Registered on a mount, a typed CLI serves its verbs there as a command
+tree. Its leaves get the mount's accessor, so the tree declares no
+`configModel`, `accessor`, `script` or `runtime`:
+
+```typescript
+import { MountMode, RAMVFS } from '@struktoai/mirage-node'
+import type { RAMAccessor } from '@struktoai/mirage-core/accessor/ram'
+
+function tag(accessor: RAMAccessor, paths: PathSpec[], texts: string[]): CommandFnResult {
+  const [note] = paths
+  if (note === undefined) return [null, new IOResult({ exitCode: 1 })]
+  accessor.store.files.set(`/${note.vfsPath}`, new TextEncoder().encode(texts.join(' ')))
+  return [null, new IOResult()]
+}
+
+const NOTES = new CLI({
+  spec: new CommandSpec({
+    name: 'notes',
+    subcommands: [new CommandSpec({
+      name: 'tag',
+      arguments: [new Argument('note', { type: 'path' }), new Argument('tags', { nargs: '+' })],
+    })],
+  }),
+  handlers: { tag: new CLIHandler({ fn: tag, write: true }) },
+})
+
+const ws = new Workspace({ '/notes/': new RAMVFS() }, { mode: MountMode.WRITE })
+ws.mount('/notes/').registerCommands([NOTES])
+```
+
+`notes tag /notes/a.md draft` walks, helps and refuses like an installed
+CLI's line, and runs on the mount that serves `notes`: the working
+directory's, else the first. A VFS hands the same tree to every mount of it
+through its `commands` option. Its leaves reach the backend past the
+dispatcher, so the tree follows the rules for a
+[user command](/typescript/vfs/new#4-commands).
 
 ## Use workspace files
 

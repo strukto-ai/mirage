@@ -14,9 +14,12 @@
 
 import logging
 
-from mirage.accessor.hf_hub import HfAccountAccessor, HfHubAccessor
-from mirage.commands.cli.builtin.hf.accessor import (
+from mirage.accessor.hf_hub import (
+    HfAccountAccessor,
+    HfHubAccessor,
     hub_for,
+)
+from mirage.commands.cli.builtin.hf.accessor import (
     repo_type_of,
     require_operands,
     text_out,

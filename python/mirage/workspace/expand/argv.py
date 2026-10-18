@@ -52,6 +52,7 @@ from mirage.workspace.lookup import (
 from mirage.workspace.lookup.constants import INTERPRETER_NAMES
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.session import env_snapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,9 +196,15 @@ async def expand_argv(
             # POSIX's own `--` is how that is said.
             extra: list[ValueType | None] = ["str"] * (consumed - 1)
             word_kinds = extra + spec_word_kinds(
-                spec, expanded[consumed:], runs
+                spec, expanded[consumed:], runs, env_snapshot(session)
             )
-            bases = spec_word_bases(spec, expanded[consumed:], session.cwd)
+            bases = spec_word_bases(
+                spec,
+                expanded[consumed:],
+                session.cwd,
+                runs,
+                env_snapshot(session),
+            )
             if bases is not None:
                 head: list[str | None] = [None] * (consumed - 1)
                 word_bases = head + bases
@@ -314,7 +321,7 @@ def _program_words(
     literal = [mark_globs(word_text(w)) for w in words]
     kinds: list[ValueType | None] = ["str"] * (consumed - 1)
     kinds += spec_word_kinds(spec, literal[consumed:], name)
-    bases = spec_word_bases(spec, literal[consumed:], cwd)
+    bases = spec_word_bases(spec, literal[consumed:], cwd, name)
     head: list[str | None] = [None] * (consumed - 1)
     reread = classify_parts(
         literal,

@@ -16,60 +16,17 @@ import { chunks } from '../../../io/cooperative.ts'
 import { NOOPAccessor } from '../../../accessor/base.ts'
 import { materialize, IOResult } from '../../../io/types.ts'
 import type { ByteSource } from '../../../io/types.ts'
-import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { currentCaller, runWithCaller, type Caller } from '../../../context/session_context.ts'
-import type { FollowOperands, MountView } from '../../../view/types.ts'
+import type { FollowOperands } from '../../../view/types.ts'
 import { Files } from '../../../workspace/files.ts'
-import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
-import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
-import { specOf } from '../../spec/builtins.ts'
+import { stripSlash } from '../../../utils/slash.ts'
+import { flagOccurrences } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { dispatchedSlots, readAhead, type GenericCommand } from './adapter.ts'
-import { mountView } from '../utils/links.ts'
+import type { GenericCommand } from './adapter.ts'
 import { dispatchStat } from '../utils/paths.ts'
-import type { CommandIO } from '../../config.ts'
-
-/** Use the workspace's policy-checked operations as a generic IO adapter.
- * The dispatcher's own answers are what a mount's table answers: a listing
- * names the links in a directory and a stat of one is the link's own row. With `bound` (a walk kept on one
- * filesystem, `du -x`) a listing also leaves out the roots of the mounts
- * below it, which the walk must neither list nor stat. Mirrors Python's
- * dispatch_io. */
-export function dispatchIO(
-  dispatch: DispatchFn,
-  bound?: MountView,
-  paths: readonly PathSpec[] = [],
-): CommandIO {
-  const [ahead, noted] = readAhead(dispatch, paths)
-  return {
-    readdir: async (_accessor, path) => {
-      let entries = (await dispatch('readdir', path))[0] as string[]
-      if (bound !== undefined) {
-        const owner = bound.rootOf(path.virtual)
-        entries = entries.filter((e) => bound.rootOf(rstripSlash(e)) === owner)
-      }
-      return entries
-    },
-    stat: async (_accessor, path) =>
-      (await dispatch('stat', path, [], { nofollow: true }))[0] as FileStat,
-    readBytes: async (_accessor, path) => {
-      if (((await dispatch('stat', path))[0] as FileStat).type === FileType.DIRECTORY)
-        throw eisdir(path)
-      await ahead(path)
-      return materialize((await dispatch('read', path))[0] as ByteSource)
-    },
-    readStream: (_accessor, path) => callerStream(dispatch, currentCaller(), path, ahead),
-    isMounted: () => true,
-    globResolved: noted,
-    // No cap of its own: a du walk charges each entry to the mount serving
-    // it, at that mount's cap (see WalkBudget).
-    maxDuEntries: null,
-    ...dispatchedSlots(dispatch, ['write', 'pwrite', 'unlink', 'mkdir', 'truncate']),
-  }
-}
 
 /** A streamed read that opens as the command that asked for it: at the first
  * pull, which can come after that command ended, so under the command's
@@ -92,10 +49,13 @@ export async function* callerStream(
 }
 
 /** Run the existing builder once over the full virtual namespace. Mirrors
- * Python's run_dispatch. The dispatcher lists the mounts below a directory
- * itself, so no descendant is left to avoid; where each mount begins stays
- * for `--one-file-system`, and each mount's du budget for a walk. `follow`
- * is the line's operand resolution, which its globs' matches take too. The output is read before this returns,
+ * Python's run_dispatch. The builder runs as a run across mounts: no mount's
+ * command scope is bound around it (`crossesMounts`), so every call it makes
+ * through its files reaches whichever mount serves the path. The dispatcher
+ * lists the mounts below a directory itself, so no descendant is left to
+ * avoid; where each mount begins stays for `--one-file-system`, and each
+ * mount's du budget for a walk. `follow` is the line's operand resolution,
+ * which its globs' matches take too. The output is read before this returns,
  * inside the running command: a `fresh` mount trusts only the listings that
  * command made, so a lazy stream read after it ends would be served the
  * previous command's. A builder that `streams` only reads, and each read opens
@@ -113,7 +73,6 @@ export async function runDispatch(
   argv: readonly string[] = [],
   follow?: FollowOperands,
 ): Promise<[ByteSource | null, IOResult]> {
-  const bounded = builder.name === 'du' && new FlagView(bag, specOf('du')).asBool('one_file_system')
   // The dispatcher keys every path by its whole virtual path, a path
   // option's value as well as an operand.
   const whole = (p: PathSpec): PathSpec =>
@@ -134,25 +93,20 @@ export async function runDispatch(
     else if (Array.isArray(value))
       rebased[key] = value.map((item) => (item instanceof PathSpec ? whole(item) : item))
   }
-  const io = dispatchIO(dispatch, bounded ? mountView(vfs) : undefined, paths.map(whole))
-  const result = await builder.fn(
-    follow === undefined ? io : { ...io, globFollow: follow },
-    new NOOPAccessor(),
-    paths.map(whole),
-    [...texts],
-    {
+  return runWithCaller({ ...currentCaller(), mount: null }, async () => {
+    const result = await builder.fn(new NOOPAccessor(), paths.map(whole), [...texts], {
       stdin,
       flags: rebased,
-      mountPrefix: '',
       cwd: PathSpec.fromStrPath(cwd),
-      vfs:
+      vfs: (
         vfs ??
-        new Files(dispatch, null, null, () => null, { follow: follow ?? null, ledger: false }),
+        new Files(dispatch, null, null, () => null, { follow: follow ?? null, ledger: false })
+      ).servedBy(null),
       argv,
       ...(signal === undefined ? {} : { signal }),
-    },
-  )
-  if (result === null) return [null, new IOResult()]
-  if (builder.streams === true) return result
-  return [await materialize(result[0]), result[1]]
+    })
+    if (result === null) return [null, new IOResult()]
+    if (builder.streams === true) return result
+    return [await materialize(result[0]), result[1]]
+  })
 }

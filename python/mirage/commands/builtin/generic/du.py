@@ -25,12 +25,12 @@ from mirage.types import FileStat, PathSpec, Visibility
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_raw
-from mirage.vfs.types import DuEntries
 from mirage.view.namespace_view import paths_scoped
 from mirage.view.types import MountView, StatPath
 
 logger = logging.getLogger(__name__)
 
+DuEntries = tuple[list[tuple[str, int]], int]
 ComputeSize = Callable[[PathSpec], Awaitable[int]]
 ComputeEntries = Callable[[PathSpec], Awaitable[DuEntries]]
 

@@ -18,7 +18,6 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Protocol, TypeAlias, overload
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.constants import ROOT_CWD
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.builtins import is_builtin_grammar, registered_spec
@@ -31,113 +30,8 @@ from mirage.io.types import ByteSource, CommandOutput, IOResult
 from mirage.process.view import ProcessView
 from mirage.runtime.types import CommandRuntime, ShellFn
 from mirage.types import Limit, PathSpec
-from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
-from mirage.vfs.constants import DEFAULT_MAX_DU_ENTRIES
-from mirage.vfs.types import (
-    ChecksumOp,
-    ExistsOp,
-    FilesContainingOp,
-    FirstLinesOp,
-    FollowOp,
-    IsMountedOp,
-    LastLinesOp,
-    LineCountOp,
-    LinesContainingOp,
-    MkdirOp,
-    PairOp,
-    PathOp,
-    PwriteOp,
-    ReadBytesOp,
-    ReaddirOp,
-    ReadRangeOp,
-    ReadStreamOp,
-    ReadTreeOp,
-    ResolveGlobOp,
-    RmdirOp,
-    RmTreeOp,
-    SearchOps,
-    SetAttrsOp,
-    StatOp,
-    TruncateOp,
-    WriteOp,
-)
-from mirage.view.types import (
-    FollowOperands,
-    LinkTargetStat,
-    SessionAccess,
-    SessionView,
-)
+from mirage.view.types import SessionView
 from mirage.workspace.files import Files
-
-
-@dataclass(frozen=True, kw_only=True)
-class CommandIO:
-    """Backend capabilities consumed by command algorithms.
-
-    Built from a mount's VFS by ``command_io``: each slot is one of its
-    functions with the accessor commands still pass in front dropped,
-    and a function the VFS does not define is an absent slot. Command
-    admission guards these calls; POSIX policy methods belong to the
-    filesystem dispatcher and are not part of this interface.
-
-    ``glob_target_stat`` is what a link a glob matched points at,
-    resolved through the workspace; the factory stamps it per invocation
-    from the session's files, because the adapter is built once per
-    backend, and it lets a trailing-slash glob follow a link the way bash
-    does. ``glob_follow`` is the line's operand resolution, which a
-    typed word's matches take as the names typed would, and
-    ``glob_resolved`` is told what each resolution answers, the operands
-    the dispatched table warms a command's reads ahead of.
-    """
-
-    readdir: ReaddirOp
-    read_bytes: ReadBytesOp
-    stat: StatOp
-    read_stream: ReadStreamOp
-    is_mounted: IsMountedOp
-    access: SessionAccess | None = None
-    read_range: ReadRangeOp | None = None
-    exists: ExistsOp | None = None
-    write: WriteOp | None = None
-    append: WriteOp | None = None
-    pwrite: PwriteOp | None = None
-    create: PathOp | None = None
-    mkdir: MkdirOp | None = None
-    unlink: PathOp | None = None
-    rmdir: RmdirOp | None = None
-    rm_r: RmTreeOp | None = None
-    rename: PairOp | None = None
-    copy: PairOp | None = None
-    dir_copy: PairOp | None = None
-    truncate: TruncateOp | None = None
-    set_attrs: SetAttrsOp | None = None
-    max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES
-    max_du_entries: int | None = DEFAULT_MAX_DU_ENTRIES
-    search: SearchOps | None = None
-    files_containing: FilesContainingOp | None = None
-    searchable: tuple[str, ...] | None = None
-    lines_containing: LinesContainingOp | None = None
-    first_lines: FirstLinesOp | None = None
-    last_lines: LastLinesOp | None = None
-    line_count: LineCountOp | None = None
-    checksum: ChecksumOp | None = None
-    follow: FollowOp | None = None
-    read_tree: ReadTreeOp | None = None
-    glob_target_stat: LinkTargetStat | None = None
-    glob_follow: FollowOperands | None = None
-    glob_resolved: Callable[[list[PathSpec]], None] | None = None
-
-    @property
-    def resolve_glob(self) -> ResolveGlobOp:
-        return make_resolve_glob(
-            self.readdir,
-            self.max_glob_matches,
-            self.stat,
-            self.glob_target_stat,
-            self.access,
-            self.glob_follow,
-            self.glob_resolved,
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,8 +45,7 @@ class Context:
     as ``session.vfs`` and a policy's ``ctx.vfs`` do; the session through
     ``session``. A handler reads the fields it needs and ignores the rest;
     the workspace builds one per command or CLI, and ``Mount.run_command``
-    adds what only the mount knows (``spec``, ``mount_prefix``, ``index``,
-    ``io``).
+    adds what only the mount knows (``spec``).
 
     Args:
         stdin (ByteSource | None): Piped standard input, if any.
@@ -174,10 +67,6 @@ class Context:
         processes (ProcessView | None): The session's processes.
         shell (ShellFn | None): Run a nested line in the calling
             session, as ``sh -c`` would (awk's pipes and ``system()``).
-        mount_prefix (str): The prefix of the mount running the command.
-        index (IndexCacheStore): The mount's index cache.
-        io (CommandIO | None): The mount's backend table, built from its
-            VFS; None outside a mount.
         runtime (CommandRuntime | None): Where an interpreter command
             runs its code, and what policy lets that code start and load.
     """
@@ -192,9 +81,6 @@ class Context:
     session: SessionView | None = None
     processes: ProcessView | None = None
     shell: ShellFn | None = None
-    mount_prefix: str = ""
-    index: IndexCacheStore = NULL_INDEX
-    io: CommandIO | None = None
     runtime: CommandRuntime | None = None
 
 
@@ -234,8 +120,6 @@ class Command:
             split across mounts.
         write (bool): Whether it changes files.
         limit (Limit | None): Its output limit.
-        path_guarded (bool): Whether mount-root policy checks its
-            operands.
     """
 
     name: str
@@ -246,7 +130,6 @@ class Command:
     aggregate: AggregateFn | None = None
     write: bool = False
     limit: Limit | None = None
-    path_guarded: bool = False
 
     def with_overrides(self, *, fn: CommandFn) -> "Command":
         """A copy with the handler replaced, to register a customized
@@ -309,7 +192,6 @@ def command(
     aggregate: AggregateFn | None = None,
     write: bool = False,
     limit: Limit | None = None,
-    path_guarded: bool = False,
 ) -> Callable[..., Any]:
     """Register the decorated handler as a command of one or more VFSes.
 
@@ -326,8 +208,6 @@ def command(
             mounts.
         write (bool): Whether it changes files.
         limit (Limit | None): Its output limit.
-        path_guarded (bool): Whether mount-root policy checks its
-            operands.
     """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -346,7 +226,6 @@ def command(
                     aggregate=aggregate,
                     write=write,
                     limit=limit,
-                    path_guarded=path_guarded,
                 )
             )
         setattr(wrapped, "_registered_commands", registrations)

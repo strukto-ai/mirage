@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { AggregateFn } from '../../../config.ts'
-import type { MountRegistry } from '../../../../workspace/mount/registry.ts'
 import type { PathSpec } from '../../../../types.ts'
 import {
   CROSS_MOUNT_COMMANDS,
@@ -21,7 +20,7 @@ import {
   RELAY_COMMANDS,
   STREAM_COMMANDS,
 } from './constants.ts'
-import { Strategy } from './types.ts'
+import { type OperandMount, Strategy } from './types.ts'
 
 // Pick the combine strategy for one cross-mount command invocation.
 export function strategyFor(cmdName: string): Strategy {
@@ -31,52 +30,50 @@ export function strategyFor(cmdName: string): Strategy {
   throw new Error(`Unsupported cross-mount command: ${cmdName}`)
 }
 
+/**
+ * Whether one invocation spans mounts and runs as a cross-mount one.
+ * `operands` are the path operands in line order, each with the mount the
+ * workspace resolved for it; `flagScopes` the path-valued flags (`-t`'s
+ * directory), which name where a copy lands.
+ */
 export function isCrossMount(
   cmdName: string,
-  scopes: PathSpec[],
-  registry: MountRegistry,
+  operands: readonly OperandMount[],
   flagScopes: readonly PathSpec[] = [],
 ): boolean {
   if (
-    scopes.length < 2 ||
-    (!CROSS_MOUNT_COMMANDS.has(cmdName) && aggregateFor(cmdName, scopes, registry) === null)
+    operands.length < 2 ||
+    (!CROSS_MOUNT_COMMANDS.has(cmdName) && aggregateFor(cmdName, operands) === null)
   )
     return false
-  const mounts = new Set<string>()
-  for (const s of scopes) {
-    // a scope outside any mount cannot make the command cross-mount
-    const m = registry.tryMountFor(s.virtual)
-    if (m !== null) mounts.add(m.prefix)
-  }
+  // a scope outside any mount cannot make the command cross-mount
+  const mounts = new Set(operands.flatMap((o) => (o.mount === null ? [] : [o.mount])))
   // A copy of a tree that holds a mount reads both filesystems, the way GNU
   // cp -r copies across one, even from a single mount's operands. Only a
   // source counts: the destination (-t's directory, else the last operand)
   // lands beside a mount and crosses nothing.
   const landing = new Set(
-    (flagScopes.length > 0 ? flagScopes : scopes.slice(-1)).map((s) => s.virtual),
+    (flagScopes.length > 0 ? flagScopes : operands.slice(-1).map((o) => o.path)).map(
+      (s) => s.virtual,
+    ),
   )
   return (
     mounts.size > 1 ||
-    (cmdName === 'cp' &&
-      scopes.some(
-        (s) => !landing.has(s.virtual) && registry.descendantMounts(s.virtual).length > 0,
-      ))
+    (cmdName === 'cp' && operands.some((o) => !landing.has(o.path.virtual) && o.nests))
   )
 }
 
 /** Resolve an existing shared reducer; known families own flag-aware reduction. */
 export function aggregateFor(
   cmdName: string,
-  scopes: readonly PathSpec[],
-  registry: MountRegistry,
+  operands: readonly OperandMount[],
 ): AggregateFn | null {
   if (CROSS_MOUNT_COMMANDS.has(cmdName)) return null
   let aggregate: AggregateFn | null = null
-  for (const scope of scopes) {
-    const handler = registry.tryMountFor(scope.virtual)?.resolveCommand(cmdName)
-    if (handler?.aggregate == null) return null
-    if (aggregate !== null && aggregate !== handler.aggregate) return null
-    aggregate = handler.aggregate
+  for (const operand of operands) {
+    if (operand.aggregate === null) return null
+    if (aggregate !== null && aggregate !== operand.aggregate) return null
+    aggregate = operand.aggregate
   }
   return aggregate
 }

@@ -22,13 +22,11 @@ import {
   getCurrentSessionFor,
   getCurrentSession,
   isProgramInvocation,
-  mountGateFor,
   sessionVisibility,
   redirectPathsFor,
   redirectTargetJudged,
   runAsProgram,
   runWithAdmission,
-  runWithMountGate,
   runWithRedirectPaths,
   runWithSession,
   sessionUmask,
@@ -117,64 +115,6 @@ describe('the bound evaluation on the fallback storage', () => {
     })
     await Promise.all([running, entered])
     expect(seen).toBe(evaluation)
-  })
-})
-
-describe('the mount gate on the fallback storage', () => {
-  it('overlapping commands each answer with their own mounts gate', async () => {
-    // The corruption the slot would allow: while B runs, a slot read in
-    // A's continuation sees B's gate, and A's protected path is judged
-    // with B's prefix and mode. The live frames answer by the path.
-    const [holdA, releaseA] = gate()
-    const [holdB, releaseB] = gate()
-    let gateInA: readonly [string, MountMode] | null = null
-    let gateInB: readonly [string, MountMode] | null = null
-    const cmdA = runWithMountGate('/a', MountMode.WRITE, async () => {
-      await holdA
-      // B is still mid-run here: both gates are live.
-      gateInA = mountGateFor('/a/data.txt')
-      releaseB()
-    })
-    const cmdB = runWithMountGate('/b', MountMode.WRITE, async () => {
-      gateInB = mountGateFor('/b/y')
-      releaseA()
-      await holdB
-    })
-    await Promise.all([cmdA, cmdB])
-    expect(gateInA).toEqual(['/a', MountMode.WRITE])
-    expect(gateInB).toEqual(['/b', MountMode.WRITE])
-    // Both runs settled, so both gates released.
-    expect(mountGateFor('/a/data.txt')).toBeNull()
-    expect(mountGateFor('/b/y')).toBeNull()
-  })
-
-  it('the longest covering prefix wins and a tie takes the weaker mode', async () => {
-    await runWithMountGate('/repo', MountMode.WRITE, () =>
-      runWithMountGate('/repo/sub', MountMode.READ, () => {
-        // The way the mount table routes: the deeper mount serves the
-        // deeper path.
-        expect(mountGateFor('/repo/sub/x')).toEqual(['/repo/sub', MountMode.READ])
-        expect(mountGateFor('/repo/y')).toEqual(['/repo', MountMode.WRITE])
-        expect(mountGateFor('/elsewhere')).toBeNull()
-        return Promise.resolve()
-      }),
-    )
-    await runWithMountGate('/data', MountMode.WRITE, () =>
-      runWithMountGate('/data', MountMode.READ, () => {
-        // Two workspaces sharing a fallback runtime with one prefix:
-        // the reader cannot tell whose gate this is, so it answers
-        // with the weaker mode.
-        expect(mountGateFor('/data/x')).toEqual(['/data', MountMode.READ])
-        return Promise.resolve()
-      }),
-    )
-  })
-
-  it('a failed run still releases its gate', async () => {
-    await expect(
-      runWithMountGate('/a', MountMode.WRITE, () => Promise.reject(new Error('boom'))),
-    ).rejects.toThrow('boom')
-    expect(mountGateFor('/a/x')).toBeNull()
   })
 })
 

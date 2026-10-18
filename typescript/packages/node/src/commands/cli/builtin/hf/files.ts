@@ -15,13 +15,13 @@
 import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
-import type { HfAccountAccessor } from '../../../../accessor/hf_hub.ts'
+import { type HfAccountAccessor, hubFor } from '../../../../accessor/hf_hub.ts'
 import { repoUrl } from '../../../../core/hf_hub/client.ts'
 import { commit } from '../../../../core/hf_hub/commit.ts'
 import { EMPTY_COMMIT_WARNING } from '../../../../core/hf_hub/constants.ts'
 import { headCommit } from '../../../../core/hf_hub/repo.ts'
 import { deletionsFor, fetchTree, repoFiles } from '../../../../core/hf_hub/tree.ts'
-import { hubFor, repoTypeOf, requireOperands, requireToken, textOut } from './accessor.ts'
+import { repoTypeOf, requireOperands, requireToken, textOut } from './accessor.ts'
 
 /**
  * Delete the files a set of glob patterns matches, in one commit.

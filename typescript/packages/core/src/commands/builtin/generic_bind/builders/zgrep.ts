@@ -13,18 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { zgrepGeneric } from '../../generic/zgrep.ts'
-import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, resolveOrEmpty } from '../files.ts'
 
-const zgrep: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return zgrepGeneric(
-    resolved,
-    texts,
-    ctx,
-    (p) => ops.readStream(accessor, p, idx),
-    (p) => ops.stat(accessor, p),
-  )
+const zgrep: CommandFn = async (_accessor, paths, texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
+  return zgrepGeneric(resolved, texts, ctx, files.readStream, files.stat)
 }
 
 export const BUILDER: GenericCommand = {

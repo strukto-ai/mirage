@@ -139,5 +139,6 @@ export const GENERAL_WGET = command({
   name: 'wget',
   vfs: null,
   spec: specOf('wget'),
+  write: true,
   fn: wget,
 })

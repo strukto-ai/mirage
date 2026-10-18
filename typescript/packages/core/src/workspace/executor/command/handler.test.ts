@@ -1,0 +1,125 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import { describe, expect, it } from 'vitest'
+import type { CommandFnResult } from '../../../commands/config.ts'
+import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
+import { enoent } from '../../../errors/fs.ts'
+import { PipeClosed } from '../../../io/errors.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { PathSpec, type Producer } from '../../../types.ts'
+import { cliVoice, mountVoice, runHandler, type RunHandlerOpts } from './handler.ts'
+
+const ENC = new TextEncoder()
+const PRODUCER: Producer = { command: 'cat', prefixes: ['/data/'], declared: null }
+const MOUNT = mountVoice('cat', [])
+const LEAF = cliVoice('gh')
+const TYPED = mountVoice('cat', [PathSpec.fromStrPath('notes.md', undefined, '/data')])
+
+function answer(stdout: ByteSource | null): Promise<CommandFnResult> {
+  return Promise.resolve([stdout, new IOResult()])
+}
+
+async function* stream(chunks: readonly string[], error?: Error): AsyncGenerator<Uint8Array> {
+  for (const chunk of chunks) {
+    await Promise.resolve()
+    yield ENC.encode(chunk)
+  }
+  if (error !== undefined) throw error
+}
+
+function run(
+  body: Promise<CommandFnResult>,
+  voice = LEAF,
+  opts: RunHandlerOpts = {},
+): Promise<CommandFnResult> {
+  return runHandler(body, 'x', null, PRODUCER, voice, opts)
+}
+
+async function text(source: ByteSource | null | undefined): Promise<string> {
+  return new TextDecoder().decode(await materialize(source ?? null))
+}
+
+class Drops {
+  count = 0
+  drop = (): Promise<void> => {
+    this.count += 1
+    return Promise.resolve()
+  }
+}
+
+describe('runHandler', () => {
+  it.each([
+    ['a usage error', new UsageError('bad', 2), LEAF, 2, 'bad\n'],
+    ['a failure', new Error('boom'), LEAF, 1, 'gh: boom\n'],
+    [
+      'a typed path like GNU',
+      enoent('/data/notes.md'),
+      TYPED,
+      1,
+      'cat: notes.md: No such file or directory\n',
+    ],
+  ])("drops after %s and words it in the caller's voice", async (_, error, voice, code, stderr) => {
+    const drops = new Drops()
+    const out = await run(Promise.reject(error), voice, { drop: drops.drop })
+    expect(out?.[0]).toBeNull()
+    expect([out?.[1].exitCode, await text(out?.[1].stderr), out?.[1].producer]).toEqual([
+      code,
+      stderr,
+      null,
+    ])
+    expect(drops.count).toBe(1)
+  })
+
+  it('lets a closed pipe from a mount reach the executor after the drop', async () => {
+    const drops = new Drops()
+    await expect(
+      run(Promise.reject(new PipeClosed()), MOUNT, { drop: drops.drop }),
+    ).rejects.toBeInstanceOf(PipeClosed)
+    expect(drops.count).toBe(1)
+  })
+
+  it.each([
+    ['a framed stream', true, true, false],
+    ['an unframed stream', true, false, false],
+    ['a stream closed early', true, true, true],
+    ['bytes', false, true, false],
+  ])('drops once it answers %s, and again once a stream ends', async (_, lazy, frame, early) => {
+    const drops = new Drops()
+    const stdout = lazy ? stream(['a\n', 'b\n']) : ENC.encode('a\nb\n')
+    const out = await run(answer(stdout), LEAF, { drop: drops.drop, frame })
+    expect(drops.count).toBe(1)
+    if (early) {
+      const pulled = out?.[0] as AsyncIterableIterator<Uint8Array>
+      expect((await pulled.next()).value).toEqual(ENC.encode('a\n'))
+      await pulled.return?.()
+    } else {
+      expect(await text(out?.[0])).toBe('a\nb\n')
+    }
+    expect(drops.count).toBe(lazy ? 2 : 1)
+  })
+
+  it.each([
+    ['as a mount', MOUNT, new Error('lost'), 'a\n', 'cat: lost\n'],
+    ['as a leaf', LEAF, new PartialOutputError('cut', ENC.encode('b\n')), 'a\nb\n', 'gh: cut\n'],
+  ])(
+    'stamps the producer on an answer and words a deferred failure %s',
+    async (_, voice, error, stdout, stderr) => {
+      const out = await run(answer(stream(['a\n'], error)), voice)
+      expect(out?.[1].producer).toBe(PRODUCER)
+      expect(await text(out?.[0])).toBe(stdout)
+      expect(await text(out?.[1].stderr)).toBe(stderr)
+      expect(out?.[1].exitCode).toBe(1)
+    },
+  )
+})

@@ -43,7 +43,8 @@ async function listedPaths(accessor: SlackAccessor, path: PathSpec): Promise<str
   return rowsOf(await slackReaddir(accessor, path)).map((row) => `${base}/${row.name}`)
 }
 
-const resolveSlackGlob = makeResolveGlob(listedPaths)
+const resolveSlackGlob = (accessor: SlackAccessor, paths: PathSpec[]): Promise<PathSpec[]> =>
+  makeResolveGlob((path) => listedPaths(accessor, path))(paths)
 
 describe('resolveSlackGlob', () => {
   it('passes through resolved PathSpec unchanged', async () => {

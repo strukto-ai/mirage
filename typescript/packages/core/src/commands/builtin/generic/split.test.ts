@@ -15,7 +15,9 @@
 import { materialize } from '../../../io/types.ts'
 import { describe, expect, it } from 'vitest'
 
-import { PathSpec } from '../../../types.ts'
+import { MountMode, PathSpec } from '../../../types.ts'
+import { runWithMountGate } from '../../../context/session_context.ts'
+import { Files } from '../../../workspace/files.ts'
 import type { Context } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { parseChunksValue, splitGeneric } from './split.ts'
@@ -314,18 +316,21 @@ describe('split names stdin outputs in the working directory', () => {
         stdin: ENC.encode('a\nb\n'),
         flags: { lines: '1' },
         cwd: PathSpec.fromStrPath(cwd),
-        mountPrefix: '/data',
+        vfs: new Files(() => Promise.reject(new Error('no dispatch'))),
       } as Context
-      await splitGeneric(
-        [],
-        ctx,
-        () => {
-          throw new Error('paths are empty; the source is stdin')
-        },
-        (p) => {
-          specs.push(p)
-          return Promise.resolve()
-        },
+      // The command runs on the mount at /data.
+      await runWithMountGate('/data/', MountMode.WRITE, () =>
+        splitGeneric(
+          [],
+          ctx,
+          () => {
+            throw new Error('paths are empty; the source is stdin')
+          },
+          (p) => {
+            specs.push(p)
+            return Promise.resolve()
+          },
+        ),
       )
       expect(specs.map((p) => p.virtual)).toEqual(named)
     },

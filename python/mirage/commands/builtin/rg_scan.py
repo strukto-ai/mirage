@@ -24,12 +24,12 @@ from mirage.commands.builtin.rg_glob import (
     walk_candidate,
 )
 from mirage.commands.builtin.utils.links import LinkResolver
-from mirage.commands.builtin.utils.types import AsyncReaddirFn, AsyncStatFn
+from mirage.commands.builtin.utils.types import AsyncReaddirFn
 from mirage.errors.classify import classify
 from mirage.errors.constants import WALK_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import linux_errno
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileStat, FileType, PathSpec, StatFn
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.path import respell_one
 from mirage.view.types import MountIsRoot, MountRoot
@@ -233,7 +233,7 @@ def on_other_mount(root_of: MountRoot, home: str, path: str) -> bool:
 
 async def walk_haystacks(
     readdir_fn: AsyncReaddirFn,
-    stat_fn: AsyncStatFn,
+    stat_fn: StatFn,
     root: str,
     shown_root: str,
     cwd: str,
@@ -255,7 +255,7 @@ async def walk_haystacks(
 
     Args:
         readdir_fn (AsyncReaddirFn): directory reader.
-        stat_fn (AsyncStatFn): stat reader.
+        stat_fn (StatFn): stat reader.
         root (str): the operand's virtual path.
         shown_root (str): the operand as typed, which every printed path
             below it starts with; empty for the implicit cwd, whose
@@ -302,7 +302,7 @@ class _Walker:
 
     Args:
         readdir_fn (AsyncReaddirFn): the operand's directory reader.
-        stat_fn (AsyncStatFn): the operand's stat reader.
+        stat_fn (StatFn): the operand's stat reader.
         cwd (str): the root the globs are matched from.
         walk (WalkFilter): what the walk keeps.
         sort_by_name (bool): each directory's entries in name order.
@@ -316,7 +316,7 @@ class _Walker:
     """
 
     readdir_fn: AsyncReaddirFn
-    stat_fn: AsyncStatFn
+    stat_fn: StatFn
     cwd: str
     walk: WalkFilter
     sort_by_name: bool

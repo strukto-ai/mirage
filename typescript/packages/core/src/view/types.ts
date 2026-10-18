@@ -97,6 +97,15 @@ export interface MountView {
   // `maxDuEntries`, null for no cap), so a walk that crosses mounts charges
   // each entry to its own backend's allowance.
   maxDuEntries?(path: string): number | null
+  // Whether the VFS serving a path answers the function `name` itself (the
+  // dispatcher's name; `read_range` for a ranged read), so a command takes
+  // its shortcut only where one stands. A walk through the dispatcher has no
+  // mount to ask, and answers none.
+  answers(path: string, name: string): boolean
+  // The serving mount's cap on one glob's matches; null for the default.
+  maxGlobMatches(path: string): number | null
+  // The globs its search covers; null for every file.
+  searchable(path: string): readonly string[] | null
 }
 
 // The session-plane facts a command may consult, as one injected object.

@@ -18,13 +18,12 @@ import pytest
 from bson import ObjectId
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.cache.index import NULL_INDEX
-from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.config import Context
 from mirage.types import PathSpec
 from mirage.vfs.mongodb import MongoDBVFS
 from mirage.vfs.mongodb.config import MongoDBConfig
-from tests.fixtures.vfs_io import io_for
+from mirage.workspace import Workspace
+from tests.fixtures.mount_commands import run_on_mount
+from tests.fixtures.vfs_io import vfs_over
 
 
 @pytest.fixture
@@ -81,16 +80,9 @@ async def test_grep_m1_short_circuits_after_first_match(accessor, _stat_reads):
         patch("mirage.core.mongodb.stream.iter_documents", new=_fake),
         patch("mirage.core.mongodb.search.iter_documents", new=_fake),
     ):
-        source, _ = await generic("grep").fn(
-            accessor,
-            [_path()],
-            ["FOUND"],
-            Context(
-                io=io_for(MongoDBVFS, accessor),
-                index=NULL_INDEX,
-                flags={"max_count": "1"},
-            ),
+        ws = Workspace({"/": vfs_over(MongoDBVFS, accessor)})
+        data, _ = await run_on_mount(
+            ws, "grep", [_path()], ["FOUND"], {"max_count": "1"}
         )
-        data = await _drain(source)
     assert b"FOUND" in data
     assert len(consumed) < 100

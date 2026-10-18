@@ -45,23 +45,30 @@ import { PathSpec, type Refusal, type Visibility } from '../../types.ts'
 import { CommandWord, type EntryGate } from '../../policy/types.ts'
 import { isGlob } from '../../utils/hidden.ts'
 import { resolvePath } from '../../utils/path.ts'
+import { getExtension } from '../../utils/filetype.ts'
 import { makeAbortError } from '../../utils/abort.ts'
 import { toScope } from '../executor/builtins/scope.ts'
 import { followPaths } from '../executor/builtins/links/links.ts'
 import {
   CWD_DEFAULT_RAW,
+  commandTree,
   defaultCwdOperand,
+  mergeScopes,
   pathFlagScopes,
+  routableScopes,
+  routedOperands,
   commandWords,
   programTokens,
+  treePathScopes,
 } from '../executor/command/routing.ts'
 import { dropsMountCaches } from '../executor/command/cli.ts'
+import { walk } from '../../commands/cli/walk.ts'
 import { classifyParts } from '../expand/classify/parts.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
 import { specForCommand, specWordBases, specWordKinds } from '../expand/spec_hints.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { INTERPRETER_NAMES } from '../lookup/constants.ts'
+import { INTERPRETER_NAMES, WRITING_PROGRAMS } from '../lookup/constants.ts'
 import {
   Consumer,
   SLASH_KEEPS_LAST,
@@ -76,6 +83,7 @@ import {
 } from '../lookup/index.ts'
 import type { SessionState } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
+import { envSnapshot } from '../session/state.ts'
 import { innerLines, innerReadable, readWord, wordValue, type Word } from './inner_lines.ts'
 import {
   argvFrame,
@@ -205,7 +213,9 @@ export class Admitted implements EntryGate {
 
 /**
  * The paths a path-pattern guard reads for a line: the operands as
- * typed and the values of path-valued flags, then, for a command that
+ * typed and the values of path-valued flags, a command tree's group and
+ * leaf options among them (`treeFlags`, from `treePathScopes`), then, for
+ * a command that
  * follows links, the targets they resolve to. `cat /data/link` reads
  * `/data/secret`, so a rule protecting the target has to see it, and a
  * command-scoped rule never runs at the dispatcher where the resolved path
@@ -237,12 +247,15 @@ export function policyScopes(
   vis: Visibility | null,
   implied: PathSpec | null = null,
   redirects: readonly PathSpec[] = [],
+  treeFlags: readonly PathSpec[] = [],
 ): PathSpec[] {
   const scopes: PathSpec[] = []
   for (const p of operands) {
     if (p instanceof PathSpec) scopes.push(p)
   }
   scopes.push(...pathFlagScopes(name, [...args], cwd))
+  const typed = new Set(scopes.map((p) => p.virtual))
+  scopes.push(...treeFlags.filter((p) => !typed.has(p.virtual)))
   if (name.includes('/')) {
     // A slash-carrying head word is a file the line executes, and it
     // lives in argv[0], not the operands, so a path-pattern guard would
@@ -420,6 +433,86 @@ export function unlistedService(
   )
 }
 
+/**
+ * Whether the handler a command resolves to declares that it may change
+ * state. A command tree's leaf (an installed CLI's, or a tree a mount
+ * serves) as its walk names it, under the session environment its run walks
+ * with, which fills a group option declaring `Argument.env`; any other mount
+ * command as every handler a run of it may reach: on the mount that would run
+ * it (the mount of the first path the line names, else of the working
+ * directory), on each path's own mount, which a run across mounts hands that
+ * path, and on every mount below a path, which a walk reaches. Its handler is
+ * picked by an operand's extension, so each path's counts, and a run follows
+ * links before it picks either, so a link's target counts beside its name. A
+ * namespace or
+ * routed program that changes what it names (`WRITING_PROGRAMS`: `ln`,
+ * `chmod` ...) writes by name. A walk the tree refuses runs nothing, and a
+ * shell builtin, a function, an external program or an unknown name declares
+ * nothing. Mirrors Python's `_writes`.
+ */
+function writes(
+  name: string,
+  args: readonly string[],
+  operands: readonly (string | PathSpec)[],
+  session: SessionState,
+  registry: MountRegistry,
+  namespace: Namespace | null,
+  implied: PathSpec | null,
+): boolean {
+  const consumer = lookup(name, session, registry)
+  if (
+    WRITING_PROGRAMS.has(name) &&
+    (consumer === Consumer.NAMESPACE || consumer === Consumer.MOUNT)
+  )
+    return true
+  if (consumer !== Consumer.CLI && consumer !== Consumer.MOUNT) return false
+  const tree = commandTree(registry, name, session.cwd)
+  if (tree !== null) {
+    const result = walk(name, tree.spec, [...args], session.cwd, envSnapshot(session))
+    return result.leaf !== null && tree.handlers[result.path.join(' ')]?.write === true
+  }
+  const runs = runsAs(name, registry)
+  // The words that route the run, picked as execution picks them: a stdin `-`
+  // and an assignment route nowhere, and a path-valued option, attached or
+  // not, routes like an operand.
+  const named = mergeScopes(
+    routableScopes(
+      runs,
+      routedOperands(
+        runs,
+        [...args],
+        session.cwd,
+        operands,
+        operands.filter((p): p is PathSpec => p instanceof PathSpec),
+      ),
+    ),
+    pathFlagScopes(runs, [...args], session.cwd),
+  ).filter((s) => s.walkError !== 'ENOENT')
+  if (namespace !== null && namespace.nodes.size > 0 && named.length > 0) {
+    const typed = new Set(named.map((p) => p.virtual))
+    const followed = followPaths(
+      namespace,
+      [...named],
+      followsLastComponent(name, [name, ...args]),
+      !SLASH_KEEPS_LAST.has(name),
+      session.visibility,
+    )
+    for (const p of followed) {
+      if (p instanceof PathSpec && !typed.has(p.virtual)) named.push(p)
+    }
+  }
+  const scopes = named.length > 0 ? named : implied !== null ? [implied] : []
+  const first = registry.commandMount(runs, scopes.slice(0, 1), session.cwd)
+  const reached = first !== null ? [first] : []
+  for (const scope of scopes) {
+    const owner = registry.tryMountFor(scope.virtual)
+    const below = `${rstripSlash(scope.virtual)}/`
+    reached.push(...registry.allMounts().filter((m) => m === owner || m.prefix.startsWith(below)))
+  }
+  const extensions = named.length > 0 ? new Set(named.map((p) => getExtension(p.virtual))) : [null]
+  return reached.some((m) => [...extensions].some((extension) => m.mayWrite(runs, extension)))
+}
+
 export async function gate(
   name: string,
   args: readonly string[],
@@ -436,7 +529,8 @@ export async function gate(
   line = '',
 ): Promise<[CommandContext, Deny | Ask | null, (Deny | Ask)[]]> {
   const tool = intrinsic || isTool(name, session)
-  const [tokens, program] = programTokens(registry, name, [...args], session.cwd)
+  const env = envSnapshot(session)
+  const [tokens, program] = programTokens(registry, name, [...args], session.cwd, env)
   const implied =
     name in CWD_DEFAULT_RAW
       ? defaultCwdOperand([name, ...operands], name, registry, session.cwd, stdin)
@@ -455,12 +549,13 @@ export async function gate(
         session.visibility,
         implied,
         redirects,
+        treePathScopes(registry, name, args, session.cwd, env),
       ),
       unread,
     ),
     words: seenWords(
       session,
-      commandWords(registry, name, args, operands, redirects, session.cwd),
+      commandWords(registry, name, args, operands, redirects, session.cwd, env),
       unread,
     ),
     argv: [...args],
@@ -470,6 +565,7 @@ export async function gate(
     program,
     tool,
     walks: walksMounts(name, [name, ...args]),
+    write: writes(name, args, operands, session, registry, namespace, implied),
     // The methods read the session this command is judged in, which for a
     // line explain walks is the walked one, not the stored one.
     ...(rulesOnly ? null : registry.policies.views?.(session.sessionId, session)),
@@ -614,8 +710,17 @@ function wordHints(
   const spec = specForCommand(runs, registry, session.cwd)
   if (spec === null) return [null, null]
   const extra: (ValueType | null)[] = new Array<ValueType | null>(consumed - 1).fill('str')
-  const wordKinds = [...extra, ...specWordKinds(spec, [...line.slice(consumed)], runs)]
-  const bases = specWordBases(spec, [...line.slice(consumed)], session.cwd)
+  const wordKinds = [
+    ...extra,
+    ...specWordKinds(spec, [...line.slice(consumed)], runs, envSnapshot(session)),
+  ]
+  const bases = specWordBases(
+    spec,
+    [...line.slice(consumed)],
+    session.cwd,
+    runs,
+    envSnapshot(session),
+  )
   const wordBases =
     bases === null ? null : [...new Array<string | null>(consumed - 1).fill(null), ...bases]
   return [wordKinds, wordBases]

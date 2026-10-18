@@ -755,6 +755,5 @@ async def sed_generic(
         line_length=parsed.line_length,
         dispatch=dispatch_of(ctx),
         cwd=cwd,
-        prefix=ctx.mount_prefix.rstrip("/"),
         utf8=utf8_locale(ctx.env),
     )

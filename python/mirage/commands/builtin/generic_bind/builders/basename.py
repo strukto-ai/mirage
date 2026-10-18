@@ -17,7 +17,7 @@ from mirage.commands.builtin.generic.basename import (
     basename as generic_basename,
 )
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -25,7 +25,6 @@ from mirage.types import PathSpec
 
 
 async def basename(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec] | None,
     texts: list[str],

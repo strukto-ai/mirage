@@ -17,8 +17,6 @@ from datetime import date
 
 import pytest
 
-from mirage.accessor.base import NOOPAccessor
-from mirage.cache.index import NULL_INDEX
 from mirage.context import reset_current_session, set_current_session
 from mirage.shell.escapes import unescape_unquoted
 from mirage.types import FileStat, FileType, HiddenPaths, PathSpec, Visibility
@@ -64,7 +62,7 @@ TREE = {
 CALLS: list[str] = []
 
 
-async def fake_readdir(accessor, path, index=None):
+async def fake_readdir(path):
     CALLS.append(path.virtual)
     key = path.virtual.rstrip("/") or "/"
     if key not in TREE:
@@ -172,7 +170,7 @@ def test_literal_word_leaves_an_unmarked_spec_untouched():
 @pytest.mark.asyncio
 async def test_mid_path_glob_never_lists_pattern_dir():
     spec = glob_spec("/notion/pages/Demo_page__*/page.md", "/notion")
-    matched = await expand_pattern(fake_readdir, NOOPAccessor(), spec, None)
+    matched = await expand_pattern(fake_readdir, spec)
     assert [m.virtual for m in matched] == [
         "/notion/pages/Demo_page__uuid1/page.md"
     ]
@@ -183,7 +181,7 @@ async def test_mid_path_glob_never_lists_pattern_dir():
 @pytest.mark.asyncio
 async def test_last_component_glob():
     spec = glob_spec("/notion/pages/Demo*", "/notion")
-    matched = await expand_pattern(fake_readdir, NOOPAccessor(), spec, None)
+    matched = await expand_pattern(fake_readdir, spec)
     assert [m.virtual for m in matched] == ["/notion/pages/Demo_page__uuid1"]
     assert matched[0].resolved
 
@@ -191,7 +189,7 @@ async def test_last_component_glob():
 @pytest.mark.asyncio
 async def test_multiple_glob_segments():
     spec = glob_spec("/notion/pages/*__uuid*/page.json", "/notion")
-    matched = await expand_pattern(fake_readdir, NOOPAccessor(), spec, None)
+    matched = await expand_pattern(fake_readdir, spec)
     assert [m.virtual for m in matched] == [
         "/notion/pages/Demo_page__uuid1/page.json",
         "/notion/pages/Roadmap__uuid2/page.json",
@@ -201,14 +199,14 @@ async def test_multiple_glob_segments():
 @pytest.mark.asyncio
 async def test_zero_match_returns_empty():
     spec = glob_spec("/notion/pages/Missing__*/page.md", "/notion")
-    matched = await expand_pattern(fake_readdir, NOOPAccessor(), spec, None)
+    matched = await expand_pattern(fake_readdir, spec)
     assert matched == []
 
 
 @pytest.mark.asyncio
 async def test_non_directory_intermediate_skipped():
     spec = glob_spec("/*/b.txt", "")
-    matched = await expand_pattern(fake_readdir, NOOPAccessor(), spec, None)
+    matched = await expand_pattern(fake_readdir, spec)
     assert [m.virtual for m in matched] == ["/alpha/b.txt"]
 
 
@@ -221,7 +219,7 @@ async def test_directory_shaped_spec():
         pattern="Demo*",
         resolved=False,
     )
-    matched = await expand_pattern(fake_readdir, NOOPAccessor(), spec, None)
+    matched = await expand_pattern(fake_readdir, spec)
     assert [m.virtual for m in matched] == ["/notion/pages/Demo_page__uuid1"]
 
 
@@ -230,7 +228,7 @@ async def test_cold_listing_directory_marker_is_not_part_of_the_name():
     # box, gdrive and dropbox mark a folder with a trailing slash on a cold
     # listing; the marker is not part of the name a match spells.
     spec = glob_spec("/box/*", "/box")
-    matched = await expand_pattern(fake_readdir, NOOPAccessor(), spec, None)
+    matched = await expand_pattern(fake_readdir, spec)
     assert [m.virtual for m in matched] == ["/box/f.txt", "/box/sub"]
     assert [m.vfs_path for m in matched] == ["f.txt", "sub"]
 
@@ -238,7 +236,7 @@ async def test_cold_listing_directory_marker_is_not_part_of_the_name():
 @pytest.mark.asyncio
 async def test_root_mount_glob():
     spec = glob_spec("/a*", "")
-    matched = await expand_pattern(fake_readdir, NOOPAccessor(), spec, None)
+    matched = await expand_pattern(fake_readdir, spec)
     assert [m.virtual for m in matched] == ["/alpha"]
     assert matched[0].vfs_path == "alpha"
 
@@ -270,7 +268,7 @@ def test_is_word_shaped():
 async def test_matches_spelled_from_typed_word():
     spec = glob_spec("/alpha/*.txt", "")
     typed = dataclasses.replace(spec, raw_path="alpha/*.txt")
-    matched = await expand_pattern(fake_readdir, NOOPAccessor(), typed, None)
+    matched = await expand_pattern(fake_readdir, typed)
     assert [m.raw_path for m in matched] == ["alpha/b.txt"]
     assert [m.virtual for m in matched] == ["/alpha/b.txt"]
 
@@ -278,16 +276,14 @@ async def test_matches_spelled_from_typed_word():
 @pytest.mark.asyncio
 async def test_dir_shaped_matches_keep_virtual():
     spec = glob_spec("/alpha/*.txt", "").dir
-    matched = await expand_pattern(fake_readdir, NOOPAccessor(), spec, None)
+    matched = await expand_pattern(fake_readdir, spec)
     assert [m.raw_path for m in matched] == ["/alpha/b.txt"]
 
 
 @pytest.mark.asyncio
 async def test_resolve_glob_with_passes_resolved_through():
     spec = PathSpec.from_str_path("/alpha/b.txt", "alpha/b.txt")
-    result = await resolve_glob_with(
-        fake_readdir, NOOPAccessor(), [spec], None
-    )
+    result = await resolve_glob_with(fake_readdir, [spec])
     assert result == [spec]
     assert CALLS == []
 
@@ -295,9 +291,7 @@ async def test_resolve_glob_with_passes_resolved_through():
 @pytest.mark.asyncio
 async def test_resolve_glob_with_expands_pattern():
     spec = glob_spec("/alpha/*.txt", "")
-    result = await resolve_glob_with(
-        fake_readdir, NOOPAccessor(), [spec], None
-    )
+    result = await resolve_glob_with(fake_readdir, [spec])
     assert [p.virtual for p in result] == ["/alpha/b.txt"]
     assert result[0].resolved
 
@@ -305,9 +299,7 @@ async def test_resolve_glob_with_expands_pattern():
 @pytest.mark.asyncio
 async def test_resolve_glob_with_expands_mid_path_pattern():
     spec = glob_spec("/notion/pages/Demo_page__*/page.md", "/notion")
-    result = await resolve_glob_with(
-        fake_readdir, NOOPAccessor(), [spec], None
-    )
+    result = await resolve_glob_with(fake_readdir, [spec])
     assert [p.virtual for p in result] == [
         "/notion/pages/Demo_page__uuid1/page.md"
     ]
@@ -317,9 +309,7 @@ async def test_resolve_glob_with_expands_mid_path_pattern():
 @pytest.mark.asyncio
 async def test_resolve_glob_with_unmatched_word_stays_literal():
     spec = glob_spec("/notion/pages/Missing__*/page.md", "/notion")
-    result = await resolve_glob_with(
-        fake_readdir, NOOPAccessor(), [spec], None
-    )
+    result = await resolve_glob_with(fake_readdir, [spec])
     assert len(result) == 1
     assert result[0].virtual == "/notion/pages/Missing__*/page.md"
     assert result[0].resolved
@@ -335,9 +325,7 @@ async def test_resolve_glob_with_unmatched_dir_shaped_dropped():
         pattern="Missing*",
         resolved=False,
     )
-    result = await resolve_glob_with(
-        fake_readdir, NOOPAccessor(), [spec], None
-    )
+    result = await resolve_glob_with(fake_readdir, [spec])
     assert result == []
 
 
@@ -345,9 +333,7 @@ async def test_resolve_glob_with_unmatched_dir_shaped_dropped():
 async def test_resolve_glob_with_cap_truncates_and_warns(caplog):
     spec = glob_spec("/notion/pages/*", "/notion")
     with caplog.at_level("WARNING"):
-        result = await resolve_glob_with(
-            fake_readdir, NOOPAccessor(), [spec], None, 1
-        )
+        result = await resolve_glob_with(fake_readdir, [spec], 1)
     assert [p.virtual for p in result] == ["/notion/pages/Demo_page__uuid1"]
     assert "exceeds limit" in caplog.text
 
@@ -355,9 +341,7 @@ async def test_resolve_glob_with_cap_truncates_and_warns(caplog):
 @pytest.mark.asyncio
 async def test_resolve_glob_with_no_cap_keeps_all_matches():
     spec = glob_spec("/notion/pages/*", "/notion")
-    result = await resolve_glob_with(
-        fake_readdir, NOOPAccessor(), [spec], None
-    )
+    result = await resolve_glob_with(fake_readdir, [spec])
     assert len(result) == 2
 
 
@@ -365,7 +349,7 @@ async def test_resolve_glob_with_no_cap_keeps_all_matches():
 async def test_make_resolve_glob_binds_readdir():
     resolve = make_resolve_glob(fake_readdir)
     spec = glob_spec("/notion/pages/Demo_page__*/page.md", "/notion")
-    result = await resolve(NOOPAccessor(), [spec], None)
+    result = await resolve([spec])
     assert [p.virtual for p in result] == [
         "/notion/pages/Demo_page__uuid1/page.md"
     ]
@@ -377,7 +361,7 @@ async def test_make_resolve_glob_passthrough():
     resolved_spec = PathSpec.from_str_path(
         "/notion/pages/Roadmap__uuid2", "pages/Roadmap__uuid2"
     )
-    result = await resolve(NOOPAccessor(), [resolved_spec], None)
+    result = await resolve([resolved_spec])
     assert result[0] is resolved_spec
 
 
@@ -385,7 +369,7 @@ async def test_make_resolve_glob_passthrough():
 async def test_make_resolve_glob_truncates_at_cap():
     resolve = make_resolve_glob(fake_readdir, max_glob_matches=1)
     spec = glob_spec("/notion/pages/*", "/notion")
-    result = await resolve(NOOPAccessor(), [spec], None)
+    result = await resolve([spec])
     assert len(result) == 1
 
 
@@ -397,7 +381,7 @@ def test_make_resolve_glob_default_cap():
 async def test_make_resolve_glob_zero_match_word_keeps_literal():
     resolve = make_resolve_glob(fake_readdir)
     spec = glob_spec("/notion/pages/*.nope", "/notion")
-    out = await resolve(NOOPAccessor(), [spec], None)
+    out = await resolve([spec])
     assert len(out) == 1
     assert out[0].virtual == "/notion/pages/*.nope"
     assert out[0].pattern is None
@@ -408,16 +392,8 @@ async def test_make_resolve_glob_zero_match_word_keeps_literal():
 async def test_make_resolve_glob_zero_match_dir_shape_stays_empty():
     resolve = make_resolve_glob(fake_readdir)
     spec = glob_spec("/notion/pages/*.nope", "/notion").dir
-    out = await resolve(NOOPAccessor(), [spec], None)
+    out = await resolve([spec])
     assert out == []
-
-
-@pytest.mark.asyncio
-async def test_make_resolve_glob_index_defaults_to_null():
-    resolve = make_resolve_glob(fake_readdir)
-    spec = glob_spec("/notion/pages/Demo*", "/notion")
-    result = await resolve(NOOPAccessor(), [spec])
-    assert [p.virtual for p in result] == ["/notion/pages/Demo_page__uuid1"]
 
 
 @pytest.mark.asyncio
@@ -429,9 +405,7 @@ async def test_resolve_glob_with_drops_hidden_matches():
     token = set_current_session(sess)
     try:
         spec = glob_spec("/notion/pages/Demo_page__uuid1/page.*", "/notion")
-        result = await resolve_glob_with(
-            fake_readdir, NOOPAccessor(), [spec], None
-        )
+        result = await resolve_glob_with(fake_readdir, [spec])
     finally:
         reset_current_session(token)
     assert [r.virtual for r in result] == [
@@ -448,9 +422,7 @@ async def test_resolve_glob_with_all_hidden_falls_back_to_literal():
     token = set_current_session(sess)
     try:
         spec = glob_spec("/notion/pages/Roadmap__uuid2/page.*", "/notion")
-        result = await resolve_glob_with(
-            fake_readdir, NOOPAccessor(), [spec], None
-        )
+        result = await resolve_glob_with(fake_readdir, [spec])
     finally:
         reset_current_session(token)
     assert len(result) == 1
@@ -529,7 +501,7 @@ def test_glob_stem_prefix_drops_only_a_reached_suffix(pattern, expected):
     assert glob_walk.glob_stem_prefix(pattern, [".md", ".png"]) == expected
 
 
-async def fake_stat(accessor, path, index=None):
+async def fake_stat(path):
     key = path.virtual.rstrip("/") or "/"
     if key in TREE:
         return FileStat(name=key.rsplit("/", 1)[-1], type=FileType.DIRECTORY)
@@ -551,9 +523,7 @@ def typed_spec(virtual: str, raw: str) -> PathSpec:
 async def test_trailing_slash_keeps_directories_only_and_the_slash():
     out = await resolve_glob_with(
         fake_readdir,
-        None,
         [typed_spec("/*", "*/")],
-        NULL_INDEX,
         stat=fake_stat,
     )
     assert [(m.virtual, m.raw_path) for m in out] == [("/alpha", "alpha/")]
@@ -563,9 +533,7 @@ async def test_trailing_slash_keeps_directories_only_and_the_slash():
 async def test_trailing_slash_spells_an_absolute_word():
     out = await resolve_glob_with(
         fake_readdir,
-        None,
         [typed_spec("/notion/p*", "/notion/p*/")],
-        NULL_INDEX,
         stat=fake_stat,
     )
     assert [m.raw_path for m in out] == ["/notion/pages/"]
@@ -573,9 +541,7 @@ async def test_trailing_slash_spells_an_absolute_word():
 
 @pytest.mark.asyncio
 async def test_trailing_slash_without_a_stat_function_keeps_every_match():
-    out = await resolve_glob_with(
-        fake_readdir, None, [typed_spec("/*", "*/")], NULL_INDEX
-    )
+    out = await resolve_glob_with(fake_readdir, [typed_spec("/*", "*/")])
     assert [m.raw_path for m in out] == ["alpha/", "beta.txt/"]
 
 
@@ -583,9 +549,7 @@ async def test_trailing_slash_without_a_stat_function_keeps_every_match():
 async def test_trailing_slash_zero_match_keeps_the_typed_word():
     out = await resolve_glob_with(
         fake_readdir,
-        None,
         [typed_spec("/zz*", "zz*/")],
-        NULL_INDEX,
         stat=fake_stat,
     )
     assert [(m.raw_path, m.pattern) for m in out] == [("zz*/", None)]
@@ -594,11 +558,11 @@ async def test_trailing_slash_zero_match_keeps_the_typed_word():
 LINKED = {"/": ["/alpha", "/beta.txt", "/broken", "/flink", "/lnk"]}
 
 
-async def linked_readdir(accessor, path, index=None):
+async def linked_readdir(path):
     return LINKED[path.virtual.rstrip("/") or "/"]
 
 
-async def linked_stat(accessor, path, index=None):
+async def linked_stat(path):
     # The dispatcher's lstat: a link answers with its own row.
     name = path.virtual.rstrip("/").rsplit("/", 1)[-1]
     kinds = {"alpha": FileType.DIRECTORY, "beta.txt": FileType.FILE}
@@ -621,9 +585,7 @@ async def test_trailing_slash_follows_a_link_to_what_it_leads_to():
     # a directory; a dangling one is dropped like any file.
     out = await resolve_glob_with(
         linked_readdir,
-        None,
         [typed_spec("/*", "*/")],
-        NULL_INDEX,
         stat=linked_stat,
         target_stat=linked_target_stat,
     )
@@ -634,9 +596,7 @@ async def test_trailing_slash_follows_a_link_to_what_it_leads_to():
 async def test_trailing_slash_drops_a_link_it_cannot_follow():
     out = await resolve_glob_with(
         linked_readdir,
-        None,
         [typed_spec("/*", "*/")],
-        NULL_INDEX,
         stat=linked_stat,
     )
     assert [m.raw_path for m in out] == ["alpha/"]

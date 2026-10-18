@@ -81,5 +81,9 @@ async def _python3(
     )
 
 
-python3 = command("python3", vfs=None, spec=SPECS["python3"])(_python3)
-python_cmd = command("python", vfs=None, spec=SPECS["python"])(_python3)
+python3 = command("python3", vfs=None, spec=SPECS["python3"], write=True)(
+    _python3
+)
+python_cmd = command("python", vfs=None, spec=SPECS["python"], write=True)(
+    _python3
+)

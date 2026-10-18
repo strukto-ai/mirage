@@ -15,7 +15,6 @@
 import type { LinkView, ReaddirPath, StatPath } from '../../../view/types.ts'
 import type { Files } from '../../../workspace/files.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { FileStat, FileType, LINK_TARGET_KEY, PathSpec, type StatFn } from '../../../types.ts'
 import { dotWalkError, eexist, enoent, isMissError, isMissingPath } from '../../../errors/fs.ts'
 import { operandSpelling } from '../../../errors/render.ts'
@@ -147,13 +146,12 @@ export function descendantPath(root: PathSpec, virtual: string): PathSpec {
 // isMissingPath stays ENOENT-only so read-family commands keep reporting
 // "Not a directory" verbatim.
 export async function entryKind(
-  stat: StatFn<[path: PathSpec, index?: IndexCacheStore]>,
+  stat: StatFn,
   path: PathSpec,
-  index?: IndexCacheStore,
 ): Promise<{ exists: boolean; isDir: boolean }> {
   let info: FileStat
   try {
-    info = await stat(path, index)
+    info = await stat(path)
   } catch (err) {
     const code = (err as { code?: unknown }).code
     if (!isMissingPath(err) && code !== 'ENOTDIR') throw err

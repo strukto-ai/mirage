@@ -13,202 +13,67 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
-from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.cache.context import active_cache_manager
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    mount_io,
-    with_dir_guard,
-)
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
-from mirage.commands.builtin.utils.links import follow_of, links_of
+from mirage.commands.builtin.generic_bind.files import Reading, with_reading
 from mirage.commands.config import (
     Command,
     CommandCatalog,
-    CommandIO,
+    CommandFnResult,
     Context,
     command,
     registered_commands,
 )
 from mirage.commands.spec import SPECS
-from mirage.errors.fs import eisdir
 from mirage.io.cooperative import chunks
-from mirage.types import FileType, PathSpec
-
-
-def _cached_stat(
-    stat: Callable[..., Any],
-    accessor: Accessor,
-    path: PathSpec,
-    *args,
-    **kwargs,
-):
-    manager = active_cache_manager()
-    return _cached_stat_result(manager, stat, accessor, path, *args, **kwargs)
-
-
-async def _cached_stat_result(
-    manager,
-    stat: Callable[..., Any],
-    accessor: Accessor,
-    path: PathSpec,
-    *args,
-    **kwargs,
-):
-    result = await stat(accessor, path, *args, **kwargs)
-    if (
-        result is not None
-        and result.type is FileType.FILE
-        and getattr(result, "size", None) is None
-        and manager is not None
-    ):
-        # The length alone, ungated: this runs only where the backend
-        # named no size -- the API mounts -- so gating it would turn a
-        # stat into a backend stat.
-        size = await manager.cached_size(path)
-        if size is not None:
-            result = result.model_copy(update={"size": size})
-    return result
-
-
-async def _slash_checked_write(
-    write: Callable[..., Any],
-    accessor: Accessor,
-    path: PathSpec,
-    *args,
-    **kwargs,
-):
-    # open(2) with O_CREAT refuses a slash-terminated name outright,
-    # before looking anything up: `x/` can only ever be a directory, so
-    # there is nothing to create and nothing to truncate. GNU tee and
-    # truncate both answer `missing/` with "Is a directory" and touch
-    # nothing, and a plain file behind the slash gets the same answer.
-    # Deliberate divergence: under a parent that is itself absent GNU
-    # reports the parent first (ENOENT); the spelling is refused here
-    # without a round trip, so that corner reads EISDIR too.
-    if path.raw_path.endswith("/"):
-        raise eisdir(path)
-    return await write(accessor, path, *args, **kwargs)
-
-
-def with_slash_guard(ops: CommandIO) -> CommandIO:
-    """Return ``ops`` whose writes refuse a slash-terminated operand.
-
-    open(2) with O_CREAT answers ``x/`` with EISDIR whether or not
-    anything is there, so ``write``, ``append``, ``pwrite`` and
-    ``truncate`` refuse it before the backend sees it and ``tee missing/``
-    cannot leave a regular file named ``missing`` behind. The read side is
-    the walk guard's: a slashed operand carries a ``dotted`` spelling, so
-    ``dot_refusal`` proves the name a directory there (``cat reg/`` is
-    "Not a directory", ``cat dangle/`` keeps its own ENOENT).
-
-    Args:
-        ops (CommandIO): the backend's IO adapter.
-    """
-    changes: dict[str, Any] = {
-        slot: functools.partial(_slash_checked_write, getattr(ops, slot))
-        for slot in ("write", "append", "pwrite", "truncate")
-        if getattr(ops, slot) is not None
-    }
-    return replace(ops, **changes)
-
-
-def with_stat_cache(ops: CommandIO) -> CommandIO:
-    """Return ``ops`` whose ``stat`` fills size from the cache when warm.
-
-    Metadata commands (ls, stat, du) don't read content, but for a
-    render-dependent backend the only place a cached file's size exists
-    is the file cache (the rendered bytes). This fills that size in on
-    the real mount, so a warm ``stat``/``ls -l`` reports it without a
-    redirect to the cache mount. No-op when the backend already knows the
-    size or the path isn't cached.
-
-    Args:
-        ops (CommandIO): the backend's IO adapter.
-    """
-    return replace(ops, stat=functools.partial(_cached_stat, ops.stat))
-
-
-def _stat_wraps(ops: CommandIO) -> CommandIO:
-    return with_slash_guard(with_stat_cache(ops))
-
-
-def _write_wraps(ops: CommandIO) -> CommandIO:
-    return with_slash_guard(ops)
+from mirage.io.types import IOResult
+from mirage.types import PathSpec
 
 
 async def _run_builder(
-    finish: Callable[[CommandIO], CommandIO],
-    fn: Callable[..., Any],
-    table: Callable[[CommandIO], CommandIO] | None,
+    builder: GenericCommand,
+    reading: Reading,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
-    *,
-    split: bool = True,
-) -> Any:
-    """Run a builder over the mount's table, with the invocation's glob
-    facts stamped on below the dir guard.
+) -> CommandFnResult:
+    """Run a builder on the mount it runs on, its files read as
+    ``reading`` says.
 
-    The table is the mount's (``ctx.io``), read per invocation, so one
-    registration serves every mount. Its stat and readdir are the
-    dispatcher's, which answer for links and nested mounts, so what is
-    stamped is only what a glob needs beside them: where a link it
-    matched leads (``glob_target_stat``), read off the session's files,
-    and the line's operand resolution (``glob_follow``).
+    A run with no files has no workspace to reach and is refused. Every
+    call the builder makes through its files is the dispatcher's, which
+    judges each itself.
 
     Args:
-        finish (Callable): the builder tier's stat and slash wraps,
-            chosen at registration from the builder's read/write kind.
-        fn (Callable): the builder's command function.
-        table (Callable | None): a backend's change to the table for
-            this command.
-        accessor (Accessor): backend handle.
+        builder (GenericCommand): the builder.
+        reading (Reading): how its files read.
+        accessor (Accessor): the mount's accessor.
         paths (list[PathSpec]): the command's path operands.
         texts (list[str]): the command's text arguments.
         ctx (Context): the per-invocation option bag.
-        split (bool): whether its input is cut into pieces; a
-            pass-through builder keeps the producer's chunks.
     """
-    io = mount_io(ctx)
-    raw = table(io) if table is not None else io
-    links = links_of(ctx)
-    stamped = replace(
-        raw,
-        glob_target_stat=(links.target_stat if links is not None else None),
-        glob_follow=follow_of(ctx),
-    )
-    # The command's path checks speak outside the stat and slash wraps
-    # (`finish`), for the slots that still reach the backend past the
-    # dispatcher (stat, exists, readdir). Reads, writes and one-call
-    # walks are the dispatcher's (`dispatched_io` on the mount's table),
-    # which judges each itself and declines a one-call walk whose subtree
-    # the caller's view restricts.
-    bound = with_dir_guard(finish(stamped))
-    if split:
+    if ctx.vfs is None:
+        return None, IOResult(
+            exit_code=1,
+            stderr=f"{builder.name}: no workspace files\n".encode(),
+        )
+    if reading.split and ctx.stdin is not None:
         # A RAM or cache read arrives as one whole chunk, over which a
         # scan that splits its buffer per line is quadratic and cannot be
-        # cancelled until it ends; each operand read and stdin is cut into
-        # pieces with a yield between them, as TypeScript's guardInput. A
-        # pass-through builder (cat, head) keeps the producer's chunks: it
-        # writes a pipe in the writes the producer made, so a write the
-        # reader's close cuts short is its SIGPIPE, and a scan inside it
-        # splits its own input.
-        read = bound.read_stream
-        bound = replace(
-            bound,
-            read_stream=lambda acc, path, *args, **kwargs: chunks(
-                read(acc, path, *args, **kwargs)
-            ),
-        )
-        if ctx.stdin is not None:
-            ctx = replace(ctx, stdin=chunks(ctx.stdin))
-    return await fn(bound, accessor, paths, texts, ctx)
+        # cancelled until it ends; stdin is cut into pieces with a yield
+        # between them, as each operand read is and as TypeScript's
+        # guardInput. A pass-through builder (cat, head) keeps the
+        # producer's chunks: it writes a pipe in the writes the producer
+        # made, so a write the reader's close cuts short is its SIGPIPE,
+        # and a scan inside it splits its own input.
+        ctx = replace(ctx, stdin=chunks(ctx.stdin))
+    with with_reading(ctx, reading) as run:
+        return await builder.fn(accessor, paths, texts, run)
 
 
 _BY_NAME = {b.name: b for b in BUILDERS}
@@ -217,18 +82,18 @@ _BY_NAME = {b.name: b for b in BUILDERS}
 def _bind(
     builder: GenericCommand,
     vfs: str | None,
-    table: Callable[[CommandIO], CommandIO] | None,
+    stream: Callable[[Context, PathSpec], AsyncIterator[bytes] | None] | None,
 ) -> Command:
-    finish = (
-        _write_wraps if builder.write and not builder.read else _stat_wraps
-    )
-    bound = functools.partial(
-        _run_builder,
-        finish,
-        builder.fn,
-        table,
+    # The builder reads its files under the command tier's guards: what it
+    # reads, cut into pieces unless it passes its input through, and a
+    # stat's unknown size filled from the read cache unless it only
+    # writes.
+    reading = Reading(
         split=not builder.pass_through,
+        cached_sizes=not builder.write or builder.read,
+        stream=stream,
     )
+    bound = functools.partial(_run_builder, builder, reading)
     (registered,) = registered_commands(
         [
             command(
@@ -237,38 +102,36 @@ def _bind(
                 spec=SPECS[builder.name],
                 aggregate=builder.aggregate,
                 write=builder.write,
-                path_guarded=True,
             )(bound)
         ]
     )
     return registered
 
 
-# Every mount falls back to these after its VFS's own commands. Each runs
-# over the table of the mount it runs on (``ctx.io``), so one set serves
-# the whole workspace.
+# Every mount falls back to these after its VFS's own commands. Each reads
+# and writes through the files of the command it runs (``ctx.vfs``), so one
+# set serves the whole workspace.
 GENERIC_COMMANDS = CommandCatalog(_bind(b, None, None) for b in BUILDERS)
 
 
-def generic(
+def generic_reading(
     name: str,
     *,
     vfs: str | None = None,
-    table: Callable[[CommandIO], CommandIO] | None = None,
+    stream: (
+        Callable[[Context, PathSpec], AsyncIterator[bytes] | None] | None
+    ) = None,
 ) -> Command:
-    """The default command ``name``, which a mount runs when its VFS has
-    no command of that name.
-
-    A VFS that replaces a command hands what the replacement does not
-    support to this one: ``generic("grep").fn(accessor, paths, texts,
-    ctx)``. With ``vfs``, the same command registered for that backend,
-    over the mount's table changed by ``table`` (``/dev``'s endless
-    ``cat``).
+    """The generic command ``name`` registered for ``vfs``, each operand
+    streamed by ``stream`` where it answers one (None keeps the
+    dispatched read): ``/dev``'s endless ``cat`` and ``head``.
 
     Args:
         name (str): the command name.
-        vfs (str | None): the backend a changed copy registers under.
-        table (Callable | None): the change to the mount's table.
+        vfs (str | None): the backend it registers under.
+        stream (Callable | None): what streams an operand, given the
+            invocation's context and the path; an answer of None keeps
+            the dispatched read.
 
     Raises:
         ValueError: no generic command has that name.
@@ -276,6 +139,24 @@ def generic(
     builder = _BY_NAME.get(name)
     if builder is None:
         raise ValueError(f"no generic command named {name!r}")
-    if vfs is None and table is None:
+    if vfs is None and stream is None:
         return GENERIC_COMMANDS.require(name)
-    return _bind(builder, vfs, table)
+    return _bind(builder, vfs, stream)
+
+
+def generic(name: str, *, vfs: str | None = None) -> Command:
+    """The default command ``name``, which a mount runs when its VFS has
+    no command of that name.
+
+    A VFS that replaces a command hands what the replacement does not
+    support to this one: ``generic("grep").fn(accessor, paths, texts,
+    ctx)``. With ``vfs``, the same command registered for that backend.
+
+    Args:
+        name (str): the command name.
+        vfs (str | None): the backend a copy registers under.
+
+    Raises:
+        ValueError: no generic command has that name.
+    """
+    return generic_reading(name, vfs=vfs)

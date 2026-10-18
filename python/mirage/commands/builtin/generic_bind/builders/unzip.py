@@ -12,41 +12,34 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.crossmount.utils import (
     transfer_primitives,
 )
 from mirage.commands.builtin.generic.unzip import unzip_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    Operation,
-    bound_op,
-    require_op,
-)
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
+from mirage.commands.builtin.utils.links import dispatch_of
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def unzip(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not ops.is_mounted(accessor):
-        raise ValueError("unzip: missing operand")
-    resolved = (
-        await ops.resolve_glob(accessor, paths, ctx.index) if paths else []
-    )
-    if ctx.vfs is not None:
-        # Extraction writes wherever cwd or -d says, which need not be
-        # this mount, so the functions are dispatch-relayed and each path
-        # routes to the mount that owns it.
-        prim = transfer_primitives(ctx.vfs.dispatch)
+    files = command_files(ctx, paths)
+    resolved = await files.resolve_glob(paths) if paths else []
+    # Extraction writes wherever cwd or -d says, which need not be this
+    # mount, so the functions are dispatch-relayed and each path routes
+    # to the mount that owns it.
+    dispatch = dispatch_of(ctx)
+    if dispatch is not None:
+        prim = transfer_primitives(dispatch)
         return await unzip_generic(
             resolved,
             list(texts),
@@ -61,10 +54,10 @@ async def unzip(
         resolved,
         list(texts),
         ctx,
-        bound_op(ops.read_stream, accessor, ctx.index),
-        partial(require_op(ops, Operation.WRITE), accessor),
-        partial(require_op(ops, Operation.MKDIR), accessor),
-        stat=bound_op(ops.stat, accessor, ctx.index),
+        files.read_stream,
+        files.write,
+        files.mkdir,
+        stat=files.stat,
     )
 
 

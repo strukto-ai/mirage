@@ -8,7 +8,6 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, fields
 from typing import Any
 
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.sort import stream_config
 from mirage.commands.builtin.sort_keys import Key, KeyMods, SortConfig
 from mirage.commands.builtin.utils import formatting
@@ -66,8 +65,8 @@ from mirage.view.types import ChildMounts, LinkView, MountView, StatPath
 
 logger = logging.getLogger(__name__)
 
-Readdir = Callable[[PathSpec, IndexCacheStore | None], Awaitable[list[str]]]
-Stat = Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]]
+Readdir = Callable[[PathSpec], Awaitable[list[str]]]
+Stat = Callable[[PathSpec], Awaitable[FileStat]]
 
 LS_OK = 0
 LS_MINOR_PROBLEM = 1
@@ -845,7 +844,6 @@ def sort_stats(
 async def _file_entry(
     path: PathSpec,
     stat: Stat,
-    index: IndexCacheStore,
 ) -> FileStat | None:
     """The row of an operand that is no directory, None for a directory
     or a path nothing is at.
@@ -854,7 +852,7 @@ async def _file_entry(
         OSError: when its stat fails other than by absence.
     """
     try:
-        s = await stat(path, index)
+        s = await stat(path)
     except MISS_ERRORS:
         return None
     if s.type == FileType.DIRECTORY:
@@ -947,7 +945,6 @@ async def _stat_entries(
     *,
     stat: Stat,
     all_files: bool,
-    index: IndexCacheStore,
     links: LinkView | None = None,
     deref: bool = False,
     child_mounts: ChildMounts | None = None,
@@ -969,7 +966,6 @@ async def _stat_entries(
         names (list[str]): entry paths from the backend readdir.
         stat (Stat): backend stat.
         all_files (bool): keep dotfiles.
-        index (IndexCacheStore): listing cache.
         links (LinkView | None): the namespace's symlink facts. The
             table's readdir names the links among the entries and its stat
             answers each with its own row.
@@ -1006,7 +1002,7 @@ async def _stat_entries(
             vfs_path=rekey(path.virtual, path.vfs_path, entry),
         )
         try:
-            s = await entry_stat(entry_spec, index)
+            s = await entry_stat(entry_spec)
         except Exception as exc:
             if not is_entry_error(exc):
                 raise
@@ -1062,7 +1058,6 @@ async def probe_operand(
     reverse: bool = False,
     recursive: bool = False,
     command_line_arg: bool = True,
-    index: IndexCacheStore = NULL_INDEX,
     links: LinkView | None = None,
     deref: bool = False,
     follow_args: bool = False,
@@ -1088,7 +1083,6 @@ async def probe_operand(
         recursive (bool): descend, emitting one group per directory (-R).
         command_line_arg (bool): False below an operand, where GNU downgrades
             a failure to a minor problem (exit 1).
-        index (IndexCacheStore): listing cache.
         links (LinkView | None): the namespace's symlink facts.
         deref (bool): ``-L``, report what a listed link leads to.
         follow_args (bool): the command line's links were resolved on
@@ -1131,7 +1125,7 @@ async def probe_operand(
         if link_row is not None:
             return Operand(path, link_row, []), warnings
     try:
-        names = await readdir(path, index)
+        names = await readdir(path)
     except (OSError, ValueError) as exc:
         if isinstance(exc, DotWalkError):
             # The operand did not resolve, so neither the path it
@@ -1156,7 +1150,7 @@ async def probe_operand(
             return Operand(path, None, []), warnings
         refused: OSError | None = None
         try:
-            row = await _file_entry(path, own_stat, index)
+            row = await _file_entry(path, own_stat)
         except OSError as stat_exc:
             row, refused = None, stat_exc
         if row is not None:
@@ -1188,7 +1182,7 @@ async def probe_operand(
 
     if not names and not structure_only:
         try:
-            row = await _file_entry(path, own_stat, index)
+            row = await _file_entry(path, own_stat)
         except OSError as refusal:
             logger.debug(
                 "ls: %s listed empty, its stat refused: %s",
@@ -1204,7 +1198,6 @@ async def probe_operand(
         names,
         stat=stat,
         all_files=all_files,
-        index=index,
         links=links,
         deref=deref,
         child_mounts=child_mounts,
@@ -1259,7 +1252,6 @@ async def probe_operand(
                 reverse=reverse,
                 recursive=True,
                 command_line_arg=False,
-                index=index,
                 links=links,
                 deref=deref,
                 child_mounts=child_mounts,
@@ -1280,7 +1272,6 @@ async def probe_operand(
 async def _operand_row(
     path: PathSpec,
     stat: Stat,
-    index: IndexCacheStore,
     links: LinkView | None,
     child_mounts: ChildMounts | None,
 ) -> FileStat | LsWarning:
@@ -1289,7 +1280,6 @@ async def _operand_row(
     Args:
         path (PathSpec): the operand to stat.
         stat (Stat): backend stat.
-        index (IndexCacheStore): listing cache.
         links (LinkView | None): the namespace's symlink facts.
         child_mounts (ChildMounts | None): session-filtered child-mount
             names, which make a path no backend serves a directory.
@@ -1298,7 +1288,7 @@ async def _operand_row(
     if link_row is not None:
         return link_row
     try:
-        listed = await stat(path, index)
+        listed = await stat(path)
     except (OSError, ValueError) as exc:
         if (
             not isinstance(exc, DotWalkError)
@@ -1322,7 +1312,6 @@ async def _operand_key(
     *,
     sort_by: LsSortBy,
     stat: Stat,
-    index: IndexCacheStore,
 ) -> FileStat:
     """Sort row for one operand, named with the operand's own spelling."""
     if operand.row is not None:
@@ -1330,7 +1319,7 @@ async def _operand_key(
     if sort_by is LsSortBy.NAME:
         return FileStat(name=operand.path.raw_path, type=FileType.DIRECTORY)
     try:
-        s = await stat(operand.path, index)
+        s = await stat(operand.path)
     except (OSError, ValueError):
         # The stat only supplies a sort key; an operand that cannot be
         # statted sorts as if it had none rather than failing the listing.
@@ -1344,13 +1333,11 @@ async def _sort_operands(
     sort_by: LsSortBy,
     reverse: bool,
     stat: Stat,
-    index: IndexCacheStore,
     time_kind: LsTimeKind = LsTimeKind.MTIME,
     escape: bool = False,
 ) -> list[Operand]:
     keys = [
-        await _operand_key(o, sort_by=sort_by, stat=stat, index=index)
-        for o in operands
+        await _operand_key(o, sort_by=sort_by, stat=stat) for o in operands
     ]
     return [
         operands[i]
@@ -1511,7 +1498,6 @@ async def ls(
     recursive: bool = False,
     list_dir: bool = False,
     indicator: LsIndicator = LsIndicator.NONE,
-    index: IndexCacheStore = NULL_INDEX,
     links: LinkView | None = None,
     deref: bool = False,
     follow_args: bool = False,
@@ -1534,7 +1520,7 @@ async def ls(
         rows: list[FileStat] = []
         row_hrefs: list[str] = []
         for p in paths:
-            row = await _operand_row(p, stat, index, links, child_mounts)
+            row = await _operand_row(p, stat, links, child_mounts)
             if isinstance(row, LsWarning):
                 warnings.append(row)
                 continue
@@ -1586,7 +1572,6 @@ async def ls(
             sort_by=sort_by,
             reverse=reverse,
             recursive=recursive,
-            index=index,
             links=links,
             deref=deref,
             follow_args=follow_args,
@@ -1606,7 +1591,6 @@ async def ls(
             sort_by=sort_by,
             reverse=reverse,
             stat=stat,
-            index=index,
             time_kind=time_kind,
             escape=escape,
         )
@@ -1658,7 +1642,6 @@ async def ls(
                                             target,
                                         ),
                                     ),
-                                    index,
                                 )
                             if found is not None:
                                 row = found.model_copy(update={"name": name})
@@ -1728,21 +1711,20 @@ async def ls_generic(
     The wiring resolves globs, defaults the operands from the cwd, and
     binds the backend ops (including the stat overlay); flag semantics
     live here, and the namespace facts (links, child mounts), the
-    identity the owner columns render, and the index ride ``ctx``.
+    and the identity the owner columns render ride ``ctx``.
 
     Args:
         paths (list[PathSpec]): Glob-resolved operands, cwd-defaulted.
         texts (list[str]): Non-path words, unused by ls.
         ctx (Context): Flags and namespace facts from the
             dispatcher.
-        readdir (Readdir): Bound readdir called as ``readdir(p, index)``.
-        stat (Stat): Bound (overlaid) stat called as ``stat(p, index)``.
+        readdir (Readdir): Bound readdir called as ``readdir(p)``.
+        stat (Stat): Bound (overlaid) stat called as ``stat(p)``.
     """
     return await ls(
         paths,
         readdir=readdir,
         stat=stat,
-        index=ctx.index,
         links=links_of(ctx),
         child_mounts=(
             functools.partial(owed_names, ctx.vfs)

@@ -24,22 +24,20 @@ import { FileType, wordText, PathSpec, type Limit } from '../../../types.ts'
 import { flagOccurrences } from '../../../commands/spec/flag_view.ts'
 import type { ProcessView } from '../../../process/view.ts'
 import { CLAP_EXIT, CLI_CONFIG_ENV, GIT_LONG_OPTIONS } from '../../../commands/cli/constants.ts'
-import type { CLI } from '../../../commands/cli/types.ts'
-import type { Context } from '../../../commands/config.ts'
+import type { CLI, CLIHandler } from '../../../commands/cli/types.ts'
+import type { CommandFnResult, Context } from '../../../commands/config.ts'
 import { listedNode, nodeHelp, ownsArgv, walk } from '../../../commands/cli/walk.ts'
 import { type RunResult, type ScriptSource, type ShellFn } from '../../../runtime/types.ts'
-import type { SessionView } from '../../../view/types.ts'
+import type { FollowOperands, SessionView } from '../../../view/types.ts'
 import type { Files } from '../../files.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { UsageStyle, Argument, type FlagValue } from '../../../commands/spec/types.ts'
-import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
-import { errorVirtualPath, fsStrerror } from '../../../errors/fs.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { chunks } from '../../../io/cooperative.ts'
-import { OutputStream, closeQuietly } from '../../../io/stream.ts'
-import { maybeWithTimeout, runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
+import { closeQuietly } from '../../../io/stream.ts'
+import { maybeWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import type { CLIInstall } from '../../cli/types.ts'
+import type { MountEntry } from '../../mount/mount.ts'
 import type { SessionState } from '../../session/session.ts'
 import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
@@ -47,6 +45,7 @@ import { resolveLimit } from '../../../policy/index.ts'
 import { runtimeForLanguage } from '../../../runtime/routing/decide.ts'
 import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import { admissionDenial } from './run.ts'
+import { answered, cliVoice, runHandler } from './handler.ts'
 import { runOutput, runtimeUnavailable } from '../../../commands/builtin/general/interpreter.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
@@ -155,18 +154,6 @@ function selectRuntime(
     ]
   }
   return [chosen, null]
-}
-
-/**
- * What a failed leaf says after its name: a file error stamped with its
- * path as the path and phrase, the way the shell's own commands say it,
- * anything else in its own words. Mirrors Python's `_leaf_message`.
- */
-function leafMessage(err: unknown): string {
-  const strerror = fsStrerror(err)
-  if (strerror !== null && typeof (err as { virtualPath?: unknown }).virtualPath === 'string')
-    return `${errorVirtualPath(err)}: ${strerror}`
-  return err instanceof Error ? err.message : String(err)
 }
 
 /** The 127 a script CLI answers when no entry can run its program. */
@@ -314,15 +301,45 @@ export async function handleCli(
   }
 }
 
-/** handleCli's body, run while the install is held. */
-async function runCli(
-  install: CLIInstall,
+/**
+ * A line a command tree's walk resolved to one leaf, parsed and ready to
+ * run. Mirrors Python's `LeafCall`.
+ */
+export interface LeafCall {
+  /** The line's words as typed, for the record. */
+  cmdStr: string
+  /** The words after the head as typed. */
+  argv: readonly string[]
+  /** The head and the verb path, the name a message, a limit and the output guards read. */
+  prog: string
+  /** The canonical verb path below the head. */
+  path: readonly string[]
+  leaf: CommandSpec
+  handler: CLIHandler
+  /** The group and leaf flags, one bag. */
+  flags: Record<string, FlagValue>
+  paths: PathSpec[]
+  texts: string[]
+  /** What the parse warned about, said ahead of the leaf's own stderr. */
+  warnings: readonly string[]
+}
+
+/**
+ * Walk a line down a command tree to the leaf it names and parse the
+ * leaf's words, or answer the line without running anything.
+ *
+ * The walk consumes subcommand words and group options; the leaf's own argv
+ * uses the shared CommandSpec parser. Help, usage refusals and an operand
+ * base that is no directory are answered here, for an installed CLI and a
+ * tree a mount serves alike. Mirrors Python's `walk_leaf`.
+ */
+export async function walkLeaf(
+  name: string,
+  cli: CLI,
   parts: readonly (string | PathSpec)[],
   session: SessionState,
-  stdin: ByteSource | null,
-  context: CLIContext,
-  dropCaches: (() => Promise<void>) | null,
-): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
+  vfs: Files | undefined,
+): Promise<LeafCall | [ByteSource | null, IOResult, ExecutionNode]> {
   // Words re-enter string space as typed (wordText): the walk owns
   // interpretation, so a quoted "Lunch?" must not arrive as the
   // glob-classified absolute /Lunch?. Leaf path operands are resolved
@@ -334,7 +351,7 @@ async function runCli(
   // The walk takes the same environment the leaf parse below does, so
   // a group-level option declaring `Argument.env` fills at its own
   // level; without it the fetched credential never enters groupFlags.
-  const result = walk(install.name, install.cli.spec, argv, session.cwd, envSnapshot(session))
+  const result = walk(name, cli.spec, argv, session.cwd, envSnapshot(session))
   if (result.leaf === null) {
     const stderr = result.stream === 'stderr' ? result.output : new Uint8Array(0)
     const stdout = result.stream === 'stdout' ? result.output : null
@@ -342,18 +359,13 @@ async function runCli(
     return [stdout, io, new ExecutionNode({ command: cmdStr, exitCode: result.exitCode, stderr })]
   }
 
-  if (context.vfs !== undefined) {
-    const dispatch = context.vfs.dispatch
+  if (vfs !== undefined) {
+    const dispatch = vfs.dispatch
     for (const base of result.operandBases) {
       const info = await pathStat(dispatch, base)
       if (info !== null && info.type === FileType.DIRECTORY) continue
       const reason = info === null ? await missCondition(dispatch, base) : 'ENOTDIR'
-      const [stderr, code] = directoryRefusal(
-        install.name,
-        base.rawPath,
-        reason,
-        install.cli.spec.usageStyle,
-      )
+      const [stderr, code] = directoryRefusal(name, base.rawPath, reason, cli.spec.usageStyle)
       return [
         null,
         new IOResult({ exitCode: code, stderr }),
@@ -362,30 +374,24 @@ async function runCli(
     }
   }
 
-  const prog = [install.name, ...result.path].join(' ')
+  const prog = [name, ...result.path].join(' ')
   const leaf = result.leaf
-  const binding = install.cli.handlers[result.path.join(' ')]
-  if (binding === undefined) throw new Error(`cli '${prog}': missing handler`)
+  const handler = cli.handlers[result.path.join(' ')]
+  if (handler === undefined) throw new Error(`cli '${prog}': missing handler`)
   // No injected --version: that is a GNU coreutils convention, not an
   // argparse one.
-  const [parseSpec, mirageHelp] = parseSpecFor(
-    leaf,
-    install.cli.spec.usageStyle,
-    ownsArgv(install.cli),
-  )
+  const [parseSpec, mirageHelp] = parseSpecFor(leaf, cli.spec.usageStyle, ownsArgv(cli))
 
   // The dialect is the root's, not the leaf's: a program answers in one voice
   // at every level.
-  const style = install.cli.spec.usageStyle
+  const style = cli.spec.usageStyle
   // The environment goes into the parse, not on top of it: an option
   // declaring one is coerced, choice-checked, path-resolved and credited
   // against required exactly as a typed value is.
   // git resolves an abbreviated long option against the verb's own full table
   // (parse-options), and its revision walkers take whole words only.
   const abbreviations =
-    install.cli.spec.name === 'git'
-      ? (GIT_LONG_OPTIONS.get(result.path.join(' ')) ?? [])
-      : undefined
+    cli.spec.name === 'git' ? (GIT_LONG_OPTIONS.get(result.path.join(' ')) ?? []) : undefined
   const parsed = parseFlags(
     [...result.argv],
     parseSpec,
@@ -442,30 +448,98 @@ async function runCli(
   // Only the injected flag is dropped; a leaf that declared --help
   // itself is handed the value it asked for.
   if (mirageHelp) delete flags.help
-
-  let active = true
-  const shell: ShellFn = async (line, data = null) => {
-    if (!active || context.signal?.aborted === true) {
-      throw new Error('CLI shell is no longer active')
-    }
-    if (context.shell === undefined) throw new Error('CLI shell is unavailable')
-    return context.shell(line, data)
-  }
-  // Most CLIs never read the files: an API client has no filesystem, while
-  // `git` is nothing but one. Absent outside a workspace, so a verb that
-  // needs a mount refuses there on its own.
-  const ctx: Context = {
-    stdin,
-    flags,
-    cwd: PathSpec.fromStrPath(session.cwd),
-    env: envSnapshot(session),
+  return {
+    cmdStr,
     argv,
-    spec: leaf,
-    ...(context.vfs !== undefined ? { vfs: context.vfs } : {}),
-    ...(context.session !== undefined ? { session: context.session } : {}),
-    ...(context.processes === undefined ? {} : { processes: context.processes }),
-    ...(context.shell !== undefined ? { shell } : {}),
+    prog,
+    path: result.path,
+    leaf,
+    handler,
+    flags,
+    paths,
+    texts,
+    warnings,
   }
+}
+
+/**
+ * Execute a line whose head word names a command tree a mount serves.
+ *
+ * The tree a VFS was handed (or one registered on its mount) is walked
+ * exactly as an installed CLI's is (`walkLeaf`: verbs, help, usage
+ * refusals, the leaf's parse); the leaf then runs on the mount, on its
+ * accessor and under its refusals (`MountEntry.runLeaf`), with its own
+ * limit: the profile's, then the mount's and the workspace's entry for the
+ * verb path, then the leaf's declared one. A tree runs on the mount serving
+ * its name, never by operand path, and its leaf keys that mount's accessor by
+ * each operand: the operands the leaf parse resolved are followed through the
+ * link table as the router follows a mount command's (`follow`), and one
+ * another mount holds (`owner`) is refused before the leaf runs. Mirrors
+ * Python's `handle_mount_cli`.
+ */
+export async function handleMountCli(
+  mount: MountEntry,
+  cli: CLI,
+  parts: readonly (string | PathSpec)[],
+  session: SessionState,
+  stdin: ByteSource | null = null,
+  context: CLIContext = {},
+  owner?: (path: string) => MountEntry | null,
+  follow?: FollowOperands,
+): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
+  const walked = await walkLeaf(cli.spec.name, cli, parts, session, context.vfs)
+  if (Array.isArray(walked)) return walked
+  const limit = resolveLimit(
+    walked.prog,
+    [],
+    walked.handler.limit,
+    mount.commandLimits.get(walked.prog) ?? null,
+    context.commandLimits,
+    session.commandLimits,
+  )
+  const signal = context.signal
+  const paths =
+    follow === undefined
+      ? walked.paths
+      : (await follow([...walked.paths])).filter((p): p is PathSpec => p instanceof PathSpec)
+  const foreign = paths.find(
+    (p) => owner !== undefined && p.rawPath !== '-' && owner(p.virtual) !== mount,
+  )
+  if (foreign !== undefined) {
+    const msg = encodeText(
+      `${walked.prog}: ${foreign.rawPath}: not on ${mount.prefix}, the mount serving ${cli.spec.name}\n`,
+    )
+    return [
+      null,
+      new IOResult({ exitCode: 1, stderr: msg }),
+      new ExecutionNode({ command: walked.cmdStr, exitCode: 1, stderr: msg }),
+    ]
+  }
+  const run = (ctx: Context): Promise<CommandFnResult> =>
+    mount.runLeaf(
+      walked.prog,
+      cli,
+      walked.handler,
+      paths,
+      walked.texts,
+      signal === undefined ? ctx : { ...ctx, signal },
+      limit,
+    )
+  return runWalked(walked, session, stdin, context, limit, run)
+}
+
+/** handleCli's body, run while the install is held. */
+async function runCli(
+  install: CLIInstall,
+  parts: readonly (string | PathSpec)[],
+  session: SessionState,
+  stdin: ByteSource | null,
+  context: CLIContext,
+  dropCaches: (() => Promise<void>) | null,
+): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
+  const walked = await walkLeaf(install.name, install.cli, parts, session, context.vfs)
+  if (Array.isArray(walked)) return walked
+  const { prog, handler: binding } = walked
 
   // The outer timer bounds the whole invocation; the runtime deadline
   // also interrupts engines that block their event loop. Unlike Python's
@@ -479,10 +553,9 @@ async function runCli(
     session.commandLimits,
   )
   const timeout = limit?.timeoutSeconds ?? null
-  const abort = new AbortController()
-  let body: Promise<[ByteSource | null, IOResult] | null>
-  const native = install.cli.script === null
-  if (install.cli.script !== null) {
+  const script = install.cli.script
+  let start: (ctx: Context, signal: AbortSignal) => Promise<[ByteSource | null, IOResult]>
+  if (script !== null) {
     const [runtime, refused] = selectRuntime(
       prog,
       install.cli,
@@ -497,18 +570,11 @@ async function runCli(
       return [
         null,
         new IOResult({ exitCode: refused.exitCode, stderr }),
-        new ExecutionNode({ command: cmdStr, exitCode: refused.exitCode, stderr }),
+        new ExecutionNode({ command: walked.cmdStr, exitCode: refused.exitCode, stderr }),
       ]
     }
-    body = scriptOutput(
-      install.config,
-      ctx,
-      install.cli.script,
-      runtime,
-      prog,
-      timeout,
-      abort.signal,
-    )
+    start = (ctx, signal) =>
+      scriptOutput(install.config, ctx, script, runtime, prog, timeout, signal)
   } else {
     const fn = binding.fn
     if (fn === null) {
@@ -517,80 +583,97 @@ async function runCli(
       // bug.
       throw new Error(`walk returned a leaf without a handler for '${prog}'`)
     }
-    // Defer the call into the promise: a synchronously-thrown leaf
-    // error must land in the catch arms below, exactly as when the
-    // call sat inside the try.
-    body = Promise.resolve().then(() => fn(install.accessor, paths, texts, ctx))
+    // Defer the call into the promise: a synchronously-thrown leaf error
+    // must land in the runner's catch arms, exactly as when the call sat
+    // inside its try.
+    start = (ctx) =>
+      answered(Promise.resolve().then(() => fn(install.accessor, walked.paths, walked.texts, ctx)))
   }
-  // Racing a promise does not stop its work: a body still running past its
-  // timeout keeps the install's accessor until it settles.
-  const settled = install.activity.acquire()
-  void body.then(settled, settled)
-  // The leaf's declared limit bounds the handler body and its
-  // streams, exactly like mount dispatch: without the wrap a blocking
-  // leaf hangs forever and an unbounded-output leaf ignores its own
-  // limits.
-  let stdout: ByteSource | null = null
-  let io = new IOResult()
+  const run = (ctx: Context): Promise<CommandFnResult> => {
+    const abort = new AbortController()
+    const body = start(ctx, abort.signal)
+    // Racing a promise does not stop its work: a body still running past
+    // its timeout keeps the install's accessor until it settles.
+    const settled = install.activity.acquire()
+    void body.then(settled, settled)
+    // The leaf's `write` is the one answer: the gate hands it to policy as
+    // `CommandContext.write`, and the cache reads it too, so a verb that can
+    // mutate (`gh api` under any method) costs the mounts a reload rather
+    // than a stale read, and so does one that failed, timed out or was
+    // cancelled after its request may have landed.
+    return runHandler(
+      body,
+      prog,
+      limit,
+      { command: prog, prefixes: [], declared: binding.limit ?? null },
+      cliVoice(prog),
+      {
+        abort,
+        ...(binding.write && dropCaches !== null ? { drop: dropCaches } : {}),
+        ...(script !== null ? { frame: false } : {}),
+      },
+    )
+  }
+  return runWalked(walked, session, stdin, context, limit, run)
+}
+
+/**
+ * Run a walked leaf with the one Context a leaf gets, and record it.
+ *
+ * The leaf's declared limit bounds the handler body and its streams,
+ * exactly like mount dispatch: without the wrap a blocking leaf hangs
+ * forever and an unbounded-output leaf ignores its own limits. A failure
+ * the runner framed is recorded as it is; an answer gets the parse's
+ * warnings ahead of its stderr and the limit's stream guards. Mirrors
+ * Python's `run_walked`.
+ */
+export async function runWalked(
+  walked: LeafCall,
+  session: SessionState,
+  stdin: ByteSource | null,
+  context: CLIContext,
+  limit: Limit | null,
+  run: (ctx: Context) => Promise<CommandFnResult>,
+): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
+  let active = true
+  const shell: ShellFn = async (line, data = null) => {
+    if (!active || context.signal?.aborted === true) {
+      throw new Error('CLI shell is no longer active')
+    }
+    if (context.shell === undefined) throw new Error('CLI shell is unavailable')
+    return context.shell(line, data)
+  }
+  // Most CLIs never read the files: an API client has no filesystem, while
+  // `git` is nothing but one. Absent outside a workspace, so a verb that
+  // needs a mount refuses there on its own.
+  const ctx: Context = {
+    stdin,
+    flags: walked.flags,
+    cwd: PathSpec.fromStrPath(session.cwd),
+    env: envSnapshot(session),
+    argv: walked.argv,
+    spec: walked.leaf,
+    ...(context.vfs !== undefined ? { vfs: context.vfs } : {}),
+    ...(context.session !== undefined ? { session: context.session } : {}),
+    ...(context.processes === undefined ? {} : { processes: context.processes }),
+    ...(context.shell !== undefined ? { shell } : {}),
+  }
+  let out: CommandFnResult
   try {
-    const out = await runWithTimeout(body, timeout, prog)
-    if (out !== null) {
-      ;[stdout, io] = out
-    }
-  } catch (err) {
-    // Leaf-raised usage errors (a malformed --json) keep the bare
-    // message and exit 2, matching the refusal branch above.
-    if (err instanceof UsageError) {
-      const stderr = encodeText(`${err.message}\n`)
-      return [
-        null,
-        new IOResult({ exitCode: err.exitCode, stderr }),
-        new ExecutionNode({ command: cmdStr, exitCode: err.exitCode, stderr }),
-      ]
-    }
-    // A limit timeout is answered by the workspace-level handler
-    // (exit 124), not here.
-    if (err instanceof CommandTimeoutError) {
-      abort.abort()
-      // Racing a promise does not stop its work: a typed fn that ignores
-      // the abort signal keeps running, and its request may land after
-      // exit 124. Drop now, for a write the service already accepted, and
-      // again when the body settles, for one still in flight.
-      if (binding.write && dropCaches !== null) {
-        await dropCaches()
-        const settle = (): Promise<void> => dropCaches()
-        void body.then(settle, settle).catch((dropErr: unknown) => {
-          // The command already returned, so a drop that fails here (a
-          // workspace torn down under it) has no stream to land on; it
-          // is reported rather than left as an unhandled rejection.
-          const reason = dropErr instanceof Error ? dropErr.message : String(dropErr)
-          console.warn(`${prog}: cache drop after timeout failed: ${reason}`)
-        })
-      }
-      throw err
-    }
-    // Any other thrown leaf error (an API error, a TypeError) becomes
-    // this command's IOResult, prefixed like GNU (prog: message), so
-    // the rest of the line keeps running, and what a leaf printed before
-    // it failed stays printed.
-    // The write may already have landed when a leaf throws after its
-    // request (a PUT whose --jq program fails filters a response the
-    // service already applied); without the drop a github mount keeps
-    // serving its pre-write bytes.
-    if (binding.write && dropCaches !== null) await dropCaches()
-    const stderr = encodeText(`${prog}: ${leafMessage(err)}\n`)
-    return [
-      err instanceof PartialOutputError ? err.stdout : null,
-      new IOResult({ exitCode: 1, stderr }),
-      new ExecutionNode({ command: cmdStr, exitCode: 1, stderr }),
-    ]
+    out = await run(ctx)
   } finally {
     active = false
   }
-  // The spec's `write` is the one answer: what policy calls a write, the
-  // cache does too, so a verb that can mutate (`gh api` under any method)
-  // costs the mounts a reload rather than a stale read.
-  if (binding.write && dropCaches !== null) await dropCaches()
+  const [answer, io] = out ?? [null, new IOResult()]
+  let stdout = answer
+  if (io.producer === null) {
+    const stderr = await io.materializeStderr()
+    return [
+      stdout,
+      io,
+      new ExecutionNode({ command: walked.cmdStr, exitCode: io.exitCode, stderr }),
+    ]
+  }
   if (context.signal?.aborted === true) {
     // The caller was released at its abort, so nothing reads this output:
     // close it rather than leave its source open.
@@ -598,53 +681,24 @@ async function runCli(
     await closeQuietly(io.stderr)
   }
 
-  io.producer = { command: prog, prefixes: [], declared: binding.limit ?? null }
-
-  if (warnings.length > 0) {
-    const warn = encodeText(warnings.map((w) => `${prog}: ${w}\n`).join(''))
+  const prog = walked.prog
+  if (walked.warnings.length > 0) {
+    const warn = encodeText(walked.warnings.map((w) => `${prog}: ${w}\n`).join(''))
     const existing = await materialize(io.stderr)
     io.stderr = concat([warn, existing])
   }
-
-  const owned = native ? stdout : null
-  if (owned !== null) stdout = cliOutput(owned, io, prog)
   stdout = maybeWithTimeout(stdout, limit, prog)
-  if (owned !== null && stdout !== null && !(stdout instanceof Uint8Array)) {
-    const wrapped = stdout
-    stdout = new OutputStream(chunks(wrapped), async () => {
-      await closeQuietly(owned)
-      await closeQuietly(wrapped)
-    })
-  }
   io.stderr = maybeWithTimeout(io.stderr, limit, prog)
 
   const stderrBytes = await io.materializeStderr()
   return [
     stdout,
     io,
-    new ExecutionNode({ command: cmdStr, stderr: stderrBytes, exitCode: io.exitCode, paths }),
+    new ExecutionNode({
+      command: walked.cmdStr,
+      stderr: stderrBytes,
+      exitCode: io.exitCode,
+      paths: walked.paths,
+    }),
   ]
-}
-
-async function* cliOutput(
-  source: ByteSource,
-  io: IOResult,
-  prog: string,
-): AsyncGenerator<Uint8Array> {
-  try {
-    yield* chunks(source)
-  } catch (error) {
-    if (
-      error instanceof CommandTimeoutError ||
-      (error instanceof Error && error.name === 'AbortError')
-    )
-      throw error
-    if (error instanceof PartialOutputError) yield* chunks(error.stdout)
-    const diagnostic =
-      error instanceof UsageError ? `${error.message}\n` : `${prog}: ${leafMessage(error)}\n`
-    io.stderr = concat([await io.materializeStderr(), encodeText(diagnostic)])
-    io.exitCode = error instanceof UsageError ? error.exitCode : 1
-  } finally {
-    await closeQuietly(source)
-  }
 }

@@ -17,17 +17,20 @@ import type { Dispatcher } from './workspace/dispatcher/dispatcher.ts'
 import { RAMIndexCacheStore } from './cache/index/ram.ts'
 import type { IndexCacheStore } from './cache/index/store.ts'
 import type { Handed } from './vfs/types.ts'
-import type { OpKwargs } from './view/types.ts'
+import type { NamespaceLinks, OpKwargs } from './view/types.ts'
+import type { MountRow } from './workspace/types.ts'
 import type { WriteContext } from './cache/types.ts'
 import { type FileStat, MountMode, type PathSpec } from './types.ts'
 import { BaseVFS } from './vfs/base.ts'
 import { RAMVFS } from './vfs/ram/ram.ts'
 import { stripSlash } from './utils/slash.ts'
 import type { Accessor } from './accessor/base.ts'
-import { commandIo } from './commands/builtin/generic_bind/adapter.ts'
-import type { CommandIO } from './commands/config.ts'
+import { runWithMountGate } from './context/session_context.ts'
 import { MountEntry } from './workspace/mount/mount.ts'
-import type { Workspace } from './workspace/workspace/workspace.ts'
+import { Workspace } from './workspace/workspace/workspace.ts'
+import { Files, type FilesOptions } from './workspace/files.ts'
+import { enotsup } from './errors/fs.ts'
+import { IOResult } from './io/types.ts'
 import type { DispatchFn } from './runtime/types.ts'
 import { sha256Hex } from './utils/hash.ts'
 import {
@@ -203,13 +206,54 @@ export function vfsOver<V extends BaseVFS>(
   return Object.assign(vfs as V, facts)
 }
 
-/** The command table of a `cls` VFS over `accessor`. */
-export function ioFor<V extends BaseVFS>(
-  cls: { prototype: V },
-  accessor: Accessor,
-  facts: Partial<Record<keyof V, unknown>> = {},
-): CommandIO {
-  return commandIo(vfsOver(cls, accessor, facts) as BaseVFS)
+type Answer = (path: PathSpec, args: readonly unknown[], kwargs: OpKwargs) => unknown
+
+/**
+ * Files whose dispatcher answers each op `answers` names, and refuses any
+ * other the way a mount without that function does (ENOTSUP): a command's
+ * files over a fake backend, for a test that drives a builder alone. `row`
+ * is the mount every path is on, `links` the namespace's link table. Mirrors
+ * Python's `tests/fixtures/answers.Answers`.
+ */
+export function answeringFiles(
+  answers: Readonly<Record<string, Answer>>,
+  options: FilesOptions = {},
+  row: MountRow | null = null,
+  links: NamespaceLinks | null = null,
+): Files {
+  const dispatch: DispatchFn = async (name, path, args = [], kwargs = {}) => {
+    const answer = answers[name]
+    if (answer === undefined) throw enotsup('fake', name, path)
+    return [await answer(path, args, kwargs), new IOResult()]
+  }
+  return new Files(dispatch, null, links, () => row, {
+    ...(row === null ? {} : { prefixes: () => [row.prefix] }),
+    ...options,
+    ledger: false,
+  })
+}
+
+const WORKSPACES = new WeakMap<BaseVFS, Workspace>()
+
+/**
+ * Run `fn` the way a command on `vfs` runs: `vfs` mounted alone at `prefix`
+ * in a workspace of its own (one per VFS), `fn` handed the workspace's files,
+ * which a command reads and writes through (`ctx.vfs`), inside the mount's
+ * command scope.
+ */
+export function onMount<T>(
+  vfs: BaseVFS,
+  fn: (files: Files) => Promise<T> | T,
+  prefix = '/',
+): Promise<T> {
+  let ws = WORKSPACES.get(vfs)
+  if (ws === undefined) {
+    ws = new Workspace({ [prefix]: vfs }, { mode: MountMode.WRITE })
+    WORKSPACES.set(vfs, ws)
+  }
+  const files = ws.vfs
+  const at = prefix.endsWith('/') ? prefix : `${prefix}/`
+  return runWithMountGate(at, MountMode.WRITE, async () => fn(files))
 }
 
 /**

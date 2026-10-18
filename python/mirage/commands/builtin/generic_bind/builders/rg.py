@@ -15,31 +15,29 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.rg import rg_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    bound_op,
-)
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.generic_bind.search import search_reads
 from mirage.commands.builtin.utils.tree import tree_walk
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def rg(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    if paths and ops.is_mounted(accessor):
-        paths = await ops.resolve_glob(accessor, paths, ctx.index)
+    files = command_files(ctx, paths)
+    if paths:
+        paths = await files.resolve_glob(paths)
     read_bytes, read_stream = await search_reads(
-        ops, "rg", accessor, paths, texts, ctx
+        files, "rg", paths, texts, ctx
     )
-    readdir = bound_op(ops.readdir, accessor, ctx.index)
-    stat = bound_op(ops.stat, accessor, ctx.index)
+    readdir = files.readdir
+    stat = files.stat
     return await rg_generic(
         paths,
         texts,
@@ -50,7 +48,9 @@ async def rg(
         read_stream=read_stream,
         stdin=ctx.stdin,
         unbounded=tree_walk(
-            bound_op(ops.read_tree, accessor, ctx.index), readdir, stat
+            (files.read_tree if files.answers("read_tree") else None),
+            readdir,
+            stat,
         ),
     )
 

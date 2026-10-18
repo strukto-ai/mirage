@@ -15,6 +15,7 @@
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
 import type { PathSpec, FileStat } from '../../../../types.ts'
 import type { FlagValue } from '../../../spec/types.ts'
+import type { AggregateFn } from '../../../config.ts'
 
 // How a cross-mount command combines per-mount work.
 //
@@ -110,4 +111,20 @@ export interface OwnedScope {
   stat?: FileStat
   diagnostic?: string
   error?: Error
+}
+
+/**
+ * One path operand of a line, as the workspace resolved it: what deciding
+ * whether a line crosses mounts needs, resolved by the caller so the
+ * decision reads no mount table. `mount` is the prefix of the mount that
+ * owns it (null outside every mount), `aggregate` the reducer of what the
+ * line's command resolves to on that mount (null where it resolves nothing
+ * or a command without one), `nests` whether a mount sits below the
+ * operand. Mirrors Python's OperandMount.
+ */
+export interface OperandMount {
+  readonly path: PathSpec
+  readonly mount: string | null
+  readonly aggregate: AggregateFn | null
+  readonly nests: boolean
 }

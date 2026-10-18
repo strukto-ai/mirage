@@ -401,7 +401,7 @@ async def _write_named(
     return None
 
 
-@command("curl", vfs=None, spec=SPECS["curl"])
+@command("curl", vfs=None, spec=SPECS["curl"], write=True)
 async def curl(
     accessor: Accessor,
     paths: list[PathSpec],

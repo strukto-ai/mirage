@@ -2,7 +2,6 @@ from mirage.commands.builtin.generic.archive.types import Entry, MemberKind
 from mirage.commands.builtin.generic.archive.walk import (
     OTHER_FILESYSTEM,
     DirProbe,
-    StatFn,
     WalkFn,
     scan_operand,
 )
@@ -12,7 +11,7 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
-from mirage.types import PathSpec
+from mirage.types import PathSpec, StatFn
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.path import respell_one
 from mirage.view.types import LinkView, MountView

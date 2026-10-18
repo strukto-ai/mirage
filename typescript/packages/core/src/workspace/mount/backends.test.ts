@@ -17,10 +17,10 @@ import { IOResult } from '../../io/types.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { type Command, command } from '../config.ts'
-import { specOf } from '../spec/builtins.ts'
+import { Command, command } from '../../commands/config.ts'
+import { specOf } from '../../commands/spec/builtins.ts'
+import { DEV_COMMANDS } from '../../commands/builtin/dev/index.ts'
 import { commandsFor } from './backends.ts'
-import { DEV_COMMANDS } from './dev/index.ts'
 
 describe('commandsFor', () => {
   it('serves a builtin its own command module', () => {
@@ -66,7 +66,9 @@ describe('commandsFor', () => {
         return cat
       }
     }
-    const cats = commandsFor(new Handed()).filter((cmd) => cmd.name === 'cat')
+    const cats = commandsFor(new Handed()).filter(
+      (cmd) => cmd instanceof Command && cmd.name === 'cat',
+    )
     expect(cats.at(-1)).toBe(cat[0])
   })
 })

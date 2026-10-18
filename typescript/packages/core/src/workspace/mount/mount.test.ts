@@ -14,7 +14,7 @@
 import { generic } from '../../commands/builtin/generic_bind/factory.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { command, type Command, type CommandFn } from '../../commands/config.ts'
+import { Command, command, type CommandFn } from '../../commands/config.ts'
 import { CommandSpec, Argument } from '../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
@@ -199,7 +199,7 @@ describe('Mount.runCommand', () => {
         name: 'mutate',
         vfs: 'ram',
         spec: new CommandSpec({
-          arguments: [...(declared ? [new Argument('--version', { action: 'store_true' })] : [])],
+          arguments: [...(declared ? [new Argument(`--${flag}`, { action: 'store_true' })] : [])],
         }),
         write: true,
         fn: (accessor) => {
@@ -212,20 +212,20 @@ describe('Mount.runCommand', () => {
       m.register(cmd)
       const [stdout, io] = await m.runCommand('mutate', [], [], { [flag]: true })
       const output = new TextDecoder().decode(await materialize(stdout))
-      if (declared && flag === 'version') {
-        if (mode === MountMode.READ) {
-          expect(io.exitCode).toBe(1)
-          expect(new TextDecoder().decode(io.stderr as Uint8Array)).toBe(
-            'mutate: read-only mount at /ram/\n',
-          )
-          expect(calls).toEqual([])
-          expect(vfs.store.files.has('/changed')).toBe(false)
-        } else {
-          expect(io.exitCode).toBe(0)
-          expect(output).toBe('custom version\n')
-          expect(calls).toEqual(['handler'])
-          expect(new TextDecoder().decode(vfs.store.files.get('/changed'))).toBe('changed')
-        }
+      // A declared --help is still answered by the command's wrapper, but
+      // the guard reads only the spec, so a read-only mount refuses it.
+      if (declared && mode === MountMode.READ) {
+        expect(io.exitCode).toBe(1)
+        expect(new TextDecoder().decode(io.stderr as Uint8Array)).toBe(
+          'mutate: read-only mount at /ram/\n',
+        )
+        expect(calls).toEqual([])
+        expect(vfs.store.files.has('/changed')).toBe(false)
+      } else if (declared && flag === 'version') {
+        expect(io.exitCode).toBe(0)
+        expect(output).toBe('custom version\n')
+        expect(calls).toEqual(['handler'])
+        expect(new TextDecoder().decode(vfs.store.files.get('/changed'))).toBe('changed')
       } else {
         expect(io.exitCode).toBe(0)
         expect(output).not.toBe('')
@@ -235,9 +235,8 @@ describe('Mount.runCommand', () => {
     },
   )
 
-  it('refuses the writes of a run with no dispatcher', async () => {
-    // The dispatcher is where a write is judged and settled, so a host
-    // running a command straight on its mount, with none, cannot write.
+  it('refuses a generic run with no workspace files', async () => {
+    // A generic reaches files only through its line's own; run bare, none.
     const vfs = new RAMVFS()
     const m = new MountEntry({ prefix: '/rw/', vfs, mode: MountMode.WRITE })
     m.register(generic('tee'))
@@ -252,9 +251,7 @@ describe('Mount.runCommand', () => {
     )
     await materialize(stdout)
     expect(io.exitCode).toBe(1)
-    expect(new TextDecoder().decode(await io.materializeStderr())).toContain(
-      'Operation not supported',
-    )
+    expect(new TextDecoder().decode(await io.materializeStderr())).toBe('tee: no workspace files\n')
     expect(vfs.store.files.has('/f')).toBe(false)
   })
 
@@ -322,13 +319,9 @@ describe('Mount.runCommand', () => {
     [MountMode.WRITE, false],
     [MountMode.WRITE, true],
   ])(
-    'refuses up front only a write command the dispatcher cannot see (%s, path guarded %s)',
-    async (mode, pathGuarded) => {
-      // A path-guarded command's writes go through the guarded op slots,
-      // which refuse each one where it happens, so a read-only mount runs
-      // it like a reader (`gzip -c`, `split -n 1/2`). A write command
-      // that reaches its service some other way has no gate to refuse
-      // it, so the mount refuses it before it runs.
+    'refuses up front only a write command the dispatcher cannot see (%s, builtin %s)',
+    async (mode, builtin) => {
+      // The dispatcher refuses a builtin's writes, not a user command's.
       const m = makeMount(mode)
       const calls: number[] = []
       const [cmd] = command({
@@ -336,16 +329,16 @@ describe('Mount.runCommand', () => {
         vfs: 'ram',
         spec: BASIC_SPEC,
         write: true,
-        pathGuarded,
         fn: (_accessor, paths) => {
           calls.push(paths.length)
           return [new TextEncoder().encode('ran\n'), new IOResult()]
         },
       })
       if (cmd === undefined) throw new Error('missing')
-      m.register(cmd)
+      if (builtin) m.registerBuiltinCommands([cmd])
+      else m.register(cmd)
       const [stdout, io] = await m.runCommand('filter', [PathSpec.fromStrPath('/a')], [], {})
-      if (mode === MountMode.READ && !pathGuarded) {
+      if (mode === MountMode.READ && !builtin) {
         expect(io.exitCode).toBe(1)
         expect(new TextDecoder().decode(io.stderr as Uint8Array)).toBe(
           `filter: read-only mount at ${m.prefix}\n`,
@@ -487,10 +480,9 @@ describe('Mount.revisions', () => {
   })
 })
 
-it('a path-guarded command is still held at its write', async () => {
+it('a builtin command is still held at its write', async () => {
   const vfs = new RAMVFS()
   vfs.store.files.set('/a', new TextEncoder().encode('original'))
-  expect(generic('gzip').pathGuarded).toBe(true)
   const ws = new Workspace(
     { '/ram/': [vfs, MountMode.READ] },
     { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
@@ -679,4 +671,58 @@ describe('handed commands under restrictions', () => {
       await ws.close()
     }
   })
+})
+
+describe('a user write past the dispatcher', () => {
+  const ENC = new TextEncoder()
+  function stamp(throws: boolean): CommandFn {
+    return (accessor) => {
+      ;(accessor as RAMAccessor).store.files.set('/a.txt', ENC.encode('v2\n'))
+      if (throws) throw new Error('half done')
+      return [null, new IOResult()]
+    }
+  }
+
+  // A handler that throws as it is called, before it returns a promise, is
+  // still the runner's to drop the caches after.
+  it.each([
+    [true, false, 0, 'v2\n'],
+    [false, false, 0, 'v1\n'],
+    [true, true, 1, 'v2\n'],
+  ])(
+    "drops only its own mount's caches (write %s, throws %s)",
+    async (write, throws, code, own) => {
+      const one = new RAMVFS()
+      const two = new RAMVFS()
+      for (const [vfs, key] of [
+        [one, '/a.txt'],
+        [two, '/b.txt'],
+      ] as const) {
+        ;(vfs as unknown as { cachesReads: boolean }).cachesReads = true
+        vfs.store.files.set(key, ENC.encode('v1\n'))
+      }
+      const ws = new Workspace(
+        { '/one/': one, '/two/': two },
+        { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
+      )
+      try {
+        ws.mount('/one/').registerCommands([
+          new Command({
+            name: 'stamp',
+            spec: new CommandSpec(),
+            vfs: null,
+            write,
+            fn: stamp(throws),
+          }),
+        ])
+        await ws.shell('cat /one/a.txt /two/b.txt')
+        two.store.files.set('/b.txt', ENC.encode('v2\n'))
+        expect((await ws.shell('cd /one && stamp')).exitCode).toBe(code)
+        expect((await ws.shell('cat /one/a.txt')).stdoutText).toBe(own)
+        expect((await ws.shell('cat /two/b.txt')).stdoutText).toBe('v1\n')
+      } finally {
+        await ws.close()
+      }
+    },
+  )
 })

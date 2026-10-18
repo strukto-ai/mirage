@@ -12,59 +12,49 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 import pytest
 
 from mirage.commands.builtin.generic_bind.archive_io import is_dir_of
-from mirage.commands.config import CommandIO
-from mirage.types import PathSpec
+from mirage.commands.builtin.generic_bind.files import command_files
+from mirage.commands.config import Context
+from mirage.context import reset_mount_gate, set_mount_gate
+from mirage.io import IOResult
+from mirage.types import MountMode, PathSpec
+from mirage.workspace.files import Files
 
 DIR = PathSpec.from_str_path("/d")
 
 
-async def _missing_stat(_accessor, path, _index):
-    raise FileNotFoundError(path.virtual)
+def _probe(stat_error: type[OSError], listed: bool) -> Any:
+    async def dispatch(name: str, path: PathSpec, /, **_kw: Any):
+        if name == "stat":
+            raise stat_error(path.virtual)
+        if not listed:
+            raise FileNotFoundError(path.virtual)
+        return [path.virtual + "/a"], IOResult()
 
-
-async def _refused_stat(_accessor, path, _index):
-    raise PermissionError(path.virtual)
-
-
-async def _listing(_accessor, path, _index):
-    return [path.virtual + "/a"]
-
-
-async def _missing_listing(_accessor, path, _index):
-    raise FileNotFoundError(path.virtual)
-
-
-async def _unused(*_args):
-    raise AssertionError("not used")
-
-
-def _ops(stat, readdir) -> CommandIO:
-    return CommandIO(
-        readdir=readdir,
-        read_bytes=_unused,
-        read_stream=_unused,
-        stat=stat,
-        is_mounted=lambda _a: True,
-    )
+    token = set_mount_gate("/", MountMode.WRITE)
+    try:
+        return is_dir_of(
+            command_files(Context(vfs=Files([], dispatch, ledger=False)))
+        )
+    finally:
+        reset_mount_gate(token)
 
 
 @pytest.mark.asyncio
 async def test_is_dir_of_asks_the_listing_after_a_stat_miss():
-    probe = is_dir_of(_ops(_missing_stat, _listing), None, None)
-    assert await probe(DIR) is True
+    assert await _probe(FileNotFoundError, True)(DIR) is True
 
 
 @pytest.mark.asyncio
 async def test_is_dir_of_answers_no_when_both_channels_miss():
-    probe = is_dir_of(_ops(_missing_stat, _missing_listing), None, None)
-    assert await probe(DIR) is False
+    assert await _probe(FileNotFoundError, False)(DIR) is False
 
 
 @pytest.mark.asyncio
 async def test_is_dir_of_lets_a_refused_stat_through():
-    probe = is_dir_of(_ops(_refused_stat, _listing), None, None)
     with pytest.raises(PermissionError):
-        await probe(DIR)
+        await _probe(PermissionError, True)(DIR)

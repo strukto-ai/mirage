@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.commands.builtin.utils.operands import operand_name
@@ -167,14 +167,3 @@ async def call_read_bytes(
     prefix: str = "",
 ) -> bytes:
     return await read_fn(to_pathspec(path, prefix))
-
-
-async def stream_from_bytes(
-    read_fn: Callable[..., Any],
-    accessor: Any,
-    path: Any,
-    index: Any = None,
-    prefix: str = "",
-) -> AsyncIterator[bytes]:
-    # CommandIO-level adapter: raw ``(accessor, path, index)`` shape.
-    yield await read_fn(accessor, to_pathspec(path, prefix), index)

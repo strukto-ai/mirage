@@ -25,6 +25,7 @@ import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { quoteText } from '../../quote.ts'
 import { EOVERFLOW_REASON, INT_MAX, signedDecimal } from '../utils/strtol.ts'
+import { mountRoot } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { ignoreBOM: true })
@@ -195,7 +196,7 @@ export async function csplitGeneric(
   // as it formed it (`csplit: xx00`), and stops at the first one it cannot
   // create, -k or not. Mirrors csplit.py.
   const typedPrefix = parsed.prefix
-  const mountPrefix = ctx.mountPrefix ?? ''
+  const mountPrefix = mountRoot(ctx)
   const first = paths[0]
   const source =
     first !== undefined && first.rawPath !== '-' ? stream(first) : (ctx.stdin ?? new Uint8Array())

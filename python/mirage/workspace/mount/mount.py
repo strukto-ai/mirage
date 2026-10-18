@@ -26,7 +26,7 @@ from contextlib import (
 )
 from typing import Any, Callable, cast
 
-from mirage.accessor.base import Accessor
+from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX
 from mirage.cache.index.config import IndexConfig, LookupStatus
@@ -36,10 +36,6 @@ from mirage.cache.index.ram import ListingCheckStore
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.cache.types import WriteContext
-from mirage.commands.builtin.generic_bind.adapter import (
-    command_io,
-    dispatched_io,
-)
 from mirage.commands.builtin.utils.limit import (
     run_with_timeout,
     with_pull_timeout,
@@ -50,21 +46,23 @@ from mirage.commands.builtin.utils.paths import (
     link_follow,
     vfs_stat_path,
 )
+from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import (
     Command,
+    CommandFnResult,
     Context,
-    registered_commands,
 )
-from mirage.commands.errors import UsageError
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.constants import (
     STDIN_DASH_COMMANDS,
     STDIN_DASH_LEADING,
 )
 from mirage.commands.spec.flag_view import FlagBag
-from mirage.commands.spec.standard import has_injected_version
+from mirage.commands.spec.standard import (
+    has_injected_help,
+    has_injected_version,
+)
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.context import (
     Caller,
     bind_caller,
@@ -84,17 +82,15 @@ from mirage.core.generic.rewrite import (
     truncate_by_rewrite,
 )
 from mirage.errors.fs import ebusy, enotdir, enotsup
-from mirage.errors.render import format_fs_error
-from mirage.errors.types import CommandTimeoutError
-from mirage.io.errors import PipeClosed
 from mirage.io.stream import OutputStream, close_quietly
-from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.io.types import ByteSource, CommandOutput, IOResult, materialize
 from mirage.observe.context import with_mount_context, with_revisions
 from mirage.policy import resolve_limit
 from mirage.runtime.binding import restricted_mounts_for
 from mirage.runtime.python.host.host_io import host_io, with_host_io
 from mirage.shell.bytes import encode_text
 from mirage.types import (
+    DirListing,
     FileStat,
     FileType,
     Limit,
@@ -110,15 +106,24 @@ from mirage.types import (
 from mirage.utils.activity import Activity
 from mirage.utils.context_scope import ContextScope
 from mirage.utils.filetype import get_extension
+from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.ids import uuid7
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import norm
 from mirage.utils.ranges import is_unsatisfiable_range, slice_window
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.call import declared
+from mirage.vfs.call import declared, declared_calls
 from mirage.vfs.constants import WRITE_EFFECTS
 from mirage.vfs.types import Effect, SearchQuery
 from mirage.view.types import StatPath
+from mirage.workspace.dispatcher.constants import CALLS
+from mirage.workspace.executor.command.handler import (
+    answered,
+    call_leaf,
+    cli_voice,
+    mount_voice,
+    run_handler,
+)
 from mirage.workspace.mount.constants import HANDED, STORED_OPS
 from mirage.workspace.mount.listing import (
     beyond_window,
@@ -139,38 +144,6 @@ from mirage.workspace.mount.write_policy import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-async def _command_output(
-    source: AsyncIterator[bytes],
-    io: IOResult,
-    command: str,
-    paths: list[PathSpec],
-) -> AsyncIterator[bytes]:
-    """Keep a deferred backend failure on its command, after any emitted bytes.
-
-    Args:
-        source (AsyncIterator[bytes]): mount-owned output.
-        io (IOResult): result finalized when the stream is exhausted.
-        command (str): command whose diagnostic and exit code apply.
-        paths (list[PathSpec]): operands for diagnostic spelling.
-    """
-    try:
-        async for chunk in source:
-            yield chunk
-    except (CommandTimeoutError, PipeClosed):
-        raise
-    except Exception as exc:
-        logger.debug("%s output failed", command, exc_info=True)
-        existing = await materialize(io.stderr) or b""
-        io.stderr = existing + format_fs_error(command, exc, paths)
-        io.exit_code = (
-            exc.exit_code
-            if isinstance(exc, UsageError)
-            else read_fail_exit_code(command, exc)
-        )
-    finally:
-        await close_quietly(source)
 
 
 def _wrap_mount_streams(
@@ -324,6 +297,60 @@ def _handed_on(
     return handed
 
 
+async def _tree_root(
+    accessor: Accessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
+) -> CommandFnResult:
+    """A command tree's root, which never runs: the executor walks the
+    tree and runs the leaf the line names (``MountEntry.run_leaf``).
+
+    Args:
+        accessor (Accessor): the mount's accessor.
+        paths (list[PathSpec]): path operands.
+        texts (list[str]): text operands.
+        ctx (Context): the command's context.
+    """
+    name = ctx.spec.name if ctx.spec is not None else "?"
+    raise RuntimeError(f"{name}: a command tree runs the leaf its walk names")
+
+
+def _tree_command(cli: CLI) -> Command:
+    """The command a mount registers for a command tree: its root, under
+    the tree's name.
+
+    The tree runs on the mount's accessor, so it declares none of an
+    installation's own: no config, no accessor, no script, no runtime.
+
+    Args:
+        cli (CLI): the tree.
+
+    Raises:
+        ValueError: The tree declares an installation's own setting.
+    """
+    name = cli.spec.name
+    for setting, own in (
+        ("config_model", cli.config_model is not None),
+        ("accessor", cli.accessor is not NOOPAccessor),
+        ("script", cli.script is not None),
+        ("runtime", cli.runtime is not None),
+    ):
+        if own:
+            raise ValueError(
+                f"cli {name!r}: a command tree on a mount runs on the "
+                f"mount's accessor; it cannot declare {setting}"
+            )
+    return Command(
+        name=name,
+        spec=cli.spec,
+        vfs=None,
+        filetype=None,
+        fn=_tree_root,
+        write=any(handler.write for handler in cli.handlers.values()),
+    )
+
+
 def _named_spec(cmd: Command, cmd_name: str) -> CommandSpec:
     """The grammar a handler sees at ``ctx.spec``, named for the command
     it runs as (python3 or python, js or node).
@@ -388,6 +415,20 @@ async def _read_window(
     return slice_window(data, offset, size)
 
 
+async def _listed_paths(vfs: BaseVFS, path: PathSpec) -> list[str]:
+    """A VFS's listing as the paths a glob walks, listed bare with no
+    index to keep its rows: each row names a child of ``path``.
+
+    Args:
+        vfs (BaseVFS): the VFS.
+        path (PathSpec): the directory.
+    """
+    listed = await vfs.readdir(path)
+    rows = listed.entries if isinstance(listed, DirListing) else listed
+    base = (path.dir if path.pattern else path).virtual.rstrip("/")
+    return [f"{base}/{row.name}" for row in rows]
+
+
 class MountEntry:
     """A mounted VFS with command and op dispatch.
 
@@ -428,8 +469,16 @@ class MountEntry:
         self.mount_id = uuid7()
         self.prefix = prefix
         self.vfs = vfs
-        # The command tier's table, built once from the VFS's functions.
-        self.io = command_io(vfs)
+        # The functions the VFS answers itself, read once when it is
+        # mounted: each dispatcher call it defines, its own ``@vfs_call``
+        # functions among them, and ``read_range`` when a read fetches only
+        # the range asked for. A command asks its mount's row
+        # (``MountView.answers``).
+        self.calls = frozenset(
+            name
+            for name in {*CALLS, *declared_calls(type(vfs))}
+            if vfs.supports(name)
+        ) | ({"read_range"} if vfs.reads_ranges else set())
         self.mode = mode
         # How this mount's cached bytes are revalidated. Read by the
         # gate (Reconciler.may_serve_cached) and by the cache write path
@@ -480,7 +529,13 @@ class MountEntry:
         # loader.
         self.revisions: dict[str, str] = {}
         self._cmds: dict[tuple[Any, ...], Command] = {}
+        # The (name, filetype) keys a user command holds: one registered
+        # through ``register`` or ``register_commands`` rather than one of
+        # mirage's own, which the registry registers privately.
+        self._user_keys: set[tuple[Any, ...]] = set()
         self._general_cmds: dict[str, Command] = {}
+        # name -> (the root command registered, the tree it walks)
+        self._trees: dict[str, tuple[Command, CLI]] = {}
         self._cmd_specs: dict[str, CommandSpec] = {}
         # first token -> descending token counts of multi-word command
         # names (e.g. "gws docs documents get"); backs longest-prefix
@@ -552,50 +607,28 @@ class MountEntry:
     async def _glob(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> list[PathSpec]:
-        """Expand one pattern through the VFS's ``readdir`` and ``stat``.
+        """Expand one pattern through the VFS's ``readdir`` and ``stat``,
+        over this mount's listings where it keeps them.
 
         Args:
             path (PathSpec): the pattern, keyed below the mount.
             index (IndexCacheStore): the mount's index.
         """
-        io = self.io
+        readdir: Callable[[PathSpec], Awaitable[list[str]]]
+        stat: Callable[[PathSpec], Awaitable[FileStat]]
         if self._lists:
-            io = dataclasses.replace(
-                io, readdir=self._listed_slot, stat=self._stat_slot
+            readdir = functools.partial(self._listed, index=index)
+            stat = functools.partial(self._stat, index)
+        else:
+            readdir = functools.partial(_listed_paths, self.vfs)
+            own: Callable[..., Awaitable[FileStat]] = self.vfs.stat
+            stat = (
+                functools.partial(own, index=index)
+                if _takes_index(own)
+                else own
             )
-        return await io.resolve_glob(self.vfs.accessor, [path], index)
-
-    async def _listed_slot(
-        self,
-        accessor: Accessor,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        nofollow: bool = False,
-    ) -> list[str]:
-        """The command tier's ``readdir`` over this mount's listings.
-
-        Args:
-            accessor (Accessor): unused; the VFS holds its own.
-            path (PathSpec): the directory, keyed below the mount.
-            index (IndexCacheStore): the mount's index.
-            nofollow (bool): unused; a VFS holds no link.
-        """
-        return await self._listed(path, index)
-
-    async def _stat_slot(
-        self,
-        accessor: Accessor,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> FileStat:
-        """The command tier's ``stat`` over this mount's listings.
-
-        Args:
-            accessor (Accessor): unused; the VFS holds its own.
-            path (PathSpec): the path, keyed below the mount.
-            index (IndexCacheStore): the mount's index.
-        """
-        return await self._stat(index, path)
+        resolve = make_resolve_glob(readdir, self.vfs.max_glob_matches, stat)
+        return await resolve([path])
 
     @property
     def index(self) -> IndexCacheStore:
@@ -630,12 +663,52 @@ class MountEntry:
     # ── command registration ──────────────────────────
 
     def register(self, cmd: Command) -> None:
-        """Register a VFS-specific command."""
+        """Register a user command for this mount's VFS.
+
+        Args:
+            cmd (Command): the command.
+        """
+        self._put(cmd)
+        self._user_keys.add((cmd.name, cmd.filetype))
+
+    def _put(self, cmd: Command) -> None:
+        """Hold ``cmd`` under its name and filetype.
+
+        Args:
+            cmd (Command): the command.
+        """
         key = (cmd.name, cmd.filetype)
         self._cmds[key] = cmd
         if cmd.spec is not None:
             self._cmd_specs[cmd.name] = cmd.spec
         self._prefix_index = None
+
+    def _register_builtins(self, fns: Iterable[Any]) -> None:
+        """Register mirage's own commands for this mount's VFS (a builtin
+        backend's command module), which run as builtins: the dispatcher
+        gates each write they make, in their own GNU voice.
+
+        Args:
+            fns (iterable): Decorated functions or Command values.
+
+        Raises:
+            ValueError: If a command's VFS doesn't match this mount's VFS.
+        """
+        commands, _trees = self._accepted(fns)
+        for rc in commands:
+            self._put(rc)
+            self._user_keys.discard((rc.name, rc.filetype))
+
+    def _is_user_command(self, cmd: Command) -> bool:
+        """Whether ``cmd`` is a user command: one a VFS was handed
+        (``vfs.commands()``) or one registered later
+        (``ws.mount(p).register_commands``), rather than mirage's own.
+
+        Args:
+            cmd (Command): the handler about to run.
+        """
+        key = (cmd.name, cmd.filetype)
+        return key in self._user_keys and self._cmds.get(key) is cmd
 
     def register_general(
         self,
@@ -681,6 +754,27 @@ class MountEntry:
             if name == cmd_name:
                 return rc
         return None
+
+    def may_write(self, cmd_name: str, extension: str | None = None) -> bool:
+        """Whether a run of ``cmd_name`` on an operand with ``extension``
+        can reach a handler that declares it may write.
+
+        Every handler the run's cascade tries counts, the filetype one
+        first, since one that declines hands the run to the next. The
+        directory probe a run makes (``_pick_handlers``) is not made, so
+        a directory named like a file counts its filetype handler too.
+
+        Args:
+            cmd_name (str): command name.
+            extension (str | None): the operand's extension; None for
+                none.
+        """
+        return any(
+            cmd.write
+            for cmd in self._resolve_cascade(
+                cmd_name, extension, self._cmds, self._general_cmds
+            )
+        )
 
     def longest_command_match(self, words: list[str]) -> int:
         """How many leading words form a registered command name here.
@@ -741,28 +835,61 @@ class MountEntry:
         return out
 
     def register_commands(self, fns: Iterable[Any]) -> None:
-        """Register decorated functions or command definitions.
+        """Register decorated functions, command definitions or command
+        trees as user commands.
+
+        A user command reaches its backend through its own handle, past
+        the dispatcher, so it does not run while the session restricts
+        this mount, and a write command is refused before it runs on a
+        read-only one. A ``CLI`` serves its verbs as a command tree on
+        this mount, under its root's name: a line naming it walks the
+        tree as an installed CLI's does and runs the leaf on this mount's
+        accessor (``run_leaf``).
 
         Args:
-            fns (iterable): Decorated functions or Command
-                values.
+            fns (iterable): Decorated functions, Command values or CLI
+                trees.
+
+        Raises:
+            ValueError: If a command's VFS doesn't match this mount's VFS,
+                or a tree declares an installation's own setting.
+        """
+        commands, trees = self._accepted(fns)
+        for rc in commands:
+            self.register(rc)
+        for root, cli in trees:
+            self._trees[root.name] = (root, cli)
+
+    def _accepted(
+        self, fns: Iterable[Any]
+    ) -> tuple[list[Command], list[tuple[Command, CLI]]]:
+        """The registrations among ``fns`` that belong to this mount's VFS.
+
+        Grouped by name, because a family table fans out over sibling VFS
+        names, so most entries a mount is handed may belong to a sibling
+        and are simply skipped. A name whose entries name only other VFS
+        is the real mistake (a table built for the wrong backend), and
+        that still raises.
+
+        Args:
+            fns (iterable): Decorated functions or Command values.
 
         Raises:
             ValueError: If a command's VFS doesn't match this mount's VFS.
         """
         pname = self.vfs.name
-        # Grouped by name, because a family table fans out over sibling
-        # VFS names, so most entries a mount is handed may belong to a
-        # sibling and are simply skipped. A name whose entries name only
-        # other VFS is the real mistake (a table built for the wrong
-        # backend), and that still raises.
         cmd_groups: dict[str, tuple[list[Command], set[str]]] = {}
+        trees: list[tuple[Command, CLI]] = []
         for fn in fns:
-            rcs: list[Command] = (
-                [fn]
-                if isinstance(fn, Command)
-                else getattr(fn, "_registered_commands", [])
-            )
+            rcs: list[Command]
+            if isinstance(fn, CLI):
+                root = _tree_command(fn)
+                trees.append((root, fn))
+                rcs = [root]
+            elif isinstance(fn, Command):
+                rcs = [fn]
+            else:
+                rcs = getattr(fn, "_registered_commands", [])
             for rc in rcs:
                 keep, attempted = cmd_groups.setdefault(rc.name, ([], set()))
                 if rc.vfs is None or rc.vfs == pname:
@@ -775,9 +902,22 @@ class MountEntry:
                     f"command {name!r} is for VFS(s) "
                     f"{sorted(attempted)!r}, not {pname!r}"
                 )
-        for keep, _attempted in cmd_groups.values():
-            for rc in keep:
-                self.register(rc)
+        commands = [
+            rc for keep, _attempted in cmd_groups.values() for rc in keep
+        ]
+        return commands, trees
+
+    def cli_for(self, cmd_name: str) -> CLI | None:
+        """The command tree this mount serves under ``cmd_name``, None
+        when the name resolves to any other command here.
+
+        Args:
+            cmd_name (str): command name.
+        """
+        tree = self._trees.get(cmd_name)
+        if tree is None or self.resolve_command(cmd_name) is not tree[0]:
+            return None
+        return tree[1]
 
     def commands(self) -> dict[str, list[str | None]]:
         """List registered commands grouped by filetype variants.
@@ -923,9 +1063,9 @@ class MountEntry:
                     exit_code=127,
                     stderr=encode_text(f"{cmd_name}: command not found"),
                 )
-            paths = self._keyed_paths(cmd_name, paths)
+            keyed = self._keyed_paths(cmd_name, paths)
             flags = self._keyed_flags(flag_kwargs)
-            run_ctx = self._command_ctx(cmd_name, flags, ctx, paths)
+            run_ctx = self._command_ctx(flags, ctx)
             with self._command_scope(run_ctx):
                 for cmd in handlers:
                     refusal = self._read_only_refusal(
@@ -933,11 +1073,17 @@ class MountEntry:
                     ) or self._unenforced_refusal(cmd_name, cmd)
                     if refusal is not None:
                         return None, refusal
-                    result = await self._run_handler(
-                        cmd_name, cmd, paths, texts, run_ctx, limit_override
+                    result = await self._run_one(
+                        cmd_name,
+                        cmd,
+                        keyed,
+                        texts,
+                        run_ctx,
+                        limit_override,
+                        paths,
                     )
                     if result is not None:
-                        return self._wrap_output(cmd_name, cmd, paths, result)
+                        return result
                 return None, IOResult()
 
     def write_context(self) -> WriteContext | None:
@@ -1065,23 +1211,16 @@ class MountEntry:
         return flags
 
     def _command_ctx(
-        self,
-        cmd_name: str,
-        flags: dict[str, FlagValue],
-        ctx: Context,
-        paths: list[PathSpec],
+        self, flags: dict[str, FlagValue], ctx: Context
     ) -> Context:
-        """The context a handler reads: the workspace's, with what only
-        this mount knows added (mirrors Mount.runCommand).
+        """The context a handler reads: the workspace's, its flags and
+        working directory keyed below this mount (mirrors
+        Mount.runCommand).
 
         Args:
-            cmd_name (str): command name.
             flags (dict[str, FlagValue]): the keyed flags.
             ctx (Context): the workspace's context for the command.
-            paths (list[PathSpec]): the command's operands, which its
-                whole reads warm ahead of themselves.
         """
-        mount_prefix = self.prefix.rstrip("/")
         cwd = ctx.cwd.virtual
         return dataclasses.replace(
             ctx,
@@ -1090,28 +1229,21 @@ class MountEntry:
                 virtual=cwd,
                 directory=cwd,
                 resolved=False,
-                vfs_path=mount_key(cwd, mount_prefix),
-            ),
-            mount_prefix=mount_prefix,
-            index=self.index,
-            io=dataclasses.replace(
-                dispatched_io(self.io, dispatch_of(ctx), paths),
-                access=(
-                    ctx.session.access() if ctx.session is not None else None
-                ),
+                vfs_path=mount_key(cwd, self.prefix.rstrip("/")),
             ),
         )
 
     @contextmanager
     def _command_scope(self, ctx: Context) -> Iterator[None]:
-        """Bind what a handler's backend calls read from the context.
+        """Bind what a handler's calls read from the context.
 
         The recorder's mount, the snapshot revision pins, the mount's
-        cache manager and write context; the mode the command tier's mode
-        guard holds each write to (its own region's mode); and what the
-        command tier's walk guard proves an operand's `.` and `..` with:
-        the handler reaches its backend past the dispatcher, so the
-        dispatcher's stat and link follow are bound here.
+        cache manager and write context; the mount the command runs on
+        (``mount``), which tells its files' calls a run on one mount from
+        one across mounts and names the mount whose facts they ask; and
+        the dispatcher's stat and link follow, which a builder proves an
+        operand's `.` and `..` with before it makes what the walk names
+        (``mkdir -p``).
 
         Args:
             ctx (Context): the handler's context.
@@ -1145,32 +1277,38 @@ class MountEntry:
         cmd_name: str,
         cmd: Command,
         flags: dict[str, FlagValue],
+        served: Command | None = None,
     ) -> IOResult | None:
-        """Refuse an unseen write command on a read-only mount.
+        """Refuse a user write command on a read-only mount.
 
-        A command whose I/O runs under the path guards is refused where
-        it writes, because only the write knows whether a line writes:
+        Mirage's own commands are refused where they write, by the
+        dispatcher, because only the write knows whether a line writes:
         `gzip -c`, `tar -t` and `split -n 1/2` read a read-only mount like
         any reader, and `gzip f` is refused at the write of `f.gz`, in
-        gzip's own GNU voice. A write command that reaches its service
-        some other way (a custom backend's own verb) is refused here,
-        before it runs, because no gate would see its write.
+        gzip's own GNU voice. A user write command reaches its service
+        through its own handle (``_is_user_command``), so it is refused
+        here, before it runs, because no gate would see its write.
         strongest_mode_under, not effective_mode: a mount whose only
         writable region is a show entry still runs it. Only wrapper-owned
-        responses (help, an injected version) bypass it. The trailing
-        newline is load-bearing: stderr accumulates across a line.
+        responses (an injected help or version) bypass it: a handler
+        that declares ``--help`` itself is handed the flag and runs. The
+        trailing newline is load-bearing: stderr accumulates across a
+        line.
 
         Args:
             cmd_name (str): command name.
             cmd (Command): the handler about to run.
             flags (dict[str, FlagValue]): the keyed flags.
+            served (Command | None): the command this mount serves it
+                under, which says whether it is a user command: a tree's
+                root for one of its leaves; None for ``cmd`` itself.
         """
-        info_only = flags.get("help") is True or (
-            flags.get("version") is True and has_injected_version(cmd.spec)
-        )
+        info_only = (
+            flags.get("help") is True and has_injected_help(cmd.spec)
+        ) or (flags.get("version") is True and has_injected_version(cmd.spec))
         if (
             cmd.write
-            and not cmd.path_guarded
+            and self._is_user_command(served or cmd)
             and not info_only
             and strongest_mode_under(self.prefix, self.mode) == MountMode.READ
         ):
@@ -1185,28 +1323,23 @@ class MountEntry:
     def _unenforced_refusal(
         self, cmd_name: str, cmd: Command
     ) -> IOResult | None:
-        """Refuse a command the VFS was handed while the session restricts
-        this mount.
+        """Refuse a user command while the session restricts this mount.
 
-        Such a command reaches its backend through its own handle, past
-        the dispatcher, so no hide, path rule or mode cap sees what it
-        reads or writes; like a runtime that cannot enforce them, it does
-        not run. The handle reaches the whole store, a part another mount
-        shadows included, so a restriction anywhere below the prefix
-        counts. The commands a builtin backend serves are mirage's own
+        A user command (``_is_user_command``: one the VFS was handed, or
+        one registered on the mount later) reaches its backend through its
+        own handle, past the dispatcher, so no hide, path rule or mode cap
+        sees what it reads or writes; like a runtime that cannot enforce
+        them, it does not run. The handle reaches the whole store, a part
+        another mount shadows included, so a restriction anywhere below
+        the prefix counts. Mirage's own commands (the generic and general
+        ones, a builtin backend's) read and write through the dispatcher,
         and run.
 
         Args:
             cmd_name (str): command name.
             cmd (Command): the handler about to run.
         """
-        key = (cmd.name, cmd.filetype)
-        handed = {
-            (rc.name, rc.filetype)
-            for rc in registered_commands(self.vfs.commands())
-            if rc.vfs is None or rc.vfs == self.vfs.name
-        }
-        if key not in handed or self._cmds.get(key) is not cmd:
+        if not self._is_user_command(cmd):
             return None
         session = current_caller().session
         if session is None or norm(self.prefix) not in {
@@ -1221,7 +1354,7 @@ class MountEntry:
             ),
         )
 
-    async def _run_handler(
+    async def _run_one(
         self,
         cmd_name: str,
         cmd: Command,
@@ -1229,13 +1362,19 @@ class MountEntry:
         texts: list[str],
         ctx: Context,
         limit_override: Limit | None,
-    ) -> Any:
-        """Run one handler under the mount-resolved timeout.
+        typed: list[PathSpec],
+    ) -> CommandFnResult:
+        """Run one handler under the mount-resolved timeout, through the
+        runner a CLI leaf shares, in this mount's voice.
 
         The dispatch-level guard only sees default limits (the mount is
         unknown before routing), so the mount-resolved timeout must also
         bound the command body: eager commands do their work inside
-        cmd.fn, where the stream-consumption guard never runs.
+        cmd.fn, where the stream-consumption guard never runs. A user
+        command that declares a write reaches its backend through its
+        own handle, past the dispatcher's per-path invalidation, so this
+        mount drops its caches once it has run; mirage's own commands
+        write through the dispatcher and drop nothing.
 
         Args:
             cmd_name (str): command name.
@@ -1244,61 +1383,139 @@ class MountEntry:
             texts (list[str]): positional text args.
             ctx (Context): the handler's context.
             limit_override (Limit | None): the caller's output limit.
+            typed (list[PathSpec]): the operands as the line typed them,
+                which a file error names.
         """
-        resolved_limit = resolve_limit(
+        limit = resolve_limit(
             cmd_name,
             command_default=cmd.limit,
             mount_override=limit_override or self.command_limits.get(cmd_name),
         )
-        cmd_timeout = (
-            resolved_limit.timeout_seconds
-            if resolved_limit is not None
-            else None
-        )
         ctx = dataclasses.replace(ctx, spec=_named_spec(cmd, cmd_name))
         with host_io():
-            return await run_with_timeout(
+            return await run_handler(
                 cmd.fn(self.vfs.accessor, paths, texts, ctx),
-                cmd_timeout,
                 cmd_name,
+                limit,
+                Producer(
+                    command=cmd_name,
+                    prefixes=(self.prefix,),
+                    declared=cmd.limit,
+                ),
+                mount_voice(cmd_name, typed),
+                drop=(
+                    self.drop_caches
+                    if cmd.write and self._is_user_command(cmd)
+                    else None
+                ),
+                scope=self._streams,
             )
 
-    def _wrap_output(
-        self,
-        cmd_name: str,
-        cmd: Command,
-        paths: list[PathSpec],
-        result: Any,
-    ) -> tuple[ByteSource | None, IOResult]:
-        """Frame a handler's answer as this mount's command output.
+    def _streams(self, result: CommandOutput) -> CommandOutput:
+        """Bind this mount's recorder, revisions and activity to an
+        answer's stream, which runs after the handler's frame is gone.
 
         Args:
-            cmd_name (str): command name.
-            cmd (Command): the handler that answered.
-            paths (list[PathSpec]): the keyed path operands.
-            result (Any): the handler's ``(stream, io)`` answer.
+            result (CommandOutput): the handler's ``(stream, io)``.
         """
-        stream, io = _wrap_mount_streams(
+        return _wrap_mount_streams(
             result,
             self.revisions or None,
             self.mount_id,
             self.activity,
         )
-        io.producer = Producer(
-            command=cmd_name,
-            prefixes=(self.prefix,),
-            declared=cmd.limit,
+
+    async def run_leaf(
+        self,
+        prog: str,
+        cli: CLI,
+        handler: CLIHandler,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+        limit: Limit | None,
+    ) -> CommandFnResult:
+        """Run one leaf of a command tree this mount serves.
+
+        The executor walked the line and parsed the leaf's words, as it
+        does an installed CLI's; the leaf runs here as a command does: on
+        this mount's accessor, in its scope, under the read-only refusal
+        for its own ``write`` and, being a user command that holds the
+        raw handle, the refusal a restricting session gets. Its failures
+        speak in a CLI's voice.
+
+        Args:
+            prog (str): the head and the verb path.
+            cli (CLI): the tree.
+            handler (CLIHandler): the leaf's execution and policy.
+            paths (list[PathSpec]): the leaf's path operands.
+            texts (list[str]): the leaf's text operands.
+            ctx (Context): the leaf's context.
+            limit (Limit | None): the resolved limit.
+        """
+        root = self.resolve_command(cli.spec.name)
+        fn = handler.fn
+        if fn is None or root is None:
+            raise RuntimeError(f"{prog}: no command tree serves it here")
+        leaf = Command(
+            name=prog,
+            spec=ctx.spec if ctx.spec is not None else cli.spec,
+            vfs=None,
+            filetype=None,
+            fn=fn,
+            write=handler.write,
+            limit=handler.limit,
         )
-        if stream is not None and not isinstance(stream, bytes):
+        async with self.use():
+            keyed = self._keyed_paths(prog, paths)
+            flags = self._keyed_flags(FlagBag(ctx.flags))
+            run_ctx = self._command_ctx(flags, ctx)
+            with self._command_scope(run_ctx):
+                # No flag here is answered for the leaf: walk_leaf answered
+                # the tree's own help, and the leaf is handed the rest.
+                refusal = self._read_only_refusal(
+                    prog, leaf, {}, root
+                ) or self._unenforced_refusal(prog, root)
+                if refusal is not None:
+                    return None, refusal
+                with host_io():
+                    return await run_handler(
+                        answered(
+                            call_leaf(
+                                fn, self.vfs.accessor, keyed, texts, run_ctx
+                            )
+                        ),
+                        prog,
+                        limit,
+                        Producer(
+                            command=prog,
+                            prefixes=(self.prefix,),
+                            declared=handler.limit,
+                        ),
+                        cli_voice(prog),
+                        drop=(
+                            self.drop_caches
+                            if handler.write and self._is_user_command(root)
+                            else None
+                        ),
+                        scope=self._streams,
+                    )
 
-            async def close() -> None:
-                await close_quietly(result[0])
-                await close_quietly(stream)
+    async def drop_caches(self) -> None:
+        """Drop this mount's cached listings and bodies after a write that
+        went past the dispatcher.
 
-            return OutputStream(
-                _command_output(stream, io, cmd_name, paths), close
-            ), io
-        return stream, io
+        Both caches go, because the two hide different writes: a stale
+        listing hides a create or a delete, a stale body an edit. The
+        index is invalidated rather than cleared: a cleared index reads
+        exactly like one that was never filled, so a backend whose index
+        *is* its listing (github seeds the whole tree once) cannot tell
+        the drop from an empty repository and reports the mount as gone.
+        Expiring keeps that distinction and the next read refetches.
+        """
+        await self.index.invalidate()
+        if self.cache_manager is not None:
+            await self.cache_manager.drop_prefix()
 
     def answers_at(self, name: str, path: str) -> bool:
         """Report whether an op would resolve for a path on this mount.
@@ -2112,7 +2329,19 @@ class MountEntry:
                 filetype = get_extension(virtual)
             levels = self._callers(name, filetype)
             if not levels:
-                raise enotsup(str(self.vfs.name), name, virtual)
+                # A copy only reads its source, so the path it is refused
+                # at is the destination it would have made.
+                mark = declared(type(self.vfs), name)
+                dst = kwargs.get("dst")
+                raise enotsup(
+                    str(self.vfs.name),
+                    name,
+                    dst
+                    if mark is not None
+                    and mark.effect is Effect.COPY
+                    and isinstance(dst, PathSpec)
+                    else virtual,
+                )
             self.require_writable(
                 name, PathSpec.from_str_path(virtual), kwargs.values()
             )

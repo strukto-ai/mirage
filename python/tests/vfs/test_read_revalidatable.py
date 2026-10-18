@@ -52,9 +52,6 @@ import mirage.core.s3.read as s3_read
 import mirage.core.s3.stream as s3_stream
 from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
 from mirage.cache.index.ram import ListingCheckStore
-from mirage.commands.builtin.generic_bind.adapter import command_io
-from mirage.commands.builtin.utils.wrap import stream_from_bytes
-from mirage.commands.config import CommandIO
 from mirage.core.box.readdir import readdir as box_readdir
 from mirage.core.dropbox.readdir import readdir as dropbox_readdir
 from mirage.core.gdrive.readdir import readdir as gdrive_readdir
@@ -64,6 +61,7 @@ from mirage.core.hf_hub.readdir import readdir as hf_readdir
 from mirage.observe.context import OpTimer, active_recorder
 from mirage.observe.record import OpRecord
 from mirage.types import FileStat, MountMode, PathSpec, ReadPolicy, ReadSpec
+from mirage.utils.filetype import get_extension
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gdocs.doc_entry import make_filename as doc_filename
 from mirage.vfs.gdocs.gdocs import GDocsVFS
@@ -222,6 +220,42 @@ COMMANDS = {
 SLOTS = {"bytes": "bytes", "stream": "stream", "partial": "stream"}
 
 
+def _with_index(
+    fn: Callable[..., Any], index: IndexCacheStore | None
+) -> Callable[..., Any]:
+    """``fn`` handed ``index`` where it takes one, as a mount hands it."""
+    if index is None or "index" not in signature(fn).parameters:
+        return fn
+    return functools.partial(fn, index=index)
+
+
+async def _direct_read(
+    vfs: BaseVFS, path: PathSpec, index: IndexCacheStore | None
+) -> bytes:
+    """A whole read straight from the VFS: its stored bytes, or the
+    rendering of a VFS whose stored form is the rendering."""
+    renderer = (
+        None
+        if vfs.supports("read")
+        else vfs.renderers.get(get_extension(path.virtual) or "")
+    )
+    fn = vfs.read if renderer is None else getattr(vfs, renderer)
+    data: bytes = await _with_index(fn, index)(path)
+    return data
+
+
+async def _direct_stream(
+    vfs: BaseVFS, path: PathSpec, index: IndexCacheStore | None
+) -> AsyncIterator[bytes]:
+    """A streamed read straight from the VFS, its whole read where it has
+    no stream of its own."""
+    if vfs.supports("read_stream"):
+        async for chunk in _with_index(vfs.read_stream, index)(path):
+            yield chunk
+        return
+    yield await _direct_read(vfs, path, index)
+
+
 @dataclass(frozen=True)
 class Fake:
     vfs: BaseVFS
@@ -244,18 +278,8 @@ class Fake:
     # calls are handed it, as the mount hands it.
     readdir: ListFn | None = None
 
-    @property
-    def io(self) -> CommandIO:
-        return command_io(self.vfs)
-
     def slot(self, row: str) -> str:
         return SLOTS[row] if self.stream_mod is not None else "bytes"
-
-    def args(self) -> tuple:
-        return () if self.index is None else (self.index,)
-
-    def stat_args(self) -> tuple:
-        return self.args() if self.stat_indexed else ()
 
     async def handed(
         self, fn: Callable[..., Any], path: PathSpec
@@ -268,14 +292,14 @@ class Fake:
         if self.readdir is not None:
             read = self.vfs.read
             return await read(path, **await self.handed(read, path))
-        return await self.io.read_bytes(self.vfs.accessor, path, *self.args())
+        return await _direct_read(self.vfs, path, self.index)
 
     async def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
         if self.readdir is not None:
             read_stream = self.vfs.read_stream
             stream = read_stream(path, **await self.handed(read_stream, path))
         else:
-            stream = self.io.read_stream(self.vfs.accessor, path, *self.args())
+            stream = _direct_stream(self.vfs, path, self.index)
         async for chunk in stream:
             yield chunk
 
@@ -283,7 +307,8 @@ class Fake:
         if self.readdir is not None:
             stat = self.vfs.stat
             return await stat(path, **await self.handed(stat, path))
-        return await self.io.stat(self.vfs.accessor, path, *self.stat_args())
+        index = self.index if self.stat_indexed else None
+        return await _with_index(self.vfs.stat, index)(path)
 
 
 # The store each driver's mount runs under, filled when a fresh workspace
@@ -1197,9 +1222,8 @@ def _wires_write(name: str) -> bool:
 
 
 def _writable_names() -> set[str]:
-    # Derived from the registry and each backend's wired write slot (the
-    # CommandIO the spec generator reads), not listed: a declarer that gains
-    # a write op joins the write rows.
+    # Derived from the registry and each backend's own write function,
+    # not listed: a declarer that gains a write joins the write rows.
     return {name for name in _declared() if _wires_write(name)}
 
 
@@ -1570,9 +1594,6 @@ def test_a_synthesized_stream_is_the_read_it_records_through():
     # otherwise hide behind stream_mod=None.
     vfs = vfs_over(GDocsVFS, None)
     assert not vfs.supports("read_stream")
-    stream = command_io(vfs).read_stream
-    assert isinstance(stream, functools.partial)
-    assert stream.func is stream_from_bytes
 
 
 def test_the_contract_goes_red_on_github_stamping_another_kind(monkeypatch):

@@ -1482,18 +1482,100 @@ describe('fillEnv through execute', () => {
     }
   })
 
-  it('a cli fetches only the invoked verb path', async () => {
-    const { calls, fetch } = countingSource({ CLI_ROOT: 'r0', CLI_ALPHA: 'a0', CLI_BETA: 'b0' })
-    registerSecrets('fake-cli-path', FakeConfig, fetch)
-    const ws = await makeWs({
-      CLI_ROOT: { from: 'fake-cli-path', ref: 'root' },
-      CLI_ALPHA: { from: 'fake-cli-path', ref: 'alpha' },
-      CLI_BETA: { from: 'fake-cli-path', ref: 'beta' },
+  it.each([false, true])(
+    'a cli fetches only the invoked verb path (mounted=%s)',
+    async (mounted) => {
+      const { calls, fetch } = countingSource({ CLI_ROOT: 'r0', CLI_ALPHA: 'a0', CLI_BETA: 'b0' })
+      registerSecrets('fake-cli-path', FakeConfig, fetch)
+      const ws = await makeWs({
+        CLI_ROOT: { from: 'fake-cli-path', ref: 'root' },
+        CLI_ALPHA: { from: 'fake-cli-path', ref: 'alpha' },
+        CLI_BETA: { from: 'fake-cli-path', ref: 'beta' },
+      })
+      try {
+        if (mounted) ws.mount('/').registerCommands([envCliSpec()])
+        else ws.registerCli('mycli', envCliSpec())
+        await ws.shell('mycli alpha')
+        expect([...calls].sort()).toEqual(['alpha', 'root'])
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it('a cd on the line fetches for the tree it reaches', async () => {
+    // /a/ and /b/ both serve mycli; only /b/'s reads managed names. /a/'s
+    // fetches nothing, and a line that reaches /b/'s after starting on /a/
+    // fetches what /b/'s reads.
+    const { calls, fetch } = countingSource({ CLI_ROOT: 'r0', CLI_ALPHA: 'a0' })
+    registerSecrets('fake-cli-cd', FakeConfig, fetch)
+    const plain = new CLI({
+      spec: new CommandSpec({ name: 'mycli', subcommands: [new CommandSpec({ name: 'alpha' })] }),
+      handlers: { alpha: new CLIHandler({ fn: () => null }) },
     })
+    const ws = new Workspace(
+      { '/a/': new RAMVFS(), '/b/': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: await getTestParser(),
+        env: {
+          CLI_ROOT: { from: 'fake-cli-cd', ref: 'root' },
+          CLI_ALPHA: { from: 'fake-cli-cd', ref: 'alpha' },
+        },
+      },
+    )
     try {
-      ws.registerCli('mycli', envCliSpec())
+      ws.mount('/a/').registerCommands([plain])
+      ws.mount('/b/').registerCommands([envCliSpec()])
+      await ws.shell('cd /a')
       await ws.shell('mycli alpha')
+      expect(calls).toEqual([])
+      await ws.shell('cd /b && mycli alpha')
       expect([...calls].sort()).toEqual(['alpha', 'root'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // --token is required and comes from the managed TOKEN, so the gate's walk
+  // reaches a leaf (its write, its files) only once TOKEN is fetched; a TOKEN
+  // the line assigns is the invocation's and fetches nothing.
+  it.each([
+    ['tok create', [true, []], ['r']],
+    ['tok show /x', [false, ['/x']], ['r']],
+    ['TOKEN=local tok create', [true, []], []],
+  ] as const)("admits a mount's tree under its managed values: %s", async (line, seen, fetched) => {
+    const { calls, fetch } = countingSource({ TOKEN: 't0' })
+    registerSecrets('fake-tree-gate', FakeConfig, fetch)
+    const got: [boolean | undefined, string[]][] = []
+    const policy: Policy = {
+      preCommand: (ctx: CommandContext): Action | null => {
+        got.push([ctx.write, ctx.paths.map((p) => p.virtual)])
+        return null
+      },
+    }
+    const tok = new CLI({
+      spec: new CommandSpec({
+        name: 'tok',
+        arguments: [new Argument('--token', { env: 'TOKEN', required: true })],
+        subcommands: [
+          new CommandSpec({ name: 'create' }),
+          new CommandSpec({
+            name: 'show',
+            arguments: [new Argument('paths', { type: 'path', nargs: '*' })],
+          }),
+        ],
+      }),
+      handlers: {
+        create: new CLIHandler({ write: true, fn: () => null }),
+        show: new CLIHandler({ fn: () => null }),
+      },
+    })
+    const ws = await makeWs({ TOKEN: { from: 'fake-tree-gate', ref: 'r' } }, [policy])
+    try {
+      ws.mount('/').registerCommands([tok])
+      await ws.shell(line)
+      expect([got, calls]).toEqual([[seen], fetched])
     } finally {
       await ws.close()
     }

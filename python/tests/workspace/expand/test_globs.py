@@ -13,11 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from functools import partial
 from unittest.mock import MagicMock
 
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.ram.readdir import readdir as ram_readdir
 from mirage.core.ram.stat import stat as ram_stat
 from mirage.types import MountMode, PathSpec
@@ -287,20 +287,18 @@ def test_pathspec_dir_no_pattern():
     assert d.pattern is None
 
 
-async def _ram_listed(accessor, path: PathSpec, index=None) -> list[str]:
+async def _ram_listed(accessor, path: PathSpec) -> list[str]:
     rows = await ram_readdir(accessor, path)
     base = (path.dir if path.pattern else path).virtual.rstrip("/")
     return [f"{base}/{row.name}" for row in rows]
 
 
 def test_scope_error_truncates_instead_of_crash():
-    ram_resolve_glob = make_resolve_glob(_ram_listed, 5)
-
     vfs = RAMVFS()
     for i in range(20):
         vfs._store.files[f"/f{i:02d}.txt"] = b""
     vfs._store.dirs.add("/")
-    index = RAMIndexCacheStore()
+    ram_resolve_glob = make_resolve_glob(partial(_ram_listed, vfs.accessor), 5)
     glob_ps = PathSpec(
         vfs_path="*.txt",
         virtual="/*.txt",
@@ -310,7 +308,7 @@ def test_scope_error_truncates_instead_of_crash():
     )
 
     async def _run():
-        return await ram_resolve_glob(vfs.accessor, [glob_ps], index)
+        return await ram_resolve_glob([glob_ps])
 
     result = asyncio.run(_run())
     assert len(result) == 5

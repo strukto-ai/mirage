@@ -2,6 +2,7 @@ import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 
+from mirage.commands.builtin.utils.links import mount_root
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.strtol import (
     EOVERFLOW_REASON,
@@ -212,6 +213,7 @@ async def csplit_generic(
         )
         sizes: list[str] = []
         created: list[tuple[str, PathSpec]] = []
+        root = mount_root(ctx)
         for first, last in parts:
             if parsed.elide_empty and first == last:
                 continue
@@ -229,9 +231,7 @@ async def csplit_generic(
             )
             data = records.data.stream(start, end - start)
             spec = PathSpec.from_str_path(name, cwd=ctx.cwd.virtual)
-            spec = replace(
-                spec, vfs_path=mount_key(spec.virtual, ctx.mount_prefix)
-            )
+            spec = replace(spec, vfs_path=mount_key(spec.virtual, root))
             try:
                 await write_bytes(spec, data)
             except FS_ERRORS as exc:

@@ -2,7 +2,6 @@ from collections.abc import Awaitable, Callable
 from functools import partial
 
 from mirage.cache.context import active_cache_manager
-from mirage.cache.index import IndexCacheStore
 from mirage.context import session_visibility
 from mirage.core.generic import find_eval
 from mirage.core.generic.find_eval import (
@@ -25,10 +24,9 @@ def modified_ts(modified: str | None) -> float | None:
 
 
 async def _stat_entry(
-    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
+    stat: Callable[[PathSpec], Awaitable[FileStat]],
     path: str,
     prefix: str,
-    index: IndexCacheStore | None,
     unstatted: dict[str, Exception] | None = None,
 ) -> FileStat | None:
     if unstatted is not None and path in unstatted:
@@ -40,7 +38,7 @@ async def _stat_entry(
         vfs_path=mount_key(path, prefix),
     )
     try:
-        row = await stat(spec, index)
+        row = await stat(spec)
         manager = active_cache_manager()
         if (
             row.type is FileType.FILE
@@ -63,14 +61,11 @@ async def _stat_entry(
 
 
 async def _is_empty_entry(
-    readdir: Callable[
-        [PathSpec, IndexCacheStore | None], Awaitable[list[str]]
-    ],
-    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
+    readdir: Callable[[PathSpec], Awaitable[list[str]]],
+    stat: Callable[[PathSpec], Awaitable[FileStat]],
     path: str,
     is_dir: bool,
     prefix: str,
-    index: IndexCacheStore | None,
     unstatted: dict[str, Exception] | None = None,
     unreadable: list[str] | None = None,
 ) -> bool:
@@ -82,7 +77,7 @@ async def _is_empty_entry(
             vfs_path=mount_key(path, prefix),
         )
         try:
-            return len(await readdir(spec, index)) == 0
+            return len(await readdir(spec)) == 0
         except (FileNotFoundError, NotADirectoryError):
             return False
         except PermissionError:
@@ -91,17 +86,14 @@ async def _is_empty_entry(
             if path not in unreadable:
                 unreadable.append(path)
             return False
-    st = await _stat_entry(stat, path, prefix, index, unstatted)
+    st = await _stat_entry(stat, path, prefix, unstatted)
     return st is not None and st.type is FileType.FILE and st.size == 0
 
 
 async def _walk_collect(
-    readdir: Callable[
-        [PathSpec, IndexCacheStore | None], Awaitable[list[str]]
-    ],
-    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
+    readdir: Callable[[PathSpec], Awaitable[list[str]]],
+    stat: Callable[[PathSpec], Awaitable[FileStat]],
     spec: PathSpec,
-    index: IndexCacheStore | None,
     maxdepth: int | None,
     depth: int,
     acc: list[tuple[str, str]],
@@ -114,7 +106,7 @@ async def _walk_collect(
     if maxdepth is not None and depth > maxdepth:
         return
     try:
-        children = await readdir(spec, index)
+        children = await readdir(spec)
     except (FileNotFoundError, NotADirectoryError):
         # Only vanished dirs are skipped; API errors (rate limit, auth)
         # propagate.
@@ -141,7 +133,7 @@ async def _walk_collect(
             kind = "d"
         else:
             trimmed = child
-            st = await _stat_entry(stat, trimmed, prefix, index, unstatted)
+            st = await _stat_entry(stat, trimmed, prefix, unstatted)
             is_dir = st is not None and st.type == FileType.DIRECTORY
             kind = printf_kind(st)
         below = chain
@@ -169,7 +161,6 @@ async def _walk_collect(
             readdir,
             stat,
             child_spec,
-            index,
             maxdepth,
             depth + 1,
             acc,
@@ -184,11 +175,8 @@ async def _walk_collect(
 async def walk_find(
     search_path: PathSpec,
     *,
-    readdir: Callable[
-        [PathSpec, IndexCacheStore | None], Awaitable[list[str]]
-    ],
-    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
-    index: IndexCacheStore | None,
+    readdir: Callable[[PathSpec], Awaitable[list[str]]],
+    stat: Callable[[PathSpec], Awaitable[FileStat]],
     args: find_eval.FindArgs,
     follow: LinkView | None = None,
     unreadable: list[str] | None = None,
@@ -216,9 +204,8 @@ async def walk_find(
 
     Args:
         search_path (PathSpec): the start point.
-        readdir (Callable): bound readdir, ``readdir(p, index)``.
-        stat (Callable): bound stat, ``stat(p, index)``.
-        index (IndexCacheStore | None): listing cache.
+        readdir (Callable): bound readdir, ``readdir(p)``.
+        stat (Callable): bound stat, ``stat(p)``.
         args (find_eval.FindArgs): parsed find expression.
         follow (LinkView | None): the namespace's links, where ``-L``
             follows them.
@@ -248,9 +235,7 @@ async def walk_find(
         search_path.raw_path,
     )
 
-    async def read_directory(
-        spec: PathSpec, cache: IndexCacheStore | None
-    ) -> list[str]:
+    async def read_directory(spec: PathSpec) -> list[str]:
         if enters is not None and not enters(spec.virtual):
             return []
         if find_eval.tree_has_prune(prune_tree):
@@ -258,9 +243,7 @@ async def walk_find(
             depth = len(spec.virtual.rstrip("/").split("/")) - len(
                 root_path.rstrip("/").split("/")
             )
-            info = await _stat_entry(
-                stat, spec.virtual, prefix, cache, unstatted
-            )
+            info = await _stat_entry(stat, spec.virtual, prefix, unstatted)
             empty = (
                 await _is_empty_entry(
                     readdir,
@@ -268,7 +251,6 @@ async def walk_find(
                     spec.virtual,
                     True,
                     prefix,
-                    cache,
                     unstatted,
                     unreadable,
                 )
@@ -289,12 +271,12 @@ async def walk_find(
             )
             if key in find_eval.pruned_keys(prune_tree):
                 return []
-        return await readdir(spec, cache)
+        return await readdir(spec)
 
     root_stat = (
         root
         if root is not None
-        else await _stat_entry(stat, root_path, prefix, index)
+        else await _stat_entry(stat, root_path, prefix)
     )
     if root_stat is not None:
         collected.append((root_path, printf_kind(root_stat)))
@@ -308,7 +290,6 @@ async def walk_find(
             read_directory,
             stat,
             search_path,
-            index,
             args.maxdepth,
             1,
             collected,
@@ -353,7 +334,6 @@ async def walk_find(
                 p,
                 is_dir,
                 prefix,
-                index,
                 unstatted,
                 unreadable,
             )
@@ -363,7 +343,7 @@ async def walk_find(
         # the tree kept.
         st = None
         if need_mtime:
-            st = await _stat_entry(stat, p, prefix, index, unstatted)
+            st = await _stat_entry(stat, p, prefix, unstatted)
             if st is None:
                 continue
             learned[key] = modified_ts(st.modified)
@@ -378,7 +358,7 @@ async def walk_find(
         if not find_eval.keep(entry, tree, args.mindepth):
             continue
         if need_size and not is_dir and st is None:
-            st = await _stat_entry(stat, p, prefix, index, unstatted)
+            st = await _stat_entry(stat, p, prefix, unstatted)
             if st is None:
                 continue
         if need_size:

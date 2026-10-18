@@ -22,6 +22,7 @@ import { PathSpec, wordText } from '../../types.ts'
 import { hasGlob, literalWord, markGlobs, unmarkGlobs } from '../../utils/glob_walk.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { INTERPRETER_NAMES } from '../lookup/constants.ts'
+import { envSnapshot } from '../session/state.ts'
 import {
   Consumer,
   WordPolicy,
@@ -164,8 +165,17 @@ export async function expandArgv(
     spec = specForCommand(runs, registry, session.cwd)
     if (spec !== null) {
       const extra: (ValueType | null)[] = new Array<ValueType | null>(consumed - 1).fill('str')
-      wordKinds = [...extra, ...specWordKinds(spec, lineWords.slice(consumed), runs)]
-      const bases = specWordBases(spec, lineWords.slice(consumed), session.cwd)
+      wordKinds = [
+        ...extra,
+        ...specWordKinds(spec, lineWords.slice(consumed), runs, envSnapshot(session)),
+      ]
+      const bases = specWordBases(
+        spec,
+        lineWords.slice(consumed),
+        session.cwd,
+        runs,
+        envSnapshot(session),
+      )
       if (bases !== null) {
         wordBases = [...new Array<string | null>(consumed - 1).fill(null), ...bases]
       }
@@ -264,7 +274,7 @@ function programWords(
     ...new Array<ValueType | null>(consumed - 1).fill('str'),
     ...specWordKinds(spec, literal.slice(consumed), name),
   ]
-  const bases = specWordBases(spec, literal.slice(consumed), cwd)
+  const bases = specWordBases(spec, literal.slice(consumed), cwd, name)
   const reread = classifyParts(
     literal,
     registry,

@@ -73,7 +73,6 @@ async def test_stdin_outputs_are_named_on_the_executing_mount(
         stdin=b"a\nb\n",
         flags={"prefix": prefix},
         cwd=PathSpec.from_str_path(cwd),
-        mount_prefix="/data",
     )
     await csplit_generic(
         [],

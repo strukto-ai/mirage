@@ -24,7 +24,6 @@ from mirage.commands.builtin.generic.archive.extract import (
 )
 from mirage.commands.builtin.generic.archive.walk import (
     DirProbe,
-    StatFn,
     WalkFn,
 )
 from mirage.commands.builtin.generic.tar.constants import (
@@ -76,7 +75,7 @@ from mirage.io.cooperative import CHUNK_SIZE, chunks
 from mirage.io.spool import ByteSpool
 from mirage.io.stream import OutputStream, prime_stream
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec, PolymorphicReadFn
+from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.compress import (
     GZIP_MAGIC,
     GzipDataError,

@@ -174,6 +174,41 @@ class HfHubAccessor(Accessor):
         )
 
 
+def hub_for(
+    account: HfAccountAccessor,
+    repo_id: str,
+    repo_type: str,
+    revision: str | None = None,
+) -> HfHubAccessor:
+    """A Hub handle for one repository, over an account it borrows.
+
+    The `hf` CLI builds one per invocation over the install's account
+    rather than owning a second Hub client: the handle only names which
+    repository is being addressed and rides the account's credential,
+    origin and pool, so `hf` gets the mount's tree walk and commit
+    builder for free and one install keeps one pool. It reaches no
+    mount, which is what keeps `hf` an account CLI. A verb reads paths
+    and sizes, never the per-file commit a mount's mtimes come from, so
+    the walk lists bare.
+
+    Args:
+        account (HfAccountAccessor): the install's account.
+        repo_id (str): "namespace/name".
+        repo_type (str): "model", "dataset" or "space".
+        revision (str | None): the revision to read or write.
+
+    Returns:
+        HfHubAccessor: the handle, which borrows the account and needs
+        no close.
+    """
+    repo = HfRepoConfig(
+        repo_id=repo_id,
+        revision=revision or DEFAULT_REVISION,
+        expand_commits=False,
+    )
+    return HfHubAccessor(account, repo, repo_type=repo_type)
+
+
 class HfModelsAccessor(HfHubAccessor):
     REPO_TYPE = "model"
     VFS_NAME = "hf_models"

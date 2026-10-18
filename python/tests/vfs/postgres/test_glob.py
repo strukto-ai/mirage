@@ -19,7 +19,8 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.types import PathSpec
 from mirage.vfs.postgres import PostgresVFS
 from mirage.vfs.postgres.config import PostgresConfig
-from tests.fixtures.vfs_io import io_for
+from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import vfs_over
 
 
 @pytest.fixture
@@ -41,7 +42,6 @@ async def test_resolve_glob_unresolved_no_pattern(accessor, index):
         resolved=False,
         pattern=None,
     )
-    result = await io_for(PostgresVFS, accessor).resolve_glob(
-        accessor, [p], index
-    )
+    ws = Workspace({"/": vfs_over(PostgresVFS, accessor)})
+    result = await ws._registry.mount_for("/").expand_glob([p], "")
     assert result == [p]

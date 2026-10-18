@@ -19,7 +19,7 @@ import type { Files } from '@struktoai/mirage-core/workspace/files'
 import { boundedMap } from '@struktoai/mirage-core/concurrency/limiter'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
-import type { HfAccountAccessor, HfHubAccessor } from '../../../../accessor/hf_hub.ts'
+import { type HfAccountAccessor, type HfHubAccessor, hubFor } from '../../../../accessor/hf_hub.ts'
 import {
   blobPath,
   cacheRoot,
@@ -39,7 +39,7 @@ import {
 } from '../../../../core/hf_hub/constants.ts'
 import { fetchTree, filterRepoPaths, repoFiles } from '../../../../core/hf_hub/tree.ts'
 import type { TreeEntry } from '../../../../core/hf_hub/tree_entry.ts'
-import { hubFor, repoTypeOf, requireOperands, textOut } from './accessor.ts'
+import { repoTypeOf, requireOperands, textOut } from './accessor.ts'
 
 // huggingface_hub 1.16.4's answer to a download pool under one worker.
 const MAX_WORKERS_REFUSAL = 'Invalid value. max_workers must be greater than 0'

@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { Workspace } from '../../workspace.ts'
-import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
+import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { normalizeDatabricksVolumeConfig, redactDatabricksVolumeConfig } from './config.ts'
 import { DatabricksVolumeVFS } from './databricks_volume.ts'

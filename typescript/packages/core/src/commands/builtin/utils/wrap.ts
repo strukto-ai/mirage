@@ -12,23 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { MountView } from '../../../view/types.ts'
-import { FileStat, FileType, type PathSpec } from '../../../types.ts'
+import { FileStat, FileType } from '../../../types.ts'
 import { isMissError } from '../../../errors/fs.ts'
 import { operandName } from './operands.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-
-// Synthesize a streaming read from a whole-file read, for backends with
-// no native streaming (mirrors python's utils/wrap.stream_from_bytes).
-export async function* streamFromBytes<A>(
-  read: (accessor: A, path: PathSpec, index?: IndexCacheStore) => Promise<Uint8Array>,
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await read(accessor, path, index)
-}
 
 /**
  * Wrap a walker's readdir so a mount parent lists as empty, not absent.

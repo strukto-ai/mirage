@@ -32,7 +32,7 @@ import type { S3Accessor } from '@struktoai/mirage-core/accessor/s3'
 import { ListingCheckStore, RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import type { OneDriveAccessor } from '@struktoai/mirage-core/accessor/onedrive'
 import type { SharePointAccessor } from '@struktoai/mirage-core/accessor/sharepoint'
-import { commandIo } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import { getExtension } from '@struktoai/mirage-core/utils/filetype'
 import { DRIVER as S3_DRIVER } from '@struktoai/mirage-core/core/s3/driver'
 import { recordingActive } from '@struktoai/mirage-core/observe/context'
 import { DirListing, type FileStat, MountMode, PathSpec } from '@struktoai/mirage-core/types'
@@ -111,6 +111,32 @@ interface GridFSDoc {
 
 // Shared with the two module mocks below; vitest hoists all three above
 // the imports.
+// A VFS's own reads, called straight, as a harness drives a backend: the
+// stored bytes, or the rendering of a VFS with no `read` of its own, and a
+// stream that reads the file whole where the VFS does not stream.
+function ownReads(vfs: BaseVFS): {
+  readBytes: (p: PathSpec) => Promise<Uint8Array>
+  readStream: (p: PathSpec) => AsyncIterable<Uint8Array>
+  stat: (p: PathSpec) => Promise<FileStat>
+} {
+  const readBytes = (p: PathSpec): Promise<Uint8Array> => {
+    const renderer = vfs.supports('read') ? undefined : vfs.renderers[getExtension(p.virtual) ?? '']
+    if (renderer === undefined) return vfs.read(p, {})
+    const render = (vfs as unknown as Record<string, typeof vfs.read>)[renderer]
+    if (render === undefined) throw new TypeError(`${vfs.name}: no renderer named ${renderer}`)
+    return render.call(vfs, p, {})
+  }
+  return {
+    readBytes,
+    readStream: vfs.supports('readStream')
+      ? (p) => vfs.readStream(p, {})
+      : async function* (p) {
+          yield await readBytes(p)
+        },
+    stat: (p) => vfs.stat(p, {}),
+  }
+}
+
 const H = vi.hoisted(() => ({
   unrecorded: false,
   slots: [] as [string, string][],
@@ -935,9 +961,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
         key,
         fetches: () => graph.fetches() - before,
         rewrite,
-        readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
-        readStream: (p) => commandIo(vfs).readStream(accessor, p),
-        stat: (p) => commandIo(vfs).stat(accessor, p),
+        readBytes: (p) => ownReads(vfs).readBytes(p),
+        readStream: (p) => ownReads(vfs).readStream(p),
+        stat: (p) => ownReads(vfs).stat(p),
         streamSlot: 'stream',
       }
     }
@@ -949,9 +975,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       key,
       fetches: () => graph.fetches() - before,
       rewrite,
-      readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
-      readStream: (p) => commandIo(vfs).readStream(accessor, p),
-      stat: (p) => commandIo(vfs).stat(accessor, p),
+      readBytes: (p) => ownReads(vfs).readBytes(p),
+      readStream: (p) => ownReads(vfs).readStream(p),
+      stat: (p) => ownReads(vfs).stat(p),
       streamSlot: 'stream',
     }
   }
@@ -988,12 +1014,11 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
     const item = gdriveAdd('a', data, mime)
     const vfs = await buildVfs(name, GDRIVE_CONFIG)
     const accessor = vfs.accessor
-    const io = commandIo(vfs)
+    const io = ownReads(vfs)
     expect(vfs.readRevalidatable).toBe(true)
     // The fake names no owner, so the file lists under shared/. A rewrite
     // moves modifiedTime within the same day, which keeps the name.
     const fileKey = `shared/${filename('a', item.id, item.modifiedTime)}`
-    const index = new RAMIndexCacheStore()
     const before = H.gdriveRenders
     let edits = 0
     return {
@@ -1006,9 +1031,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
         item.content = next
         item.modifiedTime = `2026-04-16T00:00:${String(edits).padStart(2, '0')}Z`
       },
-      readBytes: (p) => io.readBytes(accessor, p, index),
-      readStream: (p) => io.readStream(accessor, p, index),
-      stat: (p) => io.stat(accessor, p),
+      readBytes: (p) => io.readBytes(p),
+      readStream: (p) => io.readStream(p),
+      stat: (p) => io.stat(p),
       streamSlot: 'bytes',
     }
   }
@@ -1042,9 +1067,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         op.files.set(stored, Buffer.from(next))
       },
-      readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
-      readStream: (p) => commandIo(vfs).readStream(accessor, p),
-      stat: (p) => commandIo(vfs).stat(accessor, p),
+      readBytes: (p) => ownReads(vfs).readBytes(p),
+      readStream: (p) => ownReads(vfs).readStream(p),
+      stat: (p) => ownReads(vfs).stat(p),
       streamSlot: 'stream',
     }
   }
@@ -1111,9 +1136,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         H.gridfs.set(stored, gridfsDoc(stored, next, 'aaaaaaaaaaaaaaaaaaaaaaaa', 2022))
       },
-      readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
-      readStream: (p) => commandIo(vfs).readStream(accessor, p),
-      stat: (p) => commandIo(vfs).stat(accessor, p),
+      readBytes: (p) => ownReads(vfs).readBytes(p),
+      readStream: (p) => ownReads(vfs).readStream(p),
+      stat: (p) => ownReads(vfs).stat(p),
       streamSlot: 'stream',
     }
   }
@@ -1136,9 +1161,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
     rewrite: (next) => {
       s3.store.set('b', stored, next)
     },
-    readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
-    readStream: (p) => commandIo(vfs).readStream(accessor, p),
-    stat: (p) => commandIo(vfs).stat(accessor, p),
+    readBytes: (p) => ownReads(vfs).readBytes(p),
+    readStream: (p) => ownReads(vfs).readStream(p),
+    stat: (p) => ownReads(vfs).stat(p),
     streamSlot: 'stream',
   }
 }

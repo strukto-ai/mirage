@@ -13,12 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    Operation,
-    require_op,
-)
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -30,28 +27,28 @@ from mirage.types import PathSpec
 
 
 async def touch(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    files = command_files(ctx, paths)
     c = FlagView(ctx.flags, spec=SPECS["touch"]).as_bool("no_create")
-    if not ops.is_mounted(accessor) or not paths:
+    if not paths:
         raise UsageError(
             f"touch: missing file operand\n{usage_hint('touch')}", 1
         )
-    paths = await ops.resolve_glob(accessor, paths, ctx.index)
-    exists = require_op(ops, Operation.EXISTS)
-    write = require_op(ops, Operation.WRITE)
+    paths = await files.resolve_glob(paths)
+    exists = files.exists
+    write = files.write
     errors: list[str] = []
     for p in paths:
         if c:
             continue
-        if await exists(accessor, p):
+        if await exists(p):
             continue
         try:
-            await write(accessor, p, b"")
+            await write(p, b"")
         except FS_ERRORS as exc:
             # One unusable operand is not an aborted command: GNU reports
             # it and still touches the remaining ones.

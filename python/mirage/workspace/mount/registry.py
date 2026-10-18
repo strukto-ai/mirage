@@ -14,7 +14,7 @@
 
 import asyncio
 import errno
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 from weakref import WeakValueDictionary
 
@@ -23,7 +23,6 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexConfig
 from mirage.cache.index.config import Evicted
 from mirage.cache.index.factory import build_index
 from mirage.cache.manager import CacheManager
-from mirage.commands.builtin.backends import commands_for
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.commands.builtin.generic_bind.factory import GENERIC_COMMANDS
 from mirage.context import (
@@ -50,6 +49,7 @@ from mirage.utils.path import owner_prefix
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.dev import DevVFS
 from mirage.workspace.cli import CLIRegistry
+from mirage.workspace.mount.backends import backend_commands
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.types import MountRow
@@ -102,6 +102,11 @@ class MountRegistry:
     def __init__(self, io: IOConfig | None = None) -> None:
         self.io = io if io is not None else IOConfig()
         self.process_view: Callable[[SessionState], ProcessView] | None = None
+        # Fetches the managed names a tree a mount serves reads, once the
+        # executor has picked that mount; the workspace sets it.
+        self.fill_env: (
+            Callable[[SessionState, frozenset[str]], Awaitable[None]] | None
+        ) = None
         self.observer: Observer | None = None
         self._mounts: list[MountEntry] = []
         self.retiring_mounts: dict[int, asyncio.Task[None]] = {}
@@ -268,6 +273,11 @@ class MountRegistry:
             excluded_prefixes=lambda: tuple(
                 e.prefix.rstrip("/") for e in self.descendant_mounts(m.prefix)
             ),
+            aliases=lambda: tuple(
+                e.prefix.rstrip("/")
+                for e in self._mounts
+                if e is not m and e.vfs is m.vfs
+            ),
         )
 
     def check_vfs_available(self, vfs: BaseVFS) -> None:
@@ -344,7 +354,10 @@ class MountRegistry:
         # spec, not the generic one of that name.
         for cmd in (*GENERIC_COMMANDS, *GENERAL_COMMANDS):
             m.register_general(cmd)
-        m.register_commands(commands_for(vfs))
+        # Mirage's own commands for the backend, then the ones the VFS was
+        # handed, which are user commands and win.
+        m._register_builtins(backend_commands(vfs))
+        m.register_commands(vfs.commands())
         if self._file_cache is not None:
             self._attach_manager(m)
         self._mounts.append(m)
@@ -555,6 +568,34 @@ class MountRegistry:
             best = max(best, mount.longest_command_match(words))
         return best
 
+    def command_mount(
+        self,
+        cmd_name: str,
+        path_scopes: list[PathSpec],
+        cwd: str,
+    ) -> MountEntry | None:
+        """The mount a command runs on, as ``resolve_mount`` picks it,
+        without readying it.
+
+        The mount of the first path operand, else of the working
+        directory, when it registers the command; else the first mount
+        that does. None where none does, or where the first operand's
+        mount lacks it, a line ``resolve_mount`` refuses.
+
+        Args:
+            cmd_name (str): command name.
+            path_scopes (list[PathSpec]): path arguments.
+            cwd (str): current working directory.
+        """
+        mount = self.try_mount_for(
+            path_scopes[0].virtual if path_scopes else cwd
+        )
+        if mount is not None and mount.resolve_command(cmd_name) is not None:
+            return mount
+        if mount is not None and path_scopes:
+            return None
+        return self.mount_for_command(cmd_name)
+
     async def resolve_mount(
         self,
         cmd_name: str,
@@ -576,24 +617,15 @@ class MountRegistry:
             path_scopes (list[PathSpec]): path arguments.
             cwd (str): current working directory.
         """
-        if path_scopes:
-            mount_path = path_scopes[0].virtual
-        else:
-            mount_path = cwd
-
-        mount = self.try_mount_for(mount_path)
-
-        if mount is not None and mount.resolve_command(cmd_name) is None:
-            if path_scopes:
+        mount = self.command_mount(cmd_name, path_scopes, cwd)
+        if mount is None and path_scopes:
+            owner = self.try_mount_for(path_scopes[0].virtual)
+            if owner is not None:
                 raise MountCommandUnsupported(
                     cmd_name,
-                    mount.vfs.name,
+                    owner.vfs.name,
                     path_scopes[0].raw_path or path_scopes[0].virtual,
                 )
-            mount = self.mount_for_command(cmd_name)
-        elif mount is None:
-            mount = self.mount_for_command(cmd_name)
-
         if mount is None:
             return None
 
@@ -660,6 +692,9 @@ class MountRegistry:
                 anchor=m is self._anchor,
                 visible=m.visible,
                 max_du_entries=m.vfs.max_du_entries,
+                max_glob_matches=m.vfs.max_glob_matches,
+                searchable=m.vfs.searchable,
+                calls=m.calls,
             )
             for m in self._mounts
         ]

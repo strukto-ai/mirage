@@ -15,10 +15,11 @@
 import { concatAggregate } from '@struktoai/mirage-core/commands/builtin/aggregators'
 import { CLI as CLIProgram, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 import { Argument, CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
-import { commandIo, generic } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+import { generic } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
+import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { command, type Command, type CommandIO } from '@struktoai/mirage-core/commands/config'
+import { command, type Command } from '@struktoai/mirage-core/commands/config'
 import { specOf } from '@struktoai/mirage-core/commands/spec/builtins'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import { eacces } from '@struktoai/mirage-core/errors/fs'
@@ -31,14 +32,6 @@ const GATE = {
   ready: null as Promise<void> | null,
 }
 
-// The table with its one-call subtree read set aside, so a walk lists through
-// readdir. Mirrors Python's `_without_tree`.
-function withoutTree(io: CommandIO): CommandIO {
-  const rest = { ...io }
-  delete rest.readTree
-  return rest
-}
-
 export class CommandService extends RAMVFS {
   private readonly calls: string[] = []
   private readonly dropped: readonly string[]
@@ -46,14 +39,14 @@ export class CommandService extends RAMVFS {
   constructor(metadataOnly = false) {
     super()
     this.dropped = metadataOnly ? ['grep', 'rg'] : []
+    // Without its own search it has no subtree read either. Mirrors
+    // Python's `_without_tree`.
+    if (metadataOnly) Object.defineProperty(this, 'readTree', { value: BaseVFS.prototype.readTree })
   }
 
   override commands(): readonly Command[] {
-    // The service's own handlers read through a plain RAM view of its store;
-    // every other read reaches the refusal below.
-    const view = new RAMVFS()
-    Object.assign(view, { accessor: this.accessor })
-    const own = commandIo(view)
+    // The service's own handlers read its store as a stream, which the
+    // refusal below leaves alone; every other whole read reaches it.
     const wrapped = ['grep', 'rev', 'rg']
       .filter((name) => !this.dropped.includes(name))
       .map((name) => generic(name))
@@ -104,16 +97,14 @@ export class CommandService extends RAMVFS {
             }
             return [stream(), new IOResult()]
           }
-          return original.fn(accessor, paths, texts, { ...ctx, io: own })
+          return original.fn(accessor, paths, texts, ctx)
         },
       })
     })
     // Without its own search it has no walk of its own either: find and du
     // list through readdir, which refuses what it hides.
     const walks =
-      this.dropped.length > 0
-        ? ['du', 'find'].map((name) => generic(name, { vfs: 'ram', table: withoutTree }))
-        : []
+      this.dropped.length > 0 ? ['du', 'find'].map((name) => generic(name, { vfs: 'ram' })) : []
     return [
       ...handlers,
       ...walks,

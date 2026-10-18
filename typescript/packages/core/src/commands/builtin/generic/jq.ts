@@ -56,6 +56,7 @@ import { helpPage, versionLine } from '../../spec/standard.ts'
 import { UsageError } from '../../errors.ts'
 import { isStdin, stdinStream } from '../utils/stream.ts'
 import { programFileRefusal, readProgramFile } from './program.ts'
+import { mountRoot } from '../utils/links.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
@@ -593,9 +594,7 @@ export class MainLoop {
 function pathSpecFactory(paths: readonly PathSpec[], ctx: Context): (value: string) => PathSpec {
   const first = paths[0]
   const mountPrefix =
-    (first === undefined ? undefined : mountPrefixOf(first.virtual, first.vfsPath)) ??
-    ctx.mountPrefix ??
-    ''
+    first === undefined ? mountRoot(ctx) : mountPrefixOf(first.virtual, first.vfsPath)
   return (value) => PathSpec.fromStrPath(value, mountKey(value, mountPrefix))
 }
 

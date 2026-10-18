@@ -73,6 +73,7 @@ export const GENERAL_PYTHON3 = command({
   name: 'python3',
   vfs: null,
   spec: specOf('python3'),
+  write: true,
   fn: pythonCommand,
 })
 
@@ -80,5 +81,6 @@ export const GENERAL_PYTHON = command({
   name: 'python',
   vfs: null,
   spec: specOf('python'),
+  write: true,
   fn: pythonCommand,
 })

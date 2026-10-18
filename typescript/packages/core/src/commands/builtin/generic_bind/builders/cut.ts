@@ -13,23 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { cutGeneric } from '../../generic/cut.ts'
-import {
-  type GenericCommand,
-  dirAwareStat,
-  dirAwareStream,
-  resolveGlobOf,
-  type GenericCommandFn,
-} from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, dirAwareStat, dirAwareStream, resolveOrEmpty } from '../files.ts'
 
-const cut: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return cutGeneric(
-    resolved,
-    ctx,
-    dirAwareStream(ops, accessor, ctx),
-    dirAwareStat(ops, accessor, ctx),
-  )
+const cut: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
+  return cutGeneric(resolved, ctx, dirAwareStream(files, ctx), dirAwareStat(files, ctx))
 }
 
 export const BUILDER: GenericCommand = {

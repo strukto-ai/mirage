@@ -62,5 +62,5 @@ async def _js(
     )
 
 
-js = command("js", vfs=None, spec=SPECS["js"])(_js)
-node = command("node", vfs=None, spec=SPECS["node"])(_js)
+js = command("js", vfs=None, spec=SPECS["js"], write=True)(_js)
+node = command("node", vfs=None, spec=SPECS["node"], write=True)(_js)

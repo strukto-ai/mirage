@@ -592,5 +592,6 @@ export const GENERAL_CURL = command({
   name: 'curl',
   vfs: null,
   spec: specOf('curl'),
+  write: true,
   fn: curl,
 })

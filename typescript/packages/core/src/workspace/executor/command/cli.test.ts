@@ -18,13 +18,19 @@ import { varsFromEnv } from '../../../workspace/session/session.ts'
 import { describe, expect, it, vi } from 'vitest'
 
 import { CLI, type CLIVerbFn } from '../../../commands/cli/types.ts'
-import type { Context } from '../../../commands/config.ts'
+import { command, type Context } from '../../../commands/config.ts'
 import { PartialOutputError } from '../../../commands/errors.ts'
 import { Argument, UsageStyle } from '../../../commands/spec/types.ts'
 import { FlagView } from '../../../commands/spec/flag_view.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { Limit, PathSpec } from '../../../types.ts'
+import { Limit, MountMode, PathSpec } from '../../../types.ts'
+import type { RAMAccessor } from '../../../accessor/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { parseSessionProfile } from '../../../policy/profile.ts'
+import { getTestParser } from '../../fixtures/workspace_fixture.ts'
+import { Workspace } from '../../workspace/workspace.ts'
 import { CLIRegistry } from '../../cli/registry.ts'
+import { MountEntry } from '../../mount/mount.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import { Activity } from '../../../utils/activity.ts'
 import { ScriptSource } from '../../../runtime/types.ts'
@@ -1163,5 +1169,165 @@ describe('handleCli install lifetime', () => {
     expect(dec.decode(await materialize(stdout))).toBe('done\n')
     await removing
     expect(accessor.closed).toBe(true)
+  })
+})
+
+describe('a command tree a mount serves', () => {
+  const ENC = new TextEncoder()
+  const NOTE = new Argument('note', { type: 'path' })
+  // `add` writes past the dispatcher and declares its own --help.
+  const NOTES = new CLI({
+    spec: new CommandSpec({
+      name: 'notes',
+      subcommands: [
+        new CommandSpec({
+          name: 'show',
+          aliases: ['ls'],
+          arguments: [
+            new Argument('-C', { type: 'path', action: 'append' }),
+            new Argument('notes', { type: 'path', nargs: '+' }),
+          ],
+          operandBase: '-C',
+        }),
+        new CommandSpec({
+          name: 'add',
+          arguments: [
+            new Argument('--help', { action: 'store_true' }),
+            NOTE,
+            new Argument('tags', { nargs: '+' }),
+          ],
+        }),
+      ],
+    }),
+    handlers: {
+      show: new CLIHandler({
+        fn: async (_accessor, notes, _texts, ctx) => {
+          if (ctx.vfs === undefined) throw new Error('no files')
+          const out: number[] = []
+          for (const note of notes) {
+            out.push(...ENC.encode(`${note.rawPath}: `), ...(await ctx.vfs.read(note)))
+          }
+          return [new Uint8Array(out), new IOResult()]
+        },
+      }),
+      add: new CLIHandler({
+        write: true,
+        fn: (accessor: RAMAccessor, [note], texts) => {
+          if (note === undefined) throw new Error('no note')
+          accessor.store.files.set(`/${note.vfsPath}`, ENC.encode(`tags: ${texts.join(' ')}\n`))
+          return [ENC.encode('tagged\n'), new IOResult()]
+        },
+      }),
+    },
+  })
+
+  it.each([
+    ['configModel', makeInstall().cli],
+    [
+      'accessor',
+      new CLI({
+        spec: new CommandSpec({ name: 'tool' }),
+        handlers: { '': new CLIHandler({ fn: send }) },
+        accessor: (config) => new ClosingAccessor(config),
+      }),
+    ],
+    ['script', scriptInstall().cli],
+  ])('refuses a tree that brings its own %s', (setting, cli) => {
+    const mount = new MountEntry({ prefix: '/data/', vfs: new RAMVFS() })
+    expect(() => {
+      mount.registerCommands([cli])
+    }).toThrow(new RegExp(`cli '${cli.spec.name}'.*${setting}`))
+  })
+
+  it('serves a tree until a command takes its name', () => {
+    const mount = new MountEntry({ prefix: '/data/', vfs: new RAMVFS() })
+    mount.registerCommands([NOTES])
+    expect(mount.cliFor('notes')).toBe(NOTES)
+    mount.registerCommands(
+      command({ name: 'notes', vfs: null, spec: new CommandSpec(), fn: () => null }),
+    )
+    expect(mount.cliFor('notes')).toBeNull()
+  })
+
+  it('keeps the words of a tree named like ls', async () => {
+    // No implied `.`: the tree's walk reads the words as typed.
+    const tree = new CLI({
+      spec: new CommandSpec({
+        name: 'ls',
+        subcommands: [new CommandSpec({ name: 'show', arguments: [NOTE] })],
+      }),
+      handlers: { show: new CLIHandler({ fn: () => null }) },
+    })
+    const ws = new Workspace(
+      { '/n/': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      ws.mount('/n/').registerCommands([tree])
+      const helped = await ws.shell('cd /n && ls --help')
+      expect(helped.exitCode).toBe(0)
+      expect(helped.stdoutText).toContain('show')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('runs like an installed CLI on its mount', async () => {
+    const vfs = new RAMVFS()
+    ;(vfs as unknown as { cachesReads: boolean }).cachesReads = true
+    vfs.store.files.set('/a.md', ENC.encode('first\n'))
+    const ws = new Workspace(
+      { '/n/': vfs, '/o/': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    const stderr: Record<number, string> = {
+      0: '',
+      1: 'notes add: read-only mount at /n/\n',
+      126: 'notes: Permission denied\n',
+      127: "notes show: command cannot enforce this session's file restrictions\n",
+    }
+    try {
+      ws.mount('/n/').registerCommands([NOTES])
+      expect((await ws.shell('cat /n/a.md')).stdoutText).toBe('first\n')
+      const shown = await ws.shell('cd /n && notes ls a.md')
+      expect([shown.exitCode, shown.stdoutText]).toEqual([0, 'a.md: first\n'])
+      // Through a link: the leaf is handed the target, as a command is.
+      const added = await ws.shell('ln -s a.md link.md && notes add link.md work')
+      expect([added.exitCode, added.stdoutText]).toEqual([0, 'tagged\n'])
+      expect((await ws.shell('cat /n/a.md')).stdoutText).toBe('tags: work\n')
+      // One spelling, two files: each operand keeps its own -C.
+      await ws.shell('mkdir a b && echo A > a/f && echo B > b/f')
+      expect((await ws.shell('notes show -C /n/a f -C /n/b f')).stdoutText).toBe('f: A\nf: B\n')
+      // An option's value spelled like the operand stays the option's.
+      await ws.shell('echo AA > a/a')
+      expect((await ws.shell('notes show -C a a')).stdoutText).toBe('a: AA\n')
+      // The leaf keys /n/'s accessor, so another mount's file is refused.
+      const foreign = await ws.shell('notes add /o/a.md work')
+      expect([foreign.exitCode, foreign.stderrText]).toEqual([
+        1,
+        'notes add: /o/a.md: not on /n/, the mount serving notes\n',
+      ])
+      ws.setMountMode('/n/', MountMode.READ)
+      ws.createSession('hidden', { profile: { paths: { hide: ['/n/x'] } } })
+      ws.createSession('ruled', {
+        profile: parseSessionProfile({
+          commands: { deny: [{ reason: 'no tagging', commands: ['notes add'] }] },
+        }),
+      })
+      for (const [line, sessionId, code] of [
+        ['notes show /n/a.md', undefined, 0],
+        ['notes add /n/a.md w', undefined, 1],
+        ['notes add /n/a.md w --help', undefined, 1],
+        ['notes show /n/a.md', 'hidden', 127],
+        ['notes ls /n/a.md', 'ruled', 0],
+        ['notes add /n/a.md w', 'ruled', 126],
+      ] as const) {
+        const io = await ws.shell(line, sessionId === undefined ? {} : { sessionId })
+        expect([line, io.exitCode, io.stderrText]).toEqual([line, code, stderr[code]])
+      }
+      expect(dec.decode(vfs.store.files.get('/a.md'))).toBe('tags: work\n')
+    } finally {
+      await ws.close()
+    }
   })
 })

@@ -15,7 +15,7 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.dirname import dirname as generic_dirname
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -23,7 +23,6 @@ from mirage.types import PathSpec
 
 
 async def dirname(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec] | None,
     texts: list[str],

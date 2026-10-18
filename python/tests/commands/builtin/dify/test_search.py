@@ -2,7 +2,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.commands.builtin.dify import search as command_search
 from mirage.commands.config import Context
 from mirage.core.dify import search, tree
@@ -10,7 +9,11 @@ from mirage.io.types import materialize
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.dify import DifyVFS
-from tests.fixtures.vfs_io import io_for
+from mirage.vfs.types import SearchQuery
+from mirage.workspace import Workspace
+from mirage.workspace.files import Files
+from tests.fixtures.mount_commands import command_files
+from tests.fixtures.vfs_io import vfs_over
 
 
 def document(document_id: str, name: str, slug: str | None = None) -> dict:
@@ -35,28 +38,37 @@ def accessor() -> SimpleNamespace:
     return SimpleNamespace(config=SimpleNamespace(slug_metadata_name="slug"))
 
 
+def _files() -> Files:
+    """The files of a line on a workspace with the store at /knowledge,
+    whose search the command sends through the dispatcher."""
+    return command_files(
+        Workspace({"/knowledge/": vfs_over(DifyVFS, accessor())})
+    )
+
+
+async def _list_documents(config):
+    return [
+        document("doc-1", "API", "guides/api.md"),
+        document("doc-2", "Auth", "guides/auth.md"),
+    ]
+
+
 @pytest.mark.asyncio
-async def test_search_command_resolves_globs_and_passes_multiple_documents(
+async def test_search_resolves_globs_and_passes_multiple_documents(
     monkeypatch,
 ):
 
     calls: list[tuple[list[PathSpec], dict]] = []
 
-    async def list_documents(config):
-        return [
-            document("doc-1", "API", "guides/api.md"),
-            document("doc-2", "Auth", "guides/auth.md"),
-        ]
-
     async def search_segments(accessor, query, paths, **kwargs):
         calls.append((paths, kwargs))
         return [("/knowledge/a", "api"), ("/knowledge/b", "auth")]
 
-    monkeypatch.setattr(tree, "list_all_documents", list_documents)
+    monkeypatch.setattr(tree, "list_all_documents", _list_documents)
     monkeypatch.setattr(search, "search_segments", search_segments)
 
-    stdout, io = await command_search(
-        accessor(),
+    # The store resolves a glob scope itself, as a batch ranking does.
+    hits = await vfs_over(DifyVFS, accessor()).search_many(
         [
             PathSpec(
                 vfs_path=mount_key("/knowledge/guides/*.md", "/knowledge"),
@@ -66,11 +78,11 @@ async def test_search_command_resolves_globs_and_passes_multiple_documents(
                 resolved=False,
             )
         ],
-        ["login"],
-        Context(io=io_for(DifyVFS, accessor()), index=RAMIndexCacheStore()),
+        SearchQuery("login", options={"method": "semantic"}),
     )
+    stdout = "".join(record + "\n" for _, record in hits or []).encode()
 
-    assert await materialize(stdout) == b"api\nauth\n"
+    assert stdout == b"api\nauth\n"
     assert [path.virtual for path in calls[0][0]] == [
         "/knowledge/guides/api.md",
         "/knowledge/guides/auth.md",
@@ -98,7 +110,7 @@ async def test_search_command_root_searches_whole_dataset(monkeypatch):
         accessor(),
         [root],
         ["anything"],
-        Context(io=io_for(DifyVFS, accessor()), index=RAMIndexCacheStore()),
+        Context(vfs=_files()),
     )
 
     assert await materialize(stdout) == b"dataset\n"
@@ -135,11 +147,7 @@ async def test_search_command_sends_an_explicit_empty_method(monkeypatch):
         accessor(),
         [root],
         ["anything"],
-        Context(
-            flags={"method": ""},
-            io=io_for(DifyVFS, accessor()),
-            index=RAMIndexCacheStore(),
-        ),
+        Context(flags={"method": ""}, vfs=_files()),
     )
 
     assert calls[0]["method"] == ""

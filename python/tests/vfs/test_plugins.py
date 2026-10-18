@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from dataclasses import replace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -27,19 +26,33 @@ from mirage import (
     Workspace,
 )
 from mirage.accessor.ram import RAMAccessor
-from mirage.commands.builtin.generic_bind.adapter import command_io
+from mirage.commands.builtin.generic_bind.files import (
+    command_files as files_of,
+)
+from mirage.commands.config import Context
+from mirage.context import reset_mount_gate, set_mount_gate
 from mirage.core.ram.read import read as ram_read
 from mirage.core.ram.readdir import readdir as ram_readdir
 from mirage.core.ram.stat import stat as ram_stat
 from mirage.core.ram.write import write as ram_write
+from mirage.io.stream import materialize
 from mirage.types import FileStat
 from mirage.utils.ranges import slice_window
+from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ram.store import RAMStore
+from tests.fixtures.mount_commands import command_files
 from tests.fixtures.vfs_io import served
 
 PATH = PathSpec(
     virtual="/nested/data/a.txt", directory="/nested/data", vfs_path="a.txt"
 )
+
+
+async def _streamed(ws: Workspace) -> bytes:
+    """``PATH`` as a command streams it: through the dispatcher, the
+    stored bytes, a VFS with no stream of its own read whole."""
+    data, _ = await ws.dispatch("read", PATH, stream=True, filetype=None)
+    return await materialize(data)
 
 
 class Minimal(BaseVFS):
@@ -111,17 +124,7 @@ async def test_minimal_reads_serve_shell_streams_and_dispatch(accessor):
         assert (await ws.stat(PATH.virtual)).size == 6
         data, _ = await ws.dispatch("read", PATH, offset=1, size=3)
         assert data == b"ell"
-        assert (
-            b"".join(
-                [
-                    chunk
-                    async for chunk in command_io(vfs).read_stream(
-                        accessor, PATH
-                    )
-                ]
-            )
-            == b"hello\n"
-        )
+        assert await _streamed(ws) == b"hello\n"
         refused = await ws.shell("rm /nested/data/a.txt")
         assert refused.exit_code == 1
         assert await refused.stderr_str() == (
@@ -135,12 +138,21 @@ async def test_minimal_reads_serve_shell_streams_and_dispatch(accessor):
 @pytest.mark.asyncio
 async def test_existence_falls_back_to_stat_only_for_absence(accessor):
     vfs = Minimal(accessor=accessor)
-    io = command_io(vfs)
-    assert await io.exists(accessor, PATH)
-    assert not await io.exists(accessor, replace(PATH, vfs_path="missing"))
-    vfs.stat = AsyncMock(side_effect=PermissionError("denied"))  # type: ignore[method-assign]
-    with pytest.raises(PermissionError, match="denied"):
-        await command_io(vfs).exists(accessor, PATH)
+    ws = Workspace({"/nested/data": vfs})
+    try:
+        token = set_mount_gate("/nested/data/", MountMode.READ)
+        try:
+            exists = files_of(Context(vfs=command_files(ws))).exists
+        finally:
+            reset_mount_gate(token)
+        assert await exists(PATH)
+        missing = PathSpec.from_str_path("/nested/data/missing")
+        assert not await exists(missing)
+        vfs.stat = AsyncMock(side_effect=PermissionError("denied"))  # type: ignore[method-assign]
+        with pytest.raises(PermissionError, match="denied"):
+            await exists(PathSpec.from_str_path("/nested/data/other"))
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
@@ -153,17 +165,7 @@ async def test_native_reads_do_not_enable_writes(accessor):
         assert data == b"ell"
         window = vfs.read.await_args.kwargs
         assert (window["offset"], window["size"]) == (1, 3)
-        assert (
-            b"".join(
-                [
-                    chunk
-                    async for chunk in command_io(vfs).read_stream(
-                        accessor, PATH
-                    )
-                ]
-            )
-            == b"hello\n"
-        )
+        assert await _streamed(ws) == b"hello\n"
         assert vfs.read.await_count == 1
         assert "write" not in served(vfs)
     finally:
@@ -219,9 +221,7 @@ async def test_grep_and_rg_never_ask_the_search_commands_search(accessor):
         "recent deployments",
         options={"limit": 20, "filters": {"project": "backend"}},
     )
-    io = command_io(vfs)
-    assert io.search is not None
-    assert await io.search.search(accessor, PATH, query) == ["deployment 42"]
+    assert await vfs.search(PATH, query) == ["deployment 42"]
     vfs.search.assert_awaited_once_with(PATH, query)
     vfs.search.reset_mock()
     ws = Workspace({"/nested/data": vfs})
@@ -231,5 +231,22 @@ async def test_grep_and_rg_never_ask_the_search_commands_search(accessor):
             assert result.exit_code == 0
             assert await result.stdout_str() == "hello\n"
         vfs.search.assert_not_awaited()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_option_routes_a_write_off_a_mount_without_one(accessor):
+    # Typed on a mount that cannot write, the output option names one that
+    # can, and the serving mount's facts decide.
+    ws = Workspace(
+        {"/nested/data": Minimal(accessor=accessor), "/ram": RAMVFS()},
+        mode=MountMode.WRITE,
+    )
+    try:
+        await ws.shell("cd /nested/data")
+        result = await ws.shell("shuf -i 1-1 --output=/ram/out")
+        assert result.exit_code == 0, await result.stderr_str()
+        assert await (await ws.shell("cat /ram/out")).stdout_str() == "1\n"
     finally:
         await ws.close()

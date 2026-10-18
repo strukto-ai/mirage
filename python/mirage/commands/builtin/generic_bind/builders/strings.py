@@ -14,31 +14,31 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.strings import strings_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    bound_op,
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import (
+    command_files,
     dir_aware_stat,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def strings(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    resolved = await resolve_or_empty(ops, accessor, paths, ctx.index)
+    files = command_files(ctx, paths)
+    resolved = await resolve_or_empty(files, paths)
     return await strings_generic(
         resolved,
         list(texts),
         ctx,
-        dir_aware_stat(ops, accessor, ctx),
-        bound_op(ops.read_stream, accessor, ctx.index),
+        dir_aware_stat(files, ctx),
+        files.read_stream,
     )
 
 

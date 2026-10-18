@@ -14,42 +14,14 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../../../io/types.ts'
-import { BaseVFS } from '../../../../vfs/base.ts'
-import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { enoent, exdev } from '../../../../errors/fs.ts'
-import { MountRegistry } from '../../../../workspace/mount/registry.ts'
-import { handleCrossMount, isCrossMount, type RunSingle } from './index.ts'
-
-class Stub extends BaseVFS {
-  override readonly name = 'stub'
-  override close(): Promise<void> {
-    return Promise.resolve()
-  }
-}
+import { handleCrossMount, type RunSingle } from './index.ts'
 
 function decode(b: Uint8Array | null): string {
   if (b === null) return ''
   return new TextDecoder().decode(b)
 }
-
-describe('isCrossMount', () => {
-  const reg = new MountRegistry({ '/ram': new Stub(), '/disk': new Stub() }, MountMode.WRITE)
-
-  it.each([
-    ['cp', ['/ram/a', '/disk/b'], true],
-    ['unknown', ['/ram/a', '/disk/b'], false],
-    ['cp', ['/ram/a', '/ram/b'], false],
-    ['cp', ['/ram/a'], false],
-  ])('%s %j → %s', (cmd, paths, expected) => {
-    expect(
-      isCrossMount(
-        cmd,
-        paths.map((p) => PathSpec.fromStrPath(p)),
-        reg,
-      ),
-    ).toBe(expected)
-  })
-})
 
 const runSingleNoop: RunSingle = () => Promise.resolve([null, new IOResult()])
 

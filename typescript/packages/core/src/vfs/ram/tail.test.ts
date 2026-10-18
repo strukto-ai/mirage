@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
+import { onMount } from '../../test-utils.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../io/types.ts'
@@ -32,12 +32,14 @@ async function runTail(
 ): Promise<string> {
   const cmd = RAM_TAIL[0]
   if (cmd === undefined) throw new Error('tail not registered')
-  const result = await cmd.fn(vfs.accessor, paths, [], {
-    stdin: null,
-    flags,
-    io: commandIo(vfs),
-    cwd: PathSpec.fromStrPath('/'),
-  })
+  const result = await onMount(vfs, (files) =>
+    cmd.fn(vfs.accessor, paths, [], {
+      stdin: null,
+      flags,
+      vfs: files,
+      cwd: PathSpec.fromStrPath('/'),
+    }),
+  )
   if (result === null) return ''
   const [out] = result
   if (out === null) return ''

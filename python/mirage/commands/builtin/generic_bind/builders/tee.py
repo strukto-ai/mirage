@@ -12,43 +12,36 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.tee import tee_generic as generic_tee
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    Operation,
-    bound_op,
-    require_op,
-)
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.links import links_of
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def tee(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await ops.resolve_glob(accessor, paths, ctx.index) if paths else []
-    # A backend that can append natively does; the rest fall back to the
-    # read-modify-write inside the generic.
-    append = ops.append
+    files = command_files(ctx, paths)
+    paths = await files.resolve_glob(paths) if paths else []
     links = links_of(ctx)
     return await generic_tee(
         paths,
         texts,
-        read_stream=bound_op(ops.read_stream, accessor, ctx.index),
-        write_bytes=partial(require_op(ops, Operation.WRITE), accessor),
-        append_bytes=(None if append is None else partial(append, accessor)),
+        read_stream=files.read_stream,
+        write_bytes=files.write,
+        # A backend that can append natively does; the rest fall back to
+        # the read-modify-write inside the generic.
+        append_bytes=(files.append if files.answers("append") else None),
         stdin=ctx.stdin,
         flags=ctx.flags,
-        stat=bound_op(ops.stat, accessor, ctx.index),
+        stat=files.stat,
         output_key=(lambda p: links.resolve(p.virtual))
         if links is not None
         else None,

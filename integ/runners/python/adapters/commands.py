@@ -13,19 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from dataclasses import replace
+from contextvars import ContextVar
 
 from mirage.accessor import NOOPAccessor
 from mirage.commands.builtin.aggregators import concat_aggregate
 from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.cli.types import (
     CLI as CLIProgram,
 )
 from mirage.commands.cli.types import CLIHandler
 from mirage.commands.config import (
     Command,
-    CommandIO,
     Context,
     command,
     registered_commands,
@@ -36,15 +34,9 @@ from mirage.io.types import IOResult
 from mirage.types import FileStat, PathSpec
 from mirage.vfs.ram import RAMVFS
 
-
-def _without_tree(io: CommandIO) -> CommandIO:
-    """The table with its one-call subtree read set aside, so a walk lists
-    through ``readdir``.
-
-    Args:
-        io (CommandIO): the mount's table.
-    """
-    return replace(io, read_tree=None)
+# Set while one of the service's own handlers runs: the reads it makes
+# through the dispatcher are its own, which the service answers.
+_OWN = ContextVar("command_service_own", default=False)
 
 
 class Gate:
@@ -59,23 +51,21 @@ GATE = Gate()
 
 class CommandService(RAMVFS):
     def __init__(self, metadata_only: bool = False) -> None:
+        self.metadata_only = metadata_only
         super().__init__()
         calls: list[str] = []
         handlers: list[Command] = []
         dropped = {"grep", "rg"} if metadata_only else set()
-        # The service's own handlers read through a plain RAM view of its
-        # store; every other read reaches the refusal below.
-        view = RAMVFS()
-        view.accessor = self.accessor
-        own = command_io(view)
+        # The service's own handlers read its store; every other read
+        # reaches the refusal below.
         for name in sorted({"grep", "rg", "rev"} - dropped):
-            handlers.extend(self._search(generic(name), calls, own))
-        # Without its own search it has no walk of its own either: find
-        # and du list through readdir, which refuses what it hides.
+            handlers.extend(self._search(generic(name), calls))
+        # Without its own search it has no walk of its own either
+        # (``supports``): find and du list through readdir, which refuses
+        # what it hides.
         if metadata_only:
             handlers.extend(
-                generic(name, vfs="ram", table=_without_tree)
-                for name in ("du", "find")
+                generic(name, vfs="ram") for name in ("du", "find")
             )
 
         @command("calls", vfs="ram", spec=SPECS["cat"])
@@ -106,9 +96,7 @@ class CommandService(RAMVFS):
             [show_calls, meter, gate_status]
         )
 
-    def _search(
-        self, original: Command, calls: list[str], own: CommandIO
-    ) -> list[Command]:
+    def _search(self, original: Command, calls: list[str]) -> list[Command]:
         @command(original.name, vfs="ram", spec=SPECS[original.name])
         async def search(accessor, paths, texts, ctx):
             calls.extend(original.name + " " + p.virtual for p in paths)
@@ -148,18 +136,27 @@ class CommandService(RAMVFS):
                     )
 
                 return stream(), IOResult()
-            return await original.fn(
-                accessor, paths, texts, replace(ctx, io=own)
-            )
+            token = _OWN.set(True)
+            try:
+                return await original.fn(accessor, paths, texts, ctx)
+            finally:
+                _OWN.reset(token)
 
         return registered_commands([search])
 
     def commands(self) -> list[Command]:
         return self._commands
 
+    def supports(self, name: str) -> bool:
+        if name == "read_tree" and self.metadata_only:
+            return False
+        return super().supports(name)
+
     async def read(
         self, path: PathSpec, offset: int = 0, size: int | None = None
     ) -> bytes:
+        if _OWN.get():
+            return await super().read(path, offset, size)
         raise PermissionError(13, "service exposes search only", path.virtual)
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:

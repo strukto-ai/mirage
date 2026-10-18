@@ -16,10 +16,12 @@ import { expect, it } from 'vitest'
 import { commandStarted, runInCommandScope } from '../../../cache/index/scope.ts'
 import { command } from '../../config.ts'
 import { SPECS } from '../../spec/index.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
+import { runWithMountGate } from '../../../context/session_context.ts'
+import { BUILDERS } from './builders/index.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { runDispatch } from './dispatch.ts'
-import { type FileStat, MountMode, type PathSpec } from '../../../types.ts'
+import { type FileStat, MountMode, PathSpec } from '../../../types.ts'
 import { BaseVFS } from '../../../vfs/base.ts'
 import type { Handed } from '../../../vfs/types.ts'
 import { eacces } from '../../../errors/fs.ts'
@@ -310,4 +312,28 @@ it('reads a walked tree in one call and prints the same', async () => {
   expect(counted.trees).toBeGreaterThan(0)
   // find -maxdepth 1 and tree -L 1 each list their one level.
   expect(counted.listings).toBe(2)
+})
+
+// A run across mounts reads as served by no mount, even while a mount's scope
+// is bound (another task's: there is no task isolation), so its walk descends.
+it('walks across mounts as a run across them, even inside a mount scope', async () => {
+  const ws = new Workspace(
+    { '/a': new RAMVFS(), '/a/b': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  const run = (name: string): Promise<string> =>
+    runWithMountGate('/a/', MountMode.WRITE, async () => {
+      const builder = BUILDERS.find((b) => b.name === name)
+      if (builder === undefined) throw new Error(`missing builder ${name}`)
+      const at = [PathSpec.fromStrPath('/a')]
+      const [out] = await runDispatch(builder, at, [], {}, ws.vfs.dispatch, '/', ws.vfs)
+      return new TextDecoder().decode(await materialize(out))
+    })
+  try {
+    await ws.shell('echo aa > /a/f; echo bbbb > /a/b/g')
+    expect(await run('find')).toBe('/a\n/a/b\n/a/b/g\n/a/f\n')
+    expect(await run('du')).toBe('5\t/a/b\n8\t/a\n')
+  } finally {
+    await ws.close()
+  }
 })

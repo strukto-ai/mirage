@@ -13,25 +13,26 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { NO_WRITE_OP, shufGeneric } from '../../generic/shuf.ts'
-import { type GenericCommand, resolveGlobOf } from '../adapter.ts'
+import { type GenericCommand } from '../adapter.ts'
+import { commandFiles, resolveOrEmpty } from '../files.ts'
 
 export const BUILDER: GenericCommand = {
   name: 'shuf',
+  write: true,
   read: true,
-  fn: async (ops, accessor, paths, texts, ctx) => {
-    const idx = ctx.index ?? undefined
-    const { write } = ops
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  fn: async (_accessor, paths, texts, ctx) => {
+    const files = commandFiles(ctx, paths)
+    const resolved = await resolveOrEmpty(files, paths)
     return shufGeneric(
       resolved,
       texts,
       ctx,
-      (p) => ops.readStream(accessor, p, idx),
+      files.readStream,
       // Only `-o` writes, so a read-only backend still serves plain shuf.
       // Requiring the write op up front would break every read-only backend.
       (p, data) => {
-        if (write === undefined) throw new Error(NO_WRITE_OP)
-        return write(accessor, p, data)
+        if (!files.answers('write')) throw new Error(NO_WRITE_OP)
+        return files.write(p, data)
       },
     )
   },

@@ -14,29 +14,22 @@
 
 import { headerAggregate } from '../../aggregators.ts'
 import { tailGeneric } from '../../generic/tail.ts'
-import {
-  type GenericCommand,
-  boundUncached,
-  dirAwareStat,
-  dirAwareStream,
-  resolveGlobOf,
-  type GenericCommandFn,
-} from '../adapter.ts'
-import type { PathSpec } from '../../../../types.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, dirAwareStat, dirAwareStream, resolveOrEmpty } from '../files.ts'
 
-const tail: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  const { readRange, lastLines, follow } = ops
+const tail: CommandFn = async (_accessor, paths, texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
   return tailGeneric(
     resolved,
     texts,
     ctx,
-    dirAwareStream(ops, accessor, ctx),
-    dirAwareStat(ops, accessor, ctx),
-    readRange === undefined ? null : (p, offset, size) => readRange(accessor, p, idx, offset, size),
-    boundUncached(lastLines && ((p: PathSpec, n: number) => lastLines(accessor, p, n, idx))),
-    follow && ((p: PathSpec, n: number, interval: number) => follow(accessor, p, n, interval, idx)),
+    dirAwareStream(files, ctx),
+    dirAwareStat(files, ctx),
+    files.answers('read_range') ? files.readRange : null,
+    files.answers('last_lines') ? files.lastLines : undefined,
+    files.answers('follow') ? files.follow : undefined,
   )
 }
 

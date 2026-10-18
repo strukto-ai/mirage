@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
@@ -29,7 +31,8 @@ async def _listed(accessor, path, index=None):
     return [f"{base}/{row.name}" for row in rows]
 
 
-resolve_glob = make_resolve_glob(_listed, SCOPE_ERROR)
+def resolve_glob(accessor, paths, index=None):
+    return make_resolve_glob(partial(_listed, accessor), SCOPE_ERROR)(paths)
 
 
 @pytest.fixture

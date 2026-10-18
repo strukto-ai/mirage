@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { materialize } from '../../io/types.ts'
+import { IOResult, materialize } from '../../io/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { classifyParts } from '../expand/classify/parts.ts'
@@ -24,6 +24,11 @@ import { parseSessionProfile, type SessionProfile } from '../../policy/profile.t
 import { Admitted, admit, admitLine, policyScopes } from './admission.ts'
 import { PolicyDenied } from '../../policy/index.ts'
 import type { CommandContext, CommandRule, AdmissionRules } from '../../policy/types.ts'
+import type { Action } from '../../policy/index.ts'
+import { CLI, CLIHandler } from '../../commands/cli/types.ts'
+import { command, type CommandFn } from '../../commands/config.ts'
+import { SPECS } from '../../commands/spec/index.ts'
+import { Argument, CommandSpec } from '../../commands/spec/types.ts'
 
 const DEC = new TextDecoder()
 
@@ -535,5 +540,147 @@ describe('admission', () => {
     const scoped = await admit('cat', ['/data/a'], words.slice(1), session, w.registry, w.namespace)
     expect(scoped).toBeInstanceOf(Admitted)
     expect((scoped as Admitted).scoped).toBe(true)
+  })
+})
+
+describe('what the handler a command resolves to declares', () => {
+  const noop: CommandFn = () => [null, new IOResult()]
+
+  // --token is filled from the session's env; the gate's walk must read it too.
+  const ISSUES = new CLI({
+    spec: new CommandSpec({
+      name: 'issues',
+      arguments: [new Argument('--token', { env: 'TOKEN', required: true })],
+      subcommands: [
+        new CommandSpec({ name: 'list' }),
+        new CommandSpec({ name: 'create', aliases: ['new'] }),
+      ],
+    }),
+    handlers: {
+      list: new CLIHandler({ fn: noop }),
+      create: new CLIHandler({ write: true, fn: noop }),
+    },
+  })
+  // A tree a mount serves; the gate reads its group path, a leaf path the
+  // env fills and a leaf's file, behind the env-filled --token, as the walk
+  // does.
+  const NOTES = new CLI({
+    spec: new CommandSpec({
+      name: 'notes',
+      arguments: [
+        new Argument('--file', { type: 'path' }),
+        new Argument('--token', { env: 'TOKEN', required: true }),
+      ],
+      subcommands: [
+        new CommandSpec({
+          name: 'show',
+          arguments: [
+            new Argument('-C', { type: 'path' }),
+            new Argument('paths', { type: 'path', nargs: '*' }),
+          ],
+          operandBase: '-C',
+        }),
+        new CommandSpec({
+          name: 'add',
+          arguments: [new Argument('--out', { type: 'path', env: 'OUT' })],
+        }),
+      ],
+    }),
+    handlers: {
+      show: new CLIHandler({ fn: noop }),
+      add: new CLIHandler({ write: true, fn: noop }),
+    },
+  })
+  // A flat tree: -e from the env takes the text slot, so the word is a file.
+  const SCAN = new CLI({
+    spec: new CommandSpec({
+      name: 'scan',
+      arguments: [
+        new Argument('-e', { env: 'PATTERN' }),
+        new Argument('text', { nargs: '?', providedBy: ['-e'] }),
+        new Argument('paths', { type: 'path', nargs: '*' }),
+      ],
+    }),
+    handlers: { '': new CLIHandler({ fn: noop }) },
+  })
+  const PATHS = new CommandSpec({
+    arguments: [new Argument('paths', { type: 'path', nargs: '*' })],
+  })
+  const COMMANDS = [
+    ...command({ name: 'peek', vfs: null, spec: new CommandSpec(), fn: noop }),
+    ...command({ name: 'stamp', vfs: null, spec: new CommandSpec(), write: true, fn: noop }),
+    ...command({ name: 'show', vfs: null, spec: PATHS, fn: noop }),
+    ...command({ name: 'show', vfs: null, spec: PATHS, filetype: '.csv', write: true, fn: noop }),
+  ]
+
+  it('reads a command as writing when its handler says so', async () => {
+    const seen: Record<string, boolean | undefined> = {}
+    const programs: Record<string, readonly string[] | undefined> = {}
+    const paths: Record<string, string[]> = {}
+    const ws = new Workspace(
+      { '/data/': new RAMVFS(), '/other/': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: await getTestParser(),
+        policies: [
+          {
+            preCommand: (ctx: CommandContext): Action | null => {
+              seen[ctx.line ?? ''] = ctx.write
+              programs[ctx.line ?? ''] = ctx.program
+              paths[ctx.line ?? ''] = ctx.paths.map((p) => p.virtual)
+              return ctx.write === true ? { kind: 'deny', reason: 'this session only reads' } : null
+            },
+          },
+        ],
+      },
+    )
+    open.push(ws)
+    ws.registerCli('issues', ISSUES)
+    ws.mount('/data/').registerCommands(COMMANDS)
+    ws.mount('/data/').registerCommands([NOTES, SCAN])
+    // /other/'s diff writes, and an attached path option routes there.
+    const diff = SPECS.diff
+    if (diff === undefined) throw new Error('no diff spec')
+    ws.mount('/other/').registerCommands([
+      ...command({ name: 'show', vfs: null, spec: PATHS, write: true, fn: noop }),
+      ...command({ name: 'diff', vfs: null, spec: diff, write: true, fn: noop }),
+    ])
+    const lines = {
+      'issues list': false,
+      'issues create': true,
+      'issues new': true,
+      'issues nope': false,
+      'notes show': false,
+      'notes add': true,
+      'notes --file /other/secret show': false,
+      'notes show /other/note': false,
+      'notes show -C /other note': false,
+      'scan /other/s': false,
+      peek: false,
+      stamp: true,
+      'show /data/a.txt': false,
+      'show /data/a.csv': true,
+      'show /data/a.txt /other/b.txt': true,
+      'show /data/l.txt': true,
+      'diff --exclude-from=/other/list - -': true,
+      'cat /data/a.txt': false,
+      'rm -f /data/a.txt': true,
+      'sort -o /data/b.txt /data/a.txt': true,
+      'chmod 644 /data/a.txt': true,
+      'ln -s /data/a.txt /data/l': true,
+      'echo hi': false,
+    }
+    await ws.shell('export TOKEN=t OUT=/other/out PATTERN=p')
+    // A run follows the link to the .csv, whose `show` writes.
+    await ws.vfs.write('/data/f.csv', new TextEncoder().encode('x\n'))
+    await ws.vfs.symlink('/data/l.txt', '/data/f.csv')
+    for (const line of Object.keys(lines)) await ws.shell(line)
+    expect(seen).toEqual(lines)
+    expect(programs['issues new']).toEqual(['issues', 'create'])
+    expect(paths['notes --file /other/secret show']).toEqual(['/other/secret'])
+    expect(paths['notes add']).toEqual(['/other/out'])
+    expect(paths['notes show /other/note']).toEqual(['/other/note'])
+    expect(paths['notes show -C /other note']).toEqual(['/other', '/other/note'])
+    expect(paths['scan /other/s']).toEqual(['/other/s'])
   })
 })

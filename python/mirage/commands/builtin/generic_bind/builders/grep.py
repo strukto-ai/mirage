@@ -16,36 +16,30 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import grep_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    bound_op,
-)
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.generic_bind.search import search_reads
 from mirage.commands.builtin.utils.tree import tree_walk
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def grep(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    resolved = (
-        await ops.resolve_glob(accessor, paths, ctx.index)
-        if paths and ops.is_mounted(accessor)
-        else []
-    )
+    files = command_files(ctx, paths)
+    resolved = await files.resolve_glob(paths) if paths else []
     read_bytes, read_stream = await search_reads(
-        ops, "grep", accessor, resolved, texts, ctx
+        files, "grep", resolved, texts, ctx
     )
     readdir, stat = tree_walk(
-        bound_op(ops.read_tree, accessor, ctx.index),
-        bound_op(ops.readdir, accessor, ctx.index),
-        bound_op(ops.stat, accessor, ctx.index),
+        (files.read_tree if files.answers("read_tree") else None),
+        files.readdir,
+        files.stat,
     )
     return await grep_generic(
         resolved,

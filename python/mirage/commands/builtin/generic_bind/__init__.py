@@ -16,17 +16,11 @@ import importlib
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from mirage.commands.builtin.generic_bind.factory import (
-        generic,
-        with_stat_cache,
-    )
+    from mirage.commands.builtin.generic_bind.factory import generic
     from mirage.utils.glob_walk import make_resolve_glob
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
-    "mirage.commands.builtin.generic_bind.factory": (
-        "generic",
-        "with_stat_cache",
-    ),
+    "mirage.commands.builtin.generic_bind.factory": ("generic",),
     "mirage.utils.glob_walk": ("make_resolve_glob",),
 }
 _MODULE_OF = {
@@ -36,7 +30,6 @@ _MODULE_OF = {
 __all__ = [
     "generic",
     "make_resolve_glob",
-    "with_stat_cache",
 ]
 
 

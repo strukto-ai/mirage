@@ -18,8 +18,6 @@ from collections.abc import Awaitable, Callable, Sequence
 from datetime import date, timedelta
 from typing import Any, Protocol
 
-from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.context import dotglob_active, extglob_active, session_visibility
 from mirage.errors.constants import WALK_ERRORS
 from mirage.types import FileStat, FileType, PathSpec
@@ -444,9 +442,7 @@ def glob_name_matches(
 
 async def expand_pattern(
     readdir: Callable[..., Any],
-    accessor: Accessor,
     path: PathSpec,
-    index: IndexCacheStore,
     access: SessionAccess | None = None,
 ) -> list[PathSpec]:
     """Expand a glob PathSpec segment-by-segment via readdir.
@@ -460,12 +456,11 @@ async def expand_pattern(
     non-final components.
 
     Args:
-        readdir (Callable): backend readdir ``(accessor, path, index)``
-            returning absolute virtual paths.
-        accessor (Accessor): backend handle passed through to readdir.
+        readdir (Callable): readdir ``readdir(path)`` returning absolute
+            virtual paths.
         path (PathSpec): unresolved spec whose ``vfs_path`` still
             contains the pattern.
-        index (IndexCacheStore): the per-call cache index.
+        access (SessionAccess | None): the session's shell options.
     """
     prefix = path.virtual[: len(path.virtual.rstrip("/")) - len(path.vfs_path)]
     segments = glob_parts(path.vfs_path, access) if path.vfs_path else []
@@ -501,7 +496,7 @@ async def expand_pattern(
                 pattern=seg if has_glob(seg, access) else None,
             )
             try:
-                entries = await readdir(accessor, spec, index)
+                entries = await readdir(spec)
             except (FileNotFoundError, NotADirectoryError):
                 entries = []
             pattern = glob_pattern(seg)
@@ -537,21 +532,16 @@ async def expand_pattern(
 
 
 class ResolveGlobFn(Protocol):
-    """One backend's glob resolver, bound to its own readdir.
+    """A glob resolver, bound to the readdir and stat it walks with:
+    ``resolve(paths)``, the expansion of each operand in order.
 
     Named rather than left as `Callable[..., Any]`, because that erasure
     is what let the VFS base declare a wider parameter than any
-    implementation accepts. `ResolveGlobOp` in the generic_bind adapter
-    is the consumer-side twin; mypy checks the two agree where the
-    adapter hands this function out, which is the check that was missing.
+    implementation accepts.
     """
 
     def __call__(
-        self,
-        accessor: Any,
-        paths: Sequence[PathSpec],
-        /,
-        index: IndexCacheStore = ...,
+        self, paths: Sequence[PathSpec], /
     ) -> Awaitable[list[PathSpec]]: ...
 
 
@@ -564,17 +554,19 @@ def make_resolve_glob(
     follow: FollowOperands | None = None,
     resolved: Callable[[list[PathSpec]], None] | None = None,
 ) -> ResolveGlobFn:
-    """Build a resolve_glob generic over a backend's readdir.
+    """Build a glob resolver, ``resolve(paths)``, over a readdir.
 
     Args:
-        readdir (Callable): backend readdir ``(accessor, path, index)``.
+        readdir (Callable): readdir ``readdir(path)``.
         max_glob_matches (int | None): cap on matches per pattern before
             truncation.
-        stat (Callable | None): backend stat ``(accessor, path, index)``,
-            which is what lets a trailing slash keep directories only.
+        stat (Callable | None): stat ``stat(path)``, which is what lets a
+            trailing slash keep directories only.
         target_stat (LinkTargetStat | None): the namespace's stat of what
             a link points at, resolved through the workspace, so a
             trailing slash can follow a link the way bash does.
+        access (SessionAccess | None): the session's hides and shell
+            options, else the current session's.
         follow (FollowOperands | None): the line's operand resolution,
             given to a typed word's matches.
         resolved (Callable[[list[PathSpec]], None] | None): told what
@@ -582,17 +574,10 @@ def make_resolve_glob(
             reads are warmed ahead of.
     """
 
-    async def resolve_glob(
-        accessor: Accessor,
-        paths: Sequence[PathSpec],
-        /,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> list[PathSpec]:
+    async def resolve_glob(paths: Sequence[PathSpec], /) -> list[PathSpec]:
         found = await resolve_glob_with(
             readdir,
-            accessor,
             paths,
-            index,
             max_glob_matches,
             stat,
             target_stat,
@@ -633,9 +618,7 @@ async def _follow_matches(
 
 async def _is_directory(
     stat: Callable[..., Any] | None,
-    accessor: Accessor,
     match: PathSpec,
-    index: IndexCacheStore,
     target_stat: LinkTargetStat | None,
 ) -> bool:
     """Whether a match is a directory, the way a trailing slash asks.
@@ -648,17 +631,15 @@ async def _is_directory(
     apart.
 
     Args:
-        stat (Callable | None): backend stat ``(accessor, path, index)``.
-        accessor (Accessor): backend handle passed through to stat.
+        stat (Callable | None): stat ``stat(path)``.
         match (PathSpec): one match.
-        index (IndexCacheStore): the per-call cache index.
         target_stat (LinkTargetStat | None): the namespace's stat of
             what a link points at, None when it dangles.
     """
     if stat is None:
         return True
     try:
-        row = await stat(accessor, match, index=index)
+        row = await stat(match)
     except WALK_ERRORS:
         return False
     if (
@@ -673,9 +654,7 @@ async def _is_directory(
 
 async def resolve_glob_with(
     readdir: Callable[..., Any],
-    accessor: Accessor,
     paths: Sequence[PathSpec],
-    index: IndexCacheStore,
     cap: int | None = None,
     stat: Callable[..., Any] | None = None,
     target_stat: LinkTargetStat | None = None,
@@ -700,13 +679,11 @@ async def resolve_glob_with(
     can tell whether the union is empty.
 
     Args:
-        readdir (Callable): backend readdir ``(accessor, path, index)``
-            returning absolute virtual paths.
-        accessor (Accessor): backend handle passed through to readdir.
+        readdir (Callable): readdir ``readdir(path)`` returning absolute
+            virtual paths.
         paths (Sequence[PathSpec]): specs to resolve.
-        index (IndexCacheStore): the per-call cache index.
         cap (int | None): cap on matches per pattern before truncation.
-        stat (Callable | None): backend stat ``(accessor, path, index)``;
+        stat (Callable | None): stat ``stat(path)``;
             without it a trailing slash cannot drop the files it matched.
         target_stat (LinkTargetStat | None): the namespace's stat of what
             a link points at; without it a trailing slash drops every
@@ -742,17 +719,13 @@ async def resolve_glob_with(
             # exactly what bash prints when nothing matched.
             matched = [
                 m
-                for m in await expand_pattern(
-                    readdir, accessor, word, index, access
-                )
+                for m in await expand_pattern(readdir, word, access)
                 if path_visible(vis, m.virtual)
             ]
             if dirs_only:
                 kept: list[PathSpec] = []
                 for m in matched:
-                    if await _is_directory(
-                        stat, accessor, m, index, target_stat
-                    ):
+                    if await _is_directory(stat, m, target_stat):
                         kept.append(
                             dataclasses.replace(m, raw_path=m.raw_path + "/")
                         )

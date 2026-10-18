@@ -2578,8 +2578,9 @@ async def test_a_dispatched_op_meets_the_rule_through_a_linked_parent():
             mode=MountMode.WRITE,
             profiles={"zapped": doc},
         )
-        for rc in _zap._registered_commands:
-            ws._registry.mount_for("/data/").register(rc)
+        # Registered as mirage's own command: one a user registers does
+        # not run while the session's rules reach its mount.
+        ws._registry.mount_for("/data/")._register_builtins([_zap])
         ws.create_session("g", profile="zapped")
         try:
             await ws.shell(

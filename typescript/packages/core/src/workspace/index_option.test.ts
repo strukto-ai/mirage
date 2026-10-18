@@ -114,6 +114,8 @@ describe('Workspace index option', () => {
       const alias = ws.addMount('/b', ram, MountMode.READ, FRESH, null, { ttl: 0 })
       expect(alias.indexStore).toBe(ws.mount('/a').indexStore)
       expect(alias.read.policy).toBe(ReadPolicy.FRESH)
+      const manager = ws.mount('/a').cacheManager as unknown as { aliases: () => string[] }
+      expect(manager.aliases()).toEqual(['/b'])
     } finally {
       await ws.close()
     }

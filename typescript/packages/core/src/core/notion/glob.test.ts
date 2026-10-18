@@ -41,11 +41,12 @@ async function listedPaths(accessor: NotionAccessor, path: PathSpec): Promise<st
   return rowsOf(listed).map((row) => `${base}/${row.name}`)
 }
 
-const resolveNotionGlob = makeResolveGlob(
-  listedPaths,
-  undefined,
-  (accessor: NotionAccessor, path: PathSpec) => notionStat(accessor, path, ...handed(path)),
-)
+const resolveNotionGlob = (accessor: NotionAccessor, paths: PathSpec[]): Promise<PathSpec[]> =>
+  makeResolveGlob(
+    (path) => listedPaths(accessor, path),
+    undefined,
+    (path) => notionStat(accessor, path, ...handed(path)),
+  )(paths)
 
 class FakeTransport implements NotionTransport {
   public readonly invocations: { name: string; args: Record<string, unknown> }[] = []

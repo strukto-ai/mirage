@@ -13,25 +13,26 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { xxdGeneric } from '../../generic/xxd.ts'
-import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, resolveOrEmpty } from '../files.ts'
 
-const xxd: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const write = requireOp(ops.write, 'write')
-  const pwrite = ops.pwrite
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+const xxd: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
   return xxdGeneric(
     resolved,
     ctx,
-    (p) => ops.readStream(accessor, p, idx),
-    (p) => ops.readBytes(accessor, p, idx),
-    (p, d) => write(accessor, p, d),
-    pwrite === undefined ? null : (p, d, offset) => pwrite(accessor, p, d, offset),
+    files.readStream,
+    files.readBytes,
+    (p, d) => files.write(p, d),
+    files.answers('pwrite') ? files.pwrite : null,
   )
 }
 
 export const BUILDER: GenericCommand = {
   name: 'xxd',
+  write: true,
   read: true,
   fn: xxd,
 }

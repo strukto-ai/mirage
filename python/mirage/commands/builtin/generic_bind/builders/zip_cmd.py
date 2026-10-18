@@ -12,41 +12,36 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.zip_cmd import zip_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    Operation,
-    bound_op,
-    require_op,
-)
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.archive_io import walk_of
+from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.links import dispatch_of
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def zip_cmd(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not ops.is_mounted(accessor) or not paths:
+    files = command_files(ctx, paths)
+    if not paths:
         raise ValueError("zip: usage: zip archive.zip file1 [file2 ...]")
-    resolved = await ops.resolve_glob(accessor, paths, ctx.index)
+    resolved = await files.resolve_glob(paths)
     return await zip_generic(
         resolved,
         list(texts),
         ctx,
-        bound_op(ops.read_stream, accessor, ctx.index),
-        partial(require_op(ops, Operation.WRITE), accessor),
-        partial(ops.stat, accessor, index=ctx.index),
-        walk_of(ops, accessor, ctx.index, dispatch_of(ctx), "zip"),
+        files.read_stream,
+        files.write,
+        files.stat,
+        walk_of(files, dispatch_of(ctx), "zip"),
     )
 
 

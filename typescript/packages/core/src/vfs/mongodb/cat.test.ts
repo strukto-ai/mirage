@@ -25,7 +25,7 @@ import * as statModule from '../../core/mongodb/stat.ts'
 import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
 import { PathSpec } from '../../types.ts'
 import { generic } from '../../commands/builtin/generic_bind/factory.ts'
-import { ioFor } from '../../test-utils.ts'
+import { onMount, vfsOver } from '../../test-utils.ts'
 import { MongoDBVFSBase } from '../../vfs/mongodb/mongodb.ts'
 
 const STUB_DRIVER = stubMongoDriver()
@@ -54,12 +54,17 @@ describe('mongodb cat error surfacing', () => {
     const cmd = generic('cat')
     const accessor = makeAccessor()
     await expect(
-      cmd.fn(accessor, [mk('users.jsonl')], [], {
-        stdin: null,
-        flags: {},
-        io: ioFor(MongoDBVFSBase, accessor),
-        cwd: PathSpec.fromStrPath('/'),
-      }),
+      onMount(
+        vfsOver(MongoDBVFSBase, accessor),
+        (files) =>
+          cmd.fn(accessor, [mk('users.jsonl')], [], {
+            stdin: null,
+            flags: {},
+            vfs: files,
+            cwd: PathSpec.fromStrPath('/'),
+          }),
+        '/mongo',
+      ),
     ).rejects.toThrow(message)
   })
 })

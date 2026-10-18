@@ -14,30 +14,30 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.jq import jq_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    bound_op,
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import (
+    command_files,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def jq(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_or_empty(ops, accessor, paths, ctx.index)
+    files = command_files(ctx, paths)
+    paths = await resolve_or_empty(files, paths)
     return await jq_generic(
         paths,
         texts,
         ctx,
-        bound_op(ops.read_bytes, accessor, ctx.index),
-        bound_op(ops.read_stream, accessor, ctx.index),
+        files.read_bytes,
+        files.read_stream,
     )
 
 

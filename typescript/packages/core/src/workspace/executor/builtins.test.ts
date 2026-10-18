@@ -14,7 +14,7 @@
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { CLIHandler } from '../../commands/cli/types.ts'
 
-import { commandsFor } from '../../commands/builtin/backends.ts'
+import { commandsFor } from '../mount/backends.ts'
 import { EvaluationContext } from '../evaluation.ts'
 import { helpPage, versionLine } from '../../commands/spec/standard.ts'
 import { HELP as PRINTF_HELP } from './builtins/printf/printf.ts'
@@ -72,7 +72,8 @@ import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 
 function wireMount(mount: MountEntry): void {
   for (const cmd of commandsFor(mount.vfs)) {
-    if (cmd.filetype !== null) mount.register(cmd)
+    if (cmd instanceof CLI) mount.registerCommands([cmd])
+    else if (cmd.filetype !== null) mount.register(cmd)
     else if (cmd.vfs === null) mount.registerGeneral(cmd)
     else mount.register(cmd)
   }

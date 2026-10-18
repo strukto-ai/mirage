@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from functools import partial
 
 from mirage.commands.builtin.constants import GZIP_SUFFIX
-from mirage.commands.builtin.generic.archive.walk import StatFn
 from mirage.commands.builtin.generic.decompress import (
     beside_link,
     decompress_inputs,
@@ -33,7 +32,7 @@ from mirage.errors.fs import fs_strerror
 from mirage.io.spool import ByteSpool
 from mirage.io.stream import OutputStream, close_quietly, drain
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec, PolymorphicReadFn
+from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.compress import gzip_compress_stream
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import gnu_basename

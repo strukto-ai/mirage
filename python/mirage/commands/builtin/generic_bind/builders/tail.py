@@ -15,40 +15,34 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.aggregators import header_aggregate
 from mirage.commands.builtin.generic.tail import tail_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    bound_op,
-    bound_uncached,
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import (
+    command_files,
     dir_aware_stat,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def tail(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    resolved = await resolve_or_empty(ops, accessor, paths, ctx.index)
-    read_range = (
-        bound_op(ops.read_range, accessor, ctx.index)
-        if ops.read_range is not None
-        else None
-    )
+    files = command_files(ctx, paths)
+    resolved = await resolve_or_empty(files, paths)
     return await tail_generic(
         resolved,
         list(texts),
         ctx,
-        dir_aware_stat(ops, accessor, ctx),
-        bound_op(ops.read_stream, accessor, ctx.index),
-        read_range,
-        bound_uncached(ops.last_lines, accessor, ctx.index),
-        bound_op(ops.follow, accessor, ctx.index),
+        dir_aware_stat(files, ctx),
+        files.read_stream,
+        (files.read_range if files.answers("read_range") else None),
+        (files.last_lines if files.answers("last_lines") else None),
+        (files.follow if files.answers("follow") else None),
     )
 
 

@@ -63,7 +63,7 @@ import { compareCodePoints } from '../../../utils/sort.ts'
 import { contentSize } from '../../../utils/stat_view.ts'
 import { escapeName } from '../../../utils/quote.ts'
 import { charWidth } from '../../../utils/width.ts'
-import { linksOf, mountsOf, owedNames } from '../utils/links.ts'
+import { linksOf, mountsOf, owedNames, mountRoot } from '../utils/links.ts'
 import { vfsStatPath } from '../utils/paths.ts'
 import { openStream } from '../../../rs/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
@@ -1180,7 +1180,7 @@ export async function lsGeneric(
             virtual: ctx.cwd.virtual,
             directory: ctx.cwd.virtual,
             resolved: false,
-            vfsPath: mountKey(ctx.cwd.virtual, ctx.mountPrefix ?? ''),
+            vfsPath: mountKey(ctx.cwd.virtual, mountRoot(ctx)),
           }),
         ]
   const flags = parseFlags(fl)

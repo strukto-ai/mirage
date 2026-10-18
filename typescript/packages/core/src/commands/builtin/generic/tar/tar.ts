@@ -65,7 +65,7 @@ import { stdinStream } from '../../utils/stream.ts'
 import { lsModeString } from '../../utils/formatting.ts'
 import { ensureDir, extractDest } from '../archive/extract.ts'
 import type { Compression, CompressionKind, CreateResult, ReadResult } from './types.ts'
-import { linksOf, mountView } from '../../utils/links.ts'
+import { linksOf, mountView, mountRoot } from '../../utils/links.ts'
 import { formatOptionalRecords } from '../../utils/output.ts'
 import { escapeQuote } from '../../../../utils/quote.ts'
 
@@ -589,7 +589,7 @@ export async function tarGeneric(
   const stripN = parsed.stripComponents
   const exclude = parsed.exclude
   const toStdout = parsed.toStdout
-  const mountPrefix = relay ? '' : (ctx.mountPrefix ?? '')
+  const mountPrefix = relay ? '' : mountRoot(ctx)
   // With no -f the archive is standard input or output, which is GNU tar's
   // compiled-in default (no TAPE in the environment).
   const archiveSpec =

@@ -219,6 +219,14 @@ class MountView:
     # ``max_du_entries``, None for no cap), so a walk that crosses mounts
     # charges each entry to its own backend's allowance.
     max_du_entries: Callable[[str], int | None] | None = None
+    # Whether the VFS of the mount serving a path answers a function
+    # itself (``read_tree``, ``checksum``, ``read_range``, ...), so a
+    # command asks for a one-call answer only where one exists.
+    answers: Callable[[str, str], bool] | None = None
+    # The serving mount's cap on one glob's matches; None for no cap.
+    max_glob_matches: Callable[[str], int | None] | None = None
+    # The globs its ``files_containing`` covers; None for every file.
+    searchable: Callable[[str], tuple[str, ...] | None] | None = None
 
 
 @runtime_checkable

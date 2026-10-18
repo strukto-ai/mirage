@@ -14,14 +14,15 @@
 
 import { BUILDER, WalkBudget } from './du.ts'
 import { describe, expect, it } from 'vitest'
-import { IOResult, materialize } from '../../../../io/types.ts'
-import { FileStat, FileType, PathSpec } from '../../../../types.ts'
+import { runWithMountGate } from '../../../../context/session_context.ts'
+import { materialize } from '../../../../io/types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
 import { eacces, enoent, enotsup, walkDeclined } from '../../../../errors/fs.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
-import type { CommandIO } from '../../../config.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
 import type { MountView, NamespaceLinks } from '../../../../view/types.ts'
-import type { DispatchFn } from '../../../../runtime/types.ts'
-import { Files } from '../../../../workspace/files.ts'
+import { DEFAULT_MAX_DU_ENTRIES } from '../../../../vfs/constants.ts'
+import { answeringFiles } from '../../../../test-utils.ts'
 
 const DEC = new TextDecoder()
 
@@ -32,17 +33,19 @@ const TREE: Record<string, { dir: boolean; size?: number; children?: string[] }>
   '/db/sub/b.txt': { dir: false, size: 2 },
 }
 
-// A CommandIO with no native du op, so the builder must use the walk fallback.
-// eslint-disable-next-line @typescript-eslint/require-await
-async function* emptyStream(): AsyncIterable<Uint8Array> {
-  yield* []
+// A mount the dispatcher answers for: its listing, its stat, its subtree
+// read where it has one, and its du walk budget.
+interface Table {
+  readdir: (p: PathSpec) => Promise<string[]>
+  stat: (p: PathSpec) => Promise<FileStat>
+  readTree?: (p: PathSpec) => Promise<Map<string, FileStat> | null>
+  maxDuEntries?: number | null
 }
 
-const OPS: CommandIO = {
-  readdir: (_a, p) => Promise.resolve(TREE[p.virtual]?.children ?? []),
-  readBytes: () => Promise.resolve(new Uint8Array()),
-  readStream: () => emptyStream(),
-  stat: (_a, p) => {
+// A mount with no subtree read, so the builder must walk.
+const OPS: Table = {
+  readdir: (p) => Promise.resolve(TREE[p.virtual]?.children ?? []),
+  stat: (p) => {
     const node = TREE[p.virtual]
     // A stamped FsError, as every real backend raises: the builder tells a
     // missing operand from a backend failure by the code, not the message.
@@ -55,19 +58,47 @@ const OPS: CommandIO = {
       }),
     )
   },
-  isMounted: () => true,
 }
 
 const ACCESSOR = {} as Accessor
 
-describe('du walk fallback (no native du op)', () => {
-  it('stops the walk and exits 1 once the entry budget is spent', async () => {
-    const bounded: CommandIO = { ...OPS, maxDuEntries: 1 }
-    const result = await BUILDER.fn(bounded, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
+// Run du on `table`, mounted at `/`, its links `links`.
+async function du(
+  table: Table,
+  paths: PathSpec[],
+  ctx: Partial<Context> = {},
+  links: NamespaceLinks | null = null,
+): Promise<CommandFnResult> {
+  const vfs = answeringFiles(
+    {
+      readdir: (p) => table.readdir(p),
+      stat: (p) => table.stat(p),
+      ...(table.readTree === undefined ? {} : { read_tree: (p) => table.readTree?.(p) }),
+    },
+    {},
+    {
+      prefix: '/',
+      kind: 'fake',
+      maxDuEntries: table.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : table.maxDuEntries,
+      calls: new Set(table.readTree === undefined ? [] : ['read_tree']),
+    },
+    links,
+  )
+  return runWithMountGate('/', MountMode.WRITE, async () =>
+    BUILDER.fn(ACCESSOR, paths, [], {
       stdin: null,
       flags: {},
       cwd: PathSpec.fromStrPath('/'),
-    })
+      ...ctx,
+      vfs,
+    }),
+  )
+}
+
+describe('du walk fallback (no native du op)', () => {
+  it('stops the walk and exits 1 once the entry budget is spent', async () => {
+    const bounded: Table = { ...OPS, maxDuEntries: 1 }
+    const result = await du(bounded, [PathSpec.fromStrPath('/db')])
     expect(result).not.toBeNull()
     const [, io] = result as [unknown, { exitCode: number; stderr: Uint8Array | null }]
     expect(io.exitCode).toBe(1)
@@ -75,17 +106,11 @@ describe('du walk fallback (no native du op)', () => {
   })
 
   it('a backend failure propagates instead of reading as a missing operand', async () => {
-    const failing: CommandIO = {
+    const failing: Table = {
       ...OPS,
       stat: () => Promise.reject(new Error('403 Forbidden')),
     }
-    await expect(
-      BUILDER.fn(failing, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
-        stdin: null,
-        flags: {},
-        cwd: PathSpec.fromStrPath('/'),
-      }),
-    ).rejects.toThrow('403 Forbidden')
+    await expect(du(failing, [PathSpec.fromStrPath('/db')])).rejects.toThrow('403 Forbidden')
   })
 })
 
@@ -95,13 +120,13 @@ const THROTTLED = Object.assign(new Error('Box GET /folders/9/items -> 429'), {
 
 // A readTree the dispatcher declines, as it does when a path rule or a
 // hide reaches below the operand: the builder walks instead.
-const NATIVE: CommandIO = {
+const NATIVE: Table = {
   ...OPS,
-  readTree: (_a, p) => Promise.reject(walkDeclined('ram', 'read_tree', p)),
-} as CommandIO
+  readTree: (p) => Promise.reject(walkDeclined('ram', 'read_tree', p)),
+} as Table
 
 // The tree OPS walks, answered in one call.
-const TREED: CommandIO = {
+const TREED: Table = {
   ...OPS,
   readTree: () =>
     Promise.resolve(
@@ -111,17 +136,13 @@ const TREED: CommandIO = {
         ['sub/b.txt', new FileStat({ name: 'b.txt', type: FileType.FILE, size: 2 })],
       ]),
     ),
-} as CommandIO
+} as Table
 
 async function runScoped(
-  ops: CommandIO,
+  ops: Table,
   paths: PathSpec[],
 ): Promise<[Uint8Array, { exitCode: number; stderr: Uint8Array | null }]> {
-  const result = await BUILDER.fn(ops, ACCESSOR, paths, [], {
-    stdin: null,
-    flags: {},
-    cwd: PathSpec.fromStrPath('/'),
-  })
+  const result = await du(ops, paths)
   return result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]
 }
 
@@ -134,7 +155,7 @@ describe('du walk fallback under a path rule', () => {
   // The budget bounds a walk that takes a request per directory; a tree
   // read in one call is summed whole. Mirrors test_a_tree_answer_costs_no_budget.
   it('charges no budget for a tree answer', async () => {
-    const [out, io] = await runScoped({ ...TREED, maxDuEntries: 1 } as CommandIO, [
+    const [out, io] = await runScoped({ ...TREED, maxDuEntries: 1 } as Table, [
       PathSpec.fromStrPath('/db'),
     ])
     expect([DEC.decode(out), io.exitCode]).toEqual(['2\t/db/sub\n5\t/db\n', 0])
@@ -142,32 +163,32 @@ describe('du walk fallback under a path rule', () => {
 
   // Mirrors test_a_tree_answer_at_a_root_mount_costs_no_budget.
   it('charges no budget for a tree answer at a root mount', async () => {
-    const rooted: CommandIO = {
+    const rooted: Table = {
       ...TREED,
       maxDuEntries: 1,
-      stat: (a, p, i) =>
+      stat: (p) =>
         p.virtual === '/'
           ? Promise.resolve(new FileStat({ name: '/', type: FileType.DIRECTORY }))
-          : OPS.stat(a, p, i),
-    } as CommandIO
+          : OPS.stat(p),
+    } as Table
     const [out, io] = await runScoped(rooted, [PathSpec.fromStrPath('/')])
     expect([DEC.decode(out), io.exitCode]).toEqual(['2\t/sub\n5\t/\n', 0])
   })
 
   it("does not walk a backend's own refusal", async () => {
-    const refusing: CommandIO = {
+    const refusing: Table = {
       ...OPS,
-      readTree: (_a, p) => Promise.reject(enotsup('ram', 'read_tree', p)),
-    } as CommandIO
+      readTree: (p) => Promise.reject(enotsup('ram', 'read_tree', p)),
+    } as Table
     await expect(runScoped(refusing, [PathSpec.fromStrPath('/db')])).rejects.toMatchObject({
       code: 'ENOTSUP',
     })
   })
 
   it('propagates a throttled listing rather than reporting an undersized total', async () => {
-    const throttled: CommandIO = {
+    const throttled: Table = {
       ...NATIVE,
-      readdir: (_a, p) =>
+      readdir: (p) =>
         p.virtual === '/db/sub'
           ? Promise.reject(THROTTLED)
           : Promise.resolve(TREE[p.virtual]?.children ?? []),
@@ -178,10 +199,9 @@ describe('du walk fallback under a path rule', () => {
   })
 
   it('propagates a throttled stat below the operand too', async () => {
-    const throttled: CommandIO = {
+    const throttled: Table = {
       ...NATIVE,
-      stat: (a, p, i) =>
-        p.virtual === '/db/a.txt' ? Promise.reject(THROTTLED) : OPS.stat(a, p, i),
+      stat: (p) => (p.virtual === '/db/a.txt' ? Promise.reject(THROTTLED) : OPS.stat(p)),
     }
     await expect(runScoped(throttled, [PathSpec.fromStrPath('/db')])).rejects.toMatchObject({
       status: 429,
@@ -189,10 +209,10 @@ describe('du walk fallback under a path rule', () => {
   })
 
   it('still counts an entry that went away mid-walk as zero', async () => {
-    const vanished: CommandIO = {
+    const vanished: Table = {
       ...NATIVE,
-      stat: (a, p, i) =>
-        p.virtual === '/db/sub/b.txt' ? Promise.reject(enoent(p.virtual)) : OPS.stat(a, p, i),
+      stat: (p) =>
+        p.virtual === '/db/sub/b.txt' ? Promise.reject(enoent(p.virtual)) : OPS.stat(p),
     }
     const [out, io] = await runScoped(vanished, [PathSpec.fromStrPath('/db')])
     // A subtree that sums to nothing still prints its own 0 line, as GNU
@@ -202,9 +222,9 @@ describe('du walk fallback under a path rule', () => {
   })
 
   it('still skips a refused directory and names it, as GNU does', async () => {
-    const refused: CommandIO = {
+    const refused: Table = {
       ...NATIVE,
-      readdir: (_a, p) =>
+      readdir: (p) =>
         p.virtual === '/db/sub'
           ? Promise.reject(eacces(p.virtual))
           : Promise.resolve(TREE[p.virtual]?.children ?? []),
@@ -223,10 +243,9 @@ describe('du walk fallback under a path rule', () => {
   // from the total with du still exiting 0, which is the one answer a
   // caller cannot tell from a genuinely small tree.
   it('names a descendant whose stat is refused, and exits 1', async () => {
-    const refused: CommandIO = {
+    const refused: Table = {
       ...NATIVE,
-      stat: (a, p, i) =>
-        p.virtual === '/db/sub' ? Promise.reject(eacces(p.virtual)) : OPS.stat(a, p, i),
+      stat: (p) => (p.virtual === '/db/sub' ? Promise.reject(eacces(p.virtual)) : OPS.stat(p)),
     }
     const [out, io] = await runScoped(refused, [PathSpec.fromStrPath('/db')])
     expect(DEC.decode(out)).toBe('3\t/db\n')
@@ -245,13 +264,13 @@ describe('du rows for directories no file points at', () => {
     '/db/empty': [],
     '/db/sealed': [],
   }
-  const ops: CommandIO = {
+  const ops: Table = {
     ...OPS,
-    readdir: (_a, p) =>
+    readdir: (p) =>
       p.virtual === '/db/sealed'
         ? Promise.reject(eacces(p.virtual))
         : Promise.resolve(sealed[p.virtual] ?? []),
-    stat: (_a, p) => {
+    stat: (p) => {
       if (p.virtual === '/db/walled') return Promise.reject(eacces(p.virtual))
       if (p.virtual in sealed)
         return Promise.resolve(new FileStat({ name: p.virtual, type: FileType.DIRECTORY }))
@@ -265,11 +284,7 @@ describe('du rows for directories no file points at', () => {
     "du: cannot read directory '/db/walled': Permission denied\n"
 
   async function run(flags: Record<string, boolean>): Promise<[string, number, string]> {
-    const result = await BUILDER.fn(ops, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
-      stdin: null,
-      flags,
-      cwd: PathSpec.fromStrPath('/'),
-    })
+    const result = await du(ops, [PathSpec.fromStrPath('/db')], { flags })
     if (result === null) throw new Error('no result')
     const [out, io] = result
     const bytes =
@@ -312,6 +327,9 @@ describe('WalkBudget', () => {
       visibleDescendants: () => [],
       isRoot: (p) => caps.has(p.replace(/\/?$/, '/')),
       rootOf: ownerOf,
+      answers: () => false,
+      maxGlobMatches: () => null,
+      searchable: () => null,
       maxDuEntries: (p) => caps.get(ownerOf(p)) ?? null,
     }
     const budget = new WalkBudget(null, mounts)
@@ -323,13 +341,13 @@ describe('WalkBudget', () => {
 
 // /db/private refuses its listing, though its file answers a stat by name, the
 // way a directory without read permission does.
-const UNLISTED: CommandIO = {
+const UNLISTED: Table = {
   ...OPS,
-  readdir: (_a, p) =>
+  readdir: (p) =>
     p.virtual === '/db/private'
       ? Promise.reject(eacces(p.virtual))
       : Promise.resolve(p.virtual === '/db' ? ['/db/link', '/db/private'] : []),
-  stat: (_a, p) =>
+  stat: (p) =>
     Promise.resolve(
       p.virtual === '/db/link'
         ? new FileStat({ name: 'link', type: FileType.SYMLINK, size: 9 })
@@ -345,12 +363,13 @@ const ONE_LINK = {
   symlinkTargets: () => new Map<string, string>(),
 } as unknown as NamespaceLinks
 
-const linked: DispatchFn = (op, path) => {
-  if (op === 'stat' && path.virtual === '/db')
-    return Promise.resolve([new FileStat({ name: 'db', type: FileType.DIRECTORY }), new IOResult()])
-  return op === 'stat' && path.virtual === '/db/private/f'
-    ? Promise.resolve([new FileStat({ name: 'f', type: FileType.FILE, size: 6 }), new IOResult()])
-    : Promise.reject(enoent(path))
+// The stat the dispatcher answers past the walk: what the link leads to.
+const LINKED: Table = {
+  ...UNLISTED,
+  stat: (p) =>
+    p.virtual === '/db/private/f'
+      ? Promise.resolve(new FileStat({ name: 'f', type: FileType.FILE, size: 6 }))
+      : UNLISTED.stat(p),
 }
 
 // A link into the operand's tree is left to the file's own name, but a
@@ -358,12 +377,12 @@ const linked: DispatchFn = (op, path) => {
 // file under the link (coreutils 9.7).
 describe('du -L through a directory it may not list', () => {
   it('counts a link whose file only it reaches', async () => {
-    const result = await BUILDER.fn(UNLISTED, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
-      stdin: null,
-      flags: { a: true, L: true },
-      cwd: PathSpec.fromStrPath('/'),
-      vfs: new Files(linked, null, ONE_LINK),
-    })
+    const result = await du(
+      LINKED,
+      [PathSpec.fromStrPath('/db')],
+      { flags: { a: true, L: true } },
+      ONE_LINK,
+    )
     const [out, io] = result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]
     expect(DEC.decode(out)).toBe('6\t/db/link\n0\t/db/private\n6\t/db\n')
     expect([io.exitCode, DEC.decode(io.stderr ?? new Uint8Array())]).toEqual([

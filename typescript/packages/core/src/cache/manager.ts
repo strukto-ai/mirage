@@ -78,6 +78,9 @@ export class CacheManager {
     // cached listing; undefined serves them all.
     private readonly mayServeListing?: (folder: string, version: string | null) => Promise<boolean>,
     private readonly excludedPrefixes: () => readonly string[] = () => [],
+    // The prefixes of the other live mounts of this mount's VFS, whose cached
+    // bodies are the same files under other names.
+    private readonly aliases: () => readonly string[] = () => [],
   ) {
     this.fileCache = fileCache
     this.index = index
@@ -754,7 +757,9 @@ export class CacheManager {
    * id, so nothing here can say which file changed, only that this mount's
    * bytes may no longer match the service. Clearing the listing alone is not
    * enough, because an already-read body is served warm and would keep
-   * answering with the pre-write content.
+   * answering with the pre-write content. A VFS mounted at several prefixes
+   * holds each file under each of them, so the bodies under every alias go
+   * too.
    *
    * Over-evicts when this mount is the root and another mount sits beneath it,
    * since keys are compared by prefix. That costs a refetch, which is the safe
@@ -763,7 +768,9 @@ export class CacheManager {
   async dropPrefix(): Promise<void> {
     this.retire()
     if (!this.cachesReads || this.fileCache === null) return
-    await this.fileCache.evictPrefix(this.prefix + '/')
+    for (const prefix of [this.prefix, ...this.aliases()]) {
+      await this.fileCache.evictPrefix(prefix + '/')
+    }
   }
 
   private async invalidatePath(path: string | PathSpec): Promise<string> {

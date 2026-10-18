@@ -13,27 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { splitGeneric } from '../../generic/split.ts'
-import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, resolveOrEmpty } from '../files.ts'
 import { dispatchOf } from '../../utils/links.ts'
 
-const split: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const write = requireOp(ops.write, 'write')
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+const split: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
   // The pieces go to the prefix, or `x` in the working directory, which
-  // need not be this mount, so a dispatcher routes each write to the mount
+  // need not be this mount, so the dispatcher routes each write to the mount
   // that owns it. Mirrors the Python builder.
   const dispatch = dispatchOf(ctx)
-  return splitGeneric(
-    resolved,
-    ctx,
-    (p) => ops.readStream(accessor, p, idx),
-    dispatch !== undefined
-      ? async (p, d) => {
-          await dispatch('write', p, [d])
-        }
-      : (p, d) => write(accessor, p, d),
-  )
+  if (dispatch === undefined) throw new TypeError('split: no workspace files')
+  return splitGeneric(resolved, ctx, files.readStream, async (p, d) => {
+    await dispatch('write', p, [d])
+  })
 }
 
 export const BUILDER: GenericCommand = {

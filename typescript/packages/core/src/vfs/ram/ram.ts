@@ -22,7 +22,7 @@ import type { Handed } from '../types.ts'
 import { readdir as ramReaddir } from '../../core/ram/readdir.ts'
 import { read as devAwareRead, readRange as devAwareReadRange } from '../../core/dev/read.ts'
 import { stat as devAwareStat } from '../../core/dev/stat.ts'
-import { readStream as devAwareStream } from '../../core/dev/stream.ts'
+import { readStream as ramStream } from '../../core/ram/stream.ts'
 import { exists as ramExists } from '../../core/ram/exists.ts'
 import { write as ramWrite } from '../../core/ram/write.ts'
 import { appendBytes as ramAppend } from '../../core/ram/append.ts'
@@ -86,7 +86,7 @@ export class RAMVFS extends BaseVFS {
   }
 
   override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    return devAwareStream(this.accessor, path)
+    return ramStream(this.accessor, path)
   }
 
   override exists(path: PathSpec): Promise<boolean> {

@@ -13,19 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LinkView, MountView } from '../../../../view/types.ts'
-import type { PathSpec } from '../../../../types.ts'
+import type { PathSpec, StatFn } from '../../../../types.ts'
 import { fsStrerror, isFsError, walkRefusal } from '../../../../errors/fs.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
 import { respellOne } from '../../../../utils/path.ts'
 import { lstripSlash, rstripSlash } from '../../../../utils/slash.ts'
 import type { MemberKind } from '../archive/types.ts'
-import {
-  OTHER_FILESYSTEM,
-  scanOperand,
-  type DirProbe,
-  type StatFn,
-  type WalkFn,
-} from '../archive/walk.ts'
+import { OTHER_FILESYSTEM, scanOperand, type DirProbe, type WalkFn } from '../archive/walk.ts'
 import {
   CREATE_ERROR_EXIT,
   EMPTY_ARCHIVE,

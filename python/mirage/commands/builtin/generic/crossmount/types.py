@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import Callable, NamedTuple
 
+from mirage.commands.config import AggregateFn
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec
@@ -114,3 +115,26 @@ class OwnedScope:
     stat: FileStat | None = None
     error: OSError | None = None
     diagnostic: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OperandMount:
+    """One path operand of a line, as the workspace resolved it.
+
+    What deciding whether a line crosses mounts needs, resolved by the
+    caller so the decision reads no mount table.
+
+    Args:
+        path (PathSpec): the operand.
+        mount (str | None): the prefix of the mount that owns it, None
+            outside every mount.
+        aggregate (AggregateFn | None): the reducer of what the line's
+            command resolves to on that mount, None where it resolves
+            nothing or a command without one.
+        nests (bool): whether a mount sits below the operand.
+    """
+
+    path: PathSpec
+    mount: str | None
+    aggregate: AggregateFn | None = None
+    nests: bool = False

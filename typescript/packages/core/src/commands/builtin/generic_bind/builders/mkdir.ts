@@ -21,15 +21,21 @@ import { DEFAULT_UMASK, sessionUmask, walkProbeFor } from '../../../../context/s
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { mkdirLinkRefusal } from '../../utils/slash_links.ts'
-import { descendantPath, entryKind, nearestAncestor } from '../../utils/paths.ts'
-import type { Accessor } from '../../../../accessor/base.ts'
+import {
+  descendantPath,
+  dispatchStat,
+  entryKind,
+  linkFollow,
+  nearestAncestor,
+} from '../../utils/paths.ts'
 import type { LinkView } from '../../../../view/types.ts'
 import { FileType, PathSpec, type WalkProbe } from '../../../../types.ts'
 import { mountPrefixOf } from '../../../../utils/key_prefix.ts'
 import { CycleError, norm, parent, walkNodes } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
-import type { MkdirOp } from '../../../../vfs/types.ts'
-import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles } from '../files.ts'
 import { missingOperandError } from '../../../spec/usage.ts'
 import { linksOf } from '../../utils/links.ts'
 
@@ -45,9 +51,8 @@ import { linksOf } from '../../utils/links.ts'
  * to judge with, and the store's own mkdir answers. Mirrors Python's
  * _enter_node.
  */
-async function enterNode<A extends Accessor>(
-  mkdir: MkdirOp<A>,
-  accessor: A,
+async function enterNode(
+  mkdir: (path: PathSpec, parents?: boolean) => Promise<void>,
   path: PathSpec,
   node: string,
   root: string,
@@ -70,7 +75,7 @@ async function enterNode<A extends Accessor>(
     if (exists) return isDir ? null : posixPhrase('ENOTDIR')
   }
   const real = links !== null ? links.resolve(node) : node
-  if (real.startsWith(`${root}/`)) await mkdir(accessor, descendantPath(path, real), true)
+  if (real.startsWith(`${root}/`)) await mkdir(descendantPath(path, real), true)
   return null
 }
 
@@ -83,9 +88,8 @@ async function enterNode<A extends Accessor>(
  * a name in the way is quoted as the operand spells it. Null when every name
  * is made. Mirrors Python's _make_walked.
  */
-async function makeWalked<A extends Accessor>(
-  mkdir: MkdirOp<A>,
-  accessor: A,
+async function makeWalked(
+  mkdir: (path: PathSpec, parents?: boolean) => Promise<void>,
   path: PathSpec,
   dotted: string,
   links: LinkView | null,
@@ -96,7 +100,7 @@ async function makeWalked<A extends Accessor>(
   for (const [node, spelled] of walkNodes(dotted, path.rawPath, follow)) {
     let why: string | null
     try {
-      why = await enterNode(mkdir, accessor, path, node, root, links, probe)
+      why = await enterNode(mkdir, path, node, root, links, probe)
     } catch (err) {
       if (!isFsError(err)) throw err
       why =
@@ -163,9 +167,8 @@ export function createdLines(names: string[]): string[] {
   return names.map((name) => `mkdir: created directory '${name}'`)
 }
 
-export async function makeDirectory<A extends Accessor>(
-  mkdir: MkdirOp<A>,
-  accessor: A,
+export async function makeDirectory(
+  mkdir: (path: PathSpec, parents?: boolean) => Promise<void>,
   path: PathSpec,
   parents: boolean,
   links: LinkView | null = null,
@@ -176,14 +179,7 @@ export async function makeDirectory<A extends Accessor>(
   // among them, or a link loop the walk refused the operand for, is met at
   // that name and GNU quotes it rather than the operand.
   if (parents && (path.dotted !== null || path.walkError === 'ELOOP')) {
-    const failed = await makeWalked(
-      mkdir,
-      accessor,
-      path,
-      path.dotted ?? path.virtual,
-      links,
-      probe,
-    )
+    const failed = await makeWalked(mkdir, path, path.dotted ?? path.virtual, links, probe)
     if (failed !== null) return failed
     // The walk has entered every name the spelling passes through, so the
     // operand is made by its resolved path alone: walking it again would ask
@@ -199,7 +195,7 @@ export async function makeDirectory<A extends Accessor>(
     })
   }
   try {
-    await mkdir(accessor, target, parents)
+    await mkdir(target, parents)
   } catch (err) {
     if (!isFsError(err)) throw err
     const named = operandSpelling(errorVirtualPath(err), path)
@@ -208,15 +204,13 @@ export async function makeDirectory<A extends Accessor>(
   return null
 }
 
-const mkdir: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+const mkdir: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
   const fl = new FlagView(ctx.flags, specOf('mkdir'))
   const parents = fl.asBool('parents')
   const verbose = fl.asBool('verbose')
   const modeText = fl.asStr('mode') ?? null
   if (paths.length === 0) throw missingOperandError('mkdir', null)
-  const idx = ctx.index ?? undefined
-  const { setAttrs } = ops
-  const mkdirOp = requireOp(ops.mkdir, 'mkdir')
   let mode: number | null = null
   if (modeText !== null) {
     // Symbolic clauses build on what mirage renders for a new
@@ -224,10 +218,10 @@ const mkdir: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
     // umask does not reach it, which is GNU's rule too.
     mode = parseChmod(modeText, DEFAULT_DIR_MODE)
     if (mode === null) throw new Error(`mkdir: invalid mode '${modeText}'`)
-    if (setAttrs === undefined) {
+    if (!files.answers('setattr')) {
       throw new Error('mkdir: --mode is not supported on this backend')
     }
-  } else if (setAttrs !== undefined) {
+  } else if (files.answers('setattr')) {
     // A new directory is 0777 masked by the session's umask. Only a
     // mask away from bash's default costs a setattr, since 755 is what
     // every backend already renders for a fresh directory; parents
@@ -235,25 +229,29 @@ const mkdir: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
     const umask = sessionUmask(ctx.session?.access())
     if (umask !== DEFAULT_UMASK) mode = 0o777 & ~umask
   }
-  const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
+  const resolved = await files.resolveGlob(paths)
   const lines: string[] = []
   const errors: string[] = []
   const links = linksOf(ctx) ?? null
+  const probe: WalkProbe | null =
+    ctx.vfs === undefined
+      ? null
+      : { stat: dispatchStat(ctx.vfs.dispatch), follow: linkFollow(links) }
   for (const p of resolved) {
     const collision = await mkdirLinkRefusal(p, links, { parents })
     if (collision.taken) {
       if (collision.message !== null) errors.push(collision.message)
       continue
     }
-    const names = verbose ? await createdNames(p, parents, links, ops.walkProbe) : []
-    const failed = await makeDirectory(mkdirOp, accessor, p, parents, links, ops.walkProbe)
+    const names = verbose ? await createdNames(p, parents, links, probe) : []
+    const failed = await makeDirectory(files.mkdir, p, parents, links, probe)
     if (failed !== null) {
       errors.push(failed)
       continue
     }
     // -m applies to the named directory only; any parents made by -p keep
     // the default mode (GNU).
-    if (mode !== null && setAttrs !== undefined) await setAttrs(accessor, p, { mode })
+    if (mode !== null && files.answers('setattr')) await files.setAttrs(p, { mode })
     lines.push(...createdLines(names))
   }
   const out = lines.length > 0 ? new TextEncoder().encode(lines.join('\n') + '\n') : null

@@ -14,54 +14,47 @@
 
 import { describe, expect, it } from 'vitest'
 import type { Accessor } from '../../../../accessor/base.ts'
-import { RAMIndexCacheStore } from '../../../../cache/index/ram.ts'
-import type { IndexCacheStore } from '../../../../cache/index/store.ts'
+import { runWithMountGate } from '../../../../context/session_context.ts'
 import { materialize } from '../../../../io/types.ts'
-import { FileStat, FileType, PathSpec } from '../../../../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
 import { eacces, enoent } from '../../../../errors/fs.ts'
-import type { CommandIO } from '../../../config.ts'
+import { answeringFiles } from '../../../../test-utils.ts'
+import type { Files } from '../../../../workspace/files.ts'
 import { BUILDER } from './rmdir.ts'
 
 const DEC = new TextDecoder()
-const INDEX = new RAMIndexCacheStore()
 const TREE: Record<string, string[]> = { '/m': ['/m/empty', '/m/locked'], '/m/empty': [] }
 
-// eslint-disable-next-line @typescript-eslint/require-await
-async function* emptyStream(): AsyncIterable<Uint8Array> {
-  yield* []
-}
-
-function ops(removed?: string[]): CommandIO {
-  const remove = (_a: Accessor, p: PathSpec): Promise<void> => {
-    removed?.push(p.virtual)
-    return Promise.resolve()
-  }
-  return {
-    readdir: (_a, p) => Promise.resolve(TREE[p.virtual] ?? []),
-    readBytes: () => Promise.resolve(new Uint8Array()),
-    readStream: () => emptyStream(),
-    // Served from the index, as github's is: a stat handed none finds
-    // nothing, however real the directory.
-    stat: (_a, p, index?: IndexCacheStore) => {
-      if (index !== INDEX) return Promise.reject(enoent(p.virtual))
-      if (p.virtual.startsWith('/m/locked/')) return Promise.reject(eacces(p.virtual))
-      if (TREE[p.virtual] !== undefined) {
-        return Promise.resolve(new FileStat({ name: p.virtual, type: FileType.DIRECTORY }))
-      }
-      return Promise.reject(enoent(p.virtual))
+// A mount that removes nothing unless `removed` is given, whose stat is the
+// dispatcher's: it answers what the session may see.
+function files(removed?: string[]): Files {
+  return answeringFiles({
+    readdir: (p) => TREE[p.virtual] ?? [],
+    stat: (p) => {
+      if (p.virtual.startsWith('/m/locked/')) throw eacces(p.virtual)
+      if (TREE[p.virtual] !== undefined)
+        return new FileStat({ name: p.virtual, type: FileType.DIRECTORY })
+      throw enoent(p.virtual)
     },
-    isMounted: () => true,
-    ...(removed === undefined ? {} : { rmdir: remove }),
-  }
+    ...(removed === undefined
+      ? {}
+      : {
+          rmdir: (p) => {
+            removed.push(p.virtual)
+            return null
+          },
+        }),
+  })
 }
 
-async function rmdir(io: CommandIO, paths: string[]): Promise<[number, string]> {
-  const result = await BUILDER.fn(
-    io,
-    {} as Accessor,
-    paths.map((p) => PathSpec.fromStrPath(p)),
-    [],
-    { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), index: INDEX },
+async function rmdir(vfs: Files, paths: string[]): Promise<[number, string]> {
+  const result = await runWithMountGate('/', MountMode.WRITE, async () =>
+    BUILDER.fn(
+      {} as Accessor,
+      paths.map((p) => PathSpec.fromStrPath(p)),
+      [],
+      { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), vfs },
+    ),
   )
   if (result === null) throw new Error('rmdir returned no result')
   const [, res] = result
@@ -69,14 +62,14 @@ async function rmdir(io: CommandIO, paths: string[]): Promise<[number, string]> 
 }
 
 describe('rmdir builder', () => {
-  it('stats its operand through the index', async () => {
+  it('stats its operand through the dispatcher', async () => {
     const removed: string[] = []
-    expect(await rmdir(ops(removed), ['/m/empty'])).toEqual([0, ''])
+    expect(await rmdir(files(removed), ['/m/empty'])).toEqual([0, ''])
     expect(removed).toEqual(['/m/empty'])
   })
 
   it('reports an existing directory it cannot remove', async () => {
-    expect(await rmdir(ops(), ['/m/empty'])).toEqual([
+    expect(await rmdir(files(), ['/m/empty'])).toEqual([
       1,
       "rmdir: failed to remove '/m/empty': Operation not supported\n",
     ])
@@ -84,7 +77,7 @@ describe('rmdir builder', () => {
 
   it('reports a refused stat in its own words and removes the rest', async () => {
     const removed: string[] = []
-    expect(await rmdir(ops(removed), ['/m/locked/sub', '/m/empty'])).toEqual([
+    expect(await rmdir(files(removed), ['/m/locked/sub', '/m/empty'])).toEqual([
       1,
       "rmdir: failed to remove '/m/locked/sub': Permission denied\n",
     ])

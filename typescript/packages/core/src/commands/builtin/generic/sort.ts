@@ -43,6 +43,7 @@ import { matchWord } from '../../spec/word_choice.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue, type ParsedFlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { mountRoot } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
 
@@ -532,7 +533,7 @@ export async function sortGeneric(
     const outputPath = new PathSpec({
       virtual: parsed.output.virtual,
       directory: parsed.output.directory,
-      vfsPath: mountKey(parsed.output.virtual, ctx.mountPrefix ?? ''),
+      vfsPath: mountKey(parsed.output.virtual, mountRoot(ctx)),
       rawPath: parsed.output.rawPath,
       dotted: parsed.output.dotted,
       walkError: parsed.output.walkError,

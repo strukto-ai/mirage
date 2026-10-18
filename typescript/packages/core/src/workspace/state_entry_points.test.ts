@@ -2746,7 +2746,8 @@ describe('a dispatched op meets the rule on the path the dispatcher reaches', ()
         { mode: MountMode.WRITE, shellParser: parser, profiles: { zapped: doc } },
       )
       open.push(ws)
-      ws.registry.mountForPrefix('/data').register(zap)
+      // As mirage's own: it reaches the mount only through the dispatcher.
+      ws.registry.mountForPrefix('/data').registerBuiltinCommands([zap])
       ws.createSession('g', { profile: 'zapped' })
       await ws.shell(
         'mkdir -p /data/real && echo s > /data/real/secret && ln -s /data/real /data/alias',

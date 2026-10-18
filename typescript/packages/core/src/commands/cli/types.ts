@@ -33,7 +33,8 @@ export type CLIVerbFn<A extends Accessor = Accessor> = (
 /** Builds an install's accessor from its validated config. */
 export type CLIAccessorFn = (config: unknown) => Accessor
 
-const noopAccessor = (config: unknown): Accessor => new NOOPAccessor(config)
+/** The accessor a CLI that reaches no service keeps, one `NOOPAccessor` per install. */
+export const noopAccessor = (config: unknown): Accessor => new NOOPAccessor(config)
 
 export type CLIConfigModel = ZodObject<ZodRawShape> | ((input: Record<string, unknown>) => unknown)
 

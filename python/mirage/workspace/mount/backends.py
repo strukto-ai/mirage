@@ -15,6 +15,7 @@
 import importlib
 from dataclasses import replace
 
+from mirage.commands.cli.types import CLI
 from mirage.commands.config import Command, registered_commands
 from mirage.vfs.base import BaseVFS
 
@@ -32,15 +33,15 @@ _MODULES: dict[str, str] = {
 }
 
 
-def commands_for(vfs: BaseVFS) -> list[Command]:
-    """The shell commands a mount of ``vfs`` serves beside the generic set.
+def backend_commands(vfs: BaseVFS) -> list[Command]:
+    """The shell commands a builtin backend module serves on a mount of
+    ``vfs``: mirage's own, beside the generic set.
 
-    A builtin's are its command module's, found through the first class
-    in its hierarchy that has one; a command registered under that
-    class's name is registered under the VFS's own instead, so a
-    subclass under its own name serves its base's commands as itself.
-    The commands the VFS was handed come last, so they win. A name none
-    of these has falls back to the generic command every mount shares.
+    They are its command module's, found through the first class in its
+    hierarchy that has one; a command registered under that class's name
+    is registered under the VFS's own instead, so a subclass under its
+    own name serves its base's commands as itself. A VFS no builtin
+    module serves has none.
 
     Args:
         vfs (BaseVFS): the VFS being mounted.
@@ -58,4 +59,25 @@ def commands_for(vfs: BaseVFS) -> list[Command]:
             )
         ]
         break
-    return [*found, *registered_commands(vfs.commands())]
+    return found
+
+
+def commands_for(vfs: BaseVFS) -> list[Command | CLI]:
+    """The shell commands a mount of ``vfs`` serves beside the generic set.
+
+    A builtin's backend module's first (``backend_commands``), then the
+    commands the VFS was handed, so they win; a command tree it was handed
+    stays a ``CLI``, which the mount registers under its root's name. A
+    name none of these has falls back to the generic command every mount
+    shares.
+
+    Args:
+        vfs (BaseVFS): the VFS being mounted.
+    """
+    handed: list[Command | CLI] = []
+    for item in vfs.commands():
+        if isinstance(item, CLI):
+            handed.append(item)
+        else:
+            handed.extend(registered_commands([item]))
+    return [*backend_commands(vfs), *handed]

@@ -472,15 +472,17 @@ already.
 
 ## 4. Commands
 
-The generic commands are registered once per workspace, and every mount falls back to them after its VFS's own. Each runs over the functions of the mount it runs on (`ctx.io`), and the generic command owns flag interpretation, so a backend wrapper is wiring only. A command of the same name in the backend's `COMMANDS` replaces the generic on that backend; `generic("<name>")` hands the replacement the default command for what it does not support, and `generic("<name>", vfs=..., table=...)` registers the default over a changed table (`/dev`'s endless `cat`).
+The generic commands are registered once per workspace, and every mount falls back to them after its VFS's own. Each is an ordinary handler that reads and writes only through the line's files (`ctx.vfs`), so the dispatcher judges every call it makes and reaches the mount's functions by name; the generic command owns flag interpretation, so a backend wrapper is wiring only. A command of the same name in the backend's `COMMANDS` replaces the generic on that backend, and `generic("<name>")` is the default command a replacement hands what it does not support: `generic("grep").fn(accessor, paths, texts, ctx)`.
 
 - Let grep and rg skip files by defining `files_containing` (and `lines_containing` for row stores) on the VFS; `search` serves the `search` command.
 - A mount verb (`chroma-query`) declares its own `CommandSpec`, reads flags through `FlagView(ctx.flags, spec=SPEC)` (never `flags.get(...)`) and registers `write=True` for a mutation. Specs declared inline are dumped to `.cache/spec/python/vfs_commands/` and compared with TypeScript's.
 - A verb addressed by a service id rather than a path (`trello card create`) is an account [CLI](/python/cli/custom), not a mount command: a `CLI` under `commands/cli/builtin/<name>/` with a `config_model` and an `accessor`, which consults no mount and marks its writes on the `CLIHandler`. A VFS prompt that shows such verbs is pinned against the CLI's specs (`tests/vfs/trello/test_prompt.py`).
-- Handlers take `(accessor, paths, texts, opts)`. Read `stdin`, `index`, `prefix`, and namespace facts from `opts`; do not add injected parameters or a second handler convention.
-- A handler that reads its `accessor` directly is trusted host code. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands. A command handed through `commands=[...]` does not run where the session restricts its mount.
+- Handlers take `(accessor, paths, texts, ctx)`. Read `stdin`, the working directory and namespace facts from `ctx`, and files through `ctx.vfs`; do not add injected parameters or a second handler convention.
+- A handler that reads its `accessor` directly reaches its backend past the dispatcher. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands. A command handed through `commands=[...]`, or registered later with `ws.mount(prefix).register_commands(...)`, is such a user command: it does not run where the session restricts its mount, and a write command is refused on a read-only one before it runs.
+- Declare `write=True` on a user command that writes. Policy reads it as `CommandContext.write`, and the mount drops its cached listings and bodies after the command runs, since no per-path invalidation saw the write.
+- A program whose verbs work on the backend's files can be one command tree: hand the VFS a `CLI` in `commands=[...]`, and the mount serves its verbs under the root's name on its own accessor ([Serve a CLI on a mount](/python/cli/custom#serve-a-cli-on-a-mount)).
 
-Export the final list as `COMMANDS` from `commands/builtin/<name>/__init__.py`, and map the VFS class's name to that module in `commands/builtin/backends.py`. The mount imports it on first use, and a subclass serves its base's commands.
+Export the final list as `COMMANDS` from `commands/builtin/<name>/__init__.py`, and map the VFS class's name to that module in `workspace/mount/backends.py`. The mount imports it on first use, and a subclass serves its base's commands.
 
 ## 5. VFS Class
 
@@ -591,7 +593,7 @@ places:
 | `read_bytes` and `read_range` | one `read(path, index, offset, size)`; set `reads_ranges = True` when it fetches only the window |
 | `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`read_stream`, `exists`, `read_tree`, `write`, ..., `search`, `search_many`) |
 | `ops()`, `make_generic_ops`, `RegisteredOp`, `@op` | nothing to declare: the mount serves the functions; mark a custom one `@vfs_call(effect=...)` |
-| `commands()` returning a builtin set, `commands/builtin/<name>/io.py` | the command module mapped in `commands/builtin/backends.py`; `commands()` returns only the commands the VFS was handed |
+| `commands()` returning a builtin set, `commands/builtin/<name>/io.py` | the command module mapped in `workspace/mount/backends.py`; `commands()` returns only the commands the VFS was handed |
 | `DriverOps(vfs)` and `check_driver_contract(vfs, fixture)` | call the functions on the VFS directly; `check_read_contract(vfs, fixture)` |
 
 ### From `GenericVFS` and the per-driver methods

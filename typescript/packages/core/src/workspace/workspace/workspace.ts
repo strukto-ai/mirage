@@ -145,6 +145,7 @@ import { normDir, rstripSlash } from '../../utils/slash.ts'
 import type { EventRuntime } from '../../events/base.ts'
 import { resolveControlStores } from './build.ts'
 import { executeLine, type ExecuteEnv } from './execute.ts'
+import { fillEnv } from './fill.ts'
 import { closeWorkspace } from './lifecycle.ts'
 import { WorkspaceMeta } from './meta.ts'
 import { normalizeMounts, prepareAddedMount, unmountPrefix } from './mounts.ts'
@@ -291,6 +292,7 @@ export class Workspace {
       this.io,
     )
     this.registry.processView = (session) => this.processView(session)
+    this.registry.fillEnv = (session, names) => this.fillTreeEnv(session, names)
     this.wsId = options.workspaceId ?? newWorkspaceId()
     this.jobTable = new JobTable(options.consoleFactory ?? null, this.processes)
     const stores = resolveControlStores(this.wsId, options)
@@ -1614,6 +1616,19 @@ export class Workspace {
    */
   get declaredSources(): Readonly<Record<string, SecretSource>> {
     return this.declaredSecretSources
+  }
+
+  /**
+   * Fetch the managed names a tree a mount serves reads. The line's own fill
+   * cannot tell which mount's tree a head word reaches, since a `cd` before
+   * it on the line picks another, so the executor asks here once it has
+   * picked the mount. Like the line's fill, a failed fetch throws
+   * SecretsError. Mirrors Python's `Workspace._fill_tree_env`.
+   */
+  private async fillTreeEnv(session: SessionState, names: ReadonlySet<string>): Promise<void> {
+    if (names.size > 0 && this.sessionManager.hasManagedEnv) {
+      await fillEnv(session, names, await this.secretSources())
+    }
   }
 
   private async secretSources(): Promise<Readonly<Record<string, ResolvedSource>>> {

@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import functools
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.cp import walk
@@ -20,12 +19,8 @@ from mirage.commands.builtin.generic.rm_cmd import (
     remove_tree,
     rm_without_operands,
 )
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    Operation,
-    bound_op,
-    require_op,
-)
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.operands import mount_points
 from mirage.commands.builtin.utils.output import format_optional_records
@@ -34,7 +29,7 @@ from mirage.commands.builtin.utils.slash_links import (
     rm_link_refusal,
 )
 from mirage.commands.builtin.utils.verbose import removal_lines
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
@@ -47,25 +42,25 @@ from mirage.types import FileType, PathSpec
 
 
 async def rm(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    files = command_files(ctx, paths)
     fl = FlagView(ctx.flags, spec=SPECS["rm"])
     f = fl.as_bool("f")
     v = fl.as_bool("v")
     d = fl.as_bool("d")
     if not paths:
         return rm_without_operands(f)
-    if not ops.is_mounted(accessor):
-        raise ValueError("rm: missing operand")
-    paths = await ops.resolve_glob(accessor, paths, ctx.index)
+    paths = await files.resolve_glob(paths)
     recursive = fl.as_bool("r") or fl.as_bool("R")
     verbose_parts: list[str] = []
     errors: list[str] = []
     links = links_of(ctx)
+    stat = files.stat
+    readdir = files.readdir
     for p in paths:
         if is_slashed_link(p, links):
             refusal = await rm_link_refusal(
@@ -75,7 +70,7 @@ async def rm(
                 errors.append(refusal)
             continue
         try:
-            s = await ops.stat(accessor, p, index=ctx.index)
+            s = await stat(p)
         except FS_ERRORS as exc:
             # ENOTDIR is a component that is a plain file: the operand sits
             # under one, or carried a trailing slash that named one
@@ -92,10 +87,6 @@ async def rm(
         try:
             if s.type == FileType.DIRECTORY:
                 if recursive:
-                    readdir = functools.partial(
-                        ops.readdir, accessor, index=ctx.index
-                    )
-                    stat = bound_op(ops.stat, accessor, ctx.index)
                     # -v names each entry before the tree goes in one
                     # call; a tree it cannot list whole goes entry by
                     # entry, as does one the dispatcher declines for
@@ -114,7 +105,7 @@ async def rm(
                     declined = bool(unlisted)
                     if not declined:
                         try:
-                            await require_op(ops, Operation.RM_R)(accessor, p)
+                            await files.rm_r(p)
                         except WalkDeclinedError:
                             declined = True
                     failures: list[tuple[PathSpec, OSError]] = []
@@ -123,12 +114,8 @@ async def rm(
                             p,
                             readdir=readdir,
                             stat=stat,
-                            unlink=functools.partial(
-                                require_op(ops, Operation.UNLINK), accessor
-                            ),
-                            rmdir=functools.partial(
-                                require_op(ops, Operation.RMDIR), accessor
-                            ),
+                            unlink=files.unlink,
+                            rmdir=files.rmdir,
                             mounts=mounts_of(ctx),
                             force=f,
                         )
@@ -152,15 +139,13 @@ async def rm(
                         verbose_parts.extend(entry_lines)
                         continue
                 elif d:
-                    if await ops.readdir(accessor, p, index=ctx.index):
+                    if await readdir(p):
                         errors.append(
                             f"rm: cannot remove '{p.raw_path}': "
                             f"{posix_phrase(FsCondition.ENOTEMPTY)}"
                         )
                         continue
-                    await require_op(ops, Operation.RMDIR)(
-                        accessor, p, index=ctx.index
-                    )
+                    await files.rmdir(p)
                     entry_lines = [f"removed directory '{p.raw_path}'"]
                 else:
                     errors.append(
@@ -169,7 +154,7 @@ async def rm(
                     )
                     continue
             else:
-                await require_op(ops, Operation.UNLINK)(accessor, p)
+                await files.unlink(p)
                 entry_lines = [f"removed '{p.raw_path}'"]
         except FS_ERRORS as exc:
             # GNU rm names the entry below the operand it could not

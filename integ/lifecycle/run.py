@@ -28,7 +28,7 @@ from typing import Any
 
 from mirage import ShellExecution
 from mirage.commands.cli.types import CLI, CLIHandler
-from mirage.commands.config import Context
+from mirage.commands.config import Context, command
 from mirage.commands.spec.types import CommandSpec
 from mirage.config import load_config
 from mirage.context import reset_current_session, set_current_session
@@ -381,6 +381,24 @@ async def action(
                 runtime=step.get("runtime"),
             ),
             step.get("config"),
+        )
+    elif op == "register_command":
+        out = step.get("stdout", "").encode()
+
+        async def answer(
+            accessor: Any, paths: Any, texts: Any, ctx: Context
+        ) -> tuple[bytes, IOResult]:
+            return out, IOResult()
+
+        ws.mount(step["path"]).register_commands(
+            [
+                command(
+                    step["name"],
+                    vfs=None,
+                    spec=CommandSpec(),
+                    write=step.get("write", False),
+                )(answer)
+            ]
         )
     elif op == "unregister_cli":
         await ws.unregister_cli(step["name"])

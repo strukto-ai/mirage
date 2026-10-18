@@ -14,42 +14,32 @@
 
 import { fileStreamOp, statOp } from '../../generic/crossmount/utils.ts'
 import { unzipGeneric } from '../../generic/unzip.ts'
-import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, resolveOrEmpty } from '../files.ts'
 import { dispatchOf } from '../../utils/links.ts'
 
-const unzip: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const write = requireOp(ops.write, 'write')
-  const mkdir = requireOp(ops.mkdir, 'mkdir')
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+const unzip: CommandFn = async (_accessor, paths, texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
+  // Extraction writes wherever cwd or -d says, which need not be this
+  // mount, so the functions are dispatch-relayed and each path routes to the
+  // mount that owns it.
   const dispatch = dispatchOf(ctx)
-  if (dispatch !== undefined) {
-    // Extraction writes wherever cwd or -d says, which need not be
-    // this mount, so the functions are dispatch-relayed and each path
-    // routes to the mount that owns it.
-    return unzipGeneric(
-      resolved,
-      texts,
-      ctx,
-      fileStreamOp(dispatch),
-      async (p, data) => {
-        await dispatch('write', p, [data])
-      },
-      async (p) => {
-        await dispatch('mkdir', p)
-      },
-      statOp(dispatch),
-      true,
-    )
-  }
+  if (dispatch === undefined) throw new TypeError('unzip: no workspace files')
   return unzipGeneric(
     resolved,
     texts,
     ctx,
-    (p) => ops.readStream(accessor, p, idx),
-    (p, d) => write(accessor, p, d),
-    (p, parents) => mkdir(accessor, p, parents),
-    (p) => ops.stat(accessor, p, idx),
+    fileStreamOp(dispatch),
+    async (p, data) => {
+      await dispatch('write', p, [data])
+    },
+    async (p) => {
+      await dispatch('mkdir', p)
+    },
+    statOp(dispatch),
+    true,
   )
 }
 

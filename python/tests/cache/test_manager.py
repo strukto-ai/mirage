@@ -212,22 +212,24 @@ def test_null_index_is_tolerated():
 async def _drop_prefix_case() -> tuple[bool, bool, bool]:
     cache, index = _stores()
     await _seed(cache, index)
+    await cache.set("/mirror/arch/h.txt", b"same\n")
     await cache.set("/other/keep.txt", b"safe\n")
-    manager = CacheManager(cache, index, "/data/", True)
+    manager = CacheManager(
+        cache, index, "/data/", True, aliases=lambda: ("/mirror",)
+    )
     await manager.drop_prefix()
     return (
         await cache.exists("/data/arch/h.txt"),
+        await cache.exists("/mirror/arch/h.txt"),
         await cache.exists("/other/keep.txt"),
-        manager._caches_reads,
     )
 
 
-def test_drop_prefix_evicts_this_mount_only():
-    """A path-unknown mutation drops the mount's bodies without reaching
-    into a neighbouring mount's keyspace."""
-    dropped, kept, _ = _run(_drop_prefix_case())
-    assert dropped is False
-    assert kept is True
+def test_drop_prefix_evicts_this_mount_and_its_aliases_only():
+    """A path-unknown mutation drops the bodies under the mount and
+    every other mount of its VFS without reaching into a neighbouring
+    mount's keyspace."""
+    assert _run(_drop_prefix_case()) == (False, False, True)
 
 
 async def _drop_prefix_local_case() -> bool:

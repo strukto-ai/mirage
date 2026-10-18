@@ -16,8 +16,8 @@ import type { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import { yieldBytes } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { type HfAccountAccessor, HfHubAccessor } from '../../../../accessor/hf_hub.ts'
-import { API_SEGMENTS, DEFAULT_REVISION } from '../../../../core/hf_hub/constants.ts'
+import type { HfAccountAccessor } from '../../../../accessor/hf_hub.ts'
+import { API_SEGMENTS } from '../../../../core/hf_hub/constants.ts'
 
 const DEFAULT_REPO_TYPE = 'model'
 
@@ -26,34 +26,6 @@ export function repoTypeOf(fl: FlagView): string {
   const value = fl.asStr('repo_type') ?? DEFAULT_REPO_TYPE
   if (!(value in API_SEGMENTS)) throw new UsageError(`invalid repo type: ${value}`)
   return value
-}
-
-/**
- * A Hub handle for the repository this line named.
- *
- * The CLI builds one per invocation over the install's account rather than
- * owning a second Hub client: the handle only names which repository is being
- * addressed and rides the account's credential, origin and request bound, so
- * `hf` gets the mount's tree walk and commit builder for free. It reaches no
- * mount, which is what keeps this an account CLI. A verb reads paths and
- * sizes, never the per-file commit a mount's mtimes come from, so the walk
- * lists bare.
- */
-export function hubFor(
-  account: HfAccountAccessor,
-  repoId: string,
-  repoType: string,
-  revision?: string,
-): HfHubAccessor {
-  return new HfHubAccessor(
-    account,
-    {
-      repoId,
-      revision: revision === undefined || revision === '' ? DEFAULT_REVISION : revision,
-      expandCommits: false,
-    },
-    repoType,
-  )
 }
 
 /**

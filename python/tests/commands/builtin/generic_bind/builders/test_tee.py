@@ -12,107 +12,41 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import cast
-
 import pytest
 
-from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.config import CommandIO, Context
-from mirage.context import (
-    reset_current_session,
-    reset_mount_gate,
-    set_current_session,
-    set_mount_gate,
-)
-from mirage.types import (
-    FileStat,
-    FileType,
-    MountMode,
-    PathSpec,
-    ShowEntry,
-    ShownPaths,
-    Visibility,
-)
-from mirage.workspace.session import SessionState
-
-
-async def _readdir(
-    _accessor: Accessor, _path: PathSpec, index: IndexCacheStore = NULL_INDEX
-) -> list[str]:
-    return []
-
-
-async def _missing(
-    _accessor: Accessor, _path: PathSpec, index: IndexCacheStore = NULL_INDEX
-) -> bytes:
-    raise FileNotFoundError(_path.virtual)
-
-
-async def _exists(
-    _accessor: Accessor, _path: PathSpec, index: IndexCacheStore = NULL_INDEX
-) -> bool:
-    return False
-
-
-async def _stat(
-    _accessor: Accessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-) -> FileStat:
-    # The parents the outputs land in hold keys, so they read as
-    # directories; every output itself is new.
-    if path.virtual.rstrip("/") in ("/s3", "/s3/build"):
-        return FileStat(name=path.name, type=FileType.DIRECTORY)
-    raise FileNotFoundError(path.virtual)
-
-
-async def _unused_dir_op(_accessor: Accessor, _path: PathSpec) -> None:
-    raise AssertionError("directory op must not run")
-
-
-def _io(writes: list[str]) -> CommandIO:
-    async def write(_accessor: Accessor, path: PathSpec, _data: bytes) -> None:
-        writes.append(path.virtual)
-
-    return CommandIO(
-        readdir=_readdir,
-        read_bytes=_missing,
-        read_stream=_missing,
-        stat=_stat,
-        write=write,
-        exists=_exists,
-        mkdir=_unused_dir_op,
-        unlink=_unused_dir_op,
-        rmdir=_unused_dir_op,
-        rm_r=_unused_dir_op,
-        is_mounted=lambda a: True,
-    )
+from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
 
 
 @pytest.mark.asyncio
 async def test_tee_writes_inside_the_granted_region():
-    writes: list[str] = []
-    tee = generic("tee").fn
-    sess = SessionState(
-        session_id="agent",
-        mount_modes={"/s3": MountMode.READ},
-        visibility=Visibility(
-            shown=ShownPaths(
-                entries=(ShowEntry("/s3/build", MountMode.WRITE),)
-            )
-        ),
+    # The session reads the mount, but a shown region grants it writes:
+    # each write is held to its own region's mode at the dispatcher.
+    vfs = RAMVFS()
+    vfs._store.dirs.update({"/", "/build"})
+    ws = Workspace(
+        {"/s3/": (vfs, MountMode.WRITE)},
+        profiles={
+            "agent": {
+                "mounts": {"/s3": "r"},
+                "paths": {"show": {"/s3/build": "rw"}},
+            }
+        },
     )
-    session_token = set_current_session(sess)
-    gate_token = set_mount_gate("/s3", MountMode.WRITE)
+    ws.create_session("agent", profile="agent")
     try:
-        _, result = await tee(
-            cast(Accessor, object()),
-            [PathSpec.from_str_path("/s3/build/out.txt")],
-            [],
-            Context(index=NULL_INDEX, io=_io(writes)),
+        granted = await ws.shell(
+            "echo x | tee /s3/build/out.txt", session_id="agent"
+        )
+        assert granted.exit_code == 0, await granted.stderr_str()
+        refused = await ws.shell(
+            "echo x | tee /s3/out.txt", session_id="agent"
+        )
+        assert refused.exit_code == 1
+        assert await refused.stderr_str() == (
+            "tee: /s3/out.txt: Read-only file system\n"
         )
     finally:
-        reset_mount_gate(gate_token)
-        reset_current_session(session_token)
-    assert result.exit_code == 0, result.stderr
-    assert writes == ["/s3/build/out.txt"]
+        await ws.close()
+    assert vfs._store.files == {"/build/out.txt": b"x\n"}

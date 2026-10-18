@@ -33,21 +33,20 @@ import {
 import { operandSpelling } from '../../../../errors/render.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 import type { WalkDeclinedError } from '../../../../errors/types.ts'
-import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles } from '../files.ts'
 import { linksOf, mountsOf } from '../../utils/links.ts'
 
-const rm: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+const rm: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
   const fl = new FlagView(ctx.flags, specOf('rm'))
   const recursive = fl.asBool('r') || fl.asBool('R')
   const dirFlag = fl.asBool('d')
   const force = fl.asBool('f')
   const verbose = fl.asBool('v')
   if (paths.length === 0) return rmWithoutOperands(force)
-  const idx = ctx.index ?? undefined
-  const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
-  const rmR = requireOp(ops.rmR, 'rmR')
-  const rmdir = requireOp(ops.rmdir, 'rmdir')
-  const unlink = requireOp(ops.unlink, 'unlink')
+  const resolved = await files.resolveGlob(paths)
   const lines: string[] = []
   const errors: string[] = []
   const links = linksOf(ctx) ?? null
@@ -59,7 +58,7 @@ const rm: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
     }
     let isDir = false
     try {
-      const st = await ops.stat(accessor, p, idx)
+      const st = await files.stat(p)
       isDir = st.type === FileType.DIRECTORY
     } catch (err) {
       if (!isFsError(err)) throw err
@@ -78,14 +77,14 @@ const rm: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
         // rmR/rmdir are resolved lazily so object stores without a real
         // directory-remove op still unlink plain files (mirrors Python).
         if (recursive) {
-          const listing = (dir: PathSpec): Promise<string[]> => ops.readdir(accessor, dir, idx)
-          const probe = (spec: PathSpec): Promise<FileStat> => ops.stat(accessor, spec, idx)
+          const listing = (dir: PathSpec): Promise<string[]> => files.readdir(dir)
+          const probe = (spec: PathSpec): Promise<FileStat> => files.stat(spec)
           // -v names each entry before the tree goes in one call; a tree it
           // cannot list whole goes entry by entry, as does one the
           // dispatcher declines for the caller's view.
           const unlisted: string[] = []
           let listed = verbose
-            ? (await cpWalk(listing, probe, p, idx, 'rm', unlisted)).map(({ path, kind }) => ({
+            ? (await cpWalk(listing, probe, p, 'rm', unlisted)).map(({ path, kind }) => ({
                 path,
                 isDir: kind === FileType.DIRECTORY,
               }))
@@ -93,7 +92,7 @@ const rm: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
           let declined = unlisted.length > 0
           if (!declined) {
             try {
-              await rmR(accessor, p)
+              await files.rmR(p)
             } catch (err) {
               if ((err as Partial<WalkDeclinedError>).declined !== true) throw err
               declined = true
@@ -104,8 +103,8 @@ const rm: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
             ;({ removed: listed, failures } = await removeTree(p, {
               readdir: listing,
               stat: probe,
-              unlink: (spec) => unlink(accessor, spec),
-              rmdir: (spec) => rmdir(accessor, spec, idx),
+              unlink: (spec) => files.unlink(spec),
+              rmdir: (spec) => files.rmdir(spec),
               mounts: mountsOf(ctx),
               force,
             }))
@@ -125,18 +124,18 @@ const rm: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
             continue
           }
         } else if (dirFlag) {
-          if ((await ops.readdir(accessor, p, idx)).length > 0) {
+          if ((await files.readdir(p)).length > 0) {
             errors.push(`rm: cannot remove '${p.rawPath}': ${posixPhrase('ENOTEMPTY')}`)
             continue
           }
-          await rmdir(accessor, p, idx)
+          await files.rmdir(p)
           entryLines = [`removed directory '${p.rawPath}'`]
         } else {
           errors.push(`rm: cannot remove '${p.rawPath}': ${posixPhrase('EISDIR')}`)
           continue
         }
       } else {
-        await unlink(accessor, p)
+        await files.unlink(p)
         entryLines = [`removed '${p.rawPath}'`]
       }
     } catch (err) {

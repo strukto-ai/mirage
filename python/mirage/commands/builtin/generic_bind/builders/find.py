@@ -12,42 +12,61 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
-from functools import partial
-
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.find import find_walk_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    bound_op,
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import (
+    CommandFiles,
+    command_files,
+    resolve_or_empty,
 )
 from mirage.commands.builtin.utils.tree import tree_walk
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileStat, PathSpec
+from mirage.types import PathSpec
 
 
 async def find(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not ops.is_mounted(accessor):
-        raise ValueError("find: no VFS")
-    resolved = await ops.resolve_glob(accessor, paths, ctx.index)
-    readdir = partial(ops.readdir, accessor)
-    stat: Callable[..., Awaitable[FileStat]] = partial(ops.stat, accessor)
+    files = command_files(ctx, paths)
+    return await find_walk(
+        files, await resolve_or_empty(files, paths), texts, ctx
+    )
+
+
+async def find_walk(
+    files: CommandFiles,
+    resolved: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
+) -> tuple[ByteSource | None, IOResult]:
+    """Walk readdir/stat for find.
+
+    Each start point asks the mount's ``read_tree`` for its subtree
+    first, down to the expression's ``-maxdepth``, so the walk costs one
+    call where the mount can answer.
+
+    Args:
+        files (CommandFiles): the command's files.
+        resolved (list[PathSpec]): the glob-resolved start points.
+        texts (list[str]): the raw expression words.
+        ctx (Context): the invocation's context.
+    """
     whole_readdir, whole_stat = tree_walk(
-        bound_op(ops.read_tree, accessor, ctx.index), readdir, stat
+        files.read_tree if files.answers("read_tree") else None,
+        files.readdir,
+        files.stat,
     )
     return await find_walk_generic(
         resolved,
         list(texts),
         ctx,
-        readdir=readdir,
-        stat=stat,
+        readdir=files.readdir,
+        stat=files.stat,
         unbounded=(whole_readdir, whole_stat),
     )
 

@@ -23,7 +23,7 @@ from mirage.commands.builtin.generic.crossmount.utils import (
 )
 from mirage.commands.builtin.generic.mv import mv_generic as generic_mv
 from mirage.commands.builtin.generic.mv import parse_flags
-from mirage.commands.builtin.generic_bind.adapter import (
+from mirage.commands.builtin.generic_bind.files import (
     dispatched_call,
     refuse_reveal,
 )

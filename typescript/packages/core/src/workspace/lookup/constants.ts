@@ -48,6 +48,16 @@ export const ROUTED_COMMANDS: ReadonlySet<string> = new Set([
   'mount',
 ])
 
+// The namespace and routed programs that change what they name. No mount
+// registers them, so no handler declares the write; policy reads it here.
+export const WRITING_PROGRAMS: ReadonlySet<string> = new Set([
+  'chgrp',
+  'chmod',
+  'chown',
+  'ln',
+  'setfattr',
+])
+
 // The programs Debian ships as a script that runs another one with an option
 // put first: egrep is `exec grep -E "$@"`, so grep is what parses the line and
 // answers it, its refusals and --help included (grep 3.11, gzip 1.13). Each

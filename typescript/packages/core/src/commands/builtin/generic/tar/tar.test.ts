@@ -94,7 +94,6 @@ it('emits a known-size archive header before draining its source', async () => {
       flags: { create: true },
       cwd: PathSpec.fromStrPath('/'),
       stdin: null,
-      mountPrefix: '',
     } as Context,
     {
       async *stream() {

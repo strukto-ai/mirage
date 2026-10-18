@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.slug_tree.tree import SlugTree, listing_at, tree_key
 from mirage.core.slug_tree.types import A
 from mirage.errors.fs import enoent
@@ -93,12 +92,10 @@ async def search_scope(
         return [], prefix
     rows = await tree.load(accessor)
 
-    async def listed(
-        _accessor: A, path: PathSpec, _index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
+    async def listed(path: PathSpec) -> list[str]:
         base = path.virtual.rstrip("/")
         return [f"{base}/{row.name}" for row in listing_at(rows, path).entries]
 
     return await resolve_glob_with(
-        listed, accessor, paths, NULL_INDEX, DEFAULT_MAX_GLOB_MATCHES
+        listed, paths, DEFAULT_MAX_GLOB_MATCHES
     ), prefix

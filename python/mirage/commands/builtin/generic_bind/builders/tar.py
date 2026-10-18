@@ -12,26 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.crossmount.utils import (
     transfer_primitives,
 )
 from mirage.commands.builtin.generic.tar import tar_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    Operation,
-    bound_op,
-    require_op,
-)
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.archive_io import (
     is_dir_of,
     relay_is_dir_of,
     walk_of,
 )
+from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.links import dispatch_of
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -39,22 +34,21 @@ from mirage.types import PathSpec
 
 
 async def tar(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not ops.is_mounted(accessor):
-        raise ValueError("tar: missing operand")
-    resolved = await ops.resolve_glob(accessor, paths, ctx.index)
+    files = command_files(ctx, paths)
+    resolved = await files.resolve_glob(paths)
     fl = FlagView(ctx.flags, spec=SPECS["tar"])
-    if ctx.vfs is not None and not fl.as_bool("create"):
+    dispatch = dispatch_of(ctx)
+    if dispatch is not None and not fl.as_bool("create"):
         # -t reads and -x writes wherever cwd or -C says, which needs
         # not be this mount, so both run on dispatch-relayed calls and
         # each path routes to the mount that owns it. Only -c stays on
-        # the accessor: its planner walks this mount's tree.
-        prim = transfer_primitives(ctx.vfs.dispatch)
+        # this mount's own walk: its planner walks this mount's tree.
+        prim = transfer_primitives(dispatch)
         return await tar_generic(
             resolved,
             list(texts),
@@ -63,26 +57,24 @@ async def tar(
             prim["write"],
             prim["mkdir"],
             prim["stat"],
-            walk_of(ops, accessor, ctx.index, ctx.vfs.dispatch, "tar"),
-            relay_is_dir_of(ctx.vfs.dispatch),
+            walk_of(files, dispatch, "tar"),
+            relay_is_dir_of(dispatch),
             relay=True,
         )
-    # Archive output follows links even when the member scan preserves them.
-    archive_write = (
-        transfer_primitives(ctx.vfs.dispatch)["write"]
-        if ctx.vfs is not None
-        else partial(require_op(ops, Operation.WRITE), accessor)
-    )
     return await tar_generic(
         resolved,
         list(texts),
         ctx,
-        bound_op(ops.read_stream, accessor, ctx.index),
-        archive_write,
-        partial(require_op(ops, Operation.MKDIR), accessor),
-        bound_op(ops.stat, accessor, ctx.index),
-        walk_of(ops, accessor, ctx.index, dispatch_of(ctx), "tar"),
-        is_dir_of(ops, accessor, ctx.index),
+        files.read_stream,
+        # Archive output follows links even when the member scan
+        # preserves them.
+        transfer_primitives(dispatch)["write"]
+        if dispatch is not None
+        else files.write,
+        files.mkdir,
+        files.stat,
+        walk_of(files, dispatch, "tar"),
+        is_dir_of(files),
     )
 
 

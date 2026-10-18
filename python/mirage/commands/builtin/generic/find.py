@@ -497,10 +497,10 @@ async def find_walk_generic(
     Args:
         paths (list[PathSpec]): Glob-resolved start points.
         texts (list[str]): The raw expression words.
-        ctx (Context): Flags, the index for the walk, and namespace
+        ctx (Context): Flags and namespace
             facts (stat_path, links) from the dispatcher.
-        readdir (Callable): Bound readdir called as ``readdir(p, index)``.
-        stat (Callable): Bound overlaid stat called as ``stat(p, index)``.
+        readdir (Callable): Bound readdir called as ``readdir(p)``.
+        stat (Callable): Bound overlaid stat called as ``stat(p)``.
         unbounded (tuple[Callable, Callable] | None): the walk to take
             when no ``-maxdepth`` bounds it (one the mount answers whole),
             else ``readdir`` and ``stat``.
@@ -538,7 +538,7 @@ async def find_walk_generic(
                 search,
                 args,
                 stat_path,
-                stat=partial(stat, index=ctx.index),
+                stat=stat,
                 is_link=is_link(links, search),
                 follow=link_follow(links),
             )
@@ -576,7 +576,6 @@ async def find_walk_generic(
                     search,
                     readdir=readdir,
                     stat=stat,
-                    index=ctx.index,
                     args=args,
                     follow=links if parsed.follow else None,
                     unreadable=unreadable,

@@ -13,26 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { md5sumGeneric } from '../../generic/md5sum.ts'
-import {
-  type GenericCommand,
-  boundUncached,
-  dirAwareStat,
-  dirAwareStream,
-  resolveGlobOf,
-  type GenericCommandFn,
-} from '../adapter.ts'
-import type { PathSpec } from '../../../../types.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, dirAwareStat, dirAwareStream, resolveOrEmpty } from '../files.ts'
 
-const md5sum: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  const { checksum } = ops
+const md5sum: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
   return md5sumGeneric(
     resolved,
     ctx,
-    dirAwareStream(ops, accessor, ctx),
-    dirAwareStat(ops, accessor, ctx),
-    boundUncached(checksum && ((p: PathSpec, a: string) => checksum(accessor, p, a, idx))),
+    dirAwareStream(files, ctx),
+    dirAwareStat(files, ctx),
+    files.answers('checksum') ? files.checksum : undefined,
   )
 }
 

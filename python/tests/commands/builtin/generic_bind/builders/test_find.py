@@ -12,12 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 import pytest
 
-from mirage.commands.builtin.generic_bind.builders.find import find
-from mirage.commands.config import CommandIO, Context
-from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
+from tests.fixtures.answers import Answers, run_generic
 
 TREE = {
     "/mnt": ["/mnt/table1", "/mnt/notes.txt"],
@@ -27,11 +27,12 @@ TREE = {
 DIRS = {"/mnt", "/mnt/table1"}
 
 
-def _ops(stat_calls: list[str], read_tree=None) -> CommandIO:
-    async def readdir(_accessor, path, _index):
-        return TREE.get(path.virtual.rstrip("/") or "/", [])
+async def _readdir(path: PathSpec) -> list[str]:
+    return TREE.get(path.virtual.rstrip("/") or "/", [])
 
-    async def stat(_accessor, path, index=None):
+
+def _mount(stat_calls: list[str], read_tree: Any = None) -> Answers:
+    async def stat(path: PathSpec) -> FileStat:
         stat_calls.append(path.virtual)
         if (
             path.virtual not in TREE
@@ -52,20 +53,10 @@ def _ops(stat_calls: list[str], read_tree=None) -> CommandIO:
             modified="2099-01-01T00:00:00+00:00",
         )
 
-    async def read_stream(_accessor, _path, _index):
-        yield b"data"
-
-    async def unused(*_args):
-        raise AssertionError("not used")
-
-    return CommandIO(
-        readdir=readdir,
-        read_bytes=unused,
-        read_stream=read_stream,
-        stat=stat,
-        is_mounted=lambda _a: True,
-        read_tree=read_tree,
-    )
+    answers: dict[str, Any] = {"readdir": _readdir, "stat": stat}
+    if read_tree is not None:
+        answers["read_tree"] = read_tree
+    return Answers("/mnt/", **answers)
 
 
 def _root() -> PathSpec:
@@ -74,17 +65,17 @@ def _root() -> PathSpec:
     )
 
 
-async def _lines(ops: CommandIO) -> list[str]:
-    stdout, _io = await find(ops, None, [_root()], [], Context())
-    data = await materialize(stdout)
-    return data.decode().splitlines()
+async def _lines(
+    mount: Answers, roots: list[PathSpec], texts: list[str] | None = None
+) -> list[str]:
+    out, _io = await run_generic("find", mount, roots, texts or [])
+    return out.decode().splitlines()
 
 
 @pytest.mark.asyncio
 async def test_walk_stats_children_to_classify():
     stat_calls: list[str] = []
-    ops = _ops(stat_calls)
-    lines = await _lines(ops)
+    lines = await _lines(_mount(stat_calls), [_root()])
     assert "/mnt/notes.txt" in lines
     assert "/mnt/table1/rows.jsonl" in lines
     assert "/mnt/table1" in lines
@@ -94,8 +85,6 @@ async def test_walk_stats_children_to_classify():
 
 @pytest.mark.asyncio
 async def test_walk_honors_multiple_start_points():
-    stat_calls: list[str] = []
-    ops = _ops(stat_calls)
     roots = [
         PathSpec(
             virtual="/mnt/table1",
@@ -110,9 +99,7 @@ async def test_walk_honors_multiple_start_points():
             vfs_path="notes.txt",
         ),
     ]
-    stdout, _io = await find(ops, None, roots, [], Context())
-    data = await materialize(stdout)
-    lines = data.decode().splitlines()
+    lines = await _lines(_mount([]), roots)
     # GNU find walks every start point in operand order
     assert "/mnt/table1/rows.jsonl" in lines
     assert "/mnt/notes.txt" in lines
@@ -121,7 +108,7 @@ async def test_walk_honors_multiple_start_points():
     )
 
 
-def _tree():
+def _tree() -> dict[str, FileStat]:
     return {
         "notes.txt": FileStat(
             type=FileType.FILE,
@@ -152,13 +139,10 @@ def _tree():
 async def test_find_reads_the_tree_in_one_call(texts, trees):
     asked: list[str] = []
 
-    async def read_tree(_accessor, path, index=None):
+    async def read_tree(path: PathSpec) -> dict[str, FileStat]:
         asked.append(path.virtual)
         return _tree()
 
-    async def run(ops: CommandIO) -> list[str]:
-        stdout, _io = await find(ops, None, [_root()], texts, Context())
-        return (await materialize(stdout)).decode().splitlines()
-
-    assert await run(_ops([], read_tree)) == await run(_ops([]))
+    whole = await _lines(_mount([], read_tree), [_root()], texts)
+    assert whole == await _lines(_mount([]), [_root()], texts)
     assert asked == trees

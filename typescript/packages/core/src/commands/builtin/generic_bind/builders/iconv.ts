@@ -13,18 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { iconvGeneric } from '../../generic/iconv.ts'
-import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, resolveOrEmpty } from '../files.ts'
 
-const iconv: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const write = requireOp(ops.write, 'write')
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return iconvGeneric(
-    resolved,
-    ctx,
-    (p) => ops.readStream(accessor, p, idx),
-    (p, d) => write(accessor, p, d),
-  )
+const iconv: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
+  return iconvGeneric(resolved, ctx, files.readStream, (p, d) => files.write(p, d))
 }
 
 export const BUILDER: GenericCommand = {

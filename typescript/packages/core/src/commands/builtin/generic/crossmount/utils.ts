@@ -18,7 +18,6 @@ import { chunks } from '../../../../io/cooperative.ts'
 import { concat as concatBytes } from '../../../../utils/bytes.ts'
 import { isStdin } from '../../utils/stream.ts'
 import type { TransferLinks } from '../cp.ts'
-import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import type { LinkView } from '../../../../view/types.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
 import { ROOT_CWD } from '../../../constants.ts'
@@ -132,14 +131,13 @@ export function flatten(scopes: PathSpec[]): PathSpec[] {
   )
 }
 
-// Minimal Context for delegating a read/compare to a generic: only flags,
-// mountPrefix and stdin are read by those generics. The cross command always
-// has path operands, so stdin is never consulted.
+// Minimal Context for delegating a read/compare to a generic: only flags and
+// stdin are read by those generics. The cross command always has path
+// operands, so stdin is never consulted.
 export function crossOpts(flagKwargs: Record<string, FlagValue>): Context {
   return {
     stdin: null,
     flags: flagKwargs,
-    mountPrefix: '',
     cwd: ROOT_CWD,
   }
 }
@@ -153,8 +151,8 @@ export function statOp(dispatch: DispatchFn): (p: PathSpec) => Promise<FileStat>
 
 export function readdirOp(
   dispatch: DispatchFn,
-): (p: PathSpec, index?: IndexCacheStore, nofollow?: boolean) => Promise<string[]> {
-  return async (p: PathSpec, _index?: IndexCacheStore, nofollow?: boolean) => {
+): (p: PathSpec, nofollow?: boolean) => Promise<string[]> {
+  return async (p: PathSpec, nofollow?: boolean) => {
     const [entries] = await dispatch('readdir', p, [], nofollow === true ? { nofollow } : {})
     return (entries as string[] | null) ?? []
   }

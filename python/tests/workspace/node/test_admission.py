@@ -16,7 +16,12 @@ import errno
 
 import pytest
 
-from mirage.policy import PolicyDenied
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.config import command
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import Argument, CommandSpec
+from mirage.io import IOResult
+from mirage.policy import Action, Deny, Policy, PolicyDenied
 from mirage.policy.profile import PathsBlock, SessionProfile
 from mirage.policy.types import AdmissionRules, CommandContext, CommandRule
 from mirage.shell import parse
@@ -704,3 +709,152 @@ async def test_admit_reports_the_grant_the_line_runs_under_and_its_scope():
         assert isinstance(verdict, Admitted) and verdict.scoped
     finally:
         await ws.close()
+
+
+# ── what the handler a command resolves to declares ──────────────
+
+
+async def _noop(accessor, paths, texts, ctx):
+    return None, IOResult()
+
+
+# --token is filled from the session's env; the gate's walk must read it too.
+ISSUES = CLI(
+    spec=CommandSpec(
+        name="issues",
+        arguments=(Argument("--token", env="TOKEN", required=True),),
+        subcommands=(
+            CommandSpec(name="list"),
+            CommandSpec(name="create", aliases=("new",)),
+        ),
+    ),
+    handlers={
+        "list": CLIHandler(fn=_noop),
+        "create": CLIHandler(fn=_noop, write=True),
+    },
+)
+# A tree a mount serves; the gate reads its group path, a leaf path the
+# env fills and a leaf's file, behind the env-filled --token, as the walk does.
+NOTES = CLI(
+    spec=CommandSpec(
+        name="notes",
+        arguments=(
+            Argument("--file", type="path"),
+            Argument("--token", env="TOKEN", required=True),
+        ),
+        subcommands=(
+            CommandSpec(
+                name="show",
+                arguments=(
+                    Argument("-C", type="path"),
+                    Argument("paths", type="path", nargs="*"),
+                ),
+                operand_base="-C",
+            ),
+            CommandSpec(
+                name="add",
+                arguments=(Argument("--out", type="path", env="OUT"),),
+            ),
+        ),
+    ),
+    handlers={
+        "show": CLIHandler(fn=_noop),
+        "add": CLIHandler(fn=_noop, write=True),
+    },
+)
+# A flat tree: -e from the env takes the text slot, so the word is a file.
+SCAN = CLI(
+    spec=CommandSpec(
+        name="scan",
+        arguments=(
+            Argument("-e", env="PATTERN"),
+            Argument("text", nargs="?", provided_by=("-e",)),
+            Argument("paths", type="path", nargs="*"),
+        ),
+    ),
+    handlers={"": CLIHandler(fn=_noop)},
+)
+PATHS = CommandSpec(arguments=(Argument("paths", type="path", nargs="*"),))
+COMMANDS = [
+    command("peek", vfs=None, spec=CommandSpec())(_noop),
+    command("stamp", vfs=None, spec=CommandSpec(), write=True)(_noop),
+    command("show", vfs=None, spec=PATHS)(_noop),
+    command("show", vfs=None, spec=PATHS, filetype=".csv", write=True)(_noop),
+]
+
+
+class NoWrites(Policy):
+    def __init__(self) -> None:
+        self.seen: dict[str, bool] = {}
+        self.programs: dict[str, tuple[str, ...]] = {}
+        self.paths: dict[str, list[str]] = {}
+
+    async def pre_command(self, ctx: CommandContext) -> Action | None:
+        self.seen[ctx.line] = ctx.write
+        self.programs[ctx.line] = tuple(ctx.program)
+        self.paths[ctx.line] = [p.virtual for p in ctx.paths]
+        return Deny("this session only reads") if ctx.write else None
+
+
+@pytest.mark.asyncio
+async def test_a_command_reads_as_writing_when_its_handler_says_so():
+    policy = NoWrites()
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/other/": RAMVFS()},
+        mode=MountMode.WRITE,
+        policies=[policy],
+    )
+    ws.register_cli("issues", ISSUES)
+    ws.mount("/data/").register_commands(COMMANDS)
+    ws.mount("/data/").register_commands([NOTES, SCAN])
+    # /other/'s diff writes, and an attached path option routes there.
+    ws.mount("/other/").register_commands(
+        [
+            command("show", vfs=None, spec=PATHS, write=True)(_noop),
+            command("diff", vfs=None, spec=SPECS["diff"], write=True)(_noop),
+        ]
+    )
+    lines = {
+        "issues list": False,
+        "issues create": True,
+        "issues new": True,
+        "issues nope": False,
+        "notes show": False,
+        "notes add": True,
+        "notes --file /other/secret show": False,
+        "notes show /other/note": False,
+        "notes show -C /other note": False,
+        "scan /other/s": False,
+        "peek": False,
+        "stamp": True,
+        "show /data/a.txt": False,
+        "show /data/a.csv": True,
+        "show /data/a.txt /other/b.txt": True,
+        "show /data/l.txt": True,
+        "diff --exclude-from=/other/list - -": True,
+        "cat /data/a.txt": False,
+        "rm -f /data/a.txt": True,
+        "sort -o /data/b.txt /data/a.txt": True,
+        "chmod 644 /data/a.txt": True,
+        "ln -s /data/a.txt /data/l": True,
+        "echo hi": False,
+    }
+    try:
+        await ws.shell("export TOKEN=t OUT=/other/out PATTERN=p")
+        # A run follows the link to the .csv, whose `show` writes.
+        await ws.vfs.write("/data/f.csv", b"x\n")
+        await ws.vfs.symlink("/data/l.txt", "/data/f.csv")
+        for line in lines:
+            await ws.shell(line)
+    finally:
+        await ws.close()
+    assert policy.seen == lines
+    assert policy.programs["issues new"] == ("issues", "create")
+    assert policy.paths["notes --file /other/secret show"] == ["/other/secret"]
+    assert policy.paths["notes add"] == ["/other/out"]
+    assert policy.paths["notes show /other/note"] == ["/other/note"]
+    assert policy.paths["scan /other/s"] == ["/other/s"]
+    assert policy.paths["notes show -C /other note"] == [
+        "/other",
+        "/other/note",
+    ]

@@ -23,7 +23,7 @@ import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { fsStrerror, isEnotdir, isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { shellQuote } from '@struktoai/mirage-core/utils/quote'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
-import type { HfAccountAccessor } from '../../../../accessor/hf_hub.ts'
+import { type HfAccountAccessor, hubFor } from '../../../../accessor/hf_hub.ts'
 import { createRepo } from '../../../../core/hf_hub/admin.ts'
 import { repoUrl } from '../../../../core/hf_hub/client.ts'
 import { commit, type Addition } from '../../../../core/hf_hub/commit.ts'
@@ -38,7 +38,7 @@ import {
   filterRepoPaths,
   repoFiles,
 } from '../../../../core/hf_hub/tree.ts'
-import { hubFor, repoTypeOf, requireOperands, requireToken, textOut } from './accessor.ts'
+import { repoTypeOf, requireOperands, requireToken, textOut } from './accessor.ts'
 import { refuseVariadic } from './download.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { posixPhrase } from '@struktoai/mirage-core/errors/posix'

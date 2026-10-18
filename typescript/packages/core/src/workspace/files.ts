@@ -29,6 +29,7 @@ import {
 import { leadsHidden, pathVisible } from '../utils/hidden.ts'
 import { norm } from '../utils/path.ts'
 import { normDir, ownerPrefix } from '../utils/slash.ts'
+import type { MountRow } from './types.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import type {
   FollowOperands,
@@ -41,14 +42,7 @@ import type {
 /** Receives each record with the id of the session the op ran as. */
 export type OpSink = (rec: OpRecord, sessionId: string) => Promise<void>
 
-interface MountOwner {
-  readonly prefix: string
-  readonly kind: string
-  // The mount VFS's du walk budget, null for no cap.
-  readonly maxDuEntries?: number | null
-}
-
-export type OwnerOf = (path: string) => MountOwner | null
+export type OwnerOf = (path: string) => MountRow | null
 
 /** What a derived facade carries over and a constructor may set. */
 export interface FilesOptions {
@@ -71,6 +65,9 @@ export interface FilesOptions {
   follow?: FollowOperands | null
   // Record each op on the ledger; false where the dispatcher does the accounting.
   ledger?: boolean
+  // The mount whose command scope a command's files run in, null across
+  // mounts; unset where nothing said one (`servedBy`).
+  served?: Caller['mount']
 }
 
 /**
@@ -192,6 +189,14 @@ export class Files {
   protected readonly recorded: OpRecord[]
   private readonly follow: FollowOperands | null
   private readonly ledger: boolean
+  /**
+   * The mount whose command scope these files run in, null for a run across
+   * mounts; undefined where nothing said one, which the async context
+   * answers instead (`servedBy`).
+   *
+   * @internal
+   */
+  readonly served: Caller['mount'] | undefined
 
   constructor(
     dispatch: CallerDispatchFn,
@@ -213,6 +218,7 @@ export class Files {
     this.visibilityOf = options.visibility ?? null
     this.follow = options.follow ?? null
     this.ledger = options.ledger ?? true
+    this.served = options.served
   }
 
   private options(): FilesOptions {
@@ -257,6 +263,25 @@ export class Files {
     return new Files(this.dispatchFn, this.sink, this.links, this.ownerOf, {
       ...this.options(),
       caller: { ...this.caller, ...changes },
+    })
+  }
+
+  /**
+   * The same files said to run in `mount`'s command scope, null for a run
+   * across mounts: what `mountRoot` and `crossesMounts` read, tied to the
+   * command's run, where an async context without task isolation answers
+   * whichever task bound last. The ops are unchanged.
+   *
+   * @internal Said by a mount for each command it runs, and by a run across
+   * mounts; Python's task context carries the caller instead.
+   */
+  servedBy(mount: Caller['mount']): Files {
+    return new Files(this.dispatchFn, this.sink, this.links, this.ownerOf, {
+      ...this.options(),
+      caller: this.caller,
+      follow: this.follow,
+      ledger: this.ledger,
+      served: mount,
     })
   }
 
@@ -454,7 +479,7 @@ export class Files {
       return dispatch(op, typed, args, kwargs, report, caller)
     }
     let result: unknown
-    let owner: MountOwner | null = null
+    let owner: MountRow | null = null
     try {
       const bound = sessionId ?? this.sessionId
       const [value] = await (this.bind === null ? run() : this.bind(bound, run))
@@ -528,7 +553,7 @@ export class Files {
   private async recordOp(
     op: string,
     path: string,
-    owner: MountOwner,
+    owner: MountRow,
     source: string | null,
     moved: number | null,
     result: unknown,

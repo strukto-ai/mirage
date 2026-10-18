@@ -36,6 +36,7 @@ import {
   type CommandRun,
 } from '../../../core/awk/index.ts'
 import { AWK_USAGE } from '../constants.ts'
+import { splitAssignment } from '../../../core/awk/builtins.ts'
 import { type AwkFlags } from './awk_types.ts'
 import { callerStream } from '../generic_bind/dispatch.ts'
 import { currentCaller } from '../../../context/session_context.ts'
@@ -43,7 +44,7 @@ import { currentCaller } from '../../../context/session_context.ts'
 import { fsStrerror, isEnotdir, isFsError, isMissingPath, isWalkError } from '../../../errors/fs.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
-import { mountsOf, dispatchOf } from '../utils/links.ts'
+import { mountsOf, dispatchOf, mountRoot } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
 
@@ -79,6 +80,17 @@ function isFatal(err: unknown): err is AwkRuntimeError | AwkSyntaxError {
   return err instanceof AwkRuntimeError || err instanceof AwkSyntaxError
 }
 
+/** The operand whose mount runs the program: its first file. Mirrors
+ * Python's `home_operand`. */
+export function homeOperand(scopes: readonly PathSpec[]): PathSpec | null {
+  for (const scope of scopes) {
+    if (scope.rawPath !== '' && !isStdin(scope) && splitAssignment(scope.rawPath) === null) {
+      return scope
+    }
+  }
+  return scopes[0] ?? null
+}
+
 /**
  * Whether the mount awk runs on serves an operand. A line whose operands span
  * mounts runs awk once, on its first file's mount; an operand another mount
@@ -88,7 +100,7 @@ function isFatal(err: unknown): err is AwkRuntimeError | AwkSyntaxError {
 export function servedHere(ctx: Context, path: PathSpec): boolean {
   const mounts = mountsOf(ctx)
   if (mounts === undefined) return true
-  const home = (ctx.mountPrefix ?? '').replace(/\/+$/, '')
+  const home = mountRoot(ctx)
   return mounts.rootOf(path.virtual).replace(/\/+$/, '') === home
 }
 

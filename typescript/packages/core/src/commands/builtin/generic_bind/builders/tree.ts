@@ -15,21 +15,22 @@
 import { treeGeneric } from '../../generic/tree.ts'
 import { treeWalk } from '../../utils/tree.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
-import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, resolveOrEmpty } from '../files.ts'
 
-const tree: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  const { readTree } = ops
-  const readdir = (p: PathSpec): Promise<string[]> => ops.readdir(accessor, p, idx)
-  const stat = (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, idx)
+const tree: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
+  const readdir = (p: PathSpec): Promise<string[]> => files.readdir(p)
+  const stat = (p: PathSpec): Promise<FileStat> => files.stat(p)
   return treeGeneric(
     resolved,
     ctx,
     readdir,
     stat,
     treeWalk<string[], FileStat>(
-      readTree === undefined ? undefined : (p) => readTree(accessor, p, idx),
+      files.answers('read_tree') ? files.readTree : undefined,
       readdir,
       stat,
     ),

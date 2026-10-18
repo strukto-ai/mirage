@@ -29,6 +29,7 @@ import { ByteSpool, MEMORY_LIMIT } from '../../../io/spool.ts'
 import { CHUNK_SIZE } from '../../../io/cooperative.ts'
 import { OutputStream, closeQuietly, rechunk } from '../../../io/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
+import { mountRoot } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
 
@@ -509,7 +510,7 @@ export async function shufGeneric(
       : new PathSpec({
           virtual: parsed.output.virtual,
           directory: parsed.output.virtual,
-          vfsPath: mountKey(parsed.output.virtual, ctx.mountPrefix ?? ''),
+          vfsPath: mountKey(parsed.output.virtual, mountRoot(ctx)),
           resolved: true,
           rawPath: parsed.output.rawPath,
         })

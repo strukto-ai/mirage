@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { awkGeneric, servedHere } from '../../generic/awk.ts'
-import type { Context } from '../../../config.ts'
+import type { Context, CommandFn } from '../../../config.ts'
 import { splitAssignment } from '../../../../core/awk/index.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles } from '../files.ts'
 
 /**
  * Expand awk's file operands, keeping `var=value` ones in place: an
@@ -45,15 +46,16 @@ async function resolveOperands(
   return out
 }
 
-const awk: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const resolve = (run: PathSpec[]): Promise<PathSpec[]> => resolveGlobOf(ops)(accessor, run, idx)
+const awk: CommandFn = async (_accessor, paths, texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolve = (run: PathSpec[]): Promise<PathSpec[]> => files.resolveGlob(run)
   const resolved = await resolveOperands(resolve, paths, ctx)
-  return awkGeneric(resolved, texts, ctx, (p) => ops.readStream(accessor, p, idx))
+  return awkGeneric(resolved, texts, ctx, files.readStream)
 }
 
 export const BUILDER: GenericCommand = {
   name: 'awk',
+  write: true,
   read: true,
   fn: awk,
 }

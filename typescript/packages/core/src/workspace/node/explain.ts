@@ -48,6 +48,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { SessionState } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
+import { envSnapshot } from '../session/state.ts'
 import {
   Admitted,
   admit,
@@ -369,7 +370,15 @@ async function judgeWords(
   ]
   const unread = unreadPaths(readWords, kinds, session.cwd, lost)
   const redirects = redirectPaths(redirectWords, registry, session.cwd)
-  const wordsRead = commandWords(registry, name, args, classified.slice(1), redirects, session.cwd)
+  const wordsRead = commandWords(
+    registry,
+    name,
+    args,
+    classified.slice(1),
+    redirects,
+    session.cwd,
+    envSnapshot(session),
+  )
   const gated = await gate(
     name,
     args,

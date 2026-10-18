@@ -17,12 +17,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.commands.builtin.generic_bind.builders.du import du
-from mirage.commands.config import CommandIO, Context
 from mirage.core.github.stat import tree
 from mirage.core.github.tree_entry import TreeEntry
-from mirage.io.stream import materialize
 from mirage.types import FileStat, FileType, PathSpec
+from tests.fixtures.answers import Answers, run_generic
 
 TREE = {
     "Banana.md": TreeEntry("Banana.md", "blob", "s0", 2),
@@ -35,7 +33,7 @@ TREE = {
 }
 
 
-async def _tree_stat(_accessor, path, _index=None):
+async def _tree_stat(path):
     entry = TREE.get(path.vfs_path.strip("/"))
     is_file = entry is not None and entry.type == "blob"
     return FileStat(
@@ -45,12 +43,8 @@ async def _tree_stat(_accessor, path, _index=None):
     )
 
 
-async def _unlisted(_accessor, path, _index=None):
+async def _unlisted(path):
     raise AssertionError(f"listed {path.virtual}")
-
-
-async def _read_tree(accessor, path, index=None):
-    return await tree(accessor, path)
 
 
 @pytest.mark.asyncio
@@ -76,24 +70,19 @@ async def test_du_sums_the_tree_it_reads_once(
         "refresh_tree",
         AsyncMock(return_value=(TREE, "head")),
     )
-    table = CommandIO(
-        readdir=_unlisted,
-        read_bytes=AsyncMock(),
-        read_stream=AsyncMock(),
-        stat=_tree_stat,
-        read_tree=_read_tree,
-        is_mounted=lambda _: True,
-    )
     accessor = SimpleNamespace(truncated=False, tree_loaded=False, tree=TREE)
-    stream, io = await du(
-        table,
-        accessor,
+
+    async def read_tree(path):
+        return await tree(accessor, path)
+
+    out, io = await run_generic(
+        "du",
+        Answers(readdir=_unlisted, stat=_tree_stat, read_tree=read_tree),
         [PathSpec.from_str_path(operand)],
-        [],
-        Context(flags=flags),
+        **flags,
     )
     assert (
-        (await materialize(stream)).decode(),
+        out.decode(),
         io.exit_code,
         await io.stderr_str(),
     ) == (expected, 0, "")

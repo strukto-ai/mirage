@@ -225,6 +225,7 @@ function ctx(
     sessionId,
     tokens: [command, '/repo/sealed/k'],
     program: [command],
+    write: false,
     ...extra,
   }
 }
@@ -331,6 +332,7 @@ describe('scriptContext', () => {
       { text: '/repo/sealed/k', kind: 'operand', option: null, path: '/repo/sealed/k' },
     ])
     expect(data.session_id).toBe('s')
+    expect(data.write).toBe(false)
     expect(data).not.toHaveProperty('agent_id')
     expect(data.cwd).toBe('/data')
     expect(data.env).toEqual({ TEAM: 'core', HOME: '/home/agent' })

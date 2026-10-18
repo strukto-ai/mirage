@@ -13,28 +13,25 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { uniqGeneric } from '../../generic/uniq.ts'
-import {
-  type GenericCommand,
-  dirAwareStat,
-  resolveGlobOf,
-  type GenericCommandFn,
-} from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, dirAwareStat, resolveOrEmpty } from '../files.ts'
 
-const uniq: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const write = ops.write
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+const uniq: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
   return uniqGeneric(
     resolved,
     ctx,
-    (p) => ops.readStream(accessor, p, idx),
-    write === undefined ? undefined : (p, data) => write(accessor, p, data),
-    dirAwareStat(ops, accessor, ctx),
+    files.readStream,
+    files.answers('write') ? files.write : undefined,
+    dirAwareStat(files, ctx),
   )
 }
 
 export const BUILDER: GenericCommand = {
   name: 'uniq',
+  write: true,
   read: true,
   streams: true,
   fn: uniq,

@@ -16,8 +16,6 @@ import { activeCacheManager } from '../../cache/context.ts'
 import { isEacces, isEnoent } from '../../errors/fs.ts'
 import { isEntryError } from '../../errors/classify.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FindOptions } from '../../vfs/types.ts'
 import {
   bindTree,
   dropPruned,
@@ -28,6 +26,7 @@ import {
   prunedKeys,
   type FindEntry,
   keep,
+  type PredNode,
 } from './find_eval.ts'
 import { FileType, PathSpec, type FileStat } from '../../types.ts'
 import type { LinkView } from '../../view/types.ts'
@@ -37,9 +36,27 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import { DIR_SIZE } from '../../utils/stat_view.ts'
 import { type PrintfKind, printfKind } from './find_eval.ts'
 
+/** What a find walk filters by: the expression's predicates, parsed. */
+export interface FindOptions {
+  name?: string | null
+  type?: string | null
+  minSize?: number | null
+  maxSize?: number | null
+  maxDepth?: number | null
+  minDepth?: number | null
+  nameExclude?: string | null
+  orNames?: string[] | null
+  iname?: string | null
+  pathPattern?: string | null
+  empty?: boolean | null
+  tree?: PredNode | null
+  mtimeMin?: number | null
+  mtimeMax?: number | null
+}
+
 export interface WalkFindDeps {
-  readdir: (spec: PathSpec, index?: IndexCacheStore) => Promise<string[]>
-  stat: (spec: PathSpec, index?: IndexCacheStore) => Promise<FileStat>
+  readdir: (spec: PathSpec) => Promise<string[]>
+  stat: (spec: PathSpec) => Promise<FileStat>
   // The table's stat and readdir see the namespace's links, so a link is an
   // entry like any other, kind `l`. Under -L (`follow`, the links it follows)
   // an entry is what it leads to instead: a link to a directory is walked, a
@@ -89,7 +106,6 @@ async function statEntry(
   deps: WalkFindDeps,
   path: string,
   prefix: string,
-  index: IndexCacheStore | undefined,
 ): Promise<FileStat | null> {
   const spec = new PathSpec({
     virtual: path,
@@ -99,7 +115,7 @@ async function statEntry(
   })
   if (deps.unstatted?.has(path) === true) return null
   try {
-    const row = await deps.stat(spec, index)
+    const row = await deps.stat(spec)
     const size =
       row.type === FileType.FILE && row.size === null
         ? await activeCacheManager()?.cachedSize(spec)
@@ -121,7 +137,6 @@ async function isEmptyEntry(
   path: string,
   isDir: boolean,
   prefix: string,
-  index: IndexCacheStore | undefined,
 ): Promise<boolean> {
   if (isDir) {
     const spec = new PathSpec({
@@ -131,7 +146,7 @@ async function isEmptyEntry(
       vfsPath: mountKey(path, prefix),
     })
     try {
-      return (await deps.readdir(spec, index)).length === 0
+      return (await deps.readdir(spec)).length === 0
     } catch (err) {
       if (isEnoent(err)) return false
       if (isEacces(err) && deps.unreadable !== undefined) {
@@ -141,14 +156,13 @@ async function isEmptyEntry(
       throw err
     }
   }
-  const st = await statEntry(deps, path, prefix, index)
+  const st = await statEntry(deps, path, prefix)
   return st !== null && st.type === FileType.FILE && st.size === 0
 }
 
 async function walk(
   deps: WalkFindDeps,
   spec: PathSpec,
-  index: IndexCacheStore | undefined,
   maxDepth: number | null,
   depth: number,
   out: WalkEntry[],
@@ -157,7 +171,7 @@ async function walk(
   if (maxDepth !== null && depth > maxDepth) return
   let children: string[]
   try {
-    children = await deps.readdir(spec, index)
+    children = await deps.readdir(spec)
   } catch (err) {
     if (isEnoent(err)) return
     if (isEacces(err) && deps.unreadable !== undefined) {
@@ -175,7 +189,7 @@ async function walk(
     const trimmed = child.endsWith('/') ? rstripSlash(child) : child
     let kind: PrintfKind = 'd'
     if (!child.endsWith('/')) {
-      const s = await statEntry(deps, trimmed, mountPrefixOf(spec.virtual, spec.vfsPath), index)
+      const s = await statEntry(deps, trimmed, mountPrefixOf(spec.virtual, spec.vfsPath))
       kind = s === null ? 'f' : printfKind(s)
     }
     const isFolder = kind === 'd'
@@ -199,7 +213,7 @@ async function walk(
       resolved: false,
       vfsPath: mountKey(trimmed, mountPrefixOf(spec.virtual, spec.vfsPath)),
     })
-    await walk(deps, childSpec, index, maxDepth, depth + 1, out, below)
+    await walk(deps, childSpec, maxDepth, depth + 1, out, below)
   }
 }
 
@@ -207,12 +221,11 @@ export async function walkFind(
   path: PathSpec,
   found: WalkFindDeps,
   options: FindOptions = {},
-  index?: IndexCacheStore,
 ): Promise<string[]> {
   const links = found.follow
   const deps: WalkFindDeps = {
     ...found,
-    stat: (spec, i) => followedStat((p: PathSpec) => found.stat(p, i), links, spec),
+    stat: (spec) => followedStat((p: PathSpec) => found.stat(p), links, spec),
   }
   const collected: WalkEntry[] = []
   const prefix = mountPrefixOf(path.virtual, path.vfsPath)
@@ -221,15 +234,15 @@ export async function walkFind(
   // the root's own basename.
   const rootPath = path.virtual !== '/' ? rstripSlash(path.virtual) : '/'
   const pruneTree = bindTree(optionsTree(options), prefix, path.virtual, path.rawPath)
-  const readDirectory = async (spec: PathSpec, cache?: IndexCacheStore): Promise<string[]> => {
+  const readDirectory = async (spec: PathSpec): Promise<string[]> => {
     if (deps.enters !== undefined && !deps.enters(spec.virtual)) return []
     if (treeHasPrune(pruneTree)) {
       const key = rstripSlash(spec.mountPath) || '/'
       const depth =
         rstripSlash(spec.virtual).split('/').length - rstripSlash(rootPath).split('/').length
-      const info = await statEntry(deps, spec.virtual, prefix, cache)
+      const info = await statEntry(deps, spec.virtual, prefix)
       const isEmpty = treeHasEmpty(pruneTree)
-        ? await isEmptyEntry(deps, spec.virtual, true, prefix, cache)
+        ? await isEmptyEntry(deps, spec.virtual, true, prefix)
         : null
       keep(
         {
@@ -245,11 +258,11 @@ export async function walkFind(
       )
       if (prunedKeys(pruneTree).includes(key)) return []
     }
-    return deps.readdir(spec, cache)
+    return deps.readdir(spec)
   }
   let rootStat: FileStat | null = null
   try {
-    rootStat = await deps.stat(path, index)
+    rootStat = await deps.stat(path)
   } catch (err) {
     if (!isEnoent(err)) throw err
   }
@@ -270,7 +283,6 @@ export async function walkFind(
     await walk(
       { ...deps, readdir: readDirectory },
       path,
-      index,
       options.maxDepth ?? null,
       1,
       collected,
@@ -292,7 +304,7 @@ export async function walkFind(
     const key = stripped === '' ? '/' : stripped
     let isEmpty: boolean | null = null
     if (needEmpty) {
-      isEmpty = await isEmptyEntry(deps, entry.path, !entry.file, prefix, index)
+      isEmpty = await isEmptyEntry(deps, entry.path, !entry.file, prefix)
     }
     // With a time test in the tree the stat comes first, so the entry
     // answers the test itself and a -prune after it fires only where GNU's
@@ -300,7 +312,7 @@ export async function walkFind(
     // kept.
     let st: FileStat | null = null
     if (needMtime) {
-      st = await statEntry(deps, entry.path, prefix, index)
+      st = await statEntry(deps, entry.path, prefix)
       if (st === null) continue
       learned.set(key, modifiedTs(st.modified))
     }
@@ -314,7 +326,7 @@ export async function walkFind(
     }
     if (!keep(findEntry, tree, options.minDepth)) continue
     if (needSize && entry.file && st === null) {
-      st = await statEntry(deps, entry.path, prefix, index)
+      st = await statEntry(deps, entry.path, prefix)
       if (st === null) continue
     }
     if (needSize) {

@@ -31,6 +31,7 @@ from mirage.workspace import Workspace
 from mirage.workspace.files import Files
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
+from tests.fixtures.mount_commands import run_on_mount
 
 
 def _run(coro):
@@ -97,7 +98,7 @@ async def test_only_wrapper_responses_bypass_the_write_guard(
     vfs = RAMVFS()
     mount = MountEntry("/ram/", vfs, mode)
     calls: list[str] = []
-    options = (Argument("--version", action="store_true"),) if declared else ()
+    options = (Argument(f"--{flag}", action="store_true"),) if declared else ()
 
     @command(
         "mutate",
@@ -113,17 +114,18 @@ async def test_only_wrapper_responses_bypass_the_write_guard(
     mount.register_commands([mutate])
     stdout, io = await mount.run_command("mutate", [], [], {flag: True})
     output = await materialize(stdout)
-    if declared and flag == "version":
-        if mode == MountMode.READ:
-            assert io.exit_code == 1
-            assert io.stderr == b"mutate: read-only mount at /ram/\n"
-            assert not calls
-            assert "/changed" not in vfs.accessor.store.files
-        else:
-            assert io.exit_code == 0
-            assert output == b"custom version\n"
-            assert calls == ["handler"]
-            assert vfs.accessor.store.files["/changed"] == b"changed"
+    # A declared --help is still answered by the decorator's wrapper, but
+    # the guard reads only the spec, so a read-only mount refuses it.
+    if declared and mode == MountMode.READ:
+        assert io.exit_code == 1
+        assert io.stderr == b"mutate: read-only mount at /ram/\n"
+        assert not calls
+        assert "/changed" not in vfs.accessor.store.files
+    elif declared and flag == "version":
+        assert io.exit_code == 0
+        assert output == b"custom version\n"
+        assert calls == ["handler"]
+        assert vfs.accessor.store.files["/changed"] == b"changed"
     else:
         assert io.exit_code == 0
         assert output
@@ -205,34 +207,27 @@ async def test_the_read_only_refusal_is_newline_terminated():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", [MountMode.READ, MountMode.WRITE])
-@pytest.mark.parametrize("path_guarded", [False, True])
+@pytest.mark.parametrize("builtin", [False, True])
 async def test_only_a_write_command_the_dispatcher_cannot_see_is_refused_up_front(
-    mode, path_guarded
+    mode, builtin
 ):
-    # A path-guarded command's writes go through the guarded op slots,
-    # which refuse each one where it happens, so a read-only mount runs
-    # it like a reader (`gzip -c`, `split -n 1/2`). A write command that
-    # reaches its service some other way has no gate to refuse it, so
-    # the mount refuses it before it runs.
+    # The dispatcher refuses a builtin's writes, not a user command's.
     vfs = RAMVFS()
     mount = MountEntry("/ram/", vfs, mode)
     calls: list[int] = []
 
-    @command(
-        "filter",
-        vfs="ram",
-        spec=CommandSpec(),
-        write=True,
-        path_guarded=path_guarded,
-    )
+    @command("filter", vfs="ram", spec=CommandSpec(), write=True)
     async def filter_cmd(accessor: RAMAccessor, paths, texts, opts):
         calls.append(len(paths))
         return b"ran\n", IOResult()
 
-    mount.register_commands([filter_cmd])
+    if builtin:
+        mount._register_builtins([filter_cmd])
+    else:
+        mount.register_commands([filter_cmd])
     paths = [PathSpec.from_str_path("/ram/a")]
     stdout, io = await mount.run_command("filter", paths, [], {})
-    if mode == MountMode.READ and not path_guarded:
+    if mode == MountMode.READ and not builtin:
         assert io.exit_code == 1
         assert io.stderr == b"filter: read-only mount at /ram/\n"
         assert not calls
@@ -297,9 +292,8 @@ async def test_write_mode_allows_write_cmd():
 
 
 @pytest.mark.asyncio
-async def test_a_write_with_no_dispatcher_is_refused():
-    # The dispatcher is where a write is judged and settled, so a host
-    # running a command straight on its mount, with none, cannot write.
+async def test_a_command_with_no_workspace_files_is_refused():
+    # A generic reaches files only through its line's own; run bare, none.
     ram = RAMVFS()
     reg = MountRegistry()
     reg.mount("/rw/", ram, MountMode.WRITE)
@@ -308,37 +302,29 @@ async def test_a_write_with_no_dispatcher_is_refused():
     stdout, io = await mount.run_command(
         "tee", [scope], [], {}, Context(stdin=b"x")
     )
-    await materialize(stdout)
-    assert io.exit_code == 1
-    assert b"Operation not supported" in await io.materialize_stderr()
+    assert stdout is None
+    assert (io.exit_code, io.stderr) == (1, b"tee: no workspace files\n")
     assert "/f" not in ram._store.files
 
 
 def test_read_only_allows_read_cmd():
-    reg = MountRegistry()
-    reg.mount("/ro/", RAMVFS(), MountMode.READ)
-    mount = reg.mount_for("/ro/")
+    ws = Workspace({"/ro/": (RAMVFS(), MountMode.READ)})
     scope = PathSpec(
         vfs_path="ro", virtual="/ro/", directory="/ro/", resolved=False
     )
-    stdout, io = _run(mount.run_command("ls", [scope], [], {}))
+    _, io = _run(run_on_mount(ws, "ls", [scope]))
     assert io.exit_code == 0
 
 
 # ── run_command ────────────────────────────────
 
 
-def test_execute_cmd_cat(registry):
-    mount = registry.mount_for("/data/hello.txt")
-    scope = PathSpec(
-        vfs_path="data/hello.txt",
-        virtual="/data/hello.txt",
-        directory="/data/",
-        resolved=True,
-    )
-    stdout, io = _run(mount.run_command("cat", [scope], [], {}))
+def test_execute_cmd_cat(ram_vfs):
+    ws = Workspace({"/data/": (ram_vfs, MountMode.WRITE)})
+    scope = PathSpec.from_str_path("/data/hello.txt")
+    stdout, io = _run(run_on_mount(ws, "cat", [scope]))
     assert io.exit_code == 0
-    assert stdout is not None
+    assert stdout
 
 
 def test_execute_cmd_not_found(registry):
@@ -348,38 +334,28 @@ def test_execute_cmd_not_found(registry):
     assert b"command not found" in io.stderr
 
 
-def test_execute_cmd_ls(registry):
-    mount = registry.mount_for("/data/hello.txt")
+def test_execute_cmd_ls(ram_vfs):
+    ws = Workspace({"/data/": (ram_vfs, MountMode.WRITE)})
     scope = PathSpec(
         vfs_path="data", virtual="/data/", directory="/data/", resolved=False
     )
-    stdout, io = _run(mount.run_command("ls", [scope], [], {}))
+    _, io = _run(run_on_mount(ws, "ls", [scope]))
     assert io.exit_code == 0
 
 
-def test_execute_cmd_with_flag_kwargs(registry):
-    mount = registry.mount_for("/data/hello.txt")
-    scope = PathSpec(
-        vfs_path="data/hello.txt",
-        virtual="/data/hello.txt",
-        directory="/data/",
-        resolved=True,
-    )
-    stdout, io = _run(mount.run_command("cat", [scope], [], {"n": True}))
+def test_execute_cmd_with_flag_kwargs(ram_vfs):
+    ws = Workspace({"/data/": (ram_vfs, MountMode.WRITE)})
+    scope = PathSpec.from_str_path("/data/hello.txt")
+    _, io = _run(run_on_mount(ws, "cat", [scope], flags={"n": True}))
     assert io.exit_code == 0
 
 
 @pytest.mark.asyncio
-async def test_execute_cmd_with_texts(registry):
-    mount = registry.mount_for("/data/hello.txt")
-    scope = PathSpec(
-        vfs_path="data/hello.txt",
-        virtual="/data/hello.txt",
-        directory="/data/",
-        resolved=True,
-    )
-    stdout, io = await mount.run_command("grep", [scope], ["hello"], {})
-    assert b"hello" in await materialize(stdout)
+async def test_execute_cmd_with_texts(ram_vfs):
+    ws = Workspace({"/data/": (ram_vfs, MountMode.WRITE)})
+    scope = PathSpec.from_str_path("/data/hello.txt")
+    stdout, io = await run_on_mount(ws, "grep", [scope], ["hello"])
+    assert b"hello" in stdout
     assert io.exit_code == 0
 
 
@@ -463,11 +439,9 @@ async def test_a_command_for_one_filetype_runs_only_on_that_filetype():
 
 
 @pytest.mark.asyncio
-async def test_a_path_guarded_command_is_still_held_at_its_write():
+async def test_a_builtin_write_command_is_held_at_its_write():
     vfs = RAMVFS()
     vfs._store.files["/a"] = b"original"
-    cmd = generic("gzip")
-    assert cmd.path_guarded
     ws = Workspace({"/ram/": (vfs, MountMode.READ)}, mode=MountMode.WRITE)
     # The write is refused where it happens and gzip says so in its own
     # words (the fatal write_error form), leaving the store untouched.
@@ -587,3 +561,32 @@ async def test_a_pulled_stream_closes_its_source_once_through_the_wrappers():
     assert await anext(stream) == b"x\n"
     await stream.aclose()
     assert vfs.opened.closed >= 1
+
+
+# ── user writes past the dispatcher ──────────────────────────
+
+
+async def _stamp(accessor, paths, texts, ctx):
+    accessor.store.files["/a.txt"] = b"v2\n"
+    return None, IOResult()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("write", [True, False])
+async def test_a_user_write_drops_only_its_own_mounts_caches(write):
+    one, two = RAMVFS(), RAMVFS()
+    for vfs, key in ((one, "/a.txt"), (two, "/b.txt")):
+        vfs.caches_reads = True
+        vfs.accessor.store.files[key] = b"v1\n"
+    ws = Workspace({"/one/": one, "/two/": two}, mode=MountMode.WRITE)
+    try:
+        stamp = command("stamp", vfs=None, spec=CommandSpec(), write=write)
+        ws.mount("/one/").register_commands([stamp(_stamp)])
+        await ws.shell("cat /one/a.txt /two/b.txt")
+        two.accessor.store.files["/b.txt"] = b"v2\n"
+        assert (await ws.shell("cd /one && stamp")).exit_code == 0
+        own = (await ws.shell("cat /one/a.txt")).stdout
+        other = (await ws.shell("cat /two/b.txt")).stdout
+        assert (own, other) == (b"v2\n" if write else b"v1\n", b"v1\n")
+    finally:
+        await ws.close()

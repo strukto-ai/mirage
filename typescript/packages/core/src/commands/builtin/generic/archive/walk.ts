@@ -13,7 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LinkView, MountView } from '../../../../view/types.ts'
-import { type FileStat, FileType, LINK_TARGET_KEY, PathSpec } from '../../../../types.ts'
+import {
+  type FileStat,
+  FileType,
+  LINK_TARGET_KEY,
+  PathSpec,
+  type StatFn,
+} from '../../../../types.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
 import { isEnotdir } from '../../../../errors/fs.ts'
 import { CycleError } from '../../../../utils/path.ts'
@@ -28,7 +34,6 @@ import { posixPhrase } from '../../../../errors/posix.ts'
 // on purpose.
 export const OTHER_FILESYSTEM = 'file is on a different filesystem; not dumped'
 
-export type StatFn = (path: PathSpec) => Promise<FileStat>
 export type WalkFn = (path: PathSpec, findType: string) => Promise<Walked>
 export type DirProbe = (path: PathSpec) => Promise<boolean>
 

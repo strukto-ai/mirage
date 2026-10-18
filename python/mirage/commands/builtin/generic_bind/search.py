@@ -16,9 +16,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 
-from mirage.accessor.base import Accessor
 from mirage.cache.context import active_cache_manager
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import (
     directories_action,
 )
@@ -31,7 +29,7 @@ from mirage.commands.builtin.generic.rg import (
     rg_matcher,
 )
 from mirage.commands.builtin.generic.rg import parse_flags as parse_rg_flags
-from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.generic_bind.files import CommandFiles
 from mirage.commands.builtin.grep_pattern import (
     compile_pattern,
     pattern_arg,
@@ -40,9 +38,13 @@ from mirage.commands.builtin.grep_pushdown import (
     search_terms,
 )
 from mirage.commands.builtin.types import SearchTerms
-from mirage.commands.builtin.utils.links import dispatch_of, links_of
+from mirage.commands.builtin.utils.links import (
+    dispatch_of,
+    links_of,
+    mounts_of,
+)
 from mirage.commands.builtin.utils.tree import before_full_scan
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -302,23 +304,18 @@ async def _holds_line(found: ByteSource) -> bool:
 
 
 async def _directories(
-    io: CommandIO,
-    accessor: Accessor,
-    index: IndexCacheStore,
-    paths: list[PathSpec],
+    files: CommandFiles, paths: list[PathSpec]
 ) -> list[PathSpec]:
     """The operands that stat as directories, the scopes a walk covers.
 
     Args:
-        io (CommandIO): the backend table.
-        accessor (Accessor): backend handle.
-        index (IndexCacheStore): the mount's index.
+        files (CommandFiles): the command's files.
         paths (list[PathSpec]): resolved operands.
     """
     found: list[PathSpec] = []
     for path in paths:
         try:
-            info = await io.stat(accessor, path, index)
+            info = await files.stat(path)
         except (OSError, ValueError) as exc:
             logger.debug("search scope %s: %s", path.virtual, exc)
             continue
@@ -328,9 +325,8 @@ async def _directories(
 
 
 async def search_reads(
-    io: CommandIO,
+    files: CommandFiles,
     name: str,
-    accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
@@ -357,17 +353,26 @@ async def search_reads(
     refuse it.
 
     Args:
-        io (CommandIO): the backend table.
+        files (CommandFiles): the command's files.
         name (str): grep or rg.
-        accessor (Accessor): backend handle.
         paths (list[PathSpec]): resolved operands.
         texts (list[str]): pattern arguments.
         ctx (Context): parsed invocation context.
     """
-    index = ctx.index
-    read_bytes = bound_op(io.read_bytes, accessor, index)
-    read_stream = bound_op(io.read_stream, accessor, index)
-    files, lines = io.files_containing, io.lines_containing
+    read_bytes = files.read_bytes
+    read_stream = files.read_stream
+    containing = (
+        files.files_containing if files.answers("files_containing") else None
+    )
+    lines = (
+        files.lines_containing if files.answers("lines_containing") else None
+    )
+    mounts = mounts_of(ctx)
+    searchable = (
+        mounts.searchable((paths[0] if paths else ctx.cwd).virtual)
+        if mounts is not None and mounts.searchable is not None
+        else None
+    )
     links = links_of(ctx)
     fl = FlagView(ctx.flags, spec=SPECS[name])
     if not paths or (
@@ -375,7 +380,7 @@ async def search_reads(
     ):
         return read_bytes, read_stream
     walked = name == "rg" or directories_action(fl) == "recurse"
-    if files is None and lines is None:
+    if containing is None and lines is None:
         if walked:
             await _full_scan(dispatch_of(ctx), paths, name)
         return read_bytes, read_stream
@@ -388,22 +393,20 @@ async def search_reads(
     except UsageError as exc:
         logger.debug("%s search left to the scan: %s", name, exc)
         return read_bytes, read_stream
-    dirs = await _directories(io, accessor, index, paths) if walked else []
+    dirs = await _directories(files, paths) if walked else []
     if terms is None:
         await _full_scan(dispatch_of(ctx), dirs, name)
         return read_bytes, read_stream
     drops_mark = name == "rg" and encoding_flag(fl) != "none"
     hits: set[str] | None = None
-    if files is not None and dirs:
+    if containing is not None and dirs:
         answers = await asyncio.gather(
             *(
-                files(
-                    accessor,
+                containing(
                     scope,
                     text,
                     whole_word=terms.whole_word,
                     ignore_case=terms.ignore_case,
-                    index=index,
                 )
                 for scope in dirs
                 for text in terms.texts
@@ -453,22 +456,16 @@ async def search_reads(
             )
             and path.vfs_path.lower() not in hits
             and (
-                io.searchable is None
-                or any(
-                    glob_prefix_match(path.vfs_path, g) for g in io.searchable
-                )
+                searchable is None
+                or any(glob_prefix_match(path.vfs_path, g) for g in searchable)
             )
         ):
             return b""
         if lines is None:
             return None
         if terms.line_output and len(terms.texts) == 1:
-            found = await lines(
-                accessor,
-                path,
-                terms.texts[0],
-                ignore_case=terms.ignore_case,
-                index=index,
+            found: ByteSource | None = await lines(
+                path, terms.texts[0], ignore_case=terms.ignore_case
             )
             if found is not None and drops_mark:
                 found = await _unmarked(found)
@@ -476,13 +473,7 @@ async def search_reads(
                 await read_unanswered()
             return found
         for text in terms.texts:
-            found = await lines(
-                accessor,
-                path,
-                text,
-                ignore_case=terms.ignore_case,
-                index=index,
-            )
+            found = await lines(path, text, ignore_case=terms.ignore_case)
             if found is None:
                 await read_unanswered()
                 return None

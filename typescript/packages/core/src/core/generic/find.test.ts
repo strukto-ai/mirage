@@ -159,9 +159,9 @@ describe('walkFind', () => {
     const base = makeDeps({ '/': ['/a.txt'] }, { '/': {}, '/a.txt': { size: 1 } })
     const deps: WalkFindDeps = {
       ...base,
-      readdir: (spec, i) => {
+      readdir: (spec) => {
         readdirCalls += 1
-        return base.readdir(spec, i)
+        return base.readdir(spec)
       },
     }
     expect(await walkFind(ROOT, deps, { maxDepth: 0 })).toEqual(['/'])
@@ -290,9 +290,9 @@ describe('walkFind', () => {
     const base = makeDeps(FLAKY_TREE, FLAKY_STATS)
     return {
       ...base,
-      stat: (spec, index) => {
+      stat: (spec) => {
         calls.push(spec.virtual)
-        return spec.virtual === '/b.json' ? Promise.reject(err) : base.stat(spec, index)
+        return spec.virtual === '/b.json' ? Promise.reject(err) : base.stat(spec)
       },
     }
   }

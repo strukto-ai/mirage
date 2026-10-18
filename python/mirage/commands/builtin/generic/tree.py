@@ -4,7 +4,6 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from functools import partial
 
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import vfs_readdir_path, vfs_stat_path
@@ -42,48 +41,41 @@ _LAST = "`-- "
 _VERTICAL = "|   "
 _INDENT = "    "
 
-Readdir = Callable[[PathSpec, IndexCacheStore | None], Awaitable[list[str]]]
-Stat = Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]]
+Readdir = Callable[[PathSpec], Awaitable[list[str]]]
+Stat = Callable[[PathSpec], Awaitable[FileStat]]
 
 UNOPENABLE_MARK = "  [error opening dir]"
 
 
 async def _cross_readdir(
-    readdir_path: ReaddirPath, path: PathSpec, index: IndexCacheStore | None
+    readdir_path: ReaddirPath, path: PathSpec
 ) -> list[str]:
-    """List a directory that belongs to another mount.
+    """List a directory that belongs to another mount, which indexes its
+    own listing inside the dispatched op.
 
     Args:
         readdir_path (ReaddirPath): dispatcher-backed readdir.
         path (PathSpec): the directory to list.
-        index (IndexCacheStore | None): unused; the owning mount indexes
-            its own listing inside the dispatched op.
     """
     return await readdir_path(path.virtual)
 
 
-async def _not_crossed(
-    path: PathSpec, index: IndexCacheStore | None
-) -> list[str]:
+async def _not_crossed(path: PathSpec) -> list[str]:
     """List a mount point ``-x`` keeps the walk out of: empty, the way
     GNU tree draws a directory on another filesystem.
 
     Args:
         path (PathSpec): the mount point.
-        index (IndexCacheStore | None): unused.
     """
     return []
 
 
-async def _cross_stat(
-    stat_path: StatPath, path: PathSpec, index: IndexCacheStore | None
-) -> FileStat:
+async def _cross_stat(stat_path: StatPath, path: PathSpec) -> FileStat:
     """Stat an entry that belongs to another mount.
 
     Args:
         stat_path (StatPath): dispatcher-backed stat.
         path (PathSpec): the entry to stat.
-        index (IndexCacheStore | None): unused, as for `_cross_readdir`.
     """
     stat = await stat_path(path)
     if stat is None:
@@ -133,7 +125,6 @@ async def _walk_tree(
     dirs_only: bool,
     match_pattern: str | None,
     warnings: list[str],
-    index: IndexCacheStore,
     mounts: MountView | None = None,
     cross_readdir: Readdir | None = None,
     cross_stat: Stat | None = None,
@@ -164,7 +155,7 @@ async def _walk_tree(
     # one path whose children it could name for certain as unopenable.
     child_mounts = _child_mounts(mounts, path.virtual)
     try:
-        entries = sorted(await readdir(path, index))
+        entries = sorted(await readdir(path))
     except WALK_ERRORS as exc:
         # An absence only. A directory the backend refused (EACCES,
         # ENOTSUP) is there and holds data, so it stays a warning and an
@@ -196,7 +187,7 @@ async def _walk_tree(
             )
         else:
             try:
-                s = await stat(entry_spec, index)
+                s = await stat(entry_spec)
             except WALK_ERRORS as exc:
                 warnings.append(f"tree: '{entry}': {exc}")
                 continue
@@ -258,7 +249,6 @@ async def _walk_tree(
             dirs_only=dirs_only,
             match_pattern=match_pattern,
             warnings=warnings,
-            index=index,
             mounts=mounts,
             cross_readdir=cross_readdir,
             cross_stat=cross_stat,
@@ -295,7 +285,6 @@ async def tree(
     ignore_pattern: str | None = None,
     dirs_only: bool = False,
     match_pattern: str | None = None,
-    index: IndexCacheStore = NULL_INDEX,
     stat_path: StatPath | None = None,
     readdir_path: ReaddirPath | None = None,
     mounts: MountView | None = None,
@@ -321,7 +310,6 @@ async def tree(
         ignore_pattern (str | None): -I.
         dirs_only (bool): -d.
         match_pattern (str | None): -P.
-        index (IndexCacheStore): listing cache for this mount.
         stat_path (StatPath | None): dispatcher-backed stat, used for the
             operand itself and for entries past a mount boundary.
         readdir_path (ReaddirPath | None): dispatcher-backed readdir,
@@ -382,7 +370,6 @@ async def tree(
             dirs_only=dirs_only,
             match_pattern=match_pattern,
             warnings=warnings,
-            index=index,
             mounts=mounts,
             cross_readdir=cross_readdir,
             cross_stat=cross_stat,
@@ -488,7 +475,6 @@ async def tree_generic(
         ignore_pattern=parsed.ignore_pattern,
         dirs_only=parsed.dirs_only,
         match_pattern=parsed.match_pattern,
-        index=ctx.index,
         stat_path=vfs_stat_path(ctx.vfs),
         readdir_path=vfs_readdir_path(ctx.vfs),
         mounts=mounts_of(ctx),

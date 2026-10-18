@@ -14,7 +14,8 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { RAMAccessor } from '../accessor/ram.ts'
-import { commandIo } from '../commands/builtin/generic_bind/adapter.ts'
+import { commandFiles } from '../commands/builtin/generic_bind/files.ts'
+import { onMount } from '../test-utils.ts'
 import { read as ramRead } from '../core/ram/read.ts'
 import { readdir as ramReaddir } from '../core/ram/readdir.ts'
 import { stat as ramStat } from '../core/ram/stat.ts'
@@ -25,6 +26,7 @@ import { sliceWindow } from '../utils/ranges.ts'
 import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { BaseVFS } from './base.ts'
+import { RAMVFS } from './ram/ram.ts'
 import { RAMStore } from './ram/store.ts'
 import type { Handed, SearchQuery } from './types.ts'
 
@@ -105,8 +107,8 @@ describe('a plug-in VFS', () => {
         ENC.encode('ell'),
       )
       const chunks: Uint8Array[] = []
-      for await (const chunk of commandIo(vfs).readStream(accessor, PATH)) chunks.push(chunk)
-      expect(chunks).toEqual([ENC.encode('hello\n')])
+      for await (const chunk of await ws.vfs.readStream(PATH, { raw: true })) chunks.push(chunk)
+      expect(chunks.filter((c) => c.byteLength > 0)).toEqual([ENC.encode('hello\n')])
       const refused = await ws.shell('rm /nested/data/a.txt')
       expect(refused.exitCode).toBe(1)
       expect(stderrStr(refused)).toBe(
@@ -121,15 +123,27 @@ describe('a plug-in VFS', () => {
   it('derives existence from stat without swallowing permission failures', async () => {
     const accessor = await makeAccessor()
     const vfs = new Minimal({ name: 'custom', accessor })
-    const io = commandIo(vfs)
-    if (!io.exists) throw new Error('the table must provide exists')
-    expect(await io.exists(accessor, PATH)).toBe(true)
-    const missing = new PathSpec({ virtual: '/missing', directory: '/', vfsPath: 'missing' })
-    expect(await io.exists(accessor, missing)).toBe(false)
+    const exists = (path: PathSpec): Promise<boolean> =>
+      onMount(
+        vfs,
+        (files) =>
+          commandFiles({
+            stdin: null,
+            flags: {},
+            cwd: PathSpec.fromStrPath('/'),
+            vfs: files,
+          }).exists(path),
+        '/nested/data',
+      )
+    expect(await exists(PATH)).toBe(true)
+    const missing = new PathSpec({
+      virtual: '/nested/data/missing',
+      directory: '/nested/data',
+      vfsPath: 'missing',
+    })
+    expect(await exists(missing)).toBe(false)
     vfs.stat = () => Promise.reject(eacces(PATH.virtual))
-    const denied = commandIo(vfs)
-    if (!denied.exists) throw new Error('the table must provide exists')
-    await expect(denied.exists(accessor, PATH)).rejects.toMatchObject({ code: 'EACCES' })
+    await expect(exists(PATH)).rejects.toMatchObject({ code: 'EACCES' })
   })
 
   it('reads a native window and stream without enabling writes', async () => {
@@ -144,8 +158,11 @@ describe('a plug-in VFS', () => {
       expect(read).toHaveBeenCalledOnce()
       expect(read.mock.calls[0]?.slice(2, 4)).toEqual([1, 3])
       const received: Uint8Array[] = []
-      for await (const chunk of commandIo(vfs).readStream(accessor, PATH)) received.push(chunk)
-      expect(received).toEqual([ENC.encode('hel'), ENC.encode('lo\n')])
+      for await (const chunk of await ws.vfs.readStream(PATH, { raw: true })) received.push(chunk)
+      expect(received.filter((c) => c.byteLength > 0)).toEqual([
+        ENC.encode('hel'),
+        ENC.encode('lo\n'),
+      ])
       expect(read).toHaveBeenCalledOnce()
       expect(vfs.supports('write')).toBe(false)
     } finally {
@@ -205,19 +222,41 @@ it('passes resource options through, and grep and rg never ask the search', asyn
     query: 'recent deployments',
     options: { limit: 20, filters: { project: 'backend' } },
   }
-  expect(await commandIo(vfs).search?.search(accessor, PATH, query)).toEqual([
-    [`${PATH.virtual}/42`, 'deployment 42'],
-  ])
-  expect(search).toHaveBeenCalledWith(PATH, query)
-  search.mockClear()
   const ws = new Workspace({ '/nested/data': vfs }, { shellParser: await getTestParser() })
   try {
+    expect(await ws.dispatch('search', PATH.virtual, [query])).toEqual([
+      [`${PATH.virtual}/42`, 'deployment 42'],
+    ])
+    const [asked, options] = (search.mock.calls[0] ?? []) as unknown[]
+    expect(asked).toMatchObject({ virtual: PATH.virtual, vfsPath: 'a.txt' })
+    expect(options).toEqual(query)
+    search.mockClear()
     for (const command of ['grep', 'rg']) {
       const result = await ws.shell(`${command} hello ${PATH.virtual}`)
       expect(result.exitCode).toBe(0)
       expect(stdoutStr(result)).toBe('hello\n')
     }
     expect(search).not.toHaveBeenCalled()
+  } finally {
+    await ws.close()
+  }
+})
+
+it('routes a write off a mount without one when an option names another', async () => {
+  // Typed on a mount that cannot write, the output option names one that
+  // can, and the serving mount's facts decide.
+  const ws = new Workspace(
+    {
+      '/nested/data': new Minimal({ name: 'custom', accessor: await makeAccessor() }),
+      '/ram': new RAMVFS(),
+    },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  try {
+    await ws.shell('cd /nested/data')
+    const result = await ws.shell('shuf -i 1-1 --output=/ram/out')
+    expect([result.exitCode, stderrStr(result)]).toEqual([0, ''])
+    expect(stdoutStr(await ws.shell('cat /ram/out'))).toBe('1\n')
   } finally {
     await ws.close()
   }

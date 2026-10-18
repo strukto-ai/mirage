@@ -13,23 +13,23 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { teeGeneric } from '../../generic/tee.ts'
-import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, resolveOrEmpty } from '../files.ts'
 
-const tee: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const { append } = ops
-  const write = requireOp(ops.write, 'write')
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+const tee: CommandFn = async (_accessor, paths, texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
   // A backend that can append natively does; the rest fall back to the
   // read-modify-write inside the generic.
   return teeGeneric(
     resolved,
     texts,
     ctx,
-    (p) => ops.readStream(accessor, p, idx),
-    (p, d) => write(accessor, p, d),
-    append === undefined ? undefined : (p, d) => append(accessor, p, d),
-    (p) => ops.stat(accessor, p, idx),
+    files.readStream,
+    (p, d) => files.write(p, d),
+    files.answers('append') ? files.append : undefined,
+    files.stat,
   )
 }
 

@@ -137,7 +137,7 @@ def _root_spec() -> PathSpec:
 async def test_walk_find_tolerates_not_found(readdir, args, expected):
     stat = AsyncMock(side_effect=FileNotFoundError("gone"))
     results = await walk_find(
-        _root_spec(), readdir=readdir, stat=stat, index=None, args=args
+        _root_spec(), readdir=readdir, stat=stat, args=args
     )
     assert results == expected
 
@@ -175,9 +175,7 @@ async def test_walk_find_propagates_any_other_error(
     readdir, stat, args, match
 ):
     with pytest.raises(ValueError, match=match):
-        await walk_find(
-            _root_spec(), readdir=readdir, stat=stat, index=None, args=args
-        )
+        await walk_find(_root_spec(), readdir=readdir, stat=stat, args=args)
 
 
 @pytest.mark.asyncio
@@ -188,7 +186,6 @@ async def test_walk_find_emits_start_path_at_depth_zero():
         _root_spec(),
         readdir=readdir,
         stat=stat,
-        index=None,
         args=FindArgs(maxdepth=0),
     )
     assert results == ["/"]
@@ -213,10 +210,10 @@ def _flaky(exc: Exception, calls: list[str] | None = None):
         },
     }
 
-    async def readdir(spec: PathSpec, _index):
+    async def readdir(spec: PathSpec):
         return ["/a.json", "/b.json", "/c.json"]
 
-    async def stat(spec: PathSpec, _index):
+    async def stat(spec: PathSpec):
         if calls is not None:
             calls.append(spec.virtual)
         if spec.virtual == "/b.json":
@@ -235,7 +232,6 @@ async def test_walk_find_records_an_entry_whose_stat_fails_and_walks_on():
         _root_spec(),
         readdir=readdir,
         stat=stat,
-        index=None,
         args=FindArgs(type=FindType.FILE),
         unstatted=unstatted,
     )
@@ -251,7 +247,6 @@ async def test_walk_find_fails_a_stat_test_without_asking_again():
         _root_spec(),
         readdir=readdir,
         stat=stat,
-        index=None,
         args=FindArgs(min_size=1),
         unstatted={},
     )
@@ -267,7 +262,6 @@ async def test_walk_find_propagates_an_entry_failure_it_does_not_collect():
             _root_spec(),
             readdir=readdir,
             stat=stat,
-            index=None,
             args=FindArgs(),
         )
 
@@ -280,7 +274,6 @@ async def test_walk_find_propagates_a_timeout_even_when_collecting():
             _root_spec(),
             readdir=readdir,
             stat=stat,
-            index=None,
             args=FindArgs(),
             unstatted={},
         )
@@ -288,7 +281,7 @@ async def test_walk_find_propagates_a_timeout_even_when_collecting():
 
 @pytest.mark.asyncio
 async def test_walk_find_empty_matches_empty_files_and_dirs():
-    async def readdir(spec: PathSpec, _index):
+    async def readdir(spec: PathSpec):
         table = {
             "/": ["/empty.txt", "/full.txt", "/empty-dir", "/full-dir"],
             "/empty-dir": [],
@@ -296,7 +289,7 @@ async def test_walk_find_empty_matches_empty_files_and_dirs():
         }
         return table[spec.virtual]
 
-    async def stat(spec: PathSpec, _index):
+    async def stat(spec: PathSpec):
         stats = {
             "/": FileStat(name="/", type=FileType.DIRECTORY),
             "/empty.txt": FileStat(
@@ -326,7 +319,6 @@ async def test_walk_find_empty_matches_empty_files_and_dirs():
         _root_spec(),
         readdir=readdir,
         stat=stat,
-        index=None,
         args=parse_find_args(("-empty",)),
     )
     assert results == ["/empty-dir", "/empty.txt"]
@@ -336,7 +328,7 @@ async def test_walk_find_empty_matches_empty_files_and_dirs():
 async def test_walk_find_time_test_before_prune_gates_it():
     now = "2026-01-01T00:00:00Z"
 
-    async def readdir(spec: PathSpec, _index):
+    async def readdir(spec: PathSpec):
         table = {
             "/": ["/old", "/new"],
             "/old": ["/old/f.txt"],
@@ -344,7 +336,7 @@ async def test_walk_find_time_test_before_prune_gates_it():
         }
         return table[spec.virtual]
 
-    async def stat(spec: PathSpec, _index):
+    async def stat(spec: PathSpec):
         stamps = {
             "/": now,
             "/old": "2000-01-01T00:00:00Z",
@@ -360,13 +352,13 @@ async def test_walk_find_time_test_before_prune_gates_it():
         ("-mindepth", "1", "-newermt", "2010-01-01", "-prune")
     )
     assert await walk_find(
-        _root_spec(), readdir=readdir, stat=stat, index=None, args=gated
+        _root_spec(), readdir=readdir, stat=stat, args=gated
     ) == ["/new", "/old/f.txt"]
     firm = parse_find_args(
         ("-mindepth", "1", "-prune", "-newermt", "2010-01-01")
     )
     assert await walk_find(
-        _root_spec(), readdir=readdir, stat=stat, index=None, args=firm
+        _root_spec(), readdir=readdir, stat=stat, args=firm
     ) == ["/new"]
 
 
@@ -621,7 +613,7 @@ _FILE_STAT = FileStat(
 async def test_find_walks_every_start_point_in_operand_order():
     calls: list[str] = []
 
-    async def readdir(path: PathSpec, _index=None) -> list[str]:
+    async def readdir(path: PathSpec) -> list[str]:
         calls.append(path.virtual)
         return ["/mnt/sub/z.txt"]
 
@@ -657,7 +649,7 @@ async def test_find_stats_each_start_point_once():
 
     backend: list[str] = []
 
-    async def backend_stat(path: PathSpec, index=None) -> FileStat:
+    async def backend_stat(path: PathSpec) -> FileStat:
         backend.append(path.virtual)
         found = await stats(path)
         if found is None:
@@ -682,7 +674,7 @@ async def test_find_stats_each_start_point_once():
 
 @pytest.mark.asyncio
 async def test_find_no_operands_defaults_to_the_mount_root():
-    async def readdir(path: PathSpec, _index=None) -> list[str]:
+    async def readdir(path: PathSpec) -> list[str]:
         assert path.virtual == "/"
         return ["/a.txt"]
 
@@ -710,12 +702,12 @@ async def test_walk_find_reports_a_directory_it_may_not_open():
         "/open/o": FileType.FILE,
     }
 
-    async def readdir(spec, index=None):
+    async def readdir(spec):
         if spec.virtual == "/sealed":
             raise PermissionError("/sealed")
         return tree[spec.virtual]
 
-    async def stat(spec, index=None):
+    async def stat(spec):
         return FileStat(name=spec.virtual, type=kinds[spec.virtual])
 
     unreadable: list[str] = []
@@ -723,7 +715,6 @@ async def test_walk_find_reports_a_directory_it_may_not_open():
         _root_spec(),
         readdir=readdir,
         stat=stat,
-        index=None,
         args=FindArgs(),
         unreadable=unreadable,
     )
@@ -734,7 +725,6 @@ async def test_walk_find_reports_a_directory_it_may_not_open():
             _root_spec(),
             readdir=readdir,
             stat=stat,
-            index=None,
             args=FindArgs(),
         )
 
@@ -795,7 +785,6 @@ async def test_empty_walk_does_not_treat_unknown_size_as_zero():
         PathSpec.from_str_path("/records.jsonl", "records.jsonl"),
         readdir=readdir,
         stat=stat,
-        index=None,
         args=FindArgs(empty=True),
     )
     assert result == []

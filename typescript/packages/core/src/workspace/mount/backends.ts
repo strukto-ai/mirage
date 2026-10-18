@@ -19,13 +19,14 @@ import { DifyVFS } from '../../vfs/dify/dify.ts'
 import { LanceDBVFSBase } from '../../vfs/lancedb/lancedb.ts'
 import { Mem0VFS } from '../../vfs/mem0/mem0.ts'
 import { QdrantVFS } from '../../vfs/qdrant/qdrant.ts'
-import { Command } from '../config.ts'
-import { CHROMA_COMMANDS } from './chroma/index.ts'
-import { DEV_COMMANDS } from './dev/index.ts'
-import { DIFY_COMMANDS } from './dify/index.ts'
-import { LANCEDB_COMMANDS } from './lancedb/index.ts'
-import { MEM0_COMMANDS } from './mem0/index.ts'
-import { QDRANT_COMMANDS } from './qdrant/index.ts'
+import { Command } from '../../commands/config.ts'
+import type { CLI } from '../../commands/cli/types.ts'
+import { CHROMA_COMMANDS } from '../../commands/builtin/chroma/index.ts'
+import { DEV_COMMANDS } from '../../commands/builtin/dev/index.ts'
+import { DIFY_COMMANDS } from '../../commands/builtin/dify/index.ts'
+import { LANCEDB_COMMANDS } from '../../commands/builtin/lancedb/index.ts'
+import { MEM0_COMMANDS } from '../../commands/builtin/mem0/index.ts'
+import { QDRANT_COMMANDS } from '../../commands/builtin/qdrant/index.ts'
 
 // A VFS class, whatever its constructor's visibility (one may build
 // through a factory).
@@ -37,8 +38,7 @@ interface VFSClass {
 // keyed by the class, not its name, so a minified bundle still finds them,
 // and under a global symbol, so a VFS extending a class from another copy
 // of this package finds that copy's commands, as the BaseVFS brand does. A
-// package registers the backends it ships (core's below, node's and the
-// browser's from their own `commands/builtin/backends.ts`). Python finds
+// package registers the backends it ships, as core does below. Python finds
 // the same tables by class path and imports them on first mount.
 const BACKENDS = Symbol.for('mirage.backendCommands')
 
@@ -64,23 +64,21 @@ function renamed(cmd: Command, vfs: string): Command {
     fn: cmd.fn,
     aggregate: cmd.aggregate,
     write: cmd.write,
-    pathGuarded: cmd.pathGuarded,
     limit: cmd.limit,
   })
 }
 
 /**
- * The shell commands a mount of `vfs` serves beside the generic set.
+ * The shell commands a builtin backend serves on a mount of `vfs`: mirage's
+ * own, beside the generic set.
  *
- * A builtin's are the ones registered for the first class in its hierarchy
- * that has any; a command registered under that backend's one VFS name is
+ * They are the ones registered for the first class in its hierarchy that
+ * has any; a command registered under that backend's one VFS name is
  * registered under the VFS's own instead, so a subclass under its own name
- * serves its base's commands as itself. The commands the VFS was handed
- * come last, so they win. A name none of these has falls back to the
- * generic command every mount shares. Mirrors Python's `commands_for`.
+ * serves its base's commands as itself. A VFS no builtin backend serves has
+ * none. Mirrors Python's `backend_commands`.
  */
-export function commandsFor(vfs: BaseVFS): Command[] {
-  let found: Command[] = []
+export function backendCommands(vfs: BaseVFS): Command[] {
   let cls: unknown = vfs.constructor
   while (typeof cls === 'function') {
     const own: unknown = Object.hasOwn(cls, BACKENDS)
@@ -89,14 +87,25 @@ export function commandsFor(vfs: BaseVFS): Command[] {
     const commands = typeof own === 'function' ? (own as () => readonly Command[])() : undefined
     if (commands !== undefined) {
       const family = familyOf(commands)
-      found = commands.map((cmd) =>
+      return commands.map((cmd) =>
         family !== null && cmd.vfs === family && family !== vfs.name ? renamed(cmd, vfs.name) : cmd,
       )
-      break
     }
     cls = Object.getPrototypeOf(cls)
   }
-  return [...found, ...vfs.commands()]
+  return []
+}
+
+/**
+ * The shell commands a mount of `vfs` serves beside the generic set: a
+ * builtin's backend commands first (`backendCommands`), then the commands
+ * the VFS was handed, so they win; a command tree it was handed stays a
+ * `CLI`, which the mount registers under its root's name. A name none of
+ * these has falls back to the generic command every mount shares. Mirrors
+ * Python's `commands_for`.
+ */
+export function commandsFor(vfs: BaseVFS): (Command | CLI)[] {
+  return [...backendCommands(vfs), ...vfs.commands()]
 }
 
 registerBackendCommands(ChromaVFS, () => CHROMA_COMMANDS)

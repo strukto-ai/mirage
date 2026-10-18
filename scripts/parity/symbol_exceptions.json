@@ -1,5 +1,5 @@
 {
-  "baseline": 3422,
+  "baseline": 3373,
  "modules": {
   "core/api/client": {
    "typescript_only": {
@@ -126,6 +126,13 @@
    },
    "typescript_only": {
     "Completion": "TypeScript declares the streamed terminal record's parsed JSON shape as an interface; Python reads the same validated record as a dict."
+   }
+  },
+  "workspace/executor/command/handler": {
+   "typescript_only": {
+    "RunHandlerOpts": "TypeScript passes runHandler's optional hooks as one options object; Python takes them as keyword arguments.",
+    "abandon": "Racing a TypeScript promise does not stop its work, so the runner closes what a body hands back after its caller left; Python's timeout cancels the body itself.",
+    "aborted": "TypeScript recognises an abort by the error's name; Python's cancellation is asyncio.CancelledError, which no voice words."
    }
   },
   "workspace/executor/redirect": {
@@ -741,6 +748,11 @@
     "YEAR_TEXT": "A Python datetime holds no year past 9999, so git's dates past it render whole 400-year cycles earlier and the directives that print a year add the years back; a JavaScript Date holds those years itself.",
     "year_text": "Renders %F, %c and the year directives with the years a datetime past 9999 was moved back; a JavaScript Date needs no such step.",
     "year_value": "The number a year directive shows once those years are added back; a JavaScript Date reads it from the date."
+   }
+  },
+  "commands/builtin/utils/links": {
+   "typescript_only": {
+    "servingMount": "Reads the mount a command's files were said to run in (Files.servedBy) before the async context, which the browser's fallback storage does not isolate between tasks; Python's task context always isolates, so crosses_mounts and mount_root read it directly."
    }
   },
   "utils/context_scope": {

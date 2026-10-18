@@ -13,18 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { fileGeneric } from '../../generic/file.ts'
-import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, resolveOrEmpty } from '../files.ts'
 
-const file: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  const { readRange } = ops
+const file: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
   return fileGeneric(
     resolved,
     ctx,
-    (p) => ops.stat(accessor, p, idx),
-    (p) => ops.readStream(accessor, p, idx),
-    readRange === undefined ? null : (p, offset, size) => readRange(accessor, p, idx, offset, size),
+    files.stat,
+    files.readStream,
+    files.answers('read_range') ? files.readRange : null,
   )
 }
 

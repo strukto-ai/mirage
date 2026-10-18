@@ -21,10 +21,13 @@ from mirage.accessor.hf_hub import (
     HfModelsAccessor,
     HfSpacesAccessor,
     account_of,
+    hub_for,
     stall_timeout,
 )
 from mirage.core.hf_hub.config import HfConfig
 from mirage.vfs.hf_buckets.config import HfRepoConfig
+
+_ACCOUNT = HfAccountAccessor(HfConfig(endpoint="https://hub.test"))
 
 
 def models(config: HfRepoConfig) -> HfModelsAccessor:
@@ -132,3 +135,16 @@ async def test_a_repository_handle_borrows_the_account_it_rides():
     assert not session.closed
     await account.close()
     assert session.closed
+
+
+def test_hub_for_rides_the_installs_account():
+    accessor = hub_for(_ACCOUNT, "acme/widget", "dataset", "v2")
+    assert accessor.repo_type == "dataset"
+    assert accessor.repo_id == "acme/widget"
+    assert accessor.revision == "v2"
+    assert accessor.account is _ACCOUNT
+    assert accessor.endpoint == _ACCOUNT.endpoint
+
+
+def test_hub_for_defaults_the_revision_to_main():
+    assert hub_for(_ACCOUNT, "a/b", "model").revision == "main"

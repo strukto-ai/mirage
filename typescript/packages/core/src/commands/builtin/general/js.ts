@@ -51,6 +51,7 @@ export const GENERAL_JS = command({
   name: 'js',
   vfs: null,
   spec: specOf('js'),
+  write: true,
   fn: js,
 })
 
@@ -58,5 +59,6 @@ export const GENERAL_NODE = command({
   name: 'node',
   vfs: null,
   spec: specOf('node'),
+  write: true,
   fn: js,
 })

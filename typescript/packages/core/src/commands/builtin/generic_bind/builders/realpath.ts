@@ -13,15 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { realpathGeneric } from '../../generic/realpath.ts'
-import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles } from '../files.ts'
 
-const realpath: GenericCommandFn = async (ops, accessor, paths, texts, ctx) =>
-  realpathGeneric(
-    await resolveGlobOf(ops)(accessor, paths, ctx.index ?? undefined),
-    texts,
-    ctx,
-    (p) => ops.stat(accessor, p, ctx.index ?? undefined),
-  )
+const realpath: CommandFn = async (_accessor, paths, texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  return realpathGeneric(await files.resolveGlob(paths), texts, ctx, files.stat)
+}
 
 export const BUILDER: GenericCommand = {
   name: 'realpath',

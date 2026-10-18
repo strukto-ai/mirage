@@ -321,6 +321,7 @@ def test_a_context_reads_as_its_fields_with_the_session_as_data():
         },
     ]
     assert data["session_id"] == "s"
+    assert data["write"] is False
     assert "agent_id" not in data
     assert data["cwd"] == "/data"
     assert data["env"] == {"TEAM": "core", "HOME": "/home/agent"}

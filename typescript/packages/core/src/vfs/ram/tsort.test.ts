@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec } from '../../types.ts'
-import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
+import { onMount } from '../../test-utils.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../io/types.ts'
@@ -29,12 +29,14 @@ async function runTsort(
   const vfs = new RAMVFS()
   const cmd = RAM_TSORT[0]
   if (cmd === undefined) throw new Error('tsort not registered')
-  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
-    stdin,
-    flags: {},
-    io: commandIo(vfs),
-    cwd: PathSpec.fromStrPath('/'),
-  })
+  const result = await onMount(vfs, (files) =>
+    cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
+      stdin,
+      flags: {},
+      vfs: files,
+      cwd: PathSpec.fromStrPath('/'),
+    }),
+  )
   if (result === null) return { out: '', err: '', exitCode: -1 }
   const [out, ioResult] = result
   const buf =

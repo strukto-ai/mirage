@@ -189,12 +189,27 @@ describe('CacheManager', () => {
     expect((await index.listDir('/a')).entries ?? null).toBeNull()
   })
 
-  it("drops this mount's bodies without touching a neighbour", async () => {
+  it("drops this mount's and its aliases' bodies without touching a neighbour", async () => {
     const [cache, index] = await seeded()
+    await cache.set('/mirror/arch/h.txt', new TextEncoder().encode('same'))
     await cache.set('/other/keep.txt', new TextEncoder().encode('safe'))
-    const manager = new CacheManager(cache, index, '/data/', true)
+    const aliases = (): string[] => ['/mirror']
+    const none = undefined
+    const manager = new CacheManager(
+      cache,
+      index,
+      '/data/',
+      true,
+      none,
+      none,
+      none,
+      none,
+      none,
+      aliases,
+    )
     await manager.dropPrefix()
     expect(await cache.exists('/data/arch/h.txt')).toBe(false)
+    expect(await cache.exists('/mirror/arch/h.txt')).toBe(false)
     expect(await cache.exists('/other/keep.txt')).toBe(true)
   })
 

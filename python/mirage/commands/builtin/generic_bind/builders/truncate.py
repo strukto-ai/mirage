@@ -1,36 +1,30 @@
-from functools import partial
-
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.truncate import parse_flags
 from mirage.commands.builtin.generic.truncate import (
     truncate_generic as generic_truncate,
 )
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    Operation,
-    bound_op,
-    require_op,
-)
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def truncate(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    files = command_files(ctx, paths)
     flags = parse_flags(ctx.flags)
-    truncate_fn = require_op(ops, Operation.TRUNCATE)
-    paths = await ops.resolve_glob(accessor, paths, ctx.index)
+    truncate_fn = files.truncate
+    paths = await files.resolve_glob(paths)
     return await generic_truncate(
         paths,
         flags=flags,
-        stat=bound_op(ops.stat, accessor, ctx.index),
-        truncate_fn=partial(truncate_fn, accessor),
+        stat=files.stat,
+        truncate_fn=truncate_fn,
     )
 
 

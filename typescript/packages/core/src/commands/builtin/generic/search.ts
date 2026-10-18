@@ -14,13 +14,15 @@
 
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 import type { JsonValue, PathSpec, VFSName } from '../../../types.ts'
-import { searchResources } from '../../../vfs/search.ts'
+import type { SearchQuery } from '../../../vfs/types.ts'
 import { command, type CommandFnResult, type Context, type Command } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { defaultPaths } from '../utils/paths.ts'
+import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 
 const ENC = new TextEncoder()
 
@@ -41,6 +43,28 @@ export function semanticOptions(fl: FlagView): Record<string, JsonValue> {
 }
 
 /**
+ * Rank `paths` for `query` at the dispatcher: one `search` over every scope,
+ * which the dispatcher answers in one batch where the backend ranks several
+ * scopes together (`searchMany`) and scope by scope otherwise. Each hit's
+ * record is printed, one per line; a declined query fails rather than
+ * reading as no matches.
+ */
+export async function searchResources(
+  dispatch: DispatchFn,
+  paths: PathSpec[],
+  query: SearchQuery,
+): Promise<Uint8Array> {
+  const [first, ...scopes] = paths
+  if (first === undefined) throw new Error('search: at least one scope is required')
+  const [answer] = await dispatch('search', first, [query], scopes.length > 0 ? { scopes } : {})
+  if (answer === null) throw new Error('search: backend declined the query')
+  const records = answer as [string, string][]
+  return new TextEncoder().encode(
+    records.length === 0 ? '' : records.map(([, record]) => record).join('\n') + '\n',
+  )
+}
+
+/**
  * Build `NAME QUERY [PATH...]` over a backend's native search. A missing
  * query is a usage error; the backend reads the rest of its options off the
  * flags. Mirrors `make_search` in `commands/builtin/generic/search.py`.
@@ -51,7 +75,7 @@ export function makeSearch(
   { name = 'search' }: { name?: string } = {},
 ): Command[] {
   async function search(
-    accessor: Accessor,
+    _accessor: Accessor,
     paths: PathSpec[],
     texts: string[],
     ctx: Context,
@@ -60,12 +84,14 @@ export function makeSearch(
     if (query === undefined || query === '') throw new UsageError('search: query is required')
     const fl = new FlagView(ctx.flags, specOf('search'))
     try {
-      const out = await searchResources(
-        ctx.io?.search,
-        accessor,
-        defaultPaths(paths, ctx.cwd.virtual, ctx.mountPrefix ?? ''),
-        { query, options: options(fl) },
+      const scopes = defaultPaths(
+        paths,
+        ctx.cwd.virtual,
+        mountPrefixOf(ctx.cwd.virtual, ctx.cwd.vfsPath),
       )
+      const asked = { query, options: options(fl) }
+      if (ctx.vfs === undefined) throw new Error('search: no workspace files')
+      const out = await searchResources(ctx.vfs.dispatch, scopes, asked)
       return [out, new IOResult()]
     } catch (err) {
       if (err instanceof UsageError) throw err

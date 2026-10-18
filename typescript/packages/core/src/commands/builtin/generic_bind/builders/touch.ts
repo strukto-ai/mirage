@@ -16,27 +16,27 @@ import { IOResult } from '../../../../io/types.ts'
 import { fsStrerror, isFsError } from '../../../../errors/fs.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles } from '../files.ts'
 import { UsageError } from '../../../errors.ts'
 import { usageHint } from '../../../spec/usage.ts'
 
 const ENC = new TextEncoder()
 
-const touch: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+const touch: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
   if (paths.length === 0) {
     throw new UsageError(`touch: missing file operand\n${usageHint('touch')}`, 1)
   }
-  const idx = ctx.index ?? undefined
-  const write = requireOp(ops.write, 'write')
-  const exists = requireOp(ops.exists, 'exists')
-  const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
+  const resolved = await files.resolveGlob(paths)
   const createOnly = new FlagView(ctx.flags, specOf('touch')).asBool('no_create')
   const errors: string[] = []
   for (const p of resolved) {
     if (createOnly) continue
-    if (await exists(accessor, p)) continue
+    if (await files.exists(p)) continue
     try {
-      await write(accessor, p, new Uint8Array(0))
+      await files.write(p, new Uint8Array(0))
     } catch (err) {
       // One unusable operand is not an aborted command: GNU reports it
       // and still touches the remaining ones.

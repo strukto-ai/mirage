@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
+import { onMount } from '../../test-utils.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from './ram.ts'
@@ -30,12 +30,14 @@ async function runSplit(
 ): Promise<{ exitCode: number }> {
   const cmd = RAM_SPLIT[0]
   if (cmd === undefined) throw new Error('split not registered')
-  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
-    stdin,
-    flags,
-    io: commandIo(vfs),
-    cwd: PathSpec.fromStrPath('/'),
-  })
+  const result = await onMount(vfs, (files) =>
+    cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
+      stdin,
+      flags,
+      vfs: files,
+      cwd: PathSpec.fromStrPath('/'),
+    }),
+  )
   if (result === null) return { exitCode: -1 }
   const [, ioResult] = result
   return { exitCode: ioResult.exitCode }

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FileStat, PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec, StatFn } from '../../types.ts'
 import { FileType } from '../../types.ts'
 import { fsStrerror, isWalkError } from '../../errors/fs.ts'
 import { classify } from '../../errors/classify.ts'
@@ -22,7 +22,7 @@ import { BINARY_EXTENSIONS, getExtension } from '../../utils/filetype.ts'
 import type { FileTypes } from './rg_filetypes.ts'
 import { IgnoreRules, type Overrides, Verdict, walkCandidate } from './rg_glob.ts'
 import type { LinkResolver } from './utils/links.ts'
-import type { AsyncReaddirFn, AsyncStatFn } from './utils/types.ts'
+import type { AsyncReaddirFn } from './utils/types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
 /**
@@ -174,7 +174,7 @@ export function onOtherMount(
  */
 export async function* walkHaystacks(
   readdirFn: AsyncReaddirFn,
-  statFn: AsyncStatFn,
+  statFn: StatFn<[path: string]>,
   root: string,
   shownRoot: string,
   cwd: string,
@@ -211,7 +211,7 @@ type Level = readonly [real: string, named: string]
 class Walker {
   constructor(
     readonly readdirFn: AsyncReaddirFn,
-    readonly statFn: AsyncStatFn,
+    readonly statFn: StatFn<[path: string]>,
     readonly cwd: string,
     readonly walk: WalkFilter,
     readonly sortByName: boolean,

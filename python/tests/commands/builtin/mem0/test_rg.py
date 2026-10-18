@@ -1,11 +1,11 @@
 import pytest
 from pydantic import SecretStr
 
-from mirage.commands.builtin.backends import commands_for
 from mirage.commands.builtin.generic_bind import generic
 from mirage.vfs.mem0 import Mem0Config
 from mirage.vfs.mem0.mem0 import Mem0VFS
 from mirage.workspace import Workspace
+from mirage.workspace.mount.backends import commands_for
 
 
 class FakeClient:

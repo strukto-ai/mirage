@@ -13,22 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { sortGeneric } from '../../generic/sort.ts'
-import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, resolveOrEmpty } from '../files.ts'
 
-const sort: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const write = ops.write
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+const sort: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
   return sortGeneric(
     resolved,
     ctx,
-    (p) => ops.readStream(accessor, p, idx),
-    write === undefined ? undefined : (p, data) => write(accessor, p, data),
+    files.readStream,
+    files.answers('write') ? files.write : undefined,
   )
 }
 
 export const BUILDER: GenericCommand = {
   name: 'sort',
+  write: true,
   read: true,
   fn: sort,
 }

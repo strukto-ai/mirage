@@ -13,24 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from dataclasses import replace
 
-from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.config import CommandIO
+from mirage.commands.builtin.generic_bind.factory import generic_reading
+from mirage.commands.config import Context
 from mirage.core.dev.constants import ZERO_CHUNK_SIZE
 from mirage.types import PathSpec
-from mirage.vfs.types import ReadRangeOp
+from mirage.workspace.files import Files
 
 
-async def _ranged(
-    read_range: ReadRangeOp,
-    accessor: Accessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> AsyncIterator[bytes]:
-    """Stream ``path`` as successive ranged reads at the dispatcher.
+async def _ranged(files: Files, path: PathSpec) -> AsyncIterator[bytes]:
+    """Stream ``path`` as successive ranged reads of its stored bytes.
 
     ``/dev/zero`` answers every range in full, so the stream ends only
     when the reader stops; ``/dev/null`` and a regular file end at the
@@ -38,16 +30,12 @@ async def _ranged(
     and policies judge it.
 
     Args:
-        read_range (ReadRangeOp): the table's ranged read.
-        accessor (Accessor): backend handle.
+        files (Files): the command's files.
         path (PathSpec): the file.
-        index (IndexCacheStore): the mount's index.
     """
     offset = 0
     while True:
-        chunk = await read_range(
-            accessor, path, index, offset, ZERO_CHUNK_SIZE
-        )
+        chunk = await files.read(path, offset, ZERO_CHUNK_SIZE, raw=True)
         if chunk:
             yield chunk
         if len(chunk) < ZERO_CHUNK_SIZE:
@@ -55,23 +43,17 @@ async def _ranged(
         offset += len(chunk)
 
 
-def _endless(io: CommandIO) -> CommandIO:
-    read_range = io.read_range
-    if read_range is None:
-        return io
+def _endless(ctx: Context, path: PathSpec) -> AsyncIterator[bytes] | None:
+    """An operand read in ranges, except a descriptor under ``/fd/``,
+    which keeps the dispatched stream.
 
-    async def stream(
-        accessor: Accessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> AsyncIterator[bytes]:
-        source = (
-            io.read_stream(accessor, path, index)
-            if path.mount_path.startswith("/fd/")
-            else _ranged(read_range, accessor, path, index)
-        )
-        async for chunk in source:
-            yield chunk
-
-    return replace(io, read_stream=stream)
+    Args:
+        ctx (Context): the invocation's context.
+        path (PathSpec): the operand.
+    """
+    if ctx.vfs is None or path.mount_path.startswith("/fd/"):
+        return None
+    return _ranged(ctx.vfs, path)
 
 
 # /dev is a RAM mount whose read and stat know the two synthetic
@@ -79,5 +61,6 @@ def _endless(io: CommandIO) -> CommandIO:
 # stream, while the two bounded streaming commands read in ranges, which
 # /dev/zero answers without end.
 COMMANDS = [
-    generic(name, vfs="ram", table=_endless) for name in ("cat", "head")
+    generic_reading(name, vfs="ram", stream=_endless)
+    for name in ("cat", "head")
 ]

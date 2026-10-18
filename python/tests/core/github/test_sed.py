@@ -20,13 +20,12 @@ read, write-gated -i).
 
 import pytest
 
-from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.config import Context
-from mirage.io.stream import materialize
 from mirage.types import PathSpec
 from mirage.vfs.github import GitHubVFS
+from mirage.workspace import Workspace
 from tests.fixtures.github_mock import MOCK_BLOBS
-from tests.fixtures.vfs_io import io_for
+from tests.fixtures.mount_commands import run_on_mount
+from tests.fixtures.vfs_io import vfs_over
 
 
 @pytest.fixture(autouse=True)
@@ -35,9 +34,6 @@ def _patch_read(monkeypatch):
         return MOCK_BLOBS[sha]
 
     monkeypatch.setattr("mirage.core.github.read.read_bytes", _read_bytes)
-
-
-sed = generic("sed").fn
 
 
 def _scope(path: str) -> PathSpec:
@@ -52,14 +48,9 @@ def _scope(path: str) -> PathSpec:
 
 
 async def _run(accessor, index, path, expr, **kwargs):
-    stdout, io = await sed(
-        accessor,
-        [_scope(path)],
-        [expr],
-        Context(io=io_for(GitHubVFS, accessor), index=index, flags={**kwargs}),
-    )
-    data = await materialize(stdout) if stdout is not None else b""
-    return data.decode(errors="replace"), io
+    ws = Workspace({"/": vfs_over(GitHubVFS, accessor)})
+    out, io = await run_on_mount(ws, "sed", [_scope(path)], [expr], kwargs)
+    return out.decode(errors="replace"), io
 
 
 @pytest.mark.asyncio

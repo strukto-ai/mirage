@@ -181,14 +181,7 @@ async def drop_mount_caches(registry: MountRegistry) -> None:
         registry (MountRegistry): registry holding the mount table.
     """
     for mount in registry.mounts():
-        # Invalidate rather than clear: a cleared index reads exactly like
-        # one that was never filled, so a backend whose index *is* its
-        # listing (github seeds the whole tree once) cannot tell the drop
-        # from an empty repository and reports the mount as gone. Expiring
-        # keeps that distinction and the next read refetches.
-        await mount.index.invalidate()
-        if mount.cache_manager is not None:
-            await mount.cache_manager.drop_prefix()
+        await mount.drop_caches()
 
 
 async def run_nested_line(

@@ -50,7 +50,7 @@ import { SYNOPSES } from '../../spec/synopsis.ts'
 import { wordRefusalLine, validWordsBlock, usageHint } from '../../spec/usage.ts'
 import { matchWord } from '../../spec/word_choice.ts'
 import { GREP_STDIN_LABEL } from '../utils/constants.ts'
-import { linksOf, mountsOf } from '../utils/links.ts'
+import { linksOf, mountsOf, mountRoot } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
 // GNU grep with no pattern prints its synopsis and the help hint, exit 2
@@ -296,7 +296,7 @@ export async function grepGeneric(
     const exitCode = error instanceof UsageError ? error.exitCode : 2
     return [null, new IOResult({ exitCode, stderr: ENC.encode(error.message + '\n') })]
   }
-  const resolution = await resolvePattern(name, texts, fl, paths, ctx.mountPrefix, stream)
+  const resolution = await resolvePattern(name, texts, fl, paths, mountRoot(ctx), stream)
   if (resolution.error !== null || resolution.pattern === null)
     return [
       null,

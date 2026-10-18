@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { underPath } from '../../../utils/key_prefix.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import {
@@ -336,7 +335,6 @@ export async function mvGeneric(
   stat: StatFn,
   strategy: MoveStrategy,
   flags: MvFlags,
-  index?: IndexCacheStore,
   backendKey?: BackendKeyFn,
   readdir?: ReaddirFn,
   // Judges one (source, target) pair before the move touches anything,
@@ -542,7 +540,6 @@ export async function mvGeneric(
         versionReaddir,
         target,
         errors,
-        index,
         copies,
       )
       if (made.ok) errors.push(moveError(src, target, posixPhrase('EXDEV')))
@@ -583,7 +580,6 @@ export async function mvGeneric(
       versionReaddir,
       target,
       errors,
-      index,
       copies,
     )
     if (!made.ok) continue
@@ -616,18 +612,12 @@ export async function mvGeneric(
       // Across mounts GNU copies and then removes, and -v says so entry by
       // entry instead of `renamed` (coreutils 9.7).
       const verbose = flags.verbose ? lines : undefined
-      const entries = await cpWalk(strategy.readdir, stat, src, index)
-      const copiedAll = await copyEntries(
-        'mv',
-        strategy,
-        stat,
-        src,
-        target,
-        entries,
-        errors,
-        index,
-        { copies, lines: verbose, rootBackup: made.backup },
-      )
+      const entries = await cpWalk(strategy.readdir, stat, src)
+      const copiedAll = await copyEntries('mv', strategy, stat, src, target, entries, errors, {
+        copies,
+        lines: verbose,
+        rootBackup: made.backup,
+      })
       // GNU keeps the whole source tree when any copy failed; the
       // destination keeps the entries that landed.
       if (!copiedAll) continue

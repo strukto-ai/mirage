@@ -14,15 +14,11 @@
 
 import asyncio
 
-from mirage.commands.builtin.generic_bind.adapter import command_io
-from mirage.commands.builtin.generic_bind.factory import GENERIC_COMMANDS
-from mirage.commands.config import Context
 from mirage.core.ram.stream import read_stream
 from mirage.core.ram.write import write
-from mirage.types import PathSpec
-
-_CMDS = GENERIC_COMMANDS
-cp_cmd = _CMDS.require("cp").fn
+from mirage.types import MountMode, PathSpec
+from mirage.workspace import Workspace
+from tests.fixtures.mount_commands import run_on_mount
 
 
 def _cat_sync(backend, path):
@@ -44,14 +40,14 @@ def test_cp_recursive(backend):
         write(accessor, PathSpec.from_str_path("/tmp/src/sub/b.txt"), b"bbb")
     )
     asyncio.run(
-        cp_cmd(
-            accessor,
+        run_on_mount(
+            Workspace({"/": (backend, MountMode.WRITE)}),
+            "cp",
             [
                 PathSpec.from_str_path("/tmp/src/"),
                 PathSpec.from_str_path("/tmp/dst/"),
             ],
-            [],
-            Context(io=command_io(backend), flags={"r": True}),
+            flags={"r": True},
         )
     )
     assert (

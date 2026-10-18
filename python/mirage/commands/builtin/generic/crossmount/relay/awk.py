@@ -12,32 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.generic.awk import home_operand
 from mirage.commands.builtin.generic.crossmount.types import (
     Cmd,
     CrossResult,
     RunSingle,
 )
-from mirage.commands.builtin.utils.stream import is_stdin
 from mirage.commands.spec.types import FlagValue
-from mirage.core.awk.builtins import split_assignment
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
-
-
-def home_operand(scopes: list[PathSpec]) -> PathSpec:
-    """The operand whose mount runs the program: its first file.
-
-    Args:
-        scopes (list[PathSpec]): The operands in command-line order.
-    """
-    for scope in scopes:
-        if (
-            scope.raw_path != ""
-            and not is_stdin(scope)
-            and split_assignment(scope.raw_path) is None
-        ):
-            return scope
-    return scopes[0]
 
 
 async def run_awk(

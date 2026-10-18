@@ -14,7 +14,8 @@
 
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
+import { runWithMountGate } from '../../../context/session_context.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { Context } from '../../config.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
@@ -177,10 +178,8 @@ describe('treeGeneric across a nested mount', () => {
         new IOResult(),
       ])
     }
-    // `io` makes this a run on the parent mount, so the nested mount is a boundary.
     return {
       ...ctx({}),
-      io: {},
       vfs: new Files(dispatch, null, null, () => null, {
         prefixes: () => ['/', `${ROOT}/`],
         ledger: false,
@@ -194,11 +193,9 @@ describe('treeGeneric across a nested mount', () => {
   // per-mount run cannot do that: it would print two roots and two
   // summaries.
   it('draws the mounted entries and none of the covered ones', async () => {
-    const [out] = (await treeGeneric(
-      [spec('/base')],
-      crossOpts(),
-      backendReaddir,
-      backendStat,
+    // A run on the parent mount, so the nested mount is a boundary.
+    const [out] = (await runWithMountGate('/', MountMode.WRITE, () =>
+      treeGeneric([spec('/base')], crossOpts(), backendReaddir, backendStat),
     )) as [Uint8Array, unknown]
     expect(DEC.decode(out)).toBe(
       [
@@ -217,10 +214,9 @@ describe('treeGeneric across a nested mount', () => {
 
   it('stops at the mount point under -L 1', async () => {
     const withDepth = { ...crossOpts(), flags: { L: '1' } } as unknown as Context
-    const [out] = (await treeGeneric([spec('/base')], withDepth, backendReaddir, backendStat)) as [
-      Uint8Array,
-      unknown,
-    ]
+    const [out] = (await runWithMountGate('/', MountMode.WRITE, () =>
+      treeGeneric([spec('/base')], withDepth, backendReaddir, backendStat),
+    )) as [Uint8Array, unknown]
     expect(DEC.decode(out)).toBe(
       ['/base', '|-- inner', '`-- top.txt', '', '2 directories, 1 file', ''].join('\n'),
     )

@@ -31,6 +31,7 @@ import { callerStream } from '../generic_bind/dispatch.ts'
 import { currentCaller } from '../../../context/session_context.ts'
 import { concat } from '../../../utils/bytes.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
+import { mountRoot } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -217,7 +218,7 @@ async function checkFile(
   const data = DEC.decode(await materialize(stream(p)))
   const listed = ctx.vfs !== undefined ? dispatchedReader(ctx.vfs.dispatch, stream) : stream
   // A list read from stdin names files on the mount the command runs on.
-  const mountPrefix = isStdin(p) ? (ctx.mountPrefix ?? '') : mountPrefixOf(p.virtual, p.vfsPath)
+  const mountPrefix = isStdin(p) ? mountRoot(ctx) : mountPrefixOf(p.virtual, p.vfsPath)
   // GNU quotes its stdin name, which holds a space.
   const checkLabel =
     p.rawPath === '-' ? `'${STDIN_HEADER_NAME}'` : p.rawPath !== '' ? p.rawPath : p.virtual

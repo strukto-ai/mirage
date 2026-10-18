@@ -17,8 +17,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic_bind.adapter import command_io
-from mirage.commands.config import CommandIO
 from mirage.context import Caller
 from mirage.io import IOResult
 from mirage.types import PathSpec
@@ -41,16 +39,6 @@ def vfs_over(cls: type[BaseVFS], accessor: Accessor) -> BaseVFS:
     vfs = cls.__new__(cls)
     BaseVFS.__init__(vfs, accessor=accessor)
     return vfs
-
-
-def io_for(cls: type[BaseVFS], accessor: Accessor) -> CommandIO:
-    """The command table of a ``cls`` VFS over ``accessor``.
-
-    Args:
-        cls (type[BaseVFS]): the backend's VFS class.
-        accessor (Accessor): the accessor the test built.
-    """
-    return command_io(vfs_over(cls, accessor))
 
 
 def call_over(cls: type[BaseVFS], name: str) -> Callable[..., Awaitable[Any]]:

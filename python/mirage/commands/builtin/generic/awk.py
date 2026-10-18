@@ -10,7 +10,6 @@ from contextlib import aclosing
 from functools import partial
 from typing import Any
 
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.constants import AWK_USAGE
 from mirage.commands.builtin.generic.awk_types import AwkFlags
 from mirage.commands.builtin.generic_bind.dispatch import caller_stream
@@ -31,7 +30,7 @@ from mirage.core.awk import (
     Interpreter,
     parse,
 )
-from mirage.core.awk.builtins import unescape
+from mirage.core.awk.builtins import split_assignment, unescape
 from mirage.core.awk.value import text as text_value
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import fs_strerror
@@ -87,6 +86,22 @@ def split_assignments(raw: Sequence[str]) -> dict[str, str]:
             key, value = item.split("=", 1)
             out[key] = unescape(byte_view(value))
     return out
+
+
+def home_operand(scopes: list[PathSpec]) -> PathSpec:
+    """The operand whose mount runs the program: its first file.
+
+    Args:
+        scopes (list[PathSpec]): The operands in command-line order.
+    """
+    for scope in scopes:
+        if (
+            scope.raw_path != ""
+            and not is_stdin(scope)
+            and split_assignment(scope.raw_path) is None
+        ):
+            return scope
+    return scopes[0]
 
 
 def served_here(vfs: Files | None, mount_prefix: str, path: PathSpec) -> bool:
@@ -362,7 +377,6 @@ async def awk_generic(
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],
     stdin: ByteSource | None = None,
-    index: IndexCacheStore = NULL_INDEX,
     dispatch: DispatchFn | None = None,
     cwd: PathSpec = ROOT_CWD,
     shell: ShellFn | None = None,
@@ -387,7 +401,6 @@ async def awk_generic(
         read_stream (Callable[..., AsyncIterator[bytes]]): Streaming reader
             for data files.
         stdin (ByteSource | None): Standard input.
-        index (IndexCacheStore): The mount's index cache store.
         dispatch (DispatchFn | None): The workspace dispatcher that
             ``getline < file`` reads and output redirection writes
             through.

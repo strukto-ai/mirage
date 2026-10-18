@@ -21,7 +21,7 @@ from mirage.commands.builtin.generic.crossmount.utils import (
     transfer_primitives,
 )
 from mirage.commands.builtin.generic.tee import tee_generic
-from mirage.commands.builtin.generic_bind.adapter import dispatched_call
+from mirage.commands.builtin.generic_bind.files import dispatched_call
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource

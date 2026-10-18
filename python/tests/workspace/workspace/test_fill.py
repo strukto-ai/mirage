@@ -1431,7 +1431,8 @@ def _cli_spec() -> CLI:
 
 
 @pytest.mark.asyncio
-async def test_cli_fetches_only_the_invoked_verb_path():
+@pytest.mark.parametrize("mounted", [False, True])
+async def test_cli_fetches_only_the_invoked_verb_path(mounted: bool):
     calls, fetch = counting_source(
         {"CLI_ROOT": "r0", "CLI_ALPHA": "a0", "CLI_BETA": "b0"}
     )
@@ -1444,9 +1445,99 @@ async def test_cli_fetches_only_the_invoked_verb_path():
         }
     )
     try:
-        ws.register_cli("mycli", _cli_spec())
+        if mounted:
+            ws.mount("/").register_commands([_cli_spec()])
+        else:
+            ws.register_cli("mycli", _cli_spec())
         await ws.shell("mycli alpha")
         assert sorted(calls) == ["alpha", "root"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_cd_on_the_line_fetches_for_the_tree_it_reaches():
+    # /a/ and /b/ both serve mycli; only /b/'s reads managed names. /a/'s
+    # fetches nothing, and a line that reaches /b/'s after starting on /a/
+    # fetches what /b/'s reads.
+    calls, fetch = counting_source({"CLI_ROOT": "r0", "CLI_ALPHA": "a0"})
+    register_secrets("fake", FakeConfig, fetch)
+    env = {
+        "CLI_ROOT": {"from": "fake", "ref": "root"},
+        "CLI_ALPHA": {"from": "fake", "ref": "alpha"},
+    }
+    plain = CLI(
+        spec=CommandSpec(
+            name="mycli", subcommands=(CommandSpec(name="alpha"),)
+        ),
+        handlers={"alpha": CLIHandler(fn=_cli_noop)},
+    )
+    ws = Workspace(
+        {"/a/": RAMVFS(), "/b/": RAMVFS()}, mode=MountMode.WRITE, env=env
+    )
+    try:
+        ws.mount("/a/").register_commands([plain])
+        ws.mount("/b/").register_commands([_cli_spec()])
+        await ws.shell("cd /a")
+        await ws.shell("mycli alpha")
+        assert calls == []
+        await ws.shell("cd /b && mycli alpha")
+        assert sorted(calls) == ["alpha", "root"]
+    finally:
+        await ws.close()
+
+
+class _Sees(Policy):
+    def __init__(self) -> None:
+        self.seen: list[tuple[bool, list[str]]] = []
+
+    async def pre_command(self, ctx: CommandContext) -> Action | None:
+        self.seen.append((ctx.write, [p.virtual for p in ctx.paths]))
+        return None
+
+
+# --token is required and comes from the managed TOKEN, so the gate's walk
+# reaches a leaf (its write, its files) only once TOKEN is fetched; a TOKEN
+# the line assigns is the invocation's and fetches nothing.
+TOK = CLI(
+    spec=CommandSpec(
+        name="tok",
+        arguments=(Argument("--token", env="TOKEN", required=True),),
+        subcommands=(
+            CommandSpec(name="create"),
+            CommandSpec(
+                name="show",
+                arguments=(Argument("paths", type="path", nargs="*"),),
+            ),
+        ),
+    ),
+    handlers={
+        "create": CLIHandler(fn=_cli_noop, write=True),
+        "show": CLIHandler(fn=_cli_noop),
+    },
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,seen,fetched",
+    [
+        ("tok create", (True, []), ["r"]),
+        ("tok show /x", (False, ["/x"]), ["r"]),
+        ("TOKEN=local tok create", (True, []), []),
+    ],
+)
+async def test_a_mounts_tree_is_admitted_under_its_managed_values(
+    line: str, seen: tuple[bool, list[str]], fetched: list[str]
+):
+    calls, fetch = counting_source({"TOKEN": "t0"})
+    register_secrets("fake", FakeConfig, fetch)
+    policy = _Sees()
+    ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}}, policies=[policy])
+    try:
+        ws.mount("/").register_commands([TOK])
+        await ws.shell(line)
+        assert (policy.seen, calls) == ([seen], fetched)
     finally:
         await ws.close()
 

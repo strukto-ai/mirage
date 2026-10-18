@@ -20,15 +20,15 @@ from unittest.mock import patch
 
 import pytest
 
-from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.config import Context
+from mirage.context import reset_mount_gate, set_mount_gate
 from mirage.types import MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
+from tests.fixtures.mount_commands import command_files
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 
@@ -309,6 +309,16 @@ async def test_grep_then_jq_with_and_or_list(ws):
         ]
 
 
+async def _cat(backend: S3VFS, paths: list[PathSpec]):
+    """cat on the mount at /s3, its output left as it streams."""
+    ctx = Context(vfs=command_files(Workspace({"/s3/": backend})))
+    token = set_mount_gate("/s3/", MountMode.READ)
+    try:
+        return await s3_cat(backend.accessor, paths, [], ctx)
+    finally:
+        reset_mount_gate(token)
+
+
 def _resolved(original: str) -> PathSpec:
     return PathSpec(
         vfs_path=mount_key(original, "/s3"),
@@ -327,12 +337,7 @@ async def test_cat_multifile_prints_each_file_in_order():
     with _patch_async_session(objects):
         a = _resolved("/s3/reports/summary.txt")
         b = _resolved("/s3/archive/2026/q1/deep.txt")
-        source, io = await s3_cat(
-            backend.accessor,
-            [a, b],
-            [],
-            Context(io=command_io(backend), index=NULL_INDEX),
-        )
+        source, io = await _cat(backend, [a, b])
 
         combined = b"".join([chunk async for chunk in source])
         assert combined == b"alpha report\nbeta report\ndeep archive\n"
@@ -346,10 +351,5 @@ async def test_cat_single_file_streams():
     backend = _s3_backend()
     with _patch_async_session(objects):
         a = _resolved("/s3/reports/summary.txt")
-        source, io = await s3_cat(
-            backend.accessor,
-            [a],
-            [],
-            Context(io=command_io(backend), index=NULL_INDEX),
-        )
+        source, io = await _cat(backend, [a])
         assert not isinstance(source, bytes)

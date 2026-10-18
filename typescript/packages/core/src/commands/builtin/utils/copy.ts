@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { descendantPath } from './paths.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { FileType, type PathSpec, type StatFn } from '../../../types.ts'
 import { eloop, enoent, enotdir, isMissingPath } from '../../../errors/fs.ts'
 
@@ -101,13 +100,9 @@ export async function pathExists(stat: StatFn, path: PathSpec): Promise<boolean>
   return true
 }
 
-export async function isDirectory(
-  stat: StatFn<[path: PathSpec, index?: IndexCacheStore]>,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<boolean> {
+export async function isDirectory(stat: StatFn, path: PathSpec): Promise<boolean> {
   try {
-    const info = await stat(path, index)
+    const info = await stat(path)
     return info.type === FileType.DIRECTORY
   } catch (err) {
     if (isMissingPath(err)) return false

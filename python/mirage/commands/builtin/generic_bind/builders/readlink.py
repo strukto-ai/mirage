@@ -15,22 +15,23 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.readlink import readlink_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.builtin.generic_bind.files import command_files
+from mirage.commands.config import Context
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def readlink(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    files = command_files(ctx, paths)
     if not paths:
         raise missing_operand_error("readlink", None)
-    resolved = await ops.resolve_glob(accessor, paths, ctx.index)
+    resolved = await files.resolve_glob(paths)
     return await readlink_generic(resolved, list(texts), ctx)
 
 

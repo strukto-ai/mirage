@@ -13,34 +13,31 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { csplitGeneric } from '../../generic/csplit.ts'
-import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, resolveOrEmpty } from '../files.ts'
 import { dispatchOf } from '../../utils/links.ts'
 
-const csplit: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const write = requireOp(ops.write, 'write')
-  const unlink = requireOp(ops.unlink, 'unlink')
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+const csplit: CommandFn = async (_accessor, paths, texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
   // The pieces go to the prefix, or `xx` in the working directory, which
-  // need not be this mount, so a dispatcher routes each write, and the
+  // need not be this mount, so the dispatcher routes each write, and the
   // removal of a failed run's pieces, to the mount that owns it. Mirrors
   // the Python builder.
   const dispatch = dispatchOf(ctx)
+  if (dispatch === undefined) throw new TypeError('csplit: no workspace files')
   return csplitGeneric(
     resolved,
     texts,
     ctx,
-    (p) => ops.readStream(accessor, p, idx),
-    dispatch !== undefined
-      ? async (p, d) => {
-          await dispatch('write', p, [d])
-        }
-      : (p, d) => write(accessor, p, d),
-    dispatch !== undefined
-      ? async (p) => {
-          await dispatch('unlink', p)
-        }
-      : (p) => unlink(accessor, p),
+    files.readStream,
+    async (p, d) => {
+      await dispatch('write', p, [d])
+    },
+    async (p) => {
+      await dispatch('unlink', p)
+    },
   )
 }
 

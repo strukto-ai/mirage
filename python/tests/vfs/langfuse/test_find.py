@@ -15,23 +15,19 @@
 import pytest
 
 from mirage.accessor.langfuse import LangfuseAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.config import Context
-from mirage.io.types import materialize
 from mirage.types import PathSpec
 from mirage.vfs.langfuse import LangfuseVFS
 from mirage.vfs.langfuse.config import LangfuseConfig
-from tests.fixtures.vfs_io import io_for
-
-
-def _find_command():
-    return generic("find").fn
+from mirage.workspace import Workspace
+from tests.fixtures.mount_commands import run_on_mount
+from tests.fixtures.vfs_io import vfs_over
 
 
 def _spec(virtual: str) -> PathSpec:
     return PathSpec(
-        virtual=virtual, directory=virtual, vfs_path=virtual.strip("/")
+        virtual=virtual,
+        directory=virtual,
+        vfs_path=virtual.removeprefix("/lf").strip("/"),
     )
 
 
@@ -39,23 +35,13 @@ async def _run(paths, *texts: str, **flags) -> list[str]:
     accessor = LangfuseAccessor(
         LangfuseConfig(public_key="pk", secret_key="sk")
     )
-    find = _find_command()
-    stdout, _io = await find(
-        accessor,
-        paths,
-        list(texts),
-        Context(
-            io=io_for(LangfuseVFS, accessor),
-            index=RAMIndexCacheStore(),
-            flags={**flags},
-        ),
-    )
-    data = await materialize(stdout)
+    ws = Workspace({"/lf/": vfs_over(LangfuseVFS, accessor)})
+    data, _io = await run_on_mount(ws, "find", paths, texts, flags)
     return data.decode().splitlines()
 
 
 @pytest.mark.asyncio
 async def test_size_counts_a_directory_as_dir_size():
-    dirs = await _run([_spec("/")], maxdepth="1")
-    assert await _run([_spec("/")], maxdepth="1", size="+0c") == dirs
-    assert await _run([_spec("/")], maxdepth="1", size="-1k") == []
+    dirs = await _run([_spec("/lf")], maxdepth="1")
+    assert await _run([_spec("/lf")], maxdepth="1", size="+0c") == dirs
+    assert await _run([_spec("/lf")], maxdepth="1", size="-1k") == []

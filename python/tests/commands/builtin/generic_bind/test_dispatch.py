@@ -36,7 +36,7 @@ async def test_output_is_read_inside_the_running_command():
     # a walk read lazily after the command ended was served stale ones.
     seen: list[int | None] = []
 
-    async def fn(ops, accessor, paths, texts, opts):
+    async def fn(accessor, paths, texts, ctx):
         async def walk():
             seen.append(command_started())
             yield b"hit\n"

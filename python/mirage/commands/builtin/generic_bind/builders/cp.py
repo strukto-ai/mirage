@@ -12,45 +12,50 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import replace
+from collections.abc import Awaitable, Callable
 from functools import partial
+from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cp import cp_generic as generic_cp
 from mirage.commands.builtin.generic.cp import parse_flags
 from mirage.commands.builtin.generic.crossmount.utils import transfer_links_of
 from mirage.commands.builtin.generic.find import parse_find_args
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    Operation,
-    bound_op,
-    require_op,
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import (
+    CommandFiles,
+    command_files,
 )
 from mirage.commands.builtin.utils.links import (
     dispatch_of,
     links_of,
+    mount_root,
     mounts_of,
     serves,
     typed_link,
+    visibility_of,
 )
 from mirage.commands.builtin.utils.tree import tree_walk
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.context import session_visibility
 from mirage.core.generic.find import walk_find
+from mirage.errors.fs import enotsup
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import NativeCopy, PathSpec, PrimitiveCopy
+from mirage.types import (
+    NativeCopy,
+    PathSpec,
+    PrimitiveCopy,
+    ReaddirFn,
+    StatFn,
+)
 from mirage.utils.key_prefix import rekey
-from mirage.vfs.types import OperationFn
 from mirage.view.namespace_view import paths_scoped
 
 
 async def _walk_find(
-    readdir: OperationFn,
-    stat: OperationFn,
-    index: IndexCacheStore,
+    readdir: ReaddirFn,
+    stat: StatFn,
     src: PathSpec,
     type: str | None = None,
     unreadable: list[str] | None = None,
@@ -60,7 +65,6 @@ async def _walk_find(
         src,
         readdir=readdir,
         stat=stat,
-        index=index,
         args=parse_find_args((), type=type),
         unreadable=refused,
     )
@@ -71,53 +75,64 @@ async def _walk_find(
     return ["/" + rekey(src.virtual, src.vfs_path, path) for path in results]
 
 
-def _make_find(
-    ops: CommandIO, accessor: Accessor, index: IndexCacheStore
-) -> OperationFn:
+def _make_find(files: CommandFiles) -> Callable[..., Awaitable[list[str]]]:
+    """The tree to copy, walked from the mount's ``read_tree`` where it
+    answers, so stat classifies entries from the listing instead of
+    re-fetching, matching find.
+
+    Args:
+        files (CommandFiles): the command's files.
+    """
     readdir, stat = tree_walk(
-        bound_op(ops.read_tree, accessor, index),
-        partial(ops.readdir, accessor),
-        partial(ops.stat, accessor),
+        files.read_tree if files.answers("read_tree") else None,
+        files.readdir,
+        files.stat,
     )
-    return partial(_walk_find, readdir, stat, index)
+    return partial(_walk_find, readdir, stat)
 
 
 async def _write(
-    op: OperationFn, accessor: Accessor, path: PathSpec, data: bytes = b""
+    write: Callable[..., Awaitable[Any]], path: PathSpec, data: bytes = b""
 ) -> None:
-    await op(accessor, path, data)
+    await write(path, data)
 
 
 async def cp(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not ops.is_mounted(accessor):
-        raise ValueError("cp: no VFS")
-    fl = FlagView(ctx.flags, spec=SPECS["cp"])
-    parsed = parse_flags(fl)
+    files = command_files(ctx, paths)
+    parsed = parse_flags(FlagView(ctx.flags, spec=SPECS["cp"]))
     # A native copy or find answers for a whole tree in one call, so the
     # dispatcher declines one whose tree the caller's view restricts; cp
     # takes the entry-by-entry walk up front there, which is where GNU's
     # per-entry refusals are worded.
-    if paths_scoped(paths, ctx.mount_prefix):
-        ops = replace(ops, copy=None, dir_copy=None)
-    paths = await ops.resolve_glob(accessor, paths, ctx.index)
-    dir_copy = partial(ops.dir_copy, accessor) if ops.dir_copy else None
-    mkdir = partial(ops.mkdir, accessor) if ops.mkdir else None
-    if ops.copy is None and ops.write is None:
-        # Directory creation is not a usable copy step without a file
-        # transfer capability. Refuse it through the same guarded call
-        # before the command leaves an uncopyable destination tree.
-        mkdir = partial(
-            require_op(replace(ops, mkdir=None), Operation.MKDIR), accessor
-        )
+    native = not paths_scoped(paths, mount_root(ctx))
+    copy = files.copy if native and files.answers("copy") else None
+    write = files.write if files.answers("write") else None
+
+    async def refused_mkdir(path: PathSpec, parents: bool = False) -> None:
+        # A directory creation cp may not use here, refused once the
+        # dispatcher has judged the path as the create it would be: a
+        # read-only mount, a hide or a policy answers first.
+        if ctx.vfs is not None:
+            await ctx.vfs.dispatch("write", path, admit_only=True)
+        raise enotsup("backend", "mkdir", path)
+
+    # Without a file transfer capability, creating directories would
+    # leave an uncopyable destination tree. Keep the refusal guarded.
+    mkdir = (
+        refused_mkdir
+        if copy is None and write is None
+        else files.mkdir
+        if files.answers("mkdir")
+        else None
+    )
+    resolved = await files.resolve_glob(paths)
     strategy: NativeCopy | PrimitiveCopy
-    primitive = ops.copy is None
-    if primitive and ops.write is not None:
+    if copy is None and write is not None:
         # A native copy moves a tree in one backend call and read_tree
         # lists it, neither of which passes an entry through the guard
         # the way a read does; while a path rule scopes cp, or a hide
@@ -127,27 +142,31 @@ async def cp(
         # (the cross-mount relay's own path), which is also where GNU's
         # per-entry refusals are worded.
         strategy = PrimitiveCopy(
-            read_bytes=bound_op(ops.read_bytes, accessor, ctx.index),
-            read_stream=bound_op(ops.read_stream, accessor, ctx.index),
-            write=partial(_write, ops.write, accessor),
-            mkdir=partial(require_op(ops, Operation.MKDIR), accessor),
-            readdir=bound_op(ops.readdir, accessor, ctx.index),
+            read_bytes=files.read_bytes,
+            read_stream=files.read_stream,
+            write=partial(_write, write),
+            mkdir=files.mkdir,
+            readdir=files.readdir,
         )
     else:
         strategy = NativeCopy(
-            copy=partial(require_op(ops, Operation.COPY), accessor),
-            find=_make_find(ops, accessor, ctx.index),
-            dir_copy=dir_copy,
+            copy=files.copy,
+            find=_make_find(files),
+            dir_copy=(
+                files.dir_copy
+                if native and files.answers("dir_copy")
+                else None
+            ),
             mkdir=mkdir,
         )
     links = links_of(ctx)
-    cwd = ctx.cwd.virtual if ctx.cwd is not None else "/"
+    cwd = ctx.cwd.virtual
     return await generic_cp(
-        paths,
+        resolved,
         strategy=strategy,
-        stat=bound_op(ops.stat, accessor, ctx.index),
+        stat=files.stat,
         flags=parsed,
-        readdir=bound_op(ops.readdir, accessor, ctx.index),
+        readdir=files.readdir,
         link_at=(
             partial(typed_link, links, cwd=cwd) if links is not None else None
         ),
@@ -156,12 +175,8 @@ async def cp(
                 links,
                 ctx.vfs.dispatch,
                 cwd,
-                session_visibility(),
-                partial(
-                    serves,
-                    mounts_of(ctx),
-                    ctx.mount_prefix,
-                ),
+                visibility_of(ctx.vfs),
+                partial(serves, mounts_of(ctx), mount_root(ctx)),
             )
             if links is not None and ctx.vfs is not None
             else None

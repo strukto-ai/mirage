@@ -33,8 +33,8 @@ from mirage.commands.builtin.generic.wc import (
     number_width,
     parse_flags,
 )
-from mirage.commands.builtin.generic_bind.adapter import dispatched_call
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
+from mirage.commands.builtin.generic_bind.files import dispatched_call
 from mirage.commands.builtin.utils.stream import is_stdin
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import FlagValue

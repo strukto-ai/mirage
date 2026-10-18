@@ -2,11 +2,12 @@ import pytest
 from pydantic import SecretStr
 
 from mirage.accessor.mem0 import Mem0Accessor
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.types import PathSpec
 from mirage.vfs.mem0.config import Mem0Config
 from mirage.vfs.mem0.mem0 import Mem0VFS
-from tests.fixtures.vfs_io import io_for
+from mirage.workspace import Workspace
+from mirage.workspace.mount import MountEntry
+from tests.fixtures.vfs_io import vfs_over
 
 
 class FakeClient:
@@ -28,6 +29,11 @@ def _accessor():
     return acc
 
 
+def _mount(acc: Mem0Accessor) -> MountEntry:
+    ws = Workspace({"/mem/": vfs_over(Mem0VFS, acc)})
+    return ws._registry.mount_for("/mem/")
+
+
 @pytest.mark.asyncio
 async def test_passthrough_non_pattern():
     acc = _accessor()
@@ -37,9 +43,7 @@ async def test_passthrough_non_pattern():
         vfs_path="aaa.json",
         resolved=True,
     )
-    out = await io_for(Mem0VFS, acc).resolve_glob(
-        acc, [p], RAMIndexCacheStore()
-    )
+    out = await _mount(acc).expand_glob([p], "/mem")
     assert out == [p]
 
 
@@ -53,7 +57,5 @@ async def test_expands_star():
         pattern="*.json",
         resolved=False,
     )
-    out = await io_for(Mem0VFS, acc).resolve_glob(
-        acc, [p], RAMIndexCacheStore()
-    )
+    out = await _mount(acc).expand_glob([p], "/mem")
     assert sorted(x.virtual for x in out) == ["/mem/aaa.json", "/mem/bbb.json"]

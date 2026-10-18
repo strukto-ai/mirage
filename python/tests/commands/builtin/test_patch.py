@@ -13,15 +13,19 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 
 from mirage.commands.builtin.generic import patch as patch_module
 from mirage.commands.builtin.generic.patch import patch_generic
 from mirage.commands.config import Context
+from mirage.context import reset_mount_gate, set_mount_gate
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from mirage.workspace.files import Files
+from mirage.workspace.types import MountRow
 from tests.fixtures.driver_ops import ops
 
 
@@ -137,13 +141,29 @@ async def test_patch_preserves_virtual_paths_for_mounted_io(prefix, source):
     flags = {"p": "1"}
     if source == "input":
         flags["i"] = input_path
+    # The patch's own names resolve against the root of the mount the
+    # command runs on.
+    rows = (
+        [
+            MountRow(
+                prefix=prefix + "/", resource_type="ram", mode=MountMode.WRITE
+            )
+        ]
+        if prefix
+        else []
+    )
     ctx = Context(
         flags=flags,
-        mount_prefix=prefix,
+        cwd=PathSpec.from_str_path(prefix or "/"),
+        vfs=Files(rows, AsyncMock(), ledger=False),
         stdin=patch_data if source == "stdin" else None,
     )
     operands = [orig_path, input_path] if source == "operand" else []
-    await patch_generic(operands, [], ctx, read, write, True)
+    token = set_mount_gate(prefix + "/", MountMode.WRITE)
+    try:
+        await patch_generic(operands, [], ctx, read, write)
+    finally:
+        reset_mount_gate(token)
     assert "hello.txt" in seen
     assert files["hello.txt"] == b"hello\nuniverse\n"
 

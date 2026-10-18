@@ -14,7 +14,7 @@
 
 import { VFSName } from '@struktoai/mirage-core/types'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
+import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
 import { buildVfs } from '../registry.ts'
 import { redactDiscordConfig } from './config.ts'
 import { DiscordVFS } from './discord.ts'

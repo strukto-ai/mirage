@@ -27,7 +27,8 @@ async function listedPaths(accessor: OPFSAccessor, path: PathSpec): Promise<stri
   return (await readdir(accessor, path)).map((row) => `${base}/${row.name}`)
 }
 
-const resolveGlob = makeResolveGlob(listedPaths, SCOPE_ERROR)
+const resolveGlob = (accessor: OPFSAccessor, paths: PathSpec[]): Promise<PathSpec[]> =>
+  makeResolveGlob((path) => listedPaths(accessor, path), SCOPE_ERROR)(paths)
 
 describe('vfs/opfs resolveGlob binding', () => {
   it('expands a glob into matching paths', async () => {

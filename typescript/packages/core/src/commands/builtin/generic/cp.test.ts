@@ -26,7 +26,7 @@ import {
   type ReaddirFn,
   type StatFn,
 } from '../../../types.ts'
-import type { FindOptions } from '../../../vfs/types.ts'
+import type { FindOptions } from '../../../core/generic/find.ts'
 import { eacces, enoent, enotsup, walkDeclined } from '../../../errors/fs.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import {
@@ -124,7 +124,7 @@ async function run(
       noClobber: opts.no_clobber === true,
       verbose: opts.verbose === true,
     })
-  return cpGeneric(paths.map(spec), stat, { copy, find }, flags, undefined, undefined, opts.readdir)
+  return cpGeneric(paths.map(spec), stat, { copy, find }, flags, undefined, opts.readdir)
 }
 
 describe('cpGeneric guards', () => {
@@ -947,7 +947,6 @@ for (const native of [false, true]) {
           stat,
           strategy,
           cpFlags({ backup: 'simple' }),
-          undefined,
           undefined,
           undefined,
           undefined,

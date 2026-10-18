@@ -12,57 +12,59 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.crossmount.utils import transfer_links_of
 from mirage.commands.builtin.generic.mv import mv_generic as generic_mv
 from mirage.commands.builtin.generic.mv import parse_flags
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    Operation,
-    bound_op,
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import (
+    command_files,
     refuse_reveal,
-    require_op,
 )
-from mirage.commands.builtin.utils.links import links_of, mounts_of
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.builtin.utils.links import (
+    links_of,
+    mounts_of,
+    visibility_of,
+)
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.context import session_visibility
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import NativeMove, PathSpec
 
 
 async def mv(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not ops.is_mounted(accessor):
-        raise ValueError("mv: no VFS")
+    files = command_files(ctx, paths)
     fl = FlagView(ctx.flags, spec=SPECS["mv"])
     parsed = parse_flags(fl)
-    paths = await ops.resolve_glob(accessor, paths, ctx.index)
+    paths = await files.resolve_glob(paths)
     links = links_of(ctx)
     mounts = mounts_of(ctx)
+
+    def guard(src: PathSpec, dst: PathSpec) -> None:
+        refuse_reveal(
+            src, dst, ctx.session.access() if ctx.session is not None else None
+        )
+
     return await generic_mv(
         paths,
-        strategy=NativeMove(
-            rename=partial(require_op(ops, Operation.RENAME), accessor)
-        ),
-        stat=bound_op(ops.stat, accessor, ctx.index),
+        strategy=NativeMove(rename=files.rename),
+        stat=files.stat,
         flags=parsed,
-        readdir=bound_op(ops.readdir, accessor, ctx.index),
-        guard=refuse_reveal,
+        readdir=files.readdir,
+        guard=guard,
         copies=(
             transfer_links_of(
                 links,
                 ctx.vfs.dispatch,
-                ctx.cwd.virtual if ctx.cwd is not None else "/",
-                session_visibility(),
+                ctx.cwd.virtual,
+                visibility_of(ctx.vfs),
             )
             if links is not None and ctx.vfs is not None
             else None

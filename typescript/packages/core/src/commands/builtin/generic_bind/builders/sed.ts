@@ -16,19 +16,21 @@ import { IOResult } from '../../../../io/types.ts'
 import { sedGeneric, positionalAsPaths } from '../../generic/sed.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { type GenericCommand, resolveGlobOf } from '../adapter.ts'
+import { type GenericCommand } from '../adapter.ts'
+import { commandFiles } from '../files.ts'
 
 const ENC = new TextEncoder()
 
 export const BUILDER: GenericCommand = {
   name: 'sed',
-  fn: async (ops, accessor, paths, texts, ctx) => {
-    const idx = ctx.index ?? undefined
-    const { write } = ops
+  write: true,
+  read: true,
+  fn: async (_accessor, paths, texts, ctx) => {
+    const files = commandFiles(ctx, paths)
     // The default stream-to-stdout path is read-only and works on every
     // backend; only in-place editing needs a write op (#382).
     const fl = new FlagView(ctx.flags, specOf('sed'))
-    if (fl.asBool('i') && write === undefined) {
+    if (fl.asBool('i') && !files.answers('write')) {
       return [
         null,
         new IOResult({
@@ -41,21 +43,12 @@ export const BUILDER: GenericCommand = {
     const usingE = fl.asList('e').length > 0
     const usingF = fl.asPaths('f').length > 0
     const operands = usingE || usingF ? [...positionalAsPaths(texts, ctx), ...paths] : paths
-    const resolved =
-      operands.length > 0 ? await resolveGlobOf(ops)(accessor, operands, idx) : operands
-    return sedGeneric(
-      resolved,
-      texts,
-      ctx,
-      (p) => ops.readStream(accessor, p, idx),
-      (p, d) => {
-        if (write === undefined) {
-          return Promise.reject(
-            new Error('sed: -i not supported on this backend: Permission denied'),
-          )
-        }
-        return write(accessor, p, d)
-      },
-    )
+    const resolved = operands.length > 0 ? await files.resolveGlob(operands) : operands
+    return sedGeneric(resolved, texts, ctx, files.readStream, (p, d) => {
+      if (!files.answers('write')) {
+        return Promise.reject(new Error('sed: -i not supported on this backend: Permission denied'))
+      }
+      return files.write(p, d)
+    })
   },
 }

@@ -16,27 +16,27 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.tsort import (
     tsort_generic as generic_tsort,
 )
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    bound_op,
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import (
+    command_files,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def tsort(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_or_empty(ops, accessor, paths, ctx.index)
+    files = command_files(ctx, paths)
+    paths = await resolve_or_empty(files, paths)
     return await generic_tsort(
         paths,
-        read_bytes=bound_op(ops.read_bytes, accessor, ctx.index),
+        read_bytes=files.read_bytes,
         stdin=ctx.stdin,
     )
 

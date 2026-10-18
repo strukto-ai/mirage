@@ -29,6 +29,7 @@ import type { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
 import type { JobTable } from '../../../shell/job_table/index.ts'
 import { PathSpec } from '../../../types.ts'
+import { invokedEnvNames, suppliedEnvNames } from '../../../commands/cli/walk.ts'
 import {
   PROGRAM_FILE_COMMANDS,
   prepareProgram,
@@ -45,11 +46,12 @@ import { Consumer, JOB_BUILTINS, dereferences, lookup, runsAs } from '../../look
 import { EXEC_WRAPPERS } from '../../lookup/constants.ts'
 import { type Runtime } from '../../../runtime/base.ts'
 import type { RouteDecision } from '../../../runtime/routing/index.ts'
-import type { SessionState } from '../../session/session.ts'
+import { type SessionState, sessionEntry } from '../../session/session.ts'
 import { abortable, mergeSignals } from '../../../utils/abort.ts'
 import { ExecutionNode } from '../../types.ts'
 import { RELAY_COMMANDS } from '../../../commands/builtin/generic/crossmount/constants.ts'
 import { aggregateFor } from '../../../commands/builtin/generic/crossmount/detect.ts'
+import type { OperandMount } from '../../../commands/builtin/generic/crossmount/types.ts'
 import { globOptions, resolveGlobs } from '../../expand/globs.ts'
 import {
   handleCrossMount,
@@ -78,7 +80,7 @@ import {
 } from '../jobs.ts'
 import { standardRequest } from '../../../commands/spec/standard.ts'
 
-import { dropsMountCaches, handleCli } from './cli.ts'
+import { dropsMountCaches, handleCli, handleMountCli } from './cli.ts'
 import { pathStat } from '../../mount/namespace/probe.ts'
 import { Files } from '../../files.ts'
 import {
@@ -178,10 +180,64 @@ async function finishFind(
   return newStdout
 }
 
+/**
+ * Each path operand with what the cross-mount decision reads of it: the
+ * mount that owns it, the reducer of what `cmdName` resolves to there, and
+ * whether a mount sits below it. Mirrors Python's `_operand_mounts`.
+ */
+function operandMounts(
+  registry: MountRegistry,
+  cmdName: string,
+  scopes: readonly PathSpec[],
+): OperandMount[] {
+  return scopes.map((scope) => {
+    const mount = registry.tryMountFor(scope.virtual)
+    return {
+      path: scope,
+      mount: mount?.prefix ?? null,
+      aggregate: mount?.resolveCommand(cmdName)?.aggregate ?? null,
+      nests: registry.descendantMounts(scope.virtual).length > 0,
+    }
+  })
+}
+
 /** The command's words as the line spelled them, an operand as typed.
  * Mirrors Python's spelled_words. */
 function spelledWords(parts: readonly (string | PathSpec)[]): string[] {
   return parts.map((p) => (p instanceof PathSpec ? p.rawPath : p))
+}
+
+/**
+ * Fetch the managed names the tree a mount serves under `name` reads. The
+ * line's fill covers installed CLIs only: which mount's tree a head word
+ * reaches is known only when the command runs, after any `cd` before it on the
+ * line. The names are fetched ahead of the command's admission, as an
+ * installed CLI's are, so the gate walks the tree under the values the run
+ * reads; an env-filled required option would otherwise stop that walk short
+ * of the leaf, and a writing leaf would read as a reader. A name the
+ * invocation assigns (`TOKEN=x tok`, `skip`) is the invocation's, so it is
+ * never fetched. A failed fetch throws SecretsError. Resolves to whether a
+ * value was fetched, which changes how the words read. Mirrors Python's
+ * `fill_tree_env`.
+ */
+export async function fillTreeEnv(
+  name: string,
+  args: readonly string[],
+  session: SessionState,
+  registry: MountRegistry,
+  skip: ReadonlySet<string> = new Set(),
+): Promise<boolean> {
+  if (registry.fillEnv === undefined || registry.clis.get(name) !== null) return false
+  const tree = registry.commandMount(name, [], session.cwd)?.cliFor(name) ?? null
+  if (tree === null || lookup(name, session, registry) !== Consumer.MOUNT) return false
+  const verbs = new Set(args.filter((w) => !w.startsWith('-')))
+  const supplied = suppliedEnvNames(tree.spec, [...args])
+  const names = new Set(
+    [...invokedEnvNames(tree.spec, verbs)].filter((n) => !supplied.has(n) && !skip.has(n)),
+  )
+  const before = new Map([...names].map((n) => [n, sessionEntry(session.vars, n)]))
+  await registry.fillEnv(session, names)
+  return [...names].some((n) => sessionEntry(session.vars, n) !== before.get(n))
 }
 
 export async function handleCommand(
@@ -340,6 +396,47 @@ export async function handleCommand(
     ...(executeFn !== undefined ? { executeFn } : {}),
   }
 
+  // Unknown name: nobody registers it; fail like bash before any
+  // backend work. The admission policies (fired upstream at the
+  // dispatch chokepoint) stay ahead of this so
+  // protective refusals keep their specific messages.
+  if (lookup(typed, session, registry) === Consumer.UNKNOWN) {
+    const errBytes = encodeText(`${typed}: command not found\n`)
+    return [
+      null,
+      new IOResult({ exitCode: 127, stderr: errBytes }),
+      new ExecutionNode({ command: cmdStr, exitCode: 127, stderr: errBytes }),
+    ]
+  }
+
+  // A command tree a mount serves runs by name on that mount, like an
+  // installed CLI: its walk, not a spec parse, reads the words, so it sits
+  // ahead of the help, cross-mount and flag-parsing branches below, and of
+  // the operand a bare ls, du, tree, find or grep implies.
+  const treeMount = registry.commandMount(cmdName, [], session.cwd)
+  const tree = treeMount?.cliFor(cmdName) ?? null
+  if (treeMount !== null && tree !== null) {
+    await treeMount.ensureReady()
+    const treeSignal = mergeSignals(signal, context.frame.abortSignal)
+    return handleMountCli(
+      treeMount,
+      tree,
+      parts,
+      session,
+      stdin,
+      {
+        ...(executeFn !== undefined ? { shell: nestedShell(executeFn, session, treeSignal) } : {}),
+        ...(treeSignal !== undefined ? { signal: treeSignal } : {}),
+        commandLimits: registry.commandLimits,
+        vfs: files,
+        session: sessionView(session, registry.policies, context.frame.diagnostics),
+        ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
+      },
+      (path) => registry.tryMountFor(path),
+      follow,
+    )
+  }
+
   if (cmdName in CWD_DEFAULT_RAW) {
     const operand = defaultCwdOperand(parts, cmdName, registry, session.cwd, stdin)
     if (operand !== null) {
@@ -360,19 +457,6 @@ export async function handleCommand(
     if (p instanceof PathSpec) pathScopes.push(p)
   }
   const rawArgv = parts.slice(1).map((p) => (typeof p === 'string' ? p : p.virtual))
-
-  // Unknown name: nobody registers it; fail like bash before any
-  // backend work. The admission policies (fired upstream at the
-  // dispatch chokepoint) stay ahead of this so
-  // protective refusals keep their specific messages.
-  if (lookup(typed, session, registry) === Consumer.UNKNOWN) {
-    const errBytes = encodeText(`${typed}: command not found\n`)
-    return [
-      null,
-      new IOResult({ exitCode: 127, stderr: errBytes }),
-      new ExecutionNode({ command: cmdStr, exitCode: 127, stderr: errBytes }),
-    ]
-  }
 
   // --help and --version answer from the package, never from a backend, so
   // they are served before mount permission checks and cross-mount routing:
@@ -523,7 +607,7 @@ export async function handleCommand(
 
   // Path-valued flags count: `cp -t /other/mount/dir src` spans mounts
   // exactly like a positional destination would.
-  if (isCrossMount(cmdName, routingScopes, registry, flagScopes)) {
+  if (isCrossMount(cmdName, operandMounts(registry, cmdName, routingScopes), flagScopes)) {
     // Parse against the shared spec so flags and text operands do not
     // depend on the source mount: raw argv would hand flag tokens ("-c")
     // to the generic as the search pattern. The bound single-mount runner
@@ -611,7 +695,7 @@ export async function handleCommand(
       sessionView(session, registry.policies, context.frame.diagnostics),
       session.cwd,
       spelledWords(parts.slice(1)),
-      aggregateFor(cmdName, csScopes, registry),
+      aggregateFor(cmdName, operandMounts(registry, cmdName, csScopes)),
       makeCheckUnlink(registry, sessionAccess(session)),
       follow,
     )

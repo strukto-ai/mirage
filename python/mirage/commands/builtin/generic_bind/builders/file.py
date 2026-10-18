@@ -14,32 +14,30 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.file import file_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    bound_op,
-)
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def file(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not ops.is_mounted(accessor) or not paths:
+    files = command_files(ctx, paths)
+    if not paths:
         raise ValueError("file: missing operand")
-    resolved = await ops.resolve_glob(accessor, paths, ctx.index)
+    resolved = await files.resolve_glob(paths)
     return await file_generic(
         resolved,
         list(texts),
         ctx,
-        bound_op(ops.read_stream, accessor, ctx.index),
-        bound_op(ops.stat, accessor, ctx.index),
-        bound_op(ops.read_range, accessor, ctx.index),
+        files.read_stream,
+        files.stat,
+        (files.read_range if files.answers("read_range") else None),
     )
 
 

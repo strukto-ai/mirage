@@ -8,8 +8,8 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
+from mirage.runtime.types import DispatchFn
 from mirage.types import JsonValue, PathSpec
-from mirage.vfs.search import search_resources
 from mirage.vfs.types import SearchQuery
 
 
@@ -33,6 +33,42 @@ def semantic_options(fl: FlagView) -> dict[str, JsonValue]:
     if top_k is not None:
         options["top_k"] = top_k
     return options
+
+
+async def search_resources(
+    dispatch: DispatchFn | None,
+    paths: list[PathSpec],
+    query: SearchQuery,
+) -> bytes:
+    """Rank every scope as one query and render the records, one per hit.
+
+    One search through the dispatcher, the scopes after the first riding
+    along as ``scopes``: it ranks them as one where the mount serving
+    them all ranks a batch, and searches each and joins the hits in scope
+    order otherwise.
+
+    Args:
+        dispatch (DispatchFn | None): the command's dispatcher, None
+            outside a workspace.
+        paths (list[PathSpec]): explicit resource scopes.
+        query (SearchQuery): backend query and options.
+    """
+    if dispatch is None:
+        raise NotImplementedError(
+            "search: backend does not support resource search"
+        )
+    if not paths:
+        raise ValueError("search: at least one scope is required")
+    records, _ = await dispatch(
+        "search", paths[0], query=query, scopes=paths[1:]
+    )
+    if records is None:
+        raise NotImplementedError("search: backend declined the query")
+    return (
+        ("\n".join(record for _, record in records) + "\n").encode()
+        if records
+        else b""
+    )
 
 
 def make_search(
@@ -63,8 +99,7 @@ def make_search(
             raise UsageError("search: query is required")
         fl = FlagView(ctx.flags, spec=SPECS["search"])
         output = await search_resources(
-            ctx.io.search if ctx.io is not None else None,
-            accessor,
+            ctx.vfs.dispatch if ctx.vfs is not None else None,
             default_paths(paths, ctx.cwd),
             SearchQuery(texts[0], options=options(fl)),
         )

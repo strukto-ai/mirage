@@ -37,7 +37,12 @@ async function listedPaths(accessor: DatabricksVolumeAccessor, path: PathSpec): 
   return (await dbxReaddir(accessor, path)).map((row) => `${base}/${row.name}`)
 }
 
-const resolveGlob = makeResolveGlob(listedPaths, undefined, dbxStat)
+const resolveGlob = (accessor: DatabricksVolumeAccessor, paths: PathSpec[]): Promise<PathSpec[]> =>
+  makeResolveGlob(
+    (path) => listedPaths(accessor, path),
+    undefined,
+    (path) => dbxStat(accessor, path),
+  )(paths)
 
 afterEach(() => {
   vi.unstubAllGlobals()

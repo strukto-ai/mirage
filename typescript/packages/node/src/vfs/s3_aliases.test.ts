@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
+import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { S3VFS } from './s3/s3.ts'
 import type { S3Config } from './s3/config.ts'

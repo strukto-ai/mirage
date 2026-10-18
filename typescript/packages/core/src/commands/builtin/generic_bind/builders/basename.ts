@@ -13,10 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { basenameFn } from '../../generic/basename.ts'
-import type { GenericCommand, GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
 
-const basename: GenericCommandFn = (_ops, accessor, paths, texts, ctx) =>
-  basenameFn(accessor, paths, texts, ctx)
+const basename: CommandFn = (accessor, paths, texts, ctx) => basenameFn(accessor, paths, texts, ctx)
 
 export const BUILDER: GenericCommand = {
   name: 'basename',

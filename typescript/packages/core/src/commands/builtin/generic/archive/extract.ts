@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PathSpec, FileType } from '../../../../types.ts'
-import type { StatFn } from './walk.ts'
+import { PathSpec, FileType, type StatFn } from '../../../../types.ts'
 
 export type MkdirFn = (p: PathSpec, parents?: boolean) => Promise<void>
 

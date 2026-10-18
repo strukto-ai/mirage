@@ -12,110 +12,49 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import replace
-from unittest.mock import AsyncMock
-
 import pytest
 
-from mirage.cache.context import push_cache_manager
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.commands.builtin.generic_bind.factory import (
     GENERIC_COMMANDS,
+    _bind,
     _run_builder,
     generic,
-    with_slash_guard,
-    with_stat_cache,
+    generic_reading,
 )
-from mirage.commands.config import CommandIO, Context
-from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.key_prefix import mount_key
-from mirage.workspace import Workspace
+from mirage.commands.builtin.generic_bind.files import (
+    _READINGS,
+    Reading,
+    command_files,
+)
+from mirage.commands.config import Context
+from mirage.context import reset_mount_gate, set_mount_gate
+from mirage.io import IOResult
+from mirage.types import MountMode, PathSpec
 from mirage.workspace.files import Files
-from tests.fixtures.vfs_io import BatchedRAM
 
 
-class _CountingBackend:
-    def __init__(self, data: bytes) -> None:
-        self.data = data
-        self.stream_calls = 0
-        self.bytes_calls = 0
-
-    async def read_stream(self, accessor, path, *args, **kwargs):
-        self.stream_calls += 1
-        yield self.data
-
-    async def read_bytes(self, accessor, path, *args, **kwargs) -> bytes:
-        self.bytes_calls += 1
-        return self.data
+async def _nothing(op: str, path: PathSpec, /, **_):
+    return None, IOResult()
 
 
-async def _noop_readdir(accessor, path, index=None) -> list[str]:
-    return []
+async def _never(accessor, paths, texts, ctx):
+    raise AssertionError("a builder with no files must not run")
 
 
-async def _noop_stat(accessor, path, index=None):
-    return None
+async def _hooked(path: PathSpec):
+    yield b"hooked:" + path.virtual.encode()
 
 
-def _ops(backend: _CountingBackend) -> CommandIO:
-    return CommandIO(
-        readdir=_noop_readdir,
-        read_bytes=backend.read_bytes,
-        read_stream=backend.read_stream,
-        stat=_noop_stat,
-        is_mounted=lambda a: True,
-    )
-
-
-def _spec() -> PathSpec:
-    return PathSpec(
-        vfs_path=mount_key("/s3/a.txt", "/s3/"),
-        virtual="/s3/a.txt",
-        directory="/s3/",
-    )
-
-
-async def _drain(source) -> bytes:
-    return b"".join([c async for c in source])
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "kind", [FileType.FILE, FileType.DIRECTORY, FileType.SYMLINK]
-)
-async def test_stat_cache_backfills_only_file_sizes(kind):
-    ws = Workspace({"/s3": BatchedRAM()})
-    try:
-        await ws.cache.set("/s3/a.txt", b"rendered")
-        get = AsyncMock(wraps=ws.cache.get)
-        ws.cache.get = get
-        row = FileStat(name="a.txt", type=kind)
-
-        async def stat(accessor, path, index=None):
-            return row
-
-        guarded = with_stat_cache(
-            replace(_ops(_CountingBackend(b"")), stat=stat)
-        )
-        previous = push_cache_manager(ws.mount("/s3").cache_manager)
-        try:
-            result = await guarded.stat(None, _spec())
-        finally:
-            push_cache_manager(previous)
-        assert result.size == (
-            len(b"rendered") if kind is FileType.FILE else None
-        )
-        assert [call.args[0] for call in get.call_args_list] == (
-            ["/s3/a.txt"] if kind is FileType.FILE else []
-        )
-    finally:
-        await ws.close()
+def _hook(ctx, path):
+    return _hooked(path) if path.virtual == "/f" else None
 
 
 def test_the_generic_set_has_every_builder_whatever_the_backend_lacks():
-    # A backend without the write-side ops still gets the whole family:
-    # `gzip -c`, `tar -t` and `split -n 1/2` only read, and a line that
-    # writes is refused at the missing op instead of the command being
+    # A backend without the write-side functions still gets the whole
+    # family: `gzip -c`, `tar -t` and `split -n 1/2` only read, and a line
+    # that writes is refused at the write instead of the command being
     # absent.
     assert {c.name for c in GENERIC_COMMANDS} == {b.name for b in BUILDERS}
     assert {c.vfs for c in GENERIC_COMMANDS} == {None}
@@ -125,119 +64,92 @@ def test_generic_hands_back_the_shared_command():
     assert generic("grep") is GENERIC_COMMANDS.require("grep")
 
 
-def test_generic_with_a_table_registers_a_copy_for_one_backend():
-    ls = generic("ls", vfs="dify", table=with_stat_cache)
+def test_generic_for_a_backend_registers_a_copy_for_it():
+    ls = generic("ls", vfs="dify")
     assert (ls.name, ls.vfs) == ("ls", "dify")
     assert ls is not generic("ls")
     assert ls.spec == generic("ls").spec
 
 
-class _NoLinks:
-    """An empty link table, as a workspace with no links holds."""
-
-    def follow(self, path: str) -> str:
-        return path
-
-    def link_stat_at(self, path: str) -> None:
-        return None
-
-    def link_stats_below(self, directory: str) -> list:
-        return []
-
-    def symlink_targets(self) -> dict[str, str]:
-        return {}
-
-
-async def _nothing(op: str, path: PathSpec, **_):
-    return None, None
-
-
-@pytest.mark.asyncio
-async def test_namespace_globs_stamp_the_link_target_stat():
-    # The command tier's `*/` asks the namespace what a link points at,
-    # so the invocation's target_stat rides the adapter, stamped per
-    # invocation. The listing already names the namespace's children.
-    seen: list[CommandIO] = []
-
-    async def capture(ops, accessor, paths, texts, ctx):
-        seen.append(ops)
-
-    ctx = Context(vfs=Files([], _nothing, links=_NoLinks()))
-    await _run_builder(
-        lambda ops: ops,
-        capture,
-        None,
-        None,
-        [],
-        [],
-        replace(ctx, io=_ops(_CountingBackend(b""))),
-    )
-    assert seen[0].glob_target_stat is not None
-
-
-@pytest.mark.asyncio
-async def test_namespace_globs_stamp_nothing_without_links():
-    seen: list[CommandIO] = []
-
-    async def capture(ops, accessor, paths, texts, ctx):
-        seen.append(ops)
-
-    ctx = Context(vfs=Files([], _nothing))
-    await _run_builder(
-        lambda ops: ops,
-        capture,
-        None,
-        None,
-        [],
-        [],
-        replace(ctx, io=_ops(_CountingBackend(b""))),
-    )
-    assert seen[0].glob_target_stat is None
-
-
-@pytest.mark.asyncio
-async def test_slash_guard_refuses_a_slashed_write_before_the_backend():
-    # open(2) with O_CREAT answers `x/` with EISDIR before looking anything
-    # up, so `tee missing/` and `truncate -s0 missing/` must not leave a
-    # regular file called `missing` behind; a bare operand passes through.
-    backend = _CountingBackend(b"")
-    written: list[str] = []
-
-    async def write(accessor, path, data) -> None:
-        written.append(path.virtual)
-
-    async def truncate(accessor, path, length) -> None:
-        written.append(path.virtual)
-
-    guarded = with_slash_guard(
-        replace(_ops(backend), write=write, append=write, truncate=truncate)
-    )
-    slashed = PathSpec(
-        vfs_path=mount_key("/s3/missing", "/s3/"),
-        virtual="/s3/missing",
-        directory="/s3/",
-        raw_path="/s3/missing/",
-    )
-    with pytest.raises(IsADirectoryError):
-        await guarded.write(None, slashed, b"x")
-    with pytest.raises(IsADirectoryError):
-        await guarded.append(None, slashed, b"x")
-    with pytest.raises(IsADirectoryError):
-        await guarded.truncate(None, slashed, 0)
-    await guarded.write(None, _spec(), b"x")
-    await guarded.truncate(None, _spec(), 0)
-    assert written == ["/s3/a.txt", "/s3/a.txt"]
-
-
-@pytest.mark.asyncio
-async def test_slash_guard_leaves_write_absent_when_the_backend_has_none():
-    guarded = with_slash_guard(_ops(_CountingBackend(b"")))
-    assert guarded.write is None
-    assert guarded.append is None
-    assert guarded.truncate is None
-
-
-@pytest.mark.parametrize("table", [None, with_stat_cache])
-def test_a_name_no_builder_has_is_refused(table):
+def test_a_name_no_builder_has_is_refused():
     with pytest.raises(ValueError, match="no generic command named 'lss'"):
-        generic("lss", vfs="fake", table=table)
+        generic("lss", vfs="fake")
+    with pytest.raises(ValueError, match="no generic command named 'lss'"):
+        generic_reading("lss", vfs="fake", stream=lambda ctx, path: None)
+
+
+@pytest.mark.asyncio
+async def test_a_builder_with_no_workspace_files_is_refused():
+    stdout, io = await _run_builder(
+        GenericCommand("cat", _never),
+        Reading(split=False, cached_sizes=True),
+        None,
+        [],
+        [],
+        Context(),
+    )
+    assert stdout is None
+    assert (io.exit_code, io.stderr) == (1, b"cat: no workspace files\n")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "builder,cached_sizes,split",
+    [
+        (GenericCommand("cat", None, read=True), True, True),
+        (GenericCommand("ls", None), True, True),
+        (GenericCommand("rm", None, write=True), False, True),
+        (
+            GenericCommand("head", None, read=True, pass_through=True),
+            True,
+            False,
+        ),
+    ],
+)
+async def test_a_run_binds_what_its_kind_decides(builder, cached_sizes, split):
+    # A builder that reads or only looks fills a stat's size from the read
+    # cache; a pass-through one keeps its producer's chunks.
+    seen: list[Reading | None] = []
+
+    async def capture(accessor, paths, texts, ctx):
+        seen.append(_READINGS.get())
+        return None, IOResult()
+
+    run = GenericCommand(
+        builder.name,
+        capture,
+        write=builder.write,
+        read=builder.read,
+        pass_through=builder.pass_through,
+    )
+    ctx = Context(vfs=Files([], _nothing, ledger=False))
+    await _bind(run, None, None).fn(None, [], [], ctx)
+    assert seen == [Reading(split=split, cached_sizes=cached_sizes)]
+    assert _READINGS.get() is None
+
+
+@pytest.mark.asyncio
+async def test_a_stream_hook_changes_only_the_streamed_read():
+    read: list[bytes] = []
+
+    async def capture(accessor, paths, texts, ctx):
+        stream = command_files(ctx, paths).read_stream
+        read.extend([chunk async for chunk in stream(paths[0])])
+        return None, IOResult()
+
+    cat = generic_reading("cat", vfs="ram", stream=_hook)
+    assert (cat.name, cat.vfs) == ("cat", "ram")
+    run = GenericCommand("cat", capture, read=True, pass_through=True)
+    token = set_mount_gate("/", MountMode.WRITE)
+    try:
+        await _run_builder(
+            run,
+            Reading(split=False, cached_sizes=True, stream=_hook),
+            None,
+            [PathSpec.from_str_path("/f")],
+            [],
+            Context(vfs=Files([], _nothing, ledger=False)),
+        )
+    finally:
+        reset_mount_gate(token)
+    assert read == [b"hooked:/f"]

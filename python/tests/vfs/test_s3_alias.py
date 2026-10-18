@@ -15,7 +15,6 @@
 import pytest
 from pydantic import SecretStr
 
-from mirage.commands.builtin.backends import commands_for
 from mirage.vfs.aliyun.config import AliyunConfig
 from mirage.vfs.backblaze.config import BackblazeConfig
 from mirage.vfs.ceph.config import CephConfig
@@ -32,6 +31,7 @@ from mirage.vfs.seaweedfs.config import SeaweedFSConfig
 from mirage.vfs.supabase.config import SupabaseConfig
 from mirage.vfs.tencent.config import TencentConfig
 from mirage.vfs.wasabi.config import WasabiConfig
+from mirage.workspace.mount.backends import commands_for
 from tests.fixtures.vfs_io import served
 
 # Mirrors typescript/packages/node/src/vfs/s3_aliases.test.ts. Every

@@ -65,6 +65,12 @@ def test_s3_write_commands_tagged():
         "patch",
         "iconv",
         "truncate",
+        "sort",
+        "shuf",
+        "sed",
+        "uniq",
+        "xxd",
+        "awk",
     }
     for registered in mount_commands(S3VFS(S3Config(bucket="b"))):
         if registered.name in write_names:

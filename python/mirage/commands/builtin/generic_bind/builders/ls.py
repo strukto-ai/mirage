@@ -12,16 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.ls import ls_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    bound_op,
-)
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.tree import WalkCall, tree_walk
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -29,14 +26,12 @@ from mirage.types import PathSpec
 
 
 async def ls(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not ops.is_mounted(accessor):
-        raise ValueError("ls: no VFS")
+    files = command_files(ctx, paths)
     if not paths:
         paths = [
             PathSpec(
@@ -46,13 +41,15 @@ async def ls(
                 vfs_path=ctx.cwd.vfs_path,
             )
         ]
-    resolved = await ops.resolve_glob(accessor, paths, ctx.index)
-    readdir: WalkCall = partial(ops.readdir, accessor)
-    stat: WalkCall = partial(ops.stat, accessor)
+    resolved = await files.resolve_glob(paths)
+    readdir: WalkCall = files.readdir
+    stat: WalkCall = files.stat
     # Only -R walks; a plain listing reads one directory.
     if FlagView(ctx.flags, spec=SPECS["ls"]).as_bool("recursive"):
         readdir, stat = tree_walk(
-            bound_op(ops.read_tree, accessor, ctx.index), readdir, stat
+            (files.read_tree if files.answers("read_tree") else None),
+            readdir,
+            stat,
         )
     return await ls_generic(resolved, list(texts), ctx, readdir, stat)
 

@@ -134,6 +134,9 @@ function mountsView(descendants: string[]): MountView {
     visibleDescendants: (p: string) => visible.filter((d) => d.startsWith(rstripSlash(p) + '/')),
     isRoot: () => false,
     rootOf: () => '/',
+    answers: () => false,
+    maxGlobMatches: () => null,
+    searchable: () => null,
   }
 }
 

@@ -25,7 +25,6 @@ import { fsErrorLine } from '../../../errors/render.ts'
 import { callerStream } from '../generic_bind/dispatch.ts'
 import { currentCaller } from '../../../context/session_context.ts'
 import { resolvePath } from '../../../utils/path.ts'
-import { rstripSlash } from '../../../utils/slash.ts'
 import { readFailExitCode } from '../../spec/usage.ts'
 import { closeQuietly, ensureStream, primeStream } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
@@ -43,7 +42,7 @@ import {
 import { SED_LINE_LENGTH, SedMachine, type SedFileContent, type SedInput } from '../sed_exec.ts'
 import { byteView, decodeText, encodeText, fromByteView, utf8Locale } from '../../../shell/bytes.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
-import { dispatchOf } from '../utils/links.ts'
+import { dispatchOf, mountRoot } from '../utils/links.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 type Write = (p: PathSpec, data: ByteSource) => Promise<void>
@@ -62,7 +61,7 @@ interface ScriptFiles {
 }
 
 function scriptFiles(ctx: Context, stream: Stream, write: Write): ScriptFiles {
-  const prefix = ctx.mountPrefix !== undefined ? rstripSlash(ctx.mountPrefix) : ''
+  const prefix = mountRoot(ctx)
   const spec = (name: string): PathSpec => {
     const resolved = resolvePath(name, ctx.cwd.virtual)
     if (ctx.vfs !== undefined) return PathSpec.fromStrPath(name, undefined, ctx.cwd)
@@ -366,9 +365,7 @@ export async function sedGeneric(
   const pieces: SedScriptPiece[] = []
   const firstPath = paths[0]
   const scriptPrefix =
-    (firstPath === undefined ? undefined : mountPrefixOf(firstPath.virtual, firstPath.vfsPath)) ??
-    ctx.mountPrefix ??
-    ''
+    firstPath === undefined ? mountRoot(ctx) : mountPrefixOf(firstPath.virtual, firstPath.vfsPath)
   const origins = scriptOrigins(ctx.argv, parsed.scripts.length)
   for (const [index, [name, text]] of parsed.scripts.entries()) {
     const shown = origins?.[index] ?? null
@@ -525,7 +522,7 @@ async function runInPlace(
  * `text` (script) slot, so recover it as a path operand here.
  */
 export function positionalAsPaths(texts: string[], ctx: Context): PathSpec[] {
-  const prefix = ctx.mountPrefix !== undefined ? rstripSlash(ctx.mountPrefix) : ''
+  const prefix = mountRoot(ctx)
   return texts.map((t) => {
     const resolved = resolvePath(t, ctx.cwd.virtual)
     const slash = resolved.lastIndexOf('/')

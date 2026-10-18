@@ -17,19 +17,20 @@ import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { fileStreamOp, statOp } from '../../generic/crossmount/utils.ts'
 import { tarGeneric } from '../../generic/tar/tar.ts'
-import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, resolveOrEmpty } from '../files.ts'
 import { isDirOf, relayIsDirOf, walkOf } from '../archive_io.ts'
 import { dispatchOf } from '../../utils/links.ts'
 
-const tar: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const write = requireOp(ops.write, 'write')
-  const mkdir = requireOp(ops.mkdir, 'mkdir')
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  const stat = async (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, idx)
+const tar: CommandFn = async (_accessor, paths, texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
+  const stat = async (p: PathSpec): Promise<FileStat> => files.stat(p)
   const dispatch = dispatchOf(ctx)
+  if (dispatch === undefined) throw new TypeError('tar: no workspace files')
   const fl = new FlagView(ctx.flags, specOf('tar'))
-  if (dispatch !== undefined && !fl.asBool('create')) {
+  if (!fl.asBool('create')) {
     // -t reads and -x writes wherever cwd or -C says, which need not
     // be this mount, so both run on dispatch-relayed calls and each
     // path routes to the mount that owns it. Only -c stays on the
@@ -47,23 +48,22 @@ const tar: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
           await dispatch('mkdir', p)
         },
         stat: statOp(dispatch),
-        walk: walkOf(ops, accessor, idx, dispatch, 'tar'),
+        walk: walkOf(files, dispatch, 'tar'),
         isDir: relayIsDirOf(dispatch),
       },
       true,
     )
   }
   return tarGeneric(resolved, texts, ctx, {
-    stream: (p) => ops.readStream(accessor, p, idx),
+    stream: files.readStream,
     // Archive output follows links even when the member scan preserves them.
     write: async (p, data) => {
-      if (dispatch !== undefined) await dispatch('write', p, [data])
-      else await write(accessor, p, data)
+      await dispatch('write', p, [data])
     },
-    mkdir: (p, parents) => mkdir(accessor, p, parents),
+    mkdir: (p, parents) => files.mkdir(p, parents),
     stat,
-    walk: walkOf(ops, accessor, idx, dispatch, 'tar'),
-    isDir: isDirOf(ops, accessor, idx),
+    walk: walkOf(files, dispatch, 'tar'),
+    isDir: isDirOf(files),
   })
 }
 

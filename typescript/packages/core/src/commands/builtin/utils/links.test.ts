@@ -21,6 +21,7 @@ import {
   DEFAULT_VISIBILITY,
   FileStat,
   FileType,
+  MountMode,
   PathSpec,
   type Visibility,
   type WalkErrno,
@@ -29,11 +30,15 @@ import { Files } from '../../../workspace/files.ts'
 import { isDotWalkError } from '../../../errors/fs.ts'
 import { CycleError } from '../../../utils/path.ts'
 import type { Context } from '../../config.ts'
+import { runWithMountGate } from '../../../context/session_context.ts'
 import {
   LinkResolver,
+  crossesMounts,
   linkResolver,
   linkView,
+  mountRoot,
   mountView,
+  mountsOf,
   nameLocation,
   owedNames,
   typedLink,
@@ -246,5 +251,46 @@ describe('mountView', () => {
     expect(crossing?.descendants('/data')).toEqual([])
     expect(crossing?.isRoot('/data/open')).toBe(false)
     expect(crossing?.rootOf('/data/open/x')).toBe('/data/open/')
+  })
+})
+
+describe('mountsOf', () => {
+  const ctxOf = (vfs: Files): Context => ({
+    stdin: null,
+    flags: {},
+    cwd: PathSpec.fromStrPath('/'),
+    vfs,
+  })
+
+  it('walks and answers as its mount inside a mount scope, and across outside one', async () => {
+    const row = { prefix: '/data/', kind: 'ram', calls: new Set(['read_tree']) }
+    const [dispatch] = recorder()
+    const ctx = ctxOf(
+      new Files(dispatch, null, null, () => row, { prefixes: () => ['/data/', '/data/inner/'] }),
+    )
+    const across = mountsOf(ctx)
+    expect([crossesMounts(ctx), mountRoot(ctx)]).toEqual([true, ''])
+    expect(across?.descendants('/data')).toEqual([])
+    expect(across?.answers('/data/x', 'read_tree')).toBe(false)
+    await runWithMountGate('/data/', MountMode.WRITE, () => {
+      const bound = mountsOf(ctx)
+      expect([crossesMounts(ctx), mountRoot(ctx)]).toEqual([false, '/data'])
+      expect(bound?.descendants('/data')).toEqual(['/data/inner'])
+      expect(bound?.answers('/data/x', 'read_tree')).toBe(true)
+      expect(bound?.answers('/data/x', 'first_lines')).toBe(false)
+      return Promise.resolve()
+    })
+  })
+
+  // The bound mount may be another task's (no task isolation): the files' own wins.
+  it('reads the mount its files were said to run in over the bound one', async () => {
+    const vfs = files(['/data/', '/other/'])
+    const on = ctxOf(vfs.servedBy(['/data/', MountMode.WRITE]))
+    const across = ctxOf(vfs.servedBy(null))
+    await runWithMountGate('/other/', MountMode.WRITE, () => {
+      expect([crossesMounts(on), mountRoot(on)]).toEqual([false, '/data'])
+      expect([crossesMounts(across), mountRoot(across)]).toEqual([true, ''])
+      return Promise.resolve()
+    })
   })
 })

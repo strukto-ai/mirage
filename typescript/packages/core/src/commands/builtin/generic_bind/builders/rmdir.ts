@@ -24,7 +24,9 @@ import { formatRecords } from '../../utils/output.ts'
 import { linkLocation, linksOf } from '../../utils/links.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles } from '../files.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 
 // `virtual` with its parent resolved through the namespace's links: rmdir(2)
@@ -72,14 +74,13 @@ export function ancestors(
   return chain
 }
 
-const rmdir: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
+const rmdir: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
   if (paths.length === 0) throw missingOperandError('rmdir', null)
-  const idx = ctx.index ?? undefined
-  const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
+  const resolved = await files.resolveGlob(paths)
   const fl = new FlagView(ctx.flags, specOf('rmdir'))
   const verbose = fl.asBool('verbose')
   const ignore = fl.asBool('ignore_fail_on_non_empty')
-  const rmdirOp = requireOp(ops.rmdir, 'rmdir')
   const lines: string[] = []
   const errors: string[] = []
   const links = linksOf(ctx) ?? null
@@ -95,19 +96,19 @@ const rmdir: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
     }
     let isDir = false
     try {
-      const st = await ops.stat(accessor, p, idx)
+      const st = await files.stat(p)
       isDir = st.type === FileType.DIRECTORY
     } catch (exc) {
       if (!isFsError(exc)) throw exc
       return fsStrerror(exc) ?? String(exc)
     }
     if (!isDir) return posixPhrase('ENOTDIR')
-    if ((await ops.readdir(accessor, p, idx)).length > 0) return posixPhrase('ENOTEMPTY')
+    if ((await files.readdir(p)).length > 0) return posixPhrase('ENOTEMPTY')
     try {
-      await rmdirOp(accessor, p, idx)
+      await files.rmdir(p)
     } catch (exc) {
       // The listing above showed the session an empty directory, but
-      // the slot may still refuse not-empty: the hidden-remnant guard
+      // the dispatcher may still refuse not-empty: the hidden-remnant guard
       // re-raises the backend's refusal when its cascade cannot
       // finish (a mode-protected remnant, a visible entry appearing
       // mid-walk). A read-only region refuses here too. GNU's voice, not

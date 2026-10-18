@@ -13,17 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { tacGeneric } from '../../generic/tac.ts'
-import {
-  type GenericCommand,
-  dirAwareStream,
-  resolveGlobOf,
-  type GenericCommandFn,
-} from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, dirAwareStream, resolveOrEmpty } from '../files.ts'
 
-const tac: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return tacGeneric(resolved, ctx, dirAwareStream(ops, accessor, ctx))
+const tac: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
+  return tacGeneric(resolved, ctx, dirAwareStream(files, ctx))
 }
 
 export const BUILDER: GenericCommand = {

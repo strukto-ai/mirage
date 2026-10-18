@@ -12,37 +12,34 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.sort import sort_generic as generic_sort
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    bound_op,
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import (
+    command_files,
     resolve_or_empty,
 )
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 async def sort(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_or_empty(ops, accessor, paths, ctx.index)
+    files = command_files(ctx, paths)
+    paths = await resolve_or_empty(files, paths)
     return await generic_sort(
         paths,
-        read_bytes=bound_op(ops.read_stream, accessor, ctx.index),
-        write_bytes=(
-            partial(ops.write, accessor) if ops.write is not None else None
-        ),
+        read_bytes=files.read_stream,
+        write_bytes=(files.write if files.answers("write") else None),
         stdin=ctx.stdin,
         flags=ctx.flags,
     )
 
 
-BUILDER = GenericCommand("sort", sort, read=True)
+BUILDER = GenericCommand("sort", sort, write=True, read=True)

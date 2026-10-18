@@ -12,20 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import dataclasses
 import errno
+from typing import Any
 
 import pytest
 
-from mirage.commands.builtin.generic_bind.builders.du import WalkBudget, du
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.builtin.generic_bind import generic
+from mirage.commands.builtin.generic_bind.builders.du import WalkBudget
+from mirage.commands.config import Context
+from mirage.context import reset_mount_gate, set_mount_gate
 from mirage.errors.fs import enotsup, walk_declined
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io import IOResult
 from mirage.io.stream import materialize
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.view.types import MountView
 from mirage.workspace.files import Files
+from mirage.workspace.types import MountRow
 
 TREE = {
     "/db": ["/db/a.txt", "/db/sub"],
@@ -34,31 +37,65 @@ TREE = {
 SIZES = {"/db/a.txt": 3, "/db/sub/b.txt": 2}
 
 
-def _ops(max_du_entries: int | None = None) -> CommandIO:
-    async def readdir(_accessor, path, _index=None):
-        return TREE.get(path.virtual.rstrip("/") or "/", [])
+async def _readdir(path: PathSpec) -> list[str]:
+    return TREE.get(path.virtual.rstrip("/") or "/", [])
 
-    async def stat(_accessor, path, _index=None):
-        virtual = path.virtual
-        if virtual in TREE:
-            return FileStat(name=virtual, type=FileType.DIRECTORY)
-        if virtual in SIZES:
-            return FileStat(
-                type=FileType.FILE, name=virtual, size=SIZES[virtual]
-            )
-        raise FileNotFoundError(virtual)
 
-    async def read_bytes(_accessor, _path, _index=None):
-        return b""
+async def _stat(path: PathSpec) -> FileStat:
+    virtual = path.virtual
+    if virtual in TREE:
+        return FileStat(name=virtual, type=FileType.DIRECTORY)
+    if virtual in SIZES:
+        return FileStat(type=FileType.FILE, name=virtual, size=SIZES[virtual])
+    raise FileNotFoundError(virtual)
 
-    return CommandIO(
-        readdir=readdir,
-        read_bytes=read_bytes,
-        read_stream=read_bytes,
-        stat=stat,
-        is_mounted=lambda _a: True,
-        max_du_entries=max_du_entries,
-    )
+
+class _Mount:
+    """The dispatcher a du on one mount reads through: its listings, its
+    stats and, where the mount has one, its one-call tree read.
+
+    Args:
+        readdir (Any): ``readdir(path)``.
+        stat (Any): ``stat(path)``, a link's own row.
+        read_tree (Any): ``read_tree(path)``, or None for none.
+        max_du_entries (int | None): the mount's walk budget.
+        followed (Any): ``stat(path)`` with links followed, for the
+            namespace's own probes.
+    """
+
+    def __init__(
+        self,
+        readdir: Any = _readdir,
+        stat: Any = _stat,
+        read_tree: Any = None,
+        max_du_entries: int | None = None,
+        followed: Any = None,
+    ) -> None:
+        self.readdir = readdir
+        self.stat = stat
+        self.read_tree = read_tree
+        self.followed = followed
+        self.row = MountRow(
+            prefix="/",
+            resource_type="ram",
+            mode=MountMode.WRITE,
+            max_du_entries=max_du_entries,
+            calls=frozenset({"read_tree"} if read_tree is not None else ()),
+        )
+
+    async def __call__(
+        self, name: str, path: PathSpec, /, **kwargs: Any
+    ) -> tuple[Any, IOResult]:
+        if name == "stat" and not kwargs.get("nofollow"):
+            if self.followed is not None:
+                return await self.followed(path), IOResult()
+        if name == "stat":
+            return await self.stat(path), IOResult()
+        if name == "readdir":
+            return await self.readdir(path), IOResult()
+        if name == "read_tree":
+            return await self.read_tree(path), IOResult()
+        raise AssertionError(name)
 
 
 def _spec(virtual: str) -> PathSpec:
@@ -67,10 +104,20 @@ def _spec(virtual: str) -> PathSpec:
     )
 
 
-async def _run(ops: CommandIO, path: str, **flags) -> tuple[str, int, str]:
-    stream, io = await du(
-        ops, object(), [_spec(path)], [], Context(flags={**flags})
+async def _du(
+    mount: _Mount, paths: list[str], links: Any = None, **flags: Any
+) -> tuple[str, int, str]:
+    ctx = Context(
+        flags={**flags},
+        vfs=Files([mount.row], mount, links=links, ledger=False),
     )
+    token = set_mount_gate("/", MountMode.WRITE)
+    try:
+        stream, io = await generic("du").fn(
+            None, [_spec(p) for p in paths], [], ctx
+        )
+    finally:
+        reset_mount_gate(token)
     return (
         (await materialize(stream)).decode(),
         io.exit_code,
@@ -104,8 +151,8 @@ def test_walk_budget_with_no_cap_charges_each_mount_its_own():
     assert budget.hit is True
 
 
-def _tree(refusal=None):
-    async def read_tree(_accessor, path, index=None):
+def _tree(refusal: Any = None) -> Any:
+    async def read_tree(path: PathSpec) -> dict[str, FileStat]:
         if refusal is not None:
             raise refusal("ram", "read_tree", path)
         return {
@@ -119,45 +166,42 @@ def _tree(refusal=None):
 
 @pytest.mark.asyncio
 async def test_walks_when_the_dispatcher_declines_read_tree():
-    ops = dataclasses.replace(_ops(), read_tree=_tree(walk_declined))
-    out, code, _ = await _run(ops, "/db")
+    out, code, _ = await _du(_Mount(read_tree=_tree(walk_declined)), ["/db"])
     assert (out, code) == ("2\t/db/sub\n5\t/db\n", 0)
 
 
 @pytest.mark.asyncio
 async def test_a_backends_own_refusal_is_not_walked():
-    ops = dataclasses.replace(_ops(), read_tree=_tree(enotsup))
     with pytest.raises(OperationNotSupportedError):
-        await _run(ops, "/db")
+        await _du(_Mount(read_tree=_tree(enotsup)), ["/db"])
 
 
 @pytest.mark.asyncio
 async def test_a_tree_answer_costs_no_budget():
     """The budget bounds a walk that takes a request per directory; a
     tree read in one call is summed whole."""
-    ops = dataclasses.replace(_ops(max_du_entries=1), read_tree=_tree())
-    out, code, _ = await _run(ops, "/db")
+    mount = _Mount(read_tree=_tree(), max_du_entries=1)
+    out, code, _ = await _du(mount, ["/db"])
     assert (out, code) == ("2\t/db/sub\n5\t/db\n", 0)
+
+
+async def _root_stat(path: PathSpec) -> FileStat:
+    if path.virtual == "/":
+        return FileStat(name="/", type=FileType.DIRECTORY)
+    return await _stat(path)
 
 
 @pytest.mark.asyncio
 async def test_a_tree_answer_at_a_root_mount_costs_no_budget():
-    base = _ops(max_du_entries=1)
-
-    async def stat(accessor, path, index=None):
-        if path.virtual == "/":
-            return FileStat(name="/", type=FileType.DIRECTORY)
-        return await base.stat(accessor, path, index)
-
-    ops = dataclasses.replace(base, stat=stat, read_tree=_tree())
-    out, code, _ = await _run(ops, "/")
+    mount = _Mount(stat=_root_stat, read_tree=_tree(), max_du_entries=1)
+    out, code, _ = await _du(mount, ["/"])
     assert (out, code) == ("2\t/sub\n5\t/\n", 0)
 
 
 @pytest.mark.asyncio
 async def test_exhausted_budget_reports_partial_output_and_exits_one():
     """A tree bigger than the cap must not report a wrong size silently."""
-    out, code, err = await _run(_ops(max_du_entries=1), "/db")
+    out, code, err = await _du(_Mount(max_du_entries=1), ["/db"])
     assert code == 1
     assert "incomplete" in err
     assert out.endswith("\t/db\n")
@@ -165,12 +209,9 @@ async def test_exhausted_budget_reports_partial_output_and_exits_one():
 
 @pytest.mark.asyncio
 async def test_budget_is_shared_across_operands():
-    ops = _ops(max_du_entries=1)
-    stream, io = await du(
-        ops, object(), [_spec("/db"), _spec("/db/sub")], [], Context()
-    )
-    assert io.exit_code == 1
-    assert len((await materialize(stream)).decode().splitlines()) == 2
+    out, code, _ = await _du(_Mount(max_du_entries=1), ["/db", "/db/sub"])
+    assert code == 1
+    assert len(out.splitlines()) == 2
 
 
 _SEALED_TREE = {
@@ -180,25 +221,22 @@ _SEALED_TREE = {
 }
 
 
-def _sealed_ops() -> CommandIO:
+async def _sealed_readdir(path: PathSpec) -> list[str]:
     # /db/sealed lists as refused and /db/walled refuses its stat, the two
     # calls a rule or the host can shut.
+    if path.virtual == "/db/sealed":
+        raise PermissionError(13, "Permission denied", path.virtual)
+    return _SEALED_TREE.get(path.virtual, [])
 
-    async def readdir(_accessor, path, _index=None):
-        if path.virtual == "/db/sealed":
-            raise PermissionError(13, "Permission denied", path.virtual)
-        return _SEALED_TREE.get(path.virtual, [])
 
-    async def stat(_accessor, path, _index=None):
-        if path.virtual == "/db/walled":
-            raise PermissionError(13, "Permission denied", path.virtual)
-        if path.virtual in _SEALED_TREE:
-            return FileStat(name=path.virtual, type=FileType.DIRECTORY)
-        if path.virtual == "/db/a.txt":
-            return FileStat(name=path.virtual, type=FileType.FILE, size=3)
-        raise FileNotFoundError(path.virtual)
-
-    return dataclasses.replace(_ops(), readdir=readdir, stat=stat)
+async def _sealed_stat(path: PathSpec) -> FileStat:
+    if path.virtual == "/db/walled":
+        raise PermissionError(13, "Permission denied", path.virtual)
+    if path.virtual in _SEALED_TREE:
+        return FileStat(name=path.virtual, type=FileType.DIRECTORY)
+    if path.virtual == "/db/a.txt":
+        return FileStat(name=path.virtual, type=FileType.FILE, size=3)
+    raise FileNotFoundError(path.virtual)
 
 
 @pytest.mark.asyncio
@@ -210,9 +248,10 @@ async def test_a_directory_no_file_points_at_still_gets_its_row():
         "du: cannot read directory '/db/walled': Permission denied\n"
     )
     rows = "0\t/db/empty\n0\t/db/sealed\n3\t/db\n"
-    assert await _run(_sealed_ops(), "/db") == (rows, 1, notes)
+    sealed = _Mount(readdir=_sealed_readdir, stat=_sealed_stat)
+    assert await _du(sealed, ["/db"]) == (rows, 1, notes)
     everything = "3\t/db/a.txt\n" + rows
-    assert await _run(_sealed_ops(), "/db", a=True) == (everything, 1, notes)
+    assert await _du(sealed, ["/db"], a=True) == (everything, 1, notes)
 
 
 LINKED = FileStat(name="f", type=FileType.FILE, size=6)
@@ -220,29 +259,16 @@ LINKED = FileStat(name="f", type=FileType.FILE, size=6)
 
 # /db/private refuses its listing, though its file answers a stat by name,
 # the way a directory without read permission does.
-async def _unlisted_readdir(_accessor, path, _index=None):
+async def _unlisted_readdir(path: PathSpec) -> list[str]:
     if path.virtual == "/db/private":
         raise PermissionError(errno.EACCES, "Permission denied")
     return ["/db/link", "/db/private"] if path.virtual == "/db" else []
 
 
-async def _unlisted_stat(_accessor, path, _index=None):
+async def _unlisted_stat(path: PathSpec) -> FileStat:
     if path.virtual == "/db/link":
         return FileStat(name="link", type=FileType.SYMLINK, size=9)
     return FileStat(name=path.virtual, type=FileType.DIRECTORY)
-
-
-async def _no_bytes(_accessor, _path, _index=None):
-    return b""
-
-
-UNLISTED = CommandIO(
-    readdir=_unlisted_readdir,
-    read_bytes=_no_bytes,
-    read_stream=_no_bytes,
-    stat=_unlisted_stat,
-    is_mounted=lambda _a: True,
-)
 
 
 class _OneLink:
@@ -261,11 +287,11 @@ class _OneLink:
         return {}
 
 
-async def _linked(op: str, path: PathSpec, **_):
-    if op == "stat" and path.virtual == "/db/private/f":
-        return LINKED, IOResult()
-    if op == "stat" and path.virtual == "/db":
-        return FileStat(name="db", type=FileType.DIRECTORY), IOResult()
+async def _linked(path: PathSpec) -> FileStat:
+    if path.virtual == "/db/private/f":
+        return LINKED
+    if path.virtual == "/db":
+        return FileStat(name="db", type=FileType.DIRECTORY)
     raise FileNotFoundError(path.virtual)
 
 
@@ -274,20 +300,12 @@ async def test_du_L_counts_a_link_whose_file_only_it_reaches():
     # A link into the operand's tree is left to the file's own name, but
     # a directory the walk may not list hides that name, and GNU then
     # counts the file under the link (coreutils 9.7).
-    stream, io = await du(
-        UNLISTED,
-        object(),
-        [_spec("/db")],
-        [],
-        Context(
-            flags={"a": True, "L": True},
-            vfs=Files([], _linked, links=_OneLink()),
-        ),
+    mount = _Mount(
+        readdir=_unlisted_readdir, stat=_unlisted_stat, followed=_linked
     )
-    assert (await materialize(stream)).decode() == (
-        "6\t/db/link\n0\t/db/private\n6\t/db\n"
-    )
-    assert (io.exit_code, (io.stderr or b"").decode()) == (
+    out, code, err = await _du(mount, ["/db"], _OneLink(), a=True, L=True)
+    assert out == "6\t/db/link\n0\t/db/private\n6\t/db\n"
+    assert (code, err) == (
         1,
         "du: cannot read directory '/db/private': Permission denied\n",
     )

@@ -12,44 +12,30 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.sed import sed_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    bound_op,
-)
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def _resolve(
-    ops: CommandIO,
-    accessor: Accessor,
-    index: IndexCacheStore,
-    targets: list[PathSpec],
-) -> list[PathSpec]:
-    return await ops.resolve_glob(accessor, targets, index)
-
-
 async def sed(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    files = command_files(ctx, paths)
     return await sed_generic(
         paths,
         list(texts),
         ctx,
-        partial(_resolve, ops, accessor, ctx.index),
-        bound_op(ops.read_stream, accessor, ctx.index),
-        (partial(ops.write, accessor) if ops.write is not None else None),
+        files.resolve_glob,
+        files.read_stream,
+        (files.write if files.answers("write") else None),
     )
 
 
-BUILDER = GenericCommand("sed", sed)
+BUILDER = GenericCommand("sed", sed, write=True, read=True)

@@ -16,7 +16,7 @@ import { MemoryOAuthClientProvider } from '@struktoai/mirage-core/core/notion/cl
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { OAuthClientMetadata } from '@modelcontextprotocol/client'
 import { describe, expect, it } from 'vitest'
-import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
+import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
 import { NotionVFS } from './notion.ts'
 
 const clientMetadata: OAuthClientMetadata = {

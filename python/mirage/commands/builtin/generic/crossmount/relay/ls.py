@@ -14,12 +14,11 @@
 
 import functools
 
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import flat_scopes
 from mirage.commands.builtin.generic.ls import Stat, ls_options
 from mirage.commands.builtin.generic.ls import ls as generic_ls
-from mirage.commands.builtin.generic_bind.adapter import dispatched_call
+from mirage.commands.builtin.generic_bind.files import dispatched_call
 from mirage.commands.builtin.utils.identity import identity_from
 from mirage.commands.builtin.utils.links import link_view
 from mirage.commands.spec.types import FlagValue
@@ -30,31 +29,20 @@ from mirage.view.types import SessionView
 from mirage.workspace.files import Files
 
 
-async def relayed_readdir(
-    dispatch: DispatchFn,
-    path: PathSpec,
-    index: IndexCacheStore | None,
-) -> list[str]:
-    """Read one directory on the mount that owns it.
-
-    The index argument is accepted and dropped. A cache index belongs to
-    one mount, so the caller's index cannot answer for the mount this
-    path routes to; the relayed op consults its own mount's index. The
-    dispatcher's listing names the links among the entries, as a mount's
-    table does once its links are stamped on.
+async def relayed_readdir(dispatch: DispatchFn, path: PathSpec) -> list[str]:
+    """Read one directory on the mount that owns it, which consults its
+    own index. The dispatcher's listing names the links among the
+    entries.
 
     Args:
         dispatch (DispatchFn): Workspace operation dispatcher.
         path (PathSpec): Directory addressed by its full virtual path.
-        index (IndexCacheStore | None): Unused, see above.
     """
     names: list[str] = await dispatched_call(dispatch, "readdir", path)
     return names
 
 
-async def relayed_stat(
-    dispatch: DispatchFn, path: PathSpec, index: IndexCacheStore | None
-) -> FileStat:
+async def relayed_stat(dispatch: DispatchFn, path: PathSpec) -> FileStat:
     """lstat one entry on the mount that owns it, named by its own path.
 
     readdir supplies the parent's names and stat supplies the target's
@@ -68,7 +56,6 @@ async def relayed_stat(
     Args:
         dispatch (DispatchFn): Workspace operation dispatcher.
         path (PathSpec): Entry addressed by its full virtual path.
-        index (IndexCacheStore | None): Unused, see ``relayed_readdir``.
     """
     info: FileStat = await dispatched_call(
         dispatch, "stat", path, nofollow=True

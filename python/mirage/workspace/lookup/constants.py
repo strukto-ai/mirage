@@ -41,6 +41,10 @@ NAMESPACE_COMMANDS = frozenset({"getfattr", "ln", "readlink", "setfattr"})
 # for `type`, `command -v` and the /usr/bin listing.
 ROUTED_COMMANDS = frozenset({"chgrp", "chmod", "chown", "df", "mount"})
 
+# The namespace and routed programs that change what they name. No mount
+# registers them, so no handler declares the write; policy reads it here.
+WRITING_PROGRAMS = frozenset({"chgrp", "chmod", "chown", "ln", "setfattr"})
+
 # The programs Debian ships as a script that runs another one with an option
 # put first: egrep is `exec grep -E "$@"`, so grep is what parses the line
 # and answers it, its refusals and --help included (grep 3.11, gzip 1.13).

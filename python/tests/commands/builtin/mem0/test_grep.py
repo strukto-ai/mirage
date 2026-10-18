@@ -1,15 +1,11 @@
 import pytest
 from pydantic import SecretStr
 
-from mirage.commands.builtin.backends import commands_for
-from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.builtin.generic_bind.adapter import command_io
-from mirage.commands.config import Context
 from mirage.types import PathSpec
 from mirage.vfs.mem0 import Mem0Config
 from mirage.vfs.mem0.mem0 import Mem0VFS
 from mirage.workspace import Workspace
-from tests.fixtures.driver_ops import ops
+from tests.fixtures.mount_commands import run_on_mount
 
 
 class FakeClient:
@@ -38,21 +34,6 @@ def _res():
     return res
 
 
-def _command(vfs: Mem0VFS, name: str):
-    own = [
-        command.fn
-        for command in commands_for(vfs)
-        if command.name == name and command.filetype is None
-    ]
-    return own[-1] if own else generic(name).fn
-
-
-async def _bytes(source):
-    if source is None or isinstance(source, bytes):
-        return source or b""
-    return b"".join([chunk async for chunk in source])
-
-
 @pytest.mark.asyncio
 async def test_grep_recursive_matches_content():
     # A memory reads from the row the scoped listing names, which the
@@ -64,14 +45,10 @@ async def test_grep_recursive_matches_content():
 
 @pytest.mark.asyncio
 async def test_grep_bare_directory_is_a_directory():
-    res = _res()
     p = PathSpec(virtual="/mem", directory="/mem", vfs_path="")
-    source, io = await _command(res, "grep")(
-        res.accessor,
-        [p],
-        ["bananas"],
-        Context(io=command_io(res), index=ops(res).index),
+    out, io = await run_on_mount(
+        Workspace({"/mem/": _res()}), "grep", [p], ["bananas"]
     )
-    assert await _bytes(source) == b""
+    assert out == b""
     assert io.exit_code == 2
     assert b"Is a directory" in (io.stderr or b"")

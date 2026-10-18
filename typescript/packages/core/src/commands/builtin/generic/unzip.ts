@@ -20,7 +20,6 @@ import { OPERAND } from '../../spec/constants.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { ensureDir, extractDest } from './archive/extract.ts'
-import type { StatFn } from './archive/walk.ts'
 import {
   renderHeader,
   renderRow,
@@ -31,7 +30,7 @@ import {
 } from './archive/zipinfo.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { PathSpec } from '../../../types.ts'
+import { PathSpec, type StatFn } from '../../../types.ts'
 import { ByteSpool } from '../../../io/spool.ts'
 import { OutputStream, asyncChain, yieldBytes, drain } from '../../../io/stream.ts'
 import { inflateRaw, inflateRawStream, crc32 } from '../../../utils/compress.ts'

@@ -12,24 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Accessor } from '../../../accessor/base.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { walkFind, type WalkFindDeps } from '../../../core/generic/find.ts'
 import type { ChildMounts } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { FileType, type PathSpec } from '../../../types.ts'
+import { FileType, type PathSpec, type StatFn } from '../../../types.ts'
 import { isEnotdir, isMissingPath } from '../../../errors/fs.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { readdirOp, statOp } from '../generic/crossmount/utils.ts'
-import type { DirProbe, StatFn, WalkFn } from '../generic/archive/walk.ts'
-import type { CommandIO } from '../../config.ts'
+import type { DirProbe, WalkFn } from '../generic/archive/walk.ts'
+import type { CommandFiles } from './files.ts'
 import { beforeFullScan } from '../utils/tree.ts'
 
 function walkWith(
   readdir: WalkFindDeps['readdir'],
   stat: WalkFindDeps['stat'],
-  index: IndexCacheStore | undefined,
   dispatch: DispatchFn | undefined,
   command: string,
 ): WalkFn {
@@ -37,7 +34,7 @@ function walkWith(
     if (findType === 'f') await beforeFullScan(dispatch, p, command)
     const prefix = mountPrefixOf(p.virtual, p.vfsPath)
     const unreadable: string[] = []
-    const keys = await walkFind(p, { unreadable, readdir, stat }, { type: findType }, index)
+    const keys = await walkFind(p, { unreadable, readdir, stat }, { type: findType })
     const paths = prefix === '' ? keys : keys.map((key) => (key === '/' ? prefix : prefix + key))
     return { paths, unreadable }
   }
@@ -60,19 +57,11 @@ function walkWith(
  * mount that owns the operand may refuse the scan before they are listed.
  */
 export function walkOf(
-  ops: CommandIO,
-  accessor: Accessor,
-  index: IndexCacheStore | undefined,
+  files: CommandFiles,
   dispatch: DispatchFn | undefined,
   command: string,
 ): WalkFn {
-  return walkWith(
-    (spec, i) => ops.readdir(accessor, spec, i),
-    (spec, i) => ops.stat(accessor, spec, i),
-    index,
-    dispatch,
-    command,
-  )
+  return walkWith((spec) => files.readdir(spec), files.stat, dispatch, command)
 }
 
 /**
@@ -100,15 +89,8 @@ function isDirWith(stat: StatFn, readdir: (p: PathSpec) => Promise<string[]>): D
   }
 }
 
-export function isDirOf(
-  ops: CommandIO,
-  accessor: Accessor,
-  index: IndexCacheStore | undefined,
-): DirProbe {
-  return isDirWith(
-    (p) => ops.stat(accessor, p, index),
-    (p) => ops.readdir(accessor, p, index),
-  )
+export function isDirOf(files: CommandFiles): DirProbe {
+  return isDirWith(files.stat, (p) => files.readdir(p))
 }
 
 /**
@@ -148,7 +130,7 @@ export function relayWalkOf(
   owed: ChildMounts | undefined,
   command: string,
 ): WalkFn {
-  return walkWith(ownListing(dispatch, owed), statOp(dispatch), undefined, dispatch, command)
+  return walkWith(ownListing(dispatch, owed), statOp(dispatch), dispatch, command)
 }
 
 // The directory probe tar's `-C` check uses when a line spans mounts.

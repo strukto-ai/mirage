@@ -16,22 +16,25 @@ import base64
 
 import pytest
 
-from mirage.accessor.ram import RAMAccessor
-from mirage.commands.builtin.generic_bind.builders.unzip import unzip
-from mirage.commands.config import Context
-from mirage.core.ram.mkdir import mkdir
-from mirage.core.ram.read import read
-from mirage.core.ram.write import write
-from mirage.types import PathSpec
+from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
-from mirage.vfs.ram.store import RAMStore
-from tests.fixtures.vfs_io import io_for
+from mirage.workspace import Workspace
+from tests.fixtures.mount_commands import run_on_mount
 
 # a/b.txt ("first"), then a/../b.txt ("second"), which Info-ZIP maps onto
 # the same path.
 ARCHIVE = base64.b64decode(
     "UEsDBBQAAAAAAAAAIVwqs0rHBgAAAAYAAAAHAAAAYS9iLnR4dGZpcnN0ClBLAwQUAAAAAAAAACFcfsAPBgcAAAAHAAAACgAAAGEvLi4vYi50eHRzZWNvbmQKUEsBAhQDFAAAAAAAAAAhXCqzSscGAAAABgAAAAcAAAAAAAAAAAAAAIABAAAAAGEvYi50eHRQSwECFAMUAAAAAAAAACFcfsAPBgcAAAAHAAAACgAAAAAAAAAAAAAAgAErAAAAYS8uLi9iLnR4dFBLBQYAAAAAAgACAG0AAABaAAAAAAA="
 )
+
+
+def _ws(files: dict[str, bytes]) -> tuple[Workspace, RAMVFS]:
+    vfs = RAMVFS()
+    vfs._store.dirs.add("/")
+    vfs._store.files.update(files)
+    if any(name.startswith("/a/") for name in files):
+        vfs._store.dirs.add("/a")
+    return Workspace({"/": (vfs, MountMode.WRITE)}), vfs
 
 
 @pytest.mark.asyncio
@@ -44,40 +47,25 @@ ARCHIVE = base64.b64decode(
     ],
     ids=["asks", "never", "overwrite"],
 )
-async def test_unzip_without_a_dispatcher_sees_a_member_it_just_wrote(
-    flags, kept, asked
-):
-    """Without a dispatcher the builder hands the generic the mount's own
-    stat, and a member mapped onto one already written is asked about,
-    kept under -n and replaced under -o, as Info-ZIP does."""
-    accessor = RAMAccessor(RAMStore())
-    await write(accessor, PathSpec.from_str_path("/m.zip"), ARCHIVE)
-    _, io = await unzip(
-        io_for(RAMVFS, accessor),
-        accessor,
-        [PathSpec.from_str_path("/m.zip")],
-        [],
-        Context(flags=flags),
+async def test_unzip_sees_a_member_it_just_wrote(flags, kept, asked):
+    """A member mapped onto one already written is asked about, kept
+    under -n and replaced under -o, as Info-ZIP does."""
+    ws, vfs = _ws({"/m.zip": ARCHIVE})
+    _, io = await run_on_mount(
+        ws, "unzip", [PathSpec.from_str_path("/m.zip")], flags=flags
     )
-    assert await read(accessor, PathSpec.from_str_path("/a/b.txt")) == kept
+    assert vfs._store.files["/a/b.txt"] == kept
     assert io.exit_code == 1
     stderr = bytes(io.stderr or b"")
     assert (b"replace a/b.txt?" in stderr) is asked
 
 
 @pytest.mark.asyncio
-async def test_unzip_without_a_dispatcher_never_replaces_a_file_under_n():
-    """-n asks the mount's stat, so a file there before the run stays."""
-    accessor = RAMAccessor(RAMStore())
-    await write(accessor, PathSpec.from_str_path("/m.zip"), ARCHIVE)
-    await mkdir(accessor, PathSpec.from_str_path("/a"))
-    await write(accessor, PathSpec.from_str_path("/a/b.txt"), b"old\n")
-    _, io = await unzip(
-        io_for(RAMVFS, accessor),
-        accessor,
-        [PathSpec.from_str_path("/m.zip")],
-        [],
-        Context(flags={"n": True}),
+async def test_unzip_never_replaces_a_file_under_n():
+    """-n asks the stat, so a file there before the run stays."""
+    ws, vfs = _ws({"/m.zip": ARCHIVE, "/a/b.txt": b"old\n"})
+    _, io = await run_on_mount(
+        ws, "unzip", [PathSpec.from_str_path("/m.zip")], flags={"n": True}
     )
-    assert await read(accessor, PathSpec.from_str_path("/a/b.txt")) == b"old\n"
+    assert vfs._store.files["/a/b.txt"] == b"old\n"
     assert io.exit_code == 1

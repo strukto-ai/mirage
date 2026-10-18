@@ -96,6 +96,8 @@ config model, a typed CLI accepts no config and receives `None`.
 
 Mark mutating `CLIHandler` bindings `write=True`. This classifies the command for policy and
 cache invalidation; it does not grant permission or perform the mutation.
+Policy reads it as `CommandContext.write`, so one `pre_command` method can
+refuse every writing verb.
 Descriptions, options and operands supply `--help` and `man` at every level.
 
 ## Register the program
@@ -144,6 +146,38 @@ shell `install` or `uninstall` command, so an agent can use a CLI it was given
 but cannot remove it. A deployment that must pin the head word should enforce
 that with policy; shell functions can otherwise shadow it like they do in bash.
 
+## Serve a CLI on a mount
+
+Registered on a mount, a typed CLI serves its verbs there as a command
+tree. Its leaves get the mount's accessor, so the tree declares no
+`config_model`, `accessor`, `script` or `runtime`:
+
+```python
+from mirage import MountMode, RAMVFS
+from mirage.accessor.ram import RAMAccessor
+
+async def tag(accessor: RAMAccessor, paths: list[PathSpec],
+              texts: list[str], ctx: Context) -> tuple[None, IOResult]:
+    accessor.store.files["/" + paths[0].vfs_path] = " ".join(texts).encode()
+    return None, IOResult()
+
+NOTES = CLI(
+    spec=CommandSpec(name="notes", subcommands=(CommandSpec(
+        name="tag",
+        arguments=(Argument("note", type="path"), Argument("tags", nargs="+")),
+    ),)),
+    handlers={"tag": CLIHandler(fn=tag, write=True)},
+)
+
+ws = Workspace({"/notes/": RAMVFS()}, mode=MountMode.WRITE)
+ws.mount("/notes/").register_commands([NOTES])
+```
+
+`notes tag /notes/a.md draft` walks, helps and refuses like an installed
+CLI's line, and runs on the mount that serves `notes`: the working
+directory's, else the first. A VFS hands the same tree to every mount of it
+with `commands=[NOTES]`. Its leaves reach the backend past the dispatcher,
+so the tree follows the rules for a [user command](/python/vfs/new#4-commands).
 
 ## Use workspace files
 

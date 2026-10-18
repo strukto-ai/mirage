@@ -12,39 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PathSpec } from '../../../../types.ts'
-import { mountKey } from '../../../../utils/key_prefix.ts'
 import { mktempGeneric } from '../../generic/mktemp.ts'
-import { pathExists } from '../../utils/copy.ts'
-import { requireOp, type GenericCommand, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
 import { vfsStatPath } from '../../utils/paths.ts'
 
-const mktemp: GenericCommandFn = (ops, accessor, _paths, texts, ctx) => {
+const mktemp: CommandFn = (_accessor, _paths, texts, ctx) => {
   // The name a pathless mktemp creates is under $TMPDIR or /tmp, which the
   // working directory's mount rarely owns, so the create goes through the
-  // dispatcher to whichever mount does. Only a generic run outside a
-  // workspace, with no dispatcher and no other mount, writes through this
-  // mount's own ops. Mirrors Python's builder.
-  const mkdir = requireOp(ops.mkdir, 'mkdir')
-  const write = requireOp(ops.write, 'write')
-  const local = (p: PathSpec): PathSpec =>
-    PathSpec.fromStrPath(p.virtual, mountKey(p.virtual, ctx.mountPrefix ?? ''))
-  const statPath = vfsStatPath(ctx.vfs)
+  // dispatcher to whichever mount does. Mirrors Python's builder.
+  const vfs = ctx.vfs
+  if (vfs === undefined) throw new TypeError('mktemp: no workspace files')
+  const statPath = vfsStatPath(vfs)
   return mktempGeneric(
     texts,
     ctx,
     async (p) => {
-      if (ctx.vfs !== undefined) await ctx.vfs.dispatch('mkdir', p, [], { parents: false })
-      else await mkdir(accessor, local(p))
+      await vfs.dispatch('mkdir', p, [], { parents: false })
     },
     async (p, d) => {
-      if (ctx.vfs !== undefined) await ctx.vfs.dispatch('write', p, [d])
-      else await write(accessor, local(p), d)
+      await vfs.dispatch('write', p, [d])
     },
-    async (p) => {
-      if (statPath !== undefined) return (await statPath(p)) !== null
-      return pathExists((at) => ops.stat(accessor, at), local(p))
-    },
+    async (p) => statPath !== undefined && (await statPath(p)) !== null,
   )
 }
 

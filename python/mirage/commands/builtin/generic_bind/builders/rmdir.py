@@ -17,17 +17,14 @@ import logging
 from dataclasses import replace
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    Operation,
-    require_op,
-)
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.links import (
     link_location,
     links_of,
 )
 from mirage.commands.builtin.utils.output import format_optional_records
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import missing_operand_error
@@ -99,19 +96,21 @@ def ancestors(
 
 
 async def rmdir(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    files = command_files(ctx, paths)
     fl = FlagView(ctx.flags, spec=SPECS["rmdir"])
     v = fl.as_bool("verbose")
     ignore = fl.as_bool("ignore_fail_on_non_empty")
-    if not ops.is_mounted(accessor) or not paths:
+    if not paths:
         raise missing_operand_error("rmdir", None)
-    rmdir_fn = require_op(ops, Operation.RMDIR)
-    paths = await ops.resolve_glob(accessor, paths, ctx.index)
+    rmdir_fn = files.rmdir
+    stat = files.stat
+    readdir = files.readdir
+    paths = await files.resolve_glob(paths)
     links = links_of(ctx)
     verbose_parts: list[str] = []
     errors: list[str] = []
@@ -128,15 +127,15 @@ async def rmdir(
                 return "Symbolic link not followed"
             return posix_phrase(FsCondition.ENOTDIR)
         try:
-            s = await ops.stat(accessor, p, index=ctx.index)
+            s = await stat(p)
         except FS_ERRORS as exc:
             return fs_strerror(exc)
         if s.type != FileType.DIRECTORY:
             return posix_phrase(FsCondition.ENOTDIR)
-        if await ops.readdir(accessor, p, index=ctx.index):
+        if await readdir(p):
             return posix_phrase(FsCondition.ENOTEMPTY)
         try:
-            await rmdir_fn(accessor, p, index=ctx.index)
+            await rmdir_fn(p)
         except OSError as exc:
             # The listing above showed the session an empty directory,
             # but the slot may still refuse not-empty: the hidden-

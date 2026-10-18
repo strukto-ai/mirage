@@ -14,19 +14,16 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { Accessor } from '../../../../accessor/base.ts'
-import { RAMIndexCacheStore } from '../../../../cache/index/ram.ts'
-import type { IndexCacheStore } from '../../../../cache/index/store.ts'
-import { IOResult, materialize } from '../../../../io/types.ts'
-import type { DispatchFn } from '../../../../runtime/types.ts'
-import { Files } from '../../../../workspace/files.ts'
-import { FileStat, FileType, PathSpec } from '../../../../types.ts'
+import { runWithMountGate } from '../../../../context/session_context.ts'
+import { materialize } from '../../../../io/types.ts'
+import type { Files } from '../../../../workspace/files.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
 import { eacces, enoent, walkDeclined, walkRefusal } from '../../../../errors/fs.ts'
-import type { CommandIO } from '../../../config.ts'
+import { answeringFiles } from '../../../../test-utils.ts'
 import { generic } from '../factory.ts'
 import { BUILDER } from './rm.ts'
 
 const DEC = new TextDecoder()
-const INDEX = new RAMIndexCacheStore()
 const TREE: Record<string, string[]> = {
   '/m': ['/m/a.txt', '/m/d', '/m/locked'],
   '/m/d': ['/m/d/x.txt'],
@@ -34,49 +31,38 @@ const TREE: Record<string, string[]> = {
 }
 const FILES = new Set(['/m/a.txt', '/m/d/x.txt', '/m/locked/f.txt'])
 
-// eslint-disable-next-line @typescript-eslint/require-await
-async function* emptyStream(): AsyncIterable<Uint8Array> {
-  yield* []
-}
-
-function ops(removed?: string[]): CommandIO {
-  const remove = (_a: Accessor, p: PathSpec): Promise<void> => {
+// A mount that removes nothing unless `removed` is given, whose stat is the
+// dispatcher's: it answers what the session may see.
+function files(removed?: string[]): Files {
+  const remove = (p: PathSpec): null => {
     removed?.push(p.virtual)
-    return Promise.resolve()
+    return null
   }
-  return {
-    readdir: (_a, p) => Promise.resolve(TREE[p.virtual] ?? []),
-    readBytes: () => Promise.resolve(new Uint8Array()),
-    readStream: () => emptyStream(),
-    // Served from the index, as github's is: a stat handed none finds
-    // nothing, however real the file.
-    stat: (_a, p, index?: IndexCacheStore) => {
-      if (index !== INDEX) return Promise.reject(enoent(p.virtual))
-      if (p.virtual.startsWith('/m/locked/')) return Promise.reject(eacces(p.virtual))
-      if (TREE[p.virtual] !== undefined) {
-        return Promise.resolve(new FileStat({ name: p.virtual, type: FileType.DIRECTORY }))
-      }
-      if (FILES.has(p.virtual)) {
-        return Promise.resolve(new FileStat({ name: p.virtual, type: FileType.FILE }))
-      }
-      return Promise.reject(enoent(p.virtual))
+  return answeringFiles({
+    readdir: (p) => TREE[p.virtual] ?? [],
+    stat: (p) => {
+      if (p.virtual.startsWith('/m/locked/')) throw eacces(p.virtual)
+      if (TREE[p.virtual] !== undefined)
+        return new FileStat({ name: p.virtual, type: FileType.DIRECTORY })
+      if (FILES.has(p.virtual)) return new FileStat({ name: p.virtual, type: FileType.FILE })
+      throw enoent(p.virtual)
     },
-    isMounted: () => true,
-    ...(removed === undefined ? {} : { unlink: remove, rmR: remove }),
-  }
+    ...(removed === undefined ? {} : { unlink: remove, rm_r: remove }),
+  })
 }
 
 async function rm(
-  io: CommandIO,
+  vfs: Files,
   paths: string[],
   flags: Record<string, boolean> = {},
 ): Promise<[number, string, string]> {
-  const result = await BUILDER.fn(
-    io,
-    {} as Accessor,
-    paths.map((p) => PathSpec.fromStrPath(p)),
-    [],
-    { stdin: null, flags, cwd: PathSpec.fromStrPath('/'), index: INDEX },
+  const result = await runWithMountGate('/', MountMode.WRITE, async () =>
+    BUILDER.fn(
+      {} as Accessor,
+      paths.map((p) => PathSpec.fromStrPath(p)),
+      [],
+      { stdin: null, flags, cwd: PathSpec.fromStrPath('/'), vfs },
+    ),
   )
   if (result === null) throw new Error('rm returned no result')
   const [out, res] = result
@@ -88,15 +74,15 @@ async function rm(
 }
 
 describe('rm builder', () => {
-  it('stats its operand through the index', async () => {
+  it('stats its operand through the dispatcher', async () => {
     const removed: string[] = []
-    expect(await rm(ops(removed), ['/m/a.txt'])).toEqual([0, '', ''])
+    expect(await rm(files(removed), ['/m/a.txt'])).toEqual([0, '', ''])
     expect(removed).toEqual(['/m/a.txt'])
   })
 
-  it('-v walks the tree through the index', async () => {
+  it('-v walks the tree through the dispatcher', async () => {
     const removed: string[] = []
-    expect(await rm(ops(removed), ['/m/d'], { r: true, v: true })).toEqual([
+    expect(await rm(files(removed), ['/m/d'], { r: true, v: true })).toEqual([
       0,
       "removed '/m/d/x.txt'\nremoved directory '/m/d'\n",
       '',
@@ -107,7 +93,7 @@ describe('rm builder', () => {
   it('-f reports an existing file it cannot remove', async () => {
     // GNU rm -f spares ENOENT and ENOTDIR alone: a file
     // that exists on a filesystem refusing the unlink fails under -f too.
-    expect(await rm(ops(), ['/m/a.txt', '/m/nope'], { f: true })).toEqual([
+    expect(await rm(files(), ['/m/a.txt', '/m/nope'], { f: true })).toEqual([
       1,
       '',
       "rm: cannot remove '/m/a.txt': Operation not supported\n",
@@ -116,7 +102,7 @@ describe('rm builder', () => {
 
   it('reports a refused stat in its own words and removes the rest', async () => {
     const removed: string[] = []
-    expect(await rm(ops(removed), ['/m/locked/f.txt', '/m/a.txt'], { f: true })).toEqual([
+    expect(await rm(files(removed), ['/m/locked/f.txt', '/m/a.txt'], { f: true })).toEqual([
       1,
       '',
       "rm: cannot remove '/m/locked/f.txt': Permission denied\n",
@@ -138,24 +124,18 @@ it.each([
 ] as const)(
   'rm handles a refused operand under -f=%s (%s) and continues',
   async (force, refusal, raw, code, err) => {
-    const stat = vi.fn((_accessor: unknown, path: PathSpec) =>
-      path.walkError !== null
-        ? Promise.reject(walkRefusal(path))
-        : Promise.resolve(new FileStat({ name: 'ok', type: FileType.FILE })),
-    )
-    const unlink = vi.fn(() => Promise.resolve())
-    const io: CommandIO = {
-      readdir: () => Promise.resolve([]),
-      readBytes: () => Promise.resolve(new Uint8Array()),
-      readStream: () => {
-        throw new Error('unexpected read')
-      },
+    const stat = vi.fn((path: PathSpec) => {
+      if (path.walkError !== null) throw walkRefusal(path)
+      return new FileStat({ name: 'ok', type: FileType.FILE })
+    })
+    const unlink = vi.fn(() => null)
+    const vfs = answeringFiles({
+      readdir: () => [],
       stat,
       unlink,
       rmdir: unlink,
-      rmR: unlink,
-      isMounted: () => true,
-    }
+      rm_r: unlink,
+    })
     const command = generic('rm')
     const refused = new PathSpec({
       virtual: '/data',
@@ -165,12 +145,14 @@ it.each([
       walkError: refusal,
     })
     const valid = PathSpec.fromStrPath('/data/ok')
-    const result = await command.fn({} as Accessor, [refused, valid], [], {
-      flags: { f: force },
-      stdin: null,
-      cwd: PathSpec.fromStrPath('/'),
-      io,
-    })
+    const result = await runWithMountGate('/', MountMode.WRITE, async () =>
+      command.fn({} as Accessor, [refused, valid], [], {
+        flags: { f: force },
+        stdin: null,
+        cwd: PathSpec.fromStrPath('/'),
+        vfs,
+      }),
+    )
     await materialize(result?.[0] ?? null)
     expect(result?.[1].exitCode).toBe(code)
     expect(new TextDecoder().decode(await materialize(result?.[1].stderr ?? null))).toBe(err)
@@ -182,44 +164,38 @@ it.each([
 // Mirrors test_rm_r_names_a_mount_below_and_fails.
 it('rm -r names a mount below and fails', async () => {
   const tree: Record<string, string[]> = { '/data': ['/data/a.txt', '/data/inner'] }
-  const unlink = vi.fn(() => Promise.resolve())
-  const rmdir = vi.fn(() => Promise.resolve())
-  const io: CommandIO = {
-    readdir: (_a, path) => Promise.resolve(tree[path.virtual] ?? []),
-    readBytes: () => Promise.resolve(new Uint8Array()),
-    readStream: () => {
-      throw new Error('unexpected read')
-    },
-    stat: (_a, path) =>
-      Promise.resolve(
+  const unlink = vi.fn((_path: PathSpec) => null)
+  const rmdir = vi.fn(() => null)
+  const vfs = answeringFiles(
+    {
+      readdir: (path) => tree[path.virtual] ?? [],
+      stat: (path) =>
         new FileStat({
           name: path.virtual,
           type: path.virtual in tree ? FileType.DIRECTORY : FileType.FILE,
         }),
-      ),
-    unlink,
-    rmdir,
-    rmR: (_a, path) => Promise.reject(walkDeclined('s3', 'rm_r', path)),
-    isMounted: () => true,
-  }
-  const dispatchNothing: DispatchFn = () => Promise.resolve([null, new IOResult()])
+      unlink,
+      rmdir,
+      rm_r: (path) => {
+        throw walkDeclined('s3', 'rm_r', path)
+      },
+    },
+    { prefixes: () => ['/data/', '/data/inner/'] },
+  )
   const command = generic('rm')
-  const result = await command.fn({} as Accessor, [PathSpec.fromStrPath('/data')], [], {
-    flags: { r: true },
-    stdin: null,
-    cwd: PathSpec.fromStrPath('/'),
-    io,
-    vfs: new Files(dispatchNothing, null, null, () => null, {
-      prefixes: () => ['/data/', '/data/inner/'],
+  const result = await runWithMountGate('/data/', MountMode.WRITE, async () =>
+    command.fn({} as Accessor, [PathSpec.fromStrPath('/data')], [], {
+      flags: { r: true },
+      stdin: null,
+      cwd: PathSpec.fromStrPath('/'),
+      vfs,
     }),
-  })
+  )
   await materialize(result?.[0] ?? null)
   expect(result?.[1].exitCode).toBe(1)
   expect(new TextDecoder().decode(await materialize(result?.[1].stderr ?? null))).toBe(
     "rm: skipping '/data/inner', since it's on a different device\n",
   )
-  expect(unlink.mock.calls.map((call) => (call as unknown[])[1])).toEqual([
-    PathSpec.fromStrPath('/data/a.txt'),
-  ])
+  expect(unlink.mock.calls.map((call) => call[0])).toEqual([PathSpec.fromStrPath('/data/a.txt')])
   expect(rmdir).not.toHaveBeenCalled()
 })

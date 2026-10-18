@@ -14,20 +14,9 @@
 
 import type { ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { splitAssignment } from '../../../../../core/awk/builtins.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
-import { isStdin } from '../../../utils/stream.ts'
+import { homeOperand } from '../../awk.ts'
 import { Cmd, type CrossResult, type RunSingle } from '../types.ts'
-
-/** The operand whose mount runs the program: its first file. */
-function homeOperand(scopes: PathSpec[]): PathSpec | null {
-  for (const scope of scopes) {
-    if (scope.rawPath !== '' && !isStdin(scope) && splitAssignment(scope.rawPath) === null) {
-      return scope
-    }
-  }
-  return scopes[0] ?? null
-}
 
 /**
  * Run one awk over operands that span mounts, ARGV intact. awk tells its

@@ -200,9 +200,11 @@ jobs:
 
       # One import direction: backends and what they are built from
       # (accessor, cache, core, utils, view, vfs) never import commands or
-      # the workspace, and TypeScript loads no module in a loop. The
-      # excused edges and the type-only cycles are a ratchet like the two
-      # above.
+      # the workspace; no command or CLI module imports a VFS object (a
+      # VFS module, the mount table, the caches); a CLI imports only its
+      # own service's client; and TypeScript loads no module in a loop.
+      # The excused edges and the type-only cycles are a ratchet like the
+      # two above.
       - name: Import direction
         run: |
           ./python/.venv/bin/python scripts/check_import_direction.py --selftest

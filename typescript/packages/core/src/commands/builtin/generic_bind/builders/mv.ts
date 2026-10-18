@@ -13,31 +13,28 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { transferLinksOf } from '../../generic/crossmount/utils.ts'
-import type { PathSpec } from '../../../../types.ts'
 import { mvGeneric, parseFlags } from '../../generic/mv.ts'
-import type { GenericCommand, GenericCommandFn } from '../adapter.ts'
-import { refuseReveal, requireOp, resolveGlobOf } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, refuseReveal } from '../files.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
-import { linksOf, mountsOf } from '../../utils/links.ts'
-import { namespaceOf } from '../../../../workspace/files.ts'
+import { linksOf, mountsOf, visibilityOf } from '../../utils/links.ts'
 
-const mv: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const rename = requireOp(ops.rename, 'rename')
-  const idx = ctx.index ?? undefined
+const mv: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
   const parsed = parseFlags(new FlagView(ctx.flags, specOf('mv')))
   const mounts = mountsOf(ctx)
   const links = linksOf(ctx)
   return mvGeneric(
-    await resolveGlobOf(ops)(accessor, paths, idx),
-    (p: PathSpec) => ops.stat(accessor, p, idx),
-    { rename: (src: PathSpec, target: PathSpec) => rename(accessor, src, target) },
+    await files.resolveGlob(paths),
+    files.stat,
+    { rename: files.rename },
     parsed,
-    idx,
     undefined,
-    (p: PathSpec) => ops.readdir(accessor, p, idx),
+    files.readdir,
     (src, dst) => {
-      refuseReveal(src, dst, ops.access)
+      refuseReveal(src, dst, ctx.session?.access())
     },
     links === undefined || ctx.vfs === undefined
       ? undefined
@@ -45,7 +42,7 @@ const mv: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
           links,
           ctx.vfs.dispatch,
           ctx.cwd.virtual,
-          namespaceOf(ctx.vfs).vis() ?? undefined,
+          visibilityOf(ctx.vfs) ?? undefined,
         ),
     ctx.stdin,
     mounts === undefined ? undefined : (p: string) => mounts.isRoot(p),

@@ -26,6 +26,7 @@ import { READ_FAILURES } from '../../../errors/constants.ts'
 import { fsStrerror, isEisdir, isEnoent, isFsError } from '../../../errors/fs.ts'
 import { shellQuote } from '../../../utils/quote.ts'
 import { splitLines } from '../utils/lines.ts'
+import { mountRoot } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -683,7 +684,7 @@ export async function patchGeneric(
   const parsed = parseFlags(ctx.flags)
   if (paths.length > 2) throw extraOperandError(CommandName.PATCH, paths[2]?.rawPath ?? '')
   const { strip: stripCount, reverse: reverseMode, forward: forwardOnly, inputPath } = parsed
-  const mountPrefix = ctx.mountPrefix ?? ''
+  const mountPrefix = mountRoot(ctx)
   // `patch [ORIGFILE [PATCHFILE]]`: the second operand is the patch file,
   // ahead of -i, and the first is the one file every hunk goes to in place
   // of the names the patch's headers carry. A `-i` classified as a path

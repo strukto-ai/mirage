@@ -1,10 +1,8 @@
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.core.dev.constants import ZERO_CHUNK_SIZE
 from mirage.core.dev.read import read
 from mirage.core.dev.stat import stat
-from mirage.core.dev.stream import read_stream
 from mirage.types import DEVICE_NUMBERS_KEY, ContentType, FileType, PathSpec
 from mirage.vfs.dev.store import DevStore
 
@@ -49,23 +47,6 @@ async def test_zero_ranged_read_is_exact():
 async def test_zero_whole_read_refuses():
     with pytest.raises(OSError):
         await read(_accessor(), _spec("zero"))
-
-
-@pytest.mark.asyncio
-async def test_zero_stream_is_endless_and_stops_when_the_reader_stops():
-    seen = 0
-    async for chunk in read_stream(_accessor(), _spec("zero")):
-        assert chunk == b"\x00" * ZERO_CHUNK_SIZE
-        seen += 1
-        if seen == 3:
-            break
-    assert seen == 3
-
-
-@pytest.mark.asyncio
-async def test_null_stream_is_empty():
-    chunks = [c async for c in read_stream(_accessor(), _spec("null"))]
-    assert chunks == []
 
 
 @pytest.mark.asyncio

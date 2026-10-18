@@ -21,7 +21,7 @@ import { PathSpec } from '../../../../types.ts'
 import { decodeBase64 } from '../../../../utils/base64.ts'
 import { RAMStore } from '../../../../vfs/ram/store.ts'
 import type { Context } from '../../../config.ts'
-import { ioFor } from '../../../../test-utils.ts'
+import { onMount, vfsOver } from '../../../../test-utils.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { BUILDER } from './unzip.ts'
 
@@ -47,12 +47,8 @@ async function run(
     await mkdir(accessor, PathSpec.fromStrPath('/a'))
     await write(accessor, PathSpec.fromStrPath('/a/b.txt'), ENC.encode(before))
   }
-  const result = await BUILDER.fn(
-    ioFor(RAMVFS, accessor),
-    accessor,
-    [PathSpec.fromStrPath('/m.zip')],
-    [],
-    ctx(flags),
+  const result = await onMount(vfsOver(RAMVFS, accessor), (files) =>
+    BUILDER.fn(accessor, [PathSpec.fromStrPath('/m.zip')], [], { ...ctx(flags), vfs: files }),
   )
   if (result === null) throw new Error('unzip returned nothing')
   const [, io] = result
@@ -60,8 +56,8 @@ async function run(
   return [kept, io.exitCode, DEC.decode(await io.materializeStderr())]
 }
 
-describe('unzip without a dispatcher', () => {
-  // The builder hands the generic the mount's own stat, and a member mapped
+describe('unzip on its mount', () => {
+  // The builder hands the generic the dispatcher's stat, and a member mapped
   // onto one already written is asked about, kept under -n and replaced
   // under -o, as Info-ZIP does. Mirrors test_unzip.py.
   it.each([

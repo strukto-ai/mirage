@@ -14,20 +14,21 @@
 
 import { searchReads } from '../search.ts'
 import { treeWalk } from '../../utils/tree.ts'
-import type { FileStat, PathSpec } from '../../../../types.ts'
+import type { FileStat } from '../../../../types.ts'
 
 import { prefixAggregate } from '../../aggregators.ts'
 import { grepGeneric } from '../../generic/grep.ts'
-import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, resolveOrEmpty } from '../files.ts'
 
-const grep: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  const { readTree } = ops
+const grep: CommandFn = async (_accessor, paths, texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
   const [readdir, stat] = treeWalk<string[], FileStat>(
-    readTree === undefined ? undefined : (p) => readTree(accessor, p, idx),
-    (p: PathSpec) => ops.readdir(accessor, p, idx),
-    (p: PathSpec) => ops.stat(accessor, p, idx),
+    files.answers('read_tree') ? files.readTree : undefined,
+    (p) => files.readdir(p),
+    files.stat,
   )
   return grepGeneric(
     'grep',
@@ -36,7 +37,7 @@ const grep: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
     ctx,
     stat,
     readdir,
-    await searchReads(ops, 'grep', accessor, resolved, texts, ctx),
+    await searchReads(files, 'grep', resolved, texts, ctx),
   )
 }
 

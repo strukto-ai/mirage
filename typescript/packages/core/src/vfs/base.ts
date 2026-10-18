@@ -14,6 +14,7 @@
 
 import { type Accessor, NOOPAccessor } from '../accessor/base.ts'
 import type { Command } from '../commands/config.ts'
+import type { CLI } from '../commands/cli/types.ts'
 import { enotsup } from '../errors/fs.ts'
 import type { ByteSource } from '../io/types.ts'
 import type { CapacityResult, DirListing, FileStat, PathSpec, SetAttrFields } from '../types.ts'
@@ -83,10 +84,11 @@ export interface VFSOptions<A extends Accessor = Accessor> {
   /** Appended to `prompt` when the mount is writable. */
   writePrompt?: string
   /**
-   * Extra commands, from `command({...})`: bespoke verbs, or replacements
-   * that win over the generic command of the same name.
+   * Extra commands, from `command({...})`, or `CLI` trees: bespoke verbs, a
+   * program's verbs as one command tree under its root's name, or
+   * replacements that win over the generic command of the same name.
    */
-  commands?: readonly Command[]
+  commands?: readonly (Command | CLI)[]
   /** Serve repeat reads from the file cache. Read-mostly content only. */
   cachesReads?: boolean
   /**
@@ -273,7 +275,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    */
   readonly accessor: A = NO_ACCESSOR as unknown as A
 
-  readonly #commands: readonly Command[]
+  readonly #commands: readonly (Command | CLI)[]
   #closed = false
 
   /**
@@ -313,8 +315,8 @@ export class BaseVFS<A extends Accessor = Accessor> {
     )
   }
 
-  /** The bespoke commands this VFS was handed. */
-  commands(): readonly Command[] {
+  /** The bespoke commands and command trees this VFS was handed. */
+  commands(): readonly (Command | CLI)[] {
     return this.#commands
   }
 

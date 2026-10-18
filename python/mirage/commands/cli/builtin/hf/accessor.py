@@ -12,13 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.hf_hub import HfAccountAccessor, HfHubAccessor
+from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.hf_hub.constants import API_SEGMENTS, DEFAULT_REVISION
+from mirage.core.hf_hub.constants import API_SEGMENTS
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.vfs.hf_buckets.config import HfRepoConfig
 
 DEFAULT_REPO_TYPE = "model"
 
@@ -39,41 +38,6 @@ def repo_type_of(fl: FlagView) -> str:
     if value not in API_SEGMENTS:
         raise UsageError(f"invalid repo type: {value}")
     return value
-
-
-def hub_for(
-    account: HfAccountAccessor,
-    repo_id: str,
-    repo_type: str,
-    revision: str | None = None,
-) -> HfHubAccessor:
-    """A Hub handle for the repository this line named.
-
-    The CLI builds one per invocation over the install's account rather
-    than owning a second Hub client: the handle only names which
-    repository is being addressed and rides the account's credential,
-    origin and pool, so `hf` gets the mount's tree walk and commit
-    builder for free and one install keeps one pool. It reaches no
-    mount, which is what keeps this an account CLI. A verb reads paths
-    and sizes, never the per-file commit a mount's mtimes come from, so
-    the walk lists bare.
-
-    Args:
-        account (HfAccountAccessor): the install's account.
-        repo_id (str): "namespace/name".
-        repo_type (str): "model", "dataset" or "space".
-        revision (str | None): the revision to read or write.
-
-    Returns:
-        HfHubAccessor: the handle, which borrows the account and needs
-        no close.
-    """
-    repo = HfRepoConfig(
-        repo_id=repo_id,
-        revision=revision or DEFAULT_REVISION,
-        expand_commits=False,
-    )
-    return HfHubAccessor(account, repo, repo_type=repo_type)
 
 
 def require_operands(texts: list[str], names: list[str]) -> None:

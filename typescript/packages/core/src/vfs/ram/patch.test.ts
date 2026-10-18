@@ -12,11 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
+import { onMount } from '../../test-utils.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
 import { patchGeneric } from '../../commands/builtin/generic/patch.ts'
-import { PathSpec } from '../../types.ts'
+import { MountMode, PathSpec } from '../../types.ts'
+import { runWithMountGate } from '../../context/session_context.ts'
+import { Files } from '../../workspace/files.ts'
 import { RAMVFS } from './ram.ts'
 const RAM_PATCH = GENERIC_COMMANDS.filter((c) => c.name === 'patch' && c.filetype == null)
 
@@ -30,12 +32,14 @@ async function runPatch(
 ): Promise<void> {
   const cmd = RAM_PATCH[0]
   if (cmd === undefined) throw new Error('patch not registered')
-  await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
-    stdin,
-    flags,
-    io: commandIo(vfs),
-    cwd: PathSpec.fromStrPath('/'),
-  })
+  await onMount(vfs, (files) =>
+    cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
+      stdin,
+      flags,
+      vfs: files,
+      cwd: PathSpec.fromStrPath('/'),
+    }),
+  )
 }
 
 describe('patch', () => {
@@ -115,16 +119,19 @@ it.each(['', '/data', '/nested/data'])(
       }
       const input = PathSpec.fromStrPath(prefix + '/fix.diff', 'fix.diff')
       const orig = PathSpec.fromStrPath(prefix + '/hello.txt', 'hello.txt')
-      await patchGeneric(
-        source === 'operand' ? [orig, input] : [],
-        {
-          mountPrefix: prefix,
-          cwd: PathSpec.fromStrPath(prefix || '/'),
-          flags: { p: '1', ...(source === 'input' ? { i: input.virtual } : {}) },
-          stdin: source === 'stdin' ? diff : null,
-        },
-        read,
-        write,
+      // The mount the command runs on, as its scope binds it.
+      await runWithMountGate(`${prefix}/`, MountMode.WRITE, () =>
+        patchGeneric(
+          source === 'operand' ? [orig, input] : [],
+          {
+            vfs: new Files(() => Promise.reject(new Error('no dispatch'))),
+            cwd: PathSpec.fromStrPath(prefix || '/'),
+            flags: { p: '1', ...(source === 'input' ? { i: input.virtual } : {}) },
+            stdin: source === 'stdin' ? diff : null,
+          },
+          read,
+          write,
+        ),
       )
       expect(seen).toContain('hello.txt')
       expect(DEC.decode(files.get('hello.txt'))).toBe('hello\nuniverse\n')

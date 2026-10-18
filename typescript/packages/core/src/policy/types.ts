@@ -593,6 +593,15 @@ export interface CommandContext {
    * admission fires again there. Absent reads as false.
    */
   walks?: boolean
+  /**
+   * Whether the handler this command resolves to declares that it may
+   * change state (`CLIHandler.write`, `Command.write`): an installed CLI's
+   * or a mount tree's leaf as the walk names it, a mount command as the
+   * mount that would run it resolves it. False for a shell builtin, a
+   * function, an external program and an unknown name. Absent reads as
+   * false.
+   */
+  write?: boolean
   /** The session, read only: a write through it is refused. Filled when a method is asked. */
   session?: SessionView
 }

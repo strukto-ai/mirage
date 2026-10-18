@@ -40,6 +40,7 @@ import {
   SPLIT_HEX_DIGITS,
   UINTMAX,
 } from '../constants.ts'
+import { mountRoot } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
 // The three -n modes: byte chunks, line-preserving chunks, round robin.
@@ -356,7 +357,7 @@ export async function splitGeneric(
   const prefixVirtual =
     prefixOperand !== undefined ? prefixVirtualOf(prefixOperand) : resolvePath('x', ctx.cwd.virtual)
   const typedPrefix = prefixOperand?.rawPath ?? 'x'
-  const mountPrefix = ctx.mountPrefix ?? ''
+  const mountPrefix = mountRoot(ctx)
   const linesValue = fl.asStr('lines')
   const bytesValue = fl.asStr('bytes')
   const numberValue = fl.asStr('number')

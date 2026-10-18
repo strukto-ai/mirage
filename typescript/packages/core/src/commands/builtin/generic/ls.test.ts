@@ -14,7 +14,8 @@
 
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
+import { runWithMountGate } from '../../../context/session_context.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import { Files } from '../../../workspace/files.ts'
@@ -183,16 +184,17 @@ describe('structure-only directories', () => {
   // A structure chain (a link's ancestors) continues below the first
   // level, so -R descends it: only a mount root stops the walk.
   it('-R descends structure that continues below', async () => {
-    const result = await lsGeneric(
-      [PathSpec.fromStrPath('/ghost')],
-      {
-        flags: { recursive: true },
-        cwd: PathSpec.fromStrPath('/'),
-        io: {},
-        vfs: owing('/ghost/deep/lnk/'),
-      } as never,
-      missing,
-      missing,
+    const result = await runWithMountGate('/', MountMode.WRITE, () =>
+      lsGeneric(
+        [PathSpec.fromStrPath('/ghost')],
+        {
+          flags: { recursive: true },
+          cwd: PathSpec.fromStrPath('/'),
+          vfs: owing('/ghost/deep/lnk/'),
+        } as never,
+        missing,
+        missing,
+      ),
     )
     expect(result?.[1].exitCode).toBe(LS_OK)
     expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/ghost:\ndeep\n\n/ghost/deep:\nlnk\n')
@@ -201,17 +203,18 @@ describe('structure-only directories', () => {
   // Absence of the dispatcher can only mean "nobody can answer", so the row keeps
   // the shape every caller outside a workspace already saw.
   it('falls back to a directory row with no dispatcher', async () => {
-    const result = await lsGeneric(
-      [PathSpec.fromStrPath('/ghost')],
-      {
-        flags: { classify: true },
-        cwd: PathSpec.fromStrPath('/'),
-        io: {},
-        vfs: owing('/ghost/deep/'),
-      } as never,
-      missing,
-      missing,
-      null,
+    const result = await runWithMountGate('/', MountMode.WRITE, () =>
+      lsGeneric(
+        [PathSpec.fromStrPath('/ghost')],
+        {
+          flags: { classify: true },
+          cwd: PathSpec.fromStrPath('/'),
+          vfs: owing('/ghost/deep/'),
+        } as never,
+        missing,
+        missing,
+        null,
+      ),
     )
     expect(result?.[1].exitCode).toBe(LS_OK)
     expect(DEC.decode(result?.[0] as Uint8Array)).toBe('deep/\n')

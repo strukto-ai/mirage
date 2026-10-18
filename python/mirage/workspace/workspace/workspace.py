@@ -205,6 +205,7 @@ from mirage.workspace.workspace.execute import (
 )
 from mirage.workspace.workspace.explainer import Explainer
 from mirage.workspace.workspace.failure import placement_refused
+from mirage.workspace.workspace.fill import fill_env
 from mirage.workspace.workspace.kernel_mounts import KernelMounts
 from mirage.workspace.workspace.lifecycle import (
     CloseDeps,
@@ -268,6 +269,7 @@ class Workspace:
             IOConfig.model_validate({} if io is None else io)
         )
         self._registry.process_view = self._process_view
+        self._registry.fill_env = self._fill_tree_env
         self._registry.command_limits = dict(command_limits or {})
         # The permission profiles: one per name, and the one a session
         # gets when it names none. A profile is the whole document a
@@ -748,6 +750,23 @@ class Workspace:
                 self._secret_sources_task = None
         self._secret_sources_built = built
         return built
+
+    async def _fill_tree_env(
+        self, session: SessionState, names: frozenset[str]
+    ) -> None:
+        """Fetch the managed names a tree a mount serves reads.
+
+        The line's own fill cannot tell which mount's tree a head word
+        reaches, since a ``cd`` before it on the line picks another, so
+        the executor asks here once it has picked the mount. Like the
+        line's fill, a failed fetch raises SecretsError.
+
+        Args:
+            session (SessionState): the session the command runs in.
+            names (frozenset[str]): the tree's invoked env names.
+        """
+        if names and self._has_managed_env:
+            await fill_env(session, names, await self._secret_sources())
 
     @property
     def _has_managed_env(self) -> bool:

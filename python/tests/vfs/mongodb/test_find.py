@@ -17,21 +17,15 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.config import Context
 from mirage.core.mongodb.types import EntityKind
-from mirage.io.types import materialize
 from mirage.types import PathSpec
 from mirage.vfs.mongodb import MongoDBVFS
 from mirage.vfs.mongodb.config import MongoDBConfig
-from tests.fixtures.vfs_io import io_for
+from mirage.workspace import Workspace
+from tests.fixtures.mount_commands import run_on_mount
+from tests.fixtures.vfs_io import vfs_over
 
 MOUNT = "/mongo"
-
-
-def _find_command():
-    return generic("find").fn
 
 
 def _spec(virtual: str) -> PathSpec:
@@ -88,18 +82,8 @@ async def _run(paths: list[PathSpec], *texts: str, **flags) -> list[str]:
     accessor = MongoDBAccessor(
         config=MongoDBConfig(uri="mongodb://localhost:27017")
     )
-    find = _find_command()
-    stdout, _io = await find(
-        accessor,
-        paths,
-        list(texts),
-        Context(
-            io=io_for(MongoDBVFS, accessor),
-            index=RAMIndexCacheStore(),
-            flags={**flags},
-        ),
-    )
-    data = await materialize(stdout)
+    ws = Workspace({MOUNT + "/": vfs_over(MongoDBVFS, accessor)})
+    data, _io = await run_on_mount(ws, "find", paths, texts, flags)
     return data.decode().splitlines()
 
 

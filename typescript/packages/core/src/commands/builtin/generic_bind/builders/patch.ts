@@ -13,19 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { patchGeneric } from '../../generic/patch.ts'
-import {
-  type GenericCommand,
-  dirAwareStat,
-  requireOp,
-  resolveGlobOf,
-  type GenericCommandFn,
-} from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, dirAwareStat, resolveOrEmpty } from '../files.ts'
 
-const patch: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const write = requireOp(ops.write, 'write')
-  const stat = dirAwareStat(ops, accessor, ctx)
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+const patch: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const stat = dirAwareStat(files, ctx)
+  const resolved = await resolveOrEmpty(files, paths)
   // Stat first, as GNU patch does: a directory is refused before it is
   // read, because a store whose read of a collection answers a page
   // (nextcloud) never raises for one. Mirrors Python's patch builder.
@@ -34,9 +29,9 @@ const patch: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
     ctx,
     async (p) => {
       await stat(p)
-      return ops.readBytes(accessor, p, idx)
+      return files.readBytes(p)
     },
-    (p, d) => write(accessor, p, d),
+    (p, d) => files.write(p, d),
   )
 }
 

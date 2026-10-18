@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from functools import partial
 
 import pytest
 
@@ -28,7 +29,9 @@ from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
-resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
+
+def resolve_glob(accessor, paths, index=None):
+    return make_resolve_glob(partial(readdir, accessor), SCOPE_ERROR)(paths)
 
 
 @command("stat", vfs="disk", spec=SPECS["stat"], filetype=".zzz")

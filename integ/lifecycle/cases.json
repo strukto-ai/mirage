@@ -6089,6 +6089,107 @@
           }
         }
       ]
+    },
+    {
+      "id": "commands-registered-later-are-held-like-handed-ones",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/work": {
+            "vfs": "ram",
+            "config": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "register_command",
+          "path": "/work",
+          "name": "probe",
+          "stdout": "ran\n"
+        },
+        {
+          "op": "register_command",
+          "path": "/work",
+          "name": "stamp",
+          "write": true,
+          "stdout": "stamped\n"
+        },
+        {
+          "op": "exec",
+          "command": "cd /work && probe",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "ran\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "set_profile",
+          "profile": {
+            "paths": {
+              "hide": [
+                "/work/secret.txt"
+              ]
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "cd /work && probe",
+          "expect": {
+            "value": {
+              "exit_code": 127,
+              "stdout": "",
+              "stderr": "probe: command cannot enforce this session's file restrictions\n"
+            }
+          }
+        },
+        {
+          "op": "set_profile",
+          "profile": {}
+        },
+        {
+          "op": "exec",
+          "command": "cd /work && probe",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "ran\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "set_mode",
+          "path": "/work",
+          "mode": "read"
+        },
+        {
+          "op": "exec",
+          "command": "cd /work && stamp",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "",
+              "stderr": "stamp: read-only mount at /work/\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "cd /work && probe",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "ran\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
     }
   ]
 }

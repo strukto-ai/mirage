@@ -35,7 +35,7 @@ from mirage.commands.builtin.generic.rg import (
     between_files as rg_between_files,
 )
 from mirage.commands.builtin.generic.rg import parse_flags as parse_rg_flags
-from mirage.commands.builtin.generic_bind.adapter import dispatched_call
+from mirage.commands.builtin.generic_bind.files import dispatched_call
 from mirage.commands.builtin.grep_binary import group_line
 from mirage.commands.builtin.utils.stream import is_stdin
 from mirage.commands.spec import SPECS

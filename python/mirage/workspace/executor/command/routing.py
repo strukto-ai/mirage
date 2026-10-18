@@ -13,11 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dataclasses
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from mirage.commands.builtin.find_parse import find_expr_tail
 from mirage.commands.builtin.generic.grep import directories_action
 from mirage.commands.builtin.generic.program import FILE_KEYS
+from mirage.commands.cli.types import CLI
 from mirage.commands.cli.walk import walk
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.builtins import is_builtin_grammar
@@ -163,6 +164,56 @@ def path_flag_scopes(
     ]
 
 
+def tree_path_scopes(
+    registry: MountRegistry,
+    name: str,
+    argv: Sequence[str],
+    cwd: str,
+    env: Mapping[str, str] | None = None,
+) -> list[PathSpec]:
+    """The path-valued options a command tree's walk resolves.
+
+    ``path_flag_scopes`` reads the built-in specs, which hold no tree, and
+    a tree's words are classified as its walk reads them, its group
+    options as text. So a tree's group options and its leaf's are read
+    here, walked as the run walks them: ``notes --file /data/secret show``
+    hands the leaf ``/data/secret``, and a rule protecting it has to see
+    it.
+
+    Args:
+        registry (MountRegistry): registry holding the CLI installs and
+            the mounts.
+        name (str): expanded command name.
+        argv (Sequence[str]): the words after it, as typed.
+        cwd (str): session working directory.
+        env (Mapping[str, str] | None): session environment, which fills
+            options the walk needs to reach the leaf.
+    """
+    tree = command_tree(registry, name, cwd)
+    if tree is None:
+        return []
+    result = walk(name, tree.spec, list(argv), cwd, env)
+    if result.leaf is None:
+        return []
+    found: list[PathSpec] = []
+    for value in result.group_flags.values():
+        items = value if isinstance(value, list) else [value]
+        found += [item for item in items if isinstance(item, PathSpec)]
+    leaf = parse_command(
+        result.leaf,
+        list(result.argv),
+        cwd,
+        name,
+        env,
+        unknown_is_operand=True,
+    )
+    found += [
+        PathSpec(virtual=value, directory=value, vfs_path="", raw_path=value)
+        for value in leaf.path_flag_values
+    ]
+    return found
+
+
 def positional_scopes(
     cmd_name: str, argv: list[str], cwd: str, words: list[str | PathSpec]
 ) -> list[PathSpec]:
@@ -292,18 +343,45 @@ def merge_scopes(
     return merged
 
 
+def command_tree(registry: MountRegistry, name: str, cwd: str) -> CLI | None:
+    """The command tree a head word walks: an installed CLI's, else one
+    the mount serving the name registered (``MountEntry.cli_for``).
+
+    A tree on a mount runs on the mount that serves its name, the working
+    directory's when it has one, else the first that does, never by
+    operand path: its walk, not a spec, says which words are paths.
+
+    Args:
+        registry (MountRegistry): registry holding the CLI installs and
+            the mounts.
+        name (str): expanded command name.
+        cwd (str): session working directory.
+    """
+    install = registry.clis.get(name)
+    if install is not None:
+        return install.cli
+    mount = registry.command_mount(name, [], cwd)
+    tree = mount.cli_for(name) if mount is not None else None
+    return tree if isinstance(tree, CLI) else None
+
+
 def program_tokens(
-    registry: MountRegistry, name: str, argv: Sequence[str], cwd: str
+    registry: MountRegistry,
+    name: str,
+    argv: Sequence[str],
+    cwd: str,
+    env: Mapping[str, str] | None = None,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """The line as an admission pattern reads it, and the program it runs.
 
-    For an installed CLI head the spec walk names the verb path (global
-    options before the verb dropped, an alias canonicalized) and hands
-    back the leaf's own words, so ``git -C /r push origin`` reads as
-    ``git push origin`` and a rule on ``git push`` catches it; a walk
-    the tree refuses (unknown verb, bare group, usage error) reads the
-    raw words, since the line fails on its own. Anything else is the
-    name and the raw argv, and the program is the bare name.
+    For a command tree's head (an installed CLI, or a tree a mount
+    serves) the spec walk names the verb path (global options before the
+    verb dropped, an alias canonicalized) and hands back the leaf's own
+    words, so ``git -C /r push origin`` reads as ``git push origin`` and
+    a rule on ``git push`` catches it; a walk the tree refuses (unknown
+    verb, bare group, usage error) reads the raw words, since the line
+    fails on its own. Anything else is the name and the raw argv, and
+    the program is the bare name.
 
     Args:
         registry (MountRegistry): registry holding the CLI installs.
@@ -311,10 +389,13 @@ def program_tokens(
         argv (Sequence[str]): the words after it.
         cwd (str): session working directory, for the walk's PATH-typed
             group values.
+        env (Mapping[str, str] | None): session environment, which fills
+            a group option declaring ``Argument.env`` as the run's walk
+            does.
     """
-    install = registry.clis.get(name)
-    if install is not None:
-        result = walk(name, install.cli.spec, argv, cwd)
+    tree = command_tree(registry, name, cwd)
+    if tree is not None:
+        result = walk(name, tree.spec, argv, cwd, env)
         if result.leaf is not None:
             program = (name, *result.path)
             return (*program, *result.argv), program
@@ -360,13 +441,15 @@ def command_words(
     classified: Sequence[str | PathSpec],
     redirects: Sequence[PathSpec],
     cwd: str,
+    env: Mapping[str, str] | None = None,
 ) -> tuple[CommandWord, ...]:
     """The command line word by word, each with its kind and the path
     it names.
 
-    The name comes first and the redirect targets last. An installed
-    CLI's verbs are read off its tree and its leaf's words off the
-    leaf's grammar; any other command's words off its own spec.
+    The name comes first and the redirect targets last. A command
+    tree's verbs (an installed CLI's, or a mount's) are read off the tree
+    and its leaf's words off the leaf's grammar; any other command's
+    words off its own spec.
 
     Args:
         registry (MountRegistry): registry holding the CLI installs.
@@ -377,14 +460,15 @@ def command_words(
         redirects (Sequence[PathSpec]): the statement's redirect
             targets.
         cwd (str): working directory the line was typed under.
+        env (Mapping[str, str] | None): session environment, which fills
+            a group option declaring ``Argument.env`` as the run's walk
+            does.
     """
-    install = registry.clis.get(name)
+    tree = command_tree(registry, name, cwd)
     result = (
-        walk(name, install.cli.spec, argv, cwd)
-        if install is not None
-        else None
+        walk(name, tree.spec, argv, cwd, env) if tree is not None else None
     )
-    if install is not None and result is not None and result.leaf is not None:
+    if result is not None and result.leaf is not None:
         lead = len(argv) - len(result.argv)
         kinds = [
             *(

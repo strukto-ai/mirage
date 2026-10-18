@@ -13,20 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { gzipGeneric } from '../../generic/gzip.ts'
-import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, resolveOrEmpty } from '../files.ts'
 
-const gzip: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const write = requireOp(ops.write, 'write')
-  const unlink = requireOp(ops.unlink, 'unlink')
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+const gzip: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
   return gzipGeneric(
     resolved,
     ctx,
-    (p) => ops.readStream(accessor, p, idx),
-    (p, d) => write(accessor, p, d),
-    (p) => unlink(accessor, p),
-    (p) => ops.stat(accessor, p),
+    files.readStream,
+    (p, d) => files.write(p, d),
+    (p) => files.unlink(p),
+    files.stat,
   )
 }
 

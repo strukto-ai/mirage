@@ -16,107 +16,16 @@ import type { EntryGate } from '../policy/types.ts'
 import { compileSpec } from './spec/compile.ts'
 import type { ProcessView } from '../process/view.ts'
 import type { Accessor } from '../accessor/base.ts'
-import type { IndexCacheStore } from '../cache/index/index.ts'
 import { IOResult, type ByteSource } from '../io/types.ts'
-import type { Limit, PathSpec, WalkProbe } from '../types.ts'
+import type { Limit, PathSpec } from '../types.ts'
 import type { CommandRuntime, ShellFn } from '../runtime/types.ts'
-import type { SessionAccess, FollowOperands, SessionView } from '../view/types.ts'
-import type { TargetStat } from '../utils/glob_walk.ts'
-import type {
-  CopyOp,
-  ExistsOp,
-  FilesContainingOp,
-  FirstLinesOp,
-  FollowOp,
-  LastLinesOp,
-  LineCountOp,
-  ChecksumOp,
-  LinesContainingOp,
-  MkdirOp,
-  PathOp,
-  PwriteOp,
-  ReadBytesOp,
-  ReaddirOp,
-  ReadStreamOp,
-  ReadTreeOp,
-  RenameOp,
-  RmdirOp,
-  SearchOps,
-  SetAttrsOp,
-  StatOp,
-  WriteOp,
-} from '../vfs/types.ts'
+import type { SessionView } from '../view/types.ts'
 import type { AggregateResult } from './builtin/aggregators.ts'
 import { isBuiltinGrammar, registeredSpec } from './spec/builtins.ts'
 import { OWN_OPTION_LOOP } from './spec/constants.ts'
 import { helpPage, versionLine } from './spec/standard.ts'
 import type { CommandSpec, FlagValue } from './spec/types.ts'
 import type { Files } from '../workspace/files.ts'
-
-/**
- * The command tier's table: the mounted VFS's functions, each taking the
- * accessor in front as a command calls it. A slot the VFS does not define
- * is absent. Built per mount by `commandIo`; a command reaches its mount's
- * table through `mountIo`.
- */
-export interface CommandIO<A extends Accessor = Accessor> {
-  admission?: EntryGate | null
-  access?: SessionAccess
-  // What the walk guards prove an operand's `.` and `..` with: the
-  // command's own dispatcher, bound per invocation like `access`, so a
-  // command on the browser fallback storage never walks with another
-  // session's probe.
-  walkProbe?: WalkProbe
-  readdir: ReaddirOp<A>
-  readBytes: ReadBytesOp<A>
-  stat: StatOp<A>
-  readStream: ReadStreamOp<A>
-  readRange?: (
-    accessor: A,
-    path: PathSpec,
-    index: IndexCacheStore | undefined,
-    offset: number,
-    size: number | null,
-  ) => Promise<Uint8Array>
-  exists?: ExistsOp<A>
-  write?: WriteOp<A>
-  append?: WriteOp<A>
-  pwrite?: PwriteOp<A>
-  create?: PathOp<A>
-  mkdir?: MkdirOp<A>
-  unlink?: PathOp<A>
-  rmdir?: RmdirOp<A>
-  rmR?: PathOp<A>
-  rename?: RenameOp<A>
-  copy?: CopyOp<A>
-  dirCopy?: CopyOp<A>
-  /** noCreate requires an atomic existence precondition, or ENOTSUP before writing. */
-  truncate?: (accessor: A, path: PathSpec, length: number, noCreate?: boolean) => Promise<void>
-  setAttrs?: SetAttrsOp<A>
-  isMounted: (accessor: A) => boolean
-  maxGlobMatches?: number
-  maxDuEntries?: number | null
-  search?: SearchOps<A>
-  filesContaining?: FilesContainingOp<A>
-  searchable?: readonly string[] | null
-  linesContaining?: LinesContainingOp<A>
-  firstLines?: FirstLinesOp<A>
-  lastLines?: LastLinesOp<A>
-  lineCount?: LineCountOp<A>
-  checksum?: ChecksumOp<A>
-  follow?: FollowOp<A>
-  readTree?: ReadTreeOp<A>
-  // What a link a glob matched points at, resolved through the workspace.
-  // Stamped per invocation from the session's files by the factory, because
-  // the adapter is built once per backend, so a trailing-slash glob follows
-  // a link the way bash does.
-  globTargetStat?: TargetStat
-  // The line's operand resolution, stamped beside globTargetStat.
-  globFollow?: FollowOperands
-  // Told what each glob resolution answers: the operands the dispatched table
-  // warms a command's reads ahead of.
-  globResolved?: (found: PathSpec[]) => void
-}
 
 /**
  * Everything a handler gets besides its handle and its operands.
@@ -127,8 +36,8 @@ export interface CommandIO<A extends Accessor = Accessor> {
  * judge every call at the workspace dispatcher, as `session.vfs` and a
  * policy's `ctx.vfs` do; the session through `session`. A handler reads the
  * fields it needs and ignores the rest; the workspace builds one per command
- * or CLI, and `Mount.runCommand` adds what only the mount knows (`spec`,
- * `mountPrefix`, `index`, `io`). Mirrors Python's `Context`.
+ * or CLI, and `Mount.runCommand` adds the grammar it resolved (`spec`).
+ * Mirrors Python's `Context`.
  */
 export interface Context {
   /** Piped standard input, if any. */
@@ -156,12 +65,6 @@ export interface Context {
   /** Run a nested line in the calling session, as `sh -c` would (awk's pipes and `system()`). */
   shell?: ShellFn
   admission?: EntryGate | null
-  /** The prefix of the mount running the command. */
-  mountPrefix?: string
-  /** The mount's index cache. */
-  index?: IndexCacheStore | null
-  /** The command table of the mount running the command. */
-  io?: CommandIO
   /**
    * Where an interpreter command runs its code, and what policy lets that
    * code start and load.
@@ -195,7 +98,6 @@ export interface CommandInit {
   aggregate?: AggregateFn | null
   write?: boolean
   limit?: Limit | null
-  pathGuarded?: boolean
 }
 
 export interface CommandOverrides {
@@ -206,8 +108,7 @@ export interface CommandOverrides {
  * One command as a mount registers it: the grammar (with `--help` and
  * `--version` added), the backend it belongs to, the file extension it
  * handles (null for every file), the handler, how to merge a run split
- * across mounts, whether it changes files, its output limit, and whether
- * mount-root policy checks its operands.
+ * across mounts, whether it changes files, and its output limit.
  */
 export class Command {
   readonly name: string
@@ -217,7 +118,6 @@ export class Command {
   readonly fn: CommandFn
   readonly aggregate: AggregateFn | null
   readonly write: boolean
-  readonly pathGuarded: boolean
   readonly limit: Limit | null
 
   constructor(init: CommandInit) {
@@ -228,7 +128,6 @@ export class Command {
     this.fn = init.fn
     this.aggregate = init.aggregate ?? null
     this.write = init.write ?? false
-    this.pathGuarded = init.pathGuarded ?? false
     this.limit = init.limit ?? null
     Object.freeze(this)
   }
@@ -244,7 +143,6 @@ export class Command {
       aggregate: this.aggregate,
       write: this.write,
       limit: this.limit,
-      pathGuarded: this.pathGuarded,
     })
   }
 }
@@ -301,7 +199,6 @@ export interface CommandOptions<A extends Accessor = Accessor> {
   aggregate?: AggregateFn | null
   write?: boolean
   limit?: Limit | null
-  pathGuarded?: boolean
 }
 
 const ENC = new TextEncoder()
@@ -351,7 +248,6 @@ export function command<A extends Accessor = Accessor>(options: CommandOptions<A
         aggregate: options.aggregate ?? null,
         write: options.write ?? false,
         limit: options.limit ?? null,
-        pathGuarded: options.pathGuarded ?? false,
       }),
   )
 }

@@ -13,17 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { joinGeneric } from '../../generic/join.ts'
-import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles } from '../files.ts'
 
-const join: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const resolveGlob = resolveGlobOf(ops)
-  return joinGeneric(
-    paths,
-    ctx,
-    (targets) => resolveGlob(accessor, targets, idx),
-    (p) => ops.readStream(accessor, p, idx),
-  )
+const join: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  return joinGeneric(paths, ctx, files.resolveGlob, files.readStream)
 }
 
 export const BUILDER: GenericCommand = {

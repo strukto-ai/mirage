@@ -50,7 +50,7 @@ async function run(text: string, diff: string): Promise<string> {
   }
   const result = await patchGeneric(
     [],
-    { mountPrefix: '', cwd: PathSpec.fromStrPath('/'), flags: { p: '0' }, stdin: ENC.encode(diff) },
+    { cwd: PathSpec.fromStrPath('/'), flags: { p: '0' }, stdin: ENC.encode(diff) },
     read,
     write,
   )

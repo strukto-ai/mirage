@@ -740,6 +740,12 @@ class CommandContext:
             paths is a mount the line works inside: the executor's
             fan-out reruns the traversal in each descendant mount, and
             no admission fires again there.
+        write (bool): whether the handler this command resolves to
+            declares that it may change state (``CLIHandler.write``,
+            ``Command.write``): an installed CLI's or a mount tree's
+            leaf as the walk names it, a mount command as the mount
+            that would run it resolves it. False for a shell builtin, a
+            function, an external program and an unknown name.
         session (SessionView | None): the session, read only: a write
             through it is refused. Filled when a method is asked.
         vfs (Files | None): the session's files, read only: a write is
@@ -758,6 +764,7 @@ class CommandContext:
     program: tuple[str, ...] = ()
     tool: bool = True
     walks: bool = False
+    write: bool = False
     session: SessionView | None = None
     vfs: "Files | None" = None
 

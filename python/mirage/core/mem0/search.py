@@ -13,9 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import math
+from functools import partial
 
 from mirage.accessor.mem0 import Mem0Accessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.hierarchy.probe import rows_of
 from mirage.core.mem0.client import search_memories
 from mirage.core.mem0.readdir import readdir
@@ -82,9 +82,7 @@ async def search_memories_rendered(
     return lines
 
 
-async def _listed_paths(
-    accessor: Mem0Accessor, path: PathSpec, *_: IndexCacheStore
-) -> list[str]:
+async def _listed_paths(accessor: Mem0Accessor, path: PathSpec) -> list[str]:
     folder = path.virtual.rstrip("/")
     return [
         f"{folder}/{row.name}"
@@ -107,7 +105,7 @@ async def search_many(
     targets = (
         []
         if any(not p.vfs_path.strip("/") for p in paths)
-        else await make_resolve_glob(_listed_paths)(accessor, paths)
+        else await make_resolve_glob(partial(_listed_paths, accessor))(paths)
     )
     ids: set[str] | None = (
         None if any(not p.vfs_path.strip("/") for p in paths) else set()

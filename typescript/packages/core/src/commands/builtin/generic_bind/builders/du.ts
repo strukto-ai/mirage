@@ -14,20 +14,23 @@
 
 import { fsStrerror, isEacces, isEnotdir, isFsError, isMissingPath } from '../../../../errors/fs.ts'
 import { mountKey, mountPrefixOf, rekey, underPath } from '../../../../utils/key_prefix.ts'
-import type { Accessor } from '../../../../accessor/base.ts'
-import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { treeWalk, type WalkCall } from '../../utils/tree.ts'
-import { type ComputeEntries, type ComputeSize, duGeneric } from '../../generic/du.ts'
-import { DEFAULT_MAX_DU_ENTRIES } from '../../../../vfs/constants.ts'
-import { type DuEntries } from '../../../../vfs/types.ts'
+import {
+  type ComputeEntries,
+  type ComputeSize,
+  type DuEntries,
+  duGeneric,
+} from '../../generic/du.ts'
+import { rstripSlash } from '../../../../utils/slash.ts'
 import type { LinkView, MountView } from '../../../../view/types.ts'
-import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
-import type { CommandIO } from '../../../config.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { type CommandFiles, commandFiles } from '../files.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import { linksOf, mountsOf } from '../../utils/links.ts'
+import { crossesMounts, linksOf, mountView, mountsOf } from '../../utils/links.ts'
 
 /**
  * Entry allowance shared by every operand of one `du` invocation.
@@ -132,17 +135,12 @@ interface Walk {
   answered: Set<string>
 }
 
-function treeOf<A extends Accessor>(
-  ops: CommandIO<A>,
-  accessor: A,
-  index: IndexCacheStore | undefined,
-): Walk {
+function treeOf(files: CommandFiles, listing: (path: PathSpec) => Promise<string[]>): Walk {
   const answered = new Set<string>()
-  const { readTree } = ops
   const [readdir, stat] = treeWalk<string[], FileStat>(
-    readTree === undefined ? undefined : (p) => readTree(accessor, p, index),
-    (p: PathSpec, i?: IndexCacheStore) => ops.readdir(accessor, p, i),
-    (p: PathSpec, i?: IndexCacheStore) => ops.stat(accessor, p, i),
+    files.answers('read_tree') ? files.readTree : undefined,
+    listing,
+    files.stat,
     answered,
   )
   return { readdir, stat, answered }
@@ -239,7 +237,6 @@ async function counted(
 
 async function duWalk(
   walk: Walk,
-  index: IndexCacheStore | undefined,
   path: PathSpec,
   budget: WalkBudget,
   entries: [string, number][] | null,
@@ -247,7 +244,7 @@ async function duWalk(
 ): Promise<number> {
   let info
   try {
-    info = await walk.stat(path, index)
+    info = await walk.stat(path)
   } catch (err) {
     accountForWalkError(err, path, budget)
     return 0
@@ -268,7 +265,7 @@ async function duWalk(
   budget.directories.push(path.virtual)
   let children: string[]
   try {
-    children = await walk.readdir(path, index)
+    children = await walk.readdir(path)
   } catch (err) {
     accountForWalkError(err, path, budget)
     return 0
@@ -279,7 +276,6 @@ async function duWalk(
     if (!free && !budget.spend(path.virtual)) break
     total += await duWalk(
       walk,
-      index,
       PathSpec.fromStrPath(child, rekey(path.virtual, path.vfsPath, child)),
       budget,
       entries,
@@ -295,74 +291,81 @@ async function duWalk(
  * size under its name, null for a total alone. Mirrors Python's
  * _walk_operand.
  */
-async function walkOperand<A extends Accessor>(
-  ops: CommandIO<A>,
-  accessor: A,
-  index: IndexCacheStore | undefined,
+async function walkOperand(
+  walk: Walk,
   budget: WalkBudget,
   follow: Dereference | null,
   path: PathSpec,
   entries: [string, number][] | null,
 ): Promise<number> {
   budget.directories.length = 0
-  const walk = treeOf(ops, accessor, index)
   const state = follow === null ? null : follow.operand(path)
-  let total = await duWalk(walk, index, path, budget, entries, state)
+  let total = await duWalk(walk, path, budget, entries, state)
   if (state !== null) {
     for (const [link, real] of state.waiting) {
       if (!state.counted.has(real)) {
-        total += await duWalk(walk, index, link, budget, entries, state.under(link))
+        total += await duWalk(walk, link, budget, entries, state.under(link))
       }
     }
   }
   return total
 }
 
-export function walkSize<A extends Accessor>(
-  ops: CommandIO<A>,
-  accessor: A,
-  index: IndexCacheStore | undefined,
+export function walkSize(
+  walk: Walk,
   budget: WalkBudget,
   follow: Dereference | null,
   path: PathSpec,
 ): Promise<number> {
-  return walkOperand(ops, accessor, index, budget, follow, path, null)
+  return walkOperand(walk, budget, follow, path, null)
 }
 
-export async function walkEntries<A extends Accessor>(
-  ops: CommandIO<A>,
-  accessor: A,
-  index: IndexCacheStore | undefined,
+export async function walkEntries(
+  walk: Walk,
   budget: WalkBudget,
   follow: Dereference | null,
   path: PathSpec,
 ): Promise<DuEntries> {
   const entries: [string, number][] = []
-  const total = await walkOperand(ops, accessor, index, budget, follow, path, entries)
+  const total = await walkOperand(walk, budget, follow, path, entries)
   entries.sort((a, b) => compareCodePoints(a[0], b[0]))
   return [entries, total]
 }
 
-const du: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const idx = ctx.index ?? undefined
+const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const flags = new FlagView(ctx.flags, specOf('du'))
+  const crossing = crossesMounts(ctx)
+  // A walk across mounts has no cap of its own: each entry is charged to the
+  // mount serving it, at that mount's cap (see WalkBudget).
   const budget = new WalkBudget(
-    ops.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : ops.maxDuEntries,
+    crossing ? null : (mountsOf(ctx)?.maxDuEntries?.((paths[0] ?? ctx.cwd).virtual) ?? null),
     mountsOf(ctx),
   )
-  const flags = new FlagView(ctx.flags, specOf('du'))
+  // Kept on one filesystem across mounts, a listing leaves out the roots of
+  // the mounts below it, which the walk must neither list nor stat.
+  const bound = crossing && flags.asBool('one_file_system') ? mountView(ctx.vfs) : undefined
+  const listing =
+    bound === undefined
+      ? files.readdir
+      : async (path: PathSpec): Promise<string[]> => {
+          const owner = bound.rootOf(path.virtual)
+          return (await files.readdir(path)).filter((e) => bound.rootOf(rstripSlash(e)) === owner)
+        }
   const links = linksOf(ctx)
   const follow =
     links !== undefined && flags.typedOrder('L', 'P').at(-1) === 'L'
       ? new Dereference(links, flags.asBool('one_file_system') ? (mountsOf(ctx) ?? null) : null)
       : null
-  const computeSize: ComputeSize = (p) => walkSize(ops, accessor, idx, budget, follow, p)
-  const computeEntries: ComputeEntries = (p) => walkEntries(ops, accessor, idx, budget, follow, p)
+  const computeSize: ComputeSize = (p) => walkSize(treeOf(files, listing), budget, follow, p)
+  const computeEntries: ComputeEntries = (p) =>
+    walkEntries(treeOf(files, listing), budget, follow, p)
 
   return duGeneric(
     paths,
     ctx,
-    (targets) => resolveGlobOf(ops)(accessor, targets, idx),
-    (p) => ops.stat(accessor, p, idx),
+    files.resolveGlob,
+    files.stat,
     computeSize,
     computeEntries,
     () => budget.hit,

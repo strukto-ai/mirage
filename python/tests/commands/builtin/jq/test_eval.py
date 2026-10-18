@@ -14,15 +14,13 @@
 
 import asyncio
 import json
-from functools import partial
+from typing import Any
 
 import pytest
 
-from mirage.accessor.s3 import S3Accessor
-from mirage.commands.builtin.generic_bind.builders.jq import jq as jq_builder
-from mirage.commands.config import CommandIO, Context
 from mirage.core.jq import jq_eval
-from mirage.types import MountMode, PathSpec
+from mirage.types import FileStat, FileType, MountMode, PathSpec
+from tests.fixtures.answers import Answers, run_generic
 
 from .conftest import (
     collect,
@@ -35,21 +33,17 @@ from .conftest import (
 )
 
 
-async def _const_bytes(data, accessor, path, index=None):
-    return data
+async def _collect_jq(data: bytes, path: PathSpec, expr: str) -> bytes:
+    async def read(_path: PathSpec, **_kw: Any) -> bytes:
+        return data
 
+    async def stat(_path: PathSpec) -> FileStat:
+        return FileStat(name="data.json", type=FileType.FILE, size=len(data))
 
-async def _const_stream(data, accessor, path, index=None):
-    yield data
-
-
-async def _collect_jq(ops, accessor, paths, expr):
-    out, _ = await jq_builder(ops, accessor, paths, [expr], Context())
-    if isinstance(out, bytes):
-        return out
-    if hasattr(out, "__aiter__"):
-        return b"".join([chunk async for chunk in out])
-    return b"".join(out)
+    out, _ = await run_generic(
+        "jq", Answers("/s3/", read=read, stat=stat), [path], [expr]
+    )
+    return out
 
 
 def test_jq_dot_returns_full_object(backend):
@@ -952,22 +946,13 @@ class TestJqS3Backend:
         assert result == 3
 
     def _run_jq_path(self, data, expr):
-        ops = CommandIO(
-            readdir=None,
-            read_bytes=partial(_const_bytes, data),
-            read_stream=partial(_const_stream, data),
-            stat=None,
-            is_mounted=lambda a: True,
-        )
         path = PathSpec(
             vfs_path="s3/data.json",
             virtual="/s3/data.json",
             directory="/s3",
             resolved=True,
         )
-        return asyncio.run(
-            _collect_jq(ops, S3Accessor.__new__(S3Accessor), [path], expr)
-        )
+        return asyncio.run(_collect_jq(data, path, expr))
 
     def test_path_with_mock(self):
         out = self._run_jq_path(b'{"name": "from-s3"}', ".name")

@@ -19,11 +19,12 @@ from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.paths import resolve_path_stat
 from mirage.commands.config import Context
+from mirage.context.session_context import current_caller
 from mirage.errors.fs import eloop
 from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, PathSpec
+from mirage.types import FileStat, PathSpec, Visibility
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import (
     CycleError,
@@ -352,7 +353,9 @@ def mount_view(
     parent backend's keys under its prefix. Only the visible ones are
     ever named. A walk through the dispatcher (``crossing``) descends
     into each mount itself, so it has no boundary to stop at: no mount
-    below a path, and no mount root.
+    below a path, and no mount root; and it takes no mount's shortcut,
+    so no mount answers a function for it, caps its globs or narrows
+    its search.
 
     Args:
         files (Files | None): the session's files.
@@ -394,12 +397,27 @@ def mount_view(
         row = owner(virtual)
         return row.max_du_entries if row is not None else None
 
+    def answers(virtual: str, name: str) -> bool:
+        row = None if crossing else owner(virtual)
+        return row is not None and name in row.calls
+
+    def max_glob_matches(virtual: str) -> int | None:
+        row = None if crossing else owner(virtual)
+        return row.max_glob_matches if row is not None else None
+
+    def searchable(virtual: str) -> tuple[str, ...] | None:
+        row = None if crossing else owner(virtual)
+        return row.searchable if row is not None else None
+
     return MountView(
         descendants=below,
         visible_descendants=visible_below,
         is_root=is_root,
         root_of=root_of,
         max_du_entries=max_du_entries,
+        answers=answers,
+        max_glob_matches=max_glob_matches,
+        searchable=searchable,
     )
 
 
@@ -439,18 +457,54 @@ def links_of(ctx: Context) -> LinkView | None:
     return link_view(ctx.vfs)
 
 
-def mounts_of(ctx: Context) -> MountView | None:
-    """Where the mount boundaries are for the command's walk, read off
-    its files; None outside a workspace.
+def crosses_mounts(ctx: Context) -> bool:
+    """Whether the command walks across mounts.
 
-    A run whose table is the dispatcher itself (a dispatcher and no
-    mount ``io``) walks across mounts: the dispatcher descends into
-    every mount, so it has no boundary to stop at.
+    It runs on the session's files with no mount's command scope bound,
+    as a cross-mount run does, so every call it makes reaches whichever
+    mount serves the path.
 
     Args:
         ctx (Context): the invocation's context.
     """
-    return mount_view(ctx.vfs, crossing=ctx.io is None and ctx.vfs is not None)
+    return ctx.vfs is not None and current_caller().mount is None
+
+
+def mount_root(ctx: Context) -> str:
+    """The prefix of the mount the command runs on, without its trailing
+    slash: what a path the command makes up (an output name, a file a
+    list names) is keyed below.
+
+    '' for a run across mounts, which keys every path by its whole
+    virtual path, and outside a workspace.
+
+    Args:
+        ctx (Context): the invocation's context.
+    """
+    mount = current_caller().mount if ctx.vfs is not None else None
+    return mount[0].rstrip("/") if mount is not None else ""
+
+
+def mounts_of(ctx: Context) -> MountView | None:
+    """Where the mount boundaries are for the command's walk, read off
+    its files; None outside a workspace.
+
+    A run across mounts (``crosses_mounts``) has the dispatcher descend
+    into every mount, so it has no boundary to stop at.
+
+    Args:
+        ctx (Context): the invocation's context.
+    """
+    return mount_view(ctx.vfs, crossing=crosses_mounts(ctx))
+
+
+def visibility_of(files: Files | None) -> Visibility | None:
+    """The visibility of the session the files run as, None for none.
+
+    Args:
+        files (Files | None): the session's files.
+    """
+    return namespace_of(files).vis() if files is not None else None
 
 
 def link_resolver(ctx: Context) -> LinkResolver | None:
@@ -487,11 +541,13 @@ def follow_of(ctx: Context) -> FollowOperands | None:
 
 __all__ = [
     "LinkResolver",
+    "crosses_mounts",
     "dispatch_of",
     "follow_of",
     "link_location",
     "link_resolver",
     "link_view",
+    "mount_root",
     "mount_view",
     "links_of",
     "mounts_of",
@@ -499,4 +555,5 @@ __all__ = [
     "owed_names",
     "serves",
     "typed_link",
+    "visibility_of",
 ]

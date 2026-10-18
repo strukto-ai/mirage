@@ -15,6 +15,7 @@
 import { findExprTail } from '../../../commands/builtin/find_parse.ts'
 import { directoriesAction } from '../../../commands/builtin/generic/grep.ts'
 import { FILE_KEYS } from '../../../commands/builtin/generic/program.ts'
+import type { CLI } from '../../../commands/cli/types.ts'
 import { walk } from '../../../commands/cli/walk.ts'
 import { SPECS } from '../../../commands/spec/index.ts'
 import { isBuiltinGrammar } from '../../../commands/spec/builtins.ts'
@@ -116,6 +117,38 @@ export function defaultCwdOperand(
     resolved: operand.resolved,
     rawPath: CWD_DEFAULT_RAW[cmdName] ?? '',
   })
+}
+
+/**
+ * The path-valued options a command tree's walk resolves. `pathFlagScopes`
+ * reads the built-in specs, which hold no tree, and a tree's words are
+ * classified as its walk reads them, its group options as text. So a tree's
+ * group options and its leaf's are read here, walked as the run walks them:
+ * `notes --file /data/secret show` hands the leaf `/data/secret`, and a rule
+ * protecting it has to see it. Mirrors Python's `tree_path_scopes`.
+ */
+export function treePathScopes(
+  registry: MountRegistry,
+  name: string,
+  argv: readonly string[],
+  cwd: string,
+  env?: Record<string, string>,
+): PathSpec[] {
+  const tree = commandTree(registry, name, cwd)
+  if (tree === null) return []
+  const result = walk(name, tree.spec, argv, cwd, env ?? null)
+  if (result.leaf === null) return []
+  const found: PathSpec[] = []
+  for (const value of Object.values(result.groupFlags)) {
+    for (const item of Array.isArray(value) ? value : [value]) {
+      if (item instanceof PathSpec) found.push(item)
+    }
+  }
+  const leaf = parseCommand(result.leaf, [...result.argv], cwd, name, env, true)
+  for (const value of leaf.pathFlagValues) {
+    found.push(new PathSpec({ virtual: value, directory: value, vfsPath: '', rawPath: value }))
+  }
+  return found
 }
 
 export function pathFlagScopes(cmdName: string, argv: string[], cwd: string): PathSpec[] {
@@ -243,25 +276,41 @@ export function mergeScopes(positional: PathSpec[], flagScopes: PathSpec[]): Pat
 }
 
 /**
+ * The command tree a head word walks: an installed CLI's, else one the
+ * mount serving the name registered (`MountEntry.cliFor`). A tree on a mount
+ * runs on the mount that serves its name, the working directory's when it
+ * has one, else the first that does, never by operand path: its walk, not a
+ * spec, says which words are paths. Mirrors Python's `command_tree`.
+ */
+export function commandTree(registry: MountRegistry, name: string, cwd: string): CLI | null {
+  const install = registry.clis.get(name)
+  if (install !== null) return install.cli
+  return registry.commandMount(name, [], cwd)?.cliFor(name) ?? null
+}
+
+/**
  * The line as an admission pattern reads it, and the program it runs.
  *
- * For an installed CLI head the spec walk names the verb path (global
- * options before the verb dropped, an alias canonicalized) and hands
- * back the leaf's own words, so `git -C /r push origin` reads as
- * `git push origin` and a rule on `git push` catches it; a walk the tree
- * refuses (unknown verb, bare group, usage error) reads the raw words,
- * since the line fails on its own. Anything else is the name and the raw
- * argv, and the program is the bare name.
+ * For a command tree's head (an installed CLI, or a tree a mount serves)
+ * the spec walk names the verb path (global options before the verb
+ * dropped, an alias canonicalized) and hands back the leaf's own words, so
+ * `git -C /r push origin` reads as `git push origin` and a rule on
+ * `git push` catches it; a walk the tree refuses (unknown verb, bare group,
+ * usage error) reads the raw words, since the line fails on its own.
+ * Anything else is the name and the raw argv, and the program is the bare
+ * name. `env` is the session environment, which fills a group option
+ * declaring `Argument.env` as the run's walk does.
  */
 export function programTokens(
   registry: MountRegistry,
   name: string,
   argv: readonly string[],
   cwd: string,
+  env?: Record<string, string>,
 ): [readonly string[], readonly string[]] {
-  const install = registry.clis.get(name)
-  if (install !== null) {
-    const result = walk(name, install.cli.spec, argv, cwd)
+  const tree = commandTree(registry, name, cwd)
+  if (tree !== null) {
+    const result = walk(name, tree.spec, argv, cwd, env)
     if (result.leaf !== null) {
       const program = [name, ...result.path]
       return [[...program, ...result.argv], program]
@@ -293,10 +342,11 @@ function parsedKinds(
 
 /**
  * The command line word by word, each with its kind and the path it names.
- * The name comes first and the redirect targets last. An installed CLI's
- * verbs are read off its tree and its leaf's words off the leaf's grammar;
- * any other command's words off its own spec. Mirrors Python's
- * `command_words`.
+ * The name comes first and the redirect targets last. A command tree's verbs
+ * (an installed CLI's, or a mount's) are read off the tree and its leaf's
+ * words off the leaf's grammar; any other command's words off its own spec.
+ * `env` is the session environment, which fills a group option declaring
+ * `Argument.env` as the run's walk does. Mirrors Python's `command_words`.
  */
 export function commandWords(
   registry: MountRegistry,
@@ -305,11 +355,12 @@ export function commandWords(
   classified: readonly (string | PathSpec)[],
   redirects: readonly PathSpec[],
   cwd: string,
+  env?: Record<string, string>,
 ): CommandWord[] {
-  const install = registry.clis.get(name)
-  const result = install !== null ? walk(name, install.cli.spec, argv, cwd) : null
+  const tree = commandTree(registry, name, cwd)
+  const result = tree !== null ? walk(name, tree.spec, argv, cwd, env) : null
   let kinds: WordKind[]
-  if (install !== null && result !== null && result.leaf !== null) {
+  if (result !== null && result.leaf !== null) {
     const lead = argv.length - result.argv.length
     kinds = [
       ...argv

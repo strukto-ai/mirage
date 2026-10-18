@@ -14,19 +14,14 @@
 
 import { concatAggregate } from '../../aggregators.ts'
 import { catGeneric } from '../../generic/cat.ts'
-import {
-  type GenericCommand,
-  dirAwareStat,
-  resolveGlobOf,
-  type GenericCommandFn,
-} from '../adapter.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, dirAwareStat, resolveOrEmpty } from '../files.ts'
 
-const cat: GenericCommandFn = async (ops, accessor, paths, texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return catGeneric(resolved, texts, ctx, dirAwareStat(ops, accessor, ctx), (p) =>
-    ops.readStream(accessor, p, idx),
-  )
+const cat: CommandFn = async (_accessor, paths, texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
+  return catGeneric(resolved, texts, ctx, dirAwareStat(files, ctx), files.readStream)
 }
 
 export const BUILDER: GenericCommand = {

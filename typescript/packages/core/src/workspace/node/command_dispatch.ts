@@ -50,7 +50,7 @@ import { expandNode } from '../expand/node.ts'
 import { claimantFor, evaluatedFrom } from './occurrence.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { runExternal } from '../executor/command/external.ts'
-import { handleCommand } from '../executor/command/command.ts'
+import { fillTreeEnv, handleCommand } from '../executor/command/command.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import { aliasCommandText, aliasMark, expandingAliases } from '../executor/builtins/alias/index.ts'
 import { checkSyntax, syntaxErrorResult } from '../../shell/parse/index.ts'
@@ -94,7 +94,7 @@ import { CycleError } from '../../utils/path.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { Consumer, lookup, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
-import { Admitted, admit } from './admission.ts'
+import { Admitted, admit, classifiedWords } from './admission.ts'
 
 import { ensureVarVisible, gateRendering, sessionView } from '../session/state.ts'
 import { postSessionGate, preSessionGate } from '../../policy/index.ts'
@@ -386,6 +386,7 @@ export async function executeCommand(
       sink,
       parser,
       expanded,
+      new Set(prefixAssignments.map(([k]) => k)),
     )
     if (refused !== '') io.stderr = concat([encodeText(refused), await materialize(io.stderr)])
     return [stdout, io, execNode]
@@ -432,6 +433,7 @@ async function runCommandBody(
   sink?: JobConsole,
   parser?: ParseScope,
   expanded?: ExpandedWords,
+  assigned: ReadonlySet<string> = new Set(),
 ): Promise<Result> {
   const session = context.session
   const stdin = stdinIn
@@ -506,6 +508,7 @@ async function runCommandBody(
       redirectRunnerFor(node),
       parser,
       seedPrefix,
+      assigned,
     ),
     timeout,
     argv.name !== '' ? argv.name : '?',
@@ -577,6 +580,7 @@ async function runArgv(
   runner: RedirectRunner | null = null,
   parser?: ParseScope,
   seedPrefix?: (name: string) => Promise<void>,
+  assigned: ReadonlySet<string> = new Set(),
 ): Promise<Result> {
   const session = context.session
   const name = argv.name
@@ -606,6 +610,14 @@ async function runArgv(
     expandedWords.some((w, i) => w !== typedWords[i])
   ) {
     argv = new Argv(argv.name, expandedWords, boundary, argv.prefix)
+  }
+  // Ahead of every admission of the command: the gate walks a mount's tree
+  // under the managed values its run reads. A first fetch changes how the
+  // words read (an env-filled required option lets the walk reach the leaf,
+  // whose files are paths), so they are classified again.
+  if (name !== '' && (await fillTreeEnv(name, argv.args, session, registry, assigned))) {
+    const words = classifiedWords(name, argv.args, session, registry)
+    argv = new Argv(argv.name, argv.args, words.slice(1), argv.prefix)
   }
 
   let admitted: Admitted | null = null

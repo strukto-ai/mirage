@@ -16,21 +16,20 @@ import { lsGeneric } from '../../generic/ls.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { treeWalk } from '../../utils/tree.ts'
-import type { IndexCacheStore } from '../../../../cache/index/store.ts'
-import type { FileStat, PathSpec } from '../../../../types.ts'
-import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import type { FileStat } from '../../../../types.ts'
+import type { CommandFn } from '../../../config.ts'
+import type { GenericCommand } from '../adapter.ts'
+import { commandFiles, resolveOrEmpty } from '../files.ts'
 
-const ls: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
-  const idx = ctx.index ?? undefined
-  const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+const ls: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
   // Only -R walks; a plain listing reads one directory.
   const recursive = new FlagView(ctx.flags, specOf('ls')).asBool('recursive')
-  const { readTree } = ops
   const [readdir, stat] = treeWalk<string[], FileStat>(
-    !recursive || readTree === undefined ? undefined : (p) => readTree(accessor, p, idx),
-    (p: PathSpec, _index?: IndexCacheStore, nofollow?: boolean) =>
-      ops.readdir(accessor, p, idx, nofollow),
-    (p: PathSpec) => ops.stat(accessor, p, idx),
+    recursive && files.answers('read_tree') ? files.readTree : undefined,
+    files.readdir,
+    files.stat,
   )
   return lsGeneric(resolved, ctx, readdir, stat)
 }

@@ -18,18 +18,16 @@ import { walkFind } from '../../../../core/generic/find.ts'
 import { findGeneric } from '../../generic/find.ts'
 import { landingRoot, linksOf, mountsOf } from '../../utils/links.ts'
 import { treeWalk } from '../../utils/tree.ts'
-import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
-import type { Accessor } from '../../../../accessor/base.ts'
-import type { CommandFnResult, Context, CommandIO } from '../../../config.ts'
-import { type GenericCommand, resolveGlobOf } from '../adapter.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import { type GenericCommand } from '../adapter.ts'
+import { type CommandFiles, commandFiles, resolveOrEmpty } from '../files.ts'
 
 export const BUILDER: GenericCommand = {
   name: 'find',
-  fn: async (ops, accessor, paths, texts, ctx) => {
-    const idx = ctx.index ?? undefined
-    const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return findWalk(ops, accessor, resolved, texts, ctx)
+  fn: async (_accessor, paths, texts, ctx) => {
+    const files = commandFiles(ctx, paths)
+    return findWalk(files, await resolveOrEmpty(files, paths), texts, ctx)
   },
 }
 
@@ -38,14 +36,12 @@ export const BUILDER: GenericCommand = {
  * for its subtree first, down to the expression's `-maxdepth`, so the walk
  * costs one call where the mount can answer.
  */
-export function findWalk<A extends Accessor>(
-  ops: CommandIO<A>,
-  accessor: A,
+export function findWalk(
+  files: CommandFiles,
   resolved: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const idx = ctx.index ?? undefined
   const flags = new FlagView(ctx.flags, specOf('find'))
   const bounded = flags.asBool('xdev') || flags.asBool('mount')
   // The last of -H, -L and -P decides, as in GNU; only -L follows the links
@@ -54,7 +50,6 @@ export function findWalk<A extends Accessor>(
   const loops: [string, string][] = []
   const mounts = mountsOf(ctx)
   const links = linksOf(ctx) ?? null
-  const { readTree } = ops
   // The walk classifies entries through stat (see walkFind). A directory the guarded readdir
   // refuses, and an entry whose stat fails, are collected here and
   // reported by the generic per start point.
@@ -66,11 +61,11 @@ export function findWalk<A extends Accessor>(
     ctx,
     (root, options) => {
       // A walk -maxdepth bounds reads its own levels, not the whole tree.
-      const whole = readTree !== undefined && (options.maxDepth ?? null) === null
+      const whole = files.answers('read_tree') && (options.maxDepth ?? null) === null
       const [readdir, stat] = treeWalk<string[], FileStat>(
-        whole ? (p) => readTree(accessor, p, idx) : undefined,
-        (spec: PathSpec, i?: IndexCacheStore) => ops.readdir(accessor, spec, i),
-        (spec: PathSpec, i?: IndexCacheStore) => ops.stat(accessor, spec, i),
+        whole ? files.readTree : undefined,
+        (p) => files.readdir(p),
+        files.stat,
       )
       const home = bounded && mounts !== undefined ? landingRoot(mounts, links, root.virtual) : null
       return walkFind(
@@ -87,7 +82,6 @@ export function findWalk<A extends Accessor>(
           loops,
         },
         options,
-        idx,
       )
     },
     undefined,
@@ -98,7 +92,7 @@ export function findWalk<A extends Accessor>(
       unstatted.clear()
       return failed
     },
-    (spec) => ops.stat(accessor, spec, idx),
+    files.stat,
     () => loops.splice(0),
   )
 }

@@ -12,40 +12,33 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.zgrep import zgrep_generic
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    bound_op,
-)
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.links import link_resolver
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import utf8_locale
 from mirage.types import PathSpec
 
 
 async def zgrep(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    resolved = (
-        await ops.resolve_glob(accessor, paths, ctx.index)
-        if paths and ops.is_mounted(accessor)
-        else []
-    )
+    files = command_files(ctx, paths)
+    resolved = await files.resolve_glob(paths) if paths else []
     return await zgrep_generic(
         resolved,
         texts,
         ctx.flags,
-        read_bytes=bound_op(ops.read_stream, accessor, ctx.index),
+        read_bytes=files.read_stream,
         stdin=ctx.stdin,
-        stat=partial(ops.stat, accessor),
+        stat=files.stat,
         resolver=link_resolver(ctx),
         utf8=utf8_locale(ctx.env),
     )

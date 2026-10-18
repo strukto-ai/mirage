@@ -12,12 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export {
-  type GenericCommand,
-  type GenericCommandFn,
-  commandIo,
-  mountIo,
-  resolveGlobOf,
-} from './adapter.ts'
-export { type ResolveGlobOp } from '../../../vfs/types.ts'
+export { type GenericCommand } from './adapter.ts'
+export { makeResolveGlob } from '../../../utils/glob_walk.ts'
 export { GENERIC_COMMANDS, generic } from './factory.ts'

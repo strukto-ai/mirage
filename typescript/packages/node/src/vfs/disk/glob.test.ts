@@ -28,7 +28,8 @@ async function listed(accessor: DiskAccessor, path: PathSpec): Promise<string[]>
   return listing.entries.map((row) => `${base}/${row.name}`)
 }
 
-const resolveGlob = makeResolveGlob(listed, SCOPE_ERROR)
+const resolveGlob = (accessor: DiskAccessor, paths: PathSpec[]): Promise<PathSpec[]> =>
+  makeResolveGlob((path) => listed(accessor, path), SCOPE_ERROR)(paths)
 
 let root: string
 let accessor: DiskAccessor

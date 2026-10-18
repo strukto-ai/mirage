@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
+import { onMount } from '../../test-utils.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../io/types.ts'
@@ -32,12 +32,14 @@ async function runLook(
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = RAM_LOOK[0]
   if (cmd === undefined) throw new Error('look not registered')
-  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, texts, {
-    stdin,
-    flags,
-    io: commandIo(vfs),
-    cwd: PathSpec.fromStrPath('/'),
-  })
+  const result = await onMount(vfs, (files) =>
+    cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, texts, {
+      stdin,
+      flags,
+      vfs: files,
+      cwd: PathSpec.fromStrPath('/'),
+    }),
+  )
   if (result === null) return { out: '', exitCode: -1 }
   const [out, ioResult] = result
   const buf =

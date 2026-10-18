@@ -41,7 +41,8 @@ async function listed(accessor: RedisAccessor, path: PathSpec): Promise<string[]
   return rows.map((row) => `${base}/${row.name}`)
 }
 
-const resolveGlob = makeResolveGlob(listed, SCOPE_ERROR)
+const resolveGlob = (accessor: RedisAccessor, paths: PathSpec[]): Promise<PathSpec[]> =>
+  makeResolveGlob((path) => listed(accessor, path), SCOPE_ERROR)(paths)
 
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined

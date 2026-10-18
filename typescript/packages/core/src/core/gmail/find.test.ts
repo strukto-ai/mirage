@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
-import type { FindOptions } from '../../vfs/types.ts'
+import type { FindOptions } from '../generic/find.ts'
 import { walkFind } from '../generic/find.ts'
 
 function enoent(p: string): Error {

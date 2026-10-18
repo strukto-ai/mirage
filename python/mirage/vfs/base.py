@@ -212,9 +212,11 @@ class BaseVFS:
             accessor (Accessor | None): backend handle the functions use.
             prompt (str | None): LLM-facing description of the layout.
             write_prompt (str | None): appended when mounted writable.
-            commands (list[Any] | None): extra ``@command`` functions or
-                ``Command`` values: bespoke verbs, or replacements that win
-                over the generic command of the same name.
+            commands (list[Any] | None): extra ``@command`` functions,
+                ``Command`` values or ``CLI`` trees: bespoke verbs, a
+                program's verbs as one command tree under its root's
+                name, or replacements that win over the generic command
+                of the same name.
             caches_reads (bool | None): serve repeat reads from the file
                 cache; enable only for stable, read-mostly content.
             sizes_always_known (bool | None): whether ``stat`` sizes every
@@ -267,8 +269,8 @@ class BaseVFS:
         return callable(own) and fn is not getattr(BaseVFS, name, None)
 
     def commands(self) -> list[Any]:
-        """The ``@command`` functions and ``Command`` values this VFS was
-        handed."""
+        """The ``@command`` functions, ``Command`` values and ``CLI``
+        trees this VFS was handed."""
         return list(self._commands)
 
     @vfs_call(effect=Effect.READ, target=Target.DIR)

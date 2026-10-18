@@ -13,13 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic_bind.adapter import (
-    GenericCommand,
-    Operation,
-    require_op,
-)
+from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.links import links_of
-from mirage.commands.config import CommandIO, Context
+from mirage.commands.config import Context
 from mirage.commands.spec.usage import (
     extra_operand_error,
     missing_operand_error,
@@ -33,15 +30,15 @@ from mirage.types import FileType, PathSpec
 
 
 async def unlink(
-    ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not ops.is_mounted(accessor) or not paths:
+    files = command_files(ctx, paths)
+    if not paths:
         raise missing_operand_error("unlink", None)
-    paths = await ops.resolve_glob(accessor, paths, ctx.index)
+    paths = await files.resolve_glob(paths)
     if len(paths) > 1:
         raise extra_operand_error("unlink", paths[1].raw_path)
     p = paths[0]
@@ -64,7 +61,7 @@ async def unlink(
             ).encode(),
         )
     try:
-        s = await ops.stat(accessor, p, index=ctx.index)
+        s = await files.stat(p)
     except FS_ERRORS as exc:
         return None, IOResult(
             exit_code=1,
@@ -81,7 +78,7 @@ async def unlink(
             ).encode(),
         )
     try:
-        await require_op(ops, Operation.UNLINK)(accessor, p)
+        await files.unlink(p)
     except FS_ERRORS as exc:
         return None, IOResult(
             exit_code=1,

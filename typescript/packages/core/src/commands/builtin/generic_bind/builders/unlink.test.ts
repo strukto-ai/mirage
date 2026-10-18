@@ -14,74 +14,67 @@
 
 import { describe, expect, it } from 'vitest'
 import type { Accessor } from '../../../../accessor/base.ts'
-import { RAMIndexCacheStore } from '../../../../cache/index/ram.ts'
-import type { IndexCacheStore } from '../../../../cache/index/store.ts'
+import { runWithMountGate } from '../../../../context/session_context.ts'
 import { materialize } from '../../../../io/types.ts'
-import { FileStat, FileType, PathSpec } from '../../../../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
 import { eacces, enoent } from '../../../../errors/fs.ts'
-import type { CommandIO } from '../../../config.ts'
+import { answeringFiles } from '../../../../test-utils.ts'
+import type { Files } from '../../../../workspace/files.ts'
 import { BUILDER } from './unlink.ts'
 
 const DEC = new TextDecoder()
-const INDEX = new RAMIndexCacheStore()
 
-// eslint-disable-next-line @typescript-eslint/require-await
-async function* emptyStream(): AsyncIterable<Uint8Array> {
-  yield* []
-}
-
-function ops(removed?: string[]): CommandIO {
-  const remove = (_a: Accessor, p: PathSpec): Promise<void> => {
-    removed?.push(p.virtual)
-    return Promise.resolve()
-  }
-  return {
-    readdir: (_a, p) => Promise.resolve(p.virtual === '/m' ? ['/m/a.txt', '/m/locked'] : []),
-    readBytes: () => Promise.resolve(new Uint8Array()),
-    readStream: () => emptyStream(),
-    // Served from the index, as github's is: a stat handed none finds
-    // nothing, however real the file.
-    stat: (_a, p, index?: IndexCacheStore) => {
-      if (index !== INDEX) return Promise.reject(enoent(p.virtual))
-      if (p.virtual.startsWith('/m/locked/')) return Promise.reject(eacces(p.virtual))
-      if (p.virtual === '/m/a.txt') {
-        return Promise.resolve(new FileStat({ name: p.virtual, type: FileType.FILE }))
-      }
-      return Promise.reject(enoent(p.virtual))
+// A mount that removes nothing unless `removed` is given, whose stat is the
+// dispatcher's: it answers what the session may see.
+function files(removed?: string[]): Files {
+  return answeringFiles({
+    readdir: (p) => (p.virtual === '/m' ? ['/m/a.txt', '/m/locked'] : []),
+    stat: (p) => {
+      if (p.virtual.startsWith('/m/locked/')) throw eacces(p.virtual)
+      if (p.virtual === '/m/a.txt') return new FileStat({ name: p.virtual, type: FileType.FILE })
+      throw enoent(p.virtual)
     },
-    isMounted: () => true,
-    ...(removed === undefined ? {} : { unlink: remove }),
-  }
+    ...(removed === undefined
+      ? {}
+      : {
+          unlink: (p) => {
+            removed.push(p.virtual)
+            return null
+          },
+        }),
+  })
 }
 
-async function unlink(io: CommandIO, path: string): Promise<[number, string]> {
-  const result = await BUILDER.fn(io, {} as Accessor, [PathSpec.fromStrPath(path)], [], {
-    stdin: null,
-    flags: {},
-    cwd: PathSpec.fromStrPath('/'),
-    index: INDEX,
-  })
+async function unlink(vfs: Files, path: string): Promise<[number, string]> {
+  const result = await runWithMountGate('/', MountMode.WRITE, async () =>
+    BUILDER.fn({} as Accessor, [PathSpec.fromStrPath(path)], [], {
+      stdin: null,
+      flags: {},
+      cwd: PathSpec.fromStrPath('/'),
+      vfs,
+    }),
+  )
   if (result === null) throw new Error('unlink returned no result')
   const [, res] = result
   return [res.exitCode, DEC.decode(await materialize(res.stderr))]
 }
 
 describe('unlink builder', () => {
-  it('stats its operand through the index', async () => {
+  it('stats its operand through the dispatcher', async () => {
     const removed: string[] = []
-    expect(await unlink(ops(removed), '/m/a.txt')).toEqual([0, ''])
+    expect(await unlink(files(removed), '/m/a.txt')).toEqual([0, ''])
     expect(removed).toEqual(['/m/a.txt'])
   })
 
   it('reports an existing file it cannot remove', async () => {
-    expect(await unlink(ops(), '/m/a.txt')).toEqual([
+    expect(await unlink(files(), '/m/a.txt')).toEqual([
       1,
       "unlink: cannot unlink '/m/a.txt': Operation not supported\n",
     ])
   })
 
   it('reports a refused stat in its own words', async () => {
-    expect(await unlink(ops(), '/m/locked/f.txt')).toEqual([
+    expect(await unlink(files(), '/m/locked/f.txt')).toEqual([
       1,
       "unlink: cannot unlink '/m/locked/f.txt': Permission denied\n",
     ])

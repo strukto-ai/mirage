@@ -27,7 +27,6 @@ from mirage.commands.spec.types import CommandSpec
 # the namespace facts -- rides the Context bag. A handler that names
 # anything else in its signature can never receive it.
 HANDLER_PARAMS = ("accessor", "paths", "texts", "ctx")
-BUILDER_PARAMS = ("ops",) + HANDLER_PARAMS
 AGGREGATE_PARAMS = ("results",)
 
 
@@ -85,18 +84,16 @@ def test_handlers_take_accessor_paths_texts_opts():
     Flags, stdin, cwd, and the namespace facts all ride ``Context``;
     a parameter named after any of them is dead the moment the
     dispatcher stops passing keywords, so the signature itself is
-    pinned. Builders carry a leading ``ops`` (the factory binds it);
-    aggregates take the fan-in result list.
+    pinned. A generic builder is an ordinary handler; aggregates take the
+    fan-in result list.
     """
     offenders = []
     for name, label, spec, fn in _handlers():
         params = _param_names(fn)
         if params is None:
             continue
-        if label.startswith("builders/"):
-            expected: tuple[tuple[str, ...], ...] = (BUILDER_PARAMS,)
-        elif label.endswith("[aggregate]"):
-            expected = (AGGREGATE_PARAMS,)
+        if label.endswith("[aggregate]"):
+            expected: tuple[tuple[str, ...], ...] = (AGGREGATE_PARAMS,)
         else:
             expected = (HANDLER_PARAMS,)
         if params not in expected:

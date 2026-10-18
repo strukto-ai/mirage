@@ -107,7 +107,7 @@ async function run(
   const { stat, rename } = makeBackend(files, dirs)
   const flags =
     opts.flags ?? mvFlags({ noClobber: opts.no_clobber === true, verbose: opts.verbose === true })
-  return mvGeneric(paths.map(spec), stat, { rename }, flags, undefined, undefined, opts.readdir)
+  return mvGeneric(paths.map(spec), stat, { rename }, flags, undefined, opts.readdir)
 }
 
 describe('mvGeneric guards', () => {
